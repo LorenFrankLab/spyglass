@@ -121,13 +121,16 @@ optional-dependencies.spikesorting-v2 = [
   "torch>=2",
 ]
 optional-dependencies.spikesorting-v2-matching = [
-  # cross-session unit tracking (Phase 4). Pinned to the 3.2.6/3.2.7 line,
-  # the last release that declares ``numpy<3.0,>=2.0`` and so coexists with
-  # the v2 numpy>=2 baseline. 3.2.8+ (incl. all 3.3.x) reactively flipped the
-  # dep to ``numpy<2.0`` per upstream issue #134 -- a single user's
-  # env-specific install report, not a code incompatibility (3.2.7 supports
-  # numpy 2 and SpikeInterface 0.100-0.120). Revisit when UnitMatchPy restores
-  # numpy>=2 support upstream.
+  # cross-session unit tracking. Pinned to the 3.2.6/3.2.7 line, the last
+  # release that declares ``numpy<3.0,>=2.0`` so its METADATA coexists with the
+  # v2 numpy>=2 baseline (``uv pip check`` is clean against SI 0.104 + numpy 2).
+  # 3.2.8+ (incl. all 3.3.x) reactively repinned to ``numpy<2.0`` per upstream
+  # issue #134. CAVEAT: the metadata pin is necessary but not sufficient -- 3.2.7
+  # still has a numpy-2 RUNTIME break in its metric path (``np.arange`` on
+  # 1-element ``argwhere`` endpoints in ``param_functions``). The matcher backend
+  # MUST install the scoped ``param_functions`` arange shim (see
+  # tests/spikesorting/v2/resolver/unitmatch-resolver.md) or every run aborts.
+  # Revisit when UnitMatchPy restores numpy>=2 support upstream.
   "UnitMatchPy>=3.2.6,<3.2.8",
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports
 ]

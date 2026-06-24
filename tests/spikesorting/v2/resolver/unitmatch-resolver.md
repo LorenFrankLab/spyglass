@@ -77,5 +77,7 @@ The fix is a **wrapper-owned numpy-2 shim** that coerces the 1-element-array
 `UnitMatchPy.param_functions`. It does **not** edit the installed package and
 preserves the numpy≥2 baseline (no isolated numpy<2 subprocess required). With
 the shim installed, the pipeline runs end-to-end and recovers clean cross-session
-matches (verified AUC = 1.0 on the 128-channel polymer fixture; see the
-cross-session notebook).
+matches (AUC = 1.0 on a pseudo-session split of the 128-channel polymer fixture;
+see the cross-session notebook). This is API / smoke evidence — a true
+two-session polymer recording with planted correspondences is the validation
+gate left to the schema-and-implementation work, not this environment check.

@@ -436,7 +436,8 @@ This is the latent break behind the upstream numpy<2 repins. The wrapper fixes i
 with a **numpy proxy scoped to `param_functions`** whose `arange` coerces
 1-element-array endpoints to scalars (a no-op for scalar args) — no package edit,
 numpy≥2 baseline preserved. With the shim the run completes and recovers clean
-matches (AUC = 1.0 on the polymer fixture).
+matches (AUC = 1.0 on a pseudo-session split of the 60s polymer fixture — API /
+smoke evidence, not the true two-session polymer gate, which is Phase 4b work).
 
 **Import caveat (verified, 3.2.7)**: the import name is capitalized
 (`UnitMatchPy`), not `unitmatchpy`, and has no `__version__` attribute (use
@@ -528,6 +529,9 @@ probability = bf.apply_naive_bayes(kernels, priors, predictors, param, cond)
 # (n_total_units, n_total_units) pairwise probability across ALL sessions stacked
 prob_matrix = probability[:, 1].reshape(param["n_units"], param["n_units"])
 
+above = prob_matrix > param["match_threshold"]
+output_threshold = above.astype(int)
+matches = np.argwhere(above & (within_session == 0))  # cross-session matches only
 unique_ids = aid.assign_unique_id(prob_matrix, param, clus_info)  # cross-session IDs
 match_table = su.make_match_table(scores_to_include, matches, prob_matrix,
                                   total_score, output_threshold, clus_info, param,
