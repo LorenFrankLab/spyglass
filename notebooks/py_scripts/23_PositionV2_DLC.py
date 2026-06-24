@@ -590,6 +590,14 @@ if model_key is None:
 # 5. Stores model metadata in an NWB file
 # 6. Creates a Model entry for inference
 #
+# Body-part names are reconciled with the curated `BodyPart` table on import,
+# so spelling variants (e.g. `green_led` vs `greenLED`) are handled
+# automatically. To also rewrite your DLC project's `config.yaml` to the
+# canonical spelling, pass `Model().load(config_path, normalize_names=True)`;
+# the original config is saved to a timestamped `config.yaml.<ts>.bak` first.
+# Body parts that are not in `BodyPart` and have no canonical match still
+# require an admin to add them.
+#
 
 # %% [markdown]
 # #### Validate model (Path B)
