@@ -145,6 +145,56 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
         backend.UnitMatchBackend().match(inputs, {})
 
 
+def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
+    """Two sessions that load zero good units -> no pairs, no divide-by-zero.
+
+    The prior-probability computation divides by ``n_units ** 2``; the backend
+    must return early (it is a public MatcherProtocol impl and cannot assume the
+    table layer's non-empty-matchable precondition).
+    """
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    positions = tmp_path / "cp.npy"
+    np.save(positions, np.zeros((4, 2)))
+    inputs = [
+        SessionMatcherInput(
+            session_key={"sorting_id": s, "curation_id": 0},
+            waveform_dir=tmp_path,
+            channel_positions_path=positions,
+        )
+        for s in ("A", "B")
+    ]
+
+    # Both sessions load (len(good_units) == len(inputs)) but with n_units == 0.
+    def _fake_load(wave_paths, label_paths, param, good_units_only=True):
+        param["n_units"], param["n_sessions"] = 0, 2
+        return (
+            np.zeros((0, 10, 4, 2)),  # waveform
+            np.array([], dtype=int),  # session_id
+            np.array([0, 0, 0]),  # session_switch
+            np.zeros((0, 0)),  # within_session
+            [np.empty((0, 1)), np.empty((0, 1))],  # good_units -- len 2, empty
+            param,
+        )
+
+    fake_um = SimpleNamespace(
+        default_params=SimpleNamespace(
+            get_default_param=lambda: {"match_threshold": 0.5}
+        ),
+        utils=SimpleNamespace(
+            paths_from_KS=lambda dirs: ([], [], [np.zeros((4, 3))]),
+            get_probe_geometry=lambda pos, param: param,
+            load_good_waveforms=_fake_load,
+        ),
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+
+    assert backend.UnitMatchBackend().match(inputs, {}) == []
+
+
 def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     """Sessions with different channel geometry are rejected up front.
 

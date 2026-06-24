@@ -238,6 +238,61 @@ def test_derive_tracked_units_rejects_edge_outside_universe():
         )
 
 
+def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
+    """Equal-size AND equal-strength overlapping cliques resolve by sorted members.
+
+    {A1,B1} and {A1,B2} are both size 2 with identical 0.90 strength, so the final
+    deterministic tie-break (sorted members) must keep the lexically-first clique
+    {A1,B1} whole and drop B2 to a singleton -- locking the determinism that
+    ``tracked_unit_id`` assignment relies on.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+
+    a1 = ("A", 0, 1)
+    b1, b2 = ("B", 0, 1), ("B", 0, 2)
+    edges = [(a1, b1, 0.90), (a1, b2, 0.90)]  # no b1-b2 edge -> two 2-cliques
+    tracked = derive_tracked_units(
+        [a1, b1, b2], edges, threshold=0.5, max_strict_nodes=100
+    )
+    assert any(set(tu["members"]) == {a1, b1} for tu in tracked)
+    assert any(tu["members"] == [b2] for tu in tracked)
+    # True partition: every node covered exactly once.
+    all_members = [node for tu in tracked for node in tu["members"]]
+    assert sorted(all_members) == sorted([a1, b1, b2])
+    assert len(all_members) == len(set(all_members))
+
+
+def test_chronological_member_order_sorts_by_date_then_index():
+    """recording_date drives matcher feed order; member_index only breaks ties.
+
+    Locks the drift-alignment invariant: UnitMatch aligns each session to the
+    previous one, so members must reach the matcher in recording order even when
+    their member_index order disagrees with their dates.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import (
+        chronological_member_order,
+    )
+
+    # member_index 0 recorded AFTER member_index 1 -> date must reorder them.
+    plan = [
+        {"member_index": 0, "recording_date": "2023-03-02T00:00:00+00:00"},
+        {"member_index": 1, "recording_date": "2023-03-01T00:00:00+00:00"},
+    ]
+    assert [p["member_index"] for p in chronological_member_order(plan)] == [
+        1,
+        0,
+    ]
+
+    # Same-day members keep member_index order (tie-break).
+    same_day = [
+        {"member_index": 1, "recording_date": "2023-03-01T00:00:00+00:00"},
+        {"member_index": 0, "recording_date": "2023-03-01T00:00:00+00:00"},
+    ]
+    assert [
+        p["member_index"] for p in chronological_member_order(same_day)
+    ] == [0, 1]
+
+
 # --------------------------------------------------------------------------- #
 # NWB pairs (de)serialization round-trip (pure I/O, no DB).                     #
 # --------------------------------------------------------------------------- #

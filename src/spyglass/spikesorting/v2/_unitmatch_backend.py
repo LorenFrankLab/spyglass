@@ -197,7 +197,15 @@ def extract_unitmatch_bundle(
 
 
 def _zero_center(waveform: np.ndarray) -> np.ndarray:
-    """Subtract the mean of the first 15 samples (SI templates carry a DC offset)."""
+    """Subtract the mean of the first 15 samples (SI templates carry a DC offset).
+
+    The 15-sample window assumes the pre-spike baseline occupies at least the
+    first 15 samples, i.e. the peak sits well after sample 15. This holds for the
+    bundles written here -- the default symmetric ``ms_before`` (~1.5 ms) at the
+    recording's sampling rate puts the trough tens of samples in. ``ms_before``
+    is not user-configurable today; if it ever is, derive this window from the
+    peak location / ``ms_before`` instead of the literal 15.
+    """
     return waveform - np.broadcast_to(
         waveform[:, :15, :, :].mean(axis=1)[:, np.newaxis, :, :], waveform.shape
     )
@@ -272,6 +280,13 @@ class UnitMatchBackend:
                 "attributed to the correct session. Check each session bundle's "
                 "RawWaveforms/ and cluster_group.tsv."
             )
+        # No good units across the loaded sessions -> no pairs. Return early
+        # before the prior-probability computation below, which divides by
+        # ``n_units ** 2``. The table layer never reaches this (make_fetch
+        # rejects an empty matchable set), but this backend is a public
+        # MatcherProtocol implementation and must not assume that precondition.
+        if param["n_units"] == 0:
+            return []
         waveform = _zero_center(waveform)
         clus_info = {
             "good_units": good_units,

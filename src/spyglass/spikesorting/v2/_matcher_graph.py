@@ -40,6 +40,21 @@ STRICT_POLICY = "strict"
 CuratedUnit = tuple  # (sorting_id: str, curation_id: int, unit_id: int)
 
 
+def chronological_member_order(member_plan: list[dict]) -> list[dict]:
+    """Order member-plan dicts chronologically for the matcher.
+
+    Sorts by ``(recording_date, member_index)`` so a sequential matcher (e.g.
+    UnitMatch's drift correction, which aligns each session to the previous one)
+    sees sessions in recording order; ``member_index`` breaks ties for same-day
+    members. ``recording_date`` is the UTC ISO 8601 string resolved upstream, so
+    plain lexicographic order is chronological.
+    """
+    return sorted(
+        member_plan,
+        key=lambda plan: (plan["recording_date"], plan["member_index"]),
+    )
+
+
 def canonicalize_match_pairs(
     pairs: "list[MatchPair]",
     member_index_by_curation: "dict[tuple[str, int], int]",

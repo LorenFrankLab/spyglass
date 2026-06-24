@@ -638,6 +638,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
         from spyglass.spikesorting.v2._matcher_graph import (
             canonicalize_match_pairs,
+            chronological_member_order,
         )
         from spyglass.spikesorting.v2._unitmatch_backend import (
             extract_unitmatch_bundle,
@@ -653,9 +654,14 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             (plan["sorting_id"], plan["curation_id"]): plan["member_index"]
             for plan in member_plan
         }
+        # Feed the matcher in CHRONOLOGICAL order: UnitMatch's drift correction
+        # aligns each session to the previous one, so an out-of-chronology order
+        # would mis-align drift. Pair orientation is independent of feed order --
+        # canonicalize_match_pairs re-orients by member_index below.
+        ordered_plan = chronological_member_order(member_plan)
         with tempfile.TemporaryDirectory(prefix="unitmatch_") as tmp_root:
-            dated_inputs = []
-            for plan in member_plan:
+            session_inputs = []
+            for plan in ordered_plan:
                 curation_key = {
                     "sorting_id": plan["sorting_id"],
                     "curation_id": plan["curation_id"],
@@ -673,32 +679,19 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                     sorting,
                     job_kwargs=resolved_job_kwargs,
                 )
-                dated_inputs.append(
-                    (
-                        plan["recording_date"],
-                        plan["member_index"],
-                        SessionMatcherInput(
-                            session_key={
-                                "sorting_id": plan["sorting_id"],
-                                "curation_id": plan["curation_id"],
-                            },
-                            waveform_dir=session_dir,
-                            channel_positions_path=(
-                                session_dir / "channel_positions.npy"
-                            ),
-                            recording_date=plan["recording_date"],
+                session_inputs.append(
+                    SessionMatcherInput(
+                        session_key={
+                            "sorting_id": plan["sorting_id"],
+                            "curation_id": plan["curation_id"],
+                        },
+                        waveform_dir=session_dir,
+                        channel_positions_path=(
+                            session_dir / "channel_positions.npy"
                         ),
+                        recording_date=plan["recording_date"],
                     )
                 )
-            # Feed the matcher in CHRONOLOGICAL order: UnitMatch's drift
-            # correction aligns each session to the previous one, so an
-            # out-of-chronology member order would mis-align drift. The
-            # recording_date (ISO string, resolved in make_fetch) sorts
-            # chronologically; member_index breaks ties for same-day members.
-            # Pair orientation is independent of this order --
-            # canonicalize_match_pairs re-orients by member_index below.
-            dated_inputs.sort(key=lambda item: (item[0], item[1]))
-            session_inputs = [item[2] for item in dated_inputs]
             start = time.perf_counter()
             raw_pairs = get_matcher(matcher_name).match(session_inputs, params)
             runtime_s = time.perf_counter() - start
@@ -751,7 +744,19 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
-        """Derive tracked units from the pairwise ``UnitMatch.Pair`` graph."""
+        """Derive tracked units from the pairwise ``UnitMatch.Pair`` graph.
+
+        ``node_universe`` is re-derived from the CURRENT curation labels
+        (``get_matchable_unit_ids``) at this populate time -- unlike
+        ``UnitMatch``, which froze its matchable set in ``make_fetch``. If a unit
+        that ``UnitMatch`` matched is relabeled (e.g. to ``noise``) AFTER
+        ``UnitMatch`` populated but before this runs, its ``UnitMatch.Pair`` edge
+        references a node no longer in ``node_universe`` and
+        ``derive_tracked_units`` raises (an edge endpoint absent from the node
+        universe). That is the intended loud failure: re-populate ``UnitMatch``
+        so both tables agree on the matchable set rather than tracking a stale
+        match.
+        """
         from spyglass.spikesorting.v2._matcher_graph import (
             derive_tracked_units,
         )
