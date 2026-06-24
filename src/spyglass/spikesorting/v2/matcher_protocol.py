@@ -117,17 +117,37 @@ def register_matcher(matcher: MatcherProtocol, schema: type) -> None:
     TypeError
         If ``matcher`` does not satisfy :class:`MatcherProtocol`.
     """
-    if not isinstance(matcher, MatcherProtocol):
+    if not isinstance(matcher, MatcherProtocol) or not callable(
+        getattr(matcher, "match", None)
+    ):
         raise TypeError(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
-            "attribute and a `match(session_inputs, params)` method)."
+            "attribute and a callable `match(session_inputs, params)` method)."
         )
     _MATCHER_REGISTRY[matcher.name] = matcher
     _SCHEMA_REGISTRY[matcher.name] = schema
 
 
+def register_default_matchers() -> None:
+    """Register the built-in matcher backends (idempotent, self-healing).
+
+    The backends register themselves as an import side effect, so the registry
+    is empty until a backend module is imported. This makes that bootstrap
+    explicit -- callers (and the lookups below) can ensure the built-ins are
+    present without depending on import order -- and re-registers them even if
+    the registry was cleared (e.g. by a test fixture).
+    """
+    # Function-level import avoids an import cycle (the backend imports this
+    # module) and keeps the optional UnitMatchPy import lazy (the backend only
+    # imports UnitMatchPy when its match()/extract path actually runs).
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+
+    _unitmatch_backend.register()
+
+
 def _registered_matchers() -> frozenset[str]:
-    """Return the set of registered matcher names."""
+    """Return the set of registered matcher names (built-ins ensured)."""
+    register_default_matchers()
     return frozenset(_MATCHER_REGISTRY)
 
 
@@ -142,6 +162,7 @@ def _raise_unknown(name: str) -> None:
 
 def get_matcher(name: str) -> MatcherProtocol:
     """Return the registered backend for ``name`` or raise UnknownMatcherError."""
+    register_default_matchers()
     if name not in _MATCHER_REGISTRY:
         _raise_unknown(name)
     return _MATCHER_REGISTRY[name]
@@ -149,6 +170,7 @@ def get_matcher(name: str) -> MatcherProtocol:
 
 def _get_matcher_schema(name: str) -> type:
     """Return the params schema for ``name`` or raise UnknownMatcherError."""
+    register_default_matchers()
     if name not in _SCHEMA_REGISTRY:
         _raise_unknown(name)
     return _SCHEMA_REGISTRY[name]

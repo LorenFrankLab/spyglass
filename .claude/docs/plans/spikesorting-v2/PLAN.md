@@ -7,10 +7,17 @@ and Phase 4a (UnitMatchPy technical spike) are complete. Phase 4a verified the
 matcher API end-to-end against `UnitMatchPy==3.2.7` on the polymer fixture
 (`notebooks/13_UnitMatch_Cross_Session.ipynb`, AUC 1.0), reconciled the three
 `PHASE4A_CONTRACT_STUB` markers, and surfaced the mandatory numpy-2 `arange`
-shim + the wrapper-owned dense split-half bundle requirement; no DataJoint
-tables were added and the import-safe `unit_matching.py` / `matcher_protocol.py`
-placeholders are unchanged. Phase 4b (UnitMatch schema + implementation) and
-Phase 5 (UX / FigPack) are pending.
+shim + the wrapper-owned dense split-half bundle requirement.
+**Phase 4b is in progress:** the matcher core has landed — `matcher_protocol.py`
+(the real protocol + registry, no longer a placeholder), the
+`UnitMatchParamsSchema`, and the `_unitmatch_backend.py` UnitMatch backend
+(guarded import + numpy-2 shim + dense bundle extraction + bidirectional pair
+emission), with end-to-end correspondence recovery verified on the polymer
+fixture. Still pending in 4b: the `unit_matching.py` DataJoint tables
+(`MatcherParameters` / `UnitMatchSelection` / `UnitMatch` / `TrackedUnit`) — so
+`unit_matching.py` remains an import-safe placeholder — the brain-region resolver
+wiring, the two-session polymer fixture + AUC gate, and docs. Phase 5
+(UX / FigPack) is pending.
 The review-fixes child plan (completed; its planning artifacts have been
 removed) addressed correctness/schema findings on top of the completed phases.
 
@@ -29,9 +36,10 @@ than duplicate them in `pipeline.py`.
 **Current post-Phase-3 code audit (2026-06-23):** `metric_curation.py` is no
 longer a placeholder. `AnalyzerCuration` now replaces v1 `MetricCuration` +
 the v1 `BurstPair` notebook helpers, and v2 has separate recording-artifact and
-sorting-analyzer recompute verification tables. The remaining import-safe
-placeholders are Phase 4/5 surfaces (`unit_matching.py`, `matcher_protocol.py`,
-`figpack_curation.py`). Phase 3 has landed: `SessionGroup.create_group` /
+sorting-analyzer recompute verification tables. `matcher_protocol.py` is also no
+longer a placeholder (Phase 4b landed the protocol + registry + the
+`_unitmatch_backend.py` backend). The remaining import-safe placeholders are the
+Phase 4b/5 DataJoint surfaces (`unit_matching.py`, `figpack_curation.py`). Phase 3 has landed: `SessionGroup.create_group` /
 `is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, and
 `ConcatenatedRecording.make` / `get_recording` / `split_sorting_by_session` are
 implemented (same-day chronic concatenate-and-sort), and `Sorting` / `CurationV2`

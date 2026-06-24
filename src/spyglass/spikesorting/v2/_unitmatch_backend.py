@@ -17,9 +17,11 @@ Two roles live here:
 UnitMatchPy is an optional dependency (``pip install -e
 ".[spikesorting-v2-matching]"``); the import is guarded so a missing install --
 or a Tk-less top-level ``import UnitMatchPy`` -- raises a clear, actionable error
-rather than a cryptic one. UnitMatchPy 3.2.7's metric path is numpy-2 broken, so
-the guard also installs a numpy-2 ``arange`` shim scoped to its
-``param_functions`` module (see ``appendix.md`` / the resolver evidence).
+rather than a cryptic one. UnitMatchPy 3.2.7's metric path is numpy-2 broken
+(``param_functions.get_avg_waveform_per_tp`` calls ``np.arange`` with 1-element
+``np.argwhere`` endpoints, which numpy>=2 rejects and UnitMatch's bare ``except``
+silently swallows -- corrupting the waveform trajectory), so the guard installs
+a numpy-2 ``arange`` shim scoped to its ``param_functions`` module.
 """
 
 from __future__ import annotations
@@ -269,9 +271,18 @@ class UnitMatchBackend:
     ) -> list[MatchPair]:
         """Unflatten the probability matrix into cross-session MatchPairs.
 
-        Emits one pair per above-threshold cross-session entry with ascending
-        session order (side A is the earlier session), so reversed duplicates
-        cannot both appear.
+        UnitMatch's probability matrix is asymmetric (one entry per directed
+        cross-validation comparison). Following UnitMatch's own grouping
+        (``assign_unique_id``), a pair is emitted only when BOTH directions
+        ``prob_matrix[i, j]`` and ``prob_matrix[j, i]`` clear the threshold, and
+        the reported ``match_probability`` is their mean -- so a one-sided /
+        borderline match that UnitMatch would reject is dropped, and the
+        probability is orientation-independent.
+
+        Side A is the session that appears first in ``session_inputs`` (the
+        caller owns that ordering); the ``i < j`` loop with the within-session
+        skip emits each unordered cross-session pair exactly once, so reversed
+        duplicates cannot both appear.
         """
         boundaries = np.asarray(session_switch).ravel()
         n = prob_matrix.shape[0]
@@ -290,8 +301,9 @@ class UnitMatchBackend:
                 sidx_j = session_of(j)
                 if sidx_j == sidx_i:  # within-session
                     continue
-                prob = float(prob_matrix[i, j])
-                if prob <= match_threshold:
+                p_ij = float(prob_matrix[i, j])
+                p_ji = float(prob_matrix[j, i])
+                if min(p_ij, p_ji) <= match_threshold:  # require both directions
                     continue
                 key_b = session_inputs[sidx_j].session_key
                 pairs.append(
@@ -302,10 +314,20 @@ class UnitMatchBackend:
                         session_b_sorting_id=str(key_b["sorting_id"]),
                         session_b_curation_id=int(key_b["curation_id"]),
                         unit_b_id=unit_of(j),
-                        match_probability=prob,
+                        match_probability=(p_ij + p_ji) / 2.0,
                     )
                 )
         return pairs
 
 
-register_matcher(UnitMatchBackend(), UnitMatchParamsSchema)
+def register() -> None:
+    """Register the UnitMatch backend + schema (idempotent).
+
+    Called at import for the usual side-effect path, and re-callable by
+    ``matcher_protocol.register_default_matchers`` so the registry self-heals
+    even if it was cleared (e.g. by a test fixture).
+    """
+    register_matcher(UnitMatchBackend(), UnitMatchParamsSchema)
+
+
+register()

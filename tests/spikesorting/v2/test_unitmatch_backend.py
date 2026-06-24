@@ -45,6 +45,70 @@ def test_match_single_session_returns_empty():
     assert UnitMatchBackend().match([one], {}) == []
 
 
+def _two_one_unit_sessions():
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    return [
+        SessionMatcherInput(
+            session_key={"sorting_id": "A", "curation_id": 0},
+            waveform_dir=Path("/x"),
+            channel_positions_path=Path("/x/cp.npy"),
+        ),
+        SessionMatcherInput(
+            session_key={"sorting_id": "B", "curation_id": 1},
+            waveform_dir=Path("/y"),
+            channel_positions_path=Path("/y/cp.npy"),
+        ),
+    ]
+
+
+def test_one_directional_match_is_rejected():
+    """A pair above threshold in only one CV direction is not emitted."""
+    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+
+    inputs = _two_one_unit_sessions()
+    session_switch = np.array([0, 1, 2])
+    original_ids = np.array([[10], [20]])
+    one_sided = np.array([[0.0, 0.9], [0.2, 0.0]])  # M[1,0]=0.2 below threshold
+    pairs = UnitMatchBackend._pairs_from_matrix(
+        one_sided, session_switch, original_ids, inputs, 0.5
+    )
+    assert pairs == []
+
+
+def test_bidirectional_match_reports_mean_probability():
+    """Both CV directions above threshold -> pair with the mean probability."""
+    from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
+
+    inputs = _two_one_unit_sessions()
+    session_switch = np.array([0, 1, 2])
+    original_ids = np.array([[10], [20]])
+    both = np.array([[0.0, 0.9], [0.8, 0.0]])
+    pairs = UnitMatchBackend._pairs_from_matrix(
+        both, session_switch, original_ids, inputs, 0.5
+    )
+    assert len(pairs) == 1
+    assert pairs[0].unit_a_id == 10 and pairs[0].unit_b_id == 20
+    assert pairs[0].session_a_sorting_id == "A"
+    assert pairs[0].match_probability == pytest.approx(0.85)
+
+
+def test_get_matcher_bootstraps_default_after_clear():
+    """get_matcher re-registers the built-in backend even if the registry was cleared."""
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+
+    saved_m, saved_s = dict(mp._MATCHER_REGISTRY), dict(mp._SCHEMA_REGISTRY)
+    try:
+        mp._MATCHER_REGISTRY.clear()
+        mp._SCHEMA_REGISTRY.clear()
+        assert mp.get_matcher("unitmatch").name == "unitmatch"
+    finally:
+        mp._MATCHER_REGISTRY.clear()
+        mp._MATCHER_REGISTRY.update(saved_m)
+        mp._SCHEMA_REGISTRY.clear()
+        mp._SCHEMA_REGISTRY.update(saved_s)
+
+
 def _read_polymer_gt():
     """Return (recording, gt_spike_trains_seconds) from the polymer fixture."""
     import spikeinterface.preprocessing as spre
