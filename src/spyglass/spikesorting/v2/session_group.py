@@ -508,6 +508,81 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         end_sample: bigint
         """
 
+    @staticmethod
+    def _load_member_recordings(members, preprocessing_params_name):
+        """Load each member's cached ``Recording`` in member order.
+
+        The core per-member contract for materialization: resolve each member's
+        ``RecordingSelection`` PK ONCE, load its cached ``Recording``, and
+        collect the pre-motion sample count (the basis for the ``MemberBoundary``
+        back-mapping). Isolated from :meth:`make` so the load discipline -- a
+        single PK fetch and a single ``get_recording`` per member -- lives in one
+        place and is unit-testable without driving a full populate.
+
+        Never calls ``Recording.populate``: the selection-time precondition in
+        ``ConcatenatedRecordingSelection.insert_selection`` guarantees every
+        member is already cached. This defensively re-checks and raises if a row
+        is missing (the selection was inserted by a raw bypass).
+
+        Parameters
+        ----------
+        members : list[dict]
+            ``SessionGroup.Member`` rows, already ordered by ``member_index``.
+        preprocessing_params_name : str
+            The concat selection's single shared preprocessing recipe.
+
+        Returns
+        -------
+        tuple[list, list[int], list[int]]
+            ``(recordings, member_sample_counts, member_indices)`` -- aligned
+            element-wise and in ``member_index`` order.
+
+        Raises
+        ------
+        MissingRecordingForConcatError
+            If any member's ``Recording`` row is not populated.
+        """
+        from spyglass.spikesorting.v2._concat_recording import (
+            member_recording_selection_key,
+        )
+        from spyglass.spikesorting.v2.exceptions import (
+            MissingRecordingForConcatError,
+        )
+        from spyglass.spikesorting.v2.recording import (
+            Recording,
+            RecordingSelection,
+        )
+
+        recordings = []
+        member_sample_counts = []
+        member_indices = []
+        missing: list[dict] = []
+        for member in members:
+            rec_sel_key = member_recording_selection_key(
+                member, preprocessing_params_name
+            )
+            rec_sel = RecordingSelection & rec_sel_key
+            # ``fetch1("KEY")`` resolves the secondary-attribute restriction to
+            # the recording_id UUID -- a real query, so resolve it ONCE.
+            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
+            if rec_pk is None or not (Recording & rec_pk):
+                missing.append(rec_sel_key)
+                continue
+            recording = Recording().get_recording(rec_pk)
+            recordings.append(recording)
+            member_sample_counts.append(int(recording.get_num_samples()))
+            member_indices.append(int(member["member_index"]))
+        if missing:
+            raise MissingRecordingForConcatError(
+                "ConcatenatedRecording.make: "
+                f"{len(missing)} member Recording row(s) are not populated "
+                f"under preprocessing_params_name={preprocessing_params_name!r}: "
+                f"{missing}. Populate Recording for each member first "
+                "(ConcatenatedRecordingSelection.insert_selection enforces "
+                "this; the selection was likely inserted by a raw bypass)."
+            )
+        return recordings, member_sample_counts, member_indices
+
     def make(self, key):
         """Materialize the motion-corrected, unwhitened concat cache.
 
@@ -542,16 +617,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
             cumulative_member_boundaries,
-            member_recording_selection_key,
             resolve_motion_correction,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2.exceptions import (
-            MissingRecordingForConcatError,
-        )
         from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
             _ELECTRICAL_SERIES_PATH,
             _unlink_staged_analysis_file,
         )
@@ -573,34 +642,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             as_dict=True, order_by="member_index"
         )
 
-        recordings = []
-        member_sample_counts = []
-        member_indices = []
-        missing: list[dict] = []
-        for member in members:
-            rec_sel_key = member_recording_selection_key(
-                member, preprocessing_params_name
-            )
-            rec_sel = RecordingSelection & rec_sel_key
-            # ``fetch1("KEY")`` resolves the secondary-attribute restriction to
-            # the recording_id UUID -- a real query, so resolve it ONCE.
-            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
-            if rec_pk is None or not (Recording & rec_pk):
-                missing.append(rec_sel_key)
-                continue
-            recording = Recording().get_recording(rec_pk)
-            recordings.append(recording)
-            member_sample_counts.append(int(recording.get_num_samples()))
-            member_indices.append(int(member["member_index"]))
-        if missing:
-            raise MissingRecordingForConcatError(
-                "ConcatenatedRecording.make: "
-                f"{len(missing)} member Recording row(s) are not populated "
-                f"under preprocessing_params_name={preprocessing_params_name!r}: "
-                f"{missing}. Populate Recording for each member first "
-                "(ConcatenatedRecordingSelection.insert_selection enforces "
-                "this; the selection was likely inserted by a raw bypass)."
-            )
+        recordings, member_sample_counts, member_indices = (
+            self._load_member_recordings(members, preprocessing_params_name)
+        )
 
         # Motion correction: resolve the Spyglass 'auto' alias against the
         # group's multi-day status before any SpikeInterface call.

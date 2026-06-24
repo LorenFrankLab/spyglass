@@ -438,6 +438,58 @@ def _ensure_clusterless_sorter_params():
 
 
 @pytest.mark.slow
+def test_load_member_recordings_aligned_and_single_load(same_day_group):
+    """``_load_member_recordings`` loads each member's cached Recording in
+    member_index order and returns sample counts / indices aligned element-wise
+    with the loaded recordings -- the core per-member materialization contract,
+    exercised without driving a full populate."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    members = (SessionGroup.Member & grp["group_key"]).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    recordings, sample_counts, member_indices = (
+        ConcatenatedRecording._load_member_recordings(
+            members, grp["preprocessing_params_name"]
+        )
+    )
+    expected = _member_sample_counts(grp)
+    assert member_indices == [0, 1]
+    assert sample_counts == expected
+    # The returned recordings are the same objects the counts were taken from.
+    assert [int(r.get_num_samples()) for r in recordings] == expected
+
+
+@pytest.mark.slow
+def test_load_member_recordings_raises_on_missing_recording(same_day_group):
+    """A member whose Recording cache is absent raises
+    ``MissingRecordingForConcatError`` rather than silently dropping it (which
+    would shift every later member's boundary)."""
+    from spyglass.spikesorting.v2.exceptions import (
+        MissingRecordingForConcatError,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    members = (SessionGroup.Member & grp["group_key"]).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    # No RecordingSelection exists under a bogus preprocessing recipe, so every
+    # member is "missing" -- the defensive precondition fires.
+    with pytest.raises(MissingRecordingForConcatError, match="not populated"):
+        ConcatenatedRecording._load_member_recordings(
+            members, "no_such_preprocessing_recipe"
+        )
+
+
+@pytest.mark.slow
 def test_concatenated_recording_make_shape(same_day_group):
     """The materialized concat row carries the NWB pointers, channel count,
     summed duration, cumulative integer boundaries, and reads back as one

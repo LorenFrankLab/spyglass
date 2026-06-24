@@ -1305,15 +1305,52 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
+    def _first_concat_member(source_key):
+        """Return the concat anchor member row and its preprocessing recipe.
+
+        The anchor is the FIRST ``SessionGroup.Member`` (by ``member_index``):
+        its NWB is the analysis parent and its ``Recording`` (resolved lazily by
+        callers that need it) supplies the per-unit ``Electrode`` FK. The
+        preprocessing recipe is the concat selection's single shared one. This
+        is the cheap half of anchor resolution -- two part-table fetches, no
+        ``RecordingSelection`` join -- so callers that only need the NWB never
+        pay for the ``recording_id`` lookup.
+
+        Parameters
+        ----------
+        source_key : dict
+            ``{"concat_recording_id": ...}`` from ``resolve_source``.
+
+        Returns
+        -------
+        tuple[dict, str]
+            ``(first_member_row, preprocessing_params_name)``.
+        """
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+            SessionGroup,
+        )
+
+        concat_sel = (ConcatenatedRecordingSelection & source_key).fetch1()
+        group_key = {
+            "session_group_owner": concat_sel["session_group_owner"],
+            "session_group_name": concat_sel["session_group_name"],
+        }
+        first_member = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index", limit=1
+        )[0]
+        return first_member, concat_sel["preprocessing_params_name"]
+
+    @staticmethod
     def _resolve_concat_anchor(source_key):
         """Resolve a concat source to its anchor recording / NWB / preprocessing.
 
-        The anchor is the FIRST ``SessionGroup.Member`` (by ``member_index``):
-        its ``Recording`` supplies the per-unit ``Electrode`` FK and its NWB the
-        analysis parent; the preprocessing recipe is the concat selection's
-        single shared one. The full multi-session provenance stays queryable
-        through ``ConcatenatedRecordingSelection -> SessionGroup.Member``; this
-        does NOT query ``RecordingSelection`` with the concat-only key.
+        Adds the anchor ``recording_id`` (the per-unit ``Electrode`` FK) to the
+        cheap :meth:`_first_concat_member` resolution. The full multi-session
+        provenance stays queryable through
+        ``ConcatenatedRecordingSelection -> SessionGroup.Member``; this resolves
+        the anchor member's own ``RecordingSelection`` by its single-session
+        key, never ``RecordingSelection`` with the concat-only key.
 
         Parameters
         ----------
@@ -1330,20 +1367,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             member_recording_selection_key,
         )
         from spyglass.spikesorting.v2.recording import RecordingSelection
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecordingSelection,
-            SessionGroup,
-        )
 
-        concat_sel = (ConcatenatedRecordingSelection & source_key).fetch1()
-        group_key = {
-            "session_group_owner": concat_sel["session_group_owner"],
-            "session_group_name": concat_sel["session_group_name"],
-        }
-        preprocessing_params_name = concat_sel["preprocessing_params_name"]
-        first_member = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index", limit=1
-        )[0]
+        first_member, preprocessing_params_name = Sorting._first_concat_member(
+            source_key
+        )
         anchor_recording_id = (
             RecordingSelection
             & member_recording_selection_key(
@@ -1382,7 +1409,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         source = SortingSelection.resolve_source(key)
         if source.kind == "recording":
             return (RecordingSelection & source.key).fetch1("nwb_file_name")
-        return Sorting._resolve_concat_anchor(source.key)[1]
+        # NWB only -- read it off the anchor member row; no recording_id join.
+        return Sorting._first_concat_member(source.key)[0]["nwb_file_name"]
 
     def make_compute(
         self,
