@@ -1328,9 +1328,13 @@ The table shapes below stand, with these spike findings folded in:
 - **`TrackedUnit` strict cliques have a native analog.** UnitMatchPy's
   `assign_unique_id` already emits cross-session identities at three tiers;
   **Conservative** (a unit joins a group only if it matches *every* member) is a
-  maximal-clique assignment — exactly the strict mode `TrackedUnit.make()`
-  specifies. v2 still derives `TrackedUnit` from the `Pair` graph (so the cap and
-  provenance checks apply), but the backend output is a cross-check.
+  maximal-clique assignment in the same spirit as the strict mode
+  `TrackedUnit.make()` derives. As implemented, v2 partitions the curated units
+  into tracked units via a greedy maximal-clique cover (each unit in exactly one
+  identity; the strongest overlapping clique wins) so overlapping cliques never
+  duplicate a unit — mirroring UnitMatch's one-group-id-per-unit conservative
+  assignment. v2 derives `TrackedUnit` from the `Pair` graph (so the cap and
+  provenance checks apply); the backend output is a cross-check.
 - **Matcher input is a wrapper-built per-session directory bundle** (dense
   split-half templates from `CurationV2.get_recording(key)`; layout in
   shared-contracts § MatcherProtocol). The matcher never sees the analyzer,
