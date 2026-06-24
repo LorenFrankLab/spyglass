@@ -101,7 +101,9 @@ _MATCHER_REGISTRY: dict[str, MatcherProtocol] = {}
 _SCHEMA_REGISTRY: dict[str, type] = {}
 
 
-def register_matcher(matcher: MatcherProtocol, schema: type) -> None:
+def register_matcher(
+    matcher: MatcherProtocol, schema: type, *, replace: bool = False
+) -> None:
     """Register a matcher backend and its params schema under ``matcher.name``.
 
     Parameters
@@ -111,11 +113,19 @@ def register_matcher(matcher: MatcherProtocol, schema: type) -> None:
     schema : type
         The Pydantic model validating that matcher's ``MatcherParameters``
         ``params`` blob.
+    replace : bool, optional
+        If ``False`` (the default), registering a name that is already taken
+        raises ``ValueError`` -- ``MatcherParameters`` stores only the matcher
+        name, so silently overwriting a registered backend would make existing
+        rows dispatch to different code. The built-in self-healing registration
+        passes ``replace=True`` to re-register its own backend idempotently.
 
     Raises
     ------
     TypeError
         If ``matcher`` does not satisfy :class:`MatcherProtocol`.
+    ValueError
+        If ``matcher.name`` is already registered and ``replace`` is ``False``.
     """
     if not isinstance(matcher, MatcherProtocol) or not callable(
         getattr(matcher, "match", None)
@@ -123,6 +133,13 @@ def register_matcher(matcher: MatcherProtocol, schema: type) -> None:
         raise TypeError(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
             "attribute and a callable `match(session_inputs, params)` method)."
+        )
+    if not replace and matcher.name in _MATCHER_REGISTRY:
+        raise ValueError(
+            f"A matcher named {matcher.name!r} is already registered. "
+            "MatcherParameters rows store only the matcher name, so replacing a "
+            "backend would silently re-route existing rows to different code. "
+            "Pick a distinct name, or pass replace=True to override deliberately."
         )
     _MATCHER_REGISTRY[matcher.name] = matcher
     _SCHEMA_REGISTRY[matcher.name] = schema

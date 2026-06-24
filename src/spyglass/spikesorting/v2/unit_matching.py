@@ -23,10 +23,11 @@ same biological unit recorded on different days. Four tables:
     an exportable NWB pairs table.
 
 ``TrackedUnit`` (+ ``Member`` part)
-    ``make()`` derives biological-unit identities from the ``Pair`` graph: one
-    tracked unit per strict maximal clique over the curated-unit universe, with a
-    bounded node budget. ``get_unit_brain_regions`` resolves each tracked unit's
-    per-session brain regions.
+    ``make()`` derives biological-unit identities from the ``Pair`` graph: a
+    strict partition of the curated-unit universe via a greedy maximal-clique
+    cover (one identity per unit), with a bounded node budget.
+    ``get_unit_brain_regions`` resolves each tracked unit's per-session brain
+    regions.
 """
 
 from __future__ import annotations
@@ -49,7 +50,6 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2.utils import (
     _assert_v2_db_safe,
-    _validate_params,
     transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -74,30 +74,60 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    def insert1(self, row, **kwargs):
+    def insert1(self, row, allow_duplicate_params=False, **kwargs):
+        """Validate and insert a single matcher-parameters row."""
+        # Delegate to ``insert`` so one validated path serves both insert1 and
+        # bulk insert (a bulk insert must not bypass the registry / Pydantic
+        # checks), mirroring the other validated v2 parameter Lookups.
+        self.insert(
+            [row], allow_duplicate_params=allow_duplicate_params, **kwargs
+        )
+
+    def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Validate the matcher name + params against the registry, then insert.
 
         Layer-1 defense against matcher-name typos: an unknown ``matcher`` string
         could otherwise sit in the database until ``UnitMatch.populate()`` fails.
-        Looking up the per-matcher Pydantic schema via the same registry doubles
-        as the typo check.
+        The same registry dispatches the per-matcher Pydantic schema for ``params``
+        validation (so a typo is caught at insert), and the outer/inner
+        ``params_schema_version`` drift + duplicate-content guards mirror the
+        other v2 parameter Lookups.
         """
         from spyglass.spikesorting.v2.matcher_protocol import (
             _get_matcher_schema,
             _registered_matchers,
         )
+        from spyglass.spikesorting.v2.utils import (
+            reject_duplicate_parameter_content,
+            validate_lookup_rows,
+        )
 
-        row = dict(row)
-        if row["matcher"] not in _registered_matchers():
-            raise UnknownMatcherError(
-                f"Unknown matcher {row['matcher']!r}. Registered matchers: "
-                f"{sorted(_registered_matchers())}. To add a new matcher, "
-                "implement MatcherProtocol and register it via "
-                "register_matcher() before inserting parameters."
-            )
-        schema_cls = _get_matcher_schema(row["matcher"])
-        row["params"] = _validate_params(schema_cls, row["params"])
-        super().insert1(row, **kwargs)
+        registered = _registered_matchers()
+
+        def schema_for(row):
+            if row["matcher"] not in registered:
+                raise UnknownMatcherError(
+                    f"Unknown matcher {row['matcher']!r}. Registered matchers: "
+                    f"{sorted(registered)}. To add a new matcher, implement "
+                    "MatcherProtocol and register it via register_matcher() "
+                    "before inserting parameters."
+                )
+            return _get_matcher_schema(row["matcher"])
+
+        validated = validate_lookup_rows(
+            rows,
+            self.heading.names,
+            schema_for=schema_for,
+            table_name="MatcherParameters",
+        )
+        reject_duplicate_parameter_content(
+            self,
+            validated,
+            table_name="MatcherParameters",
+            name_attr="matcher_params_name",
+            allow_duplicate_params=allow_duplicate_params,
+        )
+        super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):
@@ -123,7 +153,7 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
     """One row per (session group, matcher params, per-member curation choices).
 
     The user must pin a specific ``(sorting_id, curation_id)`` per group member
-    via the ``MemberCuration`` part. The plan deliberately rejects an implicit
+    via the ``MemberCuration`` part. This design deliberately rejects an implicit
     "latest curation" lookup -- that would make UnitMatch outputs irreproducible
     when a user adds a curation to one source session. The master stores a
     deterministic hash of the part-row choices so ``insert_selection`` stays
@@ -458,7 +488,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         with tempfile.TemporaryDirectory(prefix="unitmatch_") as tmp_root:
             from pathlib import Path
 
-            session_inputs = []
+            dated_inputs = []
             for member in members:
                 member_index = int(member["member_index"])
                 sorting_id, curation_id = choices_by_member[member_index]
@@ -469,6 +499,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 recording = CurationV2.get_recording(curation_key)
                 full_sorting = CurationV2.get_sorting(curation_key)
                 matchable = CurationV2().get_matchable_unit_ids(curation_key)
+                if len(matchable) == 0:
+                    raise ValueError(
+                        "UnitMatch.make: member_index "
+                        f"{member_index} (sorting_id={sorting_id}, "
+                        f"curation_id={curation_id}) has no matchable units "
+                        "(all curated units are excluded labels); a matcher "
+                        "cannot run on an empty session. Re-curate so at least "
+                        "one unit survives the exclude filter, or drop the "
+                        "member from the SessionGroup."
+                    )
                 sorting = full_sorting.select_units(matchable)
                 session_dir = Path(tmp_root) / f"member_{member_index}"
                 extract_unitmatch_bundle(
@@ -480,19 +520,31 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 recording_date = (
                     Session & {"nwb_file_name": member["nwb_file_name"]}
                 ).fetch1("session_start_time")
-                session_inputs.append(
-                    SessionMatcherInput(
-                        session_key={
-                            "sorting_id": str(sorting_id),
-                            "curation_id": curation_id,
-                        },
-                        waveform_dir=session_dir,
-                        channel_positions_path=(
-                            session_dir / "channel_positions.npy"
+                dated_inputs.append(
+                    (
+                        recording_date,
+                        member_index,
+                        SessionMatcherInput(
+                            session_key={
+                                "sorting_id": str(sorting_id),
+                                "curation_id": curation_id,
+                            },
+                            waveform_dir=session_dir,
+                            channel_positions_path=(
+                                session_dir / "channel_positions.npy"
+                            ),
+                            recording_date=recording_date,
                         ),
-                        recording_date=recording_date,
                     )
                 )
+            # Feed the matcher in CHRONOLOGICAL order: UnitMatch's drift
+            # correction aligns each session to the previous one, so an
+            # out-of-chronology member order would mis-align drift. member_index
+            # breaks ties for same-day members. Pair orientation is independent
+            # of this order -- canonicalize_match_pairs re-orients by
+            # member_index below.
+            dated_inputs.sort(key=lambda item: (item[0], item[1]))
+            session_inputs = [item[2] for item in dated_inputs]
             start = time.perf_counter()
             raw_pairs = get_matcher(matcher_name).match(session_inputs, params)
             runtime_s = time.perf_counter() - start
@@ -688,8 +740,9 @@ def _curation_member_identity(sorting_id):
     Walks ``SortingSelection.resolve_source -> RecordingSelection`` to recover
     the ``(nwb_file_name, sort_group_id, interval_list_name, team_name)`` the
     curation was sorted from -- the tuple a ``SessionGroup.Member`` row carries.
-    Concat-backed sorts are out of scope for per-member pinning (see the
-    cross-session phase's "deliberately not in this phase" concat note).
+    Per-member pinning supports single-session sorts only; concat-backed sorts
+    are out of scope (a concat sort has one curation for the whole
+    concatenation, not one per member).
     """
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection

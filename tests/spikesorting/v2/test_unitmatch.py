@@ -224,6 +224,91 @@ def test_derive_tracked_units_under_cap_succeeds_strict():
     assert all(tu["policy_used"] == "strict" for tu in tracked)
 
 
+def test_derive_tracked_units_rejects_edge_outside_universe():
+    """An edge endpoint absent from the node universe raises (networkx
+    add_edge would otherwise silently create the node, smuggling a unit past
+    the node budget and into the partition)."""
+    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+
+    a, b = _nodes(("A", 1), ("B", 1))
+    stray = ("C", 0, 1)  # not in node_universe
+    with pytest.raises(ValueError, match="absent from node_universe"):
+        derive_tracked_units(
+            [a, b], [(a, stray, 0.9)], threshold=0.5, max_strict_nodes=100
+        )
+
+
+# --------------------------------------------------------------------------- #
+# NWB pairs (de)serialization round-trip (pure I/O, no DB).                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
+    """Non-empty + empty pairs round-trip; a None fdr stores as NaN and reads
+    back as None, while a real fdr survives and string ids stay str."""
+    from datetime import datetime, timezone
+
+    from pynwb import NWBHDF5IO, NWBFile
+
+    from spyglass.spikesorting.v2._unitmatch_nwb import (
+        build_pairs_table,
+        read_pairs,
+        write_pairs_table,
+    )
+
+    def _fresh_nwb(name):
+        path = tmp_path / name
+        nwbf = NWBFile(
+            session_description="t",
+            identifier=name,
+            session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+        with NWBHDF5IO(str(path), "w") as io:
+            io.write(nwbf)
+        return str(path)
+
+    pairs = [
+        {
+            "session_a_sorting_id": "11111111-1111-1111-1111-111111111111",
+            "session_a_curation_id": 0,
+            "unit_a_id": 3,
+            "session_b_sorting_id": "22222222-2222-2222-2222-222222222222",
+            "session_b_curation_id": 1,
+            "unit_b_id": 7,
+            "match_probability": 0.85,
+            "drift_estimate_um": 0.0,
+            "fdr_estimate": None,
+        },
+        {
+            "session_a_sorting_id": "11111111-1111-1111-1111-111111111111",
+            "session_a_curation_id": 0,
+            "unit_a_id": 4,
+            "session_b_sorting_id": "22222222-2222-2222-2222-222222222222",
+            "session_b_curation_id": 1,
+            "unit_b_id": 9,
+            "match_probability": 0.91,
+            "drift_estimate_um": 0.0,
+            "fdr_estimate": 0.05,
+        },
+    ]
+    object_id = write_pairs_table(_fresh_nwb("pairs.nwb"), pairs)
+    assert isinstance(object_id, str)
+    back = read_pairs(
+        str(tmp_path / "pairs.nwb"),
+        object_id,
+    )
+    assert [row["pair_index"] for row in back] == [0, 1]
+    assert back[0]["fdr_estimate"] is None
+    assert back[1]["fdr_estimate"] == pytest.approx(0.05)
+    assert isinstance(back[0]["session_a_sorting_id"], str)
+    assert back[0]["unit_a_id"] == 3 and back[0]["unit_b_id"] == 7
+
+    # Empty table writes and reads back empty (concrete dtypes, no inference).
+    empty_oid = write_pairs_table(_fresh_nwb("empty.nwb"), [])
+    assert read_pairs(str(tmp_path / "empty.nwb"), empty_oid) == []
+    assert len(build_pairs_table([]).columns) > 0  # columns exist even when empty
+
+
 # --------------------------------------------------------------------------- #
 # MatcherProtocol is implementable by external code (no v2 internals touched).  #
 # --------------------------------------------------------------------------- #
@@ -424,6 +509,26 @@ def test_matcher_parameters_validates_params_per_matcher(dj_conn):
             }
         )
     assert len(MatcherParameters & {"matcher_params_name": "bad_params"}) == 0
+
+
+@pytest.mark.slow
+def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
+    """Goal 1: the bulk insert() path (not just insert1) rejects a typo'd
+    matcher -- it must not be a validation bypass."""
+    from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    with pytest.raises(UnknownMatcherError):
+        MatcherParameters().insert(
+            [
+                {
+                    "matcher_params_name": "bulk_typo",
+                    "matcher": "unitmatchh",  # typo
+                    "params": {},
+                }
+            ]
+        )
+    assert len(MatcherParameters & {"matcher_params_name": "bulk_typo"}) == 0
 
 
 @pytest.mark.slow
@@ -859,6 +964,13 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
     sorter yield. The ROC labels every cross-session unit pair by whether the
     two sides are the same ground-truth neuron and uses the matcher probability
     as the score.
+
+    Coverage note (the three validations meet in the middle): this gate proves
+    the matcher SCIENCE (AUC vs ground truth); ``test_make_runs_full_matcher_
+    table_path`` proves the DataJoint TABLE path (selection -> make -> Pair ->
+    get_pairs -> TrackedUnit) on real v2-curated units; and
+    ``test_unitmatch_backend.test_match_recovers_planted_correspondences``
+    proves real-UnitMatchPy bundle extraction + matching on a real recording.
     """
     if not (_POLYMER_S1.exists() and _POLYMER_S2.exists()):
         pytest.skip(

@@ -10,8 +10,9 @@ without a database:
   same-member pairs (which include self-pairs), and reversed/duplicate pairs --
   so ``(A, B)`` and ``(B, A)`` can never both be inserted into ``UnitMatch.Pair``.
 - :func:`derive_tracked_units` seeds a graph from the full curated-unit universe,
-  enforces the strict node budget, and emits one tracked unit per maximal clique
-  (``networkx.find_cliques``), with isolated units surfacing as singletons.
+  enforces the strict node budget, and partitions the units into tracked units
+  via a greedy maximal-clique cover (each unit in exactly one tracked unit; the
+  strongest overlapping clique wins), with isolated units surfacing as singletons.
 
 Neither function imports DataJoint or SpikeInterface, so the module loads without
 a database connection.
@@ -29,8 +30,9 @@ from spyglass.spikesorting.v2.exceptions import (
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
 
-#: The only tracked-unit policy shipped today (maximal cliques). Future policies
-#: are pure inserts into ``TrackedUnit.policy_used`` -- no schema migration.
+#: The only tracked-unit policy shipped today (greedy maximal-clique cover).
+#: Future policies are pure inserts into ``TrackedUnit.policy_used`` -- no
+#: schema migration.
 STRICT_POLICY = "strict"
 
 #: Node identity for the tracked-unit graph: one curated unit.
@@ -203,7 +205,7 @@ def derive_tracked_units(
     if policy != STRICT_POLICY:
         raise ValueError(
             f"derive_tracked_units: policy {policy!r} is not supported; only "
-            f"{STRICT_POLICY!r} (maximal cliques) ships today."
+            f"{STRICT_POLICY!r} (greedy maximal-clique cover) ships today."
         )
 
     nodes = [tuple(node) for node in node_universe]
@@ -220,11 +222,21 @@ def derive_tracked_units(
 
     graph = nx.Graph()
     graph.add_nodes_from(nodes)
+    node_set = set(nodes)
     for node_a, node_b, probability in edges:
-        if float(probability) > threshold:
-            graph.add_edge(
-                tuple(node_a), tuple(node_b), probability=float(probability)
+        edge = (tuple(node_a), tuple(node_b))
+        # networkx ``add_edge`` silently CREATES missing endpoints, which would
+        # smuggle a unit past the node budget and into the partition without it
+        # being part of the declared curated-unit universe. Require every edge
+        # endpoint to be a seeded node instead.
+        if edge[0] not in node_set or edge[1] not in node_set:
+            raise ValueError(
+                f"derive_tracked_units: edge {edge} references a node absent "
+                "from node_universe; edges must be a subset of the curated-unit "
+                "universe (seed every matchable unit as a node)."
             )
+        if float(probability) > threshold:
+            graph.add_edge(*edge, probability=float(probability))
 
     def _clique_edge_probs(members: list) -> list[float]:
         return [

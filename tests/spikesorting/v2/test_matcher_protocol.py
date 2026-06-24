@@ -62,6 +62,27 @@ def test_register_and_get_matcher_round_trip(clean_registry):
     assert mp._get_matcher_schema("dummy") is DummySchema
 
 
+def test_register_matcher_rejects_non_conforming_object(clean_registry):
+    mp = clean_registry
+    with pytest.raises(TypeError):
+        mp.register_matcher(object(), DummySchema)
+
+
+def test_register_matcher_duplicate_name_raises_unless_replace(clean_registry):
+    """A second backend cannot silently claim an existing matcher name."""
+    mp = clean_registry
+    first = _dummy_matcher(mp, name="collide")
+    second = _dummy_matcher(mp, name="collide")
+    mp.register_matcher(first, DummySchema)
+    with pytest.raises(ValueError, match="already registered"):
+        mp.register_matcher(second, DummySchema)
+    # The original backend is untouched by the rejected registration.
+    assert mp.get_matcher("collide") is first
+    # Explicit opt-in replaces it.
+    mp.register_matcher(second, DummySchema, replace=True)
+    assert mp.get_matcher("collide") is second
+
+
 def test_get_matcher_unknown_raises_with_guidance(clean_registry):
     mp = clean_registry
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
