@@ -70,7 +70,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
   - Compute cost on the fixture (wall time, peak RSS).
 - **Write the findings into `appendix.md § UnitMatchPy integration notes`** and replace the `PHASE4A_CONTRACT_STUB` markers in `appendix.md`, `shared-contracts.md`, and `designs.md`. Include the exact import statements and a minimal working code snippet (the v2 wrapper will be derived from this).
 - **Reconcile with `shared-contracts.md § MatcherProtocol`**. The current contract says "matcher MUST NOT depend on raw recording data". If 4a finds UnitMatchPy requires data not already present in the analyzer, the v2 wrapper must preextract those inputs into a matcher-owned bundle while still keeping raw NWB paths, Spyglass table keys, and `SortingAnalyzer` objects out of the matcher API. If that wrapper-owned bundle approach cannot be made to run end-to-end on a Frank-lab fixture, stop before Phase 4b and escalate to the project owner; do not quietly scope a DataJoint implementation around an unproven matcher path.
-- **Output deliverables of 4a**: a new cross-session notebook (provisionally `notebooks/14_UnitMatch_Spike_Sorting.ipynb` — confirm the number against the current `notebooks/` sequence and reconcile with the Phase 5 cross-session notebook, which also claims `14_*`, so the two do not collide) that loads a v2 analyzer and runs UnitMatchPy end-to-end, plus the updated appendix and shared-contracts sections. NO new DataJoint tables. Do not replace the import-safe `unit_matching.py` placeholder until Phase 4b.
+- **Output deliverables of 4a**: a new cross-session notebook, `notebooks/13_UnitMatch_Cross_Session.ipynb` (number 13 chosen to avoid colliding with the Phase 5 cross-session notebook, which claims `14_*`), that loads a v2 analyzer and runs UnitMatchPy end-to-end, plus the updated appendix and shared-contracts sections. NO new DataJoint tables. Do not replace the import-safe `unit_matching.py` placeholder until Phase 4b.
 
 ### Phase 4b — Schema + implementation (after 4a lands)
 
@@ -148,8 +148,8 @@ test -f "$SPYGLASS_SKILL_DIR/scripts/code_graph.py"
 uv pip check
 uv pip show UnitMatchPy
 
-jupyter nbconvert --to notebook --execute notebooks/14_UnitMatch_Spike_Sorting.ipynb --output /tmp/14_UnitMatch_Spike_Sorting.executed.ipynb
-git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/plans/spikesorting-v2/shared-contracts.md .claude/docs/plans/spikesorting-v2/designs.md notebooks/14_UnitMatch_Spike_Sorting.ipynb
+jupyter nbconvert --to notebook --execute notebooks/13_UnitMatch_Cross_Session.ipynb --output /tmp/13_UnitMatch_Cross_Session.executed.ipynb
+git diff --check -- .claude/docs/plans/spikesorting-v2/appendix.md .claude/docs/plans/spikesorting-v2/shared-contracts.md .claude/docs/plans/spikesorting-v2/designs.md notebooks/13_UnitMatch_Cross_Session.ipynb
 ```
 
 ### Phase 4b commands

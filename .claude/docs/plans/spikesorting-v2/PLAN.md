@@ -1,9 +1,16 @@
 # Spike Sorting v2 Implementation Plan
 
 **Status:** Phase 0a / 0b / 0c, Phase 1, Phase 1b runtime-regressions,
-Phase 2 (AnalyzerCuration + recompute verification), and Phase 3
-(SessionGroup / ConcatenatedRecording — same-day chronic concatenate-and-sort)
-are complete. Phases 4 (UnitMatch) and 5 (UX / FigPack) are pending.
+Phase 2 (AnalyzerCuration + recompute verification), Phase 3
+(SessionGroup / ConcatenatedRecording — same-day chronic concatenate-and-sort),
+and Phase 4a (UnitMatchPy technical spike) are complete. Phase 4a verified the
+matcher API end-to-end against `UnitMatchPy==3.2.7` on the polymer fixture
+(`notebooks/13_UnitMatch_Cross_Session.ipynb`, AUC 1.0), reconciled the three
+`PHASE4A_CONTRACT_STUB` markers, and surfaced the mandatory numpy-2 `arange`
+shim + the wrapper-owned dense split-half bundle requirement; no DataJoint
+tables were added and the import-safe `unit_matching.py` / `matcher_protocol.py`
+placeholders are unchanged. Phase 4b (UnitMatch schema + implementation) and
+Phase 5 (UX / FigPack) are pending.
 The review-fixes child plan (completed; its planning artifacts have been
 removed) addressed correctness/schema findings on top of the completed phases.
 
