@@ -438,7 +438,9 @@ def _ensure_clusterless_sorter_params():
 
 
 @pytest.mark.slow
-def test_load_member_recordings_aligned_and_single_load(same_day_group):
+def test_load_member_recordings_returns_aligned_counts_and_indices(
+    same_day_group,
+):
     """``_load_member_recordings`` loads each member's cached Recording in
     member_index order and returns sample counts / indices aligned element-wise
     with the loaded recordings -- the core per-member materialization contract,
