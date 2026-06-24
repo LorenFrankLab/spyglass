@@ -546,9 +546,11 @@ UID Conservative 1/2`). **There is no per-pair drift or FDR column.** Drift is
 estimated and applied internally per session-pair (`metric_functions.drift_n_sessions`);
 the false-positive estimate is a session-level value *printed* by
 `utils.evaluate_output`, not a column. `assign_unique_id` returns a length-4 list
-(default + Liberal/Intermediate/Conservative tiers): **Conservative** assigns a
-unit to a group only if it matches *every* member (a maximal clique), so it is
-the direct analog of a strict clique-based tracked-unit derivation.
+in order `[Liberal, Intermediate, Conservative, default]` (index 2 is
+Conservative — verified against the backend source; do not assume default-first):
+**Conservative** assigns a unit to a group only if it matches *every* member (a
+maximal clique), so it is the direct analog of a strict clique-based tracked-unit
+derivation.
 
 **Compute cost** (polymer fixture, 32 units across 2 sessions, dense split-half
 extraction): ~6 s wall total, ~1.6 GB peak RSS; the matcher inference itself is

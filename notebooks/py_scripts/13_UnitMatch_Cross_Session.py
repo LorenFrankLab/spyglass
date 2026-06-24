@@ -36,7 +36,6 @@
 # optional dependency group; they are not installed into the base environment.
 
 # +
-import os
 import time
 import resource
 import tempfile
@@ -323,15 +322,21 @@ print(f"metric scores: {list(scores_to_include.keys())}")
 # `utils.evaluate_output`, not a column.
 
 threshold = param["match_threshold"]
-output_threshold = (prob_matrix > threshold).astype(int)
-matches = np.argwhere((prob_matrix > threshold) & (within_session == 0))
+above_threshold = prob_matrix > threshold
+output_threshold = above_threshold.astype(int)
+matches = np.argwhere(above_threshold & (within_session == 0))
 unique_ids = aid.assign_unique_id(prob_matrix, param, clus_info)
+# Return order is [Liberal, Intermediate, Conservative, default] (verified
+# against assign_unique_id source). Conservative (index 2) is the maximal-clique
+# tier — the strict tracked-unit analog; index it explicitly, not by guesswork.
+conservative_uids = unique_ids[2]
 match_table = su.make_match_table(
     scores_to_include, matches, prob_matrix, total_score, output_threshold,
     clus_info, param, UIDs=unique_ids,
 )
 print("assign_unique_id -> list of", np.shape(unique_ids),
-      "(rows: default / Liberal / Intermediate / Conservative)")
+      "(rows: Liberal / Intermediate / Conservative / default);",
+      "n distinct Conservative groups:", len(np.unique(conservative_uids)))
 print("make_match_table ->", type(match_table).__name__, match_table.shape)
 print("columns:", list(match_table.columns))
 match_table.head()
@@ -342,7 +347,10 @@ match_table.head()
 # columns). True correspondences are pairs sharing a ground-truth unit id.
 
 # +
-n1 = param["n_units_per_session"][0]
+# Session boundary in the stacked matrix. Use session_switch (the matched-unit
+# boundary), NOT param["n_units_per_session"], which holds TOTAL tsv rows rather
+# than good-unit counts — they coincide here only because every unit is `good`.
+n1 = int(session_switch[1])
 cross = prob_matrix[:n1, n1:]
 gt_match = np.array(S1_IDS)[:, None] == np.array(S2_IDS)[None, :]
 true_pairs = cross[gt_match]
