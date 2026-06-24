@@ -25,7 +25,7 @@ import datetime as dt
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 import datajoint as dj
 
@@ -61,6 +61,113 @@ _ZERO_HASH = "0" * 64
 def _current_env_id() -> Optional[str]:
     """Return the current ``UserEnvironment`` env_id (inserting if needed)."""
     return UserEnvironment().this_env.get("env_id")
+
+
+# ---------------------------------------------------------------------
+# Shared tri-part dispatch carriers + helpers for the recompute QC tables
+# ---------------------------------------------------------------------
+
+
+class RecomputeFetched(NamedTuple):
+    """DB inputs for a recompute table's ``make_compute`` (no regen I/O).
+
+    ``parent_key`` carries its UUID PK (``recording_id`` / ``sorting_id``) as a
+    str so the carrier is DeepHash-stable for the tri-part integrity check.
+    """
+
+    parent_key: dict
+    rounding: int
+    xfail_reason: Optional[str]
+
+
+class RecomputeComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` carrier for the recompute tables.
+
+    ``outcome`` is ``'xfail'`` | ``'error'`` | ``'compare'``. A regeneration
+    failure is a VALID ``matched=0`` outcome (``'error'``) encoded here rather
+    than raised, so ``make_insert`` still records the QC result instead of the
+    populate aborting. ``stored_hashes`` / ``new_hashes`` are empty except on
+    ``'compare'``.
+    """
+
+    outcome: str
+    err_msg: Optional[str]
+    stored_hashes: dict
+    new_hashes: dict
+    parent_key: dict
+
+
+def _recompute_compute(
+    parent_key, rounding, xfail_reason, *, regen, what
+) -> RecomputeComputed:
+    """Shared off-transaction compute for the recompute QC tables.
+
+    Branches the three outcomes the monolithic ``make()`` handled, all of which
+    end in an INSERT: ``xfail`` (skip the regen), ``error`` (a caught
+    regeneration failure -> ``matched=0``, retryable), and ``compare`` (a real
+    hash comparison). ``regen`` is a no-arg callable returning
+    ``(stored_hashes, new_hashes)``.
+    """
+    if xfail_reason:
+        return RecomputeComputed(
+            outcome="xfail",
+            err_msg=f"xfail: {xfail_reason}"[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    try:
+        stored_hashes, new_hashes = regen()
+    except Exception as err:  # noqa: BLE001 - record the failure, retryable
+        # A regeneration failure (SI pin mismatch, missing probe info, ...) is a
+        # legitimate matched=0 outcome for this QC table. Log the full traceback
+        # first so a masked code defect / disk error is still debuggable -- the
+        # err_msg column truncates to 255 chars.
+        logger.error(
+            f"{what} regeneration failed for {parent_key}; matched=0 "
+            "(retryable).",
+            exc_info=True,
+        )
+        return RecomputeComputed(
+            outcome="error",
+            err_msg=str(err)[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    return RecomputeComputed(
+        outcome="compare",
+        err_msg=None,
+        stored_hashes=stored_hashes,
+        new_hashes=new_hashes,
+        parent_key=parent_key,
+    )
+
+
+def _insert_recompute_outcome(
+    table, key, outcome, err_msg, stored_hashes, new_hashes, created_at
+):
+    """Shared ``make_insert`` body: write the QC result atomically.
+
+    ``compare`` routes through :func:`_insert_comparison` (master + Name/Hash
+    diff rows); ``xfail`` / ``error`` insert a single ``matched=0`` master row.
+    ``transaction_or_noop`` no-ops inside the framework transaction but keeps a
+    direct (non-populate) call atomic.
+    """
+    from spyglass.spikesorting.v2.utils import transaction_or_noop
+
+    with transaction_or_noop(table.connection):
+        if outcome == "compare":
+            _insert_comparison(table, key, stored_hashes, new_hashes, created_at)
+        else:  # 'xfail' / 'error': a single matched=0 row, no diff parts
+            table.insert1(
+                {
+                    **key,
+                    "matched": False,
+                    "err_msg": err_msg,
+                    "created_at": created_at,
+                }
+            )
 
 
 # =====================================================================
@@ -198,45 +305,58 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         recording_id = (RecordingArtifactVersions & key).fetch1("recording_id")
         return {"recording_id": recording_id}
 
-    def make(self, key):
-        sel = (RecordingArtifactRecomputeSelection & key).fetch1()
-        rec_key = self.get_parent_key(key)
-        created_at = _artifact_created_at(rec_key)
-        if sel["xfail_reason"]:
-            self.insert1(
-                {
-                    **key,
-                    "matched": False,
-                    "err_msg": f"xfail: {sel['xfail_reason']}"[:255],
-                    "created_at": created_at,
-                }
+    # Tri-part dispatch: the trace regeneration (re-preprocess to a fresh NWB +
+    # hash) is the long step and stays OUTSIDE the framework transaction
+    # (mirroring Recording / Sorting). A regen failure is encoded as the 'error'
+    # outcome (matched=0), not raised, preserving the monolithic behavior.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecomputeFetched:
+        """Read the recompute inputs (no regeneration I/O)."""
+        rounding, xfail_reason = (
+            RecordingArtifactRecomputeSelection & key
+        ).fetch1("rounding", "xfail_reason")
+        parent = self.get_parent_key(key)
+        return RecomputeFetched(
+            # str the recording_id UUID for a DeepHash-stable carrier.
+            parent_key={"recording_id": str(parent["recording_id"])},
+            rounding=int(rounding),
+            xfail_reason=xfail_reason,
+        )
+
+    def make_compute(
+        self, key, parent_key, rounding, xfail_reason
+    ) -> RecomputeComputed:
+        """Regenerate the recording traces + hash them off the transaction."""
+
+        def _regen():
+            stored = Recording().get_recording(parent_key)
+            return (
+                hash_recording_traces(stored, rounding=rounding),
+                _recompute_recording_trace_hashes(parent_key, rounding),
             )
-            return
-        rounding = sel["rounding"]
-        try:
-            stored = Recording().get_recording(rec_key)
-            stored_hashes = hash_recording_traces(stored, rounding=rounding)
-            new_hashes = _recompute_recording_trace_hashes(rec_key, rounding)
-        except Exception as err:  # noqa: BLE001 - record the failure, retryable
-            # A regeneration failure (SI pin mismatch, missing probe info, ...)
-            # is a legitimate matched=0 outcome for this QC table. Log the full
-            # traceback first so a masked code defect / disk error is still
-            # debuggable -- the err_msg column truncates to 255 chars.
-            logger.error(
-                f"RecordingArtifactRecompute regeneration failed for "
-                f"{rec_key}; recording matched=0 (retryable).",
-                exc_info=True,
-            )
-            self.insert1(
-                {
-                    **key,
-                    "matched": False,
-                    "err_msg": str(err)[:255],
-                    "created_at": created_at,
-                }
-            )
-            return
-        _insert_comparison(self, key, stored_hashes, new_hashes, created_at)
+
+        return _recompute_compute(
+            parent_key,
+            rounding,
+            xfail_reason,
+            regen=_regen,
+            what="RecordingArtifactRecompute",
+        )
+
+    def make_insert(
+        self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
+    ):
+        """Record the QC result (created_at = the artifact file mtime)."""
+        _insert_recompute_outcome(
+            self,
+            key,
+            outcome,
+            err_msg,
+            stored_hashes,
+            new_hashes,
+            _artifact_created_at(parent_key),
+        )
 
     def get_disk_space(self, restriction=True) -> str:
         """Report reclaimable disk for matched, not-yet-deleted artifacts."""
@@ -501,41 +621,51 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         sorting_id = (SortingAnalyzerVersions & key).fetch1("sorting_id")
         return {"sorting_id": sorting_id}
 
-    def make(self, key):
-        sel = (SortingAnalyzerRecomputeSelection & key).fetch1()
-        sort_key = self.get_parent_key(key)
-        created_at = dt.datetime.now()
-        if sel["xfail_reason"]:
-            self.insert1(
-                {
-                    **key,
-                    "matched": False,
-                    "err_msg": f"xfail: {sel['xfail_reason']}"[:255],
-                    "created_at": created_at,
-                }
-            )
-            return
-        rounding = sel["rounding"]
-        try:
-            stored_hashes, new_hashes = _recompute_analyzer_hashes(
-                sort_key, rounding, key["waveform_params_name"]
-            )
-        except Exception as err:  # noqa: BLE001 - record the failure
-            logger.error(
-                f"SortingAnalyzerRecompute regeneration failed for "
-                f"{sort_key}; analyzer matched=0 (retryable).",
-                exc_info=True,
-            )
-            self.insert1(
-                {
-                    **key,
-                    "matched": False,
-                    "err_msg": str(err)[:255],
-                    "created_at": created_at,
-                }
-            )
-            return
-        _insert_comparison(self, key, stored_hashes, new_hashes, created_at)
+    # Tri-part dispatch: the analyzer-folder regeneration + extension hashing is
+    # the long step and stays OUTSIDE the framework transaction. A regen failure
+    # is encoded as the 'error' outcome (matched=0), not raised.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecomputeFetched:
+        """Read the recompute inputs (no regeneration I/O)."""
+        rounding, xfail_reason = (
+            SortingAnalyzerRecomputeSelection & key
+        ).fetch1("rounding", "xfail_reason")
+        parent = self.get_parent_key(key)
+        return RecomputeFetched(
+            # str the sorting_id UUID for a DeepHash-stable carrier.
+            parent_key={"sorting_id": str(parent["sorting_id"])},
+            rounding=int(rounding),
+            xfail_reason=xfail_reason,
+        )
+
+    def make_compute(
+        self, key, parent_key, rounding, xfail_reason
+    ) -> RecomputeComputed:
+        """Regenerate the analyzer folder + hash extensions off the transaction."""
+        return _recompute_compute(
+            parent_key,
+            rounding,
+            xfail_reason,
+            regen=lambda: _recompute_analyzer_hashes(
+                parent_key, rounding, key["waveform_params_name"]
+            ),
+            what="SortingAnalyzerRecompute",
+        )
+
+    def make_insert(
+        self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
+    ):
+        """Record the QC result (created_at = populate time for analyzers)."""
+        _insert_recompute_outcome(
+            self,
+            key,
+            outcome,
+            err_msg,
+            stored_hashes,
+            new_hashes,
+            dt.datetime.now(),
+        )
 
     def get_disk_space(self, restriction=True) -> str:
         """Report reclaimable disk for matched, not-yet-deleted analyzers.
