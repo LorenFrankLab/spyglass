@@ -399,48 +399,161 @@ Source: https://kilosort.readthedocs.io/en/latest/parameters.html
 
 ## UnitMatchPy integration notes
 
-**Install**: `pip install UnitMatchPy mat73` (UnitMatchPy 3.3.1 imports `mat73` from `UnitMatchPy.utils` but does not declare it in the wheel metadata).
+**Verified against `UnitMatchPy==3.2.7`** in an isolated `uv` env (Python 3.11.15,
+`spikeinterface==0.104.3`, `numpy==2.4.6`). End-to-end run + durable freeze:
+[`tests/spikesorting/v2/resolver/unitmatch-resolver.md`](../../../../tests/spikesorting/v2/resolver/unitmatch-resolver.md);
+worked notebook:
+[`notebooks/13_UnitMatch_Cross_Session.ipynb`](../../../../notebooks/13_UnitMatch_Cross_Session.ipynb).
 
-**Repo**: https://github.com/EnnyvanBeest/UnitMatch (Python port under `UnitMatch_python/`)
+**Install**: `pip install "UnitMatchPy>=3.2.6,<3.2.8" mat73`. Unlike the later
+3.3.x line, **UnitMatchPy 3.2.7 declares `mat73`, `torch`, and `spikeinterface`
+as real dependencies** (`Requires: h5py, joblib, mat73, matplotlib, mtscomp,
+numpy, pandas, scikit-learn, scipy, spikeinterface, torch, tqdm`), so `mat73` is
+belt-and-suspenders for this pin and installing UnitMatchPy pulls `torch`
+transitively. `uv pip check` is clean: 3.2.7 coexists with numpy 2.4.6 and
+SpikeInterface 0.104.3 at the dependency-metadata level.
 
-**PyPI page**: https://pypi.org/project/UnitMatchPy/ (the plan pins `UnitMatchPy>=3.2.6,<3.2.8` — the 3.2.6/3.2.7 line is the last to declare `numpy>=2.0,<3.0`, so it coexists with the v2 numpy>=2 baseline; 3.2.8+ and all 3.3.x reactively flipped their metadata to `numpy<2.0` per upstream issue #134 and are excluded). The 3.2.6/3.2.7 metadata declares `python>=3.9,<3.13`; Phase 4a must still run a resolver check against the v2 SpikeInterface environment before adding the optional extra.
+**Repo**: https://github.com/EnnyvanBeest/UnitMatch (verified against upstream
+commit `ef2a7cd2a93b8d8f96e886b2582aeff91cdf9a44`, 2026-06-23).
 
-**Import caveat verified against UnitMatchPy 3.3.1**: the package import name is capitalized (`UnitMatchPy`), not `unitmatchpy`. `import UnitMatchPy` imports `UnitMatchPy.GUI`, which requires `_tkinter`; Python builds without Tk support fail at top-level import. Normal submodule imports also execute package `__init__.py`, so they can hit the same GUI failure. Phase 4a must either run in a Tk-enabled env or load the non-GUI modules by file path / upstream patch before schema work starts.
+**PyPI page**: https://pypi.org/project/UnitMatchPy/ (the plan pins
+`UnitMatchPy>=3.2.6,<3.2.8` — the 3.2.6/3.2.7 line is the last to declare
+`numpy>=2.0,<3.0`; 3.2.8+ and all 3.3.x reactively flipped to `numpy<2.0` per
+upstream issue #134). Metadata declares `python>=3.9,<3.13`.
 
-**Demo notebook**: `UMPy_spike_interface_demo.ipynb` in the repo — this is Phase 4's primary integration template.
+**numpy-2 reality (important)**: the compatible *metadata* is not enough —
+**UnitMatchPy 3.2.7's metric path does not run under numpy 2 unmodified.**
+`param_functions.get_avg_waveform_per_tp` calls
+`np.arange(wave_duration_tmp[0], wave_duration_tmp[-1]+1)` where
+`wave_duration_tmp` is a `np.argwhere` result (shape `(k, 1)`), so the endpoints
+are 1-element arrays. numpy < 2 accepted those as scalars; **numpy 2 raises
+`TypeError: only 0-dimensional arrays can be converted to Python scalars`**. A
+bare `except` swallows it for every unit (printing
+`unit{i} is very likely bad, no good time points`), leaves the per-time-point
+trajectory written at relative indices → every centroid distance becomes NaN →
+the candidate-pair set is empty → the auto-threshold quantile aborts the run.
+This is the latent break behind the upstream numpy<2 repins. The wrapper fixes it
+with a **numpy proxy scoped to `param_functions`** whose `arange` coerces
+1-element-array endpoints to scalars (a no-op for scalar args) — no package edit,
+numpy≥2 baseline preserved. With the shim the run completes and recovers clean
+matches (AUC = 1.0 on the polymer fixture).
 
-**Core API**:
+**Import caveat (verified, 3.2.7)**: the import name is capitalized
+(`UnitMatchPy`), not `unitmatchpy`, and has no `__version__` attribute (use
+`importlib.metadata.version("UnitMatchPy")`). `import UnitMatchPy` runs
+`__init__.py`, which does `from . import GUI`; `GUI.py` imports `tkinter`. Tk-less
+Python builds fail at top-level import (and at any submodule import, since
+`__init__.py` always runs). The test env's uv CPython 3.11.15 ships `_tkinter`,
+so it imports fine here; a headless/Tk-less image must provide Tk or import the
+non-GUI submodules by path. **`UnitMatchPy/run.py` is not importable** (`import
+bayes_functions as bf` — unqualified); it is a reference script, not an entry
+point. Drive the pipeline through the functions below.
 
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
-present, the UnitMatchPy API has not been verified and Phase 4b has not started.
-The sketch below captures partial planning-time observations only. Phase 4a
-must replace it with the exact UnitMatchPy import path, entry-point calls, input
-bundle layout, output schema, and measured runtime/memory behavior before Phase
-4b starts.
+**Demo notebook**: `UMPy_spike_interface_demo.ipynb` upstream — the integration
+template the worked notebook is derived from.
+
+**Core API** (verified end-to-end against 3.2.7):
+
+The entry point is the function set below, **not** `um.MakeMatchTable(...)` (no
+such symbol) and **not** `run.py`. The bundle each session is read from is a
+directory in the `paths_from_KS` layout:
+
+- `RawWaveforms/Unit{id}_RawSpikes.npy` — one file per unit, shape
+  `(spike_width, n_channels, 2)`; last axis = the two cross-validation half
+  templates. Written by `extract_raw_data.save_avg_waveforms(avg_waves, dir,
+  all_ids, good_ids, extract_good_units_only=False)` from
+  `avg_waves = np.stack([templates_half0, templates_half1], axis=-1)`.
+- `channel_positions.npy` — `(n_channels, 2)`. `paths_from_KS` prepends a column
+  of ones internally; pass the **raw 2-D** `(x, y)` array to
+  `get_probe_geometry` or it reports a single shank.
+- `cluster_group.tsv` — `cluster_id` / `group` columns; `good` rows are matched.
 
 ```python
-# Phase 4a must replace this sketch with imports verified in the target env.
-# In a Tk-enabled env this may be:
-# from UnitMatchPy import default_params, overlord, utils as util
-# In a no-Tk env, top-level UnitMatchPy imports fail because __init__.py imports GUI.
+from importlib.metadata import version  # UnitMatchPy has no __version__
+import numpy as np
+import UnitMatchPy.param_functions as pf
+import UnitMatchPy.extract_raw_data as erd
+import UnitMatchPy.utils as uutil
+import UnitMatchPy.overlord as ov
+import UnitMatchPy.bayes_functions as bf
+import UnitMatchPy.save_utils as su
+import UnitMatchPy.assign_unique_id as aid
+import UnitMatchPy.default_params as default_params
 
-# Inputs:
-# - RawWaveforms/Unit*_RawSpikes.npy files, one directory per session.
-# - Per-unit waveform shape is (n_samples, n_channels, 2); the last axis is
-#   the two half-recording / cross-validation waveform estimates.
-# - channel_positions.npy: shape (n_channels, 2 or 3)
-# - cluster_group.tsv or equivalent good-unit metadata per session
+# --- numpy-2 shim: coerce 1-element-array arange endpoints to scalars ---
+_np = np
+class _ArangeProxy:
+    def arange(self, start, stop=None, *a, **k):
+        start = start.item() if getattr(start, "size", None) == 1 else start
+        if stop is not None:
+            stop = stop.item() if getattr(stop, "size", None) == 1 else stop
+            return _np.arange(start, stop, *a, **k)
+        return _np.arange(start, *a, **k)
+    def __getattr__(self, n):
+        return getattr(_np, n)
+pf.np = _ArangeProxy()
 
+# --- per session: build the bundle from curated sorting + recording ---
+# UnitMatch needs DENSE (all-channel) templates on the two recording halves;
+# the v2 sparse single-recording analyzer cannot supply them, so the wrapper
+# re-extracts: frame_slice the recording into 2 halves, create_sorting_analyzer
+# (sparse=False), compute random_spikes/waveforms(ms_before==ms_after)/templates,
+# stack -> (n_units, spike_width, n_channels, 2). Use a SYMMETRIC waveform window
+# so the trough sits at the centre sample (load_good_waveforms forces
+# peak_loc = spike_width//2). Pass spike times in SECONDS to NumpySorting.
+
+# --- inference (matcher consumes ONLY the bundle dirs) ---
 param = default_params.get_default_param()
-param["KS_dirs"] = [session_dir_1, session_dir_2, ...]
-wave_paths, unit_label_paths, channel_pos = util.paths_from_KS(param["KS_dirs"])
+param["KS_dirs"] = session_dirs
+wave_paths, label_paths, channel_pos = uutil.paths_from_KS(session_dirs)
+param = uutil.get_probe_geometry(raw_positions_2d, param)  # raw (n_chan, 2)
 waveform, session_id, session_switch, within_session, good_units, param = (
-    util.load_good_waveforms(wave_paths, unit_label_paths, param, good_units_only=True)
+    uutil.load_good_waveforms(wave_paths, label_paths, param, good_units_only=True)
 )
-# The current demo then calls UnitMatchPy.overlord.extract_parameters(),
-# UnitMatchPy.overlord.extract_metric_scores(), and the Bayes helpers.
-# Phase 4a must replace this sketch with the exact wrapper code and outputs.
+# SI templates carry a DC offset; zero-centre on the first 15 samples:
+waveform = waveform - np.broadcast_to(
+    waveform[:, :15, :, :].mean(axis=1)[:, None, :, :], waveform.shape)
+clus_info = {"good_units": good_units, "session_switch": session_switch,
+             "session_id": session_id, "original_ids": np.concatenate(good_units)}
+extracted = ov.extract_parameters(waveform, channel_pos, clus_info, param)
+# extract_metric_scores POPULATES param["n_expected_matches"]; call before priors:
+total_score, candidate_pairs, scores_to_include, predictors = ov.extract_metric_scores(
+    extracted, session_switch, within_session, param, niter=2)
+prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
+priors = np.array((prior_match, 1 - prior_match))
+cond = np.unique(candidate_pairs.astype(int))
+kernels = bf.get_parameter_kernels(scores_to_include, candidate_pairs.astype(int),
+                                   cond, param, add_one=1)
+probability = bf.apply_naive_bayes(kernels, priors, predictors, param, cond)
+# (n_total_units, n_total_units) pairwise probability across ALL sessions stacked
+prob_matrix = probability[:, 1].reshape(param["n_units"], param["n_units"])
+
+unique_ids = aid.assign_unique_id(prob_matrix, param, clus_info)  # cross-session IDs
+match_table = su.make_match_table(scores_to_include, matches, prob_matrix,
+                                  total_score, output_threshold, clus_info, param,
+                                  UIDs=unique_ids)
 ```
+
+**Output format** (verified): `prob_matrix` is `(n_total_units, n_total_units)`
+float in `[0, 1]` over all sessions stacked (within-session block masked by
+`within_session`); `param["n_units_per_session"]` gives the per-session row
+counts. `save_utils.make_match_table` returns a pandas `DataFrame` (one row per
+unit pair) with columns `ID1, ID2, RecSes 1, RecSes 2, Matches, UM
+Probabilities, TotalScore`, the six sub-scores (`amp_score, spatial_decay_score,
+centroid_overlord_score, centroid_dist, waveform_score, trajectory_score`), and
+the `assign_unique_id` tiers (`UID1/2, UID Liberal 1/2, UID int 1 / UM UID int 2,
+UID Conservative 1/2`). **There is no per-pair drift or FDR column.** Drift is
+estimated and applied internally per session-pair (`metric_functions.drift_n_sessions`);
+the false-positive estimate is a session-level value *printed* by
+`utils.evaluate_output`, not a column. `assign_unique_id` returns a length-4 list
+(default + Liberal/Intermediate/Conservative tiers): **Conservative** assigns a
+unit to a group only if it matches *every* member (a maximal clique), so it is
+the direct analog of a strict clique-based tracked-unit derivation.
+
+**Compute cost** (polymer fixture, 32 units across 2 sessions, dense split-half
+extraction): ~6 s wall total, ~1.6 GB peak RSS; the matcher inference itself is
+sub-second. Scales with unit count, not the headline >32 GB figure (that is for
+>1000-unit multi-session Neuropixels datasets).
 
 **Key features extracted** (from the paper):
 - Spatial decay

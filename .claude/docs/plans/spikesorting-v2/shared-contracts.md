@@ -303,26 +303,50 @@ or missing part rows inserted outside the helper.
 
 ## MatcherProtocol — cross-session unit matching plugin interface
 
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
-present, the UnitMatchPy API has not been verified and Phase 4b has not started.
-The concrete signature below is a temporary contract stub so Phase 4b's schema
-design has something to reference. **It must be rewritten by the Phase 4a
-technical spike** ([phase-4-unitmatch-cross-session.md § Phase 4a](phase-4-unitmatch-cross-session.md))
-once the actual UnitMatchPy API has been walked end-to-end. Phase 4b must not
-start while this marker remains.
+**Verified in the matcher technical spike** against `UnitMatchPy==3.2.7`
+(`numpy==2.4.6`, `spikeinterface==0.104.3`). Observed API + on-disk layout:
+[appendix.md § UnitMatchPy integration notes](appendix.md#unitmatchpy-integration-notes);
+worked end-to-end notebook:
+[`notebooks/13_UnitMatch_Cross_Session.ipynb`](../../../../notebooks/13_UnitMatch_Cross_Session.ipynb).
 
-What the contract IS committed to (these survive Phase 4a):
+What the contract commits to (confirmed against the real backend):
 
-- **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper extracts per-unit waveform arrays + channel positions + per-unit metadata from each session's curated sorting/analyzer, and may read the associated v2 recording artifact when a matcher needs split-half waveform estimates that are not already present in the analyzer. It writes those inputs into a matcher-specific on-disk layout (the layout is what Phase 4a pins). The matcher consumes that wrapper-prepared bundle; it does NOT consume `si.SortingAnalyzer` objects, Spyglass table keys, or raw NWB paths directly. This is the contract that makes the wrapper invariant ("matcher never touches raw NWB paths") implementable.
-- **Output is a list of pair records** keyed by (sorting_id, curation_id, unit_id) per side (curation_id is non-negotiable per the round-7 fix — UnitMatch operates on curated units).
+- **Input is wrapper-owned, not analyzer-owned.** The v2 wrapper writes one
+  **directory bundle per session** in UnitMatchPy's `paths_from_KS` layout:
+  `RawWaveforms/Unit{id}_RawSpikes.npy` (per unit, `(spike_width, n_channels,
+  2)` — the last axis is the two cross-validation half templates),
+  `channel_positions.npy` (`(n_channels, 2)`), and `cluster_group.tsv`
+  (`cluster_id`/`group`). The matcher consumes only those directories; it never
+  receives `si.SortingAnalyzer` objects, Spyglass table keys, or raw NWB paths.
+- **The matcher needs DENSE, not sparse, waveforms.** UnitMatch's spatial /
+  centroid / trajectory features require an all-channel template per unit, and
+  the two CV halves. The v2 canonical analyzer is `sparse=True` over the whole
+  recording and **cannot** supply these, so the wrapper re-extracts: frame_slice
+  the curated recording (`CurationV2.get_recording(key)`) into two halves,
+  `create_sorting_analyzer(..., sparse=False)` per half, compute
+  `templates`/`waveforms`, and stack. (This supersedes the earlier
+  "sparsity-friendly / pass sparse templates" guess — UnitMatch is not
+  sparse-compatible on input.)
+- **Output is a list of pair records** keyed by `(sorting_id, curation_id,
+  unit_id)` per side (curation_id is non-negotiable — UnitMatch operates on
+  curated units). The backend's native output is an `(n_total_units,
+  n_total_units)` probability matrix plus a `make_match_table` DataFrame; the
+  wrapper unflattens it back to per-side `(sorting_id, curation_id, unit_id)`.
+- **No per-pair drift or FDR from the backend.** UnitMatch applies drift
+  internally per session-pair (not a per-pair value), and `evaluate_output`
+  prints a session-level false-positive estimate rather than a per-pair FDR. The
+  `MatchPair.drift_estimate_um` / `fdr_estimate` fields below therefore have no
+  direct backend source — keep `drift_estimate_um=0.0` and treat any FDR as a
+  run/master-level diagnostic, not a `Pair` column.
 - **Degenerate single-session case returns zero pairs, no error.**
-- **Reproducibility policy pinned by Phase 4a**: the wrapper uses fixed matcher params and records any matcher seed/config fields it controls. Phase 4a must empirically verify whether UnitMatchPy is exact run-to-run in the target environment. If exact reproducibility is not proven, Phase 4b validation uses bounded agreement against fixed synthetic / MEArec inputs and records the observed variance; it must not assert exact rerun equality.
-- **Sparsity-friendly**: wrapper passes sparse-template data when SI's `sparse=True` is set (v2 default).
-
-Contract-stub shape (replaced by 4a):
-The `PHASE4A_CONTRACT_STUB` marker is plan-document vocabulary only; do not
-copy it into runtime files, tests, docstrings, comments, notebooks, or
-user-facing docs.
+- **numpy-2 shim is mandatory.** UnitMatchPy 3.2.7's metric path is numpy-2
+  broken (`np.arange` on 1-element argwhere endpoints); the backend wrapper
+  installs the `param_functions`-scoped arange shim (see appendix) behind its
+  import guard. Without it, every run aborts in the auto-threshold step.
+- **Reproducibility**: the wrapper seeds SI's `random_spikes` (e.g. `seed=0`),
+  after which the bundle and UnitMatch's metric/Bayes math are deterministic in
+  the target environment. Validation may assert near-exact rerun equality on
+  fixed inputs; the only stochastic input is spike subsampling, which is seeded.
 
 ```python
 from typing import Protocol, runtime_checkable
@@ -335,12 +359,15 @@ import pandas as pd
 class SessionMatcherInput:
     """One per-session bundle the wrapper prepares for the matcher.
 
-    Concrete fields (paths, file names, dtypes) pinned by the matcher API
-    verification checkpoint.
+    Layout pinned by the spike (UnitMatchPy `paths_from_KS`): ``waveform_dir``
+    holds ``RawWaveforms/Unit{id}_RawSpikes.npy`` (``(spike_width, n_channels,
+    2)``) and ``cluster_group.tsv``; ``channel_positions_path`` is a
+    ``(n_channels, 2)`` ``.npy``. For UnitMatch these live in one directory, so a
+    backend may treat ``waveform_dir`` as that directory.
     """
     session_key: dict  # {"sorting_id": UUID, "curation_id": int}
-    waveform_dir: Path  # wrapper-prepared dir with the matcher-expected layout
-    channel_positions_path: Path
+    waveform_dir: Path  # session bundle dir (RawWaveforms/, cluster_group.tsv)
+    channel_positions_path: Path  # (n_channels, 2)
     recording_date: pd.Timestamp  # derived from Session.session_start_time
 
 
@@ -353,6 +380,8 @@ class MatchPair:
     session_b_curation_id: int
     unit_b_id: int
     match_probability: float
+    # UnitMatch has no per-pair drift/FDR source (see bullets above): drift is
+    # applied internally per session-pair; FDR is a session-level diagnostic.
     drift_estimate_um: float = 0.0
     fdr_estimate: float | None = None
 

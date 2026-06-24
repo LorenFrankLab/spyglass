@@ -1312,13 +1312,29 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 ## MatcherParameters + UnitMatch + TrackedUnit
 
 Phase 4. Cross-session matching via the plugin protocol from shared-contracts.md.
-**PHASE4A_CONTRACT_STUB — finalized in Phase 4a.** If this marker is still
-present, the UnitMatchPy API has not been verified and Phase 4b has not started.
-The table shapes below are the intended schema direction, but Phase 4a is an
-explicit technical spike that must update this section after walking the real
-UnitMatchPy API and on-disk input layout. Phase 4b must not implement these
-tables until the appendix, shared contracts, and this design section have been
-reconciled with the 4a findings.
+
+**Reconciled with the matcher technical spike** (`UnitMatchPy==3.2.7`; observed
+API in [appendix.md § UnitMatchPy integration notes](appendix.md#unitmatchpy-integration-notes),
+worked notebook
+[`notebooks/13_UnitMatch_Cross_Session.ipynb`](../../../../notebooks/13_UnitMatch_Cross_Session.ipynb)).
+The table shapes below stand, with these spike findings folded in:
+
+- **`UnitMatch.Pair.drift_estimate_um` / `fdr_estimate` are not backend-sourced
+  per pair.** UnitMatch applies drift internally per session-pair and reports a
+  *session-level* false-positive estimate (printed by `evaluate_output`), so the
+  per-pair columns keep their defaults (`drift_estimate_um=0.0`, `fdr_estimate`
+  NULL) unless a future backend supplies per-pair values. A run-level FDR, if
+  wanted, belongs on the `UnitMatch` master, not `Pair`.
+- **`TrackedUnit` strict cliques have a native analog.** UnitMatchPy's
+  `assign_unique_id` already emits cross-session identities at three tiers;
+  **Conservative** (a unit joins a group only if it matches *every* member) is a
+  maximal-clique assignment — exactly the strict mode `TrackedUnit.make()`
+  specifies. v2 still derives `TrackedUnit` from the `Pair` graph (so the cap and
+  provenance checks apply), but the backend output is a cross-check.
+- **Matcher input is a wrapper-built per-session directory bundle** (dense
+  split-half templates from `CurationV2.get_recording(key)`; layout in
+  shared-contracts § MatcherProtocol). The matcher never sees the analyzer,
+  recording, or keys. The numpy-2 `arange` shim is mandatory in the backend.
 
 ```python
 @schema
