@@ -78,8 +78,9 @@ def apply_artifact_mask(
     import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._signal_math import (
-        assert_monotonic_timestamps,
+        _segment_times_at,
         assert_positive_sampling_frequency,
+        frames_for_times,
     )
     from spyglass.spikesorting.v2.exceptions import (
         EmptyArtifactValidTimesError,
@@ -119,29 +120,61 @@ def apply_artifact_mask(
             "Sort and merge the intervals before passing them."
         )
 
-    timestamps = recording.get_times()
-    assert_monotonic_timestamps(timestamps, context="apply_artifact_mask: ")
-    # Walk the valid intervals left-to-right, collecting the
-    # complement (artifact gaps) as a list of (start_frame,
-    # end_frame) pairs. Each pair is materialized via
-    # ``np.arange`` and concatenated -- ~100x faster than the
-    # equivalent ``list.extend(range(start, end))`` for
-    # multi-million-sample recordings (Python-int boxing for
-    # every frame is the bottleneck of the loop form).
-    frame_ranges: list[tuple[int, int]] = []
-    cursor = timestamps[0]
+    # Map the artifact-removed valid intervals to the complement frame ranges
+    # WITHOUT materializing the recording's full timestamp vector.
+    # ``recording.get_times()`` builds (and caches) a concrete float64 array of
+    # every sample (~824 MB for 1 h @ 30 kHz, 8 bytes/sample); instead we read
+    # only the two recording endpoints and binary-search the (few) interval
+    # boundaries via ``frames_for_times`` / ``_segment_times_at``, both of which
+    # index the h5py-/mmap-backed timestamps lazily (peak memory bounded by the
+    # boundary count, not n_samples). The persisted recording's timestamps are
+    # monotonically non-decreasing by construction (Recording.make) -- the
+    # invariant the searchsorted-equivalent ``frames_for_times`` mapping assumes
+    # (the prior full-vector ``assert_monotonic_timestamps`` guard would force
+    # the materialization this avoids).
+    n_samples = int(recording.get_num_samples(segment_index=0))
+    t_first, t_last = (
+        float(t)
+        for t in _segment_times_at(
+            recording, np.array([0, n_samples - 1], dtype=np.int64)
+        )
+    )
+    # Walk the valid intervals left-to-right in seconds, collecting the
+    # complement (artifact gaps) as ``(start_time, end_time)`` pairs;
+    # ``end_time is None`` marks the open tail that extends to the exclusive
+    # end of the recording (frame n_samples, matching the old
+    # ``end = len(timestamps)``). The boundary times are then batch-mapped to
+    # frames in one binary search each.
+    gap_time_pairs: list[tuple[float, float | None]] = []
+    cursor = t_first
     for vs, ve in valid_times:
         if vs > cursor:
-            start = int(np.searchsorted(timestamps, cursor))
-            end = int(np.searchsorted(timestamps, vs))
+            gap_time_pairs.append((float(cursor), float(vs)))
+        cursor = max(cursor, ve)
+    if cursor < t_last:
+        gap_time_pairs.append((float(cursor), None))
+
+    frame_ranges: list[tuple[int, int]] = []
+    if gap_time_pairs:
+        start_frames = frames_for_times(
+            recording, [s for s, _ in gap_time_pairs]
+        )
+        finite_end_times = [e for _, e in gap_time_pairs if e is not None]
+        finite_end_frames = (
+            frames_for_times(recording, finite_end_times)
+            if finite_end_times
+            else np.empty(0, dtype=np.int64)
+        )
+        finite_idx = 0
+        for (_, e_time), start in zip(gap_time_pairs, start_frames):
+            if e_time is None:
+                end = n_samples
+            else:
+                end = int(finite_end_frames[finite_idx])
+                finite_idx += 1
+            start = int(start)
             if end > start:
                 frame_ranges.append((start, end))
-        cursor = max(cursor, ve)
-    if cursor < timestamps[-1]:
-        start = int(np.searchsorted(timestamps, cursor))
-        end = len(timestamps)
-        if end > start:
-            frame_ranges.append((start, end))
 
     # Drop pure inter-chunk-gap ranges. For a DISJOINT recording the
     # gap-respecting valid_times leave a single boundary frame between
@@ -151,18 +184,24 @@ def apply_artifact_mask(
     # zero a good sample per gap. A genuine 1-frame artifact instead
     # has ~1-sample spacing to its neighbor, so it is kept. (A 1-sample
     # artifact landing exactly on a chunk's final sample is the lone
-    # uncovered edge; negligible at the chunk boundary.)
+    # uncovered edge; negligible at the chunk boundary.) Read only the two
+    # boundary frames per width-1 candidate instead of indexing a full vector.
     sample_period = 1.0 / assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="apply_artifact_mask: "
     )
+
+    def _is_interchunk_boundary_range(start, end):
+        if not (end - start == 1 and end < n_samples):
+            return False
+        ts_start, ts_end = _segment_times_at(
+            recording, np.array([start, end], dtype=np.int64)
+        )
+        return (ts_end - ts_start) > 1.5 * sample_period
+
     frame_ranges = [
         (s, e)
         for (s, e) in frame_ranges
-        if not (
-            e - s == 1
-            and e < len(timestamps)
-            and (timestamps[e] - timestamps[s]) > 1.5 * sample_period
-        )
+        if not _is_interchunk_boundary_range(s, e)
     ]
 
     if not frame_ranges:
