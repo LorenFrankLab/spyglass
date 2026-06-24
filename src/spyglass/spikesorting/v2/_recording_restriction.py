@@ -222,13 +222,20 @@ class _LazyConcatenatedTimestamps(_LazyTimestamps):
 
 
 def _recording_has_explicit_time_vector(recording) -> bool:
-    """Return whether the SI recording carries explicit per-frame timestamps."""
-    has_time_vector = getattr(recording, "has_time_vector", None)
-    if has_time_vector is None:
-        # Conservative fallback: without the public predicate, keep the older
-        # full-vector path so irregular timestamps are not treated as affine.
-        return True
-    return bool(has_time_vector(segment_index=0))
+    """Return whether the SI recording carries explicit per-frame timestamps.
+
+    Thin delegator to the canonical predicate in ``_signal_math`` (kept as a
+    module-level name here for the in-module caller and the test import); the
+    lazy import preserves this module's DB-free-at-import discipline. The
+    ``get_time_info`` predicate it uses is equivalent to the public
+    ``has_time_vector`` in SpikeInterface 0.104.3 (both reduce to
+    ``get_times_kwargs()["time_vector"] is not None``).
+    """
+    from spyglass.spikesorting.v2._signal_math import (
+        _recording_has_explicit_time_vector as _impl,
+    )
+
+    return _impl(recording)
 
 
 def _recording_start_time(recording) -> float | None:
