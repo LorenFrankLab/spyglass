@@ -33,10 +33,11 @@ STUB_MODULES_WITH_V1_FALLBACK = [
     ),
 ]
 
-# (module path, a representative public symbol) -- no v1 fallback exists
+# (module path, a representative public symbol) -- no v1 fallback exists.
+# ``matcher_protocol`` is intentionally absent: it is now a real module
+# (the cross-session matcher protocol + registry), no longer a stub.
 STUB_MODULES_NO_V1_FALLBACK = [
     ("spyglass.spikesorting.v2.unit_matching", "UnitMatch"),
-    ("spyglass.spikesorting.v2.matcher_protocol", "MatcherProtocol"),
 ]
 
 ALL_STUB_MODULES = [m[0] for m in STUB_MODULES_WITH_V1_FALLBACK] + [

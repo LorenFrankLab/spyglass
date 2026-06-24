@@ -1,29 +1,154 @@
-"""Plugin interface for cross-session unit matchers -- not available yet.
+"""Plugin interface + registry for cross-session unit matchers.
 
-This is the plugin interface for future cross-session matchers; it has
-no v1 equivalent and lands together with ``unit_matching`` in a future
-v2 release. See the spike-sorting-v2 documentation in the project
-repository for the roadmap.
+A *matcher* takes per-session, wrapper-prepared waveform bundles and returns
+pairwise cross-session unit matches. The interface is deliberately narrow so
+external backends (UnitMatch first, others later) can be added without touching
+the DataJoint tables:
+
+- :class:`SessionMatcherInput` -- one wrapper-prepared bundle per session. The
+  matcher reads only these directories; it never sees a ``SortingAnalyzer``
+  object, a recording, or a Spyglass table key.
+- :class:`MatchPair` -- one cross-session match, keyed by
+  ``(sorting_id, curation_id, unit_id)`` on each side.
+- :class:`MatcherProtocol` -- the ``match(session_inputs, params)`` contract.
+- :func:`register_matcher` / :func:`get_matcher` -- the name -> backend +
+  per-matcher params-schema registry that ``MatcherParameters`` validates
+  against at insert time.
+
+This module is pure Python with no DataJoint dependency, so it is importable
+and testable standalone.
 """
 
+from __future__ import annotations
 
-def __getattr__(name):
-    """Reject public-name access; matcher plugin interface is not available."""
-    # Dunder names (``__path__``, ``__all__``, ``__spec__``, ``__file__``,
-    # ...) are probed defensively by the import machinery, pickle, and
-    # inspection tools. Always raise ``AttributeError`` for those so the
-    # probes get the answer they expect; the custom message is reserved
-    # for real public-API names.
-    if name.startswith("__"):
-        raise AttributeError(name)
-    # ``ImportError`` (not ``AttributeError``) for public names so the
-    # message survives the ``from m import X`` flattening path -- CPython
-    # collapses only ``AttributeError`` into the generic "cannot import
-    # name" ``ImportError``. No v1 fallback exists -- this is a
-    # v2-introduced feature.
-    raise ImportError(
-        f"spyglass.spikesorting.v2.matcher_protocol.{name!r} is not "
-        "available yet; the cross-session matcher plugin interface is "
-        "planned for a future v2 release. See the module docstring for "
-        "details."
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
+
+
+@dataclass(frozen=True)
+class SessionMatcherInput:
+    """One per-session bundle the wrapper prepares for the matcher.
+
+    Attributes
+    ----------
+    session_key : dict
+        ``{"sorting_id": UUID, "curation_id": int}`` identifying the curated
+        sorting this bundle was extracted from. The matcher echoes these keys
+        back on every :class:`MatchPair`; it does not use them to read data.
+    waveform_dir : pathlib.Path
+        Directory holding the per-unit waveform arrays in the backend's
+        expected layout (for UnitMatch: ``RawWaveforms/Unit{id}_RawSpikes.npy``
+        of shape ``(spike_width, n_channels, 2)`` plus a ``cluster_group.tsv``).
+    channel_positions_path : pathlib.Path
+        ``.npy`` file of shape ``(n_channels, 2)`` with the probe geometry.
+    recording_date : Any
+        ``pandas.Timestamp`` derived from ``Session.session_start_time`` (used
+        for drift ordering); may be ``None`` when a backend does not need it.
+    """
+
+    session_key: dict
+    waveform_dir: Path
+    channel_positions_path: Path
+    recording_date: Any = None
+
+
+@dataclass(frozen=True)
+class MatchPair:
+    """One cross-session unit match, keyed by curated-unit identity per side.
+
+    ``drift_estimate_um`` and ``fdr_estimate`` have no per-pair source in
+    UnitMatch (drift is applied internally per session-pair; FDR is a
+    session-level diagnostic), so they default to ``0.0`` / ``None`` and a
+    backend only sets them if it genuinely produces per-pair values.
+    """
+
+    session_a_sorting_id: str
+    session_a_curation_id: int
+    unit_a_id: int
+    session_b_sorting_id: str
+    session_b_curation_id: int
+    unit_b_id: int
+    match_probability: float
+    drift_estimate_um: float = 0.0
+    fdr_estimate: float | None = None
+
+
+@runtime_checkable
+class MatcherProtocol(Protocol):
+    """Structural interface every cross-session matcher backend implements.
+
+    A backend is any object with a ``name`` string and a ``match`` method; it
+    need not subclass anything. ``match`` consumes wrapper-prepared bundles and
+    returns the cross-session matches, returning ``[]`` for the degenerate
+    single-session case (one input) rather than raising.
+    """
+
+    name: str
+
+    def match(
+        self,
+        session_inputs: list[SessionMatcherInput],
+        params: dict,
+    ) -> list[MatchPair]: ...
+
+
+#: name -> backend instance
+_MATCHER_REGISTRY: dict[str, MatcherProtocol] = {}
+#: name -> per-matcher Pydantic params schema (validates ``MatcherParameters``)
+_SCHEMA_REGISTRY: dict[str, type] = {}
+
+
+def register_matcher(matcher: MatcherProtocol, schema: type) -> None:
+    """Register a matcher backend and its params schema under ``matcher.name``.
+
+    Parameters
+    ----------
+    matcher : MatcherProtocol
+        A backend with a ``name`` attribute and a ``match`` method.
+    schema : type
+        The Pydantic model validating that matcher's ``MatcherParameters``
+        ``params`` blob.
+
+    Raises
+    ------
+    TypeError
+        If ``matcher`` does not satisfy :class:`MatcherProtocol`.
+    """
+    if not isinstance(matcher, MatcherProtocol):
+        raise TypeError(
+            f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
+            "attribute and a `match(session_inputs, params)` method)."
+        )
+    _MATCHER_REGISTRY[matcher.name] = matcher
+    _SCHEMA_REGISTRY[matcher.name] = schema
+
+
+def _registered_matchers() -> frozenset[str]:
+    """Return the set of registered matcher names."""
+    return frozenset(_MATCHER_REGISTRY)
+
+
+def _raise_unknown(name: str) -> None:
+    raise UnknownMatcherError(
+        f"Unknown matcher {name!r}. Registered matchers: "
+        f"{sorted(_registered_matchers())}. To add a new matcher, implement "
+        "MatcherProtocol and register it via register_matcher() before "
+        "inserting parameters."
     )
+
+
+def get_matcher(name: str) -> MatcherProtocol:
+    """Return the registered backend for ``name`` or raise UnknownMatcherError."""
+    if name not in _MATCHER_REGISTRY:
+        _raise_unknown(name)
+    return _MATCHER_REGISTRY[name]
+
+
+def _get_matcher_schema(name: str) -> type:
+    """Return the params schema for ``name`` or raise UnknownMatcherError."""
+    if name not in _SCHEMA_REGISTRY:
+        _raise_unknown(name)
+    return _SCHEMA_REGISTRY[name]

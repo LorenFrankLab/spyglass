@@ -229,3 +229,41 @@ class StaleEnvMatchedError(RuntimeError):
     recompute under the current environment or pass ``force_stale_env=True``
     with an audit justification.
     """
+
+
+class UnknownMatcherError(ValueError):
+    """Raise when a matcher-parameters row names an unregistered matcher.
+
+    ``MatcherParameters.insert1()`` (and any registry lookup) received a
+    ``matcher`` string that is not in the cross-session matcher registry.
+    An unknown matcher would otherwise sit in the database until
+    ``UnitMatch.populate()`` failed hours later, so it is rejected at insert
+    time. Message names the unknown matcher, the registered matcher names,
+    and points the caller at ``register_matcher()``.
+    """
+
+
+class UnitMatchSelectionIntegrityError(RuntimeError):
+    """Raise when pinned member curations do not match the session group.
+
+    ``UnitMatch.make()`` re-validates that the
+    ``UnitMatchSelection.MemberCuration`` part rows exactly cover the parent
+    ``SessionGroup.Member`` set and that each pinned ``CurationV2`` belongs to
+    that member's session/recording path. A schema-valid but
+    provenance-invalid selection (a direct insert that bypassed
+    ``insert_selection``) raises this rather than silently matching the wrong
+    units. Message names the missing/extra/wrong ``member_index`` values and
+    points the caller at ``UnitMatchSelection.insert_selection()``.
+    """
+
+
+class TrackedUnitBudgetExceededError(RuntimeError):
+    """Raise when the strict tracked-unit graph exceeds its node budget.
+
+    ``TrackedUnit.make()`` seeds a graph from the full curated-unit universe
+    and derives maximal cliques in strict mode. If the graph exceeds
+    ``MatcherParameters.params["max_strict_nodes"]`` the clique search is
+    refused before exponential blow-up. Message names the node count, the
+    configured cap, and instructs the caller to shrink the session group or
+    raise the cap intentionally.
+    """
