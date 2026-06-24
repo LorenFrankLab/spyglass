@@ -45,8 +45,10 @@ class SessionMatcherInput:
     channel_positions_path : pathlib.Path
         ``.npy`` file of shape ``(n_channels, 2)`` with the probe geometry.
     recording_date : Any
-        ``pandas.Timestamp`` derived from ``Session.session_start_time`` (used
-        for drift ordering); may be ``None`` when a backend does not need it.
+        A canonical UTC ISO 8601 string derived from
+        ``Session.session_start_time`` (used for chronological drift ordering;
+        UTC-normalized so plain string comparison is chronological); may be
+        ``None`` when a backend does not need it.
     """
 
     session_key: dict

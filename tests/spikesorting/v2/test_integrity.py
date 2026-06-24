@@ -5,7 +5,7 @@ the per-table tests in the ``single_session/`` suite do not
 exercise as a focused gate:
 
 - **Tri-part dispatch active**: ``Recording`` / ``ArtifactDetection``
-  / ``Sorting`` use DataJoint's tri-part ``make_fetch`` /
+  / ``Sorting`` / ``UnitMatch`` use DataJoint's tri-part ``make_fetch`` /
   ``make_compute`` / ``make_insert`` rather than a monolithic
   ``make``. The reason is to move the long-running compute step
   OUTSIDE the framework transaction so it does not hold row locks.
@@ -44,8 +44,8 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
 def test_tripart_dispatch_active_on_all_v2_computed_tables():
-    """``Recording`` / ``ArtifactDetection`` / ``Sorting`` route
-    through DataJoint's tri-part dispatch.
+    """``Recording`` / ``ArtifactDetection`` / ``Sorting`` / ``UnitMatch``
+    route through DataJoint's tri-part dispatch.
 
     DataJoint fires tri-part dispatch only when
     ``inspect.isgeneratorfunction(self.make)`` is True (the
@@ -55,12 +55,19 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     become dead code. Without this gate a refactor that silently
     re-introduces a monolithic ``make`` would turn off tri-part
     dispatch (long-transaction avoidance + parallel-populate).
+
+    ``UnitMatch`` is included because its heavy work (dense bundle
+    extraction + matcher execution + NWB write) must stay outside the
+    framework transaction; ``TrackedUnit`` is intentionally excluded --
+    it does only DB reads + a bounded pure-Python clique partition (no
+    SI/NWB I/O), so a monolithic make is acceptable there.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
-    for cls in (Recording, ArtifactDetection, Sorting):
+    for cls in (Recording, ArtifactDetection, Sorting, UnitMatch):
         assert inspect.isgeneratorfunction(cls.make), (
             f"{cls.__name__}.make is not a generator -- DataJoint's "
             "tri-part dispatch fires only on generator make. A "

@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from datetime import timezone
 from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
@@ -64,10 +65,15 @@ schema = dj.schema("spikesorting_v2_unit_matching")
 class UnitMatchFetched(NamedTuple):
     """DB inputs for ``UnitMatch.make_compute`` (no SI/NWB I/O).
 
-    ``member_plan`` is the ordered per-member list of DeepHash-stable dicts
-    ``{"member_index", "nwb_file_name", "sorting_id", "curation_id"}`` -- the
-    pinned, provenance-validated curation per group member (sorting_id as ``str``
-    so the carrier hashes cleanly).
+    ``member_plan`` is the member_index-ordered per-member list of DeepHash-stable
+    dicts with the pinned, provenance-validated curation choice plus the
+    correctness-sensitive DB state resolved at fetch time:
+    ``{"member_index", "nwb_file_name", "sorting_id" (str), "curation_id",
+    "recording_date" (canonical UTC ISO 8601 str), "matchable_unit_ids"
+    (sorted list[int])}``. Threading ``recording_date`` and ``matchable_unit_ids``
+    here -- rather than re-querying in compute -- keeps a curation relabel or
+    session-time edit between stages from changing which units match or the
+    chronological drift order.
     """
 
     matcher_name: str
@@ -453,19 +459,52 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             & {"matcher_params_name": sel["matcher_params_name"]}
         ).fetch1("matcher", "params", "job_kwargs")
 
-        member_plan = [
-            {
-                "member_index": int(member["member_index"]),
-                "nwb_file_name": member["nwb_file_name"],
-                "sorting_id": str(
-                    choices_by_member[int(member["member_index"])][0]
-                ),
-                "curation_id": choices_by_member[
-                    int(member["member_index"])
-                ][1],
-            }
-            for member in members
-        ]
+        # Resolve the correctness-sensitive DB state HERE (in fetch) and thread
+        # it into compute, so a curation relabel or session-time edit between the
+        # fetch and compute stages can't change which units are matchable or the
+        # chronological drift order. ``recording_date`` is stored as an ISO
+        # string (DeepHash-stable; sorts chronologically) and ``matchable_unit_ids``
+        # as a sorted int list. compute does the heavy SI/NWB object building
+        # (get_recording / get_sorting) but no longer re-derives this state.
+        member_plan = []
+        for member in members:
+            member_index = int(member["member_index"])
+            sorting_id, curation_id = choices_by_member[member_index]
+            curation_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+            matchable = [
+                int(u)
+                for u in CurationV2().get_matchable_unit_ids(curation_key)
+            ]
+            if not matchable:
+                raise ValueError(
+                    "UnitMatch.make: member_index "
+                    f"{member_index} (sorting_id={sorting_id}, "
+                    f"curation_id={curation_id}) has no matchable units (all "
+                    "curated units are excluded labels); a matcher cannot run "
+                    "on an empty session. Re-curate so at least one unit "
+                    "survives the exclude filter, or drop the member from the "
+                    "SessionGroup."
+                )
+            recording_date = (
+                Session & {"nwb_file_name": member["nwb_file_name"]}
+            ).fetch1("session_start_time")
+            # Normalize to UTC before stringifying so the ISO strings sort
+            # chronologically by plain lexicographic order (mixed-offset ISO
+            # strings would not). A naive datetime is treated as UTC.
+            if recording_date.tzinfo is None:
+                recording_date = recording_date.replace(tzinfo=timezone.utc)
+            member_plan.append(
+                {
+                    "member_index": member_index,
+                    "nwb_file_name": member["nwb_file_name"],
+                    "sorting_id": str(sorting_id),
+                    "curation_id": int(curation_id),
+                    "recording_date": recording_date.astimezone(
+                        timezone.utc
+                    ).isoformat(),
+                    "matchable_unit_ids": matchable,
+                }
+            )
         return UnitMatchFetched(
             matcher_name=matcher_name,
             params=dict(params),
@@ -545,36 +584,55 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         )
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        pairs = read_pairs(abs_path, pairs_object_id)
         try:
-            AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
-            self.insert1(
-                {
-                    **key,
-                    "analysis_file_name": analysis_file_name,
-                    "pairs_object_id": pairs_object_id,
-                    "n_pairs": n_pairs,
-                    "matcher_runtime_s": matcher_runtime_s,
-                }
-            )
-            self.Pair.insert(
-                [
+            # Read the canonical pairs back from the staged NWB INSIDE the try so
+            # a corrupt/mismatched file still unlinks the staged scratch. Use an
+            # explicit raise (not assert -- assert is stripped under ``python
+            # -O``): the NWB table is the source of the Pair rows, so its length
+            # must agree with the computed n_pairs.
+            pairs = read_pairs(abs_path, pairs_object_id)
+            if len(pairs) != n_pairs:
+                raise RuntimeError(
+                    "UnitMatch.make_insert: staged NWB has "
+                    f"{len(pairs)} pairs but the computed n_pairs is {n_pairs}; "
+                    "the pairs table is inconsistent."
+                )
+            # transaction_or_noop keeps the registration + master + Pair inserts
+            # atomic even on a direct (non-populate) call; under tri-part populate
+            # the framework transaction is already open and this is a no-op.
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
+                self.insert1(
                     {
                         **key,
-                        "pair_index": pair["pair_index"],
-                        "session_a_sorting_id": pair["session_a_sorting_id"],
-                        "session_a_curation_id": pair["session_a_curation_id"],
-                        "unit_a_id": pair["unit_a_id"],
-                        "session_b_sorting_id": pair["session_b_sorting_id"],
-                        "session_b_curation_id": pair["session_b_curation_id"],
-                        "unit_b_id": pair["unit_b_id"],
-                        "match_probability": pair["match_probability"],
-                        "drift_estimate_um": pair["drift_estimate_um"],
-                        "fdr_estimate": pair["fdr_estimate"],
+                        "analysis_file_name": analysis_file_name,
+                        "pairs_object_id": pairs_object_id,
+                        "n_pairs": len(pairs),
+                        "matcher_runtime_s": matcher_runtime_s,
                     }
-                    for pair in pairs
-                ]
-            )
+                )
+                self.Pair.insert(
+                    [
+                        {
+                            **key,
+                            "pair_index": pair["pair_index"],
+                            "session_a_sorting_id": pair["session_a_sorting_id"],
+                            "session_a_curation_id": pair[
+                                "session_a_curation_id"
+                            ],
+                            "unit_a_id": pair["unit_a_id"],
+                            "session_b_sorting_id": pair["session_b_sorting_id"],
+                            "session_b_curation_id": pair[
+                                "session_b_curation_id"
+                            ],
+                            "unit_b_id": pair["unit_b_id"],
+                            "match_probability": pair["match_probability"],
+                            "drift_estimate_um": pair["drift_estimate_um"],
+                            "fdr_estimate": pair["fdr_estimate"],
+                        }
+                        for pair in pairs
+                    ]
+                )
         except Exception:
             _unlink_staged_analysis_file(
                 analysis_file_name, context="UnitMatch.make_insert"
@@ -618,21 +676,12 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                     "sorting_id": plan["sorting_id"],
                     "curation_id": plan["curation_id"],
                 }
+                # Build the SI objects (NWB I/O) here; the matchable unit set was
+                # already resolved + validated in make_fetch and threaded in via
+                # the plan, so compute does not re-derive curation-label state.
                 recording = CurationV2.get_recording(curation_key)
                 full_sorting = CurationV2.get_sorting(curation_key)
-                matchable = CurationV2().get_matchable_unit_ids(curation_key)
-                if len(matchable) == 0:
-                    raise ValueError(
-                        "UnitMatch.make: member_index "
-                        f"{plan['member_index']} (sorting_id="
-                        f"{plan['sorting_id']}, curation_id="
-                        f"{plan['curation_id']}) has no matchable units (all "
-                        "curated units are excluded labels); a matcher cannot "
-                        "run on an empty session. Re-curate so at least one unit "
-                        "survives the exclude filter, or drop the member from "
-                        "the SessionGroup."
-                    )
-                sorting = full_sorting.select_units(matchable)
+                sorting = full_sorting.select_units(plan["matchable_unit_ids"])
                 session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
                 extract_unitmatch_bundle(
                     session_dir,
@@ -640,12 +689,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                     sorting,
                     job_kwargs=resolved_job_kwargs,
                 )
-                recording_date = (
-                    Session & {"nwb_file_name": plan["nwb_file_name"]}
-                ).fetch1("session_start_time")
                 dated_inputs.append(
                     (
-                        recording_date,
+                        plan["recording_date"],
                         plan["member_index"],
                         SessionMatcherInput(
                             session_key={
@@ -656,16 +702,17 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                             channel_positions_path=(
                                 session_dir / "channel_positions.npy"
                             ),
-                            recording_date=recording_date,
+                            recording_date=plan["recording_date"],
                         ),
                     )
                 )
             # Feed the matcher in CHRONOLOGICAL order: UnitMatch's drift
             # correction aligns each session to the previous one, so an
-            # out-of-chronology member order would mis-align drift. member_index
-            # breaks ties for same-day members. Pair orientation is independent
-            # of this order -- canonicalize_match_pairs re-orients by
-            # member_index below.
+            # out-of-chronology member order would mis-align drift. The
+            # recording_date (ISO string, resolved in make_fetch) sorts
+            # chronologically; member_index breaks ties for same-day members.
+            # Pair orientation is independent of this order --
+            # canonicalize_match_pairs re-orients by member_index below.
             dated_inputs.sort(key=lambda item: (item[0], item[1]))
             session_inputs = [item[2] for item in dated_inputs]
             start = time.perf_counter()

@@ -966,6 +966,7 @@ def test_make_runs_full_matcher_table_path(
             "fixture_pairer_params",
             grp["choices"],
         )
+
         UnitMatch.populate(selection_pk, reserve_jobs=False)
 
         assert (UnitMatch & selection_pk).fetch1("n_pairs") == 1
@@ -989,6 +990,39 @@ def test_make_runs_full_matcher_table_path(
                 & {**selection_pk, "tracked_unit_id": matched[0]["tracked_unit_id"]}
             )
             == 2
+        )
+
+        # Purity guard: make_compute must NOT re-derive the matchable unit set
+        # -- make_fetch resolves it and threads it through the carrier. Run
+        # fetch, then break get_matchable_unit_ids, then run compute directly: it
+        # must succeed using the threaded set. Catches a regression that moves
+        # the curation-label DB read back into compute (where DB state could
+        # drift from the fetched carrier).
+        fetched = UnitMatch().make_fetch(selection_pk)
+        original_matchable = CurationV2.get_matchable_unit_ids
+
+        def _forbidden_matchable(self, *args, **kwargs):
+            raise AssertionError(
+                "UnitMatch.make_compute called get_matchable_unit_ids; the "
+                "matchable set must come from make_fetch's carrier."
+            )
+
+        CurationV2.get_matchable_unit_ids = _forbidden_matchable
+        try:
+            computed = UnitMatch().make_compute(
+                selection_pk, **fetched._asdict()
+            )
+        finally:
+            CurationV2.get_matchable_unit_ids = original_matchable
+        assert computed.n_pairs == 1
+        # make_compute staged a fresh analysis NWB (separate from the populated
+        # one); unlink it so the purity probe leaves no orphan.
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        _unlink_staged_analysis_file(
+            computed.analysis_file_name, context="unitmatch purity guard"
         )
     finally:
         if selection_pk is not None:
