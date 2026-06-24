@@ -159,11 +159,24 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
     rid_b = _plant_fake_recording(uuid.uuid4(), "session_times_.nwb", 30000.0)
 
     class _FakeRecording:
-        def __init__(self, times):
-            self._times = np.asarray(times, dtype=np.float64)
+        """Faithful stand-in for an explicit-time_vector SI recording.
 
-        def get_num_samples(self):
+        Models the SI public API ``SharedArtifactGroup.insert_group`` uses --
+        ``get_time_info`` (lazy time_vector), ``sample_index_to_time`` (the
+        chunked fingerprint reads), and segment-indexed ``get_num_samples`` -- so
+        the test exercises the real ``timestamp_fingerprint`` path rather than a
+        frame-bounded shortcut real SI lacks.
+        """
+
+        def __init__(self, times, fs=30000.0):
+            self._times = np.asarray(times, dtype=np.float64)
+            self._fs = float(fs)
+
+        def get_num_samples(self, segment_index=None):
             return len(self._times)
+
+        def get_sampling_frequency(self):
+            return self._fs
 
         def get_dtype(self):
             return "float32"
@@ -171,8 +184,18 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
         def get_num_segments(self):
             return 1
 
-        def get_times(self):
+        def get_times(self, segment_index=None):
             return self._times
+
+        def get_time_info(self, segment_index=None):
+            return {
+                "sampling_frequency": self._fs,
+                "t_start": float(self._times[0]),
+                "time_vector": self._times,
+            }
+
+        def sample_index_to_time(self, sample_ind, segment_index=None):
+            return self._times[sample_ind]
 
     base_times = np.arange(8, dtype=np.float64) / 30000.0
 

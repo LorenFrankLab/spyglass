@@ -346,13 +346,23 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     rid_b = second_rec_pk["recording_id"]
 
     class _FakeRec:
-        def __init__(self, n_samples, dtype_str):
+        """Faithful explicit-time_vector SI stub: both members share identical
+        timestamps (so the fingerprint check passes) and differ only in dtype,
+        leaving the post-loop ``distinct_dtypes`` branch as the sole raiser.
+        Models the SI methods ``insert_group`` calls (``get_time_info`` /
+        ``sample_index_to_time`` / segment-indexed ``get_num_samples``)."""
+
+        def __init__(self, n_samples, dtype_str, fs=30000.0):
             self._n = n_samples
             self._dtype = dtype_str
-            self._times = np.arange(n_samples, dtype=np.float64) / 30000.0
+            self._fs = float(fs)
+            self._times = np.arange(n_samples, dtype=np.float64) / self._fs
 
-        def get_num_samples(self):
+        def get_num_samples(self, segment_index=None):
             return self._n
+
+        def get_sampling_frequency(self):
+            return self._fs
 
         def get_dtype(self):
             return self._dtype
@@ -360,8 +370,18 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
         def get_num_segments(self):
             return 1
 
-        def get_times(self):
+        def get_times(self, segment_index=None):
             return self._times
+
+        def get_time_info(self, segment_index=None):
+            return {
+                "sampling_frequency": self._fs,
+                "t_start": float(self._times[0]),
+                "time_vector": self._times,
+            }
+
+        def sample_index_to_time(self, sample_ind, segment_index=None):
+            return self._times[sample_ind]
 
     def _fake_get_recording(self, key):
         # Both stubs share ``n_samples`` so the dtype branch -- not

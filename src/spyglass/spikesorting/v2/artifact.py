@@ -63,12 +63,12 @@ from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
+from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     SourceResolution,
     _assert_v2_db_safe,
-    _get_recording_timestamps,
     _validate_params,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
@@ -343,7 +343,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         # get_recording`` (the same path ``make_compute`` uses) and require
         # EXACT ``get_num_samples()``, ``get_dtype()``, and timestamps.
         per_member_sizes: dict[str, tuple[int, str]] = {}
-        reference_timestamps = None
+        reference_fingerprint = None
         reference_rid = None
         for rid in member_recording_ids:
             try:
@@ -357,46 +357,42 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                     "every member recording to be readable."
                 ) from exc
             n_samples = int(rec_obj.get_num_samples())
-            timestamps = np.asarray(
-                _get_recording_timestamps(rec_obj), dtype=np.float64
+            # Internal consistency without materializing: the lazy time_vector's
+            # length (h5py shape[0], no data read) must match get_num_samples().
+            explicit_time_vector = rec_obj.get_time_info(segment_index=0).get(
+                "time_vector"
             )
-            if len(timestamps) != n_samples:
+            if (
+                explicit_time_vector is not None
+                and len(explicit_time_vector) != n_samples
+            ):
                 raise ValueError(
                     "SharedArtifactGroup.insert_group: recording_id="
                     f"{rid!r} reports get_num_samples()={n_samples}, "
                     f"but its timestamp vector has length "
-                    f"{len(timestamps)}. The preprocessed recording is "
-                    "internally inconsistent and cannot be used for a "
+                    f"{len(explicit_time_vector)}. The preprocessed recording "
+                    "is internally inconsistent and cannot be used for a "
                     "shared artifact group."
                 )
-            if reference_timestamps is None:
-                reference_timestamps = timestamps
+            # Time-alignment check via a chunked SHA-256 fingerprint of the
+            # timestamp vector rather than holding two full ~824 MB float64
+            # vectors for an ``np.array_equal``. ``timestamp_fingerprint``
+            # streams the vector in ~1 s slices (bounded peak memory) and
+            # prefixes n_samples, so a length difference also yields differing
+            # fingerprints and is caught here as a timestamp mismatch.
+            fingerprint = timestamp_fingerprint(rec_obj)
+            if reference_fingerprint is None:
+                reference_fingerprint = fingerprint
                 reference_rid = rid
-            elif not np.array_equal(reference_timestamps, timestamps):
-                if reference_timestamps.shape != timestamps.shape:
-                    mismatch_detail = (
-                        "timestamp vector shapes differ: "
-                        f"recording_id={reference_rid!r} has "
-                        f"{reference_timestamps.shape}, recording_id="
-                        f"{rid!r} has {timestamps.shape}"
-                    )
-                else:
-                    mismatch_indices = np.flatnonzero(
-                        reference_timestamps != timestamps
-                    )
-                    first = int(mismatch_indices[0])
-                    mismatch_detail = (
-                        f"first mismatch at sample {first}: "
-                        f"recording_id={reference_rid!r} has "
-                        f"{reference_timestamps[first]!r}, "
-                        f"recording_id={rid!r} has {timestamps[first]!r}"
-                    )
+            elif fingerprint != reference_fingerprint:
                 raise ValueError(
                     "SharedArtifactGroup.insert_group: members have "
-                    f"differing exact timestamps ({mismatch_detail}). "
-                    "Shared artifact detection requires time-aligned "
-                    "recordings; use recordings from the same interval "
-                    "identity or run separate artifact detections."
+                    "differing exact timestamps (recording_id="
+                    f"{reference_rid!r} and recording_id={rid!r} have "
+                    "non-identical timestamp vectors). Shared artifact "
+                    "detection requires time-aligned recordings; use "
+                    "recordings from the same interval identity or run "
+                    "separate artifact detections."
                 )
             per_member_sizes[str(rid)] = (
                 n_samples,
