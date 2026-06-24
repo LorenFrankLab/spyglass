@@ -54,6 +54,7 @@ dependencies = [
   "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
   "ndx-pose",
+  "networkx",                       # imported by spikesorting v2 _matcher_graph
   "non-local-detector",
   "numpy",
   "opencv-python",

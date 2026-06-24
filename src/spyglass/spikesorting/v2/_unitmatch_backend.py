@@ -334,37 +334,45 @@ class UnitMatchBackend:
         """
         boundaries = np.asarray(session_switch).ravel()
         n = prob_matrix.shape[0]
+        if n == 0:
+            return []
+        prob = np.asarray(prob_matrix, dtype=float)
 
-        def session_of(stacked_index: int) -> int:
-            return int(np.searchsorted(boundaries, stacked_index, side="right") - 1)
+        # Build the survivor mask in NumPy rather than looping over every
+        # (i, j): a pair survives iff i < j (each unordered pair once), the two
+        # units are in different sessions, and BOTH directed probabilities clear
+        # the threshold (``min(p_ij, p_ji) > threshold``). Then loop only over
+        # the surviving matches to construct MatchPairs.
+        session_ids = (
+            np.searchsorted(boundaries, np.arange(n), side="right") - 1
+        )
+        upper = np.triu(np.ones((n, n), dtype=bool), k=1)
+        cross_session = session_ids[:, None] != session_ids[None, :]
+        both_pass = (prob > match_threshold) & (prob.T > match_threshold)
+        mask = upper & cross_session & both_pass
+        mean_prob = (prob + prob.T) / 2.0  # symmetric, orientation-independent
 
-        def unit_of(stacked_index: int) -> int:
+        def unit_of(stacked_index) -> int:
             return int(np.asarray(original_ids[stacked_index]).item())
 
         pairs: list[MatchPair] = []
-        for i in range(n):
-            sidx_i = session_of(i)
-            key_a = session_inputs[sidx_i].session_key
-            for j in range(i + 1, n):
-                sidx_j = session_of(j)
-                if sidx_j == sidx_i:  # within-session
-                    continue
-                p_ij = float(prob_matrix[i, j])
-                p_ji = float(prob_matrix[j, i])
-                if min(p_ij, p_ji) <= match_threshold:  # require both directions
-                    continue
-                key_b = session_inputs[sidx_j].session_key
-                pairs.append(
-                    MatchPair(
-                        session_a_sorting_id=str(key_a["sorting_id"]),
-                        session_a_curation_id=int(key_a["curation_id"]),
-                        unit_a_id=unit_of(i),
-                        session_b_sorting_id=str(key_b["sorting_id"]),
-                        session_b_curation_id=int(key_b["curation_id"]),
-                        unit_b_id=unit_of(j),
-                        match_probability=(p_ij + p_ji) / 2.0,
-                    )
+        # np.argwhere yields (i, j) in row-major (i then j) order, so each
+        # unordered cross-session pair appears once, side A = the earlier
+        # session block (i < j).
+        for i, j in np.argwhere(mask):
+            key_a = session_inputs[int(session_ids[i])].session_key
+            key_b = session_inputs[int(session_ids[j])].session_key
+            pairs.append(
+                MatchPair(
+                    session_a_sorting_id=str(key_a["sorting_id"]),
+                    session_a_curation_id=int(key_a["curation_id"]),
+                    unit_a_id=unit_of(i),
+                    session_b_sorting_id=str(key_b["sorting_id"]),
+                    session_b_curation_id=int(key_b["curation_id"]),
+                    unit_b_id=unit_of(j),
+                    match_probability=float(mean_prob[i, j]),
                 )
+            )
         return pairs
 
 

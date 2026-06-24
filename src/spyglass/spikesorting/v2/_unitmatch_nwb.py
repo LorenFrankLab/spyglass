@@ -113,19 +113,21 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
         nwbf = io.read()
         frame = nwbf.objects[object_id].to_dataframe()
     rows: list[dict] = []
-    for _, row in frame.iterrows():
-        fdr = float(row["fdr_estimate"])
+    # itertuples(index=False) is faster + cleaner than iterrows (no per-row
+    # Series). Pair columns are valid identifiers, so attribute access works.
+    for row in frame.itertuples(index=False):
+        fdr = float(row.fdr_estimate)
         rows.append(
             {
-                "pair_index": int(row["pair_index"]),
-                "session_a_sorting_id": str(row["session_a_sorting_id"]),
-                "session_a_curation_id": int(row["session_a_curation_id"]),
-                "unit_a_id": int(row["unit_a_id"]),
-                "session_b_sorting_id": str(row["session_b_sorting_id"]),
-                "session_b_curation_id": int(row["session_b_curation_id"]),
-                "unit_b_id": int(row["unit_b_id"]),
-                "match_probability": float(row["match_probability"]),
-                "drift_estimate_um": float(row["drift_estimate_um"]),
+                "pair_index": int(row.pair_index),
+                "session_a_sorting_id": str(row.session_a_sorting_id),
+                "session_a_curation_id": int(row.session_a_curation_id),
+                "unit_a_id": int(row.unit_a_id),
+                "session_b_sorting_id": str(row.session_b_sorting_id),
+                "session_b_curation_id": int(row.session_b_curation_id),
+                "unit_b_id": int(row.unit_b_id),
+                "match_probability": float(row.match_probability),
+                "drift_estimate_um": float(row.drift_estimate_um),
                 "fdr_estimate": None if np.isnan(fdr) else fdr,
             }
         )
