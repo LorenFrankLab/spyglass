@@ -413,8 +413,20 @@ belt-and-suspenders for this pin and installing UnitMatchPy pulls `torch`
 transitively. `uv pip check` is clean: 3.2.7 coexists with numpy 2.4.6 and
 SpikeInterface 0.104.3 at the dependency-metadata level.
 
-**Repo**: https://github.com/EnnyvanBeest/UnitMatch (verified against upstream
-commit `ef2a7cd2a93b8d8f96e886b2582aeff91cdf9a44`, 2026-06-23).
+**Source provenance (two distinct artifacts — do not conflate):**
+
+- **Runtime target = PyPI `UnitMatchPy==3.2.7`.** Every API signature, behavior,
+  and the numpy-2 finding below were verified against the *installed* 3.2.7
+  source in the matching `uv` env. This is the version the wrapper pins and runs.
+- **Demo template = upstream `main` @ `ef2a7cd2a93b8d8f96e886b2582aeff91cdf9a44`
+  (2026-06-23).** Only the orchestration *template*
+  (`UMPy_spike_interface_demo.ipynb`) was read from this commit. **That checkout
+  is a LATER release (`UnitMatchPy 3.4.2`, which repins `numpy>=1.21,<2.0`)** —
+  it is NOT the runtime target. The demo's call *order* is stable across these
+  versions, but each call was re-checked against the installed 3.2.7 source, so
+  this appendix describes 3.2.7, not main.
+
+**Repo**: https://github.com/EnnyvanBeest/UnitMatch
 
 **PyPI page**: https://pypi.org/project/UnitMatchPy/ (the plan pins
 `UnitMatchPy>=3.2.6,<3.2.8` — the 3.2.6/3.2.7 line is the last to declare
