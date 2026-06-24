@@ -19,6 +19,28 @@
       "recording_h5_sha256": "d73d89da07d0a9ed7716fcfcd1a818d6000e8c0b79809b3b689e96bab9989a28",
       "seed": 1
     },
+    "mearec_polymer_128ch_2sessions_s1": {
+      "drifting": true,
+      "duration_s": 60.0,
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "2685682d2ccde21e46e9e9d67058449fea837f7ed90fbb941dee5ba0b3ae2f34",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "e10caf9df8eea5fb7246334bb572e383bf5d1f10ca794e9c2a705283334759d2",
+      "seed": 40
+    },
+    "mearec_polymer_128ch_2sessions_s2": {
+      "drifting": true,
+      "duration_s": 60.0,
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "8b8cc2b4a4e4070ffba62e6562c405f75b0ff330a8e8ccc1200e74085902d03a",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "974b97ac5be309c0dbead1d89e546cbd53e69a46807cda492f4275818a59d98d",
+      "seed": 41
+    },
     "mearec_polymer_128ch_60s": {
       "drifting": false,
       "duration_s": 60.0,
@@ -98,6 +120,6 @@
   },
   "mearec_version": "1.10.0",
   "neuroconv_version": "0.9.3",
-  "profile": "smoke",
+  "profile": "full",
   "spikeinterface_version": "0.104.3"
 }

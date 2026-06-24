@@ -77,6 +77,15 @@ class FixtureSpec:
         Slow-drift speed when ``drifting`` is True.
     seed : int
         Deterministic seed shared by templates, spike trains, and convolution.
+    template_seed : int or None
+        Seed for MEArec's *template selection* (``seeds.templates``), decoupled
+        from the spike-train / convolution / noise seed. ``None`` (the default)
+        falls back to ``seed`` so existing single-session fixtures keep their
+        all-seeds-equal behavior. Two fixtures that share a ``template_seed``
+        (and the same template library, i.e. matching ``drifting``) select the
+        SAME ground-truth neurons in the SAME order, so unit ``i`` in one
+        corresponds to unit ``i`` in the other -- the planted cross-session
+        correspondences the matcher gate scores against.
     """
 
     name: str
@@ -95,6 +104,12 @@ class FixtureSpec:
     # "zlim": [-60, 60]}`` opens the placement volume for tiny probes.
     # ``None`` leaves MEArec's defaults untouched.
     templates_overrides: dict | None = None
+    template_seed: int | None = None
+
+    @property
+    def effective_template_seed(self) -> int:
+        """Template-selection seed, defaulting to ``seed`` when unset."""
+        return self.seed if self.template_seed is None else self.template_seed
 
 
 @dataclass
@@ -212,6 +227,41 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                         "zlim": [-60, 60],
                         "min_amp": 20,
                     },
+                ),
+                # Cross-session matcher gate: a PAIR of polymer sessions built
+                # from one drifting template library with a SHARED
+                # ``template_seed`` so both select the SAME ground-truth neurons
+                # in the same order -- unit ``i`` in ``_s1`` is the same neuron
+                # as unit ``i`` in ``_s2`` (the planted correspondences the AUC
+                # gate scores). Both sessions are ``drifting=True`` (MEArec's cell
+                # SELECTION depends on the drift flag, so the two must match it --
+                # and ``template_seed`` -- to share a selection), but at DIFFERENT
+                # slow-drift speeds: ``_s1`` barely moves (~1 µm over 60 s) while
+                # ``_s2`` drifts ~8 µm, so ``_s2``'s average waveform positions
+                # shift a few µm relative to ``_s1`` -- the small inter-session
+                # drift UnitMatch must correct. Distinct ``seed`` gives each
+                # session its own spike-train + noise realization.
+                FixtureSpec(
+                    name="mearec_polymer_128ch_2sessions_s1",
+                    layout=polymer,
+                    duration_s=60.0,
+                    n_exc=17,
+                    n_inh=7,
+                    drifting=True,
+                    drift_um_per_min=1.0,
+                    seed=40,
+                    template_seed=2,
+                ),
+                FixtureSpec(
+                    name="mearec_polymer_128ch_2sessions_s2",
+                    layout=polymer,
+                    duration_s=60.0,
+                    n_exc=17,
+                    n_inh=7,
+                    drifting=True,
+                    drift_um_per_min=8.0,
+                    seed=41,
+                    template_seed=2,
                 ),
             ),
         ),
@@ -404,7 +454,10 @@ def _generate_recording(
     params["spiketrains"]["n_inh"] = spec.n_inh
     params["spiketrains"]["duration"] = spec.duration_s
     params["seeds"]["spiketrains"] = spec.seed
-    params["seeds"]["templates"] = spec.seed
+    # ``templates`` seeds the cell SELECTION (decoupled from the spike-train
+    # realization), so two sessions sharing ``effective_template_seed`` pick the
+    # same ground-truth neurons in the same order -- the planted correspondences.
+    params["seeds"]["templates"] = spec.effective_template_seed
     params["seeds"]["convolution"] = spec.seed
     params["seeds"]["noise"] = spec.seed
     params["recordings"]["drifting"] = spec.drifting
@@ -655,7 +708,7 @@ def generate_fixtures(
             profile,
             templates_h5,
             drifting=spec.drifting,
-            seed=spec.seed,
+            seed=spec.effective_template_seed,
             overrides=spec.templates_overrides,
         )
         _generate_recording(spec, templates_h5, recording_h5)

@@ -88,6 +88,10 @@ FIXTURE_URLS: dict[str, str | None] = {
         "&shared_name=5i8e4dvjx2x1i4twc0rw09cj8dv6cjh3"
         "&file_id=f_2275379903075"
     ),
+    # Cross-session matcher gate pair (generate-or-skip until uploaded). The
+    # AUC gate references both stems by path and skips when either is absent.
+    "mearec_polymer_128ch_2sessions_s1": None,  # nightly / manual
+    "mearec_polymer_128ch_2sessions_s2": None,  # nightly / manual
 }
 
 
