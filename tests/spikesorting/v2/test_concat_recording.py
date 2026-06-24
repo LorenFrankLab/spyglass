@@ -203,3 +203,29 @@ def test_build_concatenated_recording_merges_overlapping_motion_kwargs(
     assert captured["detect_kwargs"] == {"x": 1}
     assert captured["output_motion"] is False
     assert captured["output_motion_info"] is False
+
+
+@pytest.mark.parametrize(
+    "bad_key, bad_val",
+    [
+        ("folder", "/tmp/motion"),  # side-artifact write
+        ("overwrite", True),  # side-artifact / return-type contract
+        ("output_motion", True),  # changes return type
+        ("detect_kwargs", {"x": 1}),  # motion param outside the concat identity
+    ],
+)
+def test_build_concatenated_recording_rejects_non_job_motion_job_kwargs(
+    bad_key, bad_val
+):
+    """A non-SI-job key in the resolved motion job_kwargs is rejected before it
+    can bind a correct_motion top-level param (side artifacts / return type /
+    motion params) and bypass the concat persistence contract."""
+    import spikeinterface as si
+
+    rec = si.NumpyRecording(
+        [np.zeros((50, 4), dtype=np.float32)], sampling_frequency=30_000.0
+    )
+    with pytest.raises(ValueError, match="non-job key"):
+        build_concatenated_recording(
+            [rec], motion_preset="rigid_fast", job_kwargs={bad_key: bad_val}
+        )

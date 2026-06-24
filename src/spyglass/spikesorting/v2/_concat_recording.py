@@ -266,13 +266,36 @@ def build_concatenated_recording(
     if motion_preset is None:
         return concatenated
 
+    from spikeinterface.core.job_tools import job_keys
     from spikeinterface.preprocessing import correct_motion
+
+    # The resolved ``job_kwargs`` may carry ONLY SpikeInterface job kwargs
+    # (n_jobs, chunk_duration, progress_bar, ...). ``correct_motion`` has
+    # top-level params BEFORE its ``**job_kwargs`` -- ``folder`` / ``overwrite``
+    # / ``output_motion`` / ``output_motion_info`` (the side-artifact + return-
+    # type contract the concat cache forbids) and ``detect_kwargs`` /
+    # ``estimate_motion_kwargs`` / ... (motion parameters that belong in
+    # ``preset_kwargs``, which IS part of the concat identity). A non-job key in
+    # ``job_kwargs`` would silently bind one of those, bypassing the persistence
+    # contract or changing the motion outside the content hash, so reject it.
+    resolved_job_kwargs = dict(job_kwargs or {})
+    non_job_keys = sorted(set(resolved_job_kwargs) - set(job_keys))
+    if non_job_keys:
+        raise ValueError(
+            "build_concatenated_recording: motion job_kwargs carries non-job "
+            f"key(s) {non_job_keys}; only SpikeInterface job kwargs "
+            f"{sorted(job_keys)} are allowed there. Motion per-step kwargs "
+            "(detect_kwargs, estimate_motion_kwargs, ...) and the forbidden "
+            "side-artifact kwargs (folder / overwrite / output_motion / "
+            "output_motion_info) belong in MotionCorrectionParameters."
+            "preset_kwargs, not in job_kwargs."
+        )
 
     # Merge into ONE kwargs dict (resolved job kwargs win on conflict, per the
     # job-kwargs resolution contract) so an overlapping key -- e.g. ``n_jobs``
     # in both ``preset_kwargs`` and the resolved ``job_kwargs`` -- does not
     # raise ``TypeError: got multiple values for keyword`` from a double splat.
-    motion_kwargs = {**(preset_kwargs or {}), **(job_kwargs or {})}
+    motion_kwargs = {**(preset_kwargs or {}), **resolved_job_kwargs}
     return correct_motion(
         concatenated,
         preset=motion_preset,
