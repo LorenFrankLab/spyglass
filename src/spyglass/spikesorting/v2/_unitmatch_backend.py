@@ -224,6 +224,18 @@ class UnitMatchBackend:
                 wave_paths, label_paths, param, good_units_only=True
             )
         )
+        # load_good_waveforms silently DROPS a session whose bundle fails to
+        # load (it does not raise). If that happened, the compact session
+        # indexes below would attribute one session's units to another
+        # session's Spyglass key -- fail loudly instead.
+        if len(good_units) != len(session_inputs):
+            raise RuntimeError(
+                f"UnitMatch loaded {len(good_units)} session(s) but "
+                f"{len(session_inputs)} were provided; a session bundle failed "
+                "to load (UnitMatchPy drops it silently), so units cannot be "
+                "attributed to the correct session. Check each session bundle's "
+                "RawWaveforms/ and cluster_group.tsv."
+            )
         waveform = _zero_center(waveform)
         clus_info = {
             "good_units": good_units,

@@ -93,6 +93,58 @@ def test_bidirectional_match_reports_mean_probability():
     assert pairs[0].match_probability == pytest.approx(0.85)
 
 
+def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
+    """A dropped bundle (fewer loaded sessions than inputs) fails loudly.
+
+    UnitMatchPy's load_good_waveforms excludes a session whose bundle fails to
+    load instead of raising; without a guard, the compact session indexes would
+    misattribute one session's units to another session's Spyglass key.
+    """
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+    from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
+
+    positions = tmp_path / "cp.npy"
+    np.save(positions, np.zeros((4, 2)))
+    inputs = [
+        SessionMatcherInput(
+            session_key={"sorting_id": s, "curation_id": 0},
+            waveform_dir=tmp_path,
+            channel_positions_path=positions,
+        )
+        for s in ("A", "B")
+    ]
+
+    # Fake UnitMatch namespace: load_good_waveforms returns only ONE session's
+    # good_units while two inputs were provided (a silently dropped session).
+    def _fake_load(wave_paths, label_paths, param, good_units_only=True):
+        param["n_units"], param["n_sessions"] = 1, 1
+        return (
+            np.zeros((1, 10, 4, 2)),  # waveform
+            np.array([0]),  # session_id
+            np.array([0, 1]),  # session_switch
+            np.zeros((1, 1)),  # within_session
+            [np.array([[5]])],  # good_units -- length 1, not 2
+            param,
+        )
+
+    fake_um = SimpleNamespace(
+        default_params=SimpleNamespace(
+            get_default_param=lambda: {"match_threshold": 0.5}
+        ),
+        utils=SimpleNamespace(
+            paths_from_KS=lambda dirs: ([], [], [np.zeros((4, 3))]),
+            get_probe_geometry=lambda pos, param: param,
+            load_good_waveforms=_fake_load,
+        ),
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+
+    with pytest.raises(RuntimeError, match="loaded 1 session"):
+        backend.UnitMatchBackend().match(inputs, {})
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp
@@ -141,6 +193,9 @@ def two_session_inputs(tmp_path_factory):
 
     if not FIXTURE.exists():
         pytest.skip("polymer 60s fixture not present")
+    # UnitMatchPy is the optional `spikesorting-v2-matching` extra; the default
+    # v2 CI env does not install it, so skip cleanly rather than fail.
+    pytest.importorskip("UnitMatchPy")
 
     rec, trains = _read_polymer_gt()
     fs = rec.get_sampling_frequency()
@@ -179,6 +234,8 @@ def two_session_inputs(tmp_path_factory):
     return inputs, s1_ids, s2_ids, shared
 
 
+@pytest.mark.slow
+@pytest.mark.integration
 def test_match_recovers_planted_correspondences(two_session_inputs):
     from spyglass.spikesorting.v2._unitmatch_backend import UnitMatchBackend
 
