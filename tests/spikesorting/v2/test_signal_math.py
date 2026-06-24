@@ -195,6 +195,10 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
         full[[0, 1, n // 3, n // 2, n - 2, n - 1]],
         full[[0, n // 2, n - 1]] + 1e-9,
         full[[0, n // 2, n - 1]] - 1e-9,
+        # midway between the last pre-gap and first post-gap sample: for the
+        # disjoint recording this lands INSIDE the dead wall-clock gap (the
+        # most disjoint-specific binary-search query); harmless for the others.
+        [(full[n // 3 - 1] + full[n // 3]) / 2.0],
         [full[0] - 1.0, full[-1] + 1.0],
     ])
     np.testing.assert_array_equal(
@@ -225,6 +229,40 @@ def test_base_intervals_and_gaps_matches_full_vector(kind):
     np.testing.assert_array_equal(gap, gap_ref)
     expected_gaps = {"rate": 0, "contiguous": 0, "disjoint": 2}[kind]
     assert gap.size == expected_gaps
+
+
+def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
+    """A wall-clock gap landing exactly on a scan-chunk seam exercises the
+    cross-chunk-boundary branch of ``base_intervals_and_gaps`` (the
+    ``float(times[0]) - prev_time`` check that emits ``gap_after = start_frame -
+    1``), which interior-gap recordings never hit. The chunked scan steps in
+    ``round(fs)``-frame chunks, so a gap at frame ``chunk_size - 1`` straddles
+    two scan chunks. Compared against the exact full-vector reference, plus one
+    interior gap so both gap branches run in one recording."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import (
+        _base_intervals_from_timestamps,
+        base_intervals_and_gaps,
+    )
+
+    chunk_size = max(1, int(round(FS)))  # the scan's per-chunk frame count
+    n = 4 * chunk_size  # 4 scan chunks
+    ts = np.arange(n, dtype=np.float64) / FS
+    seam_gap = chunk_size  # gap between frame chunk_size-1 (chunk 0's last) and
+    #                        frame chunk_size (chunk 1's first) -> the seam
+    interior_gap = 2 * chunk_size + chunk_size // 2  # interior to chunk 2
+    ts[seam_gap:] += 5.0
+    ts[interior_gap:] += 11.0
+    rec = _explicit_recording(ts)
+
+    base_ref = np.asarray(_base_intervals_from_timestamps(ts, FS))
+    gap_ref = np.flatnonzero(np.diff(ts) > 1.5 / FS)
+    assert gap_ref.tolist() == [seam_gap - 1, interior_gap - 1]  # sanity
+
+    base, gap = base_intervals_and_gaps(rec, FS)
+    np.testing.assert_array_equal(np.asarray(base), base_ref)
+    np.testing.assert_array_equal(gap, gap_ref)
 
 
 def test_timestamp_fingerprint_matches_array_equal_semantics():

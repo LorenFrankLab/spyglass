@@ -133,12 +133,37 @@ def apply_artifact_mask(
     # (the prior full-vector ``assert_monotonic_timestamps`` guard would force
     # the materialization this avoids).
     n_samples = int(recording.get_num_samples(segment_index=0))
+    if n_samples == 0:
+        raise ValueError(
+            "apply_artifact_mask: recording has zero samples; there is "
+            "nothing to mask (the prior get_times() path raised on the empty "
+            "timestamp vector)."
+        )
     t_first, t_last = (
         float(t)
         for t in _segment_times_at(
             recording, np.array([0, n_samples - 1], dtype=np.int64)
         )
     )
+    # Bounded (two-endpoint) monotonicity tripwire replacing the removed
+    # full-vector ``assert_monotonic_timestamps``: catch gross corruption
+    # (empty/reversed/NaN-bracketed vector) loudly instead of silently
+    # mis-masking, without materializing. NOTE: this checks only the endpoints
+    # -- an INTERIOR backward step (which Recording.make's ordering invariant
+    # rules out) is no longer detected here, unlike the pre-refactor whole-
+    # vector scan; the chunked ``detect_artifacts`` path still validates
+    # monotonicity per chunk.
+    if not (
+        np.isfinite(t_first)
+        and np.isfinite(t_last)
+        and t_last >= t_first
+    ):
+        raise ValueError(
+            "apply_artifact_mask: recording endpoints are non-finite or step "
+            f"backward (t_first={t_first}, t_last={t_last}); the persisted "
+            "recording's monotonic timestamp invariant is violated and the "
+            "searchsorted frame mapping would silently mis-mask."
+        )
     # Walk the valid intervals left-to-right in seconds, collecting the
     # complement (artifact gaps) as ``(start_time, end_time)`` pairs;
     # ``end_time is None`` marks the open tail that extends to the exclusive
