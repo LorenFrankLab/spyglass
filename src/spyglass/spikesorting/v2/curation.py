@@ -35,6 +35,7 @@ from spyglass.spikesorting.v2._units_nwb import (
     numpysorting_from_abs_times,
     numpysorting_from_sample_indices,
     read_units_abs_spike_times,
+    read_units_abs_times_and_sample_indices,
     read_units_spike_sample_indices,
     recording_timestamps,
     write_curated_units_nwb,
@@ -1805,8 +1806,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         _row, recording_row, fs, abs_path = cls._load_curation_recording_meta(
             key
         )
-        abs_times = read_units_abs_spike_times(abs_path)
-        sample_indices = read_units_spike_sample_indices(abs_path)
+        # Both columns are needed (dedup is in absolute time, frames are reused
+        # when present) -- read them from a single NWB open.
+        abs_times, sample_indices = read_units_abs_times_and_sample_indices(
+            abs_path
+        )
         if sample_indices is not None:
             return build_lazy_merged_sorting_from_samples(
                 abs_times,

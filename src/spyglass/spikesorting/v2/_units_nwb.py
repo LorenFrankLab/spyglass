@@ -97,6 +97,42 @@ def read_units_spike_sample_indices(abs_path) -> dict | None:
         }
 
 
+def read_units_abs_times_and_sample_indices(abs_path):
+    """Open the units NWB ONCE and return ``(abs_times, sample_indices_or_None)``.
+
+    Combined reader for callers that need BOTH columns (curated-units write +
+    lazy-merge preview), so a single ``NWBHDF5IO`` open replaces two. Matches the
+    single-column readers' semantics exactly: ``abs_times`` is
+    ``{unit_id: abs_spike_times}`` (``{}`` for an empty/absent Units table) and
+    ``sample_indices`` is ``{unit_id: spike_sample_index}``, ``None`` when the
+    ``spike_sample_index`` column is absent (legacy/manual files), or ``{}`` for
+    an empty Units table. Use the single-column readers on the fast paths that
+    need only one column.
+    """
+    import numpy as np
+    import pynwb
+
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        nwbf = io.read()
+        units = nwbf.units
+        if units is None or len(units) == 0:
+            return {}, {}
+        unit_ids = np.asarray(units.id[:], dtype=int)
+        spike_times = units["spike_times"]
+        abs_times = {
+            int(uid): np.asarray(spike_times[row_ind], dtype=float)
+            for row_ind, uid in enumerate(unit_ids)
+        }
+        if SPIKE_SAMPLE_INDEX_COLUMN not in units.colnames:
+            return abs_times, None
+        sample_col = units[SPIKE_SAMPLE_INDEX_COLUMN]
+        sample_indices = {
+            int(uid): np.asarray(sample_col[row_ind], dtype=np.int64)
+            for row_ind, uid in enumerate(unit_ids)
+        }
+        return abs_times, sample_indices
+
+
 def numpysorting_from_sample_indices(sample_indices, fs):
     """Build a ``NumpySorting`` directly from stored sample frames."""
     import numpy as np
@@ -645,8 +681,9 @@ def write_curated_units_nwb(
     src_abs_path = AnalysisNwbfile.get_abs_path(
         (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
-    abs_times_by_uid = read_units_abs_spike_times(src_abs_path)
-    sample_indices_by_uid = read_units_spike_sample_indices(src_abs_path)
+    abs_times_by_uid, sample_indices_by_uid = (
+        read_units_abs_times_and_sample_indices(src_abs_path)
+    )
 
     analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)

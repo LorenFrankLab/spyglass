@@ -271,6 +271,43 @@ def test_read_units_spike_sample_indices_missing_column(tmp_path):
     assert read_units_spike_sample_indices(str(p)) is None
 
 
+def test_read_units_abs_times_and_sample_indices_matches_single_readers(
+    tmp_path,
+):
+    """The single-open combined reader returns exactly what the two
+    single-column readers return -- with the sample column, without it, and for
+    an empty Units table."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_spike_times,
+        read_units_abs_times_and_sample_indices,
+        read_units_spike_sample_indices,
+    )
+
+    # (a) with the sample_sample_index column
+    p_full = tmp_path / "with_samples.nwb"
+    _write_units_nwb_with_samples(
+        p_full, [(4, [0.1, 0.2, 0.3], [10, 20, 30]), (9, [], [])]
+    )
+    abs_c, samp_c = read_units_abs_times_and_sample_indices(str(p_full))
+    abs_s = read_units_abs_spike_times(str(p_full))
+    samp_s = read_units_spike_sample_indices(str(p_full))
+    assert set(abs_c) == set(abs_s)
+    assert all(np.array_equal(abs_c[u], abs_s[u]) for u in abs_s)
+    assert all(np.array_equal(samp_c[u], samp_s[u]) for u in samp_s)
+
+    # (b) legacy file without the column -> sample_indices is None
+    p_legacy = tmp_path / "legacy.nwb"
+    _write_units_nwb(p_legacy, [[0.1, 0.2]])
+    abs_l, samp_l = read_units_abs_times_and_sample_indices(str(p_legacy))
+    assert samp_l is None
+    assert np.array_equal(abs_l[0], read_units_abs_spike_times(str(p_legacy))[0])
+
+    # (c) empty Units table -> ({}, {})
+    p_empty = tmp_path / "empty.nwb"
+    _write_units_nwb(p_empty, [])
+    assert read_units_abs_times_and_sample_indices(str(p_empty)) == ({}, {})
+
+
 class _FakeRecording:
     def __init__(self, times, fs=_FS, explicit=True):
         self.times = np.asarray(times, dtype=float)
