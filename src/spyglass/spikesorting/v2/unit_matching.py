@@ -611,28 +611,12 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                         "matcher_runtime_s": matcher_runtime_s,
                     }
                 )
-                self.Pair.insert(
-                    [
-                        {
-                            **key,
-                            "pair_index": pair["pair_index"],
-                            "session_a_sorting_id": pair["session_a_sorting_id"],
-                            "session_a_curation_id": pair[
-                                "session_a_curation_id"
-                            ],
-                            "unit_a_id": pair["unit_a_id"],
-                            "session_b_sorting_id": pair["session_b_sorting_id"],
-                            "session_b_curation_id": pair[
-                                "session_b_curation_id"
-                            ],
-                            "unit_b_id": pair["unit_b_id"],
-                            "match_probability": pair["match_probability"],
-                            "drift_estimate_um": pair["drift_estimate_um"],
-                            "fdr_estimate": pair["fdr_estimate"],
-                        }
-                        for pair in pairs
-                    ]
-                )
+                # ``read_pairs`` returns exactly the Pair part columns
+                # (pair_index + the two projected unit FKs + probability/drift/
+                # fdr) and ``key`` adds only the master PK, so splatting both is
+                # the full Pair row -- no second hand-maintained column list to
+                # drift from the NWB writer/reader.
+                self.Pair.insert([{**key, **pair} for pair in pairs])
         except Exception:
             _unlink_staged_analysis_file(
                 analysis_file_name, context="UnitMatch.make_insert"

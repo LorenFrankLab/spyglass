@@ -174,10 +174,11 @@ def reject_duplicate_parameter_content(
 ) -> None:
     """Reject a validated row whose content duplicates an existing row name.
 
-    The duplicate-content guard shared by the three validated parameter
-    Lookups. After :func:`validate_lookup_rows` normalizes the batch,
+    The duplicate-content guard shared by the validated parameter Lookups.
+    After :func:`validate_lookup_rows` normalizes the batch,
     fingerprint each incoming row (row NAME excluded; ``SorterParameters``
-    scoped per sorter via the fingerprint's ``sorter`` field) and compare
+    scoped per sorter and ``MatcherParameters`` per matcher via the
+    fingerprint's ``sorter`` / ``matcher`` field) and compare
     against the fingerprints already in the table plus earlier rows in the
     same batch. A second NAME for content that already ships under a different
     name forks provenance, so it raises

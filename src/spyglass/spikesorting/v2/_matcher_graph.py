@@ -21,6 +21,7 @@ a database connection.
 from __future__ import annotations
 
 from itertools import combinations
+from statistics import median
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2.exceptions import (
@@ -253,7 +254,7 @@ def derive_tracked_units(
     # Each clique contributes only its still-unclaimed members.
     def _clique_strength(members: list) -> float:
         probs = _clique_edge_probs(members)
-        return _median(probs) if probs else 0.0
+        return median(probs) if probs else 0.0
 
     cliques = sorted(
         (sorted(clique) for clique in nx.find_cliques(graph)),
@@ -268,25 +269,15 @@ def derive_tracked_units(
         claimed.update(members)
         sessions = {(node[0], node[1]) for node in members}
         edge_probs = _clique_edge_probs(members)
-        median = float(_median(edge_probs)) if edge_probs else None
+        median_prob = float(median(edge_probs)) if edge_probs else None
         tracked.append(
             {
                 "members": members,
                 "n_sessions_observed": len(sessions),
-                "median_match_probability": median,
+                "median_match_probability": median_prob,
                 "policy_used": policy,
             }
         )
     # Deterministic order: by the sorted member tuple of each tracked unit.
     tracked.sort(key=lambda tu: tu["members"])
     return tracked
-
-
-def _median(values: list[float]) -> float:
-    """Median of a non-empty list (no numpy dependency at import)."""
-    ordered = sorted(values)
-    n = len(ordered)
-    mid = n // 2
-    if n % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2.0
