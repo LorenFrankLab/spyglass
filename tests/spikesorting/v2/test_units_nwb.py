@@ -334,10 +334,20 @@ class _FakeRecording:
         return self.times[sample_ind]
 
     def get_times(self, segment_index=0, start_frame=None, end_frame=None):
+        # SI 0.104.3's BaseRecording.get_times takes NO frame bounds -- a
+        # frame-bounded call raises TypeError there. Model that so this double
+        # cannot stand in for an API real SI lacks: a bounded call is a hard
+        # error, and the bounds-less call is recorded so the tests can assert
+        # production never reads the full vector this way (it uses
+        # sample_index_to_time instead).
+        if start_frame is not None or end_frame is not None:
+            raise TypeError(
+                "spikeinterface 0.104.3 BaseRecording.get_times() takes no "
+                "start_frame/end_frame; production must use "
+                "sample_index_to_time for bounded reads."
+            )
         self.time_slice_calls.append((start_frame, end_frame))
-        start = 0 if start_frame is None else int(start_frame)
-        stop = self.times.size if end_frame is None else int(end_frame)
-        return self.times[start:stop]
+        return self.times
 
 
 def test_sample_indices_to_times_maps_only_requested_frames():

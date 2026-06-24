@@ -81,6 +81,46 @@ def _drop_fake_recording(recording_id):
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
+class _FakeRecording:
+    """Faithful stand-in for an explicit-time_vector SI recording.
+
+    Models the SI public API ``SharedArtifactGroup.insert_group`` uses --
+    ``get_time_info`` (lazy time_vector), ``sample_index_to_time`` (the chunked
+    ``timestamp_fingerprint`` reads), and segment-indexed ``get_num_samples`` --
+    so the insert-group tests exercise the real fingerprint path rather than a
+    frame-bounded shortcut real SI lacks.
+    """
+
+    def __init__(self, times, fs=30000.0):
+        self._times = np.asarray(times, dtype=np.float64)
+        self._fs = float(fs)
+
+    def get_num_samples(self, segment_index=None):
+        return len(self._times)
+
+    def get_sampling_frequency(self):
+        return self._fs
+
+    def get_dtype(self):
+        return "float32"
+
+    def get_num_segments(self):
+        return 1
+
+    def get_times(self, segment_index=None):
+        return self._times
+
+    def get_time_info(self, segment_index=None):
+        return {
+            "sampling_frequency": self._fs,
+            "t_start": float(self._times[0]),
+            "time_vector": self._times,
+        }
+
+    def sample_index_to_time(self, sample_ind, segment_index=None):
+        return self._times[sample_ind]
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_shared_artifact_group_rejects_cross_session_members():
     """Members from two sessions raise, and no master row is left.
@@ -158,45 +198,6 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
     rid_a = _plant_fake_recording(uuid.uuid4(), "session_times_.nwb", 30000.0)
     rid_b = _plant_fake_recording(uuid.uuid4(), "session_times_.nwb", 30000.0)
 
-    class _FakeRecording:
-        """Faithful stand-in for an explicit-time_vector SI recording.
-
-        Models the SI public API ``SharedArtifactGroup.insert_group`` uses --
-        ``get_time_info`` (lazy time_vector), ``sample_index_to_time`` (the
-        chunked fingerprint reads), and segment-indexed ``get_num_samples`` -- so
-        the test exercises the real ``timestamp_fingerprint`` path rather than a
-        frame-bounded shortcut real SI lacks.
-        """
-
-        def __init__(self, times, fs=30000.0):
-            self._times = np.asarray(times, dtype=np.float64)
-            self._fs = float(fs)
-
-        def get_num_samples(self, segment_index=None):
-            return len(self._times)
-
-        def get_sampling_frequency(self):
-            return self._fs
-
-        def get_dtype(self):
-            return "float32"
-
-        def get_num_segments(self):
-            return 1
-
-        def get_times(self, segment_index=None):
-            return self._times
-
-        def get_time_info(self, segment_index=None):
-            return {
-                "sampling_frequency": self._fs,
-                "t_start": float(self._times[0]),
-                "time_vector": self._times,
-            }
-
-        def sample_index_to_time(self, sample_ind, segment_index=None):
-            return self._times[sample_ind]
-
     base_times = np.arange(8, dtype=np.float64) / 30000.0
 
     def _fake_get_recording(self, key):
@@ -222,6 +223,17 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
     finally:
         _drop_fake_recording(rid_a)
         _drop_fake_recording(rid_b)
+    # NOTE: the equal-fingerprint *accept* branch
+    # (``fingerprint == reference_fingerprint`` -> continue) is exercised by
+    # ``test_shared_artifact_group_insert_rejects_mismatched_dtypes``
+    # (single_session/test_artifact.py): its two members carry byte-identical
+    # timestamps, so the fingerprints match and the loop continues past the
+    # timestamp check before raising on the dtype divergence. The
+    # fingerprint-equality invariant itself is unit-tested in
+    # ``test_signal_math.test_timestamp_fingerprint_matches_array_equal_semantics``.
+    # A dedicated end-to-end *success* assertion is omitted: it would only cover
+    # a generic two-row DataJoint insert (not the fingerprint logic) and would
+    # require planting a fake ``common_session`` FK chain for the master row.
 
 
 @pytest.mark.usefixtures("dj_conn")

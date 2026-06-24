@@ -288,3 +288,12 @@ def test_timestamp_fingerprint_matches_array_equal_semantics():
         _explicit_recording(ts).get_times(),
         _explicit_recording(ts.copy()).get_times(),
     )
+
+    # Rate-based agreement: the fingerprint also runs on a rate-based recording
+    # (affine sample_index_to_time, no explicit time_vector) and agrees with an
+    # explicit recording carrying its exact times -- so a rate-based member
+    # cannot spuriously mismatch a byte-identical explicit one.
+    rate_rec = _rate_based_recording(n)
+    assert timestamp_fingerprint(rate_rec) == timestamp_fingerprint(
+        _explicit_recording(rate_rec.get_times())
+    )

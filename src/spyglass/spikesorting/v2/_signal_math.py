@@ -9,6 +9,8 @@ access) and are re-exported from ``utils`` for backward compatibility.
 
 from __future__ import annotations
 
+from typing import Any, NamedTuple
+
 
 def assert_freq_max_below_nyquist(
     freq_max: float, sampling_frequency: float, *, context: str = ""
@@ -463,8 +465,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
 # a rate-based recording, computes ``frames / fs + t_start`` -- so these helpers
 # map frames<->time and find gaps with peak memory bounded by the query/chunk
 # size, not by ``n_samples``. ``sample_index_to_time(i)`` is bit-identical to
-# ``get_times()[i]`` in both timestamp modes (verified), so the outputs match
-# the full-vector path exactly.
+# ``get_times()[i]`` in both timestamp modes (pinned by the equivalence tests in
+# ``tests/spikesorting/v2/test_signal_math.py``), so the outputs match the
+# full-vector path exactly.
 #
 # MAINTAINER NOTE (SpikeInterface version): the pinned spikeinterface==0.104.3
 # (see pyproject.toml -- pinned for sorter param schemas, unrelated to
@@ -603,6 +606,19 @@ def frames_for_times(recording, times_s, *, segment_index=0):
     return lo
 
 
+class BaseIntervalsAndGaps(NamedTuple):
+    """Return of :func:`base_intervals_and_gaps`.
+
+    ``base_intervals`` are ``[start, end]`` second pairs (one per recorded
+    chunk); ``gap_after`` are int64 FRAME indices of inter-chunk wall-clock
+    discontinuities. Naming the two fields makes their differing units (seconds
+    vs frame indices) explicit at the call site.
+    """
+
+    base_intervals: list
+    gap_after: Any  # numpy.ndarray[int64] (np is lazy-imported in this module)
+
+
 def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     """Recorded chunks (seconds) and inter-chunk gap frame indices, chunked.
 
@@ -635,8 +651,8 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
 
     Returns
     -------
-    tuple[list[list[float]], numpy.ndarray]
-        ``(base_intervals, gap_after)``.
+    BaseIntervalsAndGaps
+        Named ``(base_intervals, gap_after)``; unpacks like a plain tuple.
     """
     import numpy as np
 
@@ -647,7 +663,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     )
     n_samples = int(recording.get_num_samples(segment_index=segment_index))
     if n_samples == 0:
-        return [], np.empty(0, dtype=np.int64)
+        return BaseIntervalsAndGaps([], np.empty(0, dtype=np.int64))
 
     if not _recording_has_explicit_time_vector(
         recording, segment_index=segment_index
@@ -659,7 +675,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
             np.array([0, n_samples - 1], dtype=np.int64),
             segment_index=segment_index,
         )
-        return (
+        return BaseIntervalsAndGaps(
             [[float(endpoints[0]), float(endpoints[1])]],
             np.empty(0, dtype=np.int64),
         )
@@ -705,7 +721,9 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
         prev_time = float(times[-1])
     if current_start is not None:
         intervals.append([float(current_start), float(prev_time)])
-    return intervals, np.asarray(gap_after, dtype=np.int64)
+    return BaseIntervalsAndGaps(
+        intervals, np.asarray(gap_after, dtype=np.int64)
+    )
 
 
 def timestamp_fingerprint(recording, *, segment_index=0):
@@ -719,6 +737,12 @@ def timestamp_fingerprint(recording, *, segment_index=0):
     ``get_times()`` materialization) and folds each slice's float64 bytes into
     the digest, prefixed by ``n_samples`` so different-length vectors cannot
     collide.
+
+    The digest uses native byte order (``np.int64``/``float64`` ``tobytes``) and
+    is only ever compared in-process against another fingerprint computed the
+    same way (the shared-artifact-group member check); it is never persisted or
+    compared across hosts, so endianness is not a concern. Do not store it for a
+    later cross-host comparison without normalizing byte order.
 
     Parameters
     ----------

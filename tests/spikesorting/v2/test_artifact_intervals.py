@@ -942,11 +942,11 @@ def test_gain_conversion_low_threshold_flags_both_peaks():
 
 
 # --------------------------------------------------------------------------- #
-# H. T1 timestamp helpers stay LAZY on an explicit (h5py-backed) recording.
+# H. The timestamp helpers stay LAZY on an explicit (h5py-backed) recording.
 #
 # ``Recording.get_recording`` loads the cached preprocessed NWB with
 # ``load_time_vector=True`` -- the timestamps are a lazy h5py object until a
-# consumer forces them. The pre-T1 artifact path called ``recording.get_times()``
+# consumer forces them. The prior artifact path called ``recording.get_times()``
 # which materializes (and caches) the whole float64 vector (8 bytes/sample, ~824
 # MB for 1 h @ 30 kHz). ``base_intervals_and_gaps`` / ``timestamp_fingerprint``
 # read it in ~1 s slices via ``sample_index_to_time`` instead. This guards that
@@ -958,7 +958,7 @@ def test_gain_conversion_low_threshold_flags_both_peaks():
 
 @pytest.mark.slow
 def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
-    """The T1 chunked timestamp helpers peak far below ``get_times()`` on an
+    """The chunked timestamp helpers peak far below ``get_times()`` on an
     explicit (h5py-backed) recording -- they never materialize the full
     ``n_samples`` float64 vector."""
     import gc
