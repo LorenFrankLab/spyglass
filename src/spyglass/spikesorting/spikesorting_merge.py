@@ -488,6 +488,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         sources. This is intentional -- v0/v1 do not carry the per-unit
         Electrode FK that the v2 Sorting.Unit contract requires.
 
+        This resolves a single curated sort's per-unit regions. For a
+        concat-backed v2 sort, the regions are ambiguous across members;
+        ``TrackedUnit.get_unit_brain_regions`` is the per-session resolver
+        for cross-session (matched) workflows.
+
         Parameters
         ----------
         key : dict

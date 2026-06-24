@@ -1853,9 +1853,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 raise ConcatBrainRegionAmbiguousError(
                     f"CurationV2.get_unit_brain_regions: sorting_id "
                     f"{key['sorting_id']} is concat-backed; pass "
-                    "allow_anchor_member=True for anchor-only regions. "
-                    "Per-session regions require cross-session unit "
-                    "matching, which is not available in this build."
+                    "allow_anchor_member=True for anchor-only regions, or use "
+                    "TrackedUnit.get_unit_brain_regions for per-session regions "
+                    "across matched sessions."
                 )
             resolution = "anchor_member"
         else:
