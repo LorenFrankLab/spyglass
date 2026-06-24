@@ -167,25 +167,28 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     import numpy as np
 
     from spyglass.spikesorting.v2._signal_math import (
+        _segment_times_at,
         assert_positive_sampling_frequency,
-    )
-    from spyglass.spikesorting.v2.utils import (
-        _base_intervals_from_timestamps,
+        base_intervals_and_gaps,
     )
     from spyglass.utils import logger
 
-    timestamps = recording.get_times()
     fs = assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="detect_artifacts: "
     )
-    # Recorded chunks, split at wall-clock discontinuities. For a
-    # contiguous recording this is a single ``[t0, t_end]``; for
-    # disjoint sort intervals it is one interval per chunk, so the
-    # detect=False / zero-artifact returns AND the artifact complement
-    # below never span an inter-chunk gap (which would inflate
-    # obs_intervals duration and let sub-min_length slivers survive by
-    # borrowing gap time).
-    base_intervals = _base_intervals_from_timestamps(timestamps, fs)
+    # Recorded chunks (split at wall-clock discontinuities) AND the inter-chunk
+    # gap frame indices, from a chunked scan that never materializes the full
+    # timestamp vector. ``recording.get_times()`` would allocate a concrete
+    # float64 array of every sample (~824 MB for 1 h @ 30 kHz), plus another
+    # full-length temporary for the ``np.diff`` gap scan below; the chunked
+    # ``base_intervals_and_gaps`` bounds peak memory to ~one chunk instead. For
+    # a contiguous recording ``base_intervals`` is a single ``[t0, t_end]`` and
+    # ``gap_after`` is empty; for disjoint sort intervals there is one interval
+    # per chunk, so the detect=False / zero-artifact returns AND the artifact
+    # complement below never span an inter-chunk gap (which would inflate
+    # obs_intervals duration and let sub-min_length slivers survive by borrowing
+    # gap time).
+    base_intervals, gap_after = base_intervals_and_gaps(recording, fs)
     if not validated.detect:
         logger.info(
             "ArtifactDetection: detect=False; returning the recorded "
@@ -277,14 +280,15 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     )
     join_window_frames = int(np.ceil(validated.join_window_ms * 1e-3 * fs))
 
-    # Inter-chunk wall-clock gaps: frame index of the last sample
-    # before each gap (diff > 1.5 sample periods). Frame indices are
-    # contiguous across a gap, so BOTH the join below and the
-    # removal-window expansion further down must be gap-aware --
-    # otherwise an artifact near a chunk edge bridges/spills into the
-    # neighboring chunk across the gap.
-    n = len(timestamps)
-    gap_after = np.flatnonzero(np.diff(timestamps) > 1.5 * (1.0 / fs))
+    # Inter-chunk wall-clock gaps: ``gap_after`` (the frame index of the last
+    # sample before each gap, diff > 1.5 sample periods) was computed alongside
+    # ``base_intervals`` by the chunked scan above -- identical to
+    # ``np.flatnonzero(np.diff(recording.get_times()) > 1.5 / fs)`` but without
+    # the full-vector allocation. Frame indices are contiguous across a gap, so
+    # BOTH the join below and the removal-window expansion further down must be
+    # gap-aware -- otherwise an artifact near a chunk edge bridges/spills into
+    # the neighboring chunk across the gap.
+    n = recording.get_num_samples(segment_index=0)
 
     # Build artifact intervals in frame indices, then convert to
     # seconds and subtract per base chunk. Join nearby artifact frames
@@ -339,8 +343,15 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # array element the next chunk uses as its ``base_start``, so the
         # clip is an identity (not a float coincidence) and the saved
         # valid_times never cross the gap.
-        end_time = timestamps[min(end_f + 1, n - 1)]
-        artifact_intervals.append([timestamps[start_f], end_time])
+        #
+        # Read only the two boundary frames per span via ``_segment_times_at``
+        # (lazy slice on the h5py-/mmap-backed timestamps) instead of indexing a
+        # materialized full vector.
+        start_time, end_time = _segment_times_at(
+            recording,
+            np.array([start_f, min(end_f + 1, n - 1)], dtype=np.int64),
+        )
+        artifact_intervals.append([float(start_time), float(end_time)])
 
     # Subtract artifact intervals from each recorded base chunk
     # SEPARATELY so a kept valid interval never spans an inter-chunk
