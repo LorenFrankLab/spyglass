@@ -339,8 +339,24 @@ jobs:
         # be masked by ``|| true``.
         conda run -n spyglass_v2_matching pip install \
           -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
+        # This env is the only one with UnitMatchPy installed, so it owns the
+        # cross-session matcher gates: the resolver-evidence assertion plus the
+        # polymer ground-truth AUC gate (and the rest of the matcher suite).
+        # The AUC gate reaches the run-tests job's MySQL service via --no-docker.
+        # It SKIPS until the two-session polymer fixtures are present; to ENFORCE
+        # it in CI, upload mearec_polymer_128ch_2sessions_{s1,s2}.nwb, set their
+        # URLs in tests/spikesorting/v2/fixtures/_fetch.py, fetch them here, and
+        # add them to SPYGLASS_V2_REQUIRE_FIXTURES so an absent fixture fails the
+        # run rather than silently skipping.
+        if [ "${{ github.event_name }}" = "schedule" ] || \
+           [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          python tests/spikesorting/v2/fixtures/_fetch.py \
+            mearec_polymer_128ch_2sessions_s1 \
+            mearec_polymer_128ch_2sessions_s2 || true
+        fi
         conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
+          tests/spikesorting/v2/test_unitmatch.py \
           --no-docker --no-dlc -q
 
   pytest-legacy:

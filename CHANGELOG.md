@@ -135,6 +135,33 @@ guide.
   pass. `SpikeSortingOutput.get_restricted_merge_ids` resolves concat sorts by
   `concat_recording_id` / `session_group_owner` / `session_group_name`.
 
+#### Spike Sorting v2: cross-session unit tracking via UnitMatch
+
+v2 cross-session unit tracking via UnitMatch. The 128-channel LLNL polymer probe
+is the validated path (Frank-lab standard). `TrackedUnit` derives
+biological-unit identities across sessions. See the
+[Cross-session unit tracking](./Features/SpikeSortingV2.md#cross-session-unit-tracking)
+guide.
+
+- **Pluggable matcher backend.** `MatcherProtocol` accepts swappable backends;
+  UnitMatch (`matcher="unitmatch"`, the optional `spikesorting-v2-matching`
+  extra: `UnitMatchPy` + `mat73`) ships first, with DeepUnitMatch as future work
+  through the same slot. `MatcherParameters.insert1` validates the matcher name
+  against the registry (`UnknownMatcherError`) and Pydantic-validates `params`.
+- **Explicit per-member curations.** `UnitMatchSelection` pins one
+  `(sorting_id, curation_id)` per `SessionGroup.Member` (no implicit "latest
+  curation"), with a SHA-256 `curation_set_hash` for idempotent
+  `insert_selection`. `UnitMatch.make()` re-validates member coverage + per-member
+  provenance (`UnitMatchSelectionIntegrityError`) so a schema-bypassing direct
+  insert cannot match the wrong units. The matcher consumes wrapper-built
+  waveform bundles only — never a recording, `SortingAnalyzer`, or table key.
+- **`TrackedUnit`** partitions curated units into biological identities via a
+  greedy maximal-clique cover of the `UnitMatch.Pair` graph (one identity per
+  unit; the strongest overlapping clique wins), bounded by `max_strict_nodes`
+  (`TrackedUnitBudgetExceededError`); singletons surface unmatched units.
+  `TrackedUnit.get_unit_brain_regions` is the per-session brain-region resolver
+  the concat-sort guard points to.
+
 #### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
 
 This is a focused fix-up between the initial v2 landing and the

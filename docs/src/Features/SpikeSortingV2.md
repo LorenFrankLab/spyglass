@@ -87,6 +87,20 @@ coexist under one merge surface.
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
     verification families for safely reclaiming preprocessed recording/artifact
     NWBs and analyzer folders after a current-environment content match.
+- **`SessionGroup`** -- a named bundle of sorting members analyzed together
+    (chronic concatenation *and* cross-session matching reuse it). See
+    [Cross-session unit tracking](#cross-session-unit-tracking).
+- **`MatcherParameters`** -- registry-validated cross-session matcher
+    configuration. `insert1` rejects an unregistered `matcher` name and
+    Pydantic-validates `params` against that matcher's schema.
+- **`UnitMatchSelection` / `UnitMatch`** -- pin one curation per `SessionGroup`
+    member, then match units across sessions via the chosen matcher backend.
+    The `Pair` part records each cross-session match (FK-validated against the
+    pinned `CurationV2.Unit`).
+- **`TrackedUnit`** -- biological-unit identities across sessions: a strict
+    partition of the curated units into groups via a greedy maximal-clique cover
+    of the match graph (one identity per unit). `get_unit_brain_regions`
+    resolves each tracked unit's per-session brain regions.
 
 ### Pipeline orchestrator
 
@@ -849,8 +863,9 @@ Key behaviors and caveats:
   FK anchor to the **first** `SessionGroup.Member`. Because of that,
   `get_unit_brain_regions` on a concat sort raises `ConcatBrainRegionAmbiguousError`
   by default; pass `allow_anchor_member=True` to get anchor-member regions
-  (labeled `region_resolution="anchor_member"`). Per-session brain regions
-  require cross-session unit matching, which is not in this build. Downstream
+  (labeled `region_resolution="anchor_member"`). For per-session brain regions,
+  match the sessions and use `TrackedUnit.get_unit_brain_regions` (see
+  [Cross-session unit tracking](#cross-session-unit-tracking)). Downstream
   provenance that is session-scoped — `CurationV2.get_sort_group_info` /
   `SpikeSortingOutput.get_sort_group_info`, and the `(sorter, nwb_file_name)`
   decoding metadata from `CurationV2.get_sort_metadata` — resolves through the
@@ -861,6 +876,102 @@ Key behaviors and caveats:
 - **Merge restriction.** `SpikeSortingOutput.get_restricted_merge_ids` accepts
   `concat_recording_id` / `session_group_owner` / `session_group_name` for v2
   concat sorts, alongside the usual sorter / curation fields.
+
+### Cross-session unit tracking
+
+For sessions recorded **days or weeks apart**, the recommended workflow is
+*sort-then-match*: sort and curate each session independently, then match units
+across sessions to recover the same biological unit over time. This is the
+cross-day complement to same-day concatenation — both reuse `SessionGroup`, but
+matching pins one curation **per member** and never concatenates the raw data.
+
+Matching is pluggable behind a `MatcherProtocol`. The shipped backend is
+[UnitMatch](https://github.com/EnnyvanBeest/UnitMatch) (`matcher="unitmatch"`),
+installed via the optional extra:
+
+```bash
+pip install -e ".[spikesorting-v2-matching]"   # UnitMatchPy + mat73
+```
+
+The **validated path is the 128-channel LLNL polymer probe** (the current
+Frank-lab implant); a ground-truth MEArec gate
+(`test_v2_unitmatch_polymer_mearec_ground_truth`) requires AUC > 0.85 on a
+two-session polymer recording with planted cross-session correspondences. This
+gate is verified locally; in CI it runs in the matching-extra environment and is
+enforced once the two-session polymer fixtures are uploaded (it skips cleanly
+until then — see the fixture URLs in
+`tests/spikesorting/v2/fixtures/_fetch.py`).
+
+```python
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.session_group import SessionGroup
+from spyglass.spikesorting.v2.unit_matching import (
+    UnitMatchSelection,
+    UnitMatch,
+    TrackedUnit,
+)
+
+# Each session is already sorted + curated (a CurationV2 row per session).
+initialize_v2_defaults()  # installs the unitmatch_default MatcherParameters row
+
+# 1. Group the sorted sessions as members (one member per session). For
+#    days-apart sessions pass allow_multi_day=True.
+members = [
+    {"nwb_file_name": nwb_day1, "sort_group_id": 0,
+     "interval_list_name": "raw data valid times"},
+    {"nwb_file_name": nwb_day2, "sort_group_id": 0,
+     "interval_list_name": "raw data valid times"},
+]
+SessionGroup.create_group("my_team", "implant_week1", members,
+                          allow_multi_day=True)
+
+# 2. Pin the EXACT curation used for each member (no implicit "latest"). The
+#    keys are member_index -> {"sorting_id": ..., "curation_id": ...}.
+selection_key = UnitMatchSelection.insert_selection(
+    "my_team", "implant_week1", "unitmatch_default",
+    {0: curation_day1, 1: curation_day2},
+)
+
+# 3. Run the matcher; UnitMatch.Pair holds the cross-session matches.
+UnitMatch.populate(selection_key)
+pairs = UnitMatch().get_pairs(selection_key)  # DataFrame of matched unit pairs
+
+# 4. Derive biological-unit identities (one TrackedUnit per matched group).
+TrackedUnit.populate(selection_key)
+regions = TrackedUnit().get_unit_brain_regions(
+    {**selection_key, "tracked_unit_id": 0}
+)  # per-session sorting_id / unit_id / region_name for that tracked unit
+```
+
+Key behaviors and caveats:
+
+- **Explicit, reproducible curations.** `UnitMatchSelection` pins one
+  `(sorting_id, curation_id)` per member via its `MemberCuration` part; there is
+  no implicit "latest curation" lookup, so a match run is reproducible even if a
+  source session gains new curations later. `insert_selection` verifies each
+  pinned curation actually belongs to its member, and `UnitMatch.make()`
+  re-checks that provenance (raising `UnitMatchSelectionIntegrityError`) so a
+  direct-insert bypass cannot silently match the wrong units.
+- **The matcher never sees Spyglass internals.** `UnitMatch.make()` extracts a
+  dense split-half waveform bundle per session from the curated recording +
+  sorting and hands the matcher self-contained directories — never a recording,
+  a `SortingAnalyzer`, or a table key. A new backend implements `MatcherProtocol`
+  and registers via `register_matcher()`.
+- **Tracked units are a strict partition.** `TrackedUnit` groups units that
+  match *every* other member of the group, derived as a greedy maximal-clique
+  cover of the pair graph (largest clique first, ties broken by highest median
+  edge probability) so each curated unit belongs to exactly one tracked unit —
+  overlapping cliques never duplicate a unit across identities. If A↔B and B↔C
+  match but A↔C does not, A and C land in different tracked units. A unit with no
+  matches surfaces as a singleton (`n_sessions_observed == 1`,
+  `median_match_probability` NULL). The graph size is bounded by
+  `max_strict_nodes` (default 2000); a larger universe raises
+  `TrackedUnitBudgetExceededError`.
+- **Per-session brain regions.** `TrackedUnit.get_unit_brain_regions` resolves
+  each member unit's `Electrode -> BrainRegion` and labels it by session — the
+  per-session resolver the concat-sort guard points to.
+- **Degenerate single-session.** A one-member group produces zero pairs and no
+  matcher call.
 
 ### Downstream consumers
 
