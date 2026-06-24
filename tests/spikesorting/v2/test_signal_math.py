@@ -126,3 +126,127 @@ def test_dedup_merged_spike_times_empty():
     )
 
     assert _dedup_merged_spike_times([], delta_s=0.4e-3).tolist() == []
+
+
+# --------------------------------------------------------------------------- #
+# Chunked / affine timestamp helpers: output-identical to the full-vector path.
+#
+# ``frames_for_times`` / ``base_intervals_and_gaps`` / ``timestamp_fingerprint``
+# read the recording timestamps lazily via ``sample_index_to_time`` instead of
+# materializing ``get_times()``. These pin that the outputs are IDENTICAL to the
+# full-vector references for rate-based and explicit (contiguous and disjoint)
+# recordings -- so a future SpikeInterface change to ``sample_index_to_time``
+# semantics fails CI loudly rather than silently shifting frames.
+# --------------------------------------------------------------------------- #
+FS = 30000.0
+
+
+def _explicit_recording(times, fs=FS):
+    """In-memory SI recording carrying an explicit time_vector."""
+    import warnings
+
+    import numpy as np
+    import spikeinterface as si
+
+    times = np.asarray(times, dtype=np.float64)
+    rec = si.NumpyRecording(
+        traces_list=[np.zeros((times.size, 1), dtype="float32")],
+        sampling_frequency=fs,
+    )
+    with warnings.catch_warnings():  # set_times warns "not recommended"; fine here
+        warnings.simplefilter("ignore")
+        rec.set_times(times, segment_index=0)
+    return rec
+
+
+def _rate_based_recording(n, fs=FS):
+    import spikeinterface.core as sc
+
+    return sc.generate_recording(
+        num_channels=1, sampling_frequency=fs, durations=[n / fs]
+    )
+
+
+def _recording_for_kind(kind, n, fs=FS):
+    import numpy as np
+
+    if kind == "rate":
+        return _rate_based_recording(n, fs)
+    ts = np.arange(n, dtype=np.float64) / fs
+    if kind == "disjoint":  # two wall-clock gaps from disjoint sort intervals
+        ts[n // 3:] += 5.0
+        ts[2 * n // 3:] += 11.0
+    return _explicit_recording(ts, fs)
+
+
+@pytest.mark.parametrize("kind", ["rate", "contiguous", "disjoint"])
+def test_frames_for_times_matches_full_vector_searchsorted(kind):
+    """``frames_for_times`` == ``searchsorted(get_times(), t, "left")`` exactly,
+    including at exact grid points, +/- 1 ns, out-of-range, and disjoint-gap
+    times -- the property the artifact-mask complement walk depends on."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import frames_for_times
+
+    n = 200_000
+    rec = _recording_for_kind(kind, n)
+    full = rec.get_times()
+    queries = np.concatenate([
+        full[[0, 1, n // 3, n // 2, n - 2, n - 1]],
+        full[[0, n // 2, n - 1]] + 1e-9,
+        full[[0, n // 2, n - 1]] - 1e-9,
+        [full[0] - 1.0, full[-1] + 1.0],
+    ])
+    np.testing.assert_array_equal(
+        frames_for_times(rec, queries),
+        np.searchsorted(full, queries, side="left"),
+    )
+
+
+@pytest.mark.parametrize("kind", ["rate", "contiguous", "disjoint"])
+def test_base_intervals_and_gaps_matches_full_vector(kind):
+    """``base_intervals_and_gaps`` reproduces the full-vector base intervals AND
+    the ``np.diff`` gap frame indices, without materializing ``get_times()``."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import (
+        _base_intervals_from_timestamps,
+        base_intervals_and_gaps,
+    )
+
+    n = 200_000
+    rec = _recording_for_kind(kind, n)
+    full = rec.get_times()
+    base_ref = np.asarray(_base_intervals_from_timestamps(full, FS))
+    gap_ref = np.flatnonzero(np.diff(full) > 1.5 / FS)
+
+    base, gap = base_intervals_and_gaps(rec, FS)
+    np.testing.assert_array_equal(np.asarray(base), base_ref)
+    np.testing.assert_array_equal(gap, gap_ref)
+    expected_gaps = {"rate": 0, "contiguous": 0, "disjoint": 2}[kind]
+    assert gap.size == expected_gaps
+
+
+def test_timestamp_fingerprint_matches_array_equal_semantics():
+    """Equal timestamps -> equal digest; any byte difference (a tiny shift OR a
+    different length) -> different digest -- the bounded-memory replacement for
+    ``np.array_equal`` over two full vectors in the shared-artifact-group check."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
+
+    n = 100_000
+    ts = np.arange(n, dtype=np.float64) / FS
+    fp_a = timestamp_fingerprint(_explicit_recording(ts))
+    fp_identical = timestamp_fingerprint(_explicit_recording(ts.copy()))
+    fp_shifted = timestamp_fingerprint(_explicit_recording(ts + 1e-6))
+    fp_shorter = timestamp_fingerprint(_explicit_recording(ts[:-1]))
+
+    assert fp_a == fp_identical and len(fp_a) == 32
+    assert fp_a != fp_shifted
+    assert fp_a != fp_shorter
+    # identical-timestamp equality matches np.array_equal on the full vectors
+    assert np.array_equal(
+        _explicit_recording(ts).get_times(),
+        _explicit_recording(ts.copy()).get_times(),
+    )

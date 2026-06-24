@@ -939,3 +939,96 @@ def test_gain_conversion_low_threshold_flags_both_peaks():
     rec, n = _planted_recording(gain=0.195)
     flagged = _flagged_frames(rec, n, amplitude_threshold_uv=300.0)
     np.testing.assert_array_equal(flagged, np.array([50, 100]))
+
+
+# --------------------------------------------------------------------------- #
+# H. T1 timestamp helpers stay LAZY on an explicit (h5py-backed) recording.
+#
+# ``Recording.get_recording`` loads the cached preprocessed NWB with
+# ``load_time_vector=True`` -- the timestamps are a lazy h5py object until a
+# consumer forces them. The pre-T1 artifact path called ``recording.get_times()``
+# which materializes (and caches) the whole float64 vector (8 bytes/sample, ~824
+# MB for 1 h @ 30 kHz). ``base_intervals_and_gaps`` / ``timestamp_fingerprint``
+# read it in ~1 s slices via ``sample_index_to_time`` instead. This guards that
+# they never trigger the full materialization -- if a future SpikeInterface made
+# ``sample_index_to_time`` eager, this fails loudly instead of silently
+# regressing peak memory.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.slow
+def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
+    """The T1 chunked timestamp helpers peak far below ``get_times()`` on an
+    explicit (h5py-backed) recording -- they never materialize the full
+    ``n_samples`` float64 vector."""
+    import gc
+    import tracemalloc
+    from datetime import datetime, timezone
+
+    import pynwb
+    import spikeinterface.extractors as se
+    from hdmf.backends.hdf5.h5_utils import H5DataIO
+    from pynwb.ecephys import ElectricalSeries
+
+    from spyglass.spikesorting.v2._signal_math import (
+        base_intervals_and_gaps,
+        timestamp_fingerprint,
+    )
+
+    fs = 30000.0
+    n = 4_000_000  # 32 MB float64 timestamp vector -- clear materialize signal
+    path = tmp_path / "lazy_rec.nwb"
+    nwbf = pynwb.NWBFile(
+        "d", "id", datetime(2020, 1, 1, tzinfo=timezone.utc)
+    )
+    dev = nwbf.create_device("probe")
+    grp = nwbf.create_electrode_group("g", "d", "loc", dev)
+    for _ in range(2):
+        nwbf.add_electrode(
+            x=0.0, y=0.0, z=0.0, imp=0.0, location="loc",
+            filtering="f", group=grp, group_name="g",
+        )
+    region = nwbf.create_electrode_table_region([0, 1], "all")
+    ts = np.arange(n, dtype=np.float64) / fs
+    es = ElectricalSeries(
+        name="es",
+        data=H5DataIO(np.zeros((n, 2), np.float32), chunks=(32768, 2)),
+        electrodes=region,
+        timestamps=H5DataIO(ts, chunks=(32768,)),
+    )
+    nwbf.add_acquisition(es)
+    with pynwb.NWBHDF5IO(path=str(path), mode="w") as io:
+        io.write(nwbf)
+
+    def _peak(op):
+        # recording built OUTSIDE the window (production: get_recording builds
+        # it once), re-read per op so get_times()'s caching cannot pollute.
+        rec = se.read_nwb_recording(
+            str(path), electrical_series_path="acquisition/es",
+            load_time_vector=True,
+        )
+        gc.collect()
+        tracemalloc.start()
+        keep = op(rec)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        del keep, rec
+        return peak
+
+    full_bytes = n * 8
+    peak_get_times = _peak(lambda r: r.get_times())
+    peak_base = _peak(lambda r: base_intervals_and_gaps(r, fs))
+    peak_fp = _peak(lambda r: timestamp_fingerprint(r))
+
+    assert peak_get_times > 0.5 * full_bytes, (
+        f"get_times() should materialize ~{full_bytes} bytes; "
+        f"peaked at {peak_get_times}"
+    )
+    assert peak_base < 0.25 * full_bytes, (
+        f"base_intervals_and_gaps peaked at {peak_base} bytes -- not chunked? "
+        f"(full vector is {full_bytes} bytes)"
+    )
+    assert peak_fp < 0.25 * full_bytes, (
+        f"timestamp_fingerprint peaked at {peak_fp} bytes -- not chunked? "
+        f"(full vector is {full_bytes} bytes)"
+    )

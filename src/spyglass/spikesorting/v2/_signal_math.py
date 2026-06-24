@@ -448,3 +448,304 @@ def _base_intervals_from_timestamps(timestamps, fs):
     starts = [0, *(int(i) + 1 for i in gap_after)]
     ends = [*(int(i) for i in gap_after), ts.size - 1]
     return [[float(ts[s]), float(ts[e])] for s, e in zip(starts, ends)]
+
+
+# --------------------------------------------------------------------------- #
+# Chunked / affine timestamp helpers (no full-vector materialization).
+#
+# A persisted v2 recording loads its timestamps as a LAZY vector
+# (``read_nwb_recording(load_time_vector=True)`` stores the h5py-backed pynwb
+# ``timestamps`` object; a saved recording mmaps it). SpikeInterface's
+# ``recording.get_times()`` calls ``np.asarray(time_vector)`` -- it materializes
+# the whole ``n_samples``-length float64 vector (~824 MB for 1 h @ 30 kHz, 8
+# bytes/sample) AND caches it back on the segment. ``sample_index_to_time``
+# instead indexes ``time_vector[frames]`` (a lazy h5py/mmap slice read) or, for
+# a rate-based recording, computes ``frames / fs + t_start`` -- so these helpers
+# map frames<->time and find gaps with peak memory bounded by the query/chunk
+# size, not by ``n_samples``. ``sample_index_to_time(i)`` is bit-identical to
+# ``get_times()[i]`` in both timestamp modes (verified), so the outputs match
+# the full-vector path exactly.
+#
+# MAINTAINER NOTE (SpikeInterface version): the pinned spikeinterface==0.104.3
+# (see pyproject.toml -- pinned for sorter param schemas, unrelated to
+# timestamps) exposes NO frame-bounded ``get_times``: calling
+# ``recording.get_times(start_frame=..., end_frame=...)`` raises TypeError, and
+# the bounds-less ``get_times()`` materializes (and caches) the whole vector.
+# So these helpers map frames<->time exclusively through
+# ``recording.sample_index_to_time(frames)``, which slices the lazy
+# h5py/mmap timestamp vector (or computes affine times) without materializing.
+# SpikeInterface > 0.104.3 refactored time handling into ``core/time_series.py``
+# and ADDED a bounded ``get_times(start_frame, end_frame)`` that lazily slices.
+# If/when the spikeinterface pin is raised past 0.104.3, ``base_intervals_and
+# _gaps`` / ``timestamp_fingerprint`` chunk loops MAY switch their per-chunk
+# ``_segment_times_at(recording, np.arange(start, end))`` to the (then-cheaper)
+# ``recording.get_times(segment_index=0, start_frame=start, end_frame=end)``.
+# This is an optional simplification, NOT a fix: ``sample_index_to_time`` is
+# unchanged in the newer source and stays correct + lazy either way, so there is
+# no urgency. The equivalence + bounded-memory tests guard both paths.
+# --------------------------------------------------------------------------- #
+
+
+def _recording_has_explicit_time_vector(recording, *, segment_index=0) -> bool:
+    """Return whether ``recording`` carries explicit per-frame timestamps.
+
+    Uses the public ``get_time_info`` predicate (``time_vector`` is not None),
+    which returns the lazy ``time_vector`` attribute without materializing it,
+    so this stays O(1) and never triggers a ``get_times()`` allocation. An
+    extractor lacking ``get_time_info`` is treated as explicit so callers use
+    the exact per-frame path rather than an affine shortcut.
+    """
+    try:
+        return (
+            recording.get_time_info(segment_index=segment_index).get(
+                "time_vector"
+            )
+            is not None
+        )
+    except AttributeError:
+        return True
+
+
+def _segment_times_at(recording, frames, *, segment_index=0):
+    """Absolute times (s) for arbitrary ``frames`` without materializing.
+
+    Maps each frame index to its wall-clock time via
+    ``recording.sample_index_to_time`` -- a lazy h5py/mmap slice read for an
+    explicit ``time_vector`` or the affine ``frames / fs + t_start`` for a
+    rate-based recording -- so the full 8-byte-per-sample vector is never built
+    or cached. Fancy-indexing an h5py ``time_vector`` requires strictly
+    increasing indices, but ``frames`` may be unsorted with duplicates (binary
+    -search midpoints), so the read is done on the sorted unique indices and
+    scattered back to the caller's order and shape.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    frames : array-like of int
+        Frame indices in ``[0, n_samples)``.
+    segment_index : int, optional
+
+    Returns
+    -------
+    numpy.ndarray of float64
+        Wall-clock seconds, same shape as ``frames``.
+    """
+    import numpy as np
+
+    frames = np.asarray(frames, dtype=np.int64)
+    flat = frames.reshape(-1)
+    if flat.size == 0:
+        return np.empty(frames.shape, dtype=np.float64)
+    order = np.argsort(flat, kind="stable")
+    uniq, inverse = np.unique(flat[order], return_inverse=True)
+    vals = np.asarray(
+        recording.sample_index_to_time(uniq, segment_index=segment_index),
+        dtype=np.float64,
+    )
+    out = np.empty(flat.shape, dtype=np.float64)
+    out[order] = vals[inverse]
+    return out.reshape(frames.shape)
+
+
+def frames_for_times(recording, times_s, *, segment_index=0):
+    """Frame index per query time, == ``searchsorted(get_times(), t, "left")``.
+
+    Returns, for each ``times_s[k]``, the smallest frame ``i`` in
+    ``[0, n_samples]`` with ``get_times()[i] >= times_s[k]`` -- exactly
+    ``numpy.searchsorted(recording.get_times(), times_s, side="left")``, the
+    half-open frame mapping the artifact-mask complement walk needs. Computed by
+    a vectorized binary search over ``sample_index_to_time`` so peak memory is
+    bounded by the query count, not ``n_samples``. Because
+    ``sample_index_to_time(i)`` is bit-identical to ``get_times()[i]`` for both
+    rate-based and explicit recordings, the result is identical to the
+    full-vector searchsorted.
+
+    Assumes monotonically non-decreasing timestamps (the persisted-recording
+    invariant); binary search over a non-monotonic vector mis-maps silently,
+    exactly as ``searchsorted`` would.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    times_s : array-like
+        Query times in seconds.
+    segment_index : int, optional
+
+    Returns
+    -------
+    numpy.ndarray of int64
+        Frame indices in ``[0, n_samples]``, shape ``np.shape(np.atleast_1d(
+        times_s))``.
+    """
+    import numpy as np
+
+    times = np.atleast_1d(np.asarray(times_s, dtype=np.float64))
+    n = int(recording.get_num_samples(segment_index=segment_index))
+    lo = np.zeros(times.shape, dtype=np.int64)
+    hi = np.full(times.shape, n, dtype=np.int64)
+    if n == 0:
+        return lo
+    # ~ceil(log2(n)) iterations. ``mid`` is clipped to a valid frame for the
+    # read; converged (lo == hi) entries are not updated.
+    while True:
+        active = lo < hi
+        if not bool(active.any()):
+            break
+        mid = (lo + hi) // 2
+        vals = _segment_times_at(
+            recording,
+            np.minimum(mid, n - 1),
+            segment_index=segment_index,
+        )
+        go_right = active & (vals < times)
+        lo = np.where(go_right, mid + 1, lo)
+        hi = np.where(active & ~go_right, mid, hi)
+    return lo
+
+
+def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
+    """Recorded chunks (seconds) and inter-chunk gap frame indices, chunked.
+
+    Streams the timeline in ~1 s chunks via ``sample_index_to_time`` (bounded
+    peak memory, no ``get_times()`` materialization) to derive the same gap
+    structure the full-vector path computes from ``get_times()``. Generalizes
+    the chunked scan in ``_units_nwb._base_intervals_from_recording`` to also
+    emit the gap frame indices. Returns:
+
+    * ``base_intervals`` -- one ``[start, end]`` (inclusive first/last sample
+      times, seconds) per recorded chunk; identical to
+      ``_base_intervals_from_timestamps(recording.get_times(), fs)``. A
+      contiguous recording yields a single ``[t0, t_end]``.
+    * ``gap_after`` -- int64 frame indices ``i`` where
+      ``get_times()[i + 1] - get_times()[i] > 1.5 / fs`` (a wall-clock
+      discontinuity from disjoint sort intervals); identical to
+      ``np.flatnonzero(np.diff(recording.get_times()) > 1.5 / fs)``. Empty for a
+      contiguous or rate-based recording.
+
+    Monotonicity is validated per chunk and across chunk boundaries (the
+    ``searchsorted``-based consumers assume it), preserving the full-vector
+    path's ``assert_monotonic_timestamps`` guard at bounded memory.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    fs : float, optional
+        Sampling frequency; read from the recording when ``None``.
+    segment_index : int, optional
+
+    Returns
+    -------
+    tuple[list[list[float]], numpy.ndarray]
+        ``(base_intervals, gap_after)``.
+    """
+    import numpy as np
+
+    if fs is None:
+        fs = recording.get_sampling_frequency()
+    fs = assert_positive_sampling_frequency(
+        fs, context="base_intervals_and_gaps: "
+    )
+    n_samples = int(recording.get_num_samples(segment_index=segment_index))
+    if n_samples == 0:
+        return [], np.empty(0, dtype=np.int64)
+
+    if not _recording_has_explicit_time_vector(
+        recording, segment_index=segment_index
+    ):
+        # Rate-based recording: uniform timestamps, no wall-clock gaps. Map the
+        # two endpoints affinely instead of scanning n_samples frames.
+        endpoints = _segment_times_at(
+            recording,
+            np.array([0, n_samples - 1], dtype=np.int64),
+            segment_index=segment_index,
+        )
+        return (
+            [[float(endpoints[0]), float(endpoints[1])]],
+            np.empty(0, dtype=np.int64),
+        )
+
+    sample_period = 1.0 / float(fs)
+    chunk_size = max(1, int(round(float(fs))))
+    intervals: list[list[float]] = []
+    gap_after: list[int] = []
+    current_start = None
+    prev_time = None
+    for start_frame in range(0, n_samples, chunk_size):
+        end_frame = min(n_samples, start_frame + chunk_size)
+        times = _segment_times_at(
+            recording,
+            np.arange(start_frame, end_frame, dtype=np.int64),
+            segment_index=segment_index,
+        )
+        if times.size == 0:
+            continue
+        assert_monotonic_timestamps(
+            times, context="base_intervals_and_gaps: "
+        )
+        if current_start is None:
+            current_start = float(times[0])
+        else:
+            if float(times[0]) < prev_time:
+                raise ValueError(
+                    "base_intervals_and_gaps: timestamps step backward across "
+                    "a chunk boundary (searchsorted-based frame mapping would "
+                    "silently mis-slice the recording)."
+                )
+            if float(times[0]) - prev_time > 1.5 * sample_period:
+                # Wall-clock gap at the chunk boundary: between global frame
+                # (start_frame - 1) and start_frame.
+                intervals.append([float(current_start), float(prev_time)])
+                gap_after.append(start_frame - 1)
+                current_start = float(times[0])
+        local_gaps = np.flatnonzero(np.diff(times) > 1.5 * sample_period)
+        for gap_idx in local_gaps:
+            intervals.append([float(current_start), float(times[gap_idx])])
+            gap_after.append(start_frame + int(gap_idx))
+            current_start = float(times[gap_idx + 1])
+        prev_time = float(times[-1])
+    if current_start is not None:
+        intervals.append([float(current_start), float(prev_time)])
+    return intervals, np.asarray(gap_after, dtype=np.int64)
+
+
+def timestamp_fingerprint(recording, *, segment_index=0):
+    """SHA-256 over the recording's timestamp vector, computed chunked.
+
+    A content fingerprint for the ``(n_samples,)`` float64 timestamp vector that
+    two recordings share iff their timestamps are byte-for-byte equal -- the
+    bounded-memory replacement for ``np.array_equal`` over two full vectors when
+    checking that shared-artifact-group members are time-aligned. Reads the
+    vector in ~1 s slices via ``sample_index_to_time`` (never the full
+    ``get_times()`` materialization) and folds each slice's float64 bytes into
+    the digest, prefixed by ``n_samples`` so different-length vectors cannot
+    collide.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+    segment_index : int, optional
+
+    Returns
+    -------
+    bytes
+        The 32-byte SHA-256 digest of the timestamp vector.
+    """
+    import hashlib
+
+    import numpy as np
+
+    n_samples = int(recording.get_num_samples(segment_index=segment_index))
+    hasher = hashlib.sha256()
+    hasher.update(np.int64(n_samples).tobytes())
+    if n_samples == 0:
+        return hasher.digest()
+    chunk_size = max(1, int(round(float(recording.get_sampling_frequency()))))
+    for start_frame in range(0, n_samples, chunk_size):
+        end_frame = min(n_samples, start_frame + chunk_size)
+        times = _segment_times_at(
+            recording,
+            np.arange(start_frame, end_frame, dtype=np.int64),
+            segment_index=segment_index,
+        )
+        hasher.update(np.ascontiguousarray(times, dtype=np.float64).tobytes())
+    return hasher.digest()
