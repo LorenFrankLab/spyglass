@@ -231,12 +231,16 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         bool
             ``True`` iff the group's members span two or more session dates.
         """
-        dates = {
-            (Session & {"nwb_file_name": nwb_file_name})
-            .fetch1("session_start_time")
-            .date()
-            for nwb_file_name in (cls.Member & key).fetch("nwb_file_name")
-        }
+        nwb_file_names = [
+            {"nwb_file_name": n}
+            for n in set((cls.Member & key).fetch("nwb_file_name"))
+        ]
+        if not nwb_file_names:
+            return False
+        # One batched Session query for all member sessions, not one fetch1
+        # per member.
+        start_times = (Session & nwb_file_names).fetch("session_start_time")
+        dates = {start_time.date() for start_time in start_times}
         return len(dates) > 1
 
 
@@ -578,10 +582,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 member, preprocessing_params_name
             )
             rec_sel = RecordingSelection & rec_sel_key
-            if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
+            # ``fetch1("KEY")`` resolves the secondary-attribute restriction to
+            # the recording_id UUID -- a real query, so resolve it ONCE.
+            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
+            if rec_pk is None or not (Recording & rec_pk):
                 missing.append(rec_sel_key)
                 continue
-            recording = Recording().get_recording(rec_sel.fetch1("KEY"))
+            recording = Recording().get_recording(rec_pk)
             recordings.append(recording)
             member_sample_counts.append(int(recording.get_num_samples()))
             member_indices.append(int(member["member_index"]))

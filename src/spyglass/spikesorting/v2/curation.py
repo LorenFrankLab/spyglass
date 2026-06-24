@@ -1665,22 +1665,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``(sorter, nwb_file_name)`` for the underlying sort (anchor-member
             nwb for concat sorts).
         """
-        from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
         sorting_id = key["sorting_id"]
         sorter = (SortingSelection & {"sorting_id": sorting_id}).fetch1(
             "sorter"
         )
-        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-        if source.kind == "recording":
-            nwb_file_name = (
-                RecordingSelection & source.key
-            ).fetch1("nwb_file_name")
-        else:  # concatenated_recording -> anchor member
-            _anchor_recording_id, nwb_file_name, _preproc = (
-                Sorting._resolve_concat_anchor(source.key)
-            )
+        nwb_file_name = Sorting.resolve_anchor_nwb_file_name(
+            {"sorting_id": sorting_id}
+        )
         return sorter, nwb_file_name
 
     @classmethod

@@ -381,22 +381,60 @@ def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
 # ---------- ConcatenatedRecording.make / get_recording -------------------
 
 
-def _populate_concat_none(group_key, preprocessing_params_name):
-    """Insert + populate a no-motion ConcatenatedRecording; return its PK."""
+def _concat_selection(group_key, preprocessing_params_name, motion="none"):
+    """Insert a ConcatenatedRecordingSelection (any motion preset); return PK."""
     from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
         ConcatenatedRecordingSelection,
+        MotionCorrectionParameters,
     )
 
-    concat_pk = ConcatenatedRecordingSelection.insert_selection(
+    if motion != "none":
+        MotionCorrectionParameters.insert_default()
+    return ConcatenatedRecordingSelection.insert_selection(
         {
             **group_key,
             "preprocessing_params_name": preprocessing_params_name,
-            "motion_correction_params_name": "none",
+            "motion_correction_params_name": motion,
         }
     )
+
+
+def _populate_concat(group_key, preprocessing_params_name, motion="none"):
+    """Insert + populate a ConcatenatedRecording; return its PK."""
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    concat_pk = _concat_selection(group_key, preprocessing_params_name, motion)
     ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
     return concat_pk
+
+
+def _member_sample_counts(grp):
+    """Per-member ``Recording`` sample counts, aligned with the group's members."""
+    from spyglass.spikesorting.v2.recording import Recording
+
+    return [
+        Recording().get_recording(rec_pk).get_num_samples()
+        for rec_pk in grp["recording_pks"]
+    ]
+
+
+def _ensure_clusterless_sorter_params():
+    """Insert the smoke clusterless sorter params row (idempotent)."""
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+        SMOKE_CLUSTERLESS_PARAMS,
+    )
+
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            "params": SMOKE_CLUSTERLESS_PARAMS,
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
 
 
 @pytest.mark.slow
@@ -404,11 +442,10 @@ def test_concatenated_recording_make_shape(same_day_group):
     """The materialized concat row carries the NWB pointers, channel count,
     summed duration, cumulative integer boundaries, and reads back as one
     mono-segment recording the length of both members."""
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     grp = same_day_group
-    concat_pk = _populate_concat_none(
+    concat_pk = _populate_concat(
         grp["group_key"], grp["preprocessing_params_name"]
     )
 
@@ -418,8 +455,7 @@ def test_concatenated_recording_make_shape(same_day_group):
     assert row["object_id"]
     assert int(row["n_channels"]) == 4
 
-    n0 = Recording().get_recording(grp["recording_pks"][0]).get_num_samples()
-    n1 = Recording().get_recording(grp["recording_pks"][1]).get_num_samples()
+    n0, n1 = _member_sample_counts(grp)
     fs = float(row["sampling_frequency"])
     assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
 
@@ -450,7 +486,7 @@ def test_concatenated_recording_make_never_calls_recording_populate(
 
     monkeypatch.setattr(Recording, "populate", _boom)
     grp = same_day_group
-    concat_pk = _populate_concat_none(
+    concat_pk = _populate_concat(
         grp["group_key"], grp["preprocessing_params_name"]
     )
     assert ConcatenatedRecording & concat_pk
@@ -472,10 +508,10 @@ def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
     SessionGroup.create_group(
         owner, "sg_concat_b", [grp["same_day_members"][0]]
     )
-    a_pk = _populate_concat_none(
+    a_pk = _populate_concat(
         grp["group_key"], grp["preprocessing_params_name"]
     )
-    b_pk = _populate_concat_none(
+    b_pk = _populate_concat(
         {"session_group_owner": owner, "session_group_name": "sg_concat_b"},
         grp["preprocessing_params_name"],
     )
@@ -494,26 +530,16 @@ def test_concatenated_recording_make_with_rigid_fast_motion(same_day_group):
     branch (resolve_motion_correction -> real preset, job-kwargs resolution, the
     correct_motion call) and the post-motion sample-count invariant -- the
     other materialization tests use preset='none' and never run motion."""
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
-        MotionCorrectionParameters,
-    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
-    MotionCorrectionParameters.insert_default()
     grp = same_day_group
-    concat_pk = ConcatenatedRecordingSelection.insert_selection(
-        {
-            **grp["group_key"],
-            "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "rigid_fast_default",
-        }
+    concat_pk = _populate_concat(
+        grp["group_key"],
+        grp["preprocessing_params_name"],
+        "rigid_fast_default",
     )
-    ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)
 
-    n0 = Recording().get_recording(grp["recording_pks"][0]).get_num_samples()
-    n1 = Recording().get_recording(grp["recording_pks"][1]).get_num_samples()
+    n0, n1 = _member_sample_counts(grp)
     row = (ConcatenatedRecording & concat_pk).fetch1()
     fs = float(row["sampling_frequency"])
     # Motion correction is interpolation -> sample count preserved -> the
@@ -554,12 +580,8 @@ def test_concat_make_raises_on_motion_sample_count_drift(
         )
 
     grp = same_day_group
-    concat_pk = ConcatenatedRecordingSelection.insert_selection(
-        {
-            **grp["group_key"],
-            "preprocessing_params_name": grp["preprocessing_params_name"],
-            "motion_correction_params_name": "none",
-        }
+    concat_pk = _concat_selection(
+        grp["group_key"], grp["preprocessing_params_name"], "none"
     )
     monkeypatch.setattr(concat_mod, "build_concatenated_recording", _drifted)
     # Call make() directly so the raw RuntimeError surfaces; it raises before
@@ -578,8 +600,6 @@ def test_motion_correction_preset_auto_rejects_multi_day(
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
-        MotionCorrectionParameters,
         SessionGroup,
     )
     from tests.spikesorting.v2._ingest_helpers import (
@@ -588,7 +608,6 @@ def test_motion_correction_preset_auto_rejects_multi_day(
 
     sub = chronic_2_session_minirec
     owner, name = sub["owner"], "sg_multi_auto"
-    MotionCorrectionParameters.insert_default()
 
     # The 'auto' preset rejection happens at make() time, AFTER the
     # selection-time precondition that every member has a populated Recording,
@@ -607,13 +626,10 @@ def test_motion_correction_preset_auto_rejects_multi_day(
     members = [sub["same_day_members"][0], next_day]
     SessionGroup.create_group(owner, name, members, allow_multi_day=True)
     try:
-        concat_pk = ConcatenatedRecordingSelection.insert_selection(
-            {
-                "session_group_owner": owner,
-                "session_group_name": name,
-                "preprocessing_params_name": "default",
-                "motion_correction_params_name": "auto_default",
-            }
+        concat_pk = _concat_selection(
+            {"session_group_owner": owner, "session_group_name": name},
+            "default",
+            "auto_default",
         )
         # Call make() directly so the raw ValueError surfaces (populate would
         # wrap it). It raises before writing any artifact.
@@ -642,30 +658,17 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
-        SMOKE_CLUSTERLESS_PARAMS,
     )
 
     grp = same_day_group
-    concat_pk = _populate_concat_none(
+    concat_pk = _populate_concat(
         grp["group_key"], grp["preprocessing_params_name"]
     )
 
-    SorterParameters.insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": SMOKE_CLUSTERLESS_PARAMS,
-        },
-        skip_duplicates=True,
-        allow_duplicate_params=True,
-    )
+    _ensure_clusterless_sorter_params()
     sort_pk = SortingSelection.insert_selection(
         {
             "concat_recording_id": concat_pk["concat_recording_id"],
@@ -716,10 +719,8 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     }
     assert len(split) == len(members)
     member_samples = {
-        m["nwb_file_name"]: Recording()
-        .get_recording(rec_pk)
-        .get_num_samples()
-        for m, rec_pk in zip(members, grp["recording_pks"])
+        m["nwb_file_name"]: n
+        for m, n in zip(members, _member_sample_counts(grp))
     }
     all_unit_ids = set(sorting_obj.unit_ids)
     for (nwb_file_name, _sg, _interval, _team), member_sorting in split.items():
@@ -829,7 +830,7 @@ def test_concat_materialization_memory_runtime_is_measured(same_day_group):
 
     grp = same_day_group
     with _PeakRSS() as measured:
-        concat_pk = _populate_concat_none(
+        concat_pk = _populate_concat(
             grp["group_key"], grp["preprocessing_params_name"]
         )
     logger.info(
@@ -875,11 +876,7 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
         ConcatenatedRecordingSelection,
         SessionGroup,
     )
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from tests.spikesorting.v2._ingest_helpers import (
         clean_session_groups_for_owner,
         configure_v2_run_inputs,
@@ -887,7 +884,6 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
     )
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
-        SMOKE_CLUSTERLESS_PARAMS,
     )
 
     owner, name = "chronic_real_gate_owner", "chronic_real_gate"
@@ -906,23 +902,12 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
 
     clean_session_groups_for_owner(owner)
     SessionGroup.create_group(owner, name, [member])
-    SorterParameters.insert1(
-        {
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": SMOKE_CLUSTERLESS_PARAMS,
-        },
-        skip_duplicates=True,
-        allow_duplicate_params=True,
-    )
+    _ensure_clusterless_sorter_params()
     try:
-        concat_pk = ConcatenatedRecordingSelection.insert_selection(
-            {
-                "session_group_owner": owner,
-                "session_group_name": name,
-                "preprocessing_params_name": "default",
-                "motion_correction_params_name": "rigid_fast_default",
-            }
+        concat_pk = _concat_selection(
+            {"session_group_owner": owner, "session_group_name": name},
+            "default",
+            "rigid_fast_default",
         )
         with _PeakRSS() as concat_measured:
             ConcatenatedRecording.populate(concat_pk, reserve_jobs=False)

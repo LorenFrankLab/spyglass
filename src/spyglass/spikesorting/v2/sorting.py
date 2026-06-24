@@ -1356,6 +1356,34 @@ class Sorting(SpyglassMixin, dj.Computed):
             preprocessing_params_name,
         )
 
+    @staticmethod
+    def resolve_anchor_nwb_file_name(key) -> str:
+        """Return the analysis-NWB parent ``nwb_file_name`` for a sort.
+
+        Source-agnostic: a single-recording sort anchors to its own
+        ``RecordingSelection``; a concat sort anchors to the FIRST
+        ``SessionGroup.Member`` (the deterministic parent the per-unit Electrode
+        FK and the curated/analyzer NWBs all use). Centralizes the
+        unwrap-to-nwb dispatch that several reporting / curation accessors need,
+        so the "which member is the anchor" decision lives in exactly one place.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction carrying ``sorting_id``.
+
+        Returns
+        -------
+        str
+            The anchor session's ``nwb_file_name``.
+        """
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+
+        source = SortingSelection.resolve_source(key)
+        if source.kind == "recording":
+            return (RecordingSelection & source.key).fetch1("nwb_file_name")
+        return Sorting._resolve_concat_anchor(source.key)[1]
+
     def make_compute(
         self,
         key,
