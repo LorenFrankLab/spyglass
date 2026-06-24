@@ -176,6 +176,14 @@ The single highest-leverage piece: one shared, tested, DB-free helper so the
 three consumers map frames↔time and find gaps **without** holding the 824 MB
 vector. Build it once, adopt it in three places.
 
+> **Design note (superseded by the RESULTS subsection below):** the
+> `recording.get_times(start_frame=..., end_frame=...)` slicing in the
+> `frames_for_times` bullet is the ORIGINAL plan. Pinned spikeinterface 0.104.3
+> has no such bounded `get_times` (it raises `TypeError`), so the shipped helper
+> maps frames via `recording.sample_index_to_time` instead — lazy on the
+> h5py/mmap vector, bit-identical to `get_times()[i]` for both rate-based and
+> explicit recordings. Read the RESULTS subsection for what actually shipped.
+
 - **New helper** (in `_signal_math.py` / a new `_timestamps.py`):
   - `frames_for_times(recording, times_s) -> int64` — affine (`round((t-t0)*fs)`)
     for rate-based recordings. For explicit-`time_vector` recordings, preserve
@@ -303,7 +311,7 @@ doubles were made faithful to real SI (they lacked `get_time_info` /
 - **Risk:** Low for the config/doc lever; the catalog default needs the RSS
   check above.
 
-### Fix T3 — analyzer recompute: build only the hashed extensions (R5)
+### Fix T3 — analyzer recompute: build only the hashed extensions (R5) `[SHIPPED]`
 - **Change:** `_recompute_analyzer_hashes` rebuild path computes only
   `(random_spikes, templates, waveforms)` — skip the unseeded `noise_levels`
   that is computed then discarded.
@@ -313,7 +321,7 @@ doubles were made faithful to real SI (they lacked `get_time_info` /
 - **Risk:** Low (must confirm `noise_levels` is genuinely not in the hashed set
   and not a dependency of `templates`/`waveforms`).
 
-### Fix T4 — `SortingAnalyzerVersions` tri-part (R6) + test (H1)
+### Fix T4 — `SortingAnalyzerVersions` tri-part (R6) + test (H1) `[SHIPPED]`
 - **Change:** convert its monolithic `make` to tri-part (move `get_analyzer` +
   `hash_extension_data` into `make_compute`), mirroring `SortingAnalyzerRecompute`
   (the sibling table already uses that pattern). Add it +
@@ -324,11 +332,21 @@ doubles were made faithful to real SI (they lacked `get_time_info` /
   via the existing recompute suite + the extended integrity test.
 - **Risk:** Low (same pattern already applied to the `*Recompute` tables).
 
-### Fix T5 — single-open units-NWB reader (R9)
-- **Change:** one helper that opens the units NWB once and returns
-  `(abs_times, sample_indices_or_None)`; use in `write_curated_units_nwb`,
-  `get_merged_sorting`, and the legacy `get_sorting` fallback.
-- **Measure/compare:** ~8 ms saved per affected call (M6); assert identical
+### Fix T5 — single-open units-NWB reader (R9) `[SHIPPED]`
+- **Change:** one helper (`read_units_abs_times_and_sample_indices`) opens the
+  units NWB once and returns `(abs_times, sample_indices_or_None)`. Adopted ONLY
+  in the two callers that unconditionally need BOTH columns:
+  `write_curated_units_nwb` and `CurationV2.get_merged_sorting` (lazy-merge
+  preview). **Scope correction vs the original plan:** the mutually-exclusive
+  single-column paths (`Sorting.get_sorting` / `CurationV2.get_sorting`)
+  deliberately KEEP the single-column readers — their common path reads only
+  `spike_sample_index`, so routing them through the combined reader would read
+  the (equally large) `abs_times` column on EVERY call just to save one
+  file-open in the rare missing-`spike_sample_index` legacy fallback: a net
+  common-path I/O loss. The original "legacy `get_sorting` fallback" target was
+  dropped for this reason (the fallback's second open survives, but only when a
+  legacy file lacks the sample-index column).
+- **Measure/compare:** ~8 ms saved per affected call (M6); identical
   `(abs_times, sample_indices)` vs the two-open path (covered by `test_units_nwb`
   + merge/curation suites).
 - **Risk:** Low.
