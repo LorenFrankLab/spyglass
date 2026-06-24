@@ -97,6 +97,34 @@ class RecomputeComputed(NamedTuple):
     parent_key: dict
 
 
+class RecordingVersionsFetched(NamedTuple):
+    """DB inputs for ``RecordingArtifactVersions.make_compute`` (no file I/O)."""
+
+    analysis_file_name: str
+    cache_hash: str
+
+
+class RecordingVersionsComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` for ``RecordingArtifactVersions``."""
+
+    nwb_deps: Optional[dict]
+    cache_hash: str
+
+
+class AnalyzerVersionsFetched(NamedTuple):
+    """No upstream DB state to read -- the populate key already carries
+    ``sorting_id`` + ``waveform_params_name``; the heavy analyzer load + hash is
+    deferred to ``make_compute`` (off the framework transaction)."""
+
+
+class AnalyzerVersionsComputed(NamedTuple):
+    """``make_compute`` -> ``make_insert`` for ``SortingAnalyzerVersions``."""
+
+    si_deps: dict
+    analyzer_manifest: dict
+    analyzer_hash: str
+
+
 def _recompute_compute(
     parent_key, rounding, xfail_reason, *, regen, what
 ) -> RecomputeComputed:
@@ -186,14 +214,39 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     cache_hash: char(64)      # stored Recording.cache_hash (provenance)
     """
 
-    def make(self, key):
-        row = (Recording & key).fetch1()
-        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        nwb_deps = (
-            current_nwb_namespaces(abs_path) if Path(abs_path).exists() else None
+    # Tri-part: the namespace read opens the analysis NWB; keep that file I/O
+    # OUTSIDE the framework transaction (make_compute) rather than in a
+    # monolithic make holding row locks.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> RecordingVersionsFetched:
+        """Read the artifact's file name + stored cache_hash (no file I/O)."""
+        analysis_file_name, cache_hash = (Recording & key).fetch1(
+            "analysis_file_name", "cache_hash"
         )
+        return RecordingVersionsFetched(
+            analysis_file_name=str(analysis_file_name),
+            cache_hash=str(cache_hash),
+        )
+
+    def make_compute(
+        self, key, analysis_file_name, cache_hash
+    ) -> RecordingVersionsComputed:
+        """Read embedded pynwb namespace versions off the transaction."""
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        nwb_deps = (
+            current_nwb_namespaces(abs_path)
+            if Path(abs_path).exists()
+            else None
+        )
+        return RecordingVersionsComputed(
+            nwb_deps=nwb_deps, cache_hash=cache_hash
+        )
+
+    def make_insert(self, key, nwb_deps, cache_hash):
+        """Insert the inventory row."""
         self.insert1(
-            {**key, "nwb_deps": nwb_deps, "cache_hash": row["cache_hash"]}
+            {**key, "nwb_deps": nwb_deps, "cache_hash": cache_hash}
         )
 
 
@@ -505,7 +558,18 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         )
         return all_pairs & [is_display, is_metric]
 
-    def make(self, key):
+    # Tri-part: loading the analyzer folder + hashing its full extension arrays
+    # is the heavy step and must stay OUTSIDE the framework transaction
+    # (make_compute), not hold row locks in a monolithic make. make_fetch is
+    # empty -- the populate key already carries sorting_id + waveform_params_name.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> AnalyzerVersionsFetched:
+        """No upstream DB state to read (key is self-sufficient)."""
+        return AnalyzerVersionsFetched()
+
+    def make_compute(self, key) -> AnalyzerVersionsComputed:
+        """Load the analyzer + hash its extensions off the transaction."""
         import spikeinterface as si
 
         si_deps = {"spikeinterface": si.__version__}
@@ -517,14 +581,20 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             manifest = hash_extension_data(analyzer)
         except ZeroUnitAnalyzerError:
             manifest = {}
+        return AnalyzerVersionsComputed(
+            si_deps=si_deps,
+            analyzer_manifest=manifest,
+            analyzer_hash=combined_hash(manifest) if manifest else _ZERO_HASH,
+        )
+
+    def make_insert(self, key, si_deps, analyzer_manifest, analyzer_hash):
+        """Insert the analyzer inventory row."""
         self.insert1(
             {
                 **key,
                 "si_deps": si_deps,
-                "analyzer_manifest": manifest,
-                "analyzer_hash": combined_hash(manifest)
-                if manifest
-                else _ZERO_HASH,
+                "analyzer_manifest": analyzer_manifest,
+                "analyzer_hash": analyzer_hash,
             }
         )
 
