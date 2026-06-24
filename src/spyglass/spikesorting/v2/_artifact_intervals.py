@@ -317,7 +317,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # and -- after per-chunk clipping -- remove them. Capping the
     # window at the chunk frame bounds keeps it from crossing a gap
     # orders of magnitude larger than the window.
-    artifact_intervals = []
+    clipped_spans = []
     for start_f, end_f in spans:
         left = gap_after[gap_after < start_f]
         chunk_start = int(left[-1]) + 1 if left.size else 0
@@ -343,15 +343,20 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         # array element the next chunk uses as its ``base_start``, so the
         # clip is an identity (not a float coincidence) and the saved
         # valid_times never cross the gap.
-        #
-        # Read only the two boundary frames per span via ``_segment_times_at``
-        # (lazy slice on the h5py-/mmap-backed timestamps) instead of indexing a
-        # materialized full vector.
-        start_time, end_time = _segment_times_at(
-            recording,
-            np.array([start_f, min(end_f + 1, n - 1)], dtype=np.int64),
-        )
-        artifact_intervals.append([float(start_time), float(end_time)])
+        clipped_spans.append((start_f, min(end_f + 1, n - 1)))
+
+    # Map every span's two boundary frames to times in ONE lazy
+    # ``_segment_times_at`` read (a noisy recording can have hundreds of spans;
+    # batching avoids that many tiny h5py reads) instead of indexing a
+    # materialized full vector.
+    boundary_frames = np.array(
+        [frame for span in clipped_spans for frame in span], dtype=np.int64
+    )
+    boundary_times = _segment_times_at(recording, boundary_frames)
+    artifact_intervals = [
+        [float(boundary_times[2 * i]), float(boundary_times[2 * i + 1])]
+        for i in range(len(clipped_spans))
+    ]
 
     # Subtract artifact intervals from each recorded base chunk
     # SEPARATELY so a kept valid interval never spans an inter-chunk

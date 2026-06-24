@@ -184,20 +184,18 @@ def apply_artifact_mask(
         start_frames = frames_for_times(
             recording, [s for s, _ in gap_time_pairs]
         )
-        finite_end_times = [e for _, e in gap_time_pairs if e is not None]
-        finite_end_frames = (
-            frames_for_times(recording, finite_end_times)
-            if finite_end_times
-            else np.empty(0, dtype=np.int64)
+        # Map every end in one search: the open tail's ``None`` end maps to
+        # frame ``n_samples`` (the exclusive recording end, which
+        # ``frames_for_times`` cannot produce from a query time), so pass
+        # ``t_last`` as a harmless placeholder that the loop overrides.
+        end_frames = frames_for_times(
+            recording, [t_last if e is None else e for _, e in gap_time_pairs]
         )
-        finite_idx = 0
-        for (_, e_time), start in zip(gap_time_pairs, start_frames):
-            if e_time is None:
-                end = n_samples
-            else:
-                end = int(finite_end_frames[finite_idx])
-                finite_idx += 1
+        for (_, e_time), start, end in zip(
+            gap_time_pairs, start_frames, end_frames
+        ):
             start = int(start)
+            end = n_samples if e_time is None else int(end)
             if end > start:
                 frame_ranges.append((start, end))
 

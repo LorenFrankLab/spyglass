@@ -365,22 +365,13 @@ def empty_spike_times_dataframe():
     )
 
 
-def _recording_has_explicit_time_vector(recording) -> bool:
-    """Return whether ``recording`` stores explicit timestamps."""
-    try:
-        return (
-            recording.get_time_info(segment_index=0).get("time_vector")
-            is not None
-        )
-    except AttributeError:
-        # Compatibility with any older/custom extractor lacking get_time_info:
-        # treat it as explicit so callers use the slice-based exact path.
-        return True
-
-
 def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
     """Map stored sample frames to absolute times without full-vector allocation."""
     import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import (
+        _recording_has_explicit_time_vector,
+    )
 
     fs = float(recording.get_sampling_frequency())
     if not _recording_has_explicit_time_vector(recording):
@@ -421,53 +412,15 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 
 
 def _base_intervals_from_recording(recording, fs):
-    """Return recorded time chunks without materializing full timestamps."""
-    import numpy as np
+    """Return recorded time chunks without materializing full timestamps.
 
-    n_samples = int(recording.get_num_samples(segment_index=0))
-    if n_samples == 0:
-        return []
-    if not _recording_has_explicit_time_vector(recording):
-        try:
-            t_start = recording.get_start_time(segment_index=0)
-        except TypeError:
-            t_start = recording.get_start_time()
-        except AttributeError:
-            t_start = 0.0
-        t_start = 0.0 if t_start is None else float(t_start)
-        return [[t_start, t_start + (n_samples - 1) / float(fs)]]
+    The chunked/affine scan now lives in ``_signal_math.base_intervals_and_gaps``
+    (which generalizes it to also emit the inter-chunk gap frame indices the
+    artifact path needs); this writer only needs the per-chunk base intervals.
+    """
+    from spyglass.spikesorting.v2._signal_math import base_intervals_and_gaps
 
-    sample_period = 1.0 / float(fs)
-    chunk_size = max(1, int(round(float(fs))))
-    intervals = []
-    current_start = None
-    prev_time = None
-    for start_frame in range(0, n_samples, chunk_size):
-        end_frame = min(n_samples, start_frame + chunk_size)
-        # Per-chunk frame->time via sample_index_to_time (SI 0.104.3's
-        # get_times() takes no frame bounds); chunking caps each gap-scan
-        # allocation to ~one second of samples.
-        times = np.asarray(
-            recording.sample_index_to_time(
-                np.arange(start_frame, end_frame), segment_index=0
-            ),
-            dtype=np.float64,
-        )
-        if times.size == 0:
-            continue
-        if current_start is None:
-            current_start = float(times[0])
-        elif float(times[0]) - prev_time > 1.5 * sample_period:
-            intervals.append([float(current_start), float(prev_time)])
-            current_start = float(times[0])
-        gaps = np.flatnonzero(np.diff(times) > 1.5 * sample_period)
-        for gap_idx in gaps:
-            intervals.append([float(current_start), float(times[gap_idx])])
-            current_start = float(times[gap_idx + 1])
-        prev_time = float(times[-1])
-    if current_start is not None:
-        intervals.append([float(current_start), float(prev_time)])
-    return intervals
+    return base_intervals_and_gaps(recording, fs).base_intervals
 
 
 def recording_timestamps(recording_row):
