@@ -137,6 +137,32 @@ class TestCanonicalizeDlcProject:
         assert list(tmp_path.glob("config.yaml.*.bak")) == []
 
 
+class TestDlcModelId:
+    """model_id must be unique per model (the hash must survive truncation)."""
+
+    def test_distinct_paths_give_distinct_ids(self, model):
+        a = model._dlc_model_id("DLCTask", "/projA/config.yaml")
+        b = model._dlc_model_id("DLCTask", "/projB/config.yaml")
+        assert a != b
+        assert len(a) <= 32 and len(b) <= 32
+
+    def test_distinct_tasks_give_distinct_ids(self, model):
+        a = model._dlc_model_id("TaskA", "/proj/config.yaml")
+        b = model._dlc_model_id("TaskB", "/proj/config.yaml")
+        assert a != b
+
+    def test_same_inputs_give_same_id(self, model):
+        a = model._dlc_model_id("DLCTask", "/proj/config.yaml")
+        b = model._dlc_model_id("DLCTask", "/proj/config.yaml")
+        assert a == b
+
+    def test_override_is_respected(self, model):
+        assert (
+            model._dlc_model_id("DLCTask", "/proj/config.yaml", "custom")
+            == "custom"
+        )
+
+
 class TestImportNameErrorFallback:
     """Name-error guidance points users at normalize_names where it helps."""
 

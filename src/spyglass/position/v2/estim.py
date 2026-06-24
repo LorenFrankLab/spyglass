@@ -56,7 +56,6 @@ from spyglass.position.v2.train import (
     resolve_model_path,
 )
 from spyglass.position.v2.utils.skeleton import (
-    build_canonical_map,
     canonicalize,
     normalize_label,
 )
@@ -806,9 +805,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # Resolve tool-native series names to the canonical BodyPart namespace
         # on read, so NWB written before canonicalization (or by tools that
         # used a different spelling) yields canonical names downstream.
-        canon_map = build_canonical_map(
-            [str(bp) for bp in BodyPart().fetch("bodypart")]
-        )
+        canon_map = BodyPart.canon_map()
         df = pose_estimation_to_dataframe(
             pose_estimation, scorer, is_3d, canon_map
         )
@@ -967,9 +964,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         # Single boundary: reconcile tool-native names with the canonical
         # BodyPart namespace so every downstream stage speaks one spelling.
-        canon_map = build_canonical_map(
-            [str(bp) for bp in BodyPart().fetch("bodypart")]
-        )
+        canon_map = BodyPart.canon_map()
         pose_df, bodyparts = canonicalize_pose_columns(
             pose_df, bodyparts, canon_map
         )

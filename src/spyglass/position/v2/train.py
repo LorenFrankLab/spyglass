@@ -167,6 +167,39 @@ class BodyPart(SpyglassMixin, dj.Lookup):
         ["objectA"],
     ]
 
+    @classmethod
+    def canon_map(cls) -> dict:
+        """Return ``{normalized: canonical}`` for all body parts.
+
+        This is the single source of truth used to resolve any surface form to
+        its canonical spelling. If the curated table itself holds two spellings
+        of one concept, raise a clear, admin-actionable error -- the
+        inconsistency is in the reference table, not in the caller's input.
+
+        Returns
+        -------
+        dict
+            Mapping from normalized label to canonical (stored) spelling.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If two ``BodyPart`` rows normalize to the same key.
+        """
+        names = [str(bp) for bp in cls().fetch("bodypart")]
+        try:
+            return build_canonical_map(names)
+        except dj.DataJointError as err:
+            raise dj.DataJointError(
+                "The BodyPart reference table is inconsistent: it holds two "
+                f"spellings of the same body part. {err} This is a "
+                "data-integrity problem in the curated BodyPart table -- not "
+                "in your model or config -- so it cannot be fixed by renaming "
+                "your bodyparts. An admin must reconcile the duplicate: choose "
+                "the canonical spelling, repoint any references to it, then "
+                "remove the other entry."
+            ) from err
+
     def insert1(self, key, warn=True, **kwargs):
         """Insert body part into the database.
 
@@ -375,8 +408,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         # share one namespace. (Previously validation used normalized names
         # but the FK insert used raw names, so a variant spelling could pass
         # validation and then fail the FK with an opaque IntegrityError.)
-        known = [str(bp) for bp in BodyPart().fetch("bodypart")]
-        canon_map = build_canonical_map(known)
+        canon_map = BodyPart.canon_map()
         unresolved = [
             bp for bp in bodyparts if canonicalize(bp, canon_map) is None
         ]
@@ -393,7 +425,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                     skip_duplicates=True,
                     allow_direct_insert=True,
                 )
-                canon_map = build_canonical_map(known + unresolved)
+                canon_map = BodyPart.canon_map()
             else:
                 # Raises a DataJointError naming the unknown bodyparts.
                 self._validate_bodyparts(
@@ -2216,8 +2248,7 @@ class Model(SpyglassMixin, dj.Computed):
             input order.
         """
         names = self._extract_bodypart_names(names)
-        known = [str(bp) for bp in BodyPart().fetch("bodypart")]
-        canon_map = build_canonical_map(known)
+        canon_map = BodyPart.canon_map()
         mapping, unresolved = {}, []
         for name in names:
             canonical = canonicalize(name, canon_map)
@@ -2465,6 +2496,29 @@ class Model(SpyglassMixin, dj.Computed):
         )
         return self.load(config_path, **kwargs)
 
+    @staticmethod
+    def _dlc_model_id(task, stored_path, override=None) -> str:
+        """Build a unique ``model_id`` for a DLC import.
+
+        Uses a short prefix so the identifying hash of ``(task, model_path)``
+        survives the 32-char limit. A long prefix (e.g. embedding task and
+        date) pushes the hash past the limit, so two distinct models sharing a
+        task/date would collide on ``model_id`` and the insert would fail with
+        a duplicate-key error.
+
+        Parameters
+        ----------
+        task : str
+            DLC task name.
+        stored_path : str or pathlib.Path
+            Stored model path (the stable per-model identifier).
+        override : str, optional
+            Explicit model_id; returned as-is when provided.
+        """
+        return override or default_pk_name(
+            "DLC", dict(tool="DLC", task=task, model_path=str(stored_path))
+        )
+
     def _import_dlc_model(self, model_path: Path, **kwargs):
         normalize_names = kwargs.pop("normalize_names", False)
         if model_path.suffix not in [".yml", ".yaml"]:
@@ -2535,15 +2589,10 @@ class Model(SpyglassMixin, dj.Computed):
         if existing := self & {"model_path": stored_path}:
             return existing.fetch1()
 
-        # Step 5: Generate model_id and insert directly into Model
+        # Step 5: Generate model_id and insert directly into Model. The id must
+        # be unique per model; see _dlc_model_id for why a short prefix matters.
         task = config.get("Task", "DLCTask")
-        date = config.get(
-            "date", datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        )
-        model_id = kwargs.get("model_id") or default_pk_name(
-            f"DLC-{task}-{date}",
-            dict(tool="DLC", model_path=stored_path),
-        )
+        model_id = self._dlc_model_id(task, stored_path, kwargs.get("model_id"))
         model_key = {
             **sel_key,
             "model_id": model_id,

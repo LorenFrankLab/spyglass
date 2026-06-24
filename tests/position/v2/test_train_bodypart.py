@@ -111,6 +111,32 @@ class TestBodyPartCollisionGuard:
         with pytest.raises(PermissionError):
             bodypart.insert1({"bodypart": "novelNonAdminPartXyz"})
 
+    def test_canon_map_clean_table_returns_dict(self, bodypart):
+        """canon_map() returns a normalized->canonical mapping when clean."""
+        cmap = bodypart.canon_map()
+        assert isinstance(cmap, dict)
+        assert cmap.get("green led") == "greenLED"
+
+    def test_canon_map_collision_gives_admin_guidance(self, bodypart):
+        """A colliding pair in the table raises clear admin-actionable error.
+
+        The duplicate is injected via bulk insert (bypassing the insert1
+        guard) to mimic a pre-existing / admin-introduced inconsistency.
+        """
+        bodypart.insert(
+            [{"bodypart": "green_led"}],
+            allow_direct_insert=True,
+            skip_duplicates=True,
+        )
+        try:
+            with pytest.raises(dj.DataJointError) as exc:
+                bodypart.canon_map()
+            msg = str(exc.value)
+            assert "admin" in msg.lower()
+            assert "greenLED" in msg and "green_led" in msg
+        finally:
+            (bodypart & {"bodypart": "green_led"}).delete(safemode=False)
+
 
 class TestBodyPartValidation:
     """Test bodypart validation in Skeleton._validate_bodyparts()."""

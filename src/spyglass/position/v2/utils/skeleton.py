@@ -172,7 +172,7 @@ def clean_edges(
     if malformed:
         logger.warning(
             f"Skeleton edges contained {len(malformed)} nested group(s) that "
-            f"were flattened: {malformed}. "
+            f"were flattened:\n{malformed}. \n"
             "The source DLC config.yaml has a non-standard skeleton format."
         )
 
