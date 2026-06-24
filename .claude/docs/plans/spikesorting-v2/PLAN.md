@@ -41,13 +41,15 @@ extension growth, auto-labels, merge suggestions, and BurstPair-style plots are
 now owned by `AnalyzerCuration`; Phase 5 should consume those surfaces rather
 than duplicate them in `pipeline.py`.
 
-**Current post-Phase-3 code audit (2026-06-23):** `metric_curation.py` is no
+**Current post-Phase-4 code audit:** `metric_curation.py` is no
 longer a placeholder. `AnalyzerCuration` now replaces v1 `MetricCuration` +
 the v1 `BurstPair` notebook helpers, and v2 has separate recording-artifact and
-sorting-analyzer recompute verification tables. `matcher_protocol.py` is also no
-longer a placeholder (Phase 4b landed the protocol + registry + the
-`_unitmatch_backend.py` backend). The remaining import-safe placeholders are the
-Phase 4b/5 DataJoint surfaces (`unit_matching.py`, `figpack_curation.py`). Phase 3 has landed: `SessionGroup.create_group` /
+sorting-analyzer recompute verification tables. `matcher_protocol.py` and
+`unit_matching.py` are also no longer placeholders (Phase 4b landed the protocol
++ registry, the `_unitmatch_backend.py` backend, and the
+`MatcherParameters` / `UnitMatchSelection` / `UnitMatch` / `TrackedUnit` tables).
+The remaining import-safe placeholder is the Phase 5 DataJoint surface
+(`figpack_curation.py`). Phase 3 has landed: `SessionGroup.create_group` /
 `is_multi_day`, `ConcatenatedRecordingSelection.insert_selection`, and
 `ConcatenatedRecording.make` / `get_recording` / `split_sorting_by_session` are
 implemented (same-day chronic concatenate-and-sort), and `Sorting` / `CurationV2`
