@@ -21,10 +21,10 @@ def initialize_v2_defaults() -> None:
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
     ``AnalyzerWaveformParameters``, ``MotionCorrectionParameters``,
-    ``QualityMetricParameters``, and ``AutoCurationRules`` (each accepts
-    duplicate-row noise), so a notebook user can run one helper instead of
-    remembering the per-table calls before the first ``run_v2_pipeline``
-    invocation. Idempotent.
+    ``QualityMetricParameters``, ``AutoCurationRules``, and
+    ``MatcherParameters`` (each accepts duplicate-row noise), so a notebook
+    user can run one helper instead of remembering the per-table calls before
+    the first ``run_v2_pipeline`` / cross-session match invocation. Idempotent.
 
     ``MotionCorrectionParameters`` presets are seeded here so a missing
     motion-preset row does not surface as an opaque FK violation on the first
@@ -49,6 +49,7 @@ def initialize_v2_defaults() -> None:
         AnalyzerWaveformParameters,
         SorterParameters,
     )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
@@ -57,6 +58,7 @@ def initialize_v2_defaults() -> None:
     MotionCorrectionParameters.insert_default()
     QualityMetricParameters.insert_default()
     AutoCurationRules.insert_default()
+    MatcherParameters.insert_default()
 
 
 __all__ = ["initialize_v2_defaults", "CurationLabel"]

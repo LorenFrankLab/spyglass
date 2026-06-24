@@ -113,6 +113,7 @@ def extract_unitmatch_bundle(
     ms_after: float = 1.5,
     max_spikes_per_unit: int = 100,
     seed: int = 0,
+    job_kwargs: dict | None = None,
 ):
     """Write a UnitMatch directory bundle for one curated session.
 
@@ -137,12 +138,23 @@ def extract_unitmatch_bundle(
         Random-spike cap per unit per half (default 100).
     seed : int
         Random-spikes seed for determinism (default 0).
+    job_kwargs : dict or None
+        SpikeInterface job kwargs (``n_jobs`` / ``chunk_duration`` / ...) splatted
+        into the ``waveforms`` / ``templates`` compute calls. ``UnitMatch.make``
+        resolves these from ``MatcherParameters.job_kwargs``; ``None`` uses the
+        SpikeInterface defaults.
     """
     import spikeinterface as si
 
     um = _require_unitmatch()
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
+    # ``random_seed`` is a Spyglass-side knob, NOT a valid
+    # ``SortingAnalyzer.compute`` kwarg (SI raises "please remove
+    # {'random_seed'}"). Use it to seed the random_spikes subsample and strip it
+    # from the compute job kwargs -- mirroring _sorting_analyzer.py.
+    compute_job_kwargs = dict(job_kwargs or {})
+    random_seed = compute_job_kwargs.pop("random_seed", seed)
 
     half = recording.get_num_samples() // 2
     t_halves = []
@@ -156,10 +168,15 @@ def extract_unitmatch_bundle(
             "random_spikes",
             method="uniform",
             max_spikes_per_unit=max_spikes_per_unit,
-            seed=seed,
+            seed=random_seed,
         )
-        analyzer.compute("waveforms", ms_before=ms_before, ms_after=ms_after)
-        analyzer.compute("templates")
+        analyzer.compute(
+            "waveforms",
+            ms_before=ms_before,
+            ms_after=ms_after,
+            **compute_job_kwargs,
+        )
+        analyzer.compute("templates", **compute_job_kwargs)
         t_halves.append(analyzer.get_extension("templates").get_data())
 
     avg_waves = np.stack(t_halves, axis=-1)  # (n_units, spike_width, n_chan, 2)

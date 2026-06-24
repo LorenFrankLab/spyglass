@@ -2,8 +2,7 @@
 
 Covers:
 
-- The four stub modules (``metric_curation``, ``figpack_curation``,
-  ``unit_matching``, ``matcher_protocol``) must raise an informative
+- The remaining stub module (``figpack_curation``) must raise an informative
   ``ImportError`` on public-name access -- whether the caller wrote
   ``from m import X`` or ``import m; m.X`` -- while a bare
   ``import m`` (no attribute access) still succeeds, and dunder probes
@@ -34,11 +33,10 @@ STUB_MODULES_WITH_V1_FALLBACK = [
 ]
 
 # (module path, a representative public symbol) -- no v1 fallback exists.
-# ``matcher_protocol`` is intentionally absent: it is now a real module
-# (the cross-session matcher protocol + registry), no longer a stub.
-STUB_MODULES_NO_V1_FALLBACK = [
-    ("spyglass.spikesorting.v2.unit_matching", "UnitMatch"),
-]
+# ``matcher_protocol`` and ``unit_matching`` are intentionally absent: both are
+# now real modules (the cross-session matcher protocol + registry, and the
+# UnitMatch / TrackedUnit DataJoint tables), no longer stubs.
+STUB_MODULES_NO_V1_FALLBACK: list[tuple[str, str]] = []
 
 ALL_STUB_MODULES = [m[0] for m in STUB_MODULES_WITH_V1_FALLBACK] + [
     m[0] for m in STUB_MODULES_NO_V1_FALLBACK
