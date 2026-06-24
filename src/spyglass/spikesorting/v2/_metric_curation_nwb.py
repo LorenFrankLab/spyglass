@@ -98,15 +98,17 @@ def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
     metric_columns = list(metrics_df.columns)
     for column in metric_columns:
         table.add_column(name=column, description=column)
-    for unit_id, row in metrics_df.iterrows():
+    for row in metrics_df.itertuples(index=True, name=None):
+        unit_id = row[0]
+        values = row[1:]
         table.add_row(
             unit_id=int(unit_id),
             **{
                 column: _scalar_or_nan(
-                    row[column],
+                    value,
                     context=f"unit_id={int(unit_id)}, column={column!r}",
                 )
-                for column in metric_columns
+                for column, value in zip(metric_columns, values)
             },
         )
     return table
@@ -219,9 +221,9 @@ def read_merge_suggestions(abs_path: str, object_id: str) -> list[list[int]]:
     if len(frame) == 0:
         return []
     groups: dict[int, list[int]] = {}
-    for _, row in frame.iterrows():
-        groups.setdefault(int(row["merge_group_index"]), []).append(
-            int(row["unit_id"])
+    for row in frame.itertuples(index=False):
+        groups.setdefault(int(row.merge_group_index), []).append(
+            int(row.unit_id)
         )
     return [groups[index] for index in sorted(groups)]
 
@@ -236,8 +238,8 @@ def read_proposed_labels(
     if "curation_label" not in frame.columns or len(frame) == 0:
         return {}
     labels: dict[int, list[str]] = {}
-    for _, row in frame.iterrows():
-        unit_labels = [str(label) for label in row["curation_label"]]
+    for row in frame.itertuples(index=False):
+        unit_labels = [str(label) for label in row.curation_label]
         if unit_labels:
-            labels[int(row["unit_id"])] = unit_labels
+            labels[int(row.unit_id)] = unit_labels
     return labels
