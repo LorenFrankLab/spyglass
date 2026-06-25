@@ -51,6 +51,30 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2 corrects raw-source selection and channel-name mapping
+
+Two correctness fixes to how `Recording` builds the preprocessed recording, so
+v2 reads the signal the `RecordingSelection` lineage actually points at:
+
+- **Raw source pinned to `Raw.raw_object_id`.** `Recording.make` now resolves
+  the raw acquisition `ElectricalSeries` by the exact NWB object id the common
+  `Raw` row was ingested from, threaded through `make_fetch` →
+  `make_compute`. It previously took the *first* acquisition `ElectricalSeries`,
+  so an NWB with more than one acquisition `ElectricalSeries` (or one whose
+  acquisition order changed under repacking/copying) could be preprocessed and
+  sorted from a different source than the database lineage implied.
+- **`channel_name` resolved by electrodes-table row, not by electrode id.**
+  Channel-id resolution now maps each Spyglass `electrode_id` to its
+  electrodes-table row before reading the positional `channel_name` column
+  (the same id→row mapping the write side already uses), and raises on a
+  missing or ambiguous id. The previous code indexed `channel_name` by the
+  electrode id as if it were a row position, so for NWBs whose electrode ids
+  are non-contiguous, non-zero-based, or reordered, v2 could slice one raw
+  channel and label it as another electrode.
+
+Both were silent failures: the resulting recording/sorting rows look valid but
+describe the wrong signal.
+
 #### Spike Sorting v2 fixes a v1 artifact-detection unit-conversion bug
 
 Spike sorting v2 fixes an artifact-detection unit-conversion bug present
