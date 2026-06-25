@@ -266,6 +266,7 @@ def run_v2_pipeline(
     # missing team / interval / sort group / param row / sorter binary
     # surfaces in ~1 s with the exact fix, not minutes into populate() with
     # an opaque FK or SpikeInterface error. Bypass with preflight=False.
+    preflight_warnings: list[str] = []
     if preflight:
         report = preflight_v2_pipeline(
             nwb_file_name=nwb_file_name,
@@ -276,6 +277,12 @@ def run_v2_pipeline(
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
+        # Non-blocking advisories are not errors, but dropping them hides real
+        # configuration smells. Log each and thread them into the run summary's
+        # ``warnings`` (programmatic access) alongside the per-stage warnings.
+        preflight_warnings = list(report.warnings)
+        for warning in preflight_warnings:
+            logger.warning(f"run_v2_pipeline preflight: {warning}")
 
     # Per-stage observability. For each stage: derive computed-vs-reused from
     # an existence check on the output row BEFORE populate, time the
@@ -287,7 +294,7 @@ def run_v2_pipeline(
     # rows), so no separate guard is needed before each call.
     run_summary: dict[str, Any] = {"pipeline_preset": pipeline_preset}
     stage_seconds: dict[str, float] = {}
-    warnings_list: list[str] = []
+    warnings_list: list[str] = list(preflight_warnings)
 
     recording_key = RecordingSelection.insert_selection(
         {

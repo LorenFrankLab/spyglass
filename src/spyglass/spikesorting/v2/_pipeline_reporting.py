@@ -42,20 +42,25 @@ _PARAMETER_ROW_COLUMNS = [
 def describe_parameter_rows() -> "pd.DataFrame":
     """Catalog the parameter-Lookup rows currently in the database.
 
-    One row per ``PreprocessingParameters`` / ``ArtifactDetectionParameters``
-    / ``SorterParameters`` row, with its content fingerprint (the row name
-    excluded; ``SorterParameters`` scoped per sorter), whether it is a shipped
-    catalog default, which pipeline presets reference it, and -- when its
-    content duplicates another row's -- the name it duplicates. Discovery
-    metadata that lives on the *presets* (``probe_type`` / ``sampling_rate_hz``
-    / ``recommendation_status``) is folded down onto each row from the presets
-    that use it (left blank / ``None`` when those presets disagree);
-    ``adjacency_radius_um`` is read straight from the ``SorterParameters``
-    blob.
+    One row per parameter-Lookup row across ALL eight v2 parameter tables that
+    ``initialize_v2_defaults`` seeds -- the three preset-referenced tables
+    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
+    ``SorterParameters``) plus the downstream / cross-session ones
+    (``AnalyzerWaveformParameters`` / ``MotionCorrectionParameters`` /
+    ``QualityMetricParameters`` / ``AutoCurationRules`` / ``MatcherParameters``)
+    -- each with its content fingerprint (the row name excluded;
+    ``SorterParameters`` scoped per sorter), whether it is a shipped catalog
+    default, which pipeline presets reference it, and -- when its content
+    duplicates another row's -- the name it duplicates. Discovery metadata that
+    lives on the *presets* (``probe_type`` / ``sampling_rate_hz`` /
+    ``recommendation_status`` / ``used_by_pipeline_presets``) applies only to
+    the three preset-referenced tables and is left blank / ``None`` for the
+    others (they are resolved downstream of preset selection);
+    ``adjacency_radius_um`` is read straight from the ``SorterParameters`` blob.
 
     Unlike the DB-free :func:`describe_pipeline_presets`, this reads the **live
-    tables**, so user-added rows appear -- call ``insert_default()`` on the
-    three parameter tables first to populate the shipped catalog.
+    tables**, so user-added rows appear -- call ``initialize_v2_defaults()`` (or
+    each table's ``insert_default()``) first to populate the shipped catalog.
 
     Returns
     -------
@@ -253,6 +258,99 @@ def describe_parameter_rows() -> "pd.DataFrame":
                 "summary": _sorter_summary(row["sorter"], params),
             }
         )
+
+    # The remaining parameter Lookups are not referenced by the pipeline
+    # PRESETS (they are resolved downstream of preset selection, or used only by
+    # cross-session matching), so the preset-fold columns (probe_type /
+    # sampling_rate_hz / adjacency_radius_um / used_by_pipeline_presets /
+    # recommendation_status) stay blank. They ARE content-addressed by name and
+    # user-populatable, so listing them keeps this report aligned with the full
+    # ``initialize_v2_defaults`` surface (eight Lookups, not three).
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    def _shipped_names(table):
+        contents = getattr(table, "_DEFAULT_CONTENTS", None)
+        return {r[0] for r in contents} if contents else None
+
+    def _append_simple_param_records(table, table_name, name_attr, summarize):
+        """List a name-keyed param Lookup with preset-fold columns blank.
+
+        ``is_shipped_default`` is resolved from ``_DEFAULT_CONTENTS`` when the
+        table ships it, else left ``None`` (undetermined) -- not every Lookup
+        exposes a static default-row tuple.
+        """
+        shipped = _shipped_names(table)
+        for simple_row in table.fetch(as_dict=True):
+            version = int(simple_row.get("params_schema_version", 0) or 0)
+            content = {
+                column: _jsonable_blob(value)
+                for column, value in simple_row.items()
+                if column != name_attr
+            }
+            records.append(
+                {
+                    "table": table_name,
+                    "parameter_name": simple_row[name_attr],
+                    "sorter": "",
+                    "probe_type": None,
+                    "sampling_rate_hz": None,
+                    "adjacency_radius_um": None,
+                    "params_schema_version": version,
+                    "_fp": parameter_fingerprint(
+                        table_name,
+                        params=content,
+                        params_schema_version=version,
+                        job_kwargs=None,
+                    ),
+                    "is_shipped_default": (
+                        simple_row[name_attr] in shipped
+                        if shipped is not None
+                        else None
+                    ),
+                    "recommendation_status": None,
+                    "used_by_pipeline_presets": [],
+                    "summary": summarize(simple_row),
+                }
+            )
+
+    _append_simple_param_records(
+        AnalyzerWaveformParameters,
+        "AnalyzerWaveformParameters",
+        "waveform_params_name",
+        lambda r: "",
+    )
+    _append_simple_param_records(
+        MotionCorrectionParameters,
+        "MotionCorrectionParameters",
+        "motion_correction_params_name",
+        lambda r: str(_jsonable_blob(r.get("params") or {}).get("preset", "")),
+    )
+    _append_simple_param_records(
+        QualityMetricParameters,
+        "QualityMetricParameters",
+        "metric_params_name",
+        lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
+    )
+    _append_simple_param_records(
+        AutoCurationRules,
+        "AutoCurationRules",
+        "auto_curation_rules_name",
+        lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
+    )
+    _append_simple_param_records(
+        MatcherParameters,
+        "MatcherParameters",
+        "matcher_params_name",
+        lambda r: f"matcher {r.get('matcher', '')!r}",
+    )
 
     # Duplicate-content detection: rows sharing a fingerprint within the same
     # (table, sorter) scope are content duplicates under different names.

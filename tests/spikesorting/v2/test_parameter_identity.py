@@ -473,6 +473,33 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
     )
 
 
+def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
+    """The report lists every parameter Lookup ``initialize_v2_defaults`` seeds.
+
+    Pins the report against operational drift: it must cover all EIGHT seeded
+    parameter tables, not just the three preset-referenced ones. The five
+    downstream / cross-session tables carry blank preset-fold columns but still
+    appear so a user can audit every row they can populate.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        describe_parameter_rows,
+    )
+
+    initialize_v2_defaults()
+    tables = set(describe_parameter_rows()["table"])
+    assert {
+        "PreprocessingParameters",
+        "ArtifactDetectionParameters",
+        "SorterParameters",
+        "AnalyzerWaveformParameters",
+        "MotionCorrectionParameters",
+        "QualityMetricParameters",
+        "AutoCurationRules",
+        "MatcherParameters",
+    } <= tables
+
+
 @pytest.mark.database
 def test_within_batch_duplicate_content_rejected(dj_conn):
     """Two same-content/different-name rows in ONE insert() call collide.
