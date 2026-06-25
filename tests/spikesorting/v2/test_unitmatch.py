@@ -771,6 +771,66 @@ def test_insert_selection_rejects_forged_master_with_mismatched_parts(
 
 
 @pytest.mark.slow
+def test_insert_selection_rejects_foreign_group_parts_with_matching_hash(
+    two_session_curated_group,
+):
+    """A forged master whose parts hash to the right choices but belong to a
+    DIFFERENT SessionGroup is rejected by insert_selection. curation_set_hash
+    folds only (member_index, sorting_id, curation_id), so the foreign-group
+    check -- not the hash -- is what catches copied cross-group parts. Distinct
+    from the missing-parts case above.
+    """
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    grp = two_session_curated_group
+    solo_key = {
+        "session_group_owner": grp["owner"],
+        "session_group_name": grp["solo_name"],
+    }
+    solo_member_indexes = {
+        int(m["member_index"])
+        for m in (SessionGroup.Member & solo_key).fetch(as_dict=True)
+    }
+    if 0 not in solo_member_indexes:
+        pytest.skip("solo group has no member_index 0 to borrow for the forgery")
+
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+    )
+    master_row = (UnitMatchSelection & pk).fetch1()
+    real_parts = (UnitMatchSelection.MemberCuration & pk).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    # Re-forge: same master + same (member_index, sorting_id, curation_id) per
+    # part, but point member_index 0 at the SOLO group (its FK to
+    # SessionGroup.Member still resolves; its curation FK is unchanged). The
+    # recomputed hash equals the real one, so only the foreign-group check fires.
+    (UnitMatchSelection & pk).super_delete(warn=False)
+    UnitMatchSelection.insert1(master_row, allow_direct_insert=True)
+    forged_parts = []
+    for part in real_parts:
+        forged = dict(part)
+        if int(part["member_index"]) == 0:
+            forged["session_group_name"] = grp["solo_name"]
+        forged_parts.append(forged)
+    UnitMatchSelection.MemberCuration.insert(
+        forged_parts, allow_direct_insert=True
+    )
+    try:
+        with pytest.raises(SchemaBypassError, match="different SessionGroup"):
+            UnitMatchSelection.insert_selection(
+                grp["owner"],
+                grp["group_name"],
+                "unitmatch_default",
+                grp["choices"],
+            )
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_insert_selection_rejects_wrong_member_curation(
     two_session_curated_group,
 ):
