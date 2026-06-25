@@ -8,9 +8,10 @@ content hashes (``*Recompute``) so the original is deleted only after a
 verified, current-environment match.
 
 Comparison uses reproducible CONTENT (preprocessed ``ElectricalSeries`` traces
-for recordings; deterministic analyzer extension data for analyzers), not the
-volatile whole-file ``cache_hash`` -- see ``_recompute`` for why. ``rounding``
-sets the float precision of the comparison.
+for recordings; deterministic analyzer extension data for analyzers) -- the same
+reproducible content the recording ``content_hash`` captures, never a volatile
+whole-file digest (see ``_recompute`` / ``_recording_fingerprint`` for why).
+``rounding`` sets the float precision of the analyzer comparison.
 
 ``delete_files()`` is current-environment-aware: a ``matched=1`` row from a
 different ``UserEnvironment`` does NOT authorize deletion (it raises
@@ -108,14 +109,14 @@ class RecordingVersionsFetched(NamedTuple):
     """DB inputs for ``RecordingArtifactVersions.make_compute`` (no file I/O)."""
 
     analysis_file_name: str
-    cache_hash: str
+    content_hash: str
 
 
 class RecordingVersionsComputed(NamedTuple):
     """``make_compute`` -> ``make_insert`` for ``RecordingArtifactVersions``."""
 
     nwb_deps: Optional[dict]
-    cache_hash: str
+    content_hash: str
 
 
 class AnalyzerVersionsFetched(NamedTuple):
@@ -218,7 +219,7 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     -> Recording
     ---
     nwb_deps=null: blob       # pynwb namespace versions embedded in the file
-    cache_hash: char(64)      # stored Recording.cache_hash (provenance)
+    content_hash: char(64)      # stored Recording.content_hash (provenance)
     """
 
     # Tri-part: the namespace read opens the analysis NWB; keep that file I/O
@@ -227,17 +228,17 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> RecordingVersionsFetched:
-        """Read the artifact's file name + stored cache_hash (no file I/O)."""
-        analysis_file_name, cache_hash = (Recording & key).fetch1(
-            "analysis_file_name", "cache_hash"
+        """Read the artifact's file name + stored content_hash (no file I/O)."""
+        analysis_file_name, content_hash = (Recording & key).fetch1(
+            "analysis_file_name", "content_hash"
         )
         return RecordingVersionsFetched(
             analysis_file_name=str(analysis_file_name),
-            cache_hash=str(cache_hash),
+            content_hash=str(content_hash),
         )
 
     def make_compute(
-        self, key, analysis_file_name, cache_hash
+        self, key, analysis_file_name, content_hash
     ) -> RecordingVersionsComputed:
         """Read embedded pynwb namespace versions off the transaction."""
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -247,13 +248,13 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
             else None
         )
         return RecordingVersionsComputed(
-            nwb_deps=nwb_deps, cache_hash=cache_hash
+            nwb_deps=nwb_deps, content_hash=content_hash
         )
 
-    def make_insert(self, key, nwb_deps, cache_hash):
+    def make_insert(self, key, nwb_deps, content_hash):
         """Insert the inventory row."""
         self.insert1(
-            {**key, "nwb_deps": nwb_deps, "cache_hash": cache_hash}
+            {**key, "nwb_deps": nwb_deps, "content_hash": content_hash}
         )
 
 
@@ -359,7 +360,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         """Return the upstream ``Recording`` key for a recompute row.
 
         Projects to the ``recording_id`` PK rather than joining ``Recording``
-        directly -- both tables carry a ``cache_hash`` secondary attr, which
+        directly -- both tables carry a ``content_hash`` secondary attr, which
         would otherwise trigger a join on a dependent attribute.
         """
         recording_id = (RecordingArtifactVersions & key).fetch1("recording_id")

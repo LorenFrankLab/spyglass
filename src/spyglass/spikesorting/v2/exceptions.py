@@ -316,3 +316,19 @@ class TrackedUnitBudgetExceededError(RuntimeError):
     configured cap, and instructs the caller to shrink the session group or
     raise the cap intentionally.
     """
+
+
+class RecordingContentDriftError(RuntimeError):
+    """Raise when a recording rebuild diverges from its stored ``content_hash``.
+
+    ``Recording._rebuild_nwb_artifact`` regenerates the preprocessed artifact to
+    a temp file and fingerprints it; if that fingerprint does not match the
+    ``Recording`` row's stored ``content_hash`` the rebuild is refused -- the
+    canonical slot is never written and the drifted bytes are never served. A
+    mismatch means the current environment no longer reproduces the recording
+    the row identifies (e.g. a SpikeInterface/BLAS upgrade, an edited raw NWB, or
+    changed upstream construction inputs). Message names the
+    ``analysis_file_name`` and lists the recovery options: restore a backup of
+    the artifact, rerun the recompute under the original environment, or delete
+    and repopulate the ``Recording`` row (and its downstream).
+    """

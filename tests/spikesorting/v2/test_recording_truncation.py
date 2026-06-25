@@ -200,7 +200,7 @@ def test_make_insert_raises_on_genuine_truncation():
             key={"recording_id": "unused-before-raise"},
             analysis_file_name="v2_truncation_guard_probe.nwb",
             object_id="unused-before-raise",
-            cache_hash="unused-before-raise",
+            content_hash="unused-before-raise",
             saved_start=saved_start,
             saved_end=saved_end,
             sampling_frequency=fs,

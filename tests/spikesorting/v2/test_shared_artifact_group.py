@@ -57,7 +57,7 @@ def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
                 "n_channels": 4,
                 "sampling_frequency": sampling_frequency,
                 "duration_s": 60.0,
-                "cache_hash": "0" * 64,
+                "content_hash": "0" * 64,
             },
             allow_direct_insert=True,
         )

@@ -7,7 +7,7 @@ fixture's recording) and checks the four contract properties:
 - populate writes exactly one QC row (finite ``max_abs_displacement_um >= 0``,
   ``n_temporal_bins >= 1``, non-empty ``motion`` blob);
 - the estimate is **not applied** -- the upstream ``Recording``'s
-  ``cache_hash`` and the bytes from ``get_recording`` are unchanged after
+  ``content_hash`` and the bytes from ``get_recording`` are unchanged after
   populate (QC is read-only w.r.t. the recording);
 - ``get_motion`` round-trips the stored displacement / bins;
 - ``DriftEstimate`` is **on demand** -- zero rows for a fully populated
@@ -125,23 +125,23 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
 @pytest.mark.integration
 def test_drift_estimate_not_applied(drift_recording_key):
     """Estimating drift does NOT modify the recording: the upstream
-    ``Recording``'s ``cache_hash`` and the bytes from ``get_recording`` are
+    ``Recording``'s ``content_hash`` and the bytes from ``get_recording`` are
     identical before and after ``DriftEstimate.populate`` (QC is read-only)."""
     from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
 
     key = drift_recording_key
     _clear_drift(key)
 
-    hash_before = (Recording & key).fetch1("cache_hash")
+    hash_before = (Recording & key).fetch1("content_hash")
     traces_before = Recording().get_recording(key).get_traces()
 
     DriftEstimate.populate(key, reserve_jobs=False)
 
-    hash_after = (Recording & key).fetch1("cache_hash")
+    hash_after = (Recording & key).fetch1("content_hash")
     traces_after = Recording().get_recording(key).get_traces()
 
     assert hash_after == hash_before, (
-        "Recording.cache_hash changed after DriftEstimate.populate -- the "
+        "Recording.content_hash changed after DriftEstimate.populate -- the "
         "drift estimate must never be applied to the cached recording."
     )
     assert np.array_equal(traces_before, traces_after), (

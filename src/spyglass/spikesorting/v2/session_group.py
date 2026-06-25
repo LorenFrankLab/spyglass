@@ -560,7 +560,7 @@ class ConcatRecordingComputed(NamedTuple):
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
-    cache_hash: str
+    content_hash: str
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
 
@@ -586,7 +586,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
-    cache_hash: char(64)
+    content_hash: char(64)
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -873,7 +873,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # parent, resolved in make_fetch); full multi-session provenance stays
         # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
         preset_label = motion_preset or "none"
-        analysis_file_name, object_id, cache_hash = write_nwb_artifact(
+        analysis_file_name, object_id, content_hash = write_nwb_artifact(
             corrected,
             anchor_nwb_file_name,
             filtering_description=(
@@ -892,7 +892,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             n_channels=n_channels,
             sampling_frequency=sampling_frequency,
             total_duration_s=total_duration_s,
-            cache_hash=cache_hash,
+            content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
         )
@@ -905,7 +905,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         n_channels,
         sampling_frequency,
         total_duration_s,
-        cache_hash,
+        content_hash,
         anchor_nwb_file_name,
         member_boundaries,
     ):
@@ -945,7 +945,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "n_channels": n_channels,
                         "sampling_frequency": sampling_frequency,
                         "total_duration_s": total_duration_s,
-                        "cache_hash": cache_hash,
+                        "content_hash": content_hash,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)

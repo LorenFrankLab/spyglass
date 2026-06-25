@@ -107,10 +107,12 @@ def write_nwb_artifact(
     NWB write, which OOMs on any lab workstation.
 
     Returns ``(analysis_file_name, electrical_series_object_id,
-    cache_hash)``. The ``cache_hash`` is computed **after** the
-    write via ``_hash_nwb_recording`` -- the ``NwbfileHasher``
-    digest of the file we just persisted -- so the cached artifact
-    can be re-verified on readback.
+    content_hash)``. The ``content_hash`` is the
+    :func:`recording_content_fingerprint` aggregate computed **after**
+    the write by reading the persisted ElectricalSeries back from its
+    known absolute path -- the recording's reproducible scientific
+    identity, not a whole-file byte digest -- so a content-identical
+    rebuild reproduces it (see :mod:`._recording_fingerprint`).
 
     Writes the file to disk only; the caller registers the
     ``AnalysisNwbfile`` row inside its DataJoint transaction so
@@ -147,7 +149,6 @@ def write_nwb_artifact(
     )
     from spyglass.spikesorting.v2.utils import (
         _get_recording_timestamps,
-        _hash_nwb_recording,
         electrode_table_region,
         resolve_conversion_and_offset,
         write_buffer_gb,
@@ -156,6 +157,10 @@ def write_nwb_artifact(
     import pathlib
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_content_fingerprint,
+    )
     from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_NAME
     from spyglass.utils import logger
 
@@ -239,11 +244,17 @@ def write_nwb_artifact(
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
 
-        # Hash the persisted file (not in-memory bytes) so the
-        # digest reflects what was actually written --
-        # timestamps, electrodes, conversion, ElectricalSeries
-        # metadata -- not just trace data.
-        cache_hash = _hash_nwb_recording(analysis_file_name)
+        # Fingerprint the persisted file (read back from the known abs path,
+        # never the checksum-validating get_abs_path) so the identity reflects
+        # the recording's reproducible SCIENCE -- traces, timestamps, geometry,
+        # scaling -- not the whole-file byte digest. A content-identical rebuild
+        # reproduces this hash even though its bytes differ.
+        content_hash = combined_hash(
+            recording_content_fingerprint(
+                analysis_abs_path,
+                electrical_series_path=f"acquisition/{_ELECTRICAL_SERIES_NAME}",
+            )
+        )
     except Exception:
         # Any write/hash failure: remove the partial analysis file before
         # re-raising so a half-written artifact never lingers. The unlink is
@@ -263,4 +274,4 @@ def write_nwb_artifact(
             )
         raise
 
-    return analysis_file_name, object_id, cache_hash
+    return analysis_file_name, object_id, content_hash

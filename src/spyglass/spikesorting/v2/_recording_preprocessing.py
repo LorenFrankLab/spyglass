@@ -262,7 +262,7 @@ def filtering_description(
     actual count that ran), not the params, and is appended ONLY when that count
     is > 0 -- so the default ``remove`` path (count 0) leaves the string
     byte-for-byte unchanged (this string is persisted into
-    ``ElectricalSeries.filtering`` and hashed into ``cache_hash``).
+    ``ElectricalSeries.filtering`` and hashed into ``content_hash``).
     """
     steps = []
     if applied_steps.get("phase_shift"):

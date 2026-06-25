@@ -934,7 +934,7 @@ class RecordingComputed(NamedTuple):
 
     analysis_file_name: str
     object_id: str
-    cache_hash: str
+    content_hash: str
     saved_start: float
     saved_end: float
     sampling_frequency: float
@@ -952,7 +952,7 @@ class RecordingArtifactResult(NamedTuple):
     Internal helper result -- NOT a tri-part contract object, so it is never
     splatted into ``make_*``. ``make_compute`` reads these fields by name to
     build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
-    ``cache_hash``. Typed/named so the eight values are not threaded through
+    ``content_hash``. Typed/named so the eight values are not threaded through
     brittle positional unpacking. Field order intentionally matches
     ``RecordingComputed``'s first eight fields (pinned by
     ``test_recording_artifact_result_field_contract``) so the by-name transfer
@@ -962,7 +962,7 @@ class RecordingArtifactResult(NamedTuple):
 
     analysis_file_name: str
     object_id: str
-    cache_hash: str
+    content_hash: str
     saved_start: float
     saved_end: float
     sampling_frequency: float
@@ -1022,7 +1022,7 @@ class Recording(SpyglassMixin, dj.Computed):
     n_channels: int
     sampling_frequency: float
     duration_s: float
-    cache_hash: char(64)
+    content_hash: char(64)
     """
 
     # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin``
@@ -1317,7 +1317,7 @@ class Recording(SpyglassMixin, dj.Computed):
         return RecordingComputed(
             analysis_file_name=artifact.analysis_file_name,
             object_id=artifact.object_id,
-            cache_hash=artifact.cache_hash,
+            content_hash=artifact.content_hash,
             saved_start=artifact.saved_start,
             saved_end=artifact.saved_end,
             sampling_frequency=artifact.sampling_frequency,
@@ -1349,7 +1349,7 @@ class Recording(SpyglassMixin, dj.Computed):
         key,
         analysis_file_name,
         object_id,
-        cache_hash,
+        content_hash,
         saved_start,
         saved_end,
         sampling_frequency,
@@ -1390,7 +1390,7 @@ class Recording(SpyglassMixin, dj.Computed):
             Name of the staged ``AnalysisNwbfile`` to register.
         object_id : str
             Object id of the persisted ``ElectricalSeries``.
-        cache_hash : str
+        content_hash : str
             ``NwbfileHasher`` digest of the persisted file.
         saved_start : float
             First persisted timestamp, in seconds.
@@ -1482,7 +1482,7 @@ class Recording(SpyglassMixin, dj.Computed):
                         "n_channels": n_channels,
                         "sampling_frequency": sampling_frequency,
                         "duration_s": duration_s,
-                        "cache_hash": cache_hash,
+                        "content_hash": content_hash,
                     }
                 )
         except Exception:
@@ -1501,7 +1501,7 @@ class Recording(SpyglassMixin, dj.Computed):
         """Return the preprocessed SpikeInterface recording.
 
         Rebuilds the NWB artifact on demand if missing; the DataJoint
-        row is never deleted by this path -- the cache_hash on the row
+        row is never deleted by this path -- the content_hash on the row
         is the source of truth for re-verification.
 
         Parameters
@@ -1565,48 +1565,156 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
     def _rebuild_nwb_artifact(self, key) -> None:
-        """Rebuild the NWB artifact for an existing row.
+        """Rebuild a missing recording artifact -- locked, atomic, reconciled.
 
-        Runs the same preprocessing pipeline as ``make_compute`` via
-        the shared ``_compute_recording_artifact`` helper, writing to
-        the existing ``analysis_file_name`` slot, and verifies the
-        new ``cache_hash`` matches the row. A mismatch surfaces
-        silent upstream drift (raw NWB edited / SI version skew);
-        the row is not auto-deleted so the user can diff before
-        deciding.
+        Locked + atomic-publish (DataJoint/concurrency review): acquire
+        ``recording_artifact_lock(recording_id)``, double-check the file is
+        still missing under the lock (a peer may have rebuilt while we waited),
+        then rebuild to a PRIVATE temp file on the same filesystem as the
+        canonical slot, fingerprint it, and only on a ``content_hash`` match
+        ``os.replace`` it into the slot and refresh the DataJoint ``~external``
+        byte checksum. A rebuild whose fingerprint diverges from the stored
+        ``content_hash`` (SpikeInterface/BLAS drift, an edited raw NWB, or
+        changed upstream inputs) raises ``RecordingContentDriftError`` and never
+        touches the canonical slot -- drifted bytes are never served.
 
-        Calls ``make_fetch`` to re-derive every DB input the
-        pipeline needs; this is the same fetch the populate path
-        uses, so a rebuild cannot drift from the original write's
-        inputs.
+        Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
+        if ``os.replace`` ran but the checksum refresh then failed, the
+        canonical is unlinked to return the slot to the missing state for the
+        next (locked) ``get_recording``. Ordering is load-bearing -- the atomic
+        ``os.replace`` precedes ``_resolve_external``.
+
+        Calls ``make_fetch`` to re-derive every DB input -- the same fetch the
+        populate path uses -- so a rebuild cannot drift from the original
+        write's inputs. Safe to call directly (it takes the lock itself) and
+        from ``get_recording`` (which does not hold the lock).
         """
-        fetched = self.make_fetch(key)
-        row = (self & key).fetch1()
-        raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
-        rebuilt = self._compute_recording_artifact(
-            raw_path=raw_path,
-            raw_object_id=fetched.raw_object_id,
-            nwb_file_name=fetched.sel["nwb_file_name"],
-            interval_list_name=fetched.sel["interval_list_name"],
-            channel_ids=fetched.channel_ids,
-            reference_mode=fetched.reference_mode,
-            reference_electrode_id=fetched.reference_electrode_id,
-            sort_valid_times=fetched.sort_valid_times,
-            raw_valid_times=fetched.raw_valid_times,
-            preprocessing_params=fetched.preprocessing_params,
-            probe_types=fetched.probe_types,
-            electrode_group_names=fetched.electrode_group_names,
-            bad_channel_ids=fetched.bad_channel_ids,
-            existing_analysis_file_name=row["analysis_file_name"],
+        import os
+        import time
+
+        from spyglass.spikesorting.v2._recording_fingerprint import (
+            recording_artifact_lock,
         )
-        if rebuilt.cache_hash != row["cache_hash"]:
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingContentDriftError,
+        )
+
+        row = (self & key).fetch1()
+        recording_id = row["recording_id"]
+        analysis_file_name = row["analysis_file_name"]
+        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
+
+        with recording_artifact_lock(recording_id):
+            # Double-checked: a peer rebuilt (or the file was never gone) while
+            # we waited for the lock -- nothing to do. Two readers cannot both
+            # rebuild.
+            if Path(canonical_abs).exists():
+                return
+
+            started = time.monotonic()
+            logger.info(
+                "Recording.get_recording: cache miss for "
+                f"{analysis_file_name!r} (reason=missing cache); rebuilding "
+                "the preprocessed artifact..."
+            )
+            fetched = self.make_fetch(key)
+            raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
+            # Rebuild to a FRESH, unregistered temp file -- same analysis dir
+            # (and filesystem) as the canonical slot, so the install is an
+            # atomic rename. ``_compute_recording_artifact`` returns the temp's
+            # readback content fingerprint as ``content_hash``.
+            rebuilt = self._compute_recording_artifact(
+                raw_path=raw_path,
+                raw_object_id=fetched.raw_object_id,
+                nwb_file_name=fetched.sel["nwb_file_name"],
+                interval_list_name=fetched.sel["interval_list_name"],
+                channel_ids=fetched.channel_ids,
+                reference_mode=fetched.reference_mode,
+                reference_electrode_id=fetched.reference_electrode_id,
+                sort_valid_times=fetched.sort_valid_times,
+                raw_valid_times=fetched.raw_valid_times,
+                preprocessing_params=fetched.preprocessing_params,
+                probe_types=fetched.probe_types,
+                electrode_group_names=fetched.electrode_group_names,
+                bad_channel_ids=fetched.bad_channel_ids,
+                existing_analysis_file_name=None,  # fresh temp, not the slot
+            )
+            temp_abs = AnalysisNwbfile.get_abs_path(rebuilt.analysis_file_name)
+
+            if rebuilt.content_hash != row["content_hash"]:
+                Path(temp_abs).unlink(missing_ok=True)
+                raise RecordingContentDriftError(
+                    "Recording._rebuild_nwb_artifact: rebuilt content_hash "
+                    f"{rebuilt.content_hash} does not match the stored "
+                    f"content_hash {row['content_hash']} for "
+                    f"{analysis_file_name!r}. The current environment no "
+                    "longer reproduces this recording (e.g. a SpikeInterface/"
+                    "BLAS upgrade, an edited raw NWB, or changed upstream "
+                    "inputs). The canonical artifact was NOT modified. Recover "
+                    "by restoring a backup of the artifact, rerunning the "
+                    "recompute under the original environment, or deleting and "
+                    "repopulating the Recording row (and its downstream)."
+                )
+
+            # Verified content match: atomically install the temp into the
+            # canonical slot, then reconcile the byte checksum so the next
+            # checksum-validated get_abs_path read succeeds.
+            try:
+                os.replace(temp_abs, canonical_abs)
+            except Exception:
+                Path(temp_abs).unlink(missing_ok=True)
+                raise
+            try:
+                AnalysisNwbfile()._resolve_external(analysis_file_name)
+            except Exception:
+                # os.replace already ran; return the slot to MISSING so the
+                # next (locked) get_recording retries cleanly rather than
+                # leaving byte-different content under a stale checksum.
+                Path(canonical_abs).unlink(missing_ok=True)
+                raise
+
+            logger.info(
+                "Recording.get_recording: rebuilt + reconciled "
+                f"{analysis_file_name!r} in "
+                f"{time.monotonic() - started:.1f}s"
+            )
+
+        # Best-effort (outside the all-or-nothing block): clear a stale
+        # RecordingArtifactRecompute deleted=1 flag now the file is back on
+        # disk. File tracking is presence-aware, so a failed clear cannot hide
+        # the rebuilt file -- this only keeps the flag accurate.
+        self._clear_recompute_deleted_flag(recording_id)
+
+    @staticmethod
+    def _clear_recompute_deleted_flag(recording_id) -> None:
+        """Best-effort clear of stale ``RecordingArtifactRecompute.deleted``.
+
+        After an on-demand rebuild restores the file, clear any ``deleted=1``
+        recompute rows for this recording so the flag stays semantically true
+        ("intentionally removed and still absent"). Best-effort: a failed clear
+        is logged, never raised, and cannot hide the rebuilt file because file
+        tracking is presence-aware.
+        """
+        try:
+            from spyglass.spikesorting.v2.recompute import (
+                RecordingArtifactRecompute,
+                RecordingArtifactVersions,
+            )
+
+            versions = RecordingArtifactVersions & {
+                "recording_id": recording_id
+            }
+            flagged = (
+                RecordingArtifactRecompute & versions & "deleted=1"
+            ).fetch("KEY", as_dict=True)
+            for flagged_key in flagged:
+                RecordingArtifactRecompute.update1(
+                    {**flagged_key, "deleted": 0}
+                )
+        except Exception as exc:  # pragma: no cover -- best-effort accuracy
             logger.warning(
-                "Recording._rebuild_nwb_artifact: rebuilt cache_hash "
-                f"{rebuilt.cache_hash} does not match stored {row['cache_hash']} "
-                "for analysis_file_name="
-                f"{row['analysis_file_name']!r}. The DataJoint row was not "
-                "deleted; inspect upstream raw NWB / SI version before "
-                "rerunning."
+                "Recording._rebuild_nwb_artifact: could not clear stale "
+                f"deleted flag for recording_id={recording_id}: {exc!r}"
             )
 
     # ---- Implementation helpers -----------------------------------------
@@ -1675,7 +1783,7 @@ class Recording(SpyglassMixin, dj.Computed):
         Returns
         -------
         tuple
-            ``(analysis_file_name, object_id, cache_hash,
+            ``(analysis_file_name, object_id, content_hash,
             sampling_frequency, saved_start, saved_end, n_channels,
             duration_s)`` -- the metadata needed for the
             ``RecordingComputed`` boxing.
@@ -1701,7 +1809,7 @@ class Recording(SpyglassMixin, dj.Computed):
           the rebuild. ``_rebuild_nwb_artifact`` is reached only
           from ``get_recording`` when the cache file is already
           absent, so there is no valid cache to lose, and the
-          DataJoint row (its ``cache_hash``) plus the raw NWB always
+          DataJoint row (its ``content_hash``) plus the raw NWB always
           allow the next ``get_recording`` to regenerate it. A
           rebuild that COMPLETES but whose content drifted is caught
           separately by the caller's hash-mismatch check (a warning;
@@ -1772,7 +1880,7 @@ class Recording(SpyglassMixin, dj.Computed):
             (
                 analysis_file_name,
                 object_id,
-                cache_hash,
+                content_hash,
             ) = self._write_nwb_artifact(
                 recording=recording,
                 nwb_file_name=nwb_file_name,
@@ -1824,7 +1932,7 @@ class Recording(SpyglassMixin, dj.Computed):
         return RecordingArtifactResult(
             analysis_file_name=analysis_file_name,
             object_id=object_id,
-            cache_hash=cache_hash,
+            content_hash=content_hash,
             sampling_frequency=sampling_frequency,
             saved_start=saved_start,
             saved_end=saved_end,
@@ -1921,9 +2029,10 @@ class Recording(SpyglassMixin, dj.Computed):
         monkeypatch ``Recording._write_nwb_artifact`` (the staged-file
         cleanup probe) and call it directly (the heterogeneous-gain +
         electrode-table-region guards). The streamed (chunk-iterator) NWB
-        write and the post-write ``_hash_nwb_recording`` cache hashing live
+        write and the post-write content-fingerprint hashing
+        (:func:`._recording_fingerprint.recording_content_fingerprint`) live
         in the service module. Returns ``(analysis_file_name,
-        electrical_series_object_id, cache_hash)``.
+        electrical_series_object_id, content_hash)``.
         """
         return write_nwb_artifact(
             recording,

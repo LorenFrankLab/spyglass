@@ -121,7 +121,7 @@ def test_recording_recompute_matches_and_delete_gate(populated_sorting, clean_re
     rec_key = _recording_key(populated_sorting)
 
     RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    assert (RecordingArtifactVersions & rec_key).fetch1("cache_hash")
+    assert (RecordingArtifactVersions & rec_key).fetch1("content_hash")
 
     RecordingArtifactRecomputeSelection.attempt_all(rec_key)
     RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)

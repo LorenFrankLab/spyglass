@@ -1,14 +1,16 @@
 """DB-free content-hashing helpers for v2 recompute verification.
 
-v2's stored ``cache_hash`` is a whole-file ``NwbfileHasher`` digest that
-includes volatile metadata (per-object ``object_id`` attrs, file-creation
-timestamps), so it is NOT reproducible across regenerations -- the
-Recording-Cache contract explicitly defers the recompute-tolerance question to
-the recompute tables. These helpers therefore compare reproducible CONTENT:
-the preprocessed ``ElectricalSeries`` traces (rounded), and the deterministic
-SortingAnalyzer extension data. ``noise_levels`` is excluded from the analyzer
-comparison because it estimates noise from unseeded random chunks and is
-genuinely stochastic run-to-run.
+A whole-file ``NwbfileHasher`` digest is NOT reproducible across regenerations
+-- it folds in volatile metadata (per-object ``object_id`` attrs, file-creation
+timestamps) -- so it can never confirm a content-identical rebuild. These
+helpers therefore hash reproducible CONTENT: the preprocessed
+``ElectricalSeries`` traces (rounded, little-endian), and the deterministic
+SortingAnalyzer extension data. ``hash_recording_traces`` is the ``traces``
+building block of the recording ``content_hash`` (see
+:mod:`._recording_fingerprint`); ``hash_extension_data`` backs the analyzer
+recompute comparison. ``noise_levels`` is excluded from the analyzer comparison
+because it estimates noise from unseeded random chunks and is genuinely
+stochastic run-to-run.
 """
 
 from __future__ import annotations

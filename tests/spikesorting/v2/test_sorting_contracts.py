@@ -152,7 +152,7 @@ def test_recording_artifact_result_field_contract():
     assert RecordingArtifactResult._fields == (
         "analysis_file_name",
         "object_id",
-        "cache_hash",
+        "content_hash",
         "saved_start",
         "saved_end",
         "sampling_frequency",

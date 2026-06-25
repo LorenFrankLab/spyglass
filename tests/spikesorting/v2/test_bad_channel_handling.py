@@ -293,7 +293,7 @@ def test_invalid_bad_channel_handling_raises(monkeypatch):
 
 def test_filtering_description_interpolate_branch():
     """`filtering_description` appends the interpolate clause only when N > 0
-    (so `remove` provenance/cache_hash is unchanged), singular vs plural, and
+    (so `remove` provenance/content_hash is unchanged), singular vs plural, and
     positioned between bandpass and reference."""
     from spyglass.spikesorting.v2._recording_preprocessing import (
         filtering_description,
@@ -731,8 +731,8 @@ def test_remove_field_does_not_change_default_recording(
     the SAME traces as ``default`` (which now carries
     ``bad_channel_handling='remove'``) -- the default-unchanged regression guard.
 
-    Compared by trace equality, not ``cache_hash`` (which folds in per-write
-    object_id UUIDs / file_create_date), mirroring the phase-shift precedent.
+    Compared by trace equality (the most direct check), mirroring the
+    phase-shift precedent.
     """
     import numpy as np
 

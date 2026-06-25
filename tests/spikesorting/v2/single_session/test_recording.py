@@ -119,12 +119,11 @@ def test_recording_populates_and_round_trips(
         f"Recording.duration_s = {row['duration_s']}; expected "
         f"~{expected_duration} from IntervalList valid_times span."
     )
-    # ``cache_hash`` is an ``NwbfileHasher`` digest. The exact digest
-    # length (currently 32-char MD5 hex) is intentionally not pinned; the
-    # ``char(64)`` schema column is headroom for a future hash change.
-    # Assert non-empty rather than a fixed length so a hash-algorithm swap
-    # does not break this test.
-    assert isinstance(row["cache_hash"], str) and row["cache_hash"]
+    # ``content_hash`` is the content-fingerprint aggregate. The exact digest
+    # length is intentionally not pinned; the ``char(64)`` schema column is
+    # headroom for a future hash change. Assert non-empty rather than a fixed
+    # length so a hash-algorithm swap does not break this test.
+    assert isinstance(row["content_hash"], str) and row["content_hash"]
 
     rec = Recording().get_recording(recording_selection_key)
     assert rec.get_num_channels() == expected_n_channels
@@ -256,140 +255,210 @@ def test_write_nwb_artifact_rejects_heterogeneous_gains(
 
 
 @pytest.mark.slow
-def test_get_recording_currently_raises_checksum_on_missing_cache(
-    populated_recording,
-):
-    """``get_recording`` raises a checksum ``DataJointError`` when the cache
-    file is missing and must be rebuilt.
+def test_get_recording_rebuilds_on_missing_cache(populated_recording):
+    """A missing cache file is rebuilt on demand: ``get_recording`` reconciles
+    the ``~external`` checksum and returns a valid, content-identical recording
+    -- no checksum ``DataJointError``.
 
-    Pins TODAY's behavior: the on-demand rebuild is NOT byte-deterministic
-    versus the external-store checksum (a future byte-deterministic
-    ``RecordingArtifactRecompute`` path is not yet implemented). So when the
-    canonical cache is absent, ``get_recording`` rebuilds the file, then
-    re-resolves it with checksum validation, and DataJoint rejects the
-    rebuilt-but-not-identical bytes. This test locks that failure mode: a
-    future regression that silently returned the drifted rebuilt bytes
-    (skipping the checksum) would flip this assertion and be caught.
-
-    The happy-path "rebuild succeeds, hash matches" case cannot pass against
-    current source (it needs the byte-deterministic recompute path) and is
-    therefore intentionally not asserted here.
+    The flip of the former ``..._raises_checksum...`` test. The content
+    fingerprint makes the rebuild's identity reproducible, so the rebuild
+    matches the stored ``content_hash``, installs atomically, and refreshes the
+    byte checksum; the subsequent checksum-validated read then succeeds.
     """
-    import shutil
-
-    from datajoint.errors import DataJointError
+    import numpy as np
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2.recording import Recording
-
-    row = (Recording & populated_recording).fetch1()
-    cache_hash = row["cache_hash"]
-    assert cache_hash, "populated_recording row must carry a cache_hash"
-    analysis_file_name = row["analysis_file_name"]
-
-    # Resolve via from_schema=True (skips checksum) to find the file we are
-    # about to remove; this is the same physical file get_recording's
-    # existence check (default resolution) will find absent.
-    abs_path = AnalysisNwbfile.get_abs_path(
-        analysis_file_name, from_schema=True
-    )
-    assert Path(abs_path).exists()
-    # Back up the valid cache: the rebuild overwrites it in place with
-    # non-identical bytes, so restore the original afterward or later tests
-    # reusing this shared row would themselves fail the checksum read.
-    backup = str(abs_path) + ".missing_cache_rebuild.bak"
-    shutil.copy2(abs_path, backup)
-
-    try:
-        Path(abs_path).unlink()
-        with pytest.raises(DataJointError) as excinfo:
-            Recording().get_recording(populated_recording)
-        msg = str(excinfo.value)
-        assert "checksum" in msg.lower(), (
-            "expected a checksum DataJointError from the rebuilt-file "
-            f"re-read; got: {msg!r}"
-        )
-        assert analysis_file_name in msg, (
-            "checksum error should name the analysis_file_name "
-            f"{analysis_file_name!r}; got: {msg!r}"
-        )
-    finally:
-        shutil.move(backup, abs_path)
-
-
-@pytest.mark.slow
-def test_rebuild_nwb_artifact_reaches_hash_then_raises_checksum(
-    populated_recording, monkeypatch
-):
-    """``_rebuild_nwb_artifact`` runs the rebuild pipeline far enough to call
-    ``_hash_nwb_recording`` on the rebuilt artifact, then raises a checksum
-    ``DataJointError``.
-
-    A naive expectation is that the direct rebuild "runs to completion" with
-    only ``get_recording``'s reader rejecting the bytes, but the actual
-    behavior is stronger: ``_write_nwb_artifact`` finishes its write and then
-    calls ``_hash_nwb_recording`` to record the rebuilt ``cache_hash`` -- and
-    ``_hash_nwb_recording`` reads the file through the checksum-validated
-    ``get_abs_path``, which rejects the rebuilt-but-not-byte-identical file.
-    So the rebuild raises a checksum error from INSIDE its own hashing step,
-    not only at ``get_recording``'s re-read. (Confirmed by the call chain
-    ``_rebuild_nwb_artifact`` -> ``_compute_recording_artifact`` ->
-    ``_write_nwb_artifact`` -> ``_hash_nwb_recording`` -> ``get_abs_path`` ->
-    DataJoint external checksum.)
-
-    This pins TWO facts a future regression must not break silently:
-    (1) the rebuild machinery is exercised up to and including the
-    ``_hash_nwb_recording`` verification call (counter asserts it is reached),
-    and (2) the rebuild is non-functional versus the external-store checksum
-    today (it raises rather than persisting drifted bytes). When a future
-    byte-deterministic ``RecordingArtifactRecompute`` path makes the rebuild
-    byte-deterministic (or reconciles the checksum), this test will flip to
-    asserting the happy path. The point of this test is that the
-    current-failure path must exercise the raising behavior -- this one does.
-    """
-    import shutil
-
-    from datajoint.errors import DataJointError
-
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2 import utils as v2_utils
     from spyglass.spikesorting.v2.recording import Recording
 
     row = (Recording & populated_recording).fetch1()
     abs_path = AnalysisNwbfile.get_abs_path(
         row["analysis_file_name"], from_schema=True
     )
-    # The rebuild overwrites the canonical file in place before it raises;
-    # back it up so later tests reusing this shared row read the original
-    # (checksum-valid) bytes.
-    backup = str(abs_path) + ".rebuild_hash_checksum.bak"
+    assert Path(abs_path).exists()
+    before = Recording().get_recording(populated_recording).get_traces()
+
+    Path(abs_path).unlink()
+    # Rebuild on demand: reconciles the checksum and returns a valid recording.
+    rec = Recording().get_recording(populated_recording)
+    assert rec.get_num_channels() == row["n_channels"]
+    assert Path(
+        AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    ).exists(), "the canonical file must be back on disk after rebuild"
+    # Content-identical: deterministic preprocessing reproduces the traces.
+    np.testing.assert_array_equal(rec.get_traces(), before)
+
+
+@pytest.mark.slow
+def test_rebuild_reconciles_external_checksum(populated_recording):
+    """``_rebuild_nwb_artifact`` reconciles the ``~external`` checksum and
+    returns -- a subsequent checksum-validated ``get_abs_path`` read succeeds
+    (no ``DataJointError``).
+
+    The flip of the former ``..._reaches_hash_then_raises_checksum`` test: the
+    rebuild now writes to a temp, fingerprints it, installs on a ``content_hash``
+    match, and calls ``_resolve_external`` -- so the canonical file validates.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    Path(abs_path).unlink()
+
+    Recording()._rebuild_nwb_artifact(populated_recording)
+
+    # Default (checksum-validated) resolution now succeeds + file present.
+    resolved = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    assert Path(resolved).exists()
+    # And get_recording reads it back without a checksum error.
+    Recording().get_recording(populated_recording).get_traces()
+
+
+@pytest.mark.slow
+def test_rebuild_refuses_on_content_drift(populated_recording, monkeypatch):
+    """A rebuild whose fingerprint diverges from the stored ``content_hash``
+    raises ``RecordingContentDriftError``; the canonical slot is NOT written
+    and the checksum is NOT refreshed (drifted bytes are never served)."""
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _recording_fingerprint as fp_mod
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    backup = str(abs_path) + ".drift.bak"
+    import shutil
+
     shutil.copy2(abs_path, backup)
 
-    calls = {"n": 0}
-    real_hash = v2_utils._hash_nwb_recording
+    # Force the rebuilt temp's fingerprint to drift from the stored identity.
+    real_fp = fp_mod.recording_content_fingerprint
 
-    def _counting_hash(*args, **kwargs):
-        calls["n"] += 1
-        return real_hash(*args, **kwargs)
+    def _drifted_fp(*args, **kwargs):
+        components = dict(real_fp(*args, **kwargs))
+        components["traces"] = "drifted-" + components["traces"]
+        return components
 
-    # _write_nwb_artifact imports _hash_nwb_recording from this module at call
-    # time, so patching the source attribute is observed.
-    monkeypatch.setattr(v2_utils, "_hash_nwb_recording", _counting_hash)
-
+    monkeypatch.setattr(
+        fp_mod, "recording_content_fingerprint", _drifted_fp
+    )
     try:
-        with pytest.raises(DataJointError) as excinfo:
+        Path(abs_path).unlink()
+        with pytest.raises(RecordingContentDriftError, match="content_hash"):
             Recording()._rebuild_nwb_artifact(populated_recording)
-        assert "checksum" in str(excinfo.value).lower(), (
-            "expected the rebuild's hash step to raise a checksum "
-            f"DataJointError; got: {str(excinfo.value)!r}"
-        )
-        assert calls["n"] >= 1, (
-            "_rebuild_nwb_artifact raised before reaching _hash_nwb_recording; "
-            "the rebuild's cache_hash verification path was not exercised, so "
-            "this does not pin the intended (rebuild-reached-hashing) state."
+        # Canonical slot was never written (drift refused before install).
+        assert not Path(abs_path).exists(), (
+            "the canonical slot must stay missing on a drift refusal -- "
+            "drifted bytes must never be installed"
         )
     finally:
         shutil.move(backup, abs_path)
+
+
+@pytest.mark.slow
+def test_rebuild_cleanup_on_refresh_failure(populated_recording, monkeypatch):
+    """If ``_resolve_external`` fails AFTER the atomic install, the canonical is
+    unlinked (back to the missing state) so the next ``get_recording`` retries
+    cleanly -- the slot is never left byte-different under a stale checksum."""
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    backup = str(abs_path) + ".refreshfail.bak"
+    import shutil
+
+    shutil.copy2(abs_path, backup)
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("injected _resolve_external failure")
+
+    monkeypatch.setattr(AnalysisNwbfile, "_resolve_external", _boom)
+    try:
+        Path(abs_path).unlink()
+        with pytest.raises(RuntimeError, match="injected _resolve_external"):
+            Recording()._rebuild_nwb_artifact(populated_recording)
+        # os.replace ran but the refresh failed -> the slot is returned to
+        # MISSING (not left under a stale checksum).
+        assert not Path(abs_path).exists(), (
+            "a failed checksum refresh must unlink the canonical slot"
+        )
+    finally:
+        shutil.move(backup, abs_path)
+        # The restored file's checksum is the ORIGINAL (refresh never ran), so
+        # the row stays consistent for later tests.
+
+
+@pytest.mark.slow
+def test_rebuild_double_check_skips_when_present(
+    populated_recording, monkeypatch
+):
+    """The double-checked lock: if the file is already present when
+    ``_rebuild_nwb_artifact`` takes the lock (a peer rebuilt while we waited),
+    it returns WITHOUT rebuilding -- two readers cannot both rebuild."""
+    from spyglass.spikesorting.v2.recording import Recording
+
+    calls = {"n": 0}
+    real = Recording._compute_recording_artifact
+
+    def _counting(self, *args, **kwargs):
+        calls["n"] += 1
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Recording, "_compute_recording_artifact", _counting
+    )
+    # File is present (populated), so the under-lock existence re-check short-
+    # circuits before any rebuild.
+    Recording()._rebuild_nwb_artifact(populated_recording)
+    assert calls["n"] == 0, (
+        "the double-check must skip the rebuild when the file is present"
+    )
+
+
+@pytest.mark.slow
+def test_rebuild_installs_via_atomic_replace(
+    populated_recording, monkeypatch
+):
+    """The rebuild installs via an atomic ``os.replace`` from a DISTINCT temp
+    file into the canonical slot -- so a reader never observes a partially
+    written canonical file."""
+    import os as os_mod
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    canonical_abs = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+
+    captured = {}
+    real_replace = os_mod.replace
+
+    def _spy_replace(src, dst):
+        captured["src"], captured["dst"] = str(src), str(dst)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os_mod, "replace", _spy_replace)
+    Path(canonical_abs).unlink()
+    Recording()._rebuild_nwb_artifact(populated_recording)
+
+    assert captured.get("dst") == str(canonical_abs), (
+        "the install must os.replace INTO the canonical slot"
+    )
+    assert captured.get("src") and captured["src"] != str(canonical_abs), (
+        "the install must rename a DISTINCT temp file (atomic publish), not "
+        "write the canonical slot in place"
+    )
 
 
 @pytest.mark.slow
@@ -991,9 +1060,9 @@ def test_recording_make_global_median_reference(polymer_smoke_session):
     Recording.populate(rec_pk_unref, reserve_jobs=False)
     traces_unref = Recording().get_recording(rec_pk_unref).get_traces()
 
-    # Switch SortGroupV2 to global-median reference and repopulate. A
-    # new RecordingSelection gets minted because the cache_hash depends
-    # on input data.
+    # Switch SortGroupV2 to global-median reference and repopulate. The
+    # content_hash depends on the input data, so the referenced recording's
+    # identity reflects the reference change.
     SortGroupV2.update1(
         {
             "nwb_file_name": nwb_file_name,
@@ -1098,8 +1167,8 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     traces_bp = Recording().get_recording(bp_pk).get_traces()
 
     # no_filter ships bandpass_filter=None -> the filter step is skipped.
-    # Distinct preprocessing_params_name => distinct cache_hash => distinct row,
-    # so no delete/repopulate dance is needed.
+    # Distinct preprocessing_params_name => distinct recording_id => distinct
+    # row, so no delete/repopulate dance is needed.
     nf_pk = RecordingSelection.insert_selection(
         {**common, "preprocessing_params_name": "no_filter"}
     )
@@ -1136,12 +1205,8 @@ def test_phase_shift_field_does_not_change_default_recording(
     metric: adding the optional field changes nothing on the default path, and
     existing rows validate + materialize unchanged.
 
-    Note: the materialized recordings are compared by **trace equality**, not
-    ``cache_hash``. ``cache_hash`` is an ``NwbfileHasher`` digest that includes
-    per-write NWB metadata (the analysis file's ``object_id`` UUIDs and
-    ``file_create_date``), so two separate fresh writes of byte-identical
-    preprocessing produce different hashes; the preprocessed traces are the
-    behavioral output to compare.
+    Note: the materialized recordings are compared by **trace equality** -- the
+    preprocessed traces are the direct behavioral output to compare.
     """
     import numpy as np
 
@@ -1238,9 +1303,8 @@ def test_neuropixels_preset_phase_shift_inert_without_property(
     traces** -- proving the blessed NP recipe never alters the output on a
     recording lacking the property.
 
-    Compared by trace equality rather than ``cache_hash`` (see
-    ``test_phase_shift_field_does_not_change_default_recording`` for why
-    ``cache_hash`` is not stable across two fresh writes).
+    Compared by trace equality -- the preprocessed traces are the direct
+    behavioral output to compare.
     """
     import numpy as np
 
@@ -1375,30 +1439,38 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_cache_hash_uses_nwbfile_hasher(populated_recording):
-    """``Recording.cache_hash`` matches ``_hash_nwb_recording``.
+def test_content_hash_is_fingerprint_aggregate(populated_recording):
+    """``Recording.content_hash`` is the content-fingerprint aggregate.
 
-    An earlier cache_hash was ``hashlib.sha256(data.tobytes())``
-    -- content-blind to timestamps, electrodes, and conversion
-    metadata. The recording-cache contract binds cache_hash to
-    ``NwbfileHasher`` (Spyglass's content hasher used by the v1
-    recompute machinery), so the digest covers the full NWB content
-    rather than just the raw data bytes. This test independently
-    recomputes the hash and asserts the stored value matches -- a
-    regression to the data-only sha256 would silently pass the
-    existing ``isinstance(cache_hash, str)`` check.
+    The stored identity is the representation-blind
+    :func:`recording_content_fingerprint` aggregate read back from the
+    persisted ElectricalSeries -- NOT a whole-file ``NwbfileHasher`` digest
+    (which folds volatile object ids / creation timestamps and so could never
+    confirm a content-identical rebuild). Independently recompute the
+    fingerprint over the persisted file and assert the stored value matches.
     """
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.utils import _hash_nwb_recording
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_content_fingerprint,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        _ELECTRICAL_SERIES_PATH,
+        Recording,
+    )
 
     row = (Recording & populated_recording).fetch1()
-    expected = _hash_nwb_recording(row["analysis_file_name"])
-    assert row["cache_hash"] == expected, (
-        f"cache_hash {row['cache_hash']!r} does not match "
-        f"independently-computed NwbfileHasher digest {expected!r}. "
-        "NwbfileHasher contract violated -- check that "
-        "Recording._write_nwb_artifact still routes through "
-        "_hash_nwb_recording instead of a data-only sha256."
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    expected = combined_hash(
+        recording_content_fingerprint(
+            abs_path, electrical_series_path=_ELECTRICAL_SERIES_PATH
+        )
+    )
+    assert row["content_hash"] == expected, (
+        f"content_hash {row['content_hash']!r} does not match the "
+        f"independently-computed content fingerprint {expected!r}. "
+        "Check that Recording._write_nwb_artifact still routes through "
+        "recording_content_fingerprint."
     )
 
 
