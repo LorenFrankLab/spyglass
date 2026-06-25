@@ -32,6 +32,10 @@ For agent invocation, **load only the slice you need**:
 - [overview.md](overview.md) — goals/non-goals, integration points, risks,
   metrics, rollout.
 - Phases (each ships as a separable PR):
+  - [phase-0-recording-source-correctness.md](phase-0-recording-source-correctness.md)
+    — **prerequisite** correctness fixes (raw source pinned to
+    `Raw.raw_object_id`; `channel_name` mapped by electrode-table row), so the
+    fingerprint covers the *right* signal.
   - [phase-1-content-fingerprint-reclamation.md](phase-1-content-fingerprint-reclamation.md)
     — the High-finding fix: fingerprint identity + reconciliation + safe
     delete→rebuild round-trip.

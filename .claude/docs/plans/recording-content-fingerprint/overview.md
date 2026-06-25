@@ -10,6 +10,21 @@ Design rationale (the "why" behind every decision below):
 Line numbers verified 2026-06-25 against the post-merge branch (`origin/master`
 PR #1600 merged at `c2913b4a`; WIP analyzer/orphan fix at `96e20f98`).
 
+**Phase 0 — recording-source correctness (prerequisite):**
+
+- `src/spyglass/spikesorting/v2/_recording_nwb.py:32` —
+  `raw_eseries_path_and_timestamp_mode` picks the **first** acquisition
+  `ElectricalSeries` (`:39-40`); must resolve from
+  `Raw.raw_object_id` (`src/spyglass/common/common_ephys.py:291`,
+  `Raw.nwb_object:377-389`). Threaded into `read_raw_nwb_recording` at
+  `recording.py:1697-1704`.
+- `src/spyglass/spikesorting/v2/_recording_geometry.py:70` —
+  `channel_names[int(c)]` indexes the electrodes table by electrode id as a row
+  position; must use the row mapping the write side uses
+  (`_nwb_metadata_helpers.py:69` `electrode_table_region` →
+  `get_electrode_indices`). `restrict_recording` slice/rename at
+  `_recording_restriction.py:558-571`.
+
 **Phase 1 — the fix:**
 
 - `src/spyglass/spikesorting/v2/_recompute.py:53` — `hash_recording_traces`:
@@ -77,8 +92,14 @@ analyzer self-heal + orphan-classification work already committed at `96e20f98`.
 
 ### Goals
 
+- **(Phase 0)** `Recording.make` reads the *right* signal: raw source pinned to
+  `Raw.raw_object_id`, channels mapped by electrode-table row index — so the
+  fingerprint identifies the intended recording, not whatever the first
+  acquisition series / row-position lookup happened to return.
 - Recording delete → on-demand rebuild round-trips: `get_recording` succeeds
   after `delete_files`, with the `~external` checksum reconciled.
+- The fingerprint includes the **resolved source object id** (from Phase 0) so
+  two recordings built from different raw series never collide.
 - A single scientific identity (`content_hash`) drives recompute matching,
   delete authority, and rebuild reconciliation — they can no longer disagree.
 - Never silently serve drifted bytes: a rebuild that diverges from the stored
@@ -96,6 +117,18 @@ analyzer self-heal + orphan-classification work already committed at `96e20f98`.
 - Byte-for-byte deterministic NWB writing — infeasible across SI/BLAS/platform;
   the fingerprint is representation-blind instead.
 - Touching the `SortingAnalyzer` / terminal-NWB paths.
+- The broader **input/recipe fingerprint** for *populate-time* drift detection,
+  and runtime/seed/software provenance capture (scientific-reproducibility review
+  §§3–8). Our output `content_hash` is a *rebuild-time* drift detector — a
+  rebuild whose output differs (changed seed, preprocessing order, source,
+  intervals) fails closed via `RecordingContentDriftError`. It does **not** catch
+  upstream changes at *populate* time (a fresh populate stores a fresh hash with
+  nothing to compare against). Closing that gap (validating construction inputs
+  before populate) is a separate provenance workstream. Phase 0 + the
+  `source_object_id` fingerprint field are the only pieces of it folded here.
+- Analyzer-cache locking, UnitMatch identity, curation lineage, and NWB
+  self-describing provenance tables (operational, reproducibility, and
+  portability reviews) — separate workstreams.
 
 ### Dependency policy
 
@@ -138,6 +171,13 @@ operational hardening on top. The whole-file `cache_hash` is removed in Phase 1
 
 ## Open Questions
 
+0. **Opt-in `verify_content_hash` on existing-file reads (portability review §9).**
+   `get_recording` currently trusts an existing cache file (it only fingerprints
+   on rebuild). An opt-in `verify_content_hash=True` path would re-fingerprint a
+   present file and compare to the row, catching silent on-disk corruption.
+   Default off (re-fingerprinting every read is expensive). Best answer: add the
+   opt-in flag in Phase 1 if cheap; otherwise a small follow-up. Not required for
+   reclamation correctness.
 1. **At-creation provenance scope (Phase 2).** Log env into
    `RecordingArtifactVersions` at recording creation (v1 parity), or leave
    recompute to populate it lazily? Best answer: lazy is sufficient for
@@ -146,6 +186,9 @@ operational hardening on top. The whole-file `cache_hash` is removed in Phase 1
 
 ## Estimated Effort
 
+- Phase 0: ~80–150 LOC src (raw-source resolver via `Raw.raw_object_id`;
+  electrode-id→row channel mapping) + ~150 LOC tests (multi-series + shuffled-id
+  fixtures). Independently shippable correctness fix.
 - Phase 1: ~250–350 LOC src (new `_recording_fingerprint.py` ~120; edits across
   `recording.py`/`_recording_nwb.py`/`recompute.py`/`session_group.py`/
   `common_file_tracking.py`/`exceptions.py`) + ~250 LOC tests. Wide but

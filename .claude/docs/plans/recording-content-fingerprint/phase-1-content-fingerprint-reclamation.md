@@ -63,8 +63,10 @@ Components (all read from the persisted `ElectricalSeries`):
 `ElectricalSeries.electrodes` region rows' `rel_x`/`rel_y`[/`rel_z`] in series
 channel order — **not** `get_channel_locations`), and `metadata`
 (`sampling_frequency`, ordered `channel_ids`, `conversion`, `offset`, `dtype`,
-`shape`, `filtering` read from the series attr, `electrical_series_path`).
-Reuse `hash_recording_traces` for `traces`; aggregate via `combined_hash`.
+`shape`, `filtering` read from the series attr, `electrical_series_path`, and the
+resolved raw **`source_object_id`** persisted by Phase 0 — so different raw
+sources never share a hash). Reuse `hash_recording_traces` for `traces`;
+aggregate via `combined_hash`.
 
 Also apply the **canonical-encoding** fix (design §3.2): in `_recompute.py:74`,
 make `hash_recording_traces` serialize explicit little-endian
@@ -113,7 +115,9 @@ atomic publish prevents partial reads, the fingerprint prevents drift.
 `Recording.get_recording` (`:1482`) — **double-checked locked** read-repair:
 acquire `recording_artifact_lock(recording_id)`, re-check file existence under
 the lock (a peer may have rebuilt while we waited), rebuild only if still
-missing, release, then read. Two readers can't both rebuild.
+missing, release, then read. Two readers can't both rebuild. Log a **cache-miss
+breadcrumb** at INFO around the rebuild (path, reason="missing cache", elapsed
+seconds) so a long rebuild doesn't look like a hung read (operational review §7).
 
 `Recording._rebuild_nwb_artifact` (~`:1549`), **under the lock**:
 1. Rebuild to a **private temp path on the same filesystem** as the canonical
@@ -181,6 +185,12 @@ than a correctness dependency (design §3.6 Medium 4/3).
   `_recording_nwb.py:79-80`, `recording.py` `RecordingComputed`,
   `recompute.py` module header) to the `content_hash` model. No user-facing
   notebook touches this path.
+- **`docs/src/Features/SpikeSortingV2StorageManagement.md`** (operational review
+  §1): the storage guide currently advertises the *broken* recovery path. Update
+  it to describe the actual semantics — `get_recording` rebuilds + reconciles the
+  checksum after a `delete_files`, and raises an actionable
+  `RecordingContentDriftError` (not a cryptic checksum error) if the env has
+  drifted. Don't leave docs promising recovery the code didn't deliver.
 
 ## Deliberately not in this phase
 
@@ -205,6 +215,7 @@ than a correctness dependency (design §3.6 Medium 4/3).
 | `test_delete_files_round_trip` *(slow, integration; gates re-enable)* | populate → recompute `matched` → `delete_files(dry_run=False)` removes file → `get_recording` rebuilds + reconciles → traces read back equal pre-delete content → recompute rows now `deleted=0`. |
 | `test_recompute_authority_anchors_on_content_hash` *(slow)* | Current file mutated self-consistent with its rebuild but diverging from `content_hash` → **not** `matched`/deletable; fresh rebuild equal to `content_hash` → `matched`. |
 | `test_rebuild_refuses_on_content_drift` *(slow)* | Monkeypatched fingerprint drift → `RecordingContentDriftError`; file not served, checksum not refreshed. |
+| `test_upstream_interval_drift_fails_closed` *(slow; test-coverage review §3)* | Populate `Recording` → mutate only `IntervalList.valid_times` under the same interval name → delete cache → `get_recording` rebuild yields different output → `RecordingContentDriftError` (rebuild-time defense-in-depth; populate-time detection is out of scope). |
 | `test_rebuild_cleanup_on_refresh_failure` *(slow)* | Injected `_resolve_external` failure after `os.replace` → canonical unlinked (back to missing) → next `get_recording` retries cleanly; temp never left behind. |
 | `test_rebuild_delete_serialized` *(slow, integration)* | A rebuild holding `recording_artifact_lock` blocks a concurrent `delete_files` (and vice versa); the two never interleave, and the post-sequence state is consistent (file present + `deleted=0`, or absent + `deleted=1`) — never a half-state. |
 | `test_get_recording_double_checked` *(slow)* | Two concurrent `get_recording` calls on a missing file rebuild exactly once (the second sees the file under the lock and skips its own rebuild). |

@@ -113,7 +113,13 @@ all read from the persisted `ElectricalSeries`:
   only as a **parity test**, never as the canonical fingerprint source;
 - `metadata` — `sampling_frequency`, ordered `channel_ids`, `conversion`,
   `offset`, `dtype`, `shape` (`n_channels`, `n_frames`), `filtering` (read from
-  the series' `filtering` attr, *not* a caller arg), `electrical_series_path`.
+  the series' `filtering` attr, *not* a caller arg), `electrical_series_path`,
+  and the **resolved raw `source_object_id`** (the `Raw.raw_object_id` the
+  recording was built from, persisted by the recording-source fix — plan
+  Phase 0). Including it means two recordings built from *different* raw series
+  can never share a `content_hash` even if their preprocessed traces happen to
+  coincide. Read from the persisted recording provenance (Phase 0 writes it
+  alongside the artifact), so the fingerprint stays a readback-from-disk.
 
 **Caution — readback from disk, never caller-supplied (Medium 1).** Every input
 is read from the persisted NWB — including `filtering`/`conversion`/`offset`/
@@ -350,9 +356,12 @@ advertising a rebuild that cannot work; concat has no deletion driver today.
 
 - New `RecordingContentDriftError(RuntimeError)` in
   [exceptions.py](../../../../src/spyglass/spikesorting/v2/exceptions.py) —
-  typed reconciliation refusal, names the `analysis_file_name` and that the
-  rebuild diverged from the stored `content_hash` (inspect SI version / raw NWB
-  before rerunning). Mirrors v1's delete-mismatched-file-then-raise stance.
+  typed reconciliation refusal. The message is **actionable** (operational
+  review §1): name the `analysis_file_name`, state that the rebuild diverged
+  from the stored `content_hash`, and list the concrete next steps — restore a
+  backup of the artifact, rerun the recompute under the current environment, or
+  delete + repopulate the `Recording` row (and its downstream). Mirrors v1's
+  delete-mismatched-file-then-raise stance.
 - Rebuild cleanup contract (§3.5): the canonical slot is unlinked on *any*
   post-overwrite failure — fingerprint error, content mismatch, or
   `_resolve_external` failure — never left byte-different under a stale
