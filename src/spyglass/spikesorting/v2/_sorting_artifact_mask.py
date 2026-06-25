@@ -79,6 +79,7 @@ def apply_artifact_mask(
 
     from spyglass.spikesorting.v2._signal_math import (
         _segment_times_at,
+        assert_artifact_frame_fraction,
         assert_positive_sampling_frequency,
         frames_for_times,
     )
@@ -229,6 +230,19 @@ def apply_artifact_mask(
 
     if not frame_ranges:
         return recording
+
+    # Guard before expanding the run-length ranges to a per-frame index array:
+    # a valid_times that keeps almost nothing makes the artifact complement span
+    # most of the recording, so this expansion is O(n_samples) (hundreds of MB
+    # to GB on a long, many-channel recording). Fail fast with the realized
+    # fraction rather than allocating it. (In the normal pipeline the upstream
+    # detect_artifacts guard fires first; this defends a hand-built valid_times
+    # override that keeps a sliver -- see the docstring's strict-input note.)
+    assert_artifact_frame_fraction(
+        sum(end - start for start, end in frame_ranges),
+        n_samples,
+        context="apply_artifact_mask: ",
+    )
 
     artifact_frames = np.concatenate(
         [np.arange(s, e, dtype=np.int64) for s, e in frame_ranges]

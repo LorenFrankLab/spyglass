@@ -52,6 +52,34 @@ def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
         )
 
 
+def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
+    """The per-frame artifact set must not exceed a sane fraction of the
+    recording. A fraction at/under the bound is a no-op; more than the bound
+    raises ``ArtifactFractionExceededError`` -- a misconfigured (too-loose)
+    threshold or a near-empty ``valid_times`` would otherwise materialize an
+    int64 frame index per artifact sample (O(n_samples), hundreds of MB to GB
+    on a long many-channel recording) and a correspondingly slow per-frame pass.
+    ``n_samples == 0`` forms no fraction, so it is a no-op."""
+    from spyglass.spikesorting.v2._signal_math import (
+        _MAX_ARTIFACT_FRAME_FRACTION,
+        assert_artifact_frame_fraction,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        ArtifactFractionExceededError,
+    )
+
+    n = 1000
+    bound = int(_MAX_ARTIFACT_FRAME_FRACTION * n)
+    # At/under the bound: no-op (returns None).
+    assert assert_artifact_frame_fraction(0, n) is None
+    assert assert_artifact_frame_fraction(bound, n) is None
+    # Over the bound: raises, surfacing the realized fraction and the context.
+    with pytest.raises(ArtifactFractionExceededError, match="ctx: "):
+        assert_artifact_frame_fraction(bound + 1, n, context="ctx: ")
+    # Degenerate n_samples == 0: no fraction to form -> no-op.
+    assert assert_artifact_frame_fraction(0, 0) is None
+
+
 def test_consolidate_intervals_rejects_nonmonotonic_timestamps():
     """The frame mapping is ``searchsorted``-based, so a backward step in the
     timestamp vector would silently mis-slice; reject it at the boundary."""

@@ -66,6 +66,26 @@ class EmptyArtifactValidTimesError(RuntimeError):
     """
 
 
+class ArtifactFractionExceededError(RuntimeError):
+    """Raise when the per-frame artifact set would exceed a sane fraction of
+    the recording.
+
+    Both the detection scan (``scan_artifact_frames``: frames flagged above
+    threshold) and the sort-time mask (``apply_artifact_mask``: the complement
+    of the kept ``valid_times``) materialize one int64 frame index per artifact
+    sample. Under a misconfigured (too-loose) threshold, or a ``valid_times``
+    that keeps almost nothing, that array is O(n_samples) -- hundreds of MB to
+    GB on a long, many-channel recording -- and the subsequent per-frame pass is
+    correspondingly slow. Past ``_MAX_ARTIFACT_FRAME_FRACTION`` of the recording
+    this is not artifact removal but a misconfiguration: it fails fast here with
+    the realized fraction rather than allocating the array (and, downstream, an
+    all-near-zero recording the sorter would choke on or that
+    ``EmptyArtifactValidTimesError`` would reject three stages later). Message
+    names the realized fraction and points the caller at the detection
+    thresholds / ``removal_window_ms`` / the ``valid_times`` override.
+    """
+
+
 class SingleChannelZScoreError(ValueError):
     """Raise when z-score artifact detection is configured on one channel.
 

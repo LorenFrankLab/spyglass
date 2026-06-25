@@ -88,6 +88,51 @@ def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
         )
 
 
+_MAX_ARTIFACT_FRAME_FRACTION = 0.5
+
+
+def assert_artifact_frame_fraction(
+    n_artifact_frames, n_samples, *, context: str = ""
+) -> None:
+    """Raise if the per-frame artifact set exceeds a sane fraction of the
+    recording.
+
+    Both the detection scan (``scan_artifact_frames``: frames flagged above
+    threshold) and the sort-time mask (``apply_artifact_mask``: the complement
+    of the kept ``valid_times``) materialize one int64 frame index per artifact
+    sample. Under a misconfigured (too-loose) threshold, or a ``valid_times``
+    that keeps almost nothing, that array is O(n_samples) -- hundreds of MB to
+    GB on a long, many-channel recording -- and the subsequent per-frame pass is
+    correspondingly slow. Past ``_MAX_ARTIFACT_FRAME_FRACTION`` (half the
+    recording) this is a misconfiguration, not artifact removal: fail fast with
+    the realized fraction rather than allocating the array. ``context`` names the
+    call site so the message points at the right knob.
+
+    ``n_samples <= 0`` forms no fraction and is a no-op -- the callers guard the
+    empty-recording / zero-artifact cases separately.
+    """
+    if n_samples <= 0:
+        return
+    if n_artifact_frames > _MAX_ARTIFACT_FRAME_FRACTION * n_samples:
+        from spyglass.spikesorting.v2.exceptions import (
+            ArtifactFractionExceededError,
+        )
+
+        raise ArtifactFractionExceededError(
+            f"{context}{n_artifact_frames} of {n_samples} samples "
+            f"({100.0 * n_artifact_frames / n_samples:.1f}%) are artifact "
+            f"frames, exceeding the "
+            f"{100.0 * _MAX_ARTIFACT_FRAME_FRACTION:.0f}% guard. Materializing "
+            "an index per artifact sample would allocate O(n_samples) memory "
+            "and run a correspondingly slow per-frame pass; masking this much "
+            "would also leave too little signal to sort. This indicates a "
+            "misconfigured detector (raise amplitude_threshold_uv / "
+            "zscore_threshold, lower proportion_above_threshold, or reduce "
+            "removal_window_ms) or a valid_times override that keeps almost "
+            "nothing."
+        )
+
+
 def _get_recording_timestamps(
     recording,
     override=None,

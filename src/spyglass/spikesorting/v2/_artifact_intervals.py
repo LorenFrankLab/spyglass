@@ -87,6 +87,9 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
         _compute_artifact_chunk,
         _init_artifact_worker,
     )
+    from spyglass.spikesorting.v2._signal_math import (
+        assert_artifact_frame_fraction,
+    )
 
     resolved = dict(job_kwargs or {})
     exec_kwargs = {k: resolved[k] for k in job_keys if k in resolved}
@@ -127,6 +130,15 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     per_chunk = executor.run()
     if not per_chunk:
         return np.empty(0, dtype=np.int64)
+    # Guard before concatenating (and before detect_artifacts' per-frame join):
+    # a misconfigured too-loose threshold can flag most of the recording, making
+    # this an O(n_samples) array. Summing the per-chunk lengths is cheap and
+    # lets the guard fire before the concatenate doubles the allocation.
+    assert_artifact_frame_fraction(
+        sum(len(chunk) for chunk in per_chunk),
+        recording.get_num_samples(segment_index=0),
+        context="ArtifactDetection scan: ",
+    )
     return np.concatenate(per_chunk)
 
 

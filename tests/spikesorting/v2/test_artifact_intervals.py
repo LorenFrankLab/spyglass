@@ -395,6 +395,46 @@ def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
     assert not any("rounds up" in r.message.lower() for r in caplog.records)
 
 
+def test_detect_artifacts_raises_when_most_frames_flagged():
+    """A misconfigured (too-loose) detector that flags more than half the
+    recording raises ``ArtifactFractionExceededError`` BEFORE materializing a
+    per-frame index for every flagged sample (and the slow per-frame join) --
+    instead of allocating an O(n_samples) array on a pathological config."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2.exceptions import (
+        ArtifactFractionExceededError,
+    )
+
+    # Every sample sits far above a 1 uV amplitude threshold on both channels,
+    # so the detector flags all 2000 frames (> 50% of the recording).
+    rec = _rec(np.full((2000, 2), 1000.0, dtype="float32"))
+    params = _artifact_params(
+        amplitude_threshold_uv=1.0, proportion_above_threshold=1.0
+    )
+    with pytest.raises(ArtifactFractionExceededError, match="2000 of 2000"):
+        detect_artifacts(rec, params, context=" for unit-test")
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
+    """A ``valid_times`` keeping only a sliver makes the artifact complement
+    span most of the recording; the mask raises ``ArtifactFractionExceededError``
+    BEFORE expanding the complement to a per-frame index array."""
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        ArtifactFractionExceededError,
+    )
+
+    rec = _rec(np.zeros((3000, 2), dtype="float32"))  # 0.1 s @ 30 kHz
+    # Keep only the first ~1 ms; the complement (~99%) would expand to ~2970
+    # artifact frames (> 50% of 3000).
+    valid_times = np.array([[0.0, 0.001]])
+    with pytest.raises(ArtifactFractionExceededError, match="%"):
+        apply_artifact_mask(rec, valid_times)
+
+
 # --------------------------------------------------------------------------- #
 # F. Chunked artifact detection + the artifact-mask complement walker.
 #
