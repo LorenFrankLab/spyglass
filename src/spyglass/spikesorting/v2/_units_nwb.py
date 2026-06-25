@@ -448,12 +448,20 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
                 "spike_sample_index contains frame(s) outside the recording "
                 f"range [0, {n_samples})."
             )
-        # sample_index_to_time maps the sparse spike frames -> absolute times
-        # directly without the caller materializing the full timestamp vector.
-        return np.asarray(
-            recording.sample_index_to_time(frames, segment_index=0),
+        # ``sample_index_to_time`` indexes the h5py-/mmap-backed timestamp
+        # vector, whose fancy-indexing requires STRICTLY INCREASING indices.
+        # A unit's spike frames are not guaranteed sorted (and may repeat), so
+        # map the unique-sorted frames and broadcast the times back into the
+        # original frame order -- still sparse, no full-vector materialization.
+        order = np.argsort(frames, kind="stable")
+        uniq, inverse = np.unique(frames[order], return_inverse=True)
+        uniq_times = np.asarray(
+            recording.sample_index_to_time(uniq, segment_index=0),
             dtype=np.float64,
         )
+        out = np.empty(frames.shape, dtype=np.float64)
+        out[order] = uniq_times[inverse]
+        return out
 
     return {
         int(uid): lookup(frames)
