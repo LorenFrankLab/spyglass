@@ -623,10 +623,30 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
             "SortingSelection",
             {"sorter": "mountainsort5", "sorter_params_name": "p"},
         ),
+        (
+            "spyglass.spikesorting.v2.unit_matching",
+            "UnitMatchSelection",
+            {
+                "session_group_owner": "o",
+                "session_group_name": "g",
+                "matcher_params_name": "m",
+                "curation_set_hash": "0" * 64,
+            },
+        ),
+        (
+            "spyglass.spikesorting.v2.session_group",
+            "ConcatenatedRecordingSelection",
+            {
+                "session_group_owner": "o",
+                "session_group_name": "g",
+                "preprocessing_params_name": "p",
+                "motion_correction_params_name": "m",
+            },
+        ),
     ],
 )
 def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
-    """All THREE selection masters reject a no-flag direct insert. The guard
+    """All FIVE selection masters reject a no-flag direct insert. The guard
     is a shared mixin, but a per-class regression (a class dropping the mixin
     from its MRO, or a future per-class insert override that forgets to
     forward allow_direct_insert) must surface. The guard raises BEFORE any DB

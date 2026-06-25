@@ -214,6 +214,79 @@ def split_unit_spike_trains(
     return per_member
 
 
+def assert_concat_compatible(recordings: list) -> None:
+    """Reject member recordings that cannot be concatenated channel-for-channel.
+
+    SI's ``concatenate_recordings`` already requires identical channel ids, but
+    it fails deep in the stitch with an opaque message and does NOT check probe
+    geometry. Cross-session concatenation additionally needs identical geometry
+    so a unit's waveform footprint is the same across members. This front-loads
+    both checks (against the first member, the deterministic anchor) with a
+    clear message naming the first offending member, so an incompatible
+    SessionGroup fails fast in ``ConcatenatedRecording.make`` rather than mid-
+    stitch or, worse, silently anchoring to the first member's geometry.
+
+    Parameters
+    ----------
+    recordings : list of si.BaseRecording
+        Per-member preprocessed recordings, ordered by ``member_index``.
+
+    Raises
+    ------
+    ValueError
+        If the list is empty, or any member's channel ids (or count) or channel
+        geometry differs from the first member's.
+    """
+    import numpy as np
+
+    if not recordings:
+        raise ValueError(
+            "build_concatenated_recording: no member recordings to "
+            "concatenate."
+        )
+
+    def _locations(recording):
+        # Cached Recording artifacts (the production input) always carry probe
+        # locations from the NWB electrodes table; bare synthetic recordings may
+        # not. Return None when geometry is unavailable so a probe-less member
+        # is not falsely flagged -- but a member that HAS geometry while another
+        # does not is still surfaced below.
+        try:
+            return np.asarray(recording.get_channel_locations())
+        except Exception:
+            return None
+
+    reference = recordings[0]
+    reference_ids = list(reference.get_channel_ids())
+    reference_locations = _locations(reference)
+    for index, recording in enumerate(recordings[1:], start=1):
+        channel_ids = list(recording.get_channel_ids())
+        if channel_ids != reference_ids:
+            raise ValueError(
+                f"build_concatenated_recording: member {index} has channel ids "
+                f"{channel_ids} but member 0 has {reference_ids}; concatenated "
+                "members must share channel ids (the same sort group / probe "
+                "layout across sessions)."
+            )
+        locations = _locations(recording)
+        if (reference_locations is None) != (locations is None):
+            raise ValueError(
+                f"build_concatenated_recording: member {index} channel geometry "
+                "presence differs from member 0 (one has probe locations, the "
+                "other does not); concatenated members must share probe "
+                "geometry."
+            )
+        if reference_locations is not None and (
+            locations.shape != reference_locations.shape
+            or not np.allclose(locations, reference_locations)
+        ):
+            raise ValueError(
+                f"build_concatenated_recording: member {index} channel geometry "
+                "differs from member 0; concatenated members must share probe "
+                "geometry so cross-session waveforms align channel-for-channel."
+            )
+
+
 def build_concatenated_recording(
     recordings: list,
     *,
@@ -261,6 +334,10 @@ def build_concatenated_recording(
         The concatenated (and, unless skipped, motion-corrected) recording.
     """
     from spikeinterface.core import concatenate_recordings
+
+    # Fail fast (and clearly) on incompatible members BEFORE the stitch, and
+    # before the result anchors to the first member's NWB geometry downstream.
+    assert_concat_compatible(recordings)
 
     concatenated = concatenate_recordings(recordings, ignore_times=True)
     if motion_preset is None:

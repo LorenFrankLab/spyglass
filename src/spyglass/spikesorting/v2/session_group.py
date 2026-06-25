@@ -31,6 +31,8 @@ from spyglass.spikesorting.v2.recording import (
     SortGroupV2,  # noqa: F401
 )
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
+    SelectionMasterInsertGuard,
     _assert_v2_db_safe,
     _validate_params,
     reject_duplicate_parameter_content,
@@ -245,7 +247,9 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
-class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
+class MotionCorrectionParameters(
+    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+):
     """Validated motion-correction parameter blob.
 
     ``insert1`` Pydantic-validates the ``params`` blob (preset +
@@ -323,7 +327,9 @@ class MotionCorrectionParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
+class ConcatenatedRecordingSelection(
+    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+):
     """One row per (SessionGroup, PreprocessingParameters, motion params).
 
     UUID-keyed so downstream FKs are single-column (mirrors the
@@ -400,7 +406,6 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
             deterministic_id,
         )
         from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
             MissingRecordingForConcatError,
         )
         from spyglass.spikesorting.v2.recording import (
@@ -443,16 +448,6 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
                 "Recording.populate(...) for each missing key, then retry."
             )
 
-        existing = (cls & identity).fetch("KEY", as_dict=True)
-        if len(existing) == 1:
-            return existing[0]
-        if len(existing) > 1:
-            raise DuplicateSelectionError(
-                "ConcatenatedRecordingSelection has "
-                f"{len(existing)} duplicate selection rows for identity "
-                f"{identity}; a raw insert bypassed insert_selection. Drop the "
-                "duplicates and re-insert via insert_selection."
-            )
         # Content-address the concat_recording_id from the logical identity
         # (mirrors RecordingSelection / SortingSelection): two callers that
         # request the same (group, preprocessing, motion) compute the same id,
@@ -460,18 +455,68 @@ class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
         # -- is the concurrency guard. The loser of a duplicate-PK race refetches
         # the winner's row.
         concat_recording_id = deterministic_id("concat_recording", identity)
+
+        existing = cls._find_existing_pk(identity, concat_recording_id)
+        if existing is not None:
+            return existing
         try:
+            # allow_direct_insert: this helper IS the validation boundary (it
+            # has already checked every member's Recording exists and minted the
+            # deterministic id), so it bypasses the master insert guard.
             cls.insert1(
-                {**identity, "concat_recording_id": concat_recording_id}
+                {**identity, "concat_recording_id": concat_recording_id},
+                allow_direct_insert=True,
             )
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
-            refetched = (cls & identity).fetch("KEY", as_dict=True)
-            if len(refetched) == 1:
-                return refetched[0]
+            existing = cls._find_existing_pk(identity, concat_recording_id)
+            if existing is not None:
+                return existing
             raise
         return {"concat_recording_id": concat_recording_id}
+
+    @classmethod
+    def _find_existing_pk(
+        cls, identity: dict, deterministic_concat_recording_id
+    ) -> dict | None:
+        """Return the canonical PK for this selection identity, or None.
+
+        The full logical identity (group + preprocessing + motion params) lives
+        in the master's own columns, so it is checked against the master alone.
+        Any master matching the identity whose ``concat_recording_id`` is NOT
+        the deterministic id is a raw-insert / pre-determinism legacy bypass of
+        the content-addressed invariant, and is rejected rather than silently
+        returned. Used by ``insert_selection`` for both the pre-insert lookup
+        and the post-duplicate-key refetch.
+        """
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+        )
+
+        master_ids = {
+            row["concat_recording_id"]
+            for row in (cls & identity).fetch("KEY", as_dict=True)
+        }
+        bypassed = [
+            cid
+            for cid in master_ids
+            if cid != deterministic_concat_recording_id
+        ]
+        if bypassed:
+            raise DuplicateSelectionError(
+                f"ConcatenatedRecordingSelection has {len(master_ids)} master "
+                f"row(s) for identity {identity} whose concat_recording_id is "
+                f"not the deterministic id {deterministic_concat_recording_id}: "
+                f"{bypassed}. This is a non-deterministic selection row (a raw "
+                "insert or pre-determinism legacy row); drop it and re-insert "
+                "via insert_selection."
+            )
+        return (
+            {"concat_recording_id": deterministic_concat_recording_id}
+            if master_ids
+            else None
+        )
 
 
 class ConcatRecordingFetched(NamedTuple):

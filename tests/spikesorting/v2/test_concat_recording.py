@@ -229,3 +229,63 @@ def test_build_concatenated_recording_rejects_non_job_motion_job_kwargs(
         build_concatenated_recording(
             [rec], motion_preset="rigid_fast", job_kwargs={bad_key: bad_val}
         )
+
+
+# ---------- assert_concat_compatible ---------------------------------------
+
+
+def _rec_with_locations(n_samples, channel_ids, locations, fs=30_000.0):
+    """A synthetic NumpyRecording with explicit channel ids and geometry."""
+    import spikeinterface as si
+
+    rec = si.NumpyRecording(
+        [np.zeros((n_samples, len(channel_ids)), dtype=np.float32)],
+        sampling_frequency=fs,
+        channel_ids=channel_ids,
+    )
+    rec.set_dummy_probe_from_locations(np.asarray(locations, dtype=float))
+    return rec
+
+
+def test_assert_concat_compatible_accepts_matching_members():
+    """Members sharing channel ids and geometry pass the pre-concat check."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    locs = [[0.0, 0.0], [0.0, 20.0]]
+    a = _rec_with_locations(100, [1, 2], locs)
+    b = _rec_with_locations(50, [1, 2], locs)
+    assert_concat_compatible([a, b])  # no raise
+
+
+def test_assert_concat_compatible_rejects_channel_id_mismatch():
+    """A member with different channel ids (or count) is rejected early with a
+    clear message instead of failing deep in SI's concatenate_recordings."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    locs = [[0.0, 0.0], [0.0, 20.0]]
+    a = _rec_with_locations(100, [1, 2], locs)
+    b = _rec_with_locations(50, [1, 3], locs)  # channel id 3 != 2
+    with pytest.raises(ValueError, match="channel ids"):
+        assert_concat_compatible([a, b])
+
+    c = _rec_with_locations(50, [1], [[0.0, 0.0]])  # different count
+    with pytest.raises(ValueError, match="channel ids"):
+        assert_concat_compatible([a, c])
+
+
+def test_assert_concat_compatible_rejects_geometry_mismatch():
+    """Members with matching channel ids but different probe geometry are
+    rejected -- cross-session waveforms must align channel-for-channel. This is
+    the case SI's id-only check would let through silently."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    a = _rec_with_locations(100, [1, 2], [[0.0, 0.0], [0.0, 20.0]])
+    b = _rec_with_locations(50, [1, 2], [[0.0, 0.0], [0.0, 40.0]])
+    with pytest.raises(ValueError, match="geometry"):
+        assert_concat_compatible([a, b])
