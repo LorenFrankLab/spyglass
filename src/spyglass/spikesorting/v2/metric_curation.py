@@ -978,23 +978,33 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     ) -> None:
         """Register the analysis file and insert the row.
 
-        Runs inside the framework's tri-part insert transaction (DataJoint
-        opens it around ``make_insert``), so no explicit transaction is opened
-        here. ``nwb_file_name`` is threaded from ``make_fetch`` via the compute
-        carrier rather than re-walking the recording lineage in the transaction
-        phase. On failure the staged analysis file is removed before re-raising.
+        The ``AnalysisNwbfile().add`` registration and the ``insert1`` run
+        inside ``transaction_or_noop`` so they commit (or roll back) atomically.
+        Under the tri-part populate path the framework transaction is already
+        open, so this is a no-op; the wrapper matters for a DIRECT (out-of-
+        populate) reuse of ``make_insert`` -- without it, ``add`` could commit an
+        AnalysisNwbfile row that the failed ``insert1`` then orphans (mirrors
+        ``Sorting`` / ``ConcatenatedRecording``). ``nwb_file_name`` is threaded
+        from ``make_fetch`` via the compute carrier rather than re-walking the
+        recording lineage in the transaction phase. On failure the staged
+        analysis file is removed before re-raising.
         """
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
+
         try:
-            AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
-            self.insert1(
-                {
-                    **key,
-                    "analysis_file_name": analysis_file_name,
-                    "metrics_object_id": metrics_object_id,
-                    "merge_suggestions_object_id": merge_suggestions_object_id,
-                    "proposed_labels_object_id": proposed_labels_object_id,
-                }
-            )
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+                self.insert1(
+                    {
+                        **key,
+                        "analysis_file_name": analysis_file_name,
+                        "metrics_object_id": metrics_object_id,
+                        "merge_suggestions_object_id": (
+                            merge_suggestions_object_id
+                        ),
+                        "proposed_labels_object_id": proposed_labels_object_id,
+                    }
+                )
         except Exception:
             self._cleanup_staged_file(analysis_file_name)
             raise
