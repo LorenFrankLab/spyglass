@@ -522,6 +522,15 @@ def test_describe_parameter_rows_marks_dynamic_default_shipped(dj_conn):
     assert bool(row.iloc[0]["is_shipped_default"]) is True
     assert "non-catalog" not in (row.iloc[0]["name_warnings"] or "")
 
+    # MatcherParameters seeds its default inline in insert_default(); the
+    # extracted _default_rows() lets _shipped_names mark it shipped too.
+    matcher = df[
+        (df["table"] == "MatcherParameters")
+        & (df["parameter_name"] == "unitmatch_default")
+    ]
+    assert len(matcher) == 1
+    assert bool(matcher.iloc[0]["is_shipped_default"]) is True
+
 
 def test_describe_parameter_rows_autocuration_duplicate_name_insensitive(
     dj_conn,

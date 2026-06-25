@@ -166,22 +166,32 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         super().insert(validated, **kwargs)
 
     @classmethod
-    def insert_default(cls):
-        """Insert the ``unitmatch_default`` row if missing (idempotent)."""
+    def _default_rows(cls) -> list[dict]:
+        """The shipped default matcher-parameter row(s).
+
+        Exposed as a classmethod (not inlined in ``insert_default``) so the
+        operational reporting (``describe_parameter_rows`` ->
+        ``_shipped_names``) can discover the shipped names the same way it does
+        for the other dynamic-default Lookups. Pure: builds dicts only.
+        """
         from spyglass.spikesorting.v2._params.matcher import (
             UnitMatchParamsSchema,
         )
 
-        cls().insert1(
+        return [
             {
                 "matcher_params_name": "unitmatch_default",
                 "matcher": "unitmatch",
                 "params": UnitMatchParamsSchema().model_dump(),
                 "params_schema_version": UnitMatchParamsSchema().schema_version,
                 "job_kwargs": None,
-            },
-            skip_duplicates=True,
-        )
+            }
+        ]
+
+    @classmethod
+    def insert_default(cls):
+        """Insert the ``unitmatch_default`` row if missing (idempotent)."""
+        cls().insert(cls._default_rows(), skip_duplicates=True)
 
 
 @schema
