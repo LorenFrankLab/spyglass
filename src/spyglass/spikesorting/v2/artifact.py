@@ -1018,13 +1018,17 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _scan_artifact_frames(recording, validated, job_kwargs=None):
-        """Flag artifact frame indices via a chunked ``ChunkRecordingExecutor``.
+        """Flag contiguous artifact-frame RUNS via a chunked ``ChunkRecordingExecutor``.
 
         Thin delegator to
         :func:`._artifact_intervals.scan_artifact_frames`; kept as an
         ``ArtifactDetection`` staticmethod for the public/tested chunked
-        artifact-scan boundary. The chunked-scan memory contract (default 1 s chunk,
-        ``ChunkRecordingExecutor`` over the ``_artifact_compute`` kernels)
+        artifact-scan boundary. Returns an ascending ``(n_runs, 2)`` array of
+        ``(start, end_inclusive)`` flagged-frame RUN ranges -- NOT one index per
+        flagged frame -- so the result stays O(artifact events), not O(artifact
+        samples); ``detect_artifacts`` joins runs across chunk seams and splits
+        them at wall-clock gaps. The chunked-scan memory contract (default 1 s
+        chunk, ``ChunkRecordingExecutor`` over the ``_artifact_compute`` kernels)
         lives in the service module.
         """
         return scan_artifact_frames(recording, validated, job_kwargs)
