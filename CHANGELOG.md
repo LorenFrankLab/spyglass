@@ -102,6 +102,27 @@ DataJoint `~external` checksum and the next read succeeds.
   is fixed). Integrity scans are now presence-aware: a rebuilt-but-still-flagged
   file is tracked rather than skipped.
 
+#### Spike Sorting v2 recording recompute gains v1-parity operational controls
+
+`RecordingArtifactRecomputeSelection.attempt_all` ports the proven planning
+controls from v1's `RecordingRecompute`, so retrospective recompute audits are
+practical at archive scale and don't waste work on attempts that can't succeed.
+
+- **Environment-compatibility gate (behavior change).** `attempt_all` now plans
+  only artifacts whose inventoried pynwb namespace versions are compatible with
+  the current environment, **skipping incompatible-env artifacts by default**.
+  Pass `force_attempt=True` to restore the previous behavior and plan every
+  artifact regardless of environment.
+- **`limit`.** `attempt_all(limit=k)` plans at most `k` artifacts, drawn at
+  random from the eligible set — for sampling large retrospective audits.
+- **Narrow known-xfail marking.** Each planned artifact is screened for known
+  *structural* impossibilities (missing probe info, PyNWB-API / NWB-spec
+  incompatibility) and the reason recorded in `xfail_reason`, so the recompute
+  short-circuits to `matched=0` rather than re-attempting a regen that cannot
+  succeed. This is intentionally narrow, not a general skip mechanism; pass
+  `check_xfail=False` to disable it. The `SortingAnalyzerRecomputeSelection`
+  recompute is unchanged.
+
 #### Spike Sorting v2 fixes a v1 artifact-detection unit-conversion bug
 
 Spike sorting v2 fixes an artifact-detection unit-conversion bug present
