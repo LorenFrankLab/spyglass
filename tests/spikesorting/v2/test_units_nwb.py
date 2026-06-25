@@ -309,6 +309,62 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     assert read_units_abs_times_and_sample_indices(str(p_empty)) == ({}, {})
 
 
+def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
+    tmp_path,
+):
+    """``unit_ids`` reads ONLY the requested units' trains, so a curation that
+    keeps a subset of a large sort never materializes the discarded units.
+    ``None`` reads every unit; a requested id absent from the table is skipped
+    (the caller's kept-set is authoritative)."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        read_units_abs_times_and_sample_indices,
+    )
+
+    p = tmp_path / "three_units.nwb"
+    _write_units_nwb_with_samples(
+        p,
+        [
+            (4, [0.1, 0.2], [10, 20]),
+            (7, [0.3, 0.4, 0.5], [30, 40, 50]),
+            (9, [1.5], [99]),
+        ],
+    )
+
+    # Subset: only units 4 and 9 are read (unit 7 is never materialized).
+    abs_sub, samp_sub = read_units_abs_times_and_sample_indices(
+        str(p), unit_ids={4, 9}
+    )
+    assert set(abs_sub) == {4, 9}
+    assert set(samp_sub) == {4, 9}
+    np.testing.assert_array_equal(samp_sub[4], [10, 20])
+    np.testing.assert_array_equal(samp_sub[9], [99])
+
+    # None reads every unit (unchanged default behavior).
+    abs_all, _ = read_units_abs_times_and_sample_indices(str(p), unit_ids=None)
+    assert set(abs_all) == {4, 7, 9}
+
+    # A requested id absent from the table is skipped, not an error.
+    abs_missing, _ = read_units_abs_times_and_sample_indices(
+        str(p), unit_ids={4, 999}
+    )
+    assert set(abs_missing) == {4}
+
+
+def test_curation_source_unit_ids_selects_kept_and_contributors():
+    """The source units ``write_curated_units_nwb`` actually reads: with
+    ``apply_merge=True`` a single-contributor kept unit reads its own train
+    (by kept id) and a multi-contributor kept unit reads its contributors'
+    (NOT the fresh merged head id) -- exactly mirroring the write body's access,
+    so dropped units are never read. ``apply_merge=False`` writes every original
+    unit 1:1, so it returns ``None`` (read all)."""
+    from spyglass.spikesorting.v2._units_nwb import curation_source_unit_ids
+
+    # 2 and 5 kept as-is; 11 is a fresh merged head of contributors 3 and 7.
+    kept = {2: [2], 5: [5], 11: [3, 7]}
+    assert curation_source_unit_ids(kept, apply_merge=True) == {2, 5, 3, 7}
+    assert curation_source_unit_ids(kept, apply_merge=False) is None
+
+
 class _FakeRecording:
     def __init__(self, times, fs=_FS, explicit=True):
         self.times = np.asarray(times, dtype=float)

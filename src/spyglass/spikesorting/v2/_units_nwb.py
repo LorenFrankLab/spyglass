@@ -97,7 +97,7 @@ def read_units_spike_sample_indices(abs_path) -> dict | None:
         }
 
 
-def read_units_abs_times_and_sample_indices(abs_path):
+def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     """Open the units NWB ONCE and return ``(abs_times, sample_indices_or_None)``.
 
     Combined reader for callers that need BOTH columns (curated-units write +
@@ -108,29 +108,79 @@ def read_units_abs_times_and_sample_indices(abs_path):
     ``spike_sample_index`` column is absent (legacy/manual files), or ``{}`` for
     an empty Units table. Use the single-column readers on the fast paths that
     need only one column.
+
+    ``unit_ids`` (optional iterable of int): when given, read ONLY those units'
+    spike trains / sample frames rather than every unit -- so a curation that
+    keeps a subset of a large multi-day sort never materializes the discarded
+    units' trains. ``None`` (the default) reads every unit, for the preview /
+    full-write paths that need all of them (see ``curation_source_unit_ids``). A
+    requested id absent from the table is skipped: the caller's kept-set is
+    authoritative, and a genuinely-missing source unit surfaces as a downstream
+    KeyError exactly as it did before this filter existed.
     """
     import numpy as np
     import pynwb
 
+    wanted = None if unit_ids is None else {int(u) for u in unit_ids}
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         units = nwbf.units
         if units is None or len(units) == 0:
             return {}, {}
-        unit_ids = np.asarray(units.id[:], dtype=int)
+        rows = [
+            (row_ind, int(uid))
+            for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
+            if wanted is None or int(uid) in wanted
+        ]
         spike_times = units["spike_times"]
         abs_times = {
-            int(uid): np.asarray(spike_times[row_ind], dtype=float)
-            for row_ind, uid in enumerate(unit_ids)
+            uid: np.asarray(spike_times[row_ind], dtype=float)
+            for row_ind, uid in rows
         }
         if SPIKE_SAMPLE_INDEX_COLUMN not in units.colnames:
             return abs_times, None
         sample_col = units[SPIKE_SAMPLE_INDEX_COLUMN]
         sample_indices = {
-            int(uid): np.asarray(sample_col[row_ind], dtype=np.int64)
-            for row_ind, uid in enumerate(unit_ids)
+            uid: np.asarray(sample_col[row_ind], dtype=np.int64)
+            for row_ind, uid in rows
         }
         return abs_times, sample_indices
+
+
+def curation_source_unit_ids(kept_unit_to_contributors, apply_merge):
+    """Return the source unit ids ``write_curated_units_nwb`` will actually read.
+
+    Mirrors ``_write_curated_units_nwb_body``'s access so the curated-units write
+    reads only the kept subset rather than every source unit (a large multi-day
+    sort otherwise materializes the discarded units' trains too). With
+    ``apply_merge=True`` a multi-contributor kept unit reads each contributor's
+    train and a single-contributor kept unit reads its own (by its kept id == the
+    surviving source id); the fresh merged-head id is never read from the source
+    file. With ``apply_merge=False`` every original unit is written 1:1
+    (preview), so this returns ``None`` -> read all.
+
+    Parameters
+    ----------
+    kept_unit_to_contributors : dict[int, list[int]]
+        ``{kept_unit_id: [source contributor ids]}`` for the curation.
+    apply_merge : bool
+        Whether proposed merges are applied (subset read) or previewed (read
+        all).
+
+    Returns
+    -------
+    set[int] or None
+        The source unit ids to read, or ``None`` to read every unit.
+    """
+    if not apply_merge:
+        return None
+    needed: set[int] = set()
+    for kept_uid, contribs in kept_unit_to_contributors.items():
+        if len(contribs) > 1:
+            needed.update(int(u) for u in contribs)
+        else:
+            needed.add(int(kept_uid))
+    return needed
 
 
 def numpysorting_from_sample_indices(sample_indices, fs):
@@ -661,8 +711,17 @@ def write_curated_units_nwb(
     src_abs_path = AnalysisNwbfile.get_abs_path(
         (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
+    # Read ONLY the source units this curation will write: kept singletons +
+    # merge contributors for apply_merge=True, every unit for the apply_merge=
+    # False preview (see curation_source_unit_ids). A large multi-day sort
+    # otherwise materializes the discarded units' spike trains here too.
     abs_times_by_uid, sample_indices_by_uid = (
-        read_units_abs_times_and_sample_indices(src_abs_path)
+        read_units_abs_times_and_sample_indices(
+            src_abs_path,
+            unit_ids=curation_source_unit_ids(
+                kept_unit_to_contributors, apply_merge
+            ),
+        )
     )
 
     analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
