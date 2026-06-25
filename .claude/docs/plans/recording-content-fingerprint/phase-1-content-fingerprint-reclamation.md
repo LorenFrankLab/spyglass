@@ -30,6 +30,9 @@ At its merge boundary the two pinning tests flip to the happy path.
   `resolve=True` — it resolves even on mismatch at `:816`).
 - [common_file_tracking.py:226-234](../../../../src/spyglass/common/common_file_tracking.py) —
   the unconditional `deleted=1` skip before the presence check.
+- [_analyzer_cache.py:92-135](../../../../src/spyglass/spikesorting/v2/_analyzer_cache.py) —
+  `analyzer_curation_lock`: the existing per-sort `filelock.FileLock` pattern to
+  mirror for the recording lock (design §3.5, concurrency review).
 
 ## Tasks
 
@@ -68,6 +71,13 @@ make `hash_recording_traces` serialize explicit little-endian
 (`np.ascontiguousarray(np.round(traces, rounding).astype("<f4"))` or the
 matching `<` dtype). No hash change on lab hardware; honors the contract.
 
+Also add `recording_artifact_lock(recording_id, *, timeout=-1)` to this module —
+a per-`recording_id` `filelock.FileLock` mirroring `analyzer_curation_lock`
+([_analyzer_cache.py:92](../../../../src/spyglass/spikesorting/v2/_analyzer_cache.py))
+on a stable shared lock root (the analyzer/lock dir, **not** a per-worker temp).
+It lives here because this module is DB-light and imported by both `recording.py`
+and `recompute.py` without a cycle (design §3.5).
+
 ### 2. Writer returns `content_hash`
 
 In [_recording_nwb.py:215](../../../../src/spyglass/spikesorting/v2/_recording_nwb.py),
@@ -93,18 +103,35 @@ migration):
   refs). `ConcatenatedRecording.get_recording:963` is **not** modified — concat
   rebuild/reclamation is out of scope.
 
-### 4. `_rebuild_nwb_artifact` reconcile-or-raise
+### 4. Locked, atomic-publish rebuild reconcile-or-raise
 
-Rewrite `Recording._rebuild_nwb_artifact` (~`recording.py:1549`) per design §3.5:
-rebuild into the slot → fingerprint the rebuilt file via the known abs path →
-compare `combined_hash(fresh) == row["content_hash"]`:
-- **match** → `AnalysisNwbfile()._resolve_external(analysis_file_name)`; then
-  best-effort clear `deleted=0` on the artifact's `RecordingArtifactRecompute`
-  rows (Task 6 makes a failed clear non-fatal).
-- **mismatch** → raise `RecordingContentDriftError`.
-- **Cleanup contract (High 2):** unlink the slot unless fingerprint-match **and**
-  `_resolve_external` both succeed — any post-overwrite failure returns the slot
-  to the missing state.
+Per design §3.5 (locked, atomic-publish — addresses the DataJoint/concurrency
+review's recording-race finding). The lock + atomic publish + fingerprint are
+complementary: the lock serializes against concurrent deletion/peer-rebuild,
+atomic publish prevents partial reads, the fingerprint prevents drift.
+
+`Recording.get_recording` (`:1482`) — **double-checked locked** read-repair:
+acquire `recording_artifact_lock(recording_id)`, re-check file existence under
+the lock (a peer may have rebuilt while we waited), rebuild only if still
+missing, release, then read. Two readers can't both rebuild.
+
+`Recording._rebuild_nwb_artifact` (~`:1549`), **under the lock**:
+1. Rebuild to a **private temp path on the same filesystem** as the canonical
+   slot (so install is an atomic rename) — not into the canonical slot. (The
+   `_recompute_recording_trace_hashes` fresh-write path is the precedent for a
+   scratch rebuild; ensure the temp is not left registered in `~external`.)
+2. Fingerprint the **temp** file via its known abs path.
+3. `combined_hash(fresh) == row["content_hash"]`?
+   - **match** → `os.replace(temp, canonical)` (atomic install) →
+     `AnalysisNwbfile()._resolve_external(analysis_file_name)` (hashes the
+     now-canonical path) → best-effort `deleted=0` clear (Task 6 makes a failed
+     clear non-fatal).
+   - **mismatch** → unlink the temp, raise `RecordingContentDriftError`. The
+     canonical slot is never touched.
+- **Cleanup contract (High 2, atomic-publish):** unlink the temp on any failure;
+  if `os.replace` ran but `_resolve_external` then failed, unlink the canonical
+  to return it to the missing state. Order is load-bearing: `os.replace` precedes
+  `_resolve_external`.
 
 Add `RecordingContentDriftError(RuntimeError)` to
 [exceptions.py](../../../../src/spyglass/spikesorting/v2/exceptions.py) (after
@@ -128,6 +155,13 @@ Remove the `rounding=4: int` PK from `RecordingArtifactRecomputeSelection`
 (`:267`) and the `rounding` arg from `attempt_all` (`:274`); the fixed
 `TRACE_ROUNDING`/`TIMESTAMP_ROUNDING` constants define the identity.
 `SortingAnalyzerRecomputeSelection.rounding` (`:649`) stays.
+
+`delete_files` (`:448` → `_delete_files:1019`) acquires
+`recording_artifact_lock(recording_id)` around each artifact's unlink +
+`deleted=1` update, so a reclamation cannot interleave with a concurrent rebuild
+(design §3.6). The recompute's own fresh temp rebuilds are unlinked on match,
+mismatch, **and** error (design §10 explicit-temp-cleanup) — keep them out of the
+canonical slot.
 
 ### 6. File-tracking presence-aware `deleted=1` skip
 
@@ -171,7 +205,10 @@ than a correctness dependency (design §3.6 Medium 4/3).
 | `test_delete_files_round_trip` *(slow, integration; gates re-enable)* | populate → recompute `matched` → `delete_files(dry_run=False)` removes file → `get_recording` rebuilds + reconciles → traces read back equal pre-delete content → recompute rows now `deleted=0`. |
 | `test_recompute_authority_anchors_on_content_hash` *(slow)* | Current file mutated self-consistent with its rebuild but diverging from `content_hash` → **not** `matched`/deletable; fresh rebuild equal to `content_hash` → `matched`. |
 | `test_rebuild_refuses_on_content_drift` *(slow)* | Monkeypatched fingerprint drift → `RecordingContentDriftError`; file not served, checksum not refreshed. |
-| `test_rebuild_cleanup_on_refresh_failure` *(slow)* | Injected `_resolve_external` failure after overwrite → slot unlinked → next `get_recording` retries cleanly. |
+| `test_rebuild_cleanup_on_refresh_failure` *(slow)* | Injected `_resolve_external` failure after `os.replace` → canonical unlinked (back to missing) → next `get_recording` retries cleanly; temp never left behind. |
+| `test_rebuild_delete_serialized` *(slow, integration)* | A rebuild holding `recording_artifact_lock` blocks a concurrent `delete_files` (and vice versa); the two never interleave, and the post-sequence state is consistent (file present + `deleted=0`, or absent + `deleted=1`) — never a half-state. |
+| `test_get_recording_double_checked` *(slow)* | Two concurrent `get_recording` calls on a missing file rebuild exactly once (the second sees the file under the lock and skips its own rebuild). |
+| `test_rebuild_atomic_no_partial_read` *(slow)* | The canonical slot is never observed partially written during a rebuild — a reader either sees the prior state or the fully-installed file (atomic `os.replace`). |
 | `test_deleted_flag_presence_aware` *(slow)* | `deleted=1` row + file rebuilt on disk → file-tracking scan does **not** skip it; a forced-failed `deleted=0` clear still leaves it tracked. |
 | `test_concat_stores_content_hash` *(slow)* | `ConcatenatedRecording.make` stores `content_hash`; `get_recording` round-trips; update `test_session_group_concat.py` for the renamed column. |
 | v1 `RecordingRecompute` round-trip *(existing, slow)* | Still passes — `_resolve_external` reuse + the `_recompute.py` encoding tweak don't regress v1. |

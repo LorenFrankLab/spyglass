@@ -56,6 +56,10 @@ PR #1600 merged at `c2913b4a`; WIP analyzer/orphan fix at `96e20f98`).
   presence-aware.
 - `src/spyglass/spikesorting/v2/exceptions.py:309` — add
   `RecordingContentDriftError` after the last exception.
+- `src/spyglass/spikesorting/v2/_analyzer_cache.py:92` — `analyzer_curation_lock`:
+  the per-sort `filelock.FileLock` pattern mirrored for the new
+  `recording_artifact_lock(recording_id)` (held by `get_recording` read-repair,
+  `_rebuild_nwb_artifact`, and `delete_files`).
 
 **Phase 2 — v1-parity hardening (reference, not modified):**
 
@@ -79,6 +83,10 @@ analyzer self-heal + orphan-classification work already committed at `96e20f98`.
   delete authority, and rebuild reconciliation — they can no longer disagree.
 - Never silently serve drifted bytes: a rebuild that diverges from the stored
   `content_hash` raises loudly.
+- Serialize recording-artifact mutation: rebuild, read-repair, and recompute
+  deletion hold a shared per-`recording_id` lock and publish atomically, so
+  concurrent workers cannot race the canonical file (DataJoint/concurrency
+  review, 2026-06-25).
 
 ### Non-Goals
 
@@ -112,6 +120,7 @@ No new runtime dependencies. Relies on `origin/master` PR #1600 (merged at
 
 | Risk | Mitigation |
 | --- | --- |
+| Concurrent rebuild vs. recompute deletion race the canonical file (unlink-races-write, reader sees half-written HDF5) | Shared per-`recording_id` `recording_artifact_lock` across rebuild/read-repair/delete + temp-file `os.replace` atomic publish (design §3.5/§3.6). Single-machine / shared-FS scope (`filelock`), as with `analyzer_curation_lock`. |
 | Recompute "current file == fresh rebuild" authorizes a delete the rebuild can't honor against the row identity | Anchor `matched` on `combined_hash(fresh) == Recording.content_hash` (design §3.6 Medium 1) — same invariant the rebuild enforces. |
 | A failed checksum refresh leaves a byte-different file under a stale checksum, wedging `get_recording` | All-or-nothing cleanup: unlink the slot unless fingerprint-match **and** `_resolve_external` both succeed (design §3.5 High 2). |
 | A rebuilt file stays hidden from integrity scans under a stale `deleted=1` | Presence-aware skip in `common_file_tracking` + best-effort `deleted=0` clear (design §3.6 Medium 4). |
