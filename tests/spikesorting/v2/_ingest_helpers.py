@@ -423,6 +423,92 @@ def synthesize_minirec_nwb(
     return out_path
 
 
+def write_two_eseries_nwb(
+    out_path,
+    *,
+    first_rate=30_000.0,
+    second_rate=25_000.0,
+    n_channels=4,
+    n_samples=20,
+):
+    """Write an NWB with TWO acquisition ``ElectricalSeries`` objects.
+
+    The first series is rate-based (``starting_time`` + ``rate``) and the
+    second carries an explicit ``timestamps`` vector, so a caller can assert
+    that raw-source resolution returns the *matched* series' own path AND
+    timestamp mode -- not whatever the acquisition iteration happens to yield
+    first. Both series share one electrodes table; their per-series
+    ``object_id`` values (the identifiers a ``Raw`` row would store) are
+    returned so the caller can pin resolution to either one.
+
+    Parameters
+    ----------
+    out_path : pathlib.Path or str
+        Destination NWB path.
+    first_rate, second_rate : float
+        Sampling rates (Hz) for the rate-based first series and the
+        explicit-timestamp second series. Distinct so a caller can tell which
+        series was read from the resolved sampling rate.
+    n_channels, n_samples : int
+        Electrode count and per-series sample count.
+
+    Returns
+    -------
+    dict
+        ``{"first_series": (name, object_id), "second_series": (name,
+        object_id)}`` -- the in-file acquisition name and NWB object id of
+        each written ``ElectricalSeries``.
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    import pynwb
+
+    nwbfile = pynwb.NWBFile(
+        session_description="two-ElectricalSeries raw-source fixture",
+        identifier="two-eseries-fixture",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    device = nwbfile.create_device(name="probe0")
+    electrode_group = nwbfile.create_electrode_group(
+        name="0", description="test group", location="hpc", device=device
+    )
+    for eid in range(n_channels):
+        nwbfile.add_electrode(id=eid, location="hpc", group=electrode_group)
+
+    rng = np.random.default_rng(0)
+    first = pynwb.ecephys.ElectricalSeries(
+        name="first_series",
+        data=rng.normal(size=(n_samples, n_channels)).astype("float32"),
+        electrodes=nwbfile.create_electrode_table_region(
+            region=list(range(n_channels)), description="first"
+        ),
+        starting_time=0.0,
+        rate=float(first_rate),
+    )
+    second = pynwb.ecephys.ElectricalSeries(
+        name="second_series",
+        data=(
+            rng.normal(size=(n_samples, n_channels)) + 1_000.0
+        ).astype("float32"),
+        electrodes=nwbfile.create_electrode_table_region(
+            region=list(range(n_channels)), description="second"
+        ),
+        timestamps=np.arange(n_samples, dtype=float) / float(second_rate),
+    )
+    nwbfile.add_acquisition(first)
+    nwbfile.add_acquisition(second)
+    object_ids = {
+        "first_series": ("first_series", first.object_id),
+        "second_series": ("second_series", second.object_id),
+    }
+
+    out_path = Path(out_path)
+    with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
+        io.write(nwbfile)
+    return object_ids
+
+
 def _plant_concat_sorting_selection(sid):
     """Land a minimal concat-source ``SortingSelection`` (no ``RecordingSource``).
 

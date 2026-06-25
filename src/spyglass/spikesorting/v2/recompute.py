@@ -482,6 +482,7 @@ def _recompute_recording_trace_hashes(rec_key: dict, rounding: int) -> dict:
     raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
     result = recording_table._compute_recording_artifact(
         raw_path=raw_path,
+        raw_object_id=fetched.raw_object_id,
         nwb_file_name=fetched.sel["nwb_file_name"],
         interval_list_name=fetched.sel["interval_list_name"],
         channel_ids=fetched.channel_ids,

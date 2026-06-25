@@ -906,6 +906,10 @@ class RecordingFetched(NamedTuple):
         ``(n_intervals, 2)`` in seconds.
     raw_valid_times : numpy.ndarray
         Raw data ``valid_times``, shape ``(n_intervals, 2)`` in seconds.
+    raw_object_id : str
+        NWB object id of the session's raw acquisition ElectricalSeries
+        (``Raw.raw_object_id``); pins the compute step to the exact raw
+        source the selection lineage points at.
     """
 
     sel: dict
@@ -919,6 +923,7 @@ class RecordingFetched(NamedTuple):
     probe_types: tuple
     electrode_group_names: tuple
     bad_channel_ids: tuple
+    raw_object_id: str
 
 
 class RecordingComputed(NamedTuple):
@@ -1108,6 +1113,13 @@ class Recording(SpyglassMixin, dj.Computed):
                 "interval_list_name": "raw data valid times",
             }
         ).fetch1("valid_times")
+        # The exact NWB object the common ``Raw`` row was ingested from. The
+        # compute step resolves the raw ElectricalSeries by this id (not by
+        # scanning acquisition) so a multi-ElectricalSeries / repacked NWB
+        # cannot silently feed a different source than the selection lineage.
+        raw_object_id = (
+            Raw & {"nwb_file_name": nwb_file_name}
+        ).fetch1("raw_object_id")
         # Pre-fetch + validate the preprocessing params here so the
         # compute stage does not need to re-read them. The validated
         # model is DeepHash-stable across the two ``make_fetch``
@@ -1160,6 +1172,7 @@ class Recording(SpyglassMixin, dj.Computed):
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
+            raw_object_id=raw_object_id,
         )
 
     def make_compute(
@@ -1176,6 +1189,7 @@ class Recording(SpyglassMixin, dj.Computed):
         probe_types,
         electrode_group_names,
         bad_channel_ids,
+        raw_object_id,
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
@@ -1220,6 +1234,9 @@ class Recording(SpyglassMixin, dj.Computed):
         bad_channel_ids : tuple
             Interior bad channels to re-include on the ``interpolate``
             path; empty for ``remove``.
+        raw_object_id : str
+            NWB object id of the raw acquisition ElectricalSeries
+            (``Raw.raw_object_id``); selects the raw source to read.
 
         Returns
         -------
@@ -1240,6 +1257,7 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_path = Nwbfile().get_abs_path(sel["nwb_file_name"])
         artifact = self._compute_recording_artifact(
             raw_path=raw_path,
+            raw_object_id=raw_object_id,
             nwb_file_name=sel["nwb_file_name"],
             interval_list_name=sel["interval_list_name"],
             channel_ids=channel_ids,
@@ -1567,6 +1585,7 @@ class Recording(SpyglassMixin, dj.Computed):
         raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
         rebuilt = self._compute_recording_artifact(
             raw_path=raw_path,
+            raw_object_id=fetched.raw_object_id,
             nwb_file_name=fetched.sel["nwb_file_name"],
             interval_list_name=fetched.sel["interval_list_name"],
             channel_ids=fetched.channel_ids,
@@ -1596,6 +1615,7 @@ class Recording(SpyglassMixin, dj.Computed):
         self,
         *,
         raw_path: str,
+        raw_object_id: str,
         nwb_file_name: str,
         interval_list_name: str,
         channel_ids: list,
@@ -1620,6 +1640,9 @@ class Recording(SpyglassMixin, dj.Computed):
         ----------
         raw_path : str
             Absolute path to the raw NWB file to read.
+        raw_object_id : str
+            NWB object id of the raw acquisition ElectricalSeries
+            (``Raw.raw_object_id``); selects the source series to read.
         nwb_file_name : str
             Name of the session's raw NWB file.
         interval_list_name : str
@@ -1695,7 +1718,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # lazily from (t_start, sampling_frequency, frame index). Explicit
         # timestamp series may be irregular, so keep the old eager load there.
         raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
-            raw_path
+            raw_path, raw_object_id
         )
         recording = read_raw_nwb_recording(
             raw_path,

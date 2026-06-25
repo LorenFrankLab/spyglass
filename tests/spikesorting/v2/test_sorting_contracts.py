@@ -115,6 +115,24 @@ def test_analyzer_curation_tuples_match_make_signatures():
     assert tuple(insert_params[2:]) == AnalyzerCurationComputed._fields
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_recording_fetched_matches_make_compute_signature():
+    """The tri-part dispatch splats ``RecordingFetched`` POSITIONALLY into
+    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
+    contract. ``raw_object_id`` was appended to both ``RecordingFetched`` and
+    ``make_compute`` -- a misalignment would silently mis-bind the str-adjacent
+    slots (e.g. ``preprocessing_job_kwargs`` / ``raw_object_id``) without a
+    TypeError.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingFetched
+
+    params = list(inspect.signature(Recording.make_compute).parameters)
+    assert params[:2] == ["self", "key"]
+    assert tuple(params[2:]) == RecordingFetched._fields
+
+
 def test_recording_artifact_result_field_contract():
     """``_compute_recording_artifact`` returns a typed ``RecordingArtifactResult``
     (NamedTuple) rather than a bare 8-tuple, so ``make_compute`` and

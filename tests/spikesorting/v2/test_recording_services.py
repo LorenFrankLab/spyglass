@@ -168,6 +168,7 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
             acq = nwb_file.create_group("acquisition")
             series = acq.create_group("e-series")
             series.attrs["neurodata_type"] = "ElectricalSeries"
+            series.attrs["object_id"] = "raw-obj"
             if explicit:
                 series.create_dataset("timestamps", data=np.arange(3.0))
             else:
@@ -179,15 +180,64 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
     _write(rate_path, explicit=False)
     _write(explicit_path, explicit=True)
 
-    assert raw_eseries_path_and_timestamp_mode(str(rate_path)) == (
+    assert raw_eseries_path_and_timestamp_mode(str(rate_path), "raw-obj") == (
         "acquisition/e-series",
         False,
     )
-    assert raw_eseries_path_and_timestamp_mode(str(explicit_path)) == (
+    assert raw_eseries_path_and_timestamp_mode(
+        str(explicit_path), "raw-obj"
+    ) == (
         "acquisition/e-series",
         True,
     )
-    assert raw_eseries_uses_explicit_timestamps(str(rate_path)) is False
+    assert (
+        raw_eseries_uses_explicit_timestamps(str(rate_path), "raw-obj") is False
+    )
+
+
+def test_raw_eseries_path_resolves_by_object_id(tmp_path):
+    """Raw-source resolution pins to the series matching ``raw_object_id`` --
+    the exact object the common ``Raw`` row points at -- NOT the first
+    acquisition ElectricalSeries.
+
+    An NWB can hold more than one acquisition ``ElectricalSeries`` (a repacked
+    or copied file can also reorder acquisition iteration). The previous
+    resolver returned whichever series came first, so v2 could silently
+    preprocess and sort a different signal than the ``RecordingSelection``
+    lineage implies. This pins resolution to the object id and asserts the
+    matched series' OWN path and timestamp mode are returned: the rate-based
+    first series vs. the explicit-timestamp second series.
+    """
+    from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
+
+    from spyglass.spikesorting.v2._recording_nwb import (
+        raw_eseries_path_and_timestamp_mode,
+        raw_eseries_uses_explicit_timestamps,
+    )
+
+    path = tmp_path / "two_eseries.nwb"
+    object_ids = write_two_eseries_nwb(path)
+    first_name, first_obj = object_ids["first_series"]
+    second_name, second_obj = object_ids["second_series"]
+
+    # Pin to the SECOND series' object id -> its path + explicit-timestamp mode.
+    assert raw_eseries_path_and_timestamp_mode(str(path), second_obj) == (
+        f"acquisition/{second_name}",
+        True,
+    )
+    # Pin to the FIRST series' object id -> its path + rate-based mode.
+    assert raw_eseries_path_and_timestamp_mode(str(path), first_obj) == (
+        f"acquisition/{first_name}",
+        False,
+    )
+    assert (
+        raw_eseries_uses_explicit_timestamps(str(path), second_obj) is True
+    )
+
+    # An object id absent from the file's acquisition series fails loudly
+    # rather than silently falling back to the first series.
+    with pytest.raises(ValueError, match="object_id"):
+        raw_eseries_path_and_timestamp_mode(str(path), "no-such-object-id")
 
 
 def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():

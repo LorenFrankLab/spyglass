@@ -1783,6 +1783,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
         with pytest.raises(Exception, match="rebuild post-write boom"):
             Recording()._compute_recording_artifact(
                 raw_path=raw_path,
+                raw_object_id=fetched.raw_object_id,
                 nwb_file_name=nwb_file_name,
                 interval_list_name=fetched.sel["interval_list_name"],
                 channel_ids=fetched.channel_ids,
@@ -1810,3 +1811,97 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
             (AnalysisNwbfile & {"analysis_file_name": existing}).delete(
                 safemode=False
             )
+
+
+# ---------- raw-source resolution pinned to Raw.raw_object_id --------------
+
+
+def test_recording_make_fetch_pins_raw_object_id(recording_selection_key):
+    """``make_fetch`` reads the session's ``Raw.raw_object_id`` and threads it
+    to the compute step.
+
+    The compute path must select the raw ``ElectricalSeries`` by the exact
+    object id the common ``Raw`` row points at, not by scanning acquisition.
+    That object id is database state, so it is fetched in ``make_fetch`` (no
+    NWB I/O in compute) and carried on ``RecordingFetched``.
+    """
+    from spyglass.common.common_ephys import Raw
+    from spyglass.spikesorting.v2.recording import Recording
+
+    fetched = Recording().make_fetch(recording_selection_key)
+    nwb_file_name = fetched.sel["nwb_file_name"]
+    expected = (Raw & {"nwb_file_name": nwb_file_name}).fetch1("raw_object_id")
+
+    assert fetched.raw_object_id == expected, (
+        "make_fetch must carry the session's Raw.raw_object_id so compute "
+        "resolves the raw source by object id; got "
+        f"{fetched.raw_object_id!r} vs Raw {expected!r}"
+    )
+    # Sanity: the fetched value is the canonical id string, not an array.
+    assert isinstance(fetched.raw_object_id, str)
+
+
+@pytest.mark.slow
+def test_raw_source_series_pinned_to_raw_object_id(
+    dj_conn, tmp_path, monkeypatch
+):
+    """``_compute_recording_artifact`` reads the acquisition ``ElectricalSeries``
+    identified by ``raw_object_id`` -- NOT the first acquisition series.
+
+    Builds an NWB with two acquisition ``ElectricalSeries`` (the first
+    rate-based, the second explicit-timestamp) and pins compute to the SECOND
+    series' object id. The raw read must target the second series' in-file
+    path. The previous resolver iterated acquisition and returned the first
+    series, so v2 could silently preprocess and sort a different signal than
+    the ``RecordingSelection`` lineage implies.
+
+    Drives ``_compute_recording_artifact`` directly (the shared populate /
+    rebuild / recompute pipeline body) and captures the path handed to the raw
+    reader, short-circuiting before the heavy slice/preprocess/write so the
+    test stays focused on source selection.
+    """
+    import numpy as np
+
+    from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
+
+    from spyglass.spikesorting import utils as ss_utils
+    from spyglass.spikesorting.v2.recording import Recording
+
+    path = tmp_path / "two_eseries.nwb"
+    object_ids = write_two_eseries_nwb(path)
+    second_name, second_obj = object_ids["second_series"]
+
+    captured = {}
+
+    class _StopAfterRead(Exception):
+        pass
+
+    def _capture_read(nwb_file_abs_path, **kwargs):
+        captured["electrical_series_path"] = kwargs.get("electrical_series_path")
+        raise _StopAfterRead
+
+    monkeypatch.setattr(ss_utils, "read_raw_nwb_recording", _capture_read)
+
+    with pytest.raises(_StopAfterRead):
+        Recording()._compute_recording_artifact(
+            raw_path=str(path),
+            raw_object_id=second_obj,
+            nwb_file_name="unused.nwb",
+            interval_list_name="raw data valid times",
+            channel_ids=[0],
+            reference_mode="none",
+            reference_electrode_id=None,
+            sort_valid_times=np.array([[0.0, 1.0]]),
+            raw_valid_times=np.array([[0.0, 1.0]]),
+            preprocessing_params=None,
+            probe_types=(),
+            electrode_group_names=(),
+            bad_channel_ids=(),
+            existing_analysis_file_name=None,
+        )
+
+    assert captured["electrical_series_path"] == f"acquisition/{second_name}", (
+        "the raw read must target the Raw.raw_object_id series "
+        f"('acquisition/{second_name}'), not the first acquisition series; got "
+        f"{captured['electrical_series_path']!r}"
+    )

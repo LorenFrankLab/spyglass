@@ -29,15 +29,43 @@ path resolution + file create). It also lazily imports the
 from __future__ import annotations
 
 
-def raw_eseries_path_and_timestamp_mode(nwb_file_abs_path: str) -> tuple[str, bool]:
-    """Return the raw acquisition ElectricalSeries path + timestamp mode.
+def raw_eseries_path_and_timestamp_mode(
+    nwb_file_abs_path: str, raw_object_id: str
+) -> tuple[str, bool]:
+    """Return the raw ElectricalSeries' in-file path + timestamp mode.
+
+    Resolves the acquisition ``ElectricalSeries`` whose NWB ``object_id``
+    equals ``raw_object_id`` -- the exact object the common ``Raw`` row was
+    ingested from. A file can hold more than one acquisition
+    ``ElectricalSeries`` (and repacking/copying can reorder acquisition
+    iteration), so selecting by object id reads the intended raw signal rather
+    than whichever series comes first.
 
     Rate-based ElectricalSeries store ``starting_time`` + ``rate`` and do not
     need SpikeInterface to load a full time vector. Timestamp-based series carry
     a ``timestamps`` dataset and must preserve that explicit vector to avoid
-    treating irregular/dropped-sample timing as affine. The path resolution
-    mirrors ``get_raw_eseries_path``: choose the first acquisition
-    ElectricalSeries, matching Raw ingest.
+    treating irregular/dropped-sample timing as affine.
+
+    Parameters
+    ----------
+    nwb_file_abs_path : str
+        Absolute path to the raw NWB file.
+    raw_object_id : str
+        NWB object id of the raw acquisition ElectricalSeries (the
+        ``Raw.raw_object_id`` recorded at ingest).
+
+    Returns
+    -------
+    (path, uses_explicit_timestamps) : tuple of (str, bool)
+        In-file path (e.g. ``"acquisition/e-series"``) of the matched series
+        and whether it stores an explicit ``timestamps`` vector.
+
+    Raises
+    ------
+    ValueError
+        If no acquisition ElectricalSeries with ``object_id == raw_object_id``
+        is present in the file (fail closed rather than read a different
+        series).
     """
     import h5py
 
@@ -48,14 +76,26 @@ def raw_eseries_path_and_timestamp_mode(nwb_file_abs_path: str) -> tuple[str, bo
                 neurodata_type = obj.attrs.get("neurodata_type", b"")
                 if isinstance(neurodata_type, bytes):
                     neurodata_type = neurodata_type.decode()
-                if neurodata_type == "ElectricalSeries":
+                if neurodata_type != "ElectricalSeries":
+                    continue
+                object_id = obj.attrs.get("object_id", b"")
+                if isinstance(object_id, bytes):
+                    object_id = object_id.decode()
+                if object_id == raw_object_id:
                     return f"acquisition/{name}", "timestamps" in obj
-    raise ValueError(f"No acquisition ElectricalSeries found in {nwb_file_abs_path}.")
+    raise ValueError(
+        f"No acquisition ElectricalSeries with object_id={raw_object_id!r} "
+        f"found in {nwb_file_abs_path}."
+    )
 
 
-def raw_eseries_uses_explicit_timestamps(nwb_file_abs_path: str) -> bool:
+def raw_eseries_uses_explicit_timestamps(
+    nwb_file_abs_path: str, raw_object_id: str
+) -> bool:
     """Return whether the raw acquisition ElectricalSeries stores timestamps."""
-    return raw_eseries_path_and_timestamp_mode(nwb_file_abs_path)[1]
+    return raw_eseries_path_and_timestamp_mode(
+        nwb_file_abs_path, raw_object_id
+    )[1]
 
 
 def write_nwb_artifact(
