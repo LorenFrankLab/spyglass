@@ -89,15 +89,6 @@ def raw_eseries_path_and_timestamp_mode(
     )
 
 
-def raw_eseries_uses_explicit_timestamps(
-    nwb_file_abs_path: str, raw_object_id: str
-) -> bool:
-    """Return whether the raw acquisition ElectricalSeries stores timestamps."""
-    return raw_eseries_path_and_timestamp_mode(
-        nwb_file_abs_path, raw_object_id
-    )[1]
-
-
 def write_nwb_artifact(
     recording,
     nwb_file_name: str,

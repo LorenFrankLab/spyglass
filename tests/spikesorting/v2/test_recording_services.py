@@ -160,7 +160,6 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
 
     from spyglass.spikesorting.v2._recording_nwb import (
         raw_eseries_path_and_timestamp_mode,
-        raw_eseries_uses_explicit_timestamps,
     )
 
     def _write(path, *, explicit):
@@ -190,9 +189,6 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
         "acquisition/e-series",
         True,
     )
-    assert (
-        raw_eseries_uses_explicit_timestamps(str(rate_path), "raw-obj") is False
-    )
 
 
 def test_raw_eseries_path_resolves_by_object_id(tmp_path):
@@ -212,7 +208,6 @@ def test_raw_eseries_path_resolves_by_object_id(tmp_path):
 
     from spyglass.spikesorting.v2._recording_nwb import (
         raw_eseries_path_and_timestamp_mode,
-        raw_eseries_uses_explicit_timestamps,
     )
 
     path = tmp_path / "two_eseries.nwb"
@@ -229,9 +224,6 @@ def test_raw_eseries_path_resolves_by_object_id(tmp_path):
     assert raw_eseries_path_and_timestamp_mode(str(path), first_obj) == (
         f"acquisition/{first_name}",
         False,
-    )
-    assert (
-        raw_eseries_uses_explicit_timestamps(str(path), second_obj) is True
     )
 
     # An object id absent from the file's acquisition series fails loudly
