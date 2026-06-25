@@ -73,6 +73,7 @@ from spyglass.spikesorting.v2._sort_group_planning import (
     _reference_electrode_group,
 )
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _assert_v2_db_safe,
     _validate_params,
@@ -679,7 +680,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
 
 @schema
-class PreprocessingParameters(SpyglassMixin, dj.Lookup):
+class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Bandpass + reference + optional whitening parameters.
 
     The ``params`` blob is validated by :class:`PreprocessingParamsSchema`.
@@ -1661,14 +1662,27 @@ class Recording(SpyglassMixin, dj.Computed):
         Notes
         -----
         Cleanup contract: ``_write_nwb_artifact`` either writes a
-        full file or raises before any registration; if a later
-        metadata-extraction step raises after the file is on disk
-        AND ``existing_analysis_file_name is None`` (fresh write
-        path), the staged file is unlinked before propagation so a
-        half-written artifact never outlives a failed compute. On
-        the rebuild path the file IS the canonical cache so we do
-        NOT unlink -- a mid-write failure surfaces via the hash
-        mismatch check in the caller.
+        full file or raises before any registration. On a
+        write/hash failure it unlinks the partial file before
+        propagating, on BOTH the fresh-write and the rebuild path:
+
+        * Fresh write (``existing_analysis_file_name is None``):
+          the freshly staged file is removed so a half-written
+          artifact never outlives a failed compute.
+        * Rebuild (``existing_analysis_file_name`` set): the writer
+          overwrites the canonical slot IN PLACE
+          (``AnalysisNwbfile().create(recompute_file_name=...)``
+          truncates it with ``mode="w"`` before the streaming
+          write), so removing the failed partial is correct: it
+          returns the slot to the same MISSING state that triggered
+          the rebuild. ``_rebuild_nwb_artifact`` is reached only
+          from ``get_recording`` when the cache file is already
+          absent, so there is no valid cache to lose, and the
+          DataJoint row (its ``cache_hash``) plus the raw NWB always
+          allow the next ``get_recording`` to regenerate it. A
+          rebuild that COMPLETES but whose content drifted is caught
+          separately by the caller's hash-mismatch check (a warning;
+          the row is not deleted).
         """
         from spyglass.spikesorting.utils import read_raw_nwb_recording
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps

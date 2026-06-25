@@ -256,6 +256,60 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_sorter_parameters_update1_rejected_in_place(request):
+    """A content-addressed param row cannot be mutated in place by update1.
+
+    ``sorter_params_name`` is folded into the deterministic ``sorting_id`` of
+    every downstream ``SortingSelection``, so editing the parameter blob under
+    the SAME name silently re-defines what an already-minted ``sorting_id``
+    means. ``insert`` already rejects a second NAME for identical content; this
+    pins the symmetric guard on the in-place mutation path: ``update1`` is
+    rejected unless ``allow_param_mutation=True`` (the deliberate-edit escape
+    hatch, mirroring ``allow_direct_insert`` on the selection masters).
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    key = {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "audit_immutable_guard",
+    }
+    request.addfinalizer(
+        lambda: (SorterParameters & key).delete(safemode=False)
+    )
+    SorterParameters().insert1(
+        {
+            **key,
+            "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+            "job_kwargs": None,
+        },
+        allow_duplicate_params=True,
+    )
+
+    # Default path: an in-place blob edit is rejected and the row is unchanged.
+    with pytest.raises(dj.errors.DataJointError, match="not supported"):
+        SorterParameters().update1(
+            {
+                **key,
+                "params": {"detect_threshold": 50.0, "threshold_unit": "uv"},
+            }
+        )
+    assert (
+        (SorterParameters & key).fetch1("params")["detect_threshold"] == 100.0
+    )
+
+    # Explicit escape hatch: the deliberate mutation goes through.
+    SorterParameters().update1(
+        {**key, "params": {"detect_threshold": 50.0, "threshold_unit": "uv"}},
+        allow_param_mutation=True,
+    )
+    assert (
+        (SorterParameters & key).fetch1("params")["detect_threshold"] == 50.0
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_sorter_parameters_tracks_execution_params(request):
     """SorterParameters carries validated execution_params + schema version.
 

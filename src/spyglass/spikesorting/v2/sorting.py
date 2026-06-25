@@ -74,6 +74,7 @@ from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
 )
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     SourceResolution,
     _assert_v2_db_safe,
@@ -199,7 +200,7 @@ schema = dj.schema("spikesorting_v2_sorting")
 
 
 @schema
-class SorterParameters(SpyglassMixin, dj.Lookup):
+class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Per-sorter Pydantic-validated parameter blob.
 
     The ``params`` blob is validated by the per-sorter schema returned by
@@ -579,7 +580,9 @@ def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
 
 
 @schema
-class AnalyzerWaveformParameters(SpyglassMixin, dj.Lookup):
+class AnalyzerWaveformParameters(
+    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+):
     """Tracked window / subsample / whitening for a sort's analyzer recipe.
 
     Mirrors v1's ``WaveformParameters`` so the settings that produced an

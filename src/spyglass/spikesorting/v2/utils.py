@@ -255,6 +255,62 @@ class SelectionMasterInsertGuard:
         )
 
 
+class ImmutableParamsLookup:
+    """Reject in-place mutation of a content-addressed parameter Lookup row.
+
+    The v2 parameter Lookups
+    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
+    ``SorterParameters`` / ``AnalyzerWaveformParameters`` /
+    ``MotionCorrectionParameters`` / ``MatcherParameters``) are keyed by a
+    human-chosen NAME, and that name -- not the parameter content -- is what
+    flows into the deterministic ``recording_id`` / ``artifact_detection_id``
+    / ``sorting_id`` / ``concat_recording_id`` / ``unitmatch_id`` of every
+    downstream selection. The ``insert`` overrides already reject a SECOND
+    name for identical content (``reject_duplicate_parameter_content``)
+    because that forks provenance; the symmetric hazard is editing a row's
+    blob IN PLACE under the SAME name, which silently re-defines what every
+    already-minted id means. ``update1`` is the only standard in-place
+    mutation path, so guard it: a backend/parameter change requires a NEW
+    named row, not an in-place edit.
+
+    ``allow_param_mutation=True`` is the escape hatch for a deliberate
+    maintenance or test edit (mirroring ``allow_direct_insert`` on
+    :class:`SelectionMasterInsertGuard`) of a row known to have no live
+    downstream references. The mixin must precede ``SpyglassMixin`` /
+    ``dj.Lookup`` in the MRO so its ``update1`` takes precedence.
+    """
+
+    def update1(self, row, *, allow_param_mutation=False):
+        """Reject an in-place row mutation unless ``allow_param_mutation``.
+
+        Parameters
+        ----------
+        row : dict
+            The row to update, forwarded to ``dj.Table.update1``.
+        allow_param_mutation : bool, optional
+            Escape hatch for a deliberate maintenance or test mutation of a
+            content-addressed parameter row. Default ``False``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_param_mutation`` is ``False`` (the default),
+            directing the caller to insert a new named row instead.
+        """
+        if not allow_param_mutation:
+            raise dj.errors.DataJointError(
+                f"In-place update1 of {self.__class__.__name__} is not "
+                "supported: the row name is content-addressed into the "
+                "deterministic id of every downstream selection, so mutating "
+                "the parameter blob under the same name silently re-defines "
+                "what existing ids mean. Insert a NEW named row instead (a "
+                "second name for identical content is itself rejected). Pass "
+                "allow_param_mutation=True only for a deliberate maintenance "
+                "or test edit of a row with no live references."
+            )
+        super().update1(row)
+
+
 # ``CurationSource`` and ``CurationLabel`` are defined in the stdlib-only
 # ``_enums`` module and re-exported at the top of this file; see the
 # import there for why they live outside ``utils``.

@@ -382,6 +382,10 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     # full-suite run. update1 edits the secondary attributes without touching the
     # key, so it is safe regardless of test order. The ``finally`` below restores
     # the 100 uV default the same way.
+    # ``allow_param_mutation=True``: SorterParameters is an ImmutableParamsLookup
+    # (its name is content-addressed into sorting_id), so an in-place update1 is
+    # rejected by default. This is the documented deliberate-edit escape hatch --
+    # the row is restored in the finally below.
     SorterParameters.update1(
         {
             "sorter": "clusterless_thresholder",
@@ -389,7 +393,8 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
-        }
+        },
+        allow_param_mutation=True,
     )
 
     try:
@@ -422,7 +427,11 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         # to this SorterParameters row, so DJ's replace path
         # (delete + reinsert) is blocked by the FK constraint.
         # update1 modifies the secondary attributes in place.
-        SorterParameters.update1(original_default)
+        # allow_param_mutation=True: the deliberate-restore escape hatch on the
+        # ImmutableParamsLookup guard (see the forward edit above).
+        SorterParameters.update1(
+            original_default, allow_param_mutation=True
+        )
 
 
 @pytest.mark.slow

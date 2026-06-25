@@ -66,6 +66,7 @@ from spyglass.spikesorting.v2._recipe_catalog import artifact_default_contents
 from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     SourceResolution,
     _assert_v2_db_safe,
@@ -118,7 +119,9 @@ class ArtifactComputed(NamedTuple):
 
 
 @schema
-class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
+class ArtifactDetectionParameters(
+    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+):
     """Validated artifact-detection parameter blob.
 
     The ``params`` blob is validated by
