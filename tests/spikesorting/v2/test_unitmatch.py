@@ -737,6 +737,40 @@ def test_insert_selection_idempotent_and_hash_sensitive(
 
 
 @pytest.mark.slow
+def test_insert_selection_rejects_forged_master_with_mismatched_parts(
+    two_session_curated_group,
+):
+    """A deterministic master whose MemberCuration parts no longer realize its
+    curation_set_hash (here: a part was dropped) is rejected by
+    insert_selection's _find_existing_pk -- caught up front, not returned as a
+    'valid' PK that only UnitMatch.make_fetch would later reject.
+    """
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    grp = two_session_curated_group
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+    )
+    # Tear down the consistent selection, then re-insert ONLY the master row
+    # (same deterministic id + curation_set_hash, no MemberCuration parts) -- a
+    # raw-insert orphan that DataJoint parts cannot be deleted into directly.
+    master_row = (UnitMatchSelection & pk).fetch1()
+    (UnitMatchSelection & pk).super_delete(warn=False)
+    UnitMatchSelection.insert1(master_row, allow_direct_insert=True)
+    try:
+        with pytest.raises(SchemaBypassError, match="curation_set_hash"):
+            UnitMatchSelection.insert_selection(
+                grp["owner"],
+                grp["group_name"],
+                "unitmatch_default",
+                grp["choices"],
+            )
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_insert_selection_rejects_wrong_member_curation(
     two_session_curated_group,
 ):

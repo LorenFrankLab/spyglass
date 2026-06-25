@@ -347,17 +347,23 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Return the canonical PK for this selection identity, or None.
 
         The full logical identity (group + matcher + ``curation_set_hash``)
-        lives in the master's own columns, so -- unlike the part-sourced
-        selection masters -- it is checked against the master alone. Any master
-        matching the identity whose ``unitmatch_id`` is NOT the deterministic id
-        is a raw-insert / pre-determinism legacy bypass of the content-addressed
-        invariant, and is rejected rather than silently returned.
+        lives in the master's own columns. A master matching the identity whose
+        ``unitmatch_id`` is NOT the deterministic id is a raw-insert /
+        pre-determinism bypass and is rejected. When the deterministic master
+        DOES exist, its ``MemberCuration`` parts are verified to realize the
+        identity's ``curation_set_hash`` (mirroring the part-join the other
+        part-bearing selection masters do): a forged master can carry the right
+        id with missing / stale / foreign parts, and that must be rejected HERE
+        rather than returning a "valid" PK that only ``make_fetch`` later
+        rejects.
 
         Used by ``insert_selection`` for both the pre-insert lookup and the
         post-duplicate-key refetch.
         """
+        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
+            SchemaBypassError,
         )
 
         master_ids = {
@@ -376,11 +382,28 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "pre-determinism legacy row); drop it and re-insert via "
                 "insert_selection."
             )
-        return (
-            {"unitmatch_id": deterministic_unitmatch_id}
-            if master_ids
+        if not master_ids:
+            return None
+        parts = (
+            cls.MemberCuration & {"unitmatch_id": deterministic_unitmatch_id}
+        ).fetch(as_dict=True)
+        part_hash = (
+            curation_set_hash(
+                (row["member_index"], row["sorting_id"], row["curation_id"])
+                for row in parts
+            )
+            if parts
             else None
         )
+        if part_hash != identity["curation_set_hash"]:
+            raise SchemaBypassError(
+                f"UnitMatchSelection master {deterministic_unitmatch_id} exists "
+                "but its MemberCuration parts do not realize its "
+                "curation_set_hash (missing / stale / foreign parts -- a "
+                "raw-insert orphan or forgery). Drop the master and re-insert "
+                "via insert_selection()."
+            )
+        return {"unitmatch_id": deterministic_unitmatch_id}
 
 
 @schema
