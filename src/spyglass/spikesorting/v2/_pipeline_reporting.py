@@ -283,9 +283,28 @@ def describe_parameter_rows() -> "pd.DataFrame":
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
-    def _shipped_names(table):
+    def _shipped_names(table, name_attr):
+        # Static-tuple catalogs (``_DEFAULT_CONTENTS``) and the dynamic-default
+        # tables that build rows in code (``_default_rows`` ->
+        # QualityMetricParameters; ``_default_payloads`` -> AutoCurationRules).
+        # Both default builders are pure, so calling them here is safe. Returns
+        # None only when shipped status genuinely cannot be determined.
         contents = getattr(table, "_DEFAULT_CONTENTS", None)
-        return {r[0] for r in contents} if contents else None
+        if contents:
+            return {r[0] for r in contents}
+        rows_fn = getattr(table, "_default_rows", None)
+        if callable(rows_fn):
+            try:
+                return {row[name_attr] for row in rows_fn()}
+            except Exception:  # pragma: no cover -- defensive
+                return None
+        payloads_fn = getattr(table, "_default_payloads", None)
+        if callable(payloads_fn):
+            try:
+                return {master[name_attr] for master, _ in payloads_fn()}
+            except Exception:  # pragma: no cover -- defensive
+                return None
+        return None
 
     def _append_simple_param_records(
         table, table_name, name_attr, summarize, extra_content=None
@@ -299,7 +318,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
         fingerprint so a name-keyed master with identical scalar columns but
         different part rows is not falsely flagged as a content duplicate.
         """
-        shipped = _shipped_names(table)
+        shipped = _shipped_names(table, name_attr)
         for simple_row in table.fetch(as_dict=True):
             version = int(simple_row.get("params_schema_version", 0) or 0)
             content = {
@@ -357,8 +376,15 @@ def describe_parameter_rows() -> "pd.DataFrame":
         # The Rule part rows define the named ruleset's content, so fold them
         # (ordered by rule_index) into the fingerprint -- two rulesets with the
         # same master columns but different Rule rows are NOT duplicates.
+        # Exclude the auto_curation_rules_name FK (it IS the name being
+        # abstracted away) so two IDENTICAL rule sets under different names share
+        # a fingerprint and surface as duplicate_of.
         return [
-            {k: _jsonable_blob(v) for k, v in rule.items()}
+            {
+                k: _jsonable_blob(v)
+                for k, v in rule.items()
+                if k != "auto_curation_rules_name"
+            }
             for rule in (
                 AutoCurationRules.Rule
                 & {
@@ -401,9 +427,12 @@ def describe_parameter_rows() -> "pd.DataFrame":
         warnings = []
         if rec["duplicate_of"]:
             warnings.append(f"duplicate content of {rec['duplicate_of']!r}")
-        if "franklab" in rec["parameter_name"] and not rec[
-            "is_shipped_default"
-        ]:
+        if (
+            "franklab" in rec["parameter_name"]
+            and rec["is_shipped_default"] is False
+        ):
+            # Only flag when shipped status is KNOWN False; ``None`` means
+            # undetermined (don't emit a false "non-catalog" warning).
             warnings.append("non-catalog row using the 'franklab' name")
         rec["name_warnings"] = "; ".join(warnings)
 

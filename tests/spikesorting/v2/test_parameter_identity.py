@@ -500,6 +500,74 @@ def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     } <= tables
 
 
+def test_describe_parameter_rows_marks_dynamic_default_shipped(dj_conn):
+    """Dynamic-default tables resolve is_shipped_default from their code-built
+    defaults (QualityMetricParameters._default_rows /
+    AutoCurationRules._default_payloads), not only static _DEFAULT_CONTENTS. So a
+    shipped 'franklab' row reports is_shipped_default=True and does NOT get the
+    false 'non-catalog row using the franklab name' warning.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        describe_parameter_rows,
+    )
+
+    initialize_v2_defaults()
+    df = describe_parameter_rows()
+    row = df[
+        (df["table"] == "QualityMetricParameters")
+        & (df["parameter_name"] == "franklab_default")
+    ]
+    assert len(row) == 1
+    assert bool(row.iloc[0]["is_shipped_default"]) is True
+    assert "non-catalog" not in (row.iloc[0]["name_warnings"] or "")
+
+
+def test_describe_parameter_rows_autocuration_duplicate_name_insensitive(
+    dj_conn,
+):
+    """Two AutoCurationRules rule sets with IDENTICAL Rule rows under different
+    names share a fingerprint (the name FK is excluded from the Rule content) and
+    surface as duplicate_of each other.
+    """
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        describe_parameter_rows,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    rules = [
+        {
+            "rule_index": 0,
+            "rule_name": "nn_noise",
+            "metric_name": "nn_noise_overlap",
+            "operator": ">",
+            "threshold": 0.1,
+            "label": "noise",
+        },
+    ]
+    name_a, name_b = "audit_rules_dup_a", "audit_rules_dup_b"
+    keys = [
+        {"auto_curation_rules_name": name_a},
+        {"auto_curation_rules_name": name_b},
+    ]
+    try:
+        AutoCurationRules.insert_rules(
+            {**keys[0], "auto_merge_preset": "none"}, [dict(r) for r in rules]
+        )
+        AutoCurationRules.insert_rules(
+            {**keys[1], "auto_merge_preset": "none"}, [dict(r) for r in rules]
+        )
+        sub = describe_parameter_rows().pipe(
+            lambda df: df[df["table"] == "AutoCurationRules"]
+        )
+        a = sub[sub["parameter_name"] == name_a].iloc[0]
+        b = sub[sub["parameter_name"] == name_b].iloc[0]
+        assert a["duplicate_of"] == name_b
+        assert b["duplicate_of"] == name_a
+    finally:
+        (AutoCurationRules & keys).delete(safemode=False)
+
+
 @pytest.mark.database
 def test_within_batch_duplicate_content_rejected(dj_conn):
     """Two same-content/different-name rows in ONE insert() call collide.
