@@ -584,6 +584,9 @@ def run_v2_pipeline_session(
                         "error_type": "PreflightError",
                         "error": "\n".join(row["errors"]),
                         "partial_run_summary": None,
+                        # Carry this group's advisories too, so describe_run /
+                        # the batch warning count do not under-report failures.
+                        "warnings": list(row.get("warnings", [])),
                     }
                 )
 
@@ -625,6 +628,13 @@ def run_v2_pipeline_session(
                     "error": str(exc),
                     "partial_run_summary": getattr(
                         exc, "partial_run_summary", None
+                    ),
+                    # This group passed preflight (ran with preflight=False) but
+                    # failed mid-run; keep its preflight advisories visible. Any
+                    # stage warnings live on partial_run_summary, which
+                    # _run_warnings reads too.
+                    "warnings": preflight_warnings_by_group.get(
+                        sort_group_id, []
                     ),
                 }
             )
