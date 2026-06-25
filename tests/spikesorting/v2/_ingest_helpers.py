@@ -509,6 +509,102 @@ def write_two_eseries_nwb(
     return object_ids
 
 
+def write_processed_recording_nwb(
+    out_path,
+    *,
+    traces,
+    timestamps,
+    rel_positions,
+    conversion=1e-6,
+    offset=0.0,
+    filtering="bandpass filter 300-6000 Hz",
+    channel_ids=None,
+    series_name="ProcessedElectricalSeries",
+):
+    """Write a minimal analysis-style NWB with one preprocessed ElectricalSeries.
+
+    Mirrors the shape v2's ``write_nwb_artifact`` persists -- unscaled traces
+    plus ``conversion``/``offset``, an explicit ``timestamps`` vector, and an
+    electrodes region carrying ``rel_x``/``rel_y`` geometry -- so the content
+    fingerprint can be exercised without a database.
+
+    Parameters
+    ----------
+    out_path : pathlib.Path or str
+        Destination NWB path.
+    traces : array-like, shape (n_frames, n_channels)
+        Unscaled trace samples written to the ElectricalSeries ``data``.
+    timestamps : array-like, shape (n_frames,)
+        Explicit wall-clock timestamps (seconds).
+    rel_positions : array-like, shape (n_channels, 2)
+        Per-channel ``(rel_x, rel_y)`` probe geometry (µm).
+    conversion, offset : float
+        ElectricalSeries volts-per-count and volts offset.
+    filtering : str
+        ElectricalSeries ``filtering`` provenance string.
+    channel_ids : sequence of int, optional
+        Electrode ids in row order; defaults to ``range(n_channels)``.
+    series_name : str
+        Acquisition ElectricalSeries name.
+
+    Returns
+    -------
+    tuple
+        ``(out_path, electrical_series_path)`` where the path is
+        ``f"acquisition/{series_name}"``.
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    import pynwb
+
+    traces = np.asarray(traces)
+    timestamps = np.asarray(timestamps, dtype=float)
+    rel_positions = np.asarray(rel_positions, dtype=float)
+    n_frames, n_channels = traces.shape
+
+    nwbfile = pynwb.NWBFile(
+        session_description="processed-recording fingerprint fixture",
+        identifier="processed-recording-fixture",
+        session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )
+    device = nwbfile.create_device(name="probe0")
+    electrode_group = nwbfile.create_electrode_group(
+        name="0", description="test group", location="hpc", device=device
+    )
+    ids = (
+        list(channel_ids)
+        if channel_ids is not None
+        else list(range(n_channels))
+    )
+    for i, eid in enumerate(ids):
+        nwbfile.add_electrode(
+            id=int(eid),
+            location="hpc",
+            group=electrode_group,
+            rel_x=float(rel_positions[i, 0]),
+            rel_y=float(rel_positions[i, 1]),
+        )
+    region = nwbfile.create_electrode_table_region(
+        region=list(range(n_channels)), description="all"
+    )
+    series = pynwb.ecephys.ElectricalSeries(
+        name=series_name,
+        data=traces,
+        electrodes=region,
+        timestamps=timestamps,
+        conversion=float(conversion),
+        offset=float(offset),
+        filtering=filtering,
+    )
+    nwbfile.add_acquisition(series)
+
+    out_path = Path(out_path)
+    with pynwb.NWBHDF5IO(str(out_path), mode="w") as io:
+        io.write(nwbfile)
+    return out_path, f"acquisition/{series_name}"
+
+
 def _plant_concat_sorting_selection(sid):
     """Land a minimal concat-source ``SortingSelection`` (no ``RecordingSource``).
 

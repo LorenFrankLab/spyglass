@@ -70,8 +70,13 @@ def hash_recording_traces(
                 ),
                 dtype=np.float64,
             )
+            # Serialize explicit little-endian so the digest is byte-stable
+            # across architectures (the content-fingerprint contract). traces
+            # is float64 above; ``<f8`` is a no-op on x86/ARM but defensive.
             digest.update(
-                np.ascontiguousarray(np.round(traces, rounding)).tobytes()
+                np.ascontiguousarray(
+                    np.round(traces, rounding).astype("<f8")
+                ).tobytes()
             )
         hashes[f"segment_{segment}"] = digest.hexdigest()
     return hashes
