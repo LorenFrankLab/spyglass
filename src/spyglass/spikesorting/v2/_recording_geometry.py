@@ -35,12 +35,17 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
     """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
     SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
-    electrodes table's ``channel_name`` string column as the
-    channel id if present; otherwise integer ``electrode_id`` is
-    the channel id (the 1-1 fallback). Production NWBs that carry a
-    ``channel_name`` column resolve correctly through it. The Frank-lab
-    MEArec fixture lacks the column and falls through to the
-    integer path.
+    electrodes table's ``channel_name`` string column as the channel id if
+    present; otherwise the integer ``electrode_id`` is the channel id (the 1-1
+    fallback). The ``channel_name`` column is POSITIONAL -- row ``k`` holds
+    channel ``k``'s name -- but Spyglass electrode ids are not guaranteed to
+    equal table row positions (production NWBs can be non-contiguous,
+    non-zero-based, or reordered). Each electrode id is therefore resolved to
+    its electrodes-table ROW via ``get_electrode_indices`` (the same id->row
+    mapping the write side uses in ``electrode_table_region``) before reading
+    ``channel_name`` -- never ``channel_name[electrode_id]``, which would slice
+    the wrong channel. A requested id that is absent, or that maps to more than
+    one row, raises rather than silently mis-indexing.
 
     Parameters
     ----------
@@ -52,22 +57,54 @@ def spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
     Returns
     -------
     list
-        SpikeInterface channel ids -- ``channel_name`` strings when
-        the electrodes table carries that column, otherwise integer
-        electrode ids.
+        SpikeInterface channel ids -- ``channel_name`` strings (in the order
+        of ``spyglass_ids``) when the electrodes table carries that column,
+        otherwise the integer electrode ids.
+
+    Raises
+    ------
+    ValueError
+        If any requested electrode id is not in the electrodes table, or maps
+        to more than one row (ambiguous id).
     """
     import pynwb
 
     from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.utils.nwb_helper_fn import (
+        get_electrode_indices,
+        invalid_electrode_index,
+    )
 
+    ids = [int(c) for c in spyglass_ids]
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
     with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
         nwbfile = io.read()
         electrodes_table = nwbfile.electrodes
+        table_ids = [int(e) for e in electrodes_table.id[:]]
+        # Map each requested electrode id -> electrodes-table row index.
+        row_indices = get_electrode_indices(nwbfile, ids)
+        missing = [
+            eid
+            for eid, idx in zip(ids, row_indices)
+            if idx == invalid_electrode_index
+        ]
+        if missing:
+            raise ValueError(
+                f"spikeinterface_channel_ids: electrode ids {missing} are not "
+                f"in the {nwb_file_name!r} electrodes table"
+            )
+        ambiguous = sorted({eid for eid in ids if table_ids.count(eid) > 1})
+        if ambiguous:
+            raise ValueError(
+                f"spikeinterface_channel_ids: electrode ids {ambiguous} map to "
+                f"more than one row in the {nwb_file_name!r} electrodes table"
+            )
         if "channel_name" not in electrodes_table.colnames:
-            return [int(c) for c in spyglass_ids]
+            # No channel_name column: SI uses the integer electrode_id as the
+            # channel id (validated present above), independent of row order.
+            return ids
         channel_names = electrodes_table["channel_name"]
-        return [channel_names[int(c)] for c in spyglass_ids]
+        return [channel_names[idx] for idx in row_indices]
 
 
 def fetch_sort_group_probe_info(
