@@ -219,6 +219,81 @@ def load_or_rebuild_analyzer(
     return si.load_sorting_analyzer(folder)
 
 
+def reconstruct_recording_and_sorting(sorting_table, key):
+    """Reconstruct the canonical (artifact-masked) recording + sorting for a sort.
+
+    Resolves the sort's source recording (single or concatenated), applies the
+    artifact mask when the sort is artifact-backed, and loads the canonical
+    sorting from the units NWB -- exactly the ``(recording, sorting)`` pair
+    ``build_analyzer`` starts from (it then 2D-projects + whitens per recipe).
+    Touches NO analyzer cache, so the recompute audit can source sorting +
+    recording without loading a (possibly reclaimed) analyzer folder -- shared
+    with ``rebuild_analyzer_folder`` (the cache-rebuild path) so both stay in
+    lockstep. ``key`` must carry a literal ``sorting_id``.
+
+    Parameters
+    ----------
+    sorting_table
+        ``Sorting`` table/relation instance (passed so this module imports no
+        schema module at import time).
+    key : dict
+        Restriction carrying a literal ``sorting_id``.
+
+    Returns
+    -------
+    tuple
+        ``(recording, sorting)`` -- the artifact-masked SI recording and the
+        canonical SI sorting.
+    """
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import (
+        artifact_detection_interval_list_name,
+    )
+
+    # Resolve the artifact-detection id from the ArtifactDetectionSource part
+    # (the master has no artifact_detection_id FK); without it the mask gate
+    # below never fires and an artifact-backed sort's recording would omit the
+    # mask, diverging from what Sorting.make wrote.
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(key)
+    source = SortingSelection.resolve_source(key)
+    if source.kind == "recording":
+        recording = Recording().get_recording(
+            {"recording_id": source.key["recording_id"]}
+        )
+    else:  # concatenated_recording: runs over the concat cache, no artifact pass
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
+
+        recording = ConcatenatedRecording().get_recording(source.key)
+    if source.kind == "recording" and artifact_detection_id is not None:
+        nwb_file_name = (
+            RecordingSelection
+            & {"recording_id": source.key["recording_id"]}
+        ).fetch1("nwb_file_name")
+        valid_times = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": artifact_detection_interval_list_name(
+                    artifact_detection_id
+                ),
+            }
+        ).fetch1("valid_times")
+        recording = sorting_table._apply_artifact_mask(
+            recording=recording,
+            valid_times=valid_times,
+            artifact_detection_id=artifact_detection_id,
+            recording_id=source.key["recording_id"],
+        )
+    return recording, sorting_table.get_sorting(key)
+
+
 def rebuild_analyzer_folder(
     sorting_table, key, waveform_params_name=None
 ) -> None:
@@ -240,63 +315,15 @@ def rebuild_analyzer_folder(
     """
     import shutil
 
-    from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import (
-        artifact_detection_interval_list_name,
-    )
     from spyglass.utils import logger
 
-    sel_row = (SortingSelection & key).fetch1()
-    # Resolve the artifact-detection id from the ArtifactDetectionSource
-    # part (the master has no artifact_detection_id FK); without this the
-    # artifact-mask gate below would never fire and a rebuilt analyzer for
-    # an artifact-backed sort would omit the mask, diverging from what
-    # Sorting.make wrote.
-    sel_row["artifact_detection_id"] = (
-        SortingSelection.resolve_artifact_detection(key)
+    # The canonical (artifact-masked) recording + sorting -- the exact pair the
+    # recompute audit reconstructs too (shared resolver), so a rebuilt analyzer
+    # and a fresh audit build start from identical inputs.
+    recording, sorting_obj = reconstruct_recording_and_sorting(
+        sorting_table, key
     )
-    source = SortingSelection.resolve_source(key)
-    if source.kind == "recording":
-        recording = Recording().get_recording(
-            {"recording_id": source.key["recording_id"]}
-        )
-    else:  # concatenated_recording
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
-
-        # A concat sort runs over the materialized concat cache and has no
-        # artifact pass, so the mask block below is skipped.
-        recording = ConcatenatedRecording().get_recording(source.key)
-    if source.kind == "recording" and (
-        sel_row.get("artifact_detection_id") is not None
-    ):
-        nwb_file_name = (
-            RecordingSelection
-            & {"recording_id": source.key["recording_id"]}
-        ).fetch1("nwb_file_name")
-        valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": artifact_detection_interval_list_name(
-                    sel_row["artifact_detection_id"]
-                ),
-            }
-        ).fetch1("valid_times")
-        recording = sorting_table._apply_artifact_mask(
-            recording=recording,
-            valid_times=valid_times,
-            artifact_detection_id=sel_row["artifact_detection_id"],
-            recording_id=source.key["recording_id"],
-        )
-    sorting_obj = sorting_table.get_sorting(key)
     if waveform_params_name is None:
         waveform_params_name = resolve_display_waveform_params_name(
             sorting_table, key["sorting_id"]

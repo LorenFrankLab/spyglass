@@ -853,6 +853,7 @@ def _recompute_analyzer_hashes(
     from spyglass.spikesorting.v2._sorting_analyzer import (
         build_analyzer,
         fetch_waveform_params,
+        reconstruct_recording_and_sorting,
     )
 
     try:
@@ -874,21 +875,17 @@ def _recompute_analyzer_hashes(
     import spikeinterface as si
 
     params = fetch_waveform_params(waveform_params_name)
-    # Rebuild from the UNWHITENED canonical recording (the display analyzer
-    # always holds the artifact-masked, 2D-projected, unwhitened recording
-    # build_analyzer starts from). build_analyzer re-applies whitening per the
-    # target recipe, so a whitened metric analyzer is not double-whitened from
-    # its own (already whitened) recording. The sorting is recipe-independent.
-    #
-    # NO-REBUILD here too: this only sources sorting + recording, but the default
-    # rebuild=True would self-heal the DISPLAY folder as a side effect -- so
-    # verifying a metric analyzer while the display folder is missing would
-    # re-materialize a large display cache during the audit. With rebuild=False a
-    # missing display propagates AnalyzerFolderMissingError -> matched=0 (cannot
-    # verify without the canonical source), never a silent rebuild. For the
-    # common display-recipe verify, the stored load above already required (and
-    # loaded) this same folder, so this is a no-op cache hit.
-    base = Sorting().get_analyzer(sort_key, rebuild=False)
+    # Source sorting + recording from the CANONICAL units NWB + recording (the
+    # shared resolver), NOT a self-healing analyzer load. This (a) never rebuilds
+    # the DISPLAY analyzer cache as a side effect -- so verifying a metric
+    # analyzer while the display folder is reclaimed still produces a real
+    # comparison (and never re-materializes a large display folder during the
+    # audit) -- and (b) reconstructs the SAME artifact-masked, unwhitened
+    # recording build_analyzer starts from (it 2D-projects + whitens per recipe,
+    # so a whitened metric analyzer is not double-whitened). The sorting is
+    # recipe-independent. (Recording.get_recording can still rebuild a reclaimed
+    # RECORDING cache -- a separate, known self-heal, out of scope here.)
+    recording, sorting = reconstruct_recording_and_sorting(Sorting(), sort_key)
 
     tmp = tempfile.mkdtemp(prefix="v2_analyzer_recompute_")
     try:
@@ -899,8 +896,8 @@ def _recompute_analyzer_hashes(
         # hashed (and not a dependency of templates/waveforms), so computing it
         # would be wasted work on every recompute.
         build_analyzer(
-            base.sorting,
-            base.recording,
+            sorting,
+            recording,
             sort_key,
             analyzer_folder=Path(tmp) / "analyzer.zarr",
             waveform_params=params,

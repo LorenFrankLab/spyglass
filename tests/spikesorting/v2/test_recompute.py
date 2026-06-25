@@ -331,17 +331,18 @@ def test_sorting_analyzer_recompute_missing_is_unmatched(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_recompute_base_does_not_self_heal_display(display_analyzer_folder):
-    """Verifying a NON-display (metric) recipe must NOT self-heal the display
-    cache as a side effect of sourcing sorting+recording. With the display
-    folder missing, the base load raises ``AnalyzerFolderMissingError`` instead
-    of re-materializing a large display folder during the audit."""
+def test_recompute_metric_verify_independent_of_display_cache(
+    display_analyzer_folder,
+):
+    """Verifying a metric analyzer reconstructs sorting+recording from CANONICAL
+    sources (units NWB + recording), so the audit neither depends on nor rebuilds
+    the display analyzer cache. With the display folder reclaimed (recording
+    intact), the metric verify still produces a real, matched comparison and
+    leaves the display folder absent."""
     import shutil
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2.exceptions import (
-        AnalyzerFolderMissingError,
-    )
+    from spyglass.spikesorting.v2._recompute import compare_hash_dicts
     from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -361,10 +362,14 @@ def test_recompute_base_does_not_self_heal_display(display_analyzer_folder):
     Sorting().get_analyzer(sort_key, waveform_params_name=metric_recipe)
     assert metric_folder.exists()
     try:
-        shutil.rmtree(display_folder)  # display gone; metric present
-        with pytest.raises(AnalyzerFolderMissingError):
-            _recompute_analyzer_hashes(sort_key, 4, metric_recipe)
-        # The base sorting+recording source did NOT rebuild the display folder.
+        shutil.rmtree(display_folder)  # display reclaimed; metric present
+        # No AnalyzerFolderMissingError: sorting+recording come from canonical
+        # sources, not the (now-absent) display analyzer folder.
+        stored, fresh = _recompute_analyzer_hashes(sort_key, 4, metric_recipe)
+        assert stored and fresh
+        matched, *_ = compare_hash_dicts(stored, fresh)
+        assert matched, (stored, fresh)
+        # The audit did NOT rebuild the display cache.
         assert not display_folder.exists()
     finally:
         shutil.rmtree(metric_folder, ignore_errors=True)
