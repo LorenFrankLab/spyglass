@@ -543,13 +543,77 @@ def test_chunked_artifact_matches_in_memory_reference(
         rec, validated, job_kwargs={"n_jobs": 1, "chunk_size": 90_000}
     )
 
-    assert np.array_equal(chunked, reference), (
-        "Chunked artifact frames diverge from the in-memory reference; the "
+    # scan returns run RANGES; expand them to the per-frame set the reference
+    # holds. Equivalence is "the runs cover exactly the flagged frames", across
+    # chunk seams (chunked) and as a single chunk (single).
+    assert np.array_equal(_expand_runs(chunked), reference), (
+        "Chunked artifact runs diverge from the in-memory reference; the "
         "ChunkRecordingExecutor port changed which frames are flagged."
     )
+    assert np.array_equal(_expand_runs(single), reference), (
+        "Single-chunk pass should reproduce the in-memory reference exactly."
+    )
+
+
+def _expand_runs(runs):
+    """Expand ``(start, end_inclusive)`` runs to the ascending per-frame array."""
+    if runs.size == 0:
+        return np.empty(0, dtype=np.int64)
+    return np.concatenate([np.arange(s, e + 1) for s, e in runs])
+
+
+def test_scan_artifact_frames_returns_bounded_runs(dj_conn):
+    """``scan_artifact_frames`` returns run-length ranges, not one index per
+    flagged frame, so the reviewer's "large but under the 50% guard" case (a
+    heavily-but-contiguously flagged recording) stays O(n_runs) in memory
+    instead of O(n_bad_frames). Here 40% of the recording is flagged in one
+    contiguous block -> a couple of per-chunk runs (the cross-chunk join happens
+    in detect_artifacts), and expanding them recovers exactly the flagged
+    frames."""
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        scan_artifact_frames,
+    )
+
+    traces = np.zeros((5000, 2), dtype="float32")
+    traces[:2000] = 1000.0  # first 40% (< 50% guard) flagged, contiguous
+    rec = _rec(traces)
+    validated = _artifact_params(
+        amplitude_threshold_uv=1.0, proportion_above_threshold=1.0
+    )
+    runs = scan_artifact_frames(
+        rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.05s"}
+    )
+    # (n_runs, 2) ranges, NOT a 2000-long per-frame array.
+    assert runs.ndim == 2 and runs.shape[1] == 2
+    # 2000 contiguous flagged frames across ~2 chunks -> a couple of runs.
+    assert runs.shape[0] <= 5
+    # The runs cover exactly the flagged frames (0..1999).
+    assert np.array_equal(_expand_runs(runs), np.arange(2000))
+
+
+def test_split_runs_at_gaps_splits_only_inside_runs():
+    """A fixed-size chunk can straddle a wall-clock gap, so a flagged run may
+    span one. ``_split_runs_at_gaps`` splits a run at a gap STRICTLY inside it,
+    leaves a gap at the trailing edge and a gap between runs alone, and is a
+    no-op when there are no gaps -- so the joined spans match the old per-frame
+    gap-aware behavior."""
+    from spyglass.spikesorting.v2._artifact_intervals import (
+        _split_runs_at_gaps,
+    )
+
+    runs = np.array([[10, 20], [30, 35]], dtype=np.int64)
+    # gap 15 inside [10,20] -> split; gap 20 at the run's trailing edge -> no
+    # split; gap 25 between runs -> no split.
+    gap_after = np.array([15, 20, 25], dtype=np.int64)
+    assert _split_runs_at_gaps(runs, gap_after).tolist() == [
+        [10, 15],
+        [16, 20],
+        [30, 35],
+    ]
+    # No gaps -> unchanged.
     assert np.array_equal(
-        single, reference
-    ), "Single-chunk pass should reproduce the in-memory reference exactly."
+        _split_runs_at_gaps(runs, np.array([], dtype=np.int64)), runs
+    )
 
 
 def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
@@ -938,12 +1002,15 @@ def _flagged_frames(rec, n_frames, amplitude_threshold_uv):
         amplitude_threshold_uv=amplitude_threshold_uv,
         proportion_above_threshold=1.0,
     )
-    return _compute_artifact_chunk(
+    runs = _compute_artifact_chunk(
         segment_index=0,
         start_frame=0,
         end_frame=n_frames,
         worker_ctx=ctx,
     )
+    # The worker returns (start, end_inclusive) runs; expand to the per-frame
+    # set these gain-conversion tests assert on.
+    return _expand_runs(runs)
 
 
 @pytest.mark.usefixtures("dj_conn")

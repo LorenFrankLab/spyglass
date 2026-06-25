@@ -40,19 +40,22 @@ from __future__ import annotations
 
 
 def scan_artifact_frames(recording, validated, job_kwargs=None):
-    """Flag artifact frame indices via a chunked ``ChunkRecordingExecutor``.
+    """Flag contiguous artifact-frame RUNS via a chunked ``ChunkRecordingExecutor``.
 
     Scans the recording chunk by chunk (defaulting to
     ``chunk_duration='1s'`` when ``job_kwargs`` carries no chunk-size key,
     so the scan is bounded
     for every caller, not only the production path that merges SI's global
-    job kwargs) and concatenates the per-chunk flagged frame
-    indices into one ascending array. Peak working set is bounded by the
-    chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
+    job kwargs) and concatenates the per-chunk flagged-frame RUN ranges into one
+    ascending ``(n_runs, 2)`` array. The per-chunk traces working set is bounded
+    by the chunk size -- roughly ``4 × chunk_frames × n_channels × 4 bytes`` (raw
     int slice + float32 µV copy + abs + z-score intermediate) -- rather than
     by the full recording, which a full-``get_traces`` load would
     materialize at ``~4 × n_samples × n_channels × 4 bytes`` (≈27 GB for a
-    1-hour 64-channel 30 kHz recording).
+    1-hour 64-channel 30 kHz recording). Returning run RANGES (not one index per
+    flagged frame) also bounds the collected result to the number of artifact
+    EVENTS, so even a heavily-flagged recording never materializes an
+    O(n_bad_frames) index array here or in ``detect_artifacts``.
 
     ``job_kwargs`` is the merged SI job-kwargs blob; only recognized
     ``job_keys`` (``n_jobs``, ``chunk_duration``, ``pool_engine``, ...) are
@@ -74,7 +77,16 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     Returns
     -------
     np.ndarray
-        Ascending flagged frame indices, shape ``(n_flagged,)``.
+        Contiguous flagged-frame RUNS as ascending ``(start_inclusive,
+        end_inclusive)`` frame pairs, shape ``(n_runs, 2)`` (empty
+        ``(0, 2)`` when nothing is flagged). ``detect_artifacts`` joins these
+        across chunk seams and splits them at wall-clock gaps.
+
+    Raises
+    ------
+    ArtifactFractionExceededError
+        If the total flagged sample count exceeds the
+        ``_MAX_ARTIFACT_FRAME_FRACTION`` guard (a misconfigured detector).
     """
     import numpy as np
     from spikeinterface.core.job_tools import (
@@ -129,17 +141,69 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     )
     per_chunk = executor.run()
     if not per_chunk:
-        return np.empty(0, dtype=np.int64)
-    # Guard before concatenating (and before detect_artifacts' per-frame join):
-    # a misconfigured too-loose threshold can flag most of the recording, making
-    # this an O(n_samples) array. Summing the per-chunk lengths is cheap and
-    # lets the guard fire before the concatenate doubles the allocation.
+        return np.empty((0, 2), dtype=np.int64)
+    runs = np.concatenate(per_chunk)  # (total_runs, 2) ascending (start, end)
+    # Semantic guard on the TOTAL flagged sample count, cheap from the runs.
+    # Detection now CARRIES runs (not per-frame ids), so peak memory here is
+    # already O(n_runs) regardless of how many samples are flagged; this stays
+    # as a loud check that masking more than the bound is a misconfiguration --
+    # it fails at detection time rather than letting the mask stage expand the
+    # complement of a near-empty valid_times per-frame for SI.
+    total_flagged = (
+        int(np.sum(runs[:, 1] - runs[:, 0] + 1)) if runs.size else 0
+    )
     assert_artifact_frame_fraction(
-        sum(len(chunk) for chunk in per_chunk),
+        total_flagged,
         recording.get_num_samples(segment_index=0),
         context="ArtifactDetection scan: ",
     )
-    return np.concatenate(per_chunk)
+    return runs
+
+
+def _split_runs_at_gaps(runs, gap_after):
+    """Split each ``(start, end_inclusive)`` run at every wall-clock gap inside it.
+
+    A fixed-size scan chunk can straddle a wall-clock discontinuity, so a single
+    contiguous flagged-frame run may span a gap. The prior per-frame join treated
+    such a boundary as a split point (its ``crosses_gap`` test); splitting runs
+    here restores that, so no run fed to the join spans a gap and the joined
+    spans -- and therefore the final valid_times -- are unchanged. Bounded by
+    ``n_runs + n_gaps`` (both small), never by the flagged-frame count.
+
+    Parameters
+    ----------
+    runs : np.ndarray
+        Ascending, disjoint ``(start, end_inclusive)`` frame-range pairs,
+        shape ``(n_runs, 2)``.
+    gap_after : np.ndarray
+        Frame indices that are the last sample before a wall-clock gap.
+
+    Returns
+    -------
+    np.ndarray
+        The runs with any gap-spanning run split, shape ``(n_runs', 2)``.
+    """
+    import numpy as np
+
+    if gap_after.size == 0:
+        return runs
+    out = []
+    for start, end in runs:
+        start = int(start)
+        end = int(end)
+        # A gap at frame g (g+1 is across the discontinuity) splits the run only
+        # when it falls strictly inside it (g < end); g == end means the gap is
+        # at the run's trailing edge, so the whole run is on one side already.
+        gaps_in = gap_after[(gap_after >= start) & (gap_after < end)]
+        if gaps_in.size == 0:
+            out.append((start, end))
+            continue
+        prev = start
+        for g in gaps_in:
+            out.append((prev, int(g)))
+            prev = int(g) + 1
+        out.append((prev, end))
+    return np.array(out, dtype=np.int64)
 
 
 def detect_artifacts(recording, validated, context="", job_kwargs=None):
@@ -272,9 +336,11 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # frame set unchanged; this is the equivalence the regression test
     # pins. The worker OR-combines the two detectors (an AND would make
     # the dual-threshold mode strictly less sensitive than either
-    # single-threshold mode).
-    frames_above = scan_artifact_frames(recording, validated, job_kwargs)
-    if len(frames_above) == 0:
+    # single-threshold mode). The worker returns contiguous flagged-frame
+    # RUNS (start, end_inclusive), not one id per flagged frame, so this
+    # carries O(n_runs) -- not O(n_bad_frames) -- through the join below.
+    runs = scan_artifact_frames(recording, validated, job_kwargs)
+    if len(runs) == 0:
         # Warn so a downstream consumer noticing "all valid times" can
         # see whether detection was attempted-and-empty vs skipped.
         logger.warning(
@@ -309,17 +375,28 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # wall-clock, so joining them would create a span straddling the
     # gap that over-masks the earlier chunk's tail. The gap-aware
     # guard below keeps the join from bridging a large disjoint gap.
+    #
+    # The scan returns contiguous flagged-frame RUNS, but a fixed-size chunk can
+    # straddle a wall-clock gap, so a single run may span one. Split runs at gaps
+    # first (so no run crosses a discontinuity), then join adjacent runs within
+    # join_window. This is frame-equivalent to the prior per-frame join -- the
+    # final valid_times are identical -- but never materializes a per-frame array.
+    runs = _split_runs_at_gaps(runs, gap_after)
     spans = []
-    cur_start = frames_above[0]
-    cur_end = frames_above[0]
-    for f in frames_above[1:]:
-        crosses_gap = bool(np.any((gap_after >= cur_end) & (gap_after < f)))
-        if f - cur_end <= join_window_frames and not crosses_gap:
-            cur_end = f
+    cur_start = int(runs[0, 0])
+    cur_end = int(runs[0, 1])
+    for r_start, r_end in runs[1:]:
+        r_start = int(r_start)
+        r_end = int(r_end)
+        crosses_gap = bool(
+            np.any((gap_after >= cur_end) & (gap_after < r_start))
+        )
+        if r_start - cur_end <= join_window_frames and not crosses_gap:
+            cur_end = max(cur_end, r_end)
         else:
             spans.append((cur_start, cur_end))
-            cur_start = f
-            cur_end = f
+            cur_start = r_start
+            cur_end = r_end
     spans.append((cur_start, cur_end))
 
     # Cap the removal-window expansion at the CHUNK boundary on each

@@ -77,7 +77,8 @@ def test_scan_artifact_frames_flags_transient_only():
     traces[50:52, :] = 5000.0  # large transient on every channel
     rec = _rec(traces)
     flagged = scan_artifact_frames(rec, _artifact_params())
-    assert set(int(f) for f in flagged) == {50, 51}
+    # One contiguous run covering exactly frames 50-51 (inclusive), nothing else.
+    assert flagged.tolist() == [[50, 51]]
 
 
 def test_detect_artifacts_excludes_transient_window():

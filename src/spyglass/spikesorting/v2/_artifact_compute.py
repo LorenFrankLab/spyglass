@@ -104,8 +104,14 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     Returns
     -------
     np.ndarray
-        Global (``+ start_frame``) ascending flagged frame indices,
-        shape ``(n_flagged,)``.
+        Contiguous flagged-frame RUNS as ascending ``(start_inclusive,
+        end_inclusive)`` GLOBAL frame pairs, shape ``(n_runs, 2)``. Returning
+        runs rather than one index per flagged frame bounds both this return and
+        the executor's collected result to the number of artifact EVENTS, not
+        the number of artifact SAMPLES -- a fully-flagged chunk is one run, not
+        ``chunk_len`` ids. ``detect_artifacts`` joins runs across chunk seams
+        and splits them at wall-clock gaps, so the chunk boundaries (which can
+        fall mid-run) do not change the result.
     """
     recording = worker_ctx["recording"]
     zscore_threshold = worker_ctx["zscore_threshold"]
@@ -143,5 +149,16 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     else:
         channel_hit = above_z
 
-    local = (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
-    return local + start_frame
+    # Collapse the per-frame flagged mask to contiguous run edges via a padded
+    # boolean diff: rising edge (+1) = inclusive run start, falling edge (-1) =
+    # one past the inclusive run end. This keeps the worker's return O(n_runs)
+    # rather than O(n_flagged) for the whole chunk.
+    flagged = channel_hit.sum(axis=1) >= n_required
+    edges = np.diff(
+        np.concatenate(([False], flagged, [False])).astype(np.int8)
+    )
+    starts = np.flatnonzero(edges == 1)
+    ends = np.flatnonzero(edges == -1) - 1
+    return np.stack(
+        [starts + start_frame, ends + start_frame], axis=1
+    ).astype(np.int64)
