@@ -387,6 +387,24 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         parts = (
             cls.MemberCuration & {"unitmatch_id": deterministic_unitmatch_id}
         ).fetch(as_dict=True)
+        # curation_set_hash folds only (member_index, sorting_id, curation_id),
+        # so copied parts from ANOTHER SessionGroup could hash to the same value.
+        # Reject foreign-group parts explicitly (the master's group lives in the
+        # identity; MemberCuration carries its own group via SessionGroup.Member).
+        group = (
+            identity["session_group_owner"],
+            identity["session_group_name"],
+        )
+        if any(
+            (row["session_group_owner"], row["session_group_name"]) != group
+            for row in parts
+        ):
+            raise SchemaBypassError(
+                f"UnitMatchSelection master {deterministic_unitmatch_id} has a "
+                "MemberCuration row from a different SessionGroup (a raw-insert "
+                "forgery whose copied parts hash to the same choices). Drop the "
+                "master and re-insert via insert_selection()."
+            )
         part_hash = (
             curation_set_hash(
                 (row["member_index"], row["sorting_id"], row["curation_id"])
@@ -399,9 +417,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             raise SchemaBypassError(
                 f"UnitMatchSelection master {deterministic_unitmatch_id} exists "
                 "but its MemberCuration parts do not realize its "
-                "curation_set_hash (missing / stale / foreign parts -- a "
-                "raw-insert orphan or forgery). Drop the master and re-insert "
-                "via insert_selection()."
+                "curation_set_hash (missing / stale parts -- a raw-insert "
+                "orphan or forgery). Drop the master and re-insert via "
+                "insert_selection()."
             )
         return {"unitmatch_id": deterministic_unitmatch_id}
 
