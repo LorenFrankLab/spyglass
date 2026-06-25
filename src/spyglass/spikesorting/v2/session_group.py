@@ -428,11 +428,20 @@ class ConcatenatedRecordingSelection(
         }
         preprocessing_params_name = identity["preprocessing_params_name"]
 
-        # Precondition: every member needs a populated Recording for the
-        # shared preprocessing recipe. A Recording exists iff its
-        # RecordingSelection row exists AND the Computed Recording populated.
+        # Precondition: the group must be non-empty, and every member needs a
+        # populated Recording for the shared preprocessing recipe. A Recording
+        # exists iff its RecordingSelection row exists AND the Computed Recording
+        # populated. The empty-group check is explicit: without it the loop
+        # passes vacuously and make_fetch later fails indexing members[0].
+        members = (SessionGroup.Member & group_key).fetch(as_dict=True)
+        if not members:
+            raise ValueError(
+                "ConcatenatedRecordingSelection.insert_selection: SessionGroup "
+                f"{group_key} has no members. Create it via "
+                "SessionGroup.create_group() with at least one member first."
+            )
         missing: list[dict] = []
-        for member in (SessionGroup.Member & group_key).fetch(as_dict=True):
+        for member in members:
             rec_sel_key = member_recording_selection_key(
                 member, preprocessing_params_name
             )
