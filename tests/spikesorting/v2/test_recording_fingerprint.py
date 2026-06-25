@@ -11,6 +11,7 @@ DataJoint.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from tests.spikesorting.v2._ingest_helpers import (
     write_processed_recording_nwb,
@@ -153,3 +154,119 @@ def test_fingerprint_geometry_parity(tmp_path):
         "persisted-region geometry must match SpikeInterface's "
         "get_channel_locations for an unperturbed file"
     )
+
+
+def test_fingerprint_components_match_canonical_set(tmp_path):
+    """The producer emits exactly the canonical ``FINGERPRINT_COMPONENTS`` keys.
+
+    ``content_hash`` is ``combined_hash`` of this dict, so a silently dropped or
+    renamed component would yield a stable-but-wrong scalar; pinning the key set
+    guards that identity contract.
+    """
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        FINGERPRINT_COMPONENTS,
+        recording_content_fingerprint,
+    )
+
+    path, es_path = _baseline(tmp_path / "rec.nwb")
+    components = recording_content_fingerprint(
+        path, electrical_series_path=es_path
+    )
+    assert set(components) == set(FINGERPRINT_COMPONENTS)
+
+
+def test_geometry_component_hash_rejects_empty_coords():
+    """A persisted region with no coordinate columns (no probe geometry) is a
+    structural impossibility -- hashing it would fold an empty array into a
+    content-free constant, so it raises instead."""
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        geometry_component_hash,
+    )
+
+    with pytest.raises(ValueError, match="no probe geometry"):
+        geometry_component_hash(np.zeros((4, 0)))
+
+
+def test_geometry_component_hash_distinguishes_rel_z():
+    """A 3-D layout (rel_x/rel_y/rel_z) does not collide with the 2-D layout of
+    the same in-plane coordinates -- ``rel_z`` is folded into the geometry hash,
+    so a depth change cannot pass as identical geometry."""
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        geometry_component_hash,
+    )
+
+    xy = np.array([[0.0, 0.0], [0.0, 20.0], [0.0, 40.0], [0.0, 60.0]])
+    xyz = np.column_stack([xy, np.zeros(4)])
+    xyz_deep = np.column_stack([xy, np.full(4, 5.0)])
+
+    assert geometry_component_hash(xy) != geometry_component_hash(xyz), (
+        "2-D and 3-D geometry of the same in-plane coords must not collide"
+    )
+    assert geometry_component_hash(xyz) != geometry_component_hash(xyz_deep), (
+        "a rel_z (depth) change must change the geometry hash"
+    )
+
+
+def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
+    """A degenerate readback (zero segments) is refused, not hashed to a
+    content-free constant -- two distinct broken/truncated readbacks must never
+    report 'no drift' on traces that were never actually read."""
+    import spikeinterface.extractors as se
+
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_content_fingerprint,
+    )
+
+    path, es_path = _baseline(tmp_path / "rec.nwb")
+
+    class _ZeroSegmentRecording:
+        def get_num_segments(self):
+            return 0
+
+    monkeypatch.setattr(
+        se, "read_nwb_recording", lambda *a, **k: _ZeroSegmentRecording()
+    )
+    with pytest.raises(ValueError, match="no trace samples"):
+        recording_content_fingerprint(path, electrical_series_path=es_path)
+
+
+class TestRecordingArtifactLock:
+    """Per-``recording_id`` lock serializing one recording's artifact slot.
+
+    A rebuild (``get_recording`` read-repair / ``_rebuild_nwb_artifact``) and a
+    reclamation (``RecordingArtifactRecompute.delete_files``) of the SAME
+    recording must never interleave; different recordings stay free to run
+    concurrently. Mirrors the ``analyzer_curation_lock`` contention contract.
+    DB-free: only ``analyzer_cache_root`` resolves (via the custom config dir).
+    """
+
+    def test_same_recording_is_mutually_exclusive(
+        self, tmp_path, restore_custom_config
+    ):
+        import datajoint as dj
+        from filelock import Timeout
+
+        from spyglass.spikesorting.v2._recording_fingerprint import (
+            recording_artifact_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        held = recording_artifact_lock("rec-A")
+        contender = recording_artifact_lock("rec-A")
+        with held:
+            with pytest.raises(Timeout):
+                contender.acquire(timeout=0)
+
+    def test_different_recordings_do_not_block(
+        self, tmp_path, restore_custom_config
+    ):
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._recording_fingerprint import (
+            recording_artifact_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        with recording_artifact_lock("rec-A"):
+            with recording_artifact_lock("rec-B").acquire(timeout=0):
+                pass

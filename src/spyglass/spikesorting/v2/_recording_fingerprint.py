@@ -59,6 +59,14 @@ from __future__ import annotations
 TRACE_ROUNDING = 4  # µV; well below the ephys noise floor
 TIMESTAMP_ROUNDING = 9  # seconds; sub-sample, absorbs float64 ULP noise
 
+#: Canonical component keys of a recording content fingerprint (a fixed set).
+#: ``combined_hash`` of the component dict is the scalar ``content_hash`` stored
+#: on the row, so a producer that silently dropped or renamed a component would
+#: yield a stable-but-wrong scalar that never matches the stored hash (a silent
+#: reclamation stall). The producer asserts its output matches this set so such
+#: a key-set drift fails loudly at construction instead.
+FINGERPRINT_COMPONENTS = ("traces", "timestamps", "geometry", "metadata")
+
 
 def geometry_component_hash(coords) -> str:
     """Hash a ``(n_channels, n_coords)`` probe-geometry array.
@@ -74,6 +82,13 @@ def geometry_component_hash(coords) -> str:
     import numpy as np
 
     arr = np.ascontiguousarray(np.asarray(coords, dtype=np.float64).astype("<f8"))
+    if arr.ndim != 2 or arr.shape[1] == 0:
+        raise ValueError(
+            "geometry_component_hash: expected a (n_channels, n_coords>=1) "
+            f"array but got shape {arr.shape} -- the persisted electrodes "
+            "region carries no rel_x/rel_y[/rel_z] coordinates (no probe "
+            "geometry). Refusing to hash an empty geometry component."
+        )
     digest = hashlib.md5()
     digest.update(str(arr.shape).encode())
     digest.update(arr.tobytes())
@@ -132,6 +147,21 @@ def recording_content_fingerprint(
         electrical_series_path=electrical_series_path,
         load_time_vector=True,
     )
+    # Fail closed on a degenerate readback (zero segments / zero frames): an
+    # empty trace loop would hash to a content-free constant, so two distinct
+    # broken/truncated readbacks would report "no drift" on a component that was
+    # never actually read. Refuse rather than fingerprint partial data.
+    n_segments = recording.get_num_segments()
+    if n_segments == 0 or any(
+        recording.get_num_frames(segment_index=s) == 0
+        for s in range(n_segments)
+    ):
+        raise ValueError(
+            f"recording_content_fingerprint: {analysis_abs_path!r} read back "
+            f"with no trace samples (segments={n_segments}) via "
+            f"electrical_series_path={electrical_series_path!r}; refusing to "
+            "fingerprint empty/partial data."
+        )
     traces_hash = combined_hash(
         hash_recording_traces(recording, rounding=trace_rounding)
     )
@@ -187,12 +217,20 @@ def recording_content_fingerprint(
         )
         metadata["filtering"] = series.filtering or ""
 
-    return {
+    components = {
         "traces": traces_hash,
         "timestamps": timestamps_hash,
         "geometry": geometry_hash,
         "metadata": combined_hash(metadata),
     }
+    # Guard the identity contract: the scalar content_hash is combined_hash of
+    # this dict, so a dropped/renamed component would silently change it. Fail
+    # loudly here rather than store a stable-but-wrong hash.
+    assert set(components) == set(FINGERPRINT_COMPONENTS), (
+        "recording_content_fingerprint produced an unexpected component set: "
+        f"{sorted(components)} != {sorted(FINGERPRINT_COMPONENTS)}"
+    )
+    return components
 
 
 def recording_artifact_lock(recording_id, *, timeout: float = -1):

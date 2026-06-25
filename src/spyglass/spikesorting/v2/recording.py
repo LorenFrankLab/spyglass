@@ -1004,9 +1004,10 @@ class Recording(SpyglassMixin, dj.Computed):
     reference -- whitening is deferred to the sorter for sorters that
     need it), streams one ``ElectricalSeries`` into a fresh
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
-    requested ``IntervalList.valid_times``, and records an
-    ``NwbfileHasher`` digest of the persisted file so the cached artifact
-    can be re-verified. The populate body is split into ``make_fetch`` /
+    requested ``IntervalList.valid_times``, and records a representation-blind
+    content fingerprint of the persisted file (``content_hash``; see
+    ``_recording_fingerprint``) so a content-identical rebuild can be
+    verified. The populate body is split into ``make_fetch`` /
     ``make_compute`` / ``make_insert`` so the long-running write does
     not hold a DB transaction. ``get_recording`` exposes the cached
     artifact and rebuilds on disk if missing, without deleting the
@@ -1391,7 +1392,10 @@ class Recording(SpyglassMixin, dj.Computed):
         object_id : str
             Object id of the persisted ``ElectricalSeries``.
         content_hash : str
-            ``NwbfileHasher`` digest of the persisted file.
+            Representation-blind content fingerprint of the persisted
+            recording (``combined_hash`` of the traces / timestamps /
+            geometry / metadata components; see ``_recording_fingerprint``),
+            reproducible across a content-identical rebuild.
         saved_start : float
             First persisted timestamp, in seconds.
         saved_end : float
@@ -1672,6 +1676,16 @@ class Recording(SpyglassMixin, dj.Computed):
                 # leaving byte-different content under a stale checksum.
                 Path(canonical_abs).unlink(missing_ok=True)
                 raise
+            # Confirm the reconciled slot now resolves through the
+            # checksum-validating path. get_recording re-reads after this, but a
+            # DIRECT caller has no follow-on read, so a botched reconcile (e.g.
+            # the checksum refreshed the wrong external row) would otherwise stay
+            # silent until the next reader. Unlink + raise if it does not.
+            try:
+                AnalysisNwbfile.get_abs_path(analysis_file_name)
+            except Exception:
+                Path(canonical_abs).unlink(missing_ok=True)
+                raise
 
             logger.info(
                 "Recording.get_recording: rebuilt + reconciled "
@@ -1739,10 +1753,11 @@ class Recording(SpyglassMixin, dj.Computed):
     ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
-        Pipeline body shared between ``make_compute`` (fresh write,
-        ``existing_analysis_file_name=None``) and
-        ``_rebuild_nwb_artifact`` (overwrite the row's slot,
-        ``existing_analysis_file_name=row["analysis_file_name"]``).
+        Pipeline body shared between ``make_compute`` and
+        ``_rebuild_nwb_artifact``; both stage a fresh, unregistered file
+        (``existing_analysis_file_name=None``). The rebuild path installs that
+        staged file into the canonical slot via ``os.replace`` only after a
+        verified ``content_hash`` match -- it does not overwrite in place.
 
         Parameters
         ----------
@@ -1782,11 +1797,10 @@ class Recording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        tuple
-            ``(analysis_file_name, object_id, content_hash,
-            sampling_frequency, saved_start, saved_end, n_channels,
-            duration_s)`` -- the metadata needed for the
-            ``RecordingComputed`` boxing.
+        RecordingArtifactResult
+            ``(analysis_file_name, object_id, content_hash, saved_start,
+            saved_end, sampling_frequency, n_channels, duration_s)`` -- the
+            metadata needed for the ``RecordingComputed`` boxing.
             ``saved_start``/``saved_end``/``duration_s`` describe the
             PERSISTED timestamps (the override when set).
 
@@ -1797,23 +1811,19 @@ class Recording(SpyglassMixin, dj.Computed):
         write/hash failure it unlinks the partial file before
         propagating, on BOTH the fresh-write and the rebuild path:
 
-        * Fresh write (``existing_analysis_file_name is None``):
-          the freshly staged file is removed so a half-written
-          artifact never outlives a failed compute.
-        * Rebuild (``existing_analysis_file_name`` set): the writer
-          overwrites the canonical slot IN PLACE
-          (``AnalysisNwbfile().create(recompute_file_name=...)``
-          truncates it with ``mode="w"`` before the streaming
-          write), so removing the failed partial is correct: it
-          returns the slot to the same MISSING state that triggered
-          the rebuild. ``_rebuild_nwb_artifact`` is reached only
-          from ``get_recording`` when the cache file is already
-          absent, so there is no valid cache to lose, and the
-          DataJoint row (its ``content_hash``) plus the raw NWB always
-          allow the next ``get_recording`` to regenerate it. A
-          rebuild that COMPLETES but whose content drifted is caught
-          separately by the caller's hash-mismatch check (a warning;
-          the row is not deleted).
+        Both callers stage a fresh, unregistered file, so the freshly staged
+        file is removed on a write/hash failure and a half-written artifact
+        never outlives a failed compute. The rebuild caller
+        (``_rebuild_nwb_artifact``) additionally fingerprints the staged file
+        and installs it into the canonical slot via ``os.replace`` ONLY on a
+        verified ``content_hash`` match; a rebuild that COMPLETES but whose
+        content drifted is REJECTED by the caller (it raises
+        ``RecordingContentDriftError``), the staged temp is discarded, and the
+        canonical slot is never written -- drifted bytes are never served. The
+        rebuild is reached only from ``get_recording`` when the cache file is
+        already absent, so there is no valid cache to lose, and the DataJoint
+        row (its ``content_hash``) plus the raw NWB always allow the next
+        ``get_recording`` to regenerate it.
         """
         from spyglass.spikesorting.utils import read_raw_nwb_recording
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps

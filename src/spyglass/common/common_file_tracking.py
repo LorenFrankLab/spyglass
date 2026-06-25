@@ -214,7 +214,8 @@ class AnalysisFileIssues(dj.Manual):
         full_table_name : str
             Full table name of the source analysis table.
         deleted_files : set
-            File names intentionally deleted by recompute (skip these).
+            File names intentionally deleted by recompute; skipped only while
+            still physically absent (see the presence check below).
         hash_map : dict
             Pre-fetched mapping of analysis_file_name -> stored contents_hash.
 

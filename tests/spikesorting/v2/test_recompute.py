@@ -871,6 +871,47 @@ def test_recording_recompute_mixed_env_deletes(
     assert listed, "current-env match should authorize despite the stale row"
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_write_path_persists_nondegenerate_geometry(populated_sorting):
+    """A populated ``Recording``'s persisted electrodes region carries real,
+    non-degenerate probe geometry.
+
+    Guards the write path directly: the DB-free fingerprint fixtures write
+    geometry themselves, so they cannot catch a regression where
+    ``write_nwb_artifact`` stopped persisting real ``rel_x``/``rel_y`` (the
+    geometry component would silently collapse to a constant). This reads the
+    on-disk artifact independently of the production fingerprint code.
+    """
+    _assert_temp_base_dir()
+    import numpy as np
+    import pynwb
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rec_key = _recording_key(populated_sorting)
+    analysis_file_name, es_path = (Recording & rec_key).fetch1(
+        "analysis_file_name", "electrical_series_path"
+    )
+    abs_path = AnalysisNwbfile.get_abs_path(
+        analysis_file_name, from_schema=True
+    )
+    series_name = es_path.rsplit("/", 1)[-1]
+    with pynwb.NWBHDF5IO(abs_path, mode="r", load_namespaces=True) as io:
+        region = io.read().acquisition[series_name].electrodes
+        table = region.table
+        cols = [c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames]
+        coords = np.array(
+            [[float(table[c][int(r)]) for c in cols] for r in region.data[:]]
+        )
+    assert coords.size, "persisted electrodes region carries no coordinates"
+    assert np.ptp(coords) > 0, (
+        "persisted probe geometry is degenerate (all coordinates identical) -- "
+        "the write path is not persisting real electrode positions"
+    )
+
+
 # ---------- operational hardening: env gate / limit / xfail ------------------
 
 
@@ -1030,7 +1071,10 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
         {
             **stale_sel,
             "matched": 0,
-            "err_msg": "regeneration failed: missing probe info",
+            "err_msg": (
+                "regeneration failed: sort-group electrode(s) [0] have "
+                "no probe geometry (no Probe.Electrode link)"
+            ),
             "created_at": _artifact_created_at(rec_key),
             "deleted": 0,
         },
@@ -1054,7 +1098,13 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
     # selection (a structural xfail is scheduled-but-flagged, not silently
     # dropped).
     RecordingArtifactRecompute.update1(
-        {**stale_sel, "err_msg": "regeneration failed: missing probe info"}
+        {
+            **stale_sel,
+            "err_msg": (
+                "regeneration failed: sort-group electrode(s) [0] have "
+                "no probe geometry (no Probe.Electrode link)"
+            ),
+        }
     )
     RecordingArtifactRecomputeSelection.attempt_all(rec_key)
     env_id = UserEnvironment().this_env["env_id"]

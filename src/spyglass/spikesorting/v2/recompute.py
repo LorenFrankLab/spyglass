@@ -409,7 +409,10 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
         prev_runs = RecordingArtifactRecompute & rec_key & "matched=0"
 
         if skip_probe:
-            if bool(prev_runs & 'err_msg LIKE "%probe info%"'):
+            # v2 surfaces absent probe metadata as "no probe geometry" /
+            # "have no probe geometry" (see _recording_geometry /
+            # _recording_preprocessing) -- match that, not v1's "probe info".
+            if bool(prev_runs & 'err_msg LIKE "%probe geometry%"'):
                 return True, "missing_probe_info"
             try:  # proactive: is probe metadata on record for this recording?
                 nwb_file_name = (RecordingSelection & rec_key).fetch1(
@@ -417,8 +420,11 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
                 )
                 if _recording_missing_probe_info(nwb_file_name):
                     return True, "missing_probe_info"
-            except Exception:  # noqa: BLE001 - can't check -> don't flag
-                logger.warning(f"Unable to check probe info for {rec_key}")
+            except Exception as exc:  # noqa: BLE001 - can't check -> don't flag
+                logger.warning(
+                    f"Unable to check probe info for {rec_key}; attempting "
+                    f"normally: {exc!r}"
+                )
 
         if skip_pynwb_api and bool(
             prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'
