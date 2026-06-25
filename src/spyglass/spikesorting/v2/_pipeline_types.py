@@ -102,6 +102,9 @@ class RunV2PipelineSessionFailed(TypedDict):
     error_type: str
     error: str
     partial_run_summary: dict[str, Any] | None
+    # Preflight advisories for this group are carried even on failure so the
+    # batch warning count / describe_run do not under-report failed groups.
+    warnings: list[str]
 
 
 RunV2PipelineSessionResult: TypeAlias = (

@@ -505,10 +505,12 @@ def run_v2_pipeline_session(
         A successful entry is the single-group run summary (see
         :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
         A failed entry is ``{"sort_group_id", "pipeline_preset",
-        "outcome": "failed", "error_type", "error", "partial_run_summary"}``
-        -- the ``partial_run_summary`` carries the stages completed before a
-        sort failure (from :class:`PipelineStageError`) or ``None`` when the
-        caught error carries none (a preflight or zero-unit failure). Wrap with
+        "outcome": "failed", "error_type", "error", "partial_run_summary",
+        "warnings"}`` -- the ``partial_run_summary`` carries the stages
+        completed before a sort failure (from :class:`PipelineStageError`) or
+        ``None`` when the caught error carries none (a preflight or zero-unit
+        failure), and ``warnings`` carries this group's preflight advisories so
+        the batch warning count does not under-report failed groups. Wrap with
         ``describe_run(results)`` for a receipt table.
 
     Raises
