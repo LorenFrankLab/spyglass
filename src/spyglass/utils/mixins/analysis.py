@@ -743,9 +743,12 @@ class AnalysisMixin(BaseMixin):
     def get_hash(
         self,
         analysis_file_name: str,
+        path: Optional[Path] = None,
         from_schema: Optional[bool] = False,
         precision_lookup: Optional[Dict[str, int]] = None,
         return_hasher: Optional[bool] = False,
+        stored_hash: Optional[str] = None,
+        resolve: bool = False,
     ) -> Union[str, NwbfileHasher]:
         """Return the hash of the file contents.
 
@@ -753,6 +756,9 @@ class AnalysisMixin(BaseMixin):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
+        path : Path, Optional
+            If provided, hash this path directly instead of resolving via
+            `get_abs_path`. Used when the file is in a temp directory.
         from_schema : bool, Optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
@@ -763,50 +769,67 @@ class AnalysisMixin(BaseMixin):
         return_hasher: bool, Optional
             If true, return the hasher object instead of the hash. Defaults to
             False.
+        stored_hash : str, Optional
+            If provided, compare the computed hash against this value and warn
+            on mismatch. Intended for silent in-place regeneration (path B).
+        resolve : bool, Optional
+            If true, update the external table entry after hashing so
+            DataJoint's file checksum stays in sync. Defaults to False.
 
         Returns
         -------
         hash : [str, NwbfileHasher]
             The hash of the file contents or the hasher object itself.
         """
-        hasher = NwbfileHasher(
-            self.get_abs_path(analysis_file_name, from_schema=from_schema),
-            precision_lookup=precision_lookup,
+        legacy_mode = (
+            os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true"
         )
+        file_path = path or self.get_abs_path(
+            analysis_file_name, from_schema=from_schema
+        )
+        try:
+            hasher = NwbfileHasher(
+                file_path,
+                precision_lookup=precision_lookup,
+                legacy_mode=legacy_mode,
+            )
+        except EnvironmentError as e:
+            self._logger.warning(
+                "Cannot compute hash for %s: %s. "
+                "File will be created without a stored hash; "
+                "logged_at_creation will be set to False.",
+                analysis_file_name,
+                e,
+            )
+            return None
+        if stored_hash and hasher.hash != stored_hash:
+            if not legacy_mode:
+                self._logger.warning(
+                    "Hash mismatch for %s. "
+                    "If this recording was hashed before the NwbfileHasher "
+                    "Dataset-content fix, the stored hash excludes Dataset "
+                    "values and will never match a correctly recomputed file. "
+                    "To restore legacy (metadata-only) hashing for comparison,"
+                    " rerun with:\n\tSPYGLASS_LEGACY_HASHES=true",
+                    analysis_file_name,
+                )
+        if resolve:
+            self._resolve_external(analysis_file_name)
         return hasher if return_hasher else hasher.hash
 
-    def _update_external(self, analysis_file_name: str, hash: str):
-        """Update the external contents checksum for an analysis file.
+    def _resolve_external(self, analysis_file_name: str):
+        """Update the external table entry for a recomputed analysis file.
 
-        Ensures that the file contents match the hash. If not, raise an error.
+        Admin-free counterpart to `_resolve_external_table` for automated
+        recompute workflows. Called by `get_hash` when `resolve=True`, and
+        directly by `_make_file` for the legacy recompute path. Comparison of
+        old vs. new file hashes is handled by `RecordingRecompute._hash_both`.
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        hash : str
-            The hash of the file contents as calculated by NwbfileHasher.
-            If the hash does not match the file contents, the file and
-            downstream entries are deleted.
-
-        Raises
-        ------
-        ValueError
-            If the hash does not match the file contents, the file is deleted
-            and a ValueError is raised.
         """
-        file_path = self.get_abs_path(analysis_file_name, from_schema=True)
-        new_hash = self.get_hash(analysis_file_name, from_schema=True)
-
-        if hash != new_hash:
-            Path(file_path).unlink()  # remove mismatched file
-            raise ValueError(
-                f"Checksum mismatch for analysis file '{file_path}'."
-                + HASH_ERROR_MSG.format(
-                    hash=hash, new_hash=new_hash, file_path=file_path
-                )
-            )
-
         file_path = self.__get_analysis_path(analysis_file_name, relative=True)
         key = (self._ext_tbl & f"filepath = '{str(file_path)}'").fetch1()
         abs_path = Path(self._analysis_dir) / file_path

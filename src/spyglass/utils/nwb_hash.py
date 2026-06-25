@@ -13,7 +13,7 @@ from hdmf.spec import NamespaceCatalog
 from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
-DEFAULT_BATCH_SIZE = 4095
+DEFAULT_BATCH_SIZE = 32768
 IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
@@ -146,6 +146,23 @@ class DirectoryHasher:
             return data
 
 
+def _require_h5py_v3():
+    """Raise EnvironmentError if h5py < 3.
+
+    Non-legacy hashing relies on _normalize_h5str to produce version-stable
+    hashes. That normalization is only necessary (and meaningful) with h5py 3+,
+    which changed variable-length string attributes from str to bytes. Running
+    non-legacy hashing under h5py 2.x would produce a different hash for the
+    same file.
+    """
+    major = int(h5py.__version__.split(".")[0])
+    if major < 3:
+        raise EnvironmentError(
+            f"Non-legacy hashing requires h5py >= 3.0 (found {h5py.__version__}). "
+            "Update h5py to use the new hashing mode."
+        )
+
+
 class NwbfileHasher:
     def __init__(
         self,
@@ -155,6 +172,7 @@ class NwbfileHasher:
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
         verbose: bool = False,
+        legacy_mode: bool = False,
     ):
         """Hashes the contents of an NWB file.
 
@@ -185,11 +203,21 @@ class NwbfileHasher:
         keep_obj_hash : bool, optional
             Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
-            Display progress bar, by default True.
+            Display progress bar, by default False.
+        legacy_mode : bool, optional
+            If True, reproduce the pre-fix behavior where Dataset content is
+            not incorporated into the hash (only object names and attribute
+            keys/values are hashed; Dataset shape/dtype and data are excluded).
+            Use only for comparing regenerated files against hashes computed
+            before the bug fix. Default False.
         """
+        if not legacy_mode:
+            _require_h5py_v3()
+
         self.path = Path(path)
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
+        self.legacy_mode = legacy_mode
 
         if precision_lookup is None:
             precision_lookup = PRECISION_LOOKUP
@@ -225,6 +253,33 @@ class NwbfileHasher:
 
         return items_to_process
 
+    @staticmethod
+    def _normalize_h5str(value: Any) -> Any:
+        """Decode h5py bytes to str for cross-version hash stability.
+
+        h5py 2.x returns str for variable-length strings; h5py 3.x returns
+        bytes. Without normalization, ``str(b'x')`` = ``"b'x'"`` (with the b
+        prefix), which differs from ``str('x')`` = ``"x"``, producing
+        different hashes for the same logical value.
+
+        Only called when ``legacy_mode=False``; legacy mode preserves the
+        original bytes-as-repr behavior so stored hashes remain reproducible.
+        """
+        if isinstance(value, (bytes, np.bytes_)):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, np.ndarray) and value.dtype.kind == "O":
+            return np.array(
+                [
+                    (
+                        v.decode("utf-8", errors="replace")
+                        if isinstance(v, (bytes, np.bytes_))
+                        else v
+                    )
+                    for v in value.flat
+                ]
+            ).reshape(value.shape)
+        return value
+
     def serialize_attr_value(self, value: Any):
         """Serializes an attribute value into bytes for hashing.
 
@@ -241,8 +296,12 @@ class NwbfileHasher:
             Serialized bytes of the attribute value.
         """
         if isinstance(value, np.ndarray):
-            return value.astype(str).tobytes()  # must be 'astype(str)'
+            if not self.legacy_mode and np.issubdtype(value.dtype, np.number):
+                return bytes(self._numeric_array_bytes(value))
+            return value.astype(str).tobytes()
         elif isinstance(value, (str, int, float)):
+            return str(value).encode()
+        elif isinstance(value, np.generic):
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
 
@@ -252,30 +311,49 @@ class NwbfileHasher:
             return np.issubdtype(data.dtype, np.number)
         return isinstance(data, (float, int, np.number))
 
+    @staticmethod
+    def _numeric_array_bytes(data: np.ndarray) -> memoryview:
+        """Return raw little-endian bytes of a numeric array.
+
+        ~1000x faster than astype(str).tobytes(). Only valid for numeric
+        dtypes; object/string arrays must go through serialize_attr_value.
+        """
+        arr = np.ascontiguousarray(
+            data.astype(data.dtype.newbyteorder("<"), copy=False)
+        )
+        return memoryview(arr).cast("B")
+
     def hash_dataset(self, dataset: h5py.Dataset):
-        if dataset.name in IGNORED_KEYS:
-            return  # Ignore source script
+        if dataset.name.split("/")[-1] in IGNORED_KEYS:
+            return
 
         this_hash = md5(self.hash_shape_dtype(dataset))
 
         if dataset.shape == ():
-            raw_scalar = str(dataset[()])
-            this_hash.update(self.serialize_attr_value(raw_scalar))
-            return
+            raw = self._normalize_h5str(dataset[()])
+            this_hash.update(self.serialize_attr_value(str(raw)))
+            return this_hash.hexdigest()
 
         dataset_name = dataset.parent.name.split("/")[-1]
         precision = self.precision.get(dataset_name, None)
+
+        # Hoist dtype check: dataset.dtype is constant across chunks.
+        is_numeric = np.issubdtype(dataset.dtype, np.number)
 
         size = dataset.shape[0]
         start = 0
 
         while start < size:
             end = min(start + self.batch_size, size)
-            data = dataset[start:end]
-            if precision and self.is_roundable(data):
-                data = np.round(data, precision)
-            this_hash.update(self.serialize_attr_value(data))
+            data = self._normalize_h5str(dataset[start:end])
             start = end
+
+            if precision and is_numeric:
+                data = np.round(data, precision)
+            if is_numeric:
+                this_hash.update(self._numeric_array_bytes(data))
+            else:
+                this_hash.update(self.serialize_attr_value(data))
 
         return this_hash.hexdigest()
 
@@ -319,12 +397,17 @@ class NwbfileHasher:
                 if attr_key in IGNORED_KEYS:
                     continue
                 attr_value = obj.attrs[attr_key]
+                if not self.legacy_mode:
+                    attr_value = self._normalize_h5str(attr_value)
                 this_hash.update(self.hash_shape_dtype(attr_value))
                 this_hash.update(attr_key.encode())
                 this_hash.update(self.serialize_attr_value(attr_value))
 
             if isinstance(obj, h5py.Dataset):
-                _ = self.hash_dataset(obj)
+                if not self.legacy_mode:
+                    dataset_hash = self.hash_dataset(obj)
+                    if dataset_hash is not None:
+                        this_hash.update(dataset_hash.encode())
             elif isinstance(obj, h5py.SoftLink):
                 this_hash.update(obj.path.encode())
             elif isinstance(obj, h5py.Group):
@@ -343,7 +426,6 @@ class NwbfileHasher:
 
             this_digest = this_hash.hexdigest()
             self.hashed.update(this_digest.encode())
-
             self.add_to_cache(name, obj, this_digest)
 
         return self.hashed.hexdigest()

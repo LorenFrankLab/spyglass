@@ -27,6 +27,9 @@ try:
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
 
+    MIN_ERROR_SEVERITY = Severity["ERROR"].value
+    MIN_WARNING_SEVERITY = Severity["WARNING"].value
+
 except (ImportError, ModuleNotFoundError) as e:
     (
         dandi,
@@ -38,11 +41,141 @@ except (ImportError, ModuleNotFoundError) as e:
         FileOperationMode,
         Severity,
         nwb_has_external_links,
-    ) = [None] * 9
+        MIN_ERROR_SEVERITY,
+        MIN_WARNING_SEVERITY,
+    ) = [None] * 11
     logger.warning(e)
 
 
 schema = dj.schema("common_dandi")
+
+
+@schema
+class DandiValidationSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> Export.File
+    """
+
+    def check_paper_for_dandi_errors(
+        self, key: dict, force=False, n_processes: int = 128
+    ):
+        """Run dandi validate checks on all files for a given paper.
+
+        If called on a previously-populated paper, will delete and re-populate the
+        DandiValidation table for that paper.
+
+        Parameters
+        ----------
+        key : dict
+            Export key for a single paper to be checked.
+        n_processes : int
+            Number of processes to use for validation. Default is 128.
+        """
+        if not len(Export & key) == 1:
+            raise ValueError("Key must correspond to exactly one paper export")
+
+        key = (Export & key).fetch1("KEY")
+        files_to_check = (Export.File() & key).fetch("KEY")
+        if not files_to_check:
+            logger.warning(
+                f"No files found for {key}. Skipping dandi validation."
+            )
+            return
+
+        if DandiValidation & key:
+            if not force:
+                raise RuntimeError(
+                    f"Existing Dandi validations found for {key}. To re-run validation, "
+                    + "set force=True to delete existing validations and re-populate."
+                )
+            (DandiValidation & key).delete(safemode=False)
+
+        self.insert(files_to_check, skip_duplicates=True)
+        DandiValidation.populate(
+            files_to_check,
+            processes=min(n_processes, len(files_to_check)),
+            display_progress=True,
+        )
+
+
+@schema
+class DandiValidation(SpyglassMixin, dj.Computed):
+    definition = """
+    -> DandiValidationSelection
+    """
+
+    class Violations(dj.Part):
+        definition = """
+        -> master
+        violation_id: int
+        ---
+        id: varchar(128)
+        message: varchar(255)
+        full_error: longblob
+        file_path: varchar(255)
+        """
+
+    class Warnings(dj.Part):
+        definition = """
+        -> master
+        warning_id: int
+        ---
+        id: varchar(128)
+        message: varchar(255)
+        full_error: longblob
+        file_path: varchar(255)
+        """
+
+    def make(self, key):
+        file_path = (Export.File() & key).fetch1("file_path")
+        validator_result = list(dandi.validate.validate(file_path))
+        results_maps = [
+            {
+                "table": self.Violations,
+                "min_severity": MIN_ERROR_SEVERITY,
+                "max_severity": None,
+            },
+            {
+                "table": self.Warnings,
+                "min_severity": MIN_WARNING_SEVERITY,
+                "max_severity": MIN_ERROR_SEVERITY,
+            },
+        ]
+        result_inserts = []
+        for result_map in results_maps:
+            min_severity_value = result_map["min_severity"]
+            max_severity_value = result_map["max_severity"]
+            filtered_results = [
+                result
+                for result in validator_result
+                if result.severity is not None
+                and result.severity.value >= min_severity_value
+                and (
+                    max_severity_value is None
+                    or result.severity.value < max_severity_value
+                )
+                and result.id != "DANDI.NO_DANDISET_FOUND"
+            ]
+            part_keys = [
+                {
+                    **key,
+                    "violation_id": i,
+                    "id": result.id,
+                    "message": result.message[:255]
+                    .replace("'", "")
+                    .encode("ascii", "ignore")
+                    .decode(),  # ensure sql compatibility
+                    "full_error": str(result).replace(
+                        "'", "''"
+                    ),  # escape single quotes for SQL insertion
+                    "file_path": file_path,
+                }
+                for i, result in enumerate(filtered_results)
+            ]
+            result_inserts.append({result_map["table"]: part_keys})
+        self.insert1(key)
+        for part_table, part_keys in result_inserts:
+            part_table.insert(part_keys)
 
 
 @schema
