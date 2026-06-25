@@ -35,23 +35,19 @@ def test_compare_hash_dicts_all_equal_is_matched():
 
 
 @pytest.mark.db_unit
-@pytest.mark.parametrize(
-    "selection_cls_name",
-    ["RecordingArtifactRecomputeSelection", "SortingAnalyzerRecomputeSelection"],
-)
-def test_recompute_attempt_all_rejects_negative_rounding(
-    dj_conn, selection_cls_name
-):
-    """attempt_all rejects a negative rounding before touching the DB.
+def test_recompute_attempt_all_rejects_negative_rounding(dj_conn):
+    """``SortingAnalyzerRecomputeSelection.attempt_all`` rejects a negative
+    rounding before touching the DB.
 
     ``rounding`` is an ``np.round`` precision; a negative value would silently
-    produce a misleading trace/hash comparison.
+    produce a misleading extension-data comparison. (The recording recompute no
+    longer carries a ``rounding`` knob -- its identity is the fixed-precision
+    content fingerprint -- so only the analyzer selection is checked here.)
     """
     from spyglass.spikesorting.v2 import recompute as rc
 
-    selection_cls = getattr(rc, selection_cls_name)
     with pytest.raises(ValueError, match="non-negative"):
-        selection_cls.attempt_all(rounding=-1)
+        rc.SortingAnalyzerRecomputeSelection.attempt_all(rounding=-1)
 
 
 # ---------- integration ------------------------------------------------------
@@ -434,12 +430,18 @@ def test_recording_recompute_mismatch_records_hash_rows(
     sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
     (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
 
-    # Force the regenerated traces to differ from the stored ones so make()
-    # records matched=0 and a Hash row (without re-running the real recompute).
+    # Force the fresh rebuild's fingerprint to differ from the stored
+    # content_hash so make() records matched=0 and a Hash diff row (without
+    # re-running the real recompute).
     monkeypatch.setattr(
         rc,
-        "_recompute_recording_trace_hashes",
-        lambda rk, rounding: {"segment_0": "deadbeefmismatch"},
+        "_recompute_recording_fingerprint",
+        lambda rk: {
+            "traces": "deadbeefmismatch",
+            "timestamps": "deadbeefmismatch",
+            "geometry": "deadbeefmismatch",
+            "metadata": "deadbeefmismatch",
+        },
     )
     rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
     row = rc.RecordingArtifactRecompute & sel_key
@@ -477,10 +479,10 @@ def test_recording_recompute_regen_failure_records_matched_zero(
     sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
     (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
 
-    def _boom(rk, rounding):
+    def _boom(rk):
         raise RuntimeError("simulated SI pin mismatch")
 
-    monkeypatch.setattr(rc, "_recompute_recording_trace_hashes", _boom)
+    monkeypatch.setattr(rc, "_recompute_recording_fingerprint", _boom)
     # populate must COMPLETE (not propagate the regen failure)...
     rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
     row = rc.RecordingArtifactRecompute & sel_key
@@ -580,6 +582,113 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
         == []
     ), "too-recent authorizing row must not be reclaimed"
     (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_delete_files_round_trip(populated_sorting, clean_recompute):
+    """The full reclamation round-trip (gates the delete_files re-enable):
+    populate -> recompute matched -> delete_files removes the file ->
+    get_recording rebuilds + reconciles -> traces equal pre-delete -> the
+    recompute rows are cleared back to deleted=0 by the rebuild.
+    """
+    _assert_temp_base_dir()
+    from pathlib import Path
+
+    import numpy as np
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rec_key = _recording_key(populated_sorting)
+    before = Recording().get_recording(rec_key).get_traces()
+    analysis_file_name = (Recording & rec_key).fetch1("analysis_file_name")
+    abs_path = AnalysisNwbfile.get_abs_path(
+        analysis_file_name, from_schema=True
+    )
+
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    assert (
+        RecordingArtifactRecompute & rec_key & "matched=1"
+    ), "a fresh rebuild must reproduce content_hash -> matched=1"
+
+    removed = RecordingArtifactRecompute().delete_files(
+        rec_key, dry_run=False, days_since_creation=0
+    )
+    assert removed and not Path(abs_path).exists(), (
+        "delete_files must reclaim the matched artifact"
+    )
+    assert RecordingArtifactRecompute & rec_key & "deleted=1"
+
+    # get_recording rebuilds + reconciles the checksum; traces are identical.
+    rec = Recording().get_recording(rec_key)
+    np.testing.assert_array_equal(rec.get_traces(), before)
+    assert Path(
+        AnalysisNwbfile.get_abs_path(analysis_file_name)
+    ).exists(), "the canonical file must be back on disk"
+    # The rebuild's best-effort clear flips the recompute rows to deleted=0.
+    assert not (
+        RecordingArtifactRecompute & rec_key & "deleted=1"
+    ), "rebuild must clear the stale deleted=1 flag (presence-aware)"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_recompute_authority_anchors_on_content_hash(
+    populated_sorting, clean_recompute
+):
+    """``matched`` anchors on ``combined_hash(fresh) == Recording.content_hash``
+    -- NOT on current-vs-fresh.
+
+    A file that is self-consistent with its own fresh rebuild (current == fresh)
+    but whose row ``content_hash`` has drifted is NOT matched / deletable; the
+    old current-vs-fresh authority would have wrongly matched it. Restoring the
+    true ``content_hash`` makes it matched again.
+    """
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    rec_key = _recording_key(populated_sorting)
+    row_key = (Recording & rec_key).fetch1("KEY")
+    real_hash = (Recording & rec_key).fetch1("content_hash")
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+
+    # Drift the ROW identity only: the on-disk file and a fresh rebuild are
+    # unchanged and mutually consistent, but neither matches the drifted hash.
+    Recording.update1({**row_key, "content_hash": "0" * 64})
+    try:
+        RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+        RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+        assert RecordingArtifactRecompute & rec_key & "matched=0", (
+            "fresh rebuild != drifted row content_hash must NOT match"
+        )
+        assert (
+            RecordingArtifactRecompute().delete_files(
+                rec_key, dry_run=True, days_since_creation=0
+            )
+            == []
+        ), "a non-matched artifact is never deletable"
+    finally:
+        Recording.update1({**row_key, "content_hash": real_hash})
+        (RecordingArtifactRecompute & rec_key).delete(safemode=False)
+
+    # With the true hash restored, a fresh recompute matches.
+    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    assert RecordingArtifactRecompute & rec_key & "matched=1", (
+        "fresh rebuild == restored content_hash must match"
+    )
 
 
 @pytest.mark.slow

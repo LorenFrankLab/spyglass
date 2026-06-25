@@ -20,15 +20,18 @@ verify that regeneration *before* anything is deleted.
 | Recording | SortingAnalyzer | Role |
 | --- | --- | --- |
 | `RecordingArtifactVersions` | `SortingAnalyzerVersions` | Inventory dependencies + a reference content hash. |
-| `RecordingArtifactRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` + a `rounding` precision. |
+| `RecordingArtifactRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` (a `rounding` precision applies to the analyzer trio only). |
 | `RecordingArtifactRecompute` | `SortingAnalyzerRecompute` | Regenerate, compare content hashes, record `matched` / `deleted`. |
 
-The comparison uses reproducible **content** — the preprocessed
-`ElectricalSeries` traces (rounded to `rounding` decimals) for recordings, and
-the deterministic analyzer extension data for analyzers (excluding the
-stochastic `noise_levels` estimate) — not the whole-file `cache_hash`, which
-includes volatile NWB metadata (`object_id`, timestamps) and is not
-reproducible across regenerations.
+The comparison uses reproducible **content** — for recordings the content
+fingerprint (traces, timestamps, persisted probe geometry, and scaling metadata)
+that defines `Recording.content_hash`, and for analyzers the deterministic
+extension data (excluding the stochastic `noise_levels` estimate). Neither uses
+a whole-file digest, which folds in volatile NWB metadata (`object_id`,
+timestamps) and is not reproducible across regenerations. The recording
+identity has no `rounding` knob — its precision is fixed by the fingerprint's
+`TRACE_ROUNDING` / `TIMESTAMP_ROUNDING` constants; `rounding` applies only to
+the analyzer extension comparison.
 
 ## Workflow
 
@@ -57,7 +60,7 @@ RecordingArtifactRecompute().get_disk_space(rec_key)
 RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)    # preview
 RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)   # delete
 
-# Later: get_recording() rebuilds the deleted artifact on demand.
+# Later: get_recording() rebuilds + reconciles the deleted artifact on demand.
 ```
 
 The `SortingAnalyzer*` trio mirrors this for analyzer folders; deletion removes
@@ -81,12 +84,19 @@ A `matched=0` recompute also records which objects differ in the `Name`
 
 ## Cache-drift policy
 
-The recording cache uses **warn-and-rebuild**, not fail-closed:
-`Recording.get_recording()` rebuilds only when the cached file is missing, and
-the rebuild logs a warning (it does not raise) if the regenerated `cache_hash`
-differs from the stored one. Drift is surfaced out-of-band by the recompute
-tables (a `matched=0` row), mirroring v1's `RecordingRecompute` precedent —
-there is no hash-mutating `repair()` and no fail-closed access path.
+The recording cache is **content-addressed and fail-closed on drift**.
+`Recording.get_recording()` rebuilds only when the cached file is missing; the
+rebuild regenerates to a private temp file, fingerprints it, and installs it
+(atomic `os.replace`) only if the fingerprint matches the row's stored
+`content_hash` — then reconciles the DataJoint `~external` byte checksum so the
+next checksum-validated read succeeds. If the rebuild **diverges** from
+`content_hash` (e.g. a SpikeInterface/BLAS upgrade, an edited raw NWB, or
+changed upstream construction inputs), it raises `RecordingContentDriftError`
+(naming the file and the recovery options) and never serves the drifted bytes —
+the canonical slot is left untouched. Rebuild, read-repair, and recompute
+deletion are serialized per recording (`recording_artifact_lock`) and publish
+atomically, so a reclamation can never race a rebuild. There is no hash-mutating
+`repair()`.
 
 ## Admin surface
 

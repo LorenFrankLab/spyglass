@@ -223,7 +223,12 @@ class AnalysisFileIssues(dj.Manual):
         insert_dict : dict or None
             Dict ready for insertion into AnalysisFileIssues, or None if OK.
         """
-        if analysis_file_name in deleted_files:
+        # A file intentionally deleted by recompute is skipped ONLY while it is
+        # physically absent (the intended "reclaimed and gone" state). If it is
+        # back on disk -- an on-demand rebuild restored it -- fall through to
+        # normal integrity tracking, so a stale ``deleted=1`` flag can never
+        # hide a live file from the scan.
+        if analysis_file_name in deleted_files and not Path(fname).exists():
             return None
 
         key = dict(

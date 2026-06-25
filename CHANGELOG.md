@@ -75,6 +75,33 @@ v2 reads the signal the `RecordingSelection` lineage actually points at:
 Both were silent failures: the resulting recording/sorting rows look valid but
 describe the wrong signal.
 
+#### Spike Sorting v2 recording reclamation round-trips via a content fingerprint
+
+Reclaiming a preprocessed recording's disk
+(`RecordingArtifactRecompute.delete_files`) and rebuilding it on demand
+(`Recording.get_recording`) now round-trips correctly. The recording identity is
+a representation-blind **content fingerprint** (traces, timestamps, persisted
+probe geometry, scaling metadata) read back from the on-disk `ElectricalSeries`,
+reproducible across byte-different rebuilds — so a rebuild reconciles the
+DataJoint `~external` checksum and the next read succeeds.
+
+- The volatile whole-file `cache_hash` column is **retired** from the
+  `Recording` and `ConcatenatedRecording` schemas and replaced with
+  `content_hash` (pre-release; no migration). A whole-file `NwbfileHasher` digest
+  folds in volatile object ids / creation timestamps and so could never confirm
+  a content-identical rebuild.
+- `Recording.get_recording` rebuilds a missing cache under a per-recording lock,
+  installs the rebuilt file atomically (`os.replace`), and reconciles the byte
+  checksum. A rebuild that diverges from the stored `content_hash` raises the
+  new `RecordingContentDriftError` (with recovery guidance) instead of serving
+  drifted bytes or a cryptic checksum error.
+- `RecordingArtifactRecompute` deletion authority anchors on
+  `content_hash` (a fresh rebuild reproducing the row identity), holds the same
+  per-recording lock as the rebuild, and the per-attempt `rounding` knob is
+  removed from `RecordingArtifactRecomputeSelection` (the fingerprint precision
+  is fixed). Integrity scans are now presence-aware: a rebuilt-but-still-flagged
+  file is tracked rather than skipped.
+
 #### Spike Sorting v2 fixes a v1 artifact-detection unit-conversion bug
 
 Spike sorting v2 fixes an artifact-detection unit-conversion bug present

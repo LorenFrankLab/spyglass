@@ -40,6 +40,10 @@ from spyglass.spikesorting.v2._recompute import (
     hash_extension_data,
     hash_recording_traces,
 )
+from spyglass.spikesorting.v2._recording_fingerprint import (
+    TRACE_ROUNDING,
+    recording_content_fingerprint,
+)
 from spyglass.spikesorting.v2.exceptions import (
     AnalyzerFolderInvalidError,
     AnalyzerFolderMissingError,
@@ -265,25 +269,25 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> RecordingArtifactVersions
     -> UserEnvironment
-    rounding=4: int           # float precision for the trace comparison
     ---
     logged_at_creation=0: bool
     xfail_reason=NULL: varchar(127)
     """
 
     @classmethod
-    def attempt_all(cls, restriction=True, *, rounding: int = 4) -> None:
+    def attempt_all(cls, restriction=True) -> None:
         """Insert a recompute attempt for every eligible artifact (current env).
 
         The v2 analog of v1 ``RecordingRecomputeSelection.attempt_all``: bulk
         plan attempts for all (or restricted) ``RecordingArtifactVersions``
         rows under the current ``UserEnvironment``.
+
+        There is no per-attempt ``rounding`` knob: the recording identity is the
+        content fingerprint, whose precision is the fixed ``TRACE_ROUNDING`` /
+        ``TIMESTAMP_ROUNDING`` constants. A per-attempt rounding would hash
+        differently from the stored ``content_hash`` and spuriously never match
+        (design Medium 3).
         """
-        if rounding < 0:
-            raise ValueError(
-                f"rounding must be a non-negative np.round precision; "
-                f"got {rounding}."
-            )
         env_id = _current_env_id()
         if not env_id:
             logger.warning(
@@ -291,7 +295,7 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
             )
             return
         rows = [
-            {**version_key, "env_id": env_id, "rounding": rounding}
+            {**version_key, "env_id": env_id}
             for version_key in (
                 RecordingArtifactVersions & restriction
             ).fetch("KEY", as_dict=True)
@@ -373,29 +377,49 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:
-        """Read the recompute inputs (no regeneration I/O)."""
-        rounding, xfail_reason = (
+        """Read the recompute inputs (no regeneration I/O).
+
+        There is no per-attempt ``rounding`` -- the content fingerprint's
+        precision is fixed (``TRACE_ROUNDING`` / ``TIMESTAMP_ROUNDING``). The
+        shared ``RecomputeFetched.rounding`` field carries ``TRACE_ROUNDING`` for
+        carrier shape only; the recording compute path ignores it.
+        """
+        xfail_reason = (
             RecordingArtifactRecomputeSelection & key
-        ).fetch1("rounding", "xfail_reason")
+        ).fetch1("xfail_reason")
         parent = self.get_parent_key(key)
         return RecomputeFetched(
             # str the recording_id UUID for a DeepHash-stable carrier.
             parent_key={"recording_id": str(parent["recording_id"])},
-            rounding=int(rounding),
+            rounding=TRACE_ROUNDING,
             xfail_reason=xfail_reason,
         )
 
     def make_compute(
         self, key, parent_key, rounding, xfail_reason
     ) -> RecomputeComputed:
-        """Regenerate the recording traces + hash them off the transaction."""
+        """Fingerprint the current file + a fresh rebuild, off the transaction.
+
+        ``stored_hashes`` is the CURRENT on-disk file's fingerprint components
+        (``get_recording`` self-heals a missing file first) and ``new_hashes``
+        is an independent FRESH temp rebuild's components. ``make_insert``
+        anchors ``matched`` on ``combined_hash(new) == Recording.content_hash``
+        (recoverability) and reports the current-vs-fresh component diff.
+        """
 
         def _regen():
-            stored = Recording().get_recording(parent_key)
-            return (
-                hash_recording_traces(stored, rounding=rounding),
-                _recompute_recording_trace_hashes(parent_key, rounding),
+            # Self-heal a missing/deleted file first (and fail closed on drift),
+            # then fingerprint the canonical file; fingerprint a fresh,
+            # independent temp rebuild for the match authority.
+            Recording().get_recording(parent_key)
+            current_abs = AnalysisNwbfile.get_abs_path(
+                (Recording & parent_key).fetch1("analysis_file_name")
             )
+            current = recording_content_fingerprint(
+                current_abs, electrical_series_path=_ELECTRICAL_SERIES_PATH
+            )
+            fresh = _recompute_recording_fingerprint(parent_key)
+            return current, fresh
 
         return _recompute_compute(
             parent_key,
@@ -408,19 +432,28 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
     def make_insert(
         self, key, outcome, err_msg, stored_hashes, new_hashes, parent_key
     ):
-        """Record the QC result (created_at = the artifact file mtime)."""
-        # ``_artifact_created_at`` reads the row + the file mtime here, NOT in
-        # make_fetch: the mtime is non-deterministic across the framework's two
-        # make_fetch calls and would trip the DeepHash integrity check. It is a
-        # single tiny indexed read, not the heavy regen, so it stays in insert.
-        _insert_recompute_outcome(
-            self,
-            key,
-            outcome,
-            err_msg,
-            stored_hashes,
-            new_hashes,
-            _artifact_created_at(parent_key),
+        """Record the QC result; ``matched`` anchors on ``content_hash``.
+
+        ``created_at`` is the artifact file mtime, read here (not in
+        ``make_fetch``) because the mtime is non-deterministic across the
+        framework's two ``make_fetch`` calls and would trip the DeepHash
+        integrity check.
+
+        ``matched`` is ``combined_hash(new_hashes) == Recording.content_hash``
+        (design Medium 1) -- the same invariant ``_rebuild_nwb_artifact``
+        enforces, so a ``matched`` recompute authorizes a delete the rebuild can
+        honor -- NOT the current-vs-fresh dict diff. The diff parts still report
+        which component drifted.
+        """
+        created_at = _artifact_created_at(parent_key)
+        if outcome != "compare":
+            _insert_recompute_outcome(
+                self, key, outcome, err_msg, {}, {}, created_at
+            )
+            return
+        content_hash = (Recording & parent_key).fetch1("content_hash")
+        _insert_recording_comparison(
+            self, key, stored_hashes, new_hashes, content_hash, created_at
         )
 
     def get_disk_space(self, restriction=True) -> str:
@@ -474,10 +507,13 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         )
 
 
-def _recompute_recording_trace_hashes(rec_key: dict, rounding: int) -> dict:
-    """Recompute a recording to a fresh (unregistered) file and hash traces."""
-    import spikeinterface.extractors as se
+def _recompute_recording_fingerprint(rec_key: dict) -> dict:
+    """Recompute a recording to a fresh (unregistered) temp file and return its
+    content-fingerprint component dict.
 
+    The fresh temp is unlinked on success, mismatch, and error (explicit
+    temp-artifact cleanup, design §10) -- it never enters the canonical slot.
+    """
     recording_table = Recording()
     fetched = recording_table.make_fetch(rec_key)
     raw_path = Nwbfile().get_abs_path(fetched.sel["nwb_file_name"])
@@ -495,18 +531,43 @@ def _recompute_recording_trace_hashes(rec_key: dict, rounding: int) -> dict:
         probe_types=fetched.probe_types,
         electrode_group_names=fetched.electrode_group_names,
         bad_channel_ids=fetched.bad_channel_ids,
-        existing_analysis_file_name=None,  # fresh, unregistered file
+        existing_analysis_file_name=None,  # fresh, unregistered temp file
     )
     fresh_abs = AnalysisNwbfile.get_abs_path(result.analysis_file_name)
     try:
-        fresh = se.read_nwb_recording(
-            fresh_abs,
-            electrical_series_path=_ELECTRICAL_SERIES_PATH,
-            load_time_vector=True,
+        return recording_content_fingerprint(
+            fresh_abs, electrical_series_path=_ELECTRICAL_SERIES_PATH
         )
-        return hash_recording_traces(fresh, rounding=rounding)
     finally:
         Path(fresh_abs).unlink(missing_ok=True)
+
+
+def _insert_recording_comparison(
+    table, key, current, fresh, content_hash, created_at
+):
+    """Insert a recording recompute outcome with a content-anchored ``matched``.
+
+    ``matched = combined_hash(fresh) == content_hash`` -- the FRESH rebuild
+    reproducing the row identity (recoverability), the same invariant
+    ``Recording._rebuild_nwb_artifact`` enforces -- NOT the current-vs-fresh
+    dict diff. The ``Name`` / ``Hash`` diff parts still report which fingerprint
+    component differs between the current served file and the fresh rebuild
+    (non-determinism / current-file drift), so an operator can localize a
+    problem even on a matched row.
+    """
+    from spyglass.spikesorting.v2.utils import transaction_or_noop
+
+    matched = combined_hash(fresh) == content_hash
+    _, missing_old, missing_new, differing = compare_hash_dicts(current, fresh)
+    with transaction_or_noop(table.connection):
+        table.insert1({**key, "matched": matched, "created_at": created_at})
+        name_rows = [
+            {**key, "name": n, "missing_from": "old"} for n in missing_old
+        ] + [{**key, "name": n, "missing_from": "new"} for n in missing_new]
+        if name_rows:
+            table.Name().insert(name_rows)
+        if differing:
+            table.Hash().insert([{**key, "name": n} for n in differing])
 
 
 # =====================================================================
@@ -1030,7 +1091,17 @@ def _delete_files(
     path_fn,
     artifact_pk,
 ):
-    """Artifact-level recording delete gate: current-env match + age, unlink once."""
+    """Artifact-level recording delete gate: current-env match + age, unlink once.
+
+    The unlink + ``deleted=1`` update for each artifact runs under
+    ``recording_artifact_lock(recording_id)`` so a reclamation can never
+    interleave with a concurrent ``get_recording`` rebuild of the same recording
+    -- no unlink racing a write, no reader seeing a half-state (design §3.6).
+    """
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        recording_artifact_lock,
+    )
+
     cutoff = _recent_cutoff(days_since_creation)
     authorized, matched = _authorize_artifacts_for_deletion(
         recompute_table,
@@ -1049,17 +1120,19 @@ def _delete_files(
         if dry_run:
             deleted.append(str(abs_path))
             continue
-        abs_path.unlink(missing_ok=True)
-        if abs_path.exists():
-            logger.warning(
-                f"delete_files: file not removed: {abs_path}; leaving "
-                "deleted=0 so a later cleanup retries."
-            )
-            continue
-        # Mark every matched row for this artifact deleted, only after the file
-        # is gone (the file is per-artifact; the flag is per recompute row).
-        for key in (matched & artifact).fetch("KEY", as_dict=True):
-            recompute_table.update1({**key, "deleted": 1})
+        # Serialize against a concurrent rebuild of THIS recording.
+        with recording_artifact_lock(artifact["recording_id"]):
+            abs_path.unlink(missing_ok=True)
+            if abs_path.exists():
+                logger.warning(
+                    f"delete_files: file not removed: {abs_path}; leaving "
+                    "deleted=0 so a later cleanup retries."
+                )
+                continue
+            # Mark every matched row for this artifact deleted, only after the
+            # file is gone (the file is per-artifact; the flag is per row).
+            for key in (matched & artifact).fetch("KEY", as_dict=True):
+                recompute_table.update1({**key, "deleted": 1})
         deleted.append(str(abs_path))
     return deleted
 
