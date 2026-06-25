@@ -107,7 +107,9 @@ notebook. For the pipeline overview, see
   `n_jobs=1`) instead of loading the full trace array into RAM. Output is
   frame-identical to the old path.
 - **Hash-verifiable Recording rebuild.** The preprocessed `Recording`
-  cache carries an `NwbfileHasher` `cache_hash`.
+  cache carries a representation-blind `content_hash` (a content
+  fingerprint of traces / timestamps / geometry / scaling metadata),
+  reproducible across a content-identical rebuild.
 - **Pinned SpikeInterface (`==0.104.3`) + KS4/MS5 snapshot tests.** A SI
   version bump that would change a sorter's `extra="allow"` defaults
   surfaces as a deliberate, audited test failure.

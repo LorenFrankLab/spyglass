@@ -778,7 +778,7 @@ localizes peaks spatially, so it consumes the recording's channel locations (the
 cached `Recording` carries probe geometry).
 
 To be explicit: populating `DriftEstimate` leaves the upstream `Recording`
-untouched — its `cache_hash` and the traces from `get_recording` are unchanged.
+untouched — its `content_hash` and the traces from `get_recording` are unchanged.
 Applying motion correction is out of scope by design.
 
 ### Chronic same-day recordings
