@@ -34,6 +34,62 @@ def test_compare_hash_dicts_all_equal_is_matched():
     assert matched and not mo and not mn and not diff
 
 
+# ---------- DB-free env-compatibility logic ---------------------------------
+
+
+def test_env_matches_compatible_on_shared_namespaces():
+    """A file is compatible when every namespace shared with the env agrees."""
+    from spyglass.spikesorting.v2._recompute import env_matches
+
+    env = {"core": "2.9.0", "hdmf-common": "1.8.0", "hdmf-experimental": "0.5.0"}
+    file_deps = {"core": "2.9.0", "hdmf-common": "1.8.0"}
+    assert env_matches(file_deps, env)
+
+
+def test_env_matches_incompatible_on_version_drift():
+    """A drifted version on a shared namespace marks the file incompatible."""
+    from spyglass.spikesorting.v2._recompute import env_matches
+
+    env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
+    assert not env_matches({"core": "0.0.0-incompatible"}, env)
+
+
+def test_env_matches_none_or_empty_deps_is_incompatible():
+    """Deps absent at inventory time can't be confirmed -> incompatible."""
+    from spyglass.spikesorting.v2._recompute import env_matches
+
+    env = {"core": "2.9.0"}
+    assert not env_matches(None, env)
+    assert not env_matches({}, env)
+
+
+def test_env_matches_ignores_namespaces_absent_from_env():
+    """An extension embedded in the file but not registered in the live env
+    (extensions register lazily) is NOT compared -- it never spuriously fails
+    the gate, mirroring v1's lenient comparison."""
+    from spyglass.spikesorting.v2._recompute import env_matches
+
+    env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
+    file_deps = {"core": "2.9.0", "ndx-franklab-novela": "0.1.0"}
+    assert env_matches(file_deps, env)
+
+
+def test_env_matches_no_shared_namespace_is_incompatible():
+    """No overlap with the env means nothing was verified -> incompatible."""
+    from spyglass.spikesorting.v2._recompute import env_matches
+
+    assert not env_matches({"ndx-only": "1.0.0"}, {"core": "2.9.0"})
+
+
+def test_current_env_namespaces_reports_core_stack():
+    """The live-env reader returns the base NWB/HDMF namespace versions."""
+    from spyglass.spikesorting.v2._recompute import current_env_namespaces
+
+    deps = current_env_namespaces()
+    assert "core" in deps and deps["core"]
+    assert "version" not in deps  # the non-namespace 'version' key is dropped
+
+
 @pytest.mark.db_unit
 def test_recompute_attempt_all_rejects_negative_rounding(dj_conn):
     """``SortingAnalyzerRecomputeSelection.attempt_all`` rejects a negative
@@ -48,6 +104,21 @@ def test_recompute_attempt_all_rejects_negative_rounding(dj_conn):
 
     with pytest.raises(ValueError, match="non-negative"):
         rc.SortingAnalyzerRecomputeSelection.attempt_all(rounding=-1)
+
+
+@pytest.mark.db_unit
+def test_recording_missing_probe_info_detects_absence(dj_conn):
+    """The proactive probe check reports a structural impossibility when no
+    ``Electrode * Probe`` rows exist for a file (probe metadata never ingested).
+
+    Uses a file name with no ingested probe so the join is genuinely empty --
+    the same condition a probe-stripped session would produce.
+    """
+    from spyglass.spikesorting.v2.recompute import (
+        _recording_missing_probe_info,
+    )
+
+    assert _recording_missing_probe_info("no_such_session_.nwb") is True
 
 
 # ---------- integration ------------------------------------------------------
@@ -798,3 +869,195 @@ def test_recording_recompute_mixed_env_deletes(
         rec_key, dry_run=True, days_since_creation=0
     )
     assert listed, "current-env match should authorize despite the stale row"
+
+
+# ---------- operational hardening: env gate / limit / xfail ------------------
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_attempt_all_skips_incompatible_env(populated_sorting, clean_recompute):
+    """``attempt_all`` plans only env-compatible artifacts by default;
+    ``force_attempt=True`` overrides the gate.
+
+    The artifact was written in THIS environment, so its inventoried
+    ``nwb_deps`` match and it is planned. Drift the inventory to an
+    incompatible namespace version and the default gate skips it -- only
+    ``force_attempt`` plans it.
+    """
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+    )
+
+    rec_key = _recording_key(populated_sorting)
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    ver_key = (RecordingArtifactVersions & rec_key).fetch1("KEY")
+
+    # Baseline: env-compatible -> planned.
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    assert (
+        RecordingArtifactRecomputeSelection & rec_key
+    ), "an env-compatible artifact must be planned"
+
+    # Drift the inventoried env to incompatible; the default gate skips it.
+    (RecordingArtifactRecomputeSelection & rec_key).delete(safemode=False)
+    RecordingArtifactVersions.update1(
+        {**ver_key, "nwb_deps": {"core": "0.0.0-incompatible"}}
+    )
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    assert not (
+        RecordingArtifactRecomputeSelection & rec_key
+    ), "an env-incompatible artifact must be skipped by default"
+
+    # force_attempt overrides the gate.
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key, force_attempt=True)
+    assert (
+        RecordingArtifactRecomputeSelection & rec_key
+    ), "force_attempt must plan even an env-incompatible artifact"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_attempt_all_limit(populated_sorting, clean_recompute):
+    """``attempt_all(limit=k)`` inserts at most ``k`` selections from a larger
+    eligible set; an unthrottled call fills in the rest."""
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    rec_key = _recording_key(populated_sorting)
+    nwb_file_name = (RecordingSelection & rec_key).fetch1("nwb_file_name")
+    # ``populated_sorting`` covers sort group [0]; populate a SECOND recording
+    # from sort group [1] so two eligible Versions rows exist to throttle over.
+    sort_group_ids = sorted(
+        int(g)
+        for g in (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+            "sort_group_id"
+        )
+    )
+    assert len(sort_group_ids) >= 2, "fixture must have >=2 sort groups"
+    rec_pk2 = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_ids[1],
+            "interval_list_name": "raw data valid times",
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    rec_key2 = {"recording_id": rec_pk2["recording_id"]}
+    restr = [rec_key, rec_key2]
+    try:
+        if not (Recording & rec_key2):
+            Recording.populate(rec_key2, reserve_jobs=False)
+        RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+        RecordingArtifactVersions.populate(rec_key2, reserve_jobs=False)
+        assert len(RecordingArtifactVersions & restr) == 2
+
+        RecordingArtifactRecomputeSelection.attempt_all(restr, limit=1)
+        assert (
+            len(RecordingArtifactRecomputeSelection & restr) == 1
+        ), "limit=1 must insert exactly one selection"
+
+        # Unthrottled fills in the remainder (skip_duplicates keeps the first).
+        RecordingArtifactRecomputeSelection.attempt_all(restr)
+        assert len(RecordingArtifactRecomputeSelection & restr) == 2
+    finally:
+        # One cascading delete from the selection top removes the 2nd
+        # recording's Recompute/Selection/Versions/Recording rows.
+        (RecordingArtifactRecompute & rec_key2).delete(safemode=False)
+        (RecordingSelection & rec_key2).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
+    """``_check_xfail`` leaves a healthy recording unflagged, marks known
+    STRUCTURAL impossibilities (missing probe / PyNWB-API / NWB-spec) from a
+    prior failed run, and ``attempt_all`` records the reason on the planned
+    selection.
+    """
+    _assert_temp_base_dir()
+    from spyglass.common.common_user import UserEnvironment
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+        _artifact_created_at,
+        _recording_missing_probe_info,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    rec_key = _recording_key(populated_sorting)
+    nwb_file_name = (RecordingSelection & rec_key).fetch1("nwb_file_name")
+
+    # Healthy recording: probe info present -> not flagged (real query, not a
+    # tautology -- a wrong/empty probe query would flag it).
+    assert _recording_missing_probe_info(nwb_file_name) is False
+    assert RecordingArtifactRecomputeSelection._check_xfail(rec_key) == (
+        False,
+        None,
+    )
+
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    ver_key = (RecordingArtifactVersions & rec_key).fetch1("KEY")
+
+    # Plant a prior failed attempt under a STALE env (survives re-planning the
+    # current-env selection) whose error names a structural impossibility.
+    stale_env = "planted_stale_env_00"
+    UserEnvironment().insert1(
+        {
+            "env_id": stale_env,
+            "env_hash": "0" * 32,
+            "env": {"x": 1},
+            "has_editable": 0,
+        },
+        skip_duplicates=True,
+    )
+    stale_sel = {**ver_key, "env_id": stale_env}
+    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingArtifactRecompute.insert1(
+        {
+            **stale_sel,
+            "matched": 0,
+            "err_msg": "regeneration failed: missing probe info",
+            "created_at": _artifact_created_at(rec_key),
+            "deleted": 0,
+        },
+        allow_direct_insert=True,
+    )
+
+    check = RecordingArtifactRecomputeSelection._check_xfail
+    assert check(rec_key) == (True, "missing_probe_info")
+
+    # The same narrow detector recognizes PyNWB-API and NWB-spec patterns.
+    RecordingArtifactRecompute.update1(
+        {**stale_sel, "err_msg": "got an unexpected keyword argument 'dtype'"}
+    )
+    assert check(rec_key) == (True, "pynwb_api_incompatible")
+    RecordingArtifactRecompute.update1(
+        {**stale_sel, "err_msg": "No spec found for type in namespace core"}
+    )
+    assert check(rec_key) == (True, "nwb_spec_incompatible")
+
+    # attempt_all records the reason on the freshly-planned current-env
+    # selection (a structural xfail is scheduled-but-flagged, not silently
+    # dropped).
+    RecordingArtifactRecompute.update1(
+        {**stale_sel, "err_msg": "regeneration failed: missing probe info"}
+    )
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    env_id = UserEnvironment().this_env["env_id"]
+    assert (
+        RecordingArtifactRecomputeSelection & {**ver_key, "env_id": env_id}
+    ).fetch1("xfail_reason") == "missing_probe_info"

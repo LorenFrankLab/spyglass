@@ -118,3 +118,50 @@ def current_nwb_namespaces(abs_path: str) -> dict:
     deps = dict(get_file_namespaces(abs_path))
     deps.pop("version", None)
     return deps
+
+
+def current_env_namespaces() -> dict:
+    """Return the pynwb namespace versions registered in the current process.
+
+    Reads the live ``pynwb`` type-map catalog (the base NWB/HDMF stack -- and
+    any extension already loaded this session). The counterpart to
+    :func:`current_nwb_namespaces`, which reads versions embedded in a file:
+    comparing the two (see :func:`env_matches`) decides whether a re-preprocess
+    in this environment would write namespace-comparable output.
+    """
+    import pynwb
+
+    name_cat = pynwb.get_manager().type_map.namespace_catalog
+    deps = {
+        ns: name_cat.get_namespace(ns).get("version", None)
+        for ns in name_cat.namespaces
+    }
+    deps.pop("version", None)
+    return deps
+
+
+def env_matches(file_deps: dict | None, env_deps: dict) -> bool:
+    """Whether a file's inventoried namespaces are reproducible in ``env_deps``.
+
+    Compatible iff every namespace the file and the environment have in COMMON
+    agrees on version. Namespaces present only in the file -- e.g. an extension
+    not yet registered in the live catalog (extensions load lazily) -- are not
+    compared, so an unregistered extension never spuriously fails the gate (the
+    lenient half of v1's ``_dicts_match``). Unlike v1, which compared a fixed
+    namespace allowlist, this compares ALL shared namespaces and so is slightly
+    stricter -- acceptable because the env gate is only a pre-filter, not the
+    delete authority (the real authority is the ``content_hash`` recompute
+    match): a false *compatible* here merely costs one failed attempt, and a
+    false *incompatible* only skips a recomputable artifact (recover with
+    ``force_attempt``), never anything unsafe.
+
+    A file with no inventoried deps (absent at inventory time) or no namespace
+    in common with the environment is treated as incompatible -- nothing could
+    be verified.
+    """
+    if not file_deps:
+        return False
+    shared = set(file_deps) & set(env_deps)
+    if not shared:
+        return False
+    return all(file_deps[ns] == env_deps[ns] for ns in shared)

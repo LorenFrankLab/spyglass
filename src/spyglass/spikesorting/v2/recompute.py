@@ -36,7 +36,9 @@ from spyglass.spikesorting.v2._recompute import (
     ANALYZER_RECOMPUTE_EXTENSIONS,
     combined_hash,
     compare_hash_dicts,
+    current_env_namespaces,
     current_nwb_namespaces,
+    env_matches,
     hash_extension_data,
     hash_recording_traces,
 )
@@ -53,6 +55,7 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.spikesorting.v2.recording import (
     _ELECTRICAL_SERIES_PATH,
     Recording,
+    RecordingSelection,
 )
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
@@ -261,6 +264,26 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
             {**key, "nwb_deps": nwb_deps, "content_hash": content_hash}
         )
 
+    def this_env(self) -> dj.expression.QueryExpression:
+        """Restrict to artifacts reproducible in the current environment.
+
+        The v2 analog of v1 ``RecordingRecomputeVersions.this_env``: an artifact
+        is eligible only when every pynwb namespace it and the live environment
+        have in common agrees on version (so a re-preprocess writes
+        namespace-comparable output). Reads the live catalog once, then keeps the
+        rows whose inventoried ``nwb_deps`` are compatible (see
+        :func:`~spyglass.spikesorting.v2._recompute.env_matches`). Operates on
+        ``self`` (restrict first to scope the scan).
+        """
+        env_deps = current_env_namespaces()
+        pk = self.primary_key
+        compatible = [
+            {field: row[field] for field in pk}
+            for row in self.fetch(as_dict=True)
+            if env_matches(row["nwb_deps"], env_deps)
+        ]
+        return self & compatible
+
 
 @schema
 class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
@@ -275,17 +298,51 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def attempt_all(cls, restriction=True) -> None:
+    def attempt_all(
+        cls,
+        restriction=True,
+        *,
+        limit: Optional[int] = None,
+        force_attempt: bool = False,
+        check_xfail: bool = True,
+    ) -> None:
         """Insert a recompute attempt for every eligible artifact (current env).
 
         The v2 analog of v1 ``RecordingRecomputeSelection.attempt_all``: bulk
         plan attempts for all (or restricted) ``RecordingArtifactVersions``
         rows under the current ``UserEnvironment``.
 
+        By default only **env-compatible** artifacts are planned: an artifact is
+        skipped unless every pynwb namespace its file and the current
+        environment share agrees on version (mirrors v1's ``this_env`` gate).
+        This avoids scheduling attempts that cannot reproduce the artifact in
+        the current environment. ``force_attempt=True`` overrides the gate for a
+        deliberate audit. Each planned artifact is also screened for known
+        structural impossibilities (missing probe info, PyNWB-API / NWB-spec
+        incompatibility); a match is recorded in ``xfail_reason`` so the
+        recompute short-circuits to ``matched=0`` instead of wasting a regen
+        (set ``check_xfail=False`` to skip the screen).
+
         There is no per-attempt ``rounding`` knob: the recording identity is the
         content fingerprint, whose precision is the fixed ``TRACE_ROUNDING`` /
         ``TIMESTAMP_ROUNDING`` constants. A per-attempt rounding would hash
         differently from the stored ``content_hash`` and spuriously never match.
+
+        Parameters
+        ----------
+        restriction : dict, str, or list, optional
+            Restriction on ``RecordingArtifactVersions``. Default all.
+        limit : int, optional
+            Plan at most this many artifacts, drawn at RANDOM from the eligible
+            set (``dj.condition.Top(order_by="RAND()")``). For large
+            retrospective audits where attempting every artifact is too costly;
+            a random sample exercises a diverse spread. Default None (all).
+        force_attempt : bool, optional
+            Plan even env-incompatible artifacts (skip the compatibility gate).
+            Default False.
+        check_xfail : bool, optional
+            Screen each artifact for known structural impossibilities and record
+            the reason in ``xfail_reason``. Default True.
         """
         env_id = _current_env_id()
         if not env_id:
@@ -293,13 +350,87 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
                 "No UserEnvironment available; cannot plan recompute attempts."
             )
             return
-        rows = [
-            {**version_key, "env_id": env_id}
-            for version_key in (
-                RecordingArtifactVersions & restriction
-            ).fetch("KEY", as_dict=True)
-        ]
+        versions = RecordingArtifactVersions()
+        eligible = versions if force_attempt else versions.this_env()
+        source = eligible & restriction
+        if limit:
+            source = source & dj.condition.Top(limit=limit, order_by="RAND()")
+        rows = []
+        for version_key in source.fetch("KEY", as_dict=True):
+            xfail_reason = None
+            if check_xfail:
+                _is_xfail, xfail_reason = cls._check_xfail(version_key)
+            rows.append(
+                {**version_key, "env_id": env_id, "xfail_reason": xfail_reason}
+            )
         cls.insert(rows, skip_duplicates=True)
+
+    @classmethod
+    def _check_xfail(
+        cls,
+        key: dict,
+        *,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
+    ) -> tuple[bool, Optional[str]]:
+        """Detect known STRUCTURAL impossibilities for one recording.
+
+        Ports v1 ``RecordingRecomputeSelection._check_xfail`` and is kept
+        deliberately NARROW -- it flags only impossibilities a recompute can
+        never overcome (missing probe info, a PyNWB-API or NWB-spec
+        incompatibility), so a flagged artifact is scheduled-but-marked rather
+        than re-attempted. It is **not** a general skip mechanism: anything not
+        matching these patterns returns ``(False, None)`` and is attempted
+        normally.
+
+        Recognition has two cheap (no file I/O) layers: prior ``matched=0``
+        recompute runs whose ``err_msg`` names the pattern, and -- for probe
+        info -- a direct ``Electrode * Probe`` presence query. (PyNWB-API /
+        NWB-spec incompatibilities are recognized only from a prior failure's
+        message; unlike v1 there is no proactive SpikeInterface re-read here, so
+        planning stays I/O-free and the ``limit`` throttle is meaningful.)
+
+        Parameters
+        ----------
+        key : dict
+            A key carrying ``recording_id`` (e.g. a ``RecordingArtifactVersions``
+            primary key).
+        skip_probe, skip_pynwb_api, skip_nwb_spec : bool, optional
+            Enable each xfail pattern. All default True.
+
+        Returns
+        -------
+        tuple[bool, str | None]
+            ``(is_xfail, reason)``; ``reason`` is one of ``"missing_probe_info"``,
+            ``"pynwb_api_incompatible"``, ``"nwb_spec_incompatible"``, or None.
+        """
+        rec_key = {"recording_id": key["recording_id"]}
+        prev_runs = RecordingArtifactRecompute & rec_key & "matched=0"
+
+        if skip_probe:
+            if bool(prev_runs & 'err_msg LIKE "%probe info%"'):
+                return True, "missing_probe_info"
+            try:  # proactive: is probe metadata on record for this recording?
+                nwb_file_name = (RecordingSelection & rec_key).fetch1(
+                    "nwb_file_name"
+                )
+                if _recording_missing_probe_info(nwb_file_name):
+                    return True, "missing_probe_info"
+            except Exception:  # noqa: BLE001 - can't check -> don't flag
+                logger.warning(f"Unable to check probe info for {rec_key}")
+
+        if skip_pynwb_api and bool(
+            prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'
+        ):
+            return True, "pynwb_api_incompatible"
+
+        if skip_nwb_spec and bool(
+            prev_runs & 'err_msg LIKE "%No spec%namespace%"'
+        ):
+            return True, "nwb_spec_incompatible"
+
+        return False, None
 
     @classmethod
     def remove_matched(cls, restriction=True, *, dry_run: bool = True) -> int:
@@ -504,6 +635,19 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             path_fn=AnalysisNwbfile.get_abs_path,
             artifact_pk=Recording.primary_key,
         )
+
+
+def _recording_missing_probe_info(nwb_file_name: str) -> bool:
+    """Whether no ``Electrode * Probe`` rows are on record for ``nwb_file_name``.
+
+    A structural impossibility for recompute: the rebuild needs probe geometry,
+    so an empty join (probe metadata never ingested, or stripped) means the
+    artifact can never be regenerated. Mirrors v1's probe-presence check.
+    """
+    from spyglass.common.common_device import Probe
+    from spyglass.common.common_ephys import Electrode
+
+    return not bool(Electrode * Probe & {"nwb_file_name": nwb_file_name})
 
 
 def _recompute_recording_fingerprint(rec_key: dict) -> dict:
