@@ -56,7 +56,6 @@ from spyglass.spikesorting.v2._lookup_validation import (  # noqa: F401
     validate_lookup_rows,
 )
 from spyglass.spikesorting.v2._nwb_metadata_helpers import (  # noqa: F401
-    _hash_nwb_recording,
     electrode_table_region,
     resolve_conversion_and_offset,
 )

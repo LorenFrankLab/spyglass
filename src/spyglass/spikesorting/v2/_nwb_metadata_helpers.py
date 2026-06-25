@@ -112,25 +112,3 @@ def electrode_table_region(nwbf, electrode_ids, description: str):
     return nwbf.create_electrode_table_region(
         region=[int(i) for i in indices], description=description
     )
-
-
-def _hash_nwb_recording(analysis_file_name: str) -> str:
-    """Return a content hash of a recording's AnalysisNwbfile.
-
-    Delegates to ``AnalysisNwbfile().get_hash`` (the project's blessed
-    wrapper over ``NwbfileHasher``) so recording verification uses the
-    same hashing path as the rest of the project.
-
-    Parameters
-    ----------
-    analysis_file_name : str
-        Name of the AnalysisNwbfile holding the preprocessed recording.
-
-    Returns
-    -------
-    str
-        The ``NwbfileHasher`` digest of the file.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    return AnalysisNwbfile().get_hash(analysis_file_name)
