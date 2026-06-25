@@ -542,6 +542,7 @@ def run_v2_pipeline_session(
 
     results: list[dict[str, Any]] = []
     failed_preflight_ids: set[int] = set()
+    preflight_warnings_by_group: dict[int, list[str]] = {}
 
     # Up-front, read-only whole-session preflight (when requested).
     if preflight:
@@ -552,6 +553,15 @@ def run_v2_pipeline_session(
             pipeline_preset=pipeline_preset,
             sort_group_ids=targets,
         )
+        # Capture each group's non-blocking advisories. OK groups run below with
+        # preflight=False (the DB checks are not repeated), so without this their
+        # preflight warnings would never reach the run summary and the batch
+        # warning count would under-report.
+        for row in session_report.group_reports:
+            if row.get("warnings"):
+                preflight_warnings_by_group[row["sort_group_id"]] = list(
+                    row["warnings"]
+                )
         if not session_report.ok:
             if not continue_on_error:
                 raise PreflightError("\n".join(session_report.errors))
@@ -619,8 +629,25 @@ def run_v2_pipeline_session(
                 }
             )
         else:
+            # Fold this group's preflight advisories (captured above) into its
+            # run summary; the per-group run did no preflight, so there is no
+            # overlap with the stage warnings it already carries.
+            group_preflight_warnings = preflight_warnings_by_group.get(
+                sort_group_id, []
+            )
+            for warning in group_preflight_warnings:
+                logger.warning(
+                    "run_v2_pipeline_session: sort_group_id="
+                    f"{sort_group_id} preflight: {warning}"
+                )
             results.append(
-                {**summary, "sort_group_id": sort_group_id, "outcome": "ok"}
+                {
+                    **summary,
+                    "sort_group_id": sort_group_id,
+                    "outcome": "ok",
+                    "warnings": list(summary.get("warnings", []))
+                    + group_preflight_warnings,
+                }
             )
 
     # Stable, group-ordered result (preflight-failed entries were appended
