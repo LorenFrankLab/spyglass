@@ -20,6 +20,8 @@ a database connection.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from itertools import combinations
 from statistics import median
 from typing import TYPE_CHECKING
@@ -30,6 +32,45 @@ from spyglass.spikesorting.v2.exceptions import (
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
+
+
+def curation_set_hash(member_choices) -> str:
+    """Content-address a UnitMatch selection's per-member curation choices.
+
+    The sha256 hex digest over the canonical, ascending-``member_index``
+    ordered ``(member_index, sorting_id, curation_id)`` triples. It is the
+    ``curation_set_hash`` stored on every ``UnitMatchSelection`` master and
+    is the single source of truth for that selection's identity:
+    ``insert_selection`` calls it to MINT the hash, and ``UnitMatch.make_fetch``
+    calls it to RE-DERIVE the hash from the pinned ``MemberCuration`` rows and
+    reject a row whose stored hash disagrees with its parts (a raw-insert
+    bypass).
+
+    Parameters
+    ----------
+    member_choices : iterable of (member_index, sorting_id, curation_id)
+        One entry per ``SessionGroup`` member. ``sorting_id`` may be a
+        ``uuid.UUID`` or its ``str`` form -- both hash identically because it
+        is stringified here, so a freshly-passed str and a DB-fetched UUID
+        agree. ``member_index`` / ``curation_id`` are coerced to ``int``.
+        Order does not matter: entries are sorted by ``member_index`` first.
+
+    Returns
+    -------
+    str
+        The 64-char sha256 hex digest, byte-compatible with the value stored
+        on existing ``UnitMatchSelection`` rows.
+    """
+    ordered = sorted(
+        (
+            [int(member_index), str(sorting_id), int(curation_id)]
+            for member_index, sorting_id, curation_id in member_choices
+        ),
+        key=lambda entry: entry[0],
+    )
+    return hashlib.sha256(
+        json.dumps(ordered, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 #: The only tracked-unit policy shipped today (greedy maximal-clique cover).
 #: Future policies are pure inserts into ``TrackedUnit.policy_used`` -- no

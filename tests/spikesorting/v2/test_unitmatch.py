@@ -293,6 +293,55 @@ def test_chronological_member_order_sorts_by_date_then_index():
     ] == [0, 1]
 
 
+def test_curation_set_hash_order_independent_and_type_stable():
+    """The curation-set hash is the content address of a UnitMatch selection.
+
+    It must (a) ignore the order member choices are presented in (it sorts by
+    member_index), (b) treat a ``uuid.UUID`` and its ``str`` form identically
+    (so a fetched UUID and a passed str hash the same), and (c) change when any
+    ``(member_index, sorting_id, curation_id)`` changes. ``insert_selection``
+    (minting) and ``make_fetch`` (verifying) both call it, so it is the single
+    source of truth for selection identity.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
+
+    sid0 = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    sid1 = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    base = curation_set_hash([(0, sid0, 1), (1, sid1, 2)])
+    # (a) order-independent
+    assert curation_set_hash([(1, sid1, 2), (0, sid0, 1)]) == base
+    # (b) uuid and str hash identically
+    assert curation_set_hash([(0, str(sid0), 1), (1, str(sid1), 2)]) == base
+    # (c) any change flips the digest
+    assert curation_set_hash([(0, sid0, 1), (1, sid1, 3)]) != base
+    assert curation_set_hash([(0, sid0, 1)]) != base
+
+
+def test_curation_set_hash_matches_legacy_inline_form():
+    """The helper reproduces the byte-for-byte digest the old inline
+    insert_selection code produced, so curation_set_hash values already stored
+    on existing rows stay stable (idempotency is preserved across the refactor).
+    """
+    import hashlib
+    import json
+    import uuid
+
+    from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
+
+    sid0 = uuid.uuid4()
+    sid1 = uuid.uuid4()
+    # Legacy inline form: [[member_index, str(sorting_id), curation_id], ...] in
+    # ascending member_index order, hashed via json.dumps(sort_keys=True).
+    legacy = hashlib.sha256(
+        json.dumps(
+            [[0, str(sid0), 1], [1, str(sid1), 2]], sort_keys=True
+        ).encode("utf-8")
+    ).hexdigest()
+    assert curation_set_hash([(0, sid0, 1), (1, sid1, 2)]) == legacy
+
+
 # --------------------------------------------------------------------------- #
 # NWB pairs (de)serialization round-trip (pure I/O, no DB).                     #
 # --------------------------------------------------------------------------- #
@@ -755,7 +804,10 @@ def test_make_rechecks_member_provenance(two_session_curated_group):
             **group_key,
             "matcher_params_name": "unitmatch_default",
             "curation_set_hash": "0" * 64,
-        }
+        },
+        # UnitMatchSelection now guards direct inserts; this test deliberately
+        # bypasses insert_selection to forge a provenance-invalid master.
+        allow_direct_insert=True,
     )
     UnitMatchSelection.MemberCuration.insert(
         [
@@ -781,6 +833,76 @@ def test_make_rechecks_member_provenance(two_session_curated_group):
             UnitMatch.populate({"unitmatch_id": unitmatch_id}, reserve_jobs=False)
         assert len(UnitMatch & {"unitmatch_id": unitmatch_id}) == 0
         assert len(UnitMatch.Pair & {"unitmatch_id": unitmatch_id}) == 0
+    finally:
+        (UnitMatchSelection & {"unitmatch_id": unitmatch_id}).super_delete(
+            warn=False
+        )
+
+
+@pytest.mark.slow
+def test_make_rejects_curation_set_hash_mismatch(two_session_curated_group):
+    """A raw-insert master whose stored curation_set_hash disagrees with its
+    (otherwise valid, owned, complete) MemberCuration rows is rejected by
+    make_fetch -- the gap the ownership/coverage checks alone do NOT catch.
+    Without the recompute, such a master could claim one curation set in its
+    hash while matching on the units pinned by its parts.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    group_key = {
+        "session_group_owner": grp["owner"],
+        "session_group_name": grp["group_name"],
+    }
+    member_rows = (SessionGroup.Member & group_key).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    unitmatch_id = uuid.uuid4()
+    # Pin each member to its OWN correct curation (ownership + coverage pass),
+    # but store a bogus curation_set_hash so ONLY the recompute can catch it.
+    UnitMatchSelection.insert1(
+        {
+            "unitmatch_id": unitmatch_id,
+            **group_key,
+            "matcher_params_name": "unitmatch_default",
+            "curation_set_hash": "0" * 64,
+        },
+        allow_direct_insert=True,
+    )
+    UnitMatchSelection.MemberCuration.insert(
+        [
+            {
+                "unitmatch_id": unitmatch_id,
+                **group_key,
+                "member_index": int(member["member_index"]),
+                "sorting_id": grp["choices"][int(member["member_index"])][
+                    "sorting_id"
+                ],
+                "curation_id": grp["choices"][int(member["member_index"])][
+                    "curation_id"
+                ],
+            }
+            for member in member_rows
+        ],
+        allow_direct_insert=True,
+    )
+    try:
+        with pytest.raises(
+            UnitMatchSelectionIntegrityError, match="curation_set_hash"
+        ):
+            UnitMatch.populate(
+                {"unitmatch_id": unitmatch_id}, reserve_jobs=False
+            )
+        assert len(UnitMatch & {"unitmatch_id": unitmatch_id}) == 0
     finally:
         (UnitMatchSelection & {"unitmatch_id": unitmatch_id}).super_delete(
             warn=False
@@ -814,7 +936,10 @@ def test_make_rejects_foreign_group_member_curation(two_session_curated_group):
             **group_key,
             "matcher_params_name": "unitmatch_default",
             "curation_set_hash": "0" * 64,
-        }
+        },
+        # UnitMatchSelection now guards direct inserts; this test deliberately
+        # bypasses insert_selection to forge a provenance-invalid master.
+        allow_direct_insert=True,
     )
     # Attach a member_index=0 row from the SOLO group (a different
     # session_group_name) under this unitmatch_id -- schema-valid (its

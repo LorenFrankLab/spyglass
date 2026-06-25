@@ -32,8 +32,6 @@ same biological unit recorded on different days. Four tables:
 
 from __future__ import annotations
 
-import hashlib
-import json
 import time
 from datetime import timezone
 from typing import TYPE_CHECKING, NamedTuple
@@ -50,6 +48,8 @@ from spyglass.spikesorting.v2.exceptions import (
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
+    SelectionMasterInsertGuard,
     _assert_v2_db_safe,
     transaction_or_noop,
 )
@@ -97,7 +97,7 @@ class UnitMatchComputed(NamedTuple):
 
 
 @schema
-class MatcherParameters(SpyglassMixin, dj.Lookup):
+class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """A named, registry-validated cross-session matcher configuration."""
 
     definition = """
@@ -185,7 +185,7 @@ class MatcherParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class UnitMatchSelection(SpyglassMixin, dj.Manual):
+class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (session group, matcher params, per-member curation choices).
 
     The user must pin a specific ``(sorting_id, curation_id)`` per group member
@@ -263,9 +263,6 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2._selection_identity import (
             deterministic_id,
         )
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
-        )
         from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
         group_key = {
@@ -289,35 +286,31 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
         # wrong-member choice raises here, before the master or part inserts).
         _validate_member_curations(members, choices_by_member, ValueError)
 
+        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
+
         # ``members`` is ordered by member_index; pair each with its choice once.
         ordered_members = [
             (int(member["member_index"]), member) for member in members
         ]
-        ordered_choices = [
-            [index, str(choices_by_member[index][0]), choices_by_member[index][1]]
+        # ``curation_set_hash`` content-addresses the per-member choices. The
+        # shared helper is the single source of truth, so insert_selection
+        # (mint) and ``UnitMatch.make_fetch`` (verify) compute byte-identical
+        # digests for the same choices.
+        set_hash = curation_set_hash(
+            (index, choices_by_member[index][0], choices_by_member[index][1])
             for index, _member in ordered_members
-        ]
-        curation_set_hash = hashlib.sha256(
-            json.dumps(ordered_choices, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        )
         identity = {
             **group_key,
             "matcher_params_name": matcher_params_name,
-            "curation_set_hash": curation_set_hash,
+            "curation_set_hash": set_hash,
         }
-
-        existing = (cls & identity).fetch("KEY", as_dict=True)
-        if len(existing) == 1:
-            return existing[0]
-        if len(existing) > 1:
-            raise DuplicateSelectionError(
-                "UnitMatchSelection has "
-                f"{len(existing)} duplicate selection rows for identity "
-                f"{identity}; a raw insert bypassed insert_selection. Drop the "
-                "duplicates and re-insert via insert_selection."
-            )
-
         unitmatch_id = deterministic_id("unitmatch", identity)
+
+        existing = cls._find_existing_pk(identity, unitmatch_id)
+        if existing is not None:
+            return existing
+
         master_row = {**identity, "unitmatch_id": unitmatch_id}
         part_rows = [
             {
@@ -331,16 +324,63 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
         ]
         try:
             with cls.connection.transaction:
-                cls().insert1(master_row)
+                # allow_direct_insert: this helper IS the validation boundary
+                # (it has already validated coverage/ownership and minted the
+                # deterministic id), so it bypasses the master insert guard.
+                cls().insert1(master_row, allow_direct_insert=True)
                 cls.MemberCuration.insert(part_rows)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK race
             if not _is_duplicate_key_error(exc):
                 raise
-            refetched = (cls & identity).fetch("KEY", as_dict=True)
-            if len(refetched) == 1:
-                return refetched[0]
+            # Lost a concurrent race on the same deterministic unitmatch_id;
+            # refetch and return the winner's row.
+            existing = cls._find_existing_pk(identity, unitmatch_id)
+            if existing is not None:
+                return existing
             raise
         return {"unitmatch_id": unitmatch_id}
+
+    @classmethod
+    def _find_existing_pk(
+        cls, identity: dict, deterministic_unitmatch_id
+    ) -> dict | None:
+        """Return the canonical PK for this selection identity, or None.
+
+        The full logical identity (group + matcher + ``curation_set_hash``)
+        lives in the master's own columns, so -- unlike the part-sourced
+        selection masters -- it is checked against the master alone. Any master
+        matching the identity whose ``unitmatch_id`` is NOT the deterministic id
+        is a raw-insert / pre-determinism legacy bypass of the content-addressed
+        invariant, and is rejected rather than silently returned.
+
+        Used by ``insert_selection`` for both the pre-insert lookup and the
+        post-duplicate-key refetch.
+        """
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+        )
+
+        master_ids = {
+            row["unitmatch_id"]
+            for row in (cls & identity).fetch("KEY", as_dict=True)
+        }
+        bypassed = [
+            mid for mid in master_ids if mid != deterministic_unitmatch_id
+        ]
+        if bypassed:
+            raise DuplicateSelectionError(
+                f"UnitMatchSelection has {len(master_ids)} master row(s) for "
+                f"identity {identity} whose unitmatch_id is not the "
+                f"deterministic id {deterministic_unitmatch_id}: {bypassed}. "
+                "This is a non-deterministic selection row (a raw insert or "
+                "pre-determinism legacy row); drop it and re-insert via "
+                "insert_selection."
+            )
+        return (
+            {"unitmatch_id": deterministic_unitmatch_id}
+            if master_ids
+            else None
+        )
 
 
 @schema
@@ -453,6 +493,33 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         _validate_member_curations(
             members, choices_by_member, UnitMatchSelectionIntegrityError
         )
+
+        # Re-derive the content address from the pinned parts and reject a row
+        # whose stored ``curation_set_hash`` disagrees with its MemberCuration
+        # rows -- i.e. a raw insert that set a hash not matching its parts.
+        # ``insert_selection`` mints the hash from the same helper, so a
+        # legitimately-created selection always agrees here. This closes the
+        # gap the ownership/coverage checks above do NOT cover: a master can
+        # claim one curation set in its hash while its parts pin another.
+        from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
+
+        recomputed_hash = curation_set_hash(
+            (member_index, sorting_id, curation_id)
+            for member_index, (
+                sorting_id,
+                curation_id,
+            ) in choices_by_member.items()
+        )
+        if recomputed_hash != sel["curation_set_hash"]:
+            raise UnitMatchSelectionIntegrityError(
+                "UnitMatch.make: the selection's stored curation_set_hash "
+                f"{sel['curation_set_hash']} does not match the hash recomputed "
+                f"from its MemberCuration rows ({recomputed_hash}). The master "
+                "and its pinned curations were not created together by "
+                "insert_selection (a raw-insert bypass that lets a master claim "
+                "one curation set while matching on another). Use "
+                "UnitMatchSelection.insert_selection()."
+            )
 
         matcher_name, params, job_kwargs = (
             MatcherParameters
