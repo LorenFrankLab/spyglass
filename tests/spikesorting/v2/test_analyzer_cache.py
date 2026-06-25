@@ -156,6 +156,68 @@ def test_analyzer_cache_import_pulls_no_db_layer_modules():
     )
 
 
+class TestAnalyzerCurationLock:
+    """Per-sort lock serializing concurrent ``AnalyzerCuration`` mutation.
+
+    ``AnalyzerCuration`` runs with ``_parallel_make=True``; two curation jobs
+    for the SAME sort load the same shared analyzer-cache folder(s)
+    (``analyzer_path(sorting_id, ...)``) and each persists extensions and
+    ``quality_metrics`` (with ``delete_existing_metrics=True``) into them -- a
+    concurrent write race on the shared zarr store.
+    ``analyzer_curation_lock(sorting_id)`` serializes those jobs so the on-disk
+    analyzer is mutated by one curation at a time. It is keyed on ``sorting_id``
+    (shared by every recipe folder of that sort), so curations of DIFFERENT
+    sorts still run concurrently. DB-free: only ``analyzer_cache_root`` resolves.
+    """
+
+    def test_same_sort_is_mutually_exclusive(
+        self, tmp_path, restore_custom_config
+    ):
+        import datajoint as dj
+        from filelock import Timeout
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_curation_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        held = analyzer_curation_lock("sid-A")
+        contender = analyzer_curation_lock("sid-A")
+        with held:
+            # A second curation of the same sort cannot acquire while held.
+            with pytest.raises(Timeout):
+                contender.acquire(timeout=0)
+
+    def test_different_sorts_do_not_block(
+        self, tmp_path, restore_custom_config
+    ):
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_curation_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        # Both held simultaneously without a Timeout -> independent locks.
+        with analyzer_curation_lock("sid-A"):
+            with analyzer_curation_lock("sid-B").acquire(timeout=0):
+                pass
+
+    def test_lock_file_lives_under_cache_root(
+        self, tmp_path, restore_custom_config
+    ):
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_root,
+            analyzer_curation_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        lock = analyzer_curation_lock("sid-A")
+        assert Path(lock.lock_file).parent == analyzer_cache_root()
+
+
 # --------------------------------------------------------------------------- #
 # ``build_analyzer`` projects a 3D probe to 2D before building the analyzer.
 #

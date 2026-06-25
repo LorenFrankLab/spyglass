@@ -106,6 +106,11 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq",
 ]
 optional-dependencies.spikesorting-v2 = [
+  # Cross-process lock serializing concurrent AnalyzerCuration jobs that share a
+  # sort's analyzer-cache folder (see _analyzer_cache.analyzer_curation_lock).
+  # Pure-Python and tiny; declared explicitly rather than relied on transitively
+  # via torch.
+  "filelock",
   # v1 production sorter. Installs the SI wrapper + isosplit5 (so it registers
   # in installed_sorters()), but NOT ml_ms4alg -- MS4's actual algorithm backend
   # is a numpy<2-era package that does not install under the v2 numpy>=2 baseline.

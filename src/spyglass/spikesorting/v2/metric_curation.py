@@ -914,46 +914,62 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         sorting_key = {"sorting_id": sorting_id}
+        # Serialize concurrent curations of the SAME sort. _parallel_make lets
+        # two AnalyzerCuration jobs load this sort's shared analyzer-cache
+        # folder(s) (Sorting.get_analyzer -> analyzer_path(sorting_id, ...)) and
+        # each persists extensions + quality_metrics (delete_existing_metrics)
+        # into them at once -- a zarr write race on the shared store (and a race
+        # on get_analyzer's rebuild-if-missing). The per-sort lock lets one
+        # curation mutate the analyzer at a time; curations of OTHER sorts run
+        # in parallel. Released before the per-curation NWB write below, which
+        # touches no shared analyzer state.
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_curation_lock,
+        )
+
         try:
-            try:
-                display_analyzer = Sorting().get_analyzer(sorting_key)
-            except ZeroUnitAnalyzerError:
-                logger.warning(
-                    "AnalyzerCuration: zero-unit sort "
-                    f"{sorting_id}; writing empty metric/merge/label tables."
-                )
-                object_ids = self._write_empty(abs_path)
-                return AnalyzerCurationComputed(
-                    analysis_file_name, *object_ids, nwb_file_name
-                )
+            with analyzer_curation_lock(sorting_id):
+                try:
+                    display_analyzer = Sorting().get_analyzer(sorting_key)
+                except ZeroUnitAnalyzerError:
+                    logger.warning(
+                        "AnalyzerCuration: zero-unit sort "
+                        f"{sorting_id}; writing empty metric/merge/label "
+                        "tables."
+                    )
+                    object_ids = self._write_empty(abs_path)
+                    return AnalyzerCurationComputed(
+                        analysis_file_name, *object_ids, nwb_file_name
+                    )
 
-            # The whitened metric analyzer is only needed for PC/NN metrics;
-            # building a second analyzer is expensive, so skip it when none are
-            # requested. (Display get_analyzer above already raised for a
-            # zero-unit sort, so we never build the metric analyzer for one.)
-            metric_analyzer = None
-            if not skip_pc_metrics and _requested_pc_metrics(metric_names):
-                metric_analyzer = Sorting().get_analyzer(
-                    sorting_key,
-                    waveform_params_name=metric_waveform_params_name,
-                )
+                # The whitened metric analyzer is only needed for PC/NN
+                # metrics; building a second analyzer is expensive, so skip it
+                # when none are requested. (Display get_analyzer above already
+                # raised for a zero-unit sort, so we never build the metric
+                # analyzer for one.)
+                metric_analyzer = None
+                if not skip_pc_metrics and _requested_pc_metrics(metric_names):
+                    metric_analyzer = Sorting().get_analyzer(
+                        sorting_key,
+                        waveform_params_name=metric_waveform_params_name,
+                    )
 
-            metrics_df = self._compute_metrics(
-                display_analyzer,
-                metric_analyzer,
-                metric_names,
-                metric_kwargs,
-                skip_pc_metrics,
-                job_kwargs,
-                template_metric_columns=template_metric_columns,
-            )
-            labels_by_unit = apply_label_rules(metrics_df, rule_rows)
-            merge_groups = self._compute_merge_groups(
-                display_analyzer,
-                auto_merge_preset,
-                auto_merge_kwargs,
-                job_kwargs,
-            )
+                metrics_df = self._compute_metrics(
+                    display_analyzer,
+                    metric_analyzer,
+                    metric_names,
+                    metric_kwargs,
+                    skip_pc_metrics,
+                    job_kwargs,
+                    template_metric_columns=template_metric_columns,
+                )
+                labels_by_unit = apply_label_rules(metrics_df, rule_rows)
+                merge_groups = self._compute_merge_groups(
+                    display_analyzer,
+                    auto_merge_preset,
+                    auto_merge_kwargs,
+                    job_kwargs,
+                )
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,

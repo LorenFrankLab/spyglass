@@ -89,6 +89,52 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     )
 
 
+def analyzer_curation_lock(sorting_id, *, timeout: float = -1):
+    """Return a cross-process lock serializing analyzer-cache mutation per sort.
+
+    ``AnalyzerCuration`` runs with ``_parallel_make=True``, so two curation jobs
+    for the SAME sort can run concurrently. Both load the same shared
+    analyzer-cache folder(s) (``analyzer_path(sorting_id, ...)``) via
+    ``Sorting.get_analyzer`` and each persists extensions and ``quality_metrics``
+    (``compute_quality_metrics(..., delete_existing_metrics=True)``) into them --
+    a concurrent write race on the shared zarr store that can corrupt the cache
+    or fail a job mid-write. Holding this lock around the load-and-compute region
+    lets one curation mutate the analyzer at a time.
+
+    The lock is keyed on ``sorting_id`` (which every recipe folder of that sort
+    shares -- both the display and the whitened-metric analyzer), so it serializes
+    a sort's curations against each other while leaving curations of DIFFERENT
+    sorts free to run in parallel. The lock file lives under
+    ``analyzer_cache_root()`` next to the folders it guards.
+
+    This serializes processes on ONE machine (the standard
+    ``populate(processes=N)`` case). It does NOT coordinate across machines
+    sharing an NFS-mounted ``spikesorting_v2_analyzer_dir`` -- ``filelock``'s
+    OS-level lock is local; cross-host populate of the same sort would still
+    race. A regeneratable cache makes the worst case a rebuild, not data loss.
+
+    Parameters
+    ----------
+    sorting_id
+        The sorting whose analyzer-cache folders the curation will mutate.
+    timeout : float, optional
+        Seconds to wait for the lock before raising ``filelock.Timeout``.
+        Default ``-1`` blocks indefinitely (wait your turn), which is the
+        intended serialize-don't-fail behavior; the lock releases when the
+        holding process exits, so a crashed job cannot wedge the next one.
+
+    Returns
+    -------
+    filelock.FileLock
+        An unacquired lock; use it as a context manager or call ``.acquire()``.
+    """
+    from filelock import FileLock
+
+    root = analyzer_cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return FileLock(str(root / f"{sorting_id}.curation.lock"), timeout=timeout)
+
+
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
