@@ -1873,7 +1873,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         *,
         rebuild: bool = True,
     ) -> "si.SortingAnalyzer":
-        """Return the SortingAnalyzer; rebuild on missing folder.
+        """Return the SortingAnalyzer; rebuild on missing or invalid folder.
 
         Recompute is in-place; the DataJoint row is not deleted on a
         missing analyzer folder.
@@ -1905,25 +1905,29 @@ class Sorting(SpyglassMixin, dj.Computed):
             stored DISPLAY recipe (``display_waveform_params_name``); a caller
             needing the whitened metric recipe (e.g. the PC/NN cluster-
             separation metrics in ``AnalyzerCuration``) passes it explicitly.
-            A missing folder is rebuilt for whichever recipe is requested
-            (unless ``rebuild=False``).
+            A missing or invalid folder is rebuilt for whichever recipe is
+            requested (unless ``rebuild=False``).
         rebuild : bool, optional
-            If ``True`` (default), a missing analyzer folder is rebuilt in place
-            (the self-healing cache). If ``False``, a missing folder raises
-            ``AnalyzerFolderMissingError`` instead -- the recompute audit uses
-            this to OBSERVE a missing/reclaimed analyzer rather than silently
-            rebuild-then-hash it.
+            If ``True`` (default), a missing or invalid analyzer folder is
+            rebuilt in place (the self-healing cache). If ``False``, a missing
+            folder raises ``AnalyzerFolderMissingError`` and an unloadable folder
+            raises ``AnalyzerFolderInvalidError`` instead -- the recompute audit
+            uses this to OBSERVE a missing/reclaimed/corrupt analyzer rather
+            than silently rebuild-then-hash it.
 
         Returns
         -------
         si.SortingAnalyzer
             The loaded ``SortingAnalyzer`` for the sort, rebuilt in
-            place if its folder was missing (when ``rebuild=True``).
+            place if its folder was missing or invalid (when ``rebuild=True``).
 
         Raises
         ------
         AnalyzerFolderMissingError
             If ``rebuild=False`` and the analyzer folder is absent on disk.
+        AnalyzerFolderInvalidError
+            If ``rebuild=False`` and the analyzer folder exists but cannot be
+            loaded.
         """
         return load_or_rebuild_analyzer(
             self,
@@ -2157,7 +2161,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``Sorting.delete`` override cleans it up on row delete, but an external
         path that bypasses the override (raw SQL delete, scripted
         ``dj.Table.connection.query``) leaks the folder. This periodic audit
-        mirrors ``prune_orphaned_selections`` and reports two leak classes:
+        mirrors ``prune_orphaned_selections`` and reports three classes:
 
         - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
           folder (``analyzer_path(sorting_id, display_waveform_params_name)``)
@@ -2166,6 +2170,9 @@ class Sorting(SpyglassMixin, dj.Computed):
           deleting the *row* is a destructive DB operation the human decides on
           (per the Spyglass destructive-op contract); this method NEVER
           auto-deletes a row.
+        - **Reclaimed**: a missing analyzer folder with a
+          ``SortingAnalyzerRecompute.deleted=1`` audit trail. This is expected
+          storage reclamation, not an unexpected DB-side orphan.
         - **Disk-side orphan**: an on-disk folder under the analyzer root that
           no ``Sorting`` row references (the row was deleted via a path that
           bypassed the ``delete`` override). Safe to delete after inspection.
@@ -2189,9 +2196,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         -------
         dict
             ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
-            "disk_side": [folder_path_str, ...]}``. ``computed_analyzer_path``
-            is resolved from ``sorting_id`` (there is no stored
-            ``analyzer_folder`` column).
+            "disk_side": [folder_path_str, ...],
+            "reclaimed": [{"sorting_id", "computed_analyzer_path"}, ...]}``.
+            ``computed_analyzer_path`` is resolved from ``sorting_id`` (there is
+            no stored ``analyzer_folder`` column).
         """
         import shutil
 
@@ -2251,6 +2259,17 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "sorting_id", "metric_waveform_params_name", as_dict=True
             )
         )
+        # A missing display analyzer with a recompute deleted=1 row is expected
+        # storage reclamation, not an unexpected DB-side orphan. Import lazily to
+        # avoid a sorting <-> recompute import cycle at module load.
+        from spyglass.spikesorting.v2.recompute import SortingAnalyzerRecompute
+
+        reclaimed_paths = {
+            str(analyzer_path(r["sorting_id"], r["waveform_params_name"]))
+            for r in (SortingAnalyzerRecompute & "deleted=1").fetch(
+                "sorting_id", "waveform_params_name", as_dict=True
+            )
+        }
         analyzer_root = analyzer_cache_root()
         disk_dir_paths = (
             [str(c) for c in sorted(analyzer_root.iterdir()) if c.is_dir()]
@@ -2258,15 +2277,20 @@ class Sorting(SpyglassMixin, dj.Computed):
             else []
         )
         classification = classify_orphaned_analyzer_folders(
-            units_bearing, referenced_paths, disk_dir_paths
+            units_bearing,
+            referenced_paths,
+            disk_dir_paths,
+            reclaimed_paths=reclaimed_paths,
         )
         db_side = classification["db_side"]
         disk_side = classification["disk_side"]
+        reclaimed = classification["reclaimed"]
 
         logger.info(
             "Sorting.find_orphaned_analyzer_folders: "
             f"{len(db_side)} DB-side orphan(s) (row present, folder missing), "
-            f"{len(disk_side)} disk-side orphan(s) (folder present, no row)."
+            f"{len(disk_side)} disk-side orphan(s) (folder present, no row), "
+            f"{len(reclaimed)} reclaimed folder(s) (missing with deleted=1)."
         )
         for row in db_side:
             logger.info(
@@ -2274,11 +2298,21 @@ class Sorting(SpyglassMixin, dj.Computed):
                 row["sorting_id"],
                 row["computed_analyzer_path"],
             )
+        for row in reclaimed:
+            logger.info(
+                "  reclaimed analyzer: sorting_id=%s computed_analyzer_path=%s",
+                row["sorting_id"],
+                row["computed_analyzer_path"],
+            )
         for folder in disk_side:
             logger.info("  disk-side orphan: %s", folder)
 
         if dry_run or not disk_side:
-            return {"db_side": db_side, "disk_side": disk_side}
+            return {
+                "db_side": db_side,
+                "disk_side": disk_side,
+                "reclaimed": reclaimed,
+            }
 
         # dry_run=False: delete ONLY the disk-side orphan folders, and only
         # after explicit interactive confirmation. DB-side rows are never
@@ -2300,7 +2334,11 @@ class Sorting(SpyglassMixin, dj.Computed):
                 "Sorting.find_orphaned_analyzer_folders: aborted; nothing "
                 "deleted."
             )
-        return {"db_side": db_side, "disk_side": disk_side}
+        return {
+            "db_side": db_side,
+            "disk_side": disk_side,
+            "reclaimed": reclaimed,
+        }
 
     def get_unit_brain_regions(
         self, key: dict, *, allow_anchor_member: bool = False

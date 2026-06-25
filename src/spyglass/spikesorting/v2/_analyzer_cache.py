@@ -187,20 +187,24 @@ def classify_orphaned_analyzer_folders(
     units_bearing,
     referenced_paths,
     disk_dir_paths,
+    reclaimed_paths=(),
 ) -> dict:
-    """Classify analyzer-folder leaks into DB-side and disk-side orphans.
+    """Classify analyzer-folder leaks into DB-side, disk-side, and reclaimed.
 
     Pure (DB-free) set logic for ``Sorting.find_orphaned_analyzer_folders``; the
     caller gathers the DB / filesystem facts (which sorting_ids bear units,
     whether each computed folder exists, which folders sit under the analyzer
-    root) and this function classifies them.
+    root, and which missing folders were intentionally reclaimed) and this
+    function classifies them.
 
     A **DB-side orphan** is a units-bearing ``Sorting`` row whose computed
     analyzer folder is gone on disk (regeneratable scratch removed out of band);
-    reported only, never auto-deleted. A **disk-side orphan** is an on-disk
-    folder under the analyzer root that no row references (the row was deleted
-    via a path that bypassed the ``Sorting.delete`` override). Input order of
-    ``units_bearing`` and ``disk_dir_paths`` is preserved.
+    reported only, never auto-deleted. A **reclaimed** folder is the same missing
+    row-side path, but with a recompute ``deleted=1`` audit trail showing the
+    absence was intentional. A **disk-side orphan** is an on-disk folder under
+    the analyzer root that no row references (the row was deleted via a path that
+    bypassed the ``Sorting.delete`` override). Input order of ``units_bearing``
+    and ``disk_dir_paths`` is preserved.
 
     Parameters
     ----------
@@ -212,18 +216,29 @@ def classify_orphaned_analyzer_folders(
         disk folder in this set is referenced and not an orphan.
     disk_dir_paths : iterable of str
         Directory paths found directly under the analyzer root.
+    reclaimed_paths : iterable of str, optional
+        Computed analyzer paths intentionally removed by the recompute deletion
+        workflow (``deleted=1``). Missing units-bearing rows in this set are
+        reported separately from unexpected DB-side orphans.
 
     Returns
     -------
     dict
         ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
-        "disk_side": [folder_path_str, ...]}``.
+        "disk_side": [folder_path_str, ...],
+        "reclaimed": [{"sorting_id", "computed_analyzer_path"}, ...]}``.
     """
-    db_side = [
-        {"sorting_id": sorting_id, "computed_analyzer_path": computed_path}
-        for sorting_id, computed_path, exists in units_bearing
-        if not exists
-    ]
+    reclaimed_set = set(reclaimed_paths)
+    db_side = []
+    reclaimed = []
+    for sorting_id, computed_path, exists in units_bearing:
+        if exists:
+            continue
+        row = {"sorting_id": sorting_id, "computed_analyzer_path": computed_path}
+        if computed_path in reclaimed_set:
+            reclaimed.append(row)
+        else:
+            db_side.append(row)
     referenced = set(referenced_paths)
     disk_side = [path for path in disk_dir_paths if path not in referenced]
-    return {"db_side": db_side, "disk_side": disk_side}
+    return {"db_side": db_side, "disk_side": disk_side, "reclaimed": reclaimed}

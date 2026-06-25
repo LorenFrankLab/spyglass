@@ -241,6 +241,19 @@ class AnalyzerFolderMissingError(RuntimeError):
     """
 
 
+class AnalyzerFolderInvalidError(AnalyzerFolderMissingError):
+    """Raise when an existing analyzer folder cannot be loaded.
+
+    ``Sorting.get_analyzer(..., rebuild=False)`` found a directory at the
+    computed cache path, but SpikeInterface could not load it as a valid
+    ``SortingAnalyzer``. This usually means a killed build, partial cleanup, or
+    out-of-band corruption left a half-written zarr store. It subclasses
+    ``AnalyzerFolderMissingError`` so no-rebuild audit paths can treat invalid
+    regeneratable scratch the same as absent scratch, while preserving a more
+    precise diagnostic for callers and logs.
+    """
+
+
 class UnsupportedDirectInsertError(RuntimeError):
     """Raise on a direct insert into a structured Lookup with part rows.
 

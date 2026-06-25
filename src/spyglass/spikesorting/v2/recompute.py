@@ -40,6 +40,7 @@ from spyglass.spikesorting.v2._recompute import (
     hash_recording_traces,
 )
 from spyglass.spikesorting.v2.exceptions import (
+    AnalyzerFolderInvalidError,
     AnalyzerFolderMissingError,
     StaleEnvMatchedError,
     ZeroUnitAnalyzerError,
@@ -596,6 +597,18 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             manifest = hash_extension_data(analyzer)
         except ZeroUnitAnalyzerError:
             manifest = {}
+        except AnalyzerFolderInvalidError as exc:
+            logger.warning(
+                "SortingAnalyzerVersions: analyzer folder invalid for "
+                f"sorting_id={key['sorting_id']}, "
+                f"recipe={key['waveform_params_name']}; inventorying as MISSING "
+                f"(not rebuilding). Error: {exc}"
+            )
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps,
+                analyzer_manifest={},
+                analyzer_hash=_MISSING_HASH,
+            )
         except AnalyzerFolderMissingError:
             logger.warning(
                 "SortingAnalyzerVersions: analyzer folder missing for "

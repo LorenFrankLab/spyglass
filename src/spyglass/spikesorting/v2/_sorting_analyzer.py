@@ -148,17 +148,19 @@ def load_or_rebuild_analyzer(
         not a silent cross-recipe reuse. A caller needing the whitened metric
         recipe passes its name explicitly.
     rebuild : bool, optional
-        If ``True`` (the default), a missing analyzer folder is rebuilt in place
-        from the canonical stored sorting (the self-healing cache). If ``False``,
-        a missing folder raises ``AnalyzerFolderMissingError`` -- the recompute
-        audit uses this so it can OBSERVE a missing/reclaimed analyzer rather than
-        silently rebuild-then-hash it.
+        If ``True`` (the default), a missing or invalid analyzer folder is
+        rebuilt in place from the canonical stored sorting (the self-healing
+        cache). If ``False``, a missing folder raises
+        ``AnalyzerFolderMissingError`` and an unloadable folder raises
+        ``AnalyzerFolderInvalidError`` -- the recompute audit uses this so it can
+        OBSERVE a missing/reclaimed/corrupt analyzer rather than silently
+        rebuild-then-hash it.
 
     Returns
     -------
     spikeinterface.SortingAnalyzer
-        Loaded analyzer. With ``rebuild=True`` a missing folder is rebuilt in
-        place from the canonical stored sorting first.
+        Loaded analyzer. With ``rebuild=True`` a missing or invalid folder is
+        rebuilt in place from the canonical stored sorting first.
 
     Raises
     ------
@@ -168,8 +170,11 @@ def load_or_rebuild_analyzer(
     AnalyzerFolderMissingError
         If ``rebuild=False`` and the (units-bearing) sort's analyzer folder is
         absent on disk.
+    AnalyzerFolderInvalidError
+        If ``rebuild=False`` and the analyzer folder exists but cannot be loaded.
     """
     from spyglass.spikesorting.v2.exceptions import (
+        AnalyzerFolderInvalidError,
         AnalyzerFolderMissingError,
         ZeroUnitAnalyzerError,
     )
@@ -196,11 +201,44 @@ def load_or_rebuild_analyzer(
             sorting_table, sorting_id
         )
 
+    import shutil
+
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     folder = analyzer_path(sorting_id, waveform_params_name)
+    if folder.exists():
+        try:
+            return si.load_sorting_analyzer(folder)
+        except Exception as exc:
+            message = (
+                "Sorting.get_analyzer: analyzer folder for "
+                f"sorting_id={sorting_id!r}, recipe={waveform_params_name!r} "
+                f"exists but could not be loaded ({folder}). The regeneratable "
+                "analyzer cache is invalid, likely from a killed build, partial "
+                "cleanup, or out-of-band corruption."
+            )
+            if not rebuild:
+                raise AnalyzerFolderInvalidError(
+                    message
+                    + " The no-rebuild loader surfaces this state for the "
+                    "recompute audit instead of rebuilding."
+                ) from exc
+            from spyglass.utils import logger
+
+            logger.warning(
+                f"{message} Removing it and rebuilding. Original error: {exc!r}"
+            )
+            try:
+                shutil.rmtree(folder, ignore_errors=False)
+            except Exception as cleanup_exc:
+                raise AnalyzerFolderInvalidError(
+                    message
+                    + " Failed to remove the invalid folder before rebuilding; "
+                    "manual cleanup is required."
+                ) from cleanup_exc
+
     if not folder.exists():
         if not rebuild:
             raise AnalyzerFolderMissingError(

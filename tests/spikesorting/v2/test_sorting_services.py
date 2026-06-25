@@ -192,3 +192,105 @@ def test_load_or_rebuild_analyzer_raises_zero_unit_without_path_io():
         load_or_rebuild_analyzer(
             _ZeroUnitSortingRelation(), {"sorting_id": "zero"}
         )
+
+
+def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
+    monkeypatch, tmp_path
+):
+    """An existing but unloadable analyzer folder is not treated as healthy."""
+    import sys
+    import types
+
+    from spyglass.spikesorting.v2 import _analyzer_cache
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        load_or_rebuild_analyzer,
+    )
+    from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
+
+    folder = tmp_path / "bad.zarr"
+    folder.mkdir()
+
+    class _OneUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "s1"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "s1", 1
+
+    def _raise_load(_folder):
+        raise RuntimeError("not a valid zarr store")
+
+    monkeypatch.setattr(
+        _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spikeinterface",
+        types.SimpleNamespace(load_sorting_analyzer=_raise_load),
+    )
+
+    with pytest.raises(AnalyzerFolderInvalidError, match="could not be loaded"):
+        load_or_rebuild_analyzer(
+            _OneUnitSortingRelation(),
+            {"sorting_id": "s1"},
+            waveform_params_name="display",
+            rebuild=False,
+        )
+    assert folder.exists(), "no-rebuild audit path must not mutate the folder"
+
+
+def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(monkeypatch, tmp_path):
+    """Default analyzer access removes an invalid cache folder and rebuilds it."""
+    import sys
+    import types
+
+    from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
+
+    folder = tmp_path / "bad.zarr"
+    folder.mkdir()
+    rebuilt_marker = folder / "rebuilt"
+    loaded = object()
+
+    class _OneUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "s1"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "s1", 1
+
+    def _load(_folder):
+        if rebuilt_marker.exists():
+            return loaded
+        raise RuntimeError("not a valid zarr store")
+
+    def _rebuild(_sorting_table, key, waveform_params_name=None):
+        assert key == {"sorting_id": "s1"}
+        assert waveform_params_name == "display"
+        assert not folder.exists(), "invalid folder must be removed before rebuild"
+        folder.mkdir()
+        rebuilt_marker.write_text("ok")
+
+    monkeypatch.setattr(
+        _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
+    )
+    monkeypatch.setattr(
+        _sorting_analyzer, "rebuild_analyzer_folder", _rebuild
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spikeinterface",
+        types.SimpleNamespace(load_sorting_analyzer=_load),
+    )
+
+    analyzer = _sorting_analyzer.load_or_rebuild_analyzer(
+        _OneUnitSortingRelation(),
+        {"sorting_id": "s1"},
+        waveform_params_name="display",
+    )
+
+    assert analyzer is loaded
+    assert rebuilt_marker.exists()
