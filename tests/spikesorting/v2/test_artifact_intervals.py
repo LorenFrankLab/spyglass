@@ -105,6 +105,24 @@ def test_apply_artifact_mask_rejects_unsorted_or_overlapping(valid_times):
         Sorting._apply_artifact_mask(rec, np.array(valid_times))
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_apply_artifact_mask_zeros_complement_frames():
+    """The mask zeros exactly the complement of ``valid_times`` (the artifact
+    frames) and leaves the kept frames untouched. Pins the masking semantics so
+    the interval-native silence_periods path zeros the same samples the prior
+    per-frame remove_artifacts path did."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    fs = 30000.0
+    rec = _rec(np.ones((10, 2), dtype="float32"), fs=fs)
+    # Keep [0, 3/fs) and [6/fs, end] -> the artifact complement is frames 3,4,5.
+    valid_times = np.array([[0.0, 3.0 / fs], [6.0 / fs, 1.0]])
+    out = Sorting._apply_artifact_mask(rec, valid_times).get_traces()
+    assert np.all(out[3:6] == 0.0), "artifact (complement) frames not zeroed"
+    assert np.all(out[0:3] == 1.0), "kept frames before the artifact altered"
+    assert np.all(out[6:10] == 1.0), "kept frames after the artifact altered"
+
+
 # --------------------------------------------------------------------------- #
 # B. _detect_artifacts output structure (contiguous)
 # --------------------------------------------------------------------------- #

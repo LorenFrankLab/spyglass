@@ -231,40 +231,32 @@ def apply_artifact_mask(
     if not frame_ranges:
         return recording
 
-    # Guard before expanding the run-length ranges to a per-frame index array:
-    # a valid_times that keeps almost nothing makes the artifact complement span
-    # most of the recording, so this expansion is O(n_samples) (hundreds of MB
-    # to GB on a long, many-channel recording). Fail fast with the realized
-    # fraction rather than allocating it. (In the normal pipeline the upstream
-    # detect_artifacts guard fires first; this defends a hand-built valid_times
-    # override that keeps a sliver -- see the docstring's strict-input note.)
+    # Data-sanity guard: a valid_times that keeps almost nothing makes the
+    # artifact complement span most of the recording. The interval-native
+    # silence_periods below keeps peak memory O(n_ranges) regardless of how many
+    # samples are masked, so this is NO LONGER a memory guard -- it is a loud
+    # "you are masking more than the bound; the sort would run on a sliver"
+    # data-sanity check, mainly for a hand-built valid_times override (the normal
+    # pipeline's detect_artifacts guard fires first; see the strict-input note).
     assert_artifact_frame_fraction(
         sum(end - start for start, end in frame_ranges),
         n_samples,
         context="apply_artifact_mask: ",
     )
 
-    artifact_frames = np.concatenate(
-        [np.arange(s, e, dtype=np.int64) for s, e in frame_ranges]
-    )
-    # SI's ``list_triggers`` is documented as a list-of-arrays, one
-    # per event channel. We pass a single numpy array wrapping ALL
-    # artifact frames so the mask zeros every artifact sample
-    # exactly once, independent of how SI interprets a bare Python
-    # list of scalars in future minor versions.
-    #
-    # ``ms_before=None, ms_after=None`` is the documented "single
-    # sample" mode and uses the ``pad is None`` code path in SI
-    # 0.104's RemoveArtifactsRecordingSegment.get_traces (each
-    # trigger zeros exactly its own frame). ``ms_before=0.0,
-    # ms_after=0.0`` looks equivalent but triggers a boundary
-    # bug in SI 0.104 where the first artifact frame in any
-    # contiguous run is left unmasked (the ``trig - pad[0] <= 0``
-    # branch assigns to an empty slice).
-    return sip.remove_artifacts(
-        recording=recording,
-        list_triggers=[artifact_frames],
-        ms_before=None,
-        ms_after=None,
+    # Mask the artifact RANGES with the interval-native ``silence_periods``
+    # rather than expanding them to one trigger per sample. ``list_periods``
+    # takes ``(start, end_frame)`` tuples per segment with a HALF-OPEN ``end``
+    # (frames ``[start, end)`` are zeroed -- matching ``frame_ranges`` and the
+    # prior ``np.arange(s, e)`` expansion, verified), zeros them lazily in a
+    # ``SilencedPeriodsRecording``, and never materializes an
+    # O(n_artifact_frames) index array. This also sidesteps the SI 0.104
+    # ``remove_artifacts`` boundary bug the per-frame path worked around
+    # (single-sample triggers left the first frame of a contiguous run unmasked
+    # under ``ms_before/ms_after=0``); ``silence_periods`` zeros the slice
+    # directly, so no run edge is dropped.
+    return sip.silence_periods(
+        recording,
+        list_periods=[frame_ranges],
         mode="zeros",
     )
