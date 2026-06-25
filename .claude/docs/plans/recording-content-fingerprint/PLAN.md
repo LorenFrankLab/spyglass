@@ -1,6 +1,11 @@
 # Recording Content-Fingerprint Reclamation Implementation Plan
 
-**Status:** Not started.
+**Status:** Complete. All three phases implemented, tested, and reviewed
+(multi-agent PR review, no critical findings); the whole-file `cache_hash` is
+retired and the delete → rebuild round-trip reconciles the `~external` checksum.
+Both Open Questions are resolved (see [overview](overview.md)); the
+`ConcatenatedRecording` reclamation path and the broader provenance workstream
+remain explicit non-goals.
 
 Makes spike-sorting v2 recording-cache reclamation correct. Today
 `RecordingArtifactRecompute.delete_files()` deletes a recording's preprocessed

@@ -172,13 +172,21 @@ operational hardening on top. The whole-file `cache_hash` is removed in Phase 1
 ## Open Questions
 
 0. **Opt-in `verify_content_hash` on existing-file reads (portability review §9).**
-   `get_recording` currently trusts an existing cache file (it only fingerprints
-   on rebuild). An opt-in `verify_content_hash=True` path would re-fingerprint a
-   present file and compare to the row, catching silent on-disk corruption.
-   Default off (re-fingerprinting every read is expensive). Best answer: add the
-   opt-in flag in Phase 1 if cheap; otherwise a small follow-up. Not required for
-   reclamation correctness.
-1. **At-creation provenance scope (Phase 2).** Log env into
+   RESOLVED — won't do. `get_recording` re-validates the DataJoint `~external`
+   byte checksum on every read (via the default `get_abs_path`), which already
+   catches ordinary on-disk corruption; an opt-in re-fingerprint would only add
+   the narrow "valid-but-content-diverged" case (manual file replacement, a
+   restore that desynced the checksum table, untrusted cross-host storage), at
+   the cost of reading every trace on each read. Marginal value off the normal
+   path, not required for reclamation correctness — dropped rather than carried
+   as a flag.
+1. **At-creation provenance scope (Phase 2).** RESOLVED — dropped in Phase 2
+   with evidence: `RecordingArtifactVersions` is `dj.Computed` and reads
+   `nwb_deps` from the immutable file, so lazy populate captures identical
+   values regardless of timing; pip-env provenance already lives in the
+   selection's `UserEnvironment` FK; and deletion authority is the
+   `content_hash` recompute match, never provenance. At-creation logging would
+   add no fidelity. Original question for reference: log env into
    `RecordingArtifactVersions` at recording creation (v1 parity), or leave
    recompute to populate it lazily? Best answer: lazy is sufficient for
    correctness; at-creation logging is the v1-parity nicety — deferred to
