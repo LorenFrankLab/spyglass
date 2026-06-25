@@ -1567,7 +1567,7 @@ class Recording(SpyglassMixin, dj.Computed):
     def _rebuild_nwb_artifact(self, key) -> None:
         """Rebuild a missing recording artifact -- locked, atomic, reconciled.
 
-        Locked + atomic-publish (DataJoint/concurrency review): acquire
+        Locked + atomic-publish: acquire
         ``recording_artifact_lock(recording_id)``, double-check the file is
         still missing under the lock (a peer may have rebuilt while we waited),
         then rebuild to a PRIVATE temp file on the same filesystem as the

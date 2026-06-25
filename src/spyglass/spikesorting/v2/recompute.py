@@ -285,8 +285,7 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
         There is no per-attempt ``rounding`` knob: the recording identity is the
         content fingerprint, whose precision is the fixed ``TRACE_ROUNDING`` /
         ``TIMESTAMP_ROUNDING`` constants. A per-attempt rounding would hash
-        differently from the stored ``content_hash`` and spuriously never match
-        (design Medium 3).
+        differently from the stored ``content_hash`` and spuriously never match.
         """
         env_id = _current_env_id()
         if not env_id:
@@ -440,10 +439,10 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         integrity check.
 
         ``matched`` is ``combined_hash(new_hashes) == Recording.content_hash``
-        (design Medium 1) -- the same invariant ``_rebuild_nwb_artifact``
-        enforces, so a ``matched`` recompute authorizes a delete the rebuild can
-        honor -- NOT the current-vs-fresh dict diff. The diff parts still report
-        which component drifted.
+        -- the same invariant ``_rebuild_nwb_artifact`` enforces, so a
+        ``matched`` recompute authorizes a delete the rebuild can honor -- NOT
+        the current-vs-fresh dict diff. The diff parts still report which
+        component drifted.
         """
         created_at = _artifact_created_at(parent_key)
         if outcome != "compare":
@@ -511,8 +510,8 @@ def _recompute_recording_fingerprint(rec_key: dict) -> dict:
     """Recompute a recording to a fresh (unregistered) temp file and return its
     content-fingerprint component dict.
 
-    The fresh temp is unlinked on success, mismatch, and error (explicit
-    temp-artifact cleanup, design §10) -- it never enters the canonical slot.
+    The fresh temp is unlinked on success, mismatch, and error -- it never
+    enters the canonical slot.
     """
     recording_table = Recording()
     fetched = recording_table.make_fetch(rec_key)
@@ -1096,7 +1095,7 @@ def _delete_files(
     The unlink + ``deleted=1`` update for each artifact runs under
     ``recording_artifact_lock(recording_id)`` so a reclamation can never
     interleave with a concurrent ``get_recording`` rebuild of the same recording
-    -- no unlink racing a write, no reader seeing a half-state (design §3.6).
+    -- no unlink racing a write, no reader seeing a half-state.
     """
     from spyglass.spikesorting.v2._recording_fingerprint import (
         recording_artifact_lock,
