@@ -300,13 +300,12 @@ class ImmutableParamsLookup:
         if not allow_param_mutation:
             raise dj.errors.DataJointError(
                 f"In-place update1 of {self.__class__.__name__} is not "
-                "supported: the row name is content-addressed into the "
-                "deterministic id of every downstream selection, so mutating "
-                "the parameter blob under the same name silently re-defines "
-                "what existing ids mean. Insert a NEW named row instead (a "
-                "second name for identical content is itself rejected). Pass "
-                "allow_param_mutation=True only for a deliberate maintenance "
-                "or test edit of a row with no live references."
+                "supported: this row's content is folded into the deterministic "
+                "id of downstream selections (directly, or via the named set it "
+                "belongs to), so editing it under the same key silently "
+                "re-defines what existing ids mean. Insert a NEW named row "
+                "instead. Pass allow_param_mutation=True only for a deliberate "
+                "maintenance or test edit of a row with no live references."
             )
         super().update1(row)
 

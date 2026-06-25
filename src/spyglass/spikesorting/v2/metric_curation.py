@@ -62,6 +62,7 @@ from spyglass.spikesorting.v2.sorting import (
     SortingSelection,
 )
 from spyglass.spikesorting.v2.utils import (
+    ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _jsonable_blob,
     _resolved_job_kwargs,
@@ -205,7 +206,7 @@ class AnalyzerCurationComputed(NamedTuple):
 
 
 @schema
-class QualityMetricParameters(SpyglassMixin, dj.Lookup):
+class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Which quality metrics to compute and their per-metric kwargs.
 
     ``metric_names`` is validated against the installed SpikeInterface's
@@ -361,7 +362,7 @@ class QualityMetricParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class AutoCurationRules(SpyglassMixin, dj.Lookup):
+class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Auto-merge preset + ordered threshold rules that label units.
 
     Label rules are part rows (not a blob) so rule order is explicit and a
@@ -379,7 +380,7 @@ class AutoCurationRules(SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    class Rule(SpyglassMixinPart):
+    class Rule(ImmutableParamsLookup, SpyglassMixinPart):
         definition = """
         -> master
         rule_index: int

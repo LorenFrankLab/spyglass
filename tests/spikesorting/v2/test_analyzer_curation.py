@@ -44,6 +44,38 @@ def test_quality_metric_parameters_rejects_bogus_metric(dj_conn):
 
 
 @pytest.mark.db_unit
+def test_metric_and_rules_params_reject_in_place_update1(dj_conn):
+    """metric_params_name + auto_curation_rules_name fold into the deterministic
+    analyzer_curation_id (AnalyzerCurationSelection.insert_selection), so their
+    rows -- and the AutoCurationRules.Rule rows that define a named ruleset --
+    must not be mutated in place under the same key. The guard raises before any
+    DB write, so no row is touched (no cross-test contamination).
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
+
+    metric_key = QualityMetricParameters.fetch("KEY", as_dict=True)[0]
+    with pytest.raises(dj.errors.DataJointError, match="not supported"):
+        QualityMetricParameters.update1({**metric_key, "skip_pc_metrics": 0})
+
+    rules_key = AutoCurationRules.fetch("KEY", as_dict=True)[0]
+    with pytest.raises(dj.errors.DataJointError, match="not supported"):
+        AutoCurationRules.update1({**rules_key, "auto_merge_preset": "none"})
+
+    rule_keys = AutoCurationRules.Rule.fetch("KEY", as_dict=True)
+    if rule_keys:
+        with pytest.raises(dj.errors.DataJointError, match="not supported"):
+            AutoCurationRules.Rule.update1({**rule_keys[0], "threshold": 0.0})
+
+
+@pytest.mark.db_unit
 def test_franklab_default_metric_params_include_full_qc_set(dj_conn):
     """The Frank-lab default metric row computes the full Phase-3 QC surface."""
     from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
