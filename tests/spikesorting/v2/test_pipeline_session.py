@@ -395,6 +395,87 @@ def test_session_runner_continue_on_error(monkeypatch):
 
 
 @pytest.mark.unit
+def test_session_runner_propagates_preflight_warnings(monkeypatch):
+    """Per-group preflight warnings reach EVERY entry -- ok, failed-preflight,
+    and failed-run -- so describe_run / the batch warning count do not
+    under-report (review R2-D + R3-C). Each OK group runs with preflight=False,
+    so the warnings must come from the session report, not a per-group rerun.
+    """
+    monkeypatch.setattr(
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
+    )
+
+    def fake_session_report(**kw):
+        return PreflightSessionReport(
+            ok=False,  # group 1 carries a blocking error
+            errors=["sort_group_id=1: group 1 misconfigured"],
+            warnings=[
+                "sort_group_id=0: w-ok",
+                "sort_group_id=1: w-failpre",
+                "sort_group_id=2: w-failrun",
+            ],
+            resolved_pipeline_preset=_PRESET,
+            group_reports=[
+                {
+                    "sort_group_id": 0,
+                    "ok": True,
+                    "errors": [],
+                    "warnings": ["w-ok"],
+                    "expected_ids": {},
+                    "checks": [],
+                },
+                {
+                    "sort_group_id": 1,
+                    "ok": False,
+                    "errors": ["group 1 misconfigured"],
+                    "warnings": ["w-failpre"],
+                    "expected_ids": {},
+                    "checks": [],
+                },
+                {
+                    "sort_group_id": 2,
+                    "ok": True,
+                    "errors": [],
+                    "warnings": ["w-failrun"],
+                    "expected_ids": {},
+                    "checks": [],
+                },
+            ],
+        )
+
+    monkeypatch.setattr(
+        plr, "preflight_v2_pipeline_session", fake_session_report
+    )
+
+    def fake_run(*, sort_group_id, **kw):
+        if sort_group_id == 2:  # passes preflight, fails mid-run
+            raise PipelineStageError(
+                "sorting", {"recording_id": "r2"}, "boom"
+            )
+        return {"merge_id": f"m{sort_group_id}", "n_units": 1, "warnings": []}
+
+    monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
+
+    results = run_v2_pipeline_session(
+        nwb_file_name="s.nwb",
+        interval_list_name=_INTERVAL,
+        team_name=_TEAM,
+        pipeline_preset=_PRESET,
+        continue_on_error=True,
+    )
+    by_id = {r["sort_group_id"]: r for r in results}
+    # ok group: its preflight warning is folded into the success summary.
+    assert by_id[0]["outcome"] == "ok"
+    assert "w-ok" in by_id[0]["warnings"]
+    # failed-preflight group: its warning rides on the failed entry.
+    assert by_id[1]["outcome"] == "failed"
+    assert "w-failpre" in by_id[1]["warnings"]
+    # failed-run group: its preflight warning rides on the failed entry.
+    assert by_id[2]["outcome"] == "failed"
+    assert "w-failrun" in by_id[2]["warnings"]
+
+
+@pytest.mark.unit
 def test_session_runner_fail_fast(monkeypatch):
     """Without ``continue_on_error`` a per-group sort failure propagates."""
     monkeypatch.setattr(
