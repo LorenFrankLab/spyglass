@@ -480,12 +480,45 @@ def write_sorting_units_nwb(
     timestamp envelope when no artifact mask was applied
     (``obs_intervals=None``).
     """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
+    # ``create`` already wrote a stub file to disk; if any step below raises
+    # before the caller registers the AnalysisNwbfile row, unlink that orphan
+    # (mirrors the recording writer -- the caller's staging cleanup only knows
+    # the analyzer folder, not this file's name).
+    try:
+        return _write_sorting_units_nwb_body(
+            analysis_file_name=analysis_file_name,
+            sorting=sorting,
+            recording=recording,
+            obs_intervals=obs_intervals,
+        )
+    except Exception:
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        _unlink_staged_analysis_file(
+            analysis_file_name, context="write_sorting_units_nwb"
+        )
+        raise
+
+
+def _write_sorting_units_nwb_body(
+    *, analysis_file_name, sorting, recording, obs_intervals
+):
+    """Fill the staged sort-units ``AnalysisNwbfile`` (no cleanup on failure).
+
+    Split out of :func:`write_sorting_units_nwb` so the staged-file cleanup-on-
+    error wrapper there stays a thin try/except. Returns
+    ``(analysis_file_name, units_object_id)``.
+    """
     import numpy as np
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
-    analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     sample_indices_by_unit = {
@@ -610,14 +643,8 @@ def write_curated_units_nwb(
     ``CurationV2.MergeGroup`` and is reconstructed by
     ``get_merged_sorting`` on demand.
     """
-    import numpy as np
-    import pynwb
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._enums import CurationLabel
-    from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
     from spyglass.spikesorting.v2.sorting import Sorting
-    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
 
     # Anchor the curated-units NWB to the same parent as the Sorting (the sort's
     # own session, or the first SessionGroup.Member for a concat source). The
@@ -639,6 +666,54 @@ def write_curated_units_nwb(
     )
 
     analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
+    # ``create`` staged a stub file; unlink it if the write below fails before
+    # the caller registers the AnalysisNwbfile row (curation stages OUTSIDE its
+    # rows-transaction try, so its cleanup does not otherwise cover this file).
+    try:
+        return _write_curated_units_nwb_body(
+            analysis_file_name=analysis_file_name,
+            nwb_file_name=nwb_file_name,
+            kept_unit_to_contributors=kept_unit_to_contributors,
+            apply_merge=apply_merge,
+            labels=labels,
+            abs_times_by_uid=abs_times_by_uid,
+            sample_indices_by_uid=sample_indices_by_uid,
+        )
+    except Exception:
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        _unlink_staged_analysis_file(
+            analysis_file_name, context="write_curated_units_nwb"
+        )
+        raise
+
+
+def _write_curated_units_nwb_body(
+    *,
+    analysis_file_name,
+    nwb_file_name,
+    kept_unit_to_contributors,
+    apply_merge,
+    labels,
+    abs_times_by_uid,
+    sample_indices_by_uid,
+):
+    """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
+
+    Split out of :func:`write_curated_units_nwb` so its staged-file cleanup-on-
+    error wrapper stays a thin try/except. Returns ``(analysis_file_name,
+    units_object_id, nwb_file_name, n_spikes_by_uid)``.
+    """
+    import numpy as np
+    import pynwb
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._enums import CurationLabel
+    from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
+    from spyglass.spikesorting.v2.utils import _dedup_merged_spike_times
+
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     with pynwb.NWBHDF5IO(

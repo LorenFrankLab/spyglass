@@ -9,6 +9,7 @@ the readback goes through pynwb against a temp NWB file -- no DataJoint.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 
 def _unit_train(sorting, unit_id):
@@ -397,3 +398,51 @@ def test_base_intervals_from_recording_detects_gaps():
     assert len(rec.sample_calls) == 1
     assert rec.sample_calls[0].tolist() == list(range(9))
     assert rec.time_slice_calls == []
+
+
+# ---------- staged-file cleanup on write failure ----------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
+    populated_sorting, monkeypatch
+):
+    """If the units-NWB write fails after ``AnalysisNwbfile().create`` staged the
+    file, the writer unlinks that orphan before propagating.
+
+    Mirrors the recording writer's cleanup contract. Without it the partial,
+    unregistered AnalysisNwbfile would leak on disk (the Sorting/curation
+    staging cleanup only knows the analyzer folder / the registration step, not
+    this file's name). The curated writer shares the identical wrapper. Fault is
+    injected into the post-create body so the real ``create`` + cleanup path
+    runs end to end.
+    """
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _units_nwb
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    nwb_file_name = Sorting.resolve_anchor_nwb_file_name(populated_sorting)
+
+    staged = {}
+
+    def _boom(*, analysis_file_name, **kwargs):
+        staged["name"] = analysis_file_name
+        # The file must exist on disk at this point (create staged it).
+        assert Path(AnalysisNwbfile.get_abs_path(analysis_file_name)).exists()
+        raise RuntimeError("simulated units-NWB write failure")
+
+    monkeypatch.setattr(_units_nwb, "_write_sorting_units_nwb_body", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated units-NWB write failure"):
+        _units_nwb.write_sorting_units_nwb(
+            sorting=None, recording=None, nwb_file_name=nwb_file_name
+        )
+
+    # The staged orphan was unlinked by the writer's except block.
+    assert "name" in staged
+    assert not Path(
+        AnalysisNwbfile.get_abs_path(staged["name"])
+    ).exists()
