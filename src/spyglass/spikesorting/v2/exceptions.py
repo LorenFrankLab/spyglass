@@ -225,6 +225,22 @@ class ZeroUnitAnalyzerError(RuntimeError):
     """
 
 
+class AnalyzerFolderMissingError(RuntimeError):
+    """Raise when a no-rebuild analyzer load finds the folder absent.
+
+    ``Sorting.get_analyzer(..., rebuild=False)`` was asked to load a
+    units-bearing sort's analyzer folder, but the folder is gone on disk
+    (regeneratable scratch removed out of band, or reclaimed). The default
+    ``rebuild=True`` path self-heals by rebuilding it; the no-rebuild path exists
+    for the recompute AUDIT, which must OBSERVE the missing state rather than
+    silently rebuild-then-hash (which would inventory a reconstructed artifact as
+    if it were present and let the deletion gate compare a rebuild to itself).
+    Message names the sort and the recipe. Distinct from
+    ``ZeroUnitAnalyzerError``: that sort legitimately has no analyzer (zero
+    units), whereas this one should have one but the folder is absent.
+    """
+
+
 class UnsupportedDirectInsertError(RuntimeError):
     """Raise on a direct insert into a structured Lookup with part rows.
 

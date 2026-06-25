@@ -40,6 +40,7 @@ from spyglass.spikesorting.v2._recompute import (
     hash_recording_traces,
 )
 from spyglass.spikesorting.v2.exceptions import (
+    AnalyzerFolderMissingError,
     StaleEnvMatchedError,
     ZeroUnitAnalyzerError,
 )
@@ -57,6 +58,10 @@ from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 schema = dj.schema("spikesorting_v2_recompute")
 
 _ZERO_HASH = "0" * 64
+# Explicit "analyzer folder absent" inventory sentinel, distinct from
+# _ZERO_HASH (a legitimately zero-unit sort with no analyzer). Non-hex
+# characters guarantee it never collides with a real sha256 content hash.
+_MISSING_HASH = "MISSING_ANALYZER_FOLDER".ljust(64, "0")
 
 
 def _current_env_id() -> Optional[str]:
@@ -570,7 +575,15 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         return AnalyzerVersionsFetched()
 
     def make_compute(self, key) -> AnalyzerVersionsComputed:
-        """Load the analyzer + hash its extensions off the transaction."""
+        """Load the analyzer + hash its extensions off the transaction.
+
+        Uses the NO-REBUILD loader: an absent analyzer folder is inventoried as
+        an explicit MISSING state (``_MISSING_HASH``) rather than silently
+        rebuilt and hashed as if present -- so the inventory distinguishes a
+        reclaimed/missing analyzer from a legitimately zero-unit one
+        (``_ZERO_HASH``), and reclaimed disk is not re-materialized just to
+        record a hash.
+        """
         import spikeinterface as si
 
         si_deps = {"spikeinterface": si.__version__}
@@ -578,10 +591,23 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             analyzer = Sorting().get_analyzer(
                 {"sorting_id": key["sorting_id"]},
                 waveform_params_name=key["waveform_params_name"],
+                rebuild=False,
             )
             manifest = hash_extension_data(analyzer)
         except ZeroUnitAnalyzerError:
             manifest = {}
+        except AnalyzerFolderMissingError:
+            logger.warning(
+                "SortingAnalyzerVersions: analyzer folder missing for "
+                f"sorting_id={key['sorting_id']}, "
+                f"recipe={key['waveform_params_name']}; inventorying as MISSING "
+                "(not rebuilding)."
+            )
+            return AnalyzerVersionsComputed(
+                si_deps=si_deps,
+                analyzer_manifest={},
+                analyzer_hash=_MISSING_HASH,
+            )
         return AnalyzerVersionsComputed(
             si_deps=si_deps,
             analyzer_manifest=manifest,
@@ -830,8 +856,16 @@ def _recompute_analyzer_hashes(
     )
 
     try:
+        # NO-REBUILD: an absent stored analyzer must NOT be self-healed here --
+        # rebuilding it would compare a fresh build to another fresh build and
+        # report a tautological match, authorizing deletion of a folder that was
+        # reconstructed for the audit. Instead AnalyzerFolderMissingError
+        # propagates to _recompute_compute, which records matched=0 (the audit
+        # cannot verify reproducibility against an original that is gone).
         stored = Sorting().get_analyzer(
-            sort_key, waveform_params_name=waveform_params_name
+            sort_key,
+            waveform_params_name=waveform_params_name,
+            rebuild=False,
         )
     except ZeroUnitAnalyzerError:
         return {}, {}  # zero-unit: nothing to verify -> trivially matched

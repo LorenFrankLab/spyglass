@@ -129,7 +129,9 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
     return dict(row.fetch1("params"))
 
 
-def load_or_rebuild_analyzer(sorting_table, key, waveform_params_name=None):
+def load_or_rebuild_analyzer(
+    sorting_table, key, waveform_params_name=None, *, rebuild=True
+):
     """Return the SortingAnalyzer for ``key``, rebuilding the cache if needed.
 
     Parameters
@@ -145,20 +147,32 @@ def load_or_rebuild_analyzer(sorting_table, key, waveform_params_name=None):
         deterministic, well-defined default (the sort's OWN display analyzer),
         not a silent cross-recipe reuse. A caller needing the whitened metric
         recipe passes its name explicitly.
+    rebuild : bool, optional
+        If ``True`` (the default), a missing analyzer folder is rebuilt in place
+        from the canonical stored sorting (the self-healing cache). If ``False``,
+        a missing folder raises ``AnalyzerFolderMissingError`` -- the recompute
+        audit uses this so it can OBSERVE a missing/reclaimed analyzer rather than
+        silently rebuild-then-hash it.
 
     Returns
     -------
     spikeinterface.SortingAnalyzer
-        Loaded analyzer. Missing analyzer folders are rebuilt in place from
-        the canonical stored sorting.
+        Loaded analyzer. With ``rebuild=True`` a missing folder is rebuilt in
+        place from the canonical stored sorting first.
 
     Raises
     ------
     ZeroUnitAnalyzerError
         If the selected sort has zero units; SI cannot build a valid analyzer
         over an empty sorting.
+    AnalyzerFolderMissingError
+        If ``rebuild=False`` and the (units-bearing) sort's analyzer folder is
+        absent on disk.
     """
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+    from spyglass.spikesorting.v2.exceptions import (
+        AnalyzerFolderMissingError,
+        ZeroUnitAnalyzerError,
+    )
 
     # Resolve the canonical sorting_id from the matched row rather than
     # assuming ``key`` literally carries "sorting_id" -- a general
@@ -188,6 +202,15 @@ def load_or_rebuild_analyzer(sorting_table, key, waveform_params_name=None):
 
     folder = analyzer_path(sorting_id, waveform_params_name)
     if not folder.exists():
+        if not rebuild:
+            raise AnalyzerFolderMissingError(
+                "Sorting.get_analyzer(rebuild=False): analyzer folder for "
+                f"sorting_id={sorting_id!r}, recipe={waveform_params_name!r} is "
+                f"absent ({folder}). The regeneratable analyzer cache was removed "
+                "out of band; the no-rebuild loader surfaces the missing state "
+                "for the recompute audit instead of rebuilding. Use the default "
+                "rebuild=True path to reconstruct it."
+            )
         rebuild_analyzer_folder(
             sorting_table,
             {"sorting_id": sorting_id},

@@ -1867,7 +1867,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         return recording_timestamps(recording_row)
 
     def get_analyzer(
-        self, key: dict, waveform_params_name: str | None = None
+        self,
+        key: dict,
+        waveform_params_name: str | None = None,
+        *,
+        rebuild: bool = True,
     ) -> "si.SortingAnalyzer":
         """Return the SortingAnalyzer; rebuild on missing folder.
 
@@ -1901,16 +1905,31 @@ class Sorting(SpyglassMixin, dj.Computed):
             stored DISPLAY recipe (``display_waveform_params_name``); a caller
             needing the whitened metric recipe (e.g. the PC/NN cluster-
             separation metrics in ``AnalyzerCuration``) passes it explicitly.
-            A missing folder is rebuilt for whichever recipe is requested.
+            A missing folder is rebuilt for whichever recipe is requested
+            (unless ``rebuild=False``).
+        rebuild : bool, optional
+            If ``True`` (default), a missing analyzer folder is rebuilt in place
+            (the self-healing cache). If ``False``, a missing folder raises
+            ``AnalyzerFolderMissingError`` instead -- the recompute audit uses
+            this to OBSERVE a missing/reclaimed analyzer rather than silently
+            rebuild-then-hash it.
 
         Returns
         -------
         si.SortingAnalyzer
             The loaded ``SortingAnalyzer`` for the sort, rebuilt in
-            place if its folder was missing.
+            place if its folder was missing (when ``rebuild=True``).
+
+        Raises
+        ------
+        AnalyzerFolderMissingError
+            If ``rebuild=False`` and the analyzer folder is absent on disk.
         """
         return load_or_rebuild_analyzer(
-            self, key, waveform_params_name=waveform_params_name
+            self,
+            key,
+            waveform_params_name=waveform_params_name,
+            rebuild=rebuild,
         )
 
     def add_extensions(

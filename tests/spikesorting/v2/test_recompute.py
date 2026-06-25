@@ -235,6 +235,100 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
 
 
+@pytest.fixture
+def display_analyzer_folder(populated_sorting):
+    """Resolve (building if needed) the sort's display analyzer folder, and
+    restore it after the test -- the package-scoped sort's regeneratable cache
+    is shared, so a test that deletes the folder must rebuild it on teardown."""
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort_key = {"sorting_id": populated_sorting["sorting_id"]}
+    recipe = (Sorting & sort_key).fetch1("display_waveform_params_name")
+    folder = analyzer_path(populated_sorting["sorting_id"], recipe)
+    Sorting().get_analyzer(sort_key)  # build if a prior test removed it
+    assert folder.exists()
+    yield sort_key, recipe, folder
+    if not folder.exists():
+        Sorting().get_analyzer(sort_key)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_get_analyzer_no_rebuild_raises_on_missing_folder(
+    display_analyzer_folder,
+):
+    """``get_analyzer(rebuild=False)`` raises ``AnalyzerFolderMissingError`` for
+    a missing folder and does NOT recreate it -- the audit must observe the
+    missing state, not silently rebuild. ``rebuild=True`` still self-heals."""
+    import shutil
+
+    from spyglass.spikesorting.v2.exceptions import (
+        AnalyzerFolderMissingError,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort_key, _recipe, folder = display_analyzer_folder
+    shutil.rmtree(folder)
+    with pytest.raises(AnalyzerFolderMissingError):
+        Sorting().get_analyzer(sort_key, rebuild=False)
+    assert not folder.exists()  # the no-rebuild load did not recreate it
+    # The default path still rebuilds on demand.
+    assert Sorting().get_analyzer(sort_key) is not None
+    assert folder.exists()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_analyzer_versions_records_missing_without_rebuild(
+    display_analyzer_folder, clean_recompute
+):
+    """The inventory records an explicit missing state (and does NOT rebuild)
+    when a units-bearing sort's analyzer folder is absent -- so an audit can
+    tell a reclaimed/missing analyzer from a legitimately zero-unit one."""
+    import shutil
+
+    from spyglass.spikesorting.v2.recompute import (
+        _MISSING_HASH,
+        SortingAnalyzerVersions,
+    )
+
+    sort_key, recipe, folder = display_analyzer_folder
+    shutil.rmtree(folder)
+    SortingAnalyzerVersions.populate(sort_key, reserve_jobs=False)
+    row = (
+        SortingAnalyzerVersions & sort_key & {"waveform_params_name": recipe}
+    ).fetch1()
+    assert row["analyzer_hash"] == _MISSING_HASH
+    assert not row["analyzer_manifest"]  # {} / None -- no hashed content
+    assert not folder.exists()  # the inventory did NOT rebuild
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_sorting_analyzer_recompute_missing_is_unmatched(
+    display_analyzer_folder, clean_recompute
+):
+    """A missing stored analyzer yields matched=0 (cannot verify reproducibility
+    against an absent original) instead of a rebuild-vs-rebuild tautological
+    match that would authorize deleting a freshly-rebuilt folder."""
+    import shutil
+
+    from spyglass.spikesorting.v2.recompute import (
+        SortingAnalyzerRecompute,
+        SortingAnalyzerRecomputeSelection,
+        SortingAnalyzerVersions,
+    )
+
+    sort_key, _recipe, folder = display_analyzer_folder
+    SortingAnalyzerVersions.populate(sort_key, reserve_jobs=False)
+    SortingAnalyzerRecomputeSelection.attempt_all(sort_key)
+    shutil.rmtree(folder)  # the original is gone before the verify runs
+    SortingAnalyzerRecompute.populate(sort_key, reserve_jobs=False)
+    assert SortingAnalyzerRecompute & sort_key & "matched=0"
+    assert not (SortingAnalyzerRecompute & sort_key & "matched=1")
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_file_tracking_excludes_v2_deleted_files(populated_sorting, clean_recompute):
