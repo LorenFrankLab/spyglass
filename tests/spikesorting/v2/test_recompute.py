@@ -331,6 +331,47 @@ def test_sorting_analyzer_recompute_missing_is_unmatched(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_recompute_base_does_not_self_heal_display(display_analyzer_folder):
+    """Verifying a NON-display (metric) recipe must NOT self-heal the display
+    cache as a side effect of sourcing sorting+recording. With the display
+    folder missing, the base load raises ``AnalyzerFolderMissingError`` instead
+    of re-materializing a large display folder during the audit."""
+    import shutil
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.exceptions import (
+        AnalyzerFolderMissingError,
+    )
+    from spyglass.spikesorting.v2.recompute import _recompute_analyzer_hashes
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        Sorting,
+    )
+
+    sort_key, _display_recipe, display_folder = display_analyzer_folder
+    # A whitened (metric) recipe distinct from the sort's display recipe.
+    metric_recipe = next(
+        r["waveform_params_name"]
+        for r in AnalyzerWaveformParameters().fetch(
+            "waveform_params_name", "params", as_dict=True
+        )
+        if r["params"].get("whiten")
+    )
+    metric_folder = analyzer_path(sort_key["sorting_id"], metric_recipe)
+    Sorting().get_analyzer(sort_key, waveform_params_name=metric_recipe)
+    assert metric_folder.exists()
+    try:
+        shutil.rmtree(display_folder)  # display gone; metric present
+        with pytest.raises(AnalyzerFolderMissingError):
+            _recompute_analyzer_hashes(sort_key, 4, metric_recipe)
+        # The base sorting+recording source did NOT rebuild the display folder.
+        assert not display_folder.exists()
+    finally:
+        shutil.rmtree(metric_folder, ignore_errors=True)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_file_tracking_excludes_v2_deleted_files(populated_sorting, clean_recompute):
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 

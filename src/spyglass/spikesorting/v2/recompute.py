@@ -879,7 +879,16 @@ def _recompute_analyzer_hashes(
     # build_analyzer starts from). build_analyzer re-applies whitening per the
     # target recipe, so a whitened metric analyzer is not double-whitened from
     # its own (already whitened) recording. The sorting is recipe-independent.
-    base = Sorting().get_analyzer(sort_key)
+    #
+    # NO-REBUILD here too: this only sources sorting + recording, but the default
+    # rebuild=True would self-heal the DISPLAY folder as a side effect -- so
+    # verifying a metric analyzer while the display folder is missing would
+    # re-materialize a large display cache during the audit. With rebuild=False a
+    # missing display propagates AnalyzerFolderMissingError -> matched=0 (cannot
+    # verify without the canonical source), never a silent rebuild. For the
+    # common display-recipe verify, the stored load above already required (and
+    # loaded) this same folder, so this is a no-op cache hit.
+    base = Sorting().get_analyzer(sort_key, rebuild=False)
 
     tmp = tempfile.mkdtemp(prefix="v2_analyzer_recompute_")
     try:
