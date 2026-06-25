@@ -249,6 +249,13 @@ def describe_parameter_rows() -> "pd.DataFrame":
                     params_schema_version=int(row["params_schema_version"]),
                     job_kwargs=_jsonable_blob(row["job_kwargs"]),
                     sorter=row["sorter"],
+                    # execution_params is part of SorterParameters' real
+                    # identity (local vs container backend); omitting it here
+                    # would falsely flag two backend variants as duplicates.
+                    execution_params=_jsonable_blob(row["execution_params"]),
+                    execution_params_schema_version=int(
+                        row["execution_params_schema_version"]
+                    ),
                 ),
                 "is_shipped_default": key in shipped_sorter,
                 "recommendation_status": _str_axis(
@@ -280,12 +287,17 @@ def describe_parameter_rows() -> "pd.DataFrame":
         contents = getattr(table, "_DEFAULT_CONTENTS", None)
         return {r[0] for r in contents} if contents else None
 
-    def _append_simple_param_records(table, table_name, name_attr, summarize):
+    def _append_simple_param_records(
+        table, table_name, name_attr, summarize, extra_content=None
+    ):
         """List a name-keyed param Lookup with preset-fold columns blank.
 
         ``is_shipped_default`` is resolved from ``_DEFAULT_CONTENTS`` when the
         table ships it, else left ``None`` (undetermined) -- not every Lookup
-        exposes a static default-row tuple.
+        exposes a static default-row tuple. ``extra_content(row)`` folds
+        part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
+        fingerprint so a name-keyed master with identical scalar columns but
+        different part rows is not falsely flagged as a content duplicate.
         """
         shipped = _shipped_names(table)
         for simple_row in table.fetch(as_dict=True):
@@ -295,6 +307,8 @@ def describe_parameter_rows() -> "pd.DataFrame":
                 for column, value in simple_row.items()
                 if column != name_attr
             }
+            if extra_content is not None:
+                content["__part_content__"] = extra_content(simple_row)
             records.append(
                 {
                     "table": table_name,
@@ -339,11 +353,28 @@ def describe_parameter_rows() -> "pd.DataFrame":
         "metric_params_name",
         lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
     )
+    def _autocuration_rule_content(rules_row):
+        # The Rule part rows define the named ruleset's content, so fold them
+        # (ordered by rule_index) into the fingerprint -- two rulesets with the
+        # same master columns but different Rule rows are NOT duplicates.
+        return [
+            {k: _jsonable_blob(v) for k, v in rule.items()}
+            for rule in (
+                AutoCurationRules.Rule
+                & {
+                    "auto_curation_rules_name": rules_row[
+                        "auto_curation_rules_name"
+                    ]
+                }
+            ).fetch(as_dict=True, order_by="rule_index")
+        ]
+
     _append_simple_param_records(
         AutoCurationRules,
         "AutoCurationRules",
         "auto_curation_rules_name",
         lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
+        extra_content=_autocuration_rule_content,
     )
     _append_simple_param_records(
         MatcherParameters,
