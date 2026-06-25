@@ -217,8 +217,8 @@ def derive_tracked_units(
     Strict tracked units are a **partition**: each curated unit belongs to
     exactly one tracked unit (mirroring UnitMatch's conservative unique-id
     assignment, which keeps one group id per unit). Maximal cliques
-    (``networkx.find_cliques``) can overlap -- e.g. edges ``A1-B1``, ``A1-B2``,
-    ``A2-B1`` yield three size-2 cliques sharing ``A1``/``B1`` -- so emitting
+    (``networkx.find_cliques``) can overlap -- e.g. edges ``a1-b1``, ``a1-b2``,
+    ``a2-b1`` yield three size-2 cliques sharing ``a1``/``b1`` -- so emitting
     every clique would assign one unit to several biological identities. Instead
     the graph is covered greedily by maximal clique, largest first
     (deterministic tie-break by sorted members): each clique contributes only its

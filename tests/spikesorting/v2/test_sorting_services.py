@@ -62,16 +62,20 @@ def test_apply_artifact_mask_rejects_malformed_valid_times():
 
 
 def test_apply_artifact_mask_rejects_nonmonotonic_recording_times():
-    """The mask walks the recording timeline with ``searchsorted``, so a
-    backward-stepping ``get_times()`` would silently mis-mask. Pins that the
-    monotonic guard is actually wired into this boundary (not just the pure
+    """The mask binary-searches the recording timeline, so a reversed/corrupt
+    timestamp vector would silently mis-mask. The boundary guard is a bounded
+    two-endpoint tripwire -- interior monotonicity is guaranteed by
+    ``Recording.make`` and re-validated per chunk in ``detect_artifacts``, so the
+    boundary only catches gross corruption (reversed/non-finite endpoints)
+    cheaply, without materializing the timestamp vector. This pins that the
+    endpoint guard is wired into ``apply_artifact_mask`` (not only the pure
     ``_signal_math`` helpers)."""
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         apply_artifact_mask,
     )
 
     times = np.arange(100, dtype=float) / 1000.0
-    times[50] = times[49] - 0.05  # inject a backward step
+    times[-1] = times[0] - 0.05  # last endpoint steps backward past the first
     rec = _rec(np.zeros((100, 2), dtype="float32"), times=times)
     with pytest.raises(ValueError, match="monotonic"):
         apply_artifact_mask(rec, np.array([[0.0, 0.05]]))
