@@ -342,7 +342,7 @@ class AnalysisRegistry(dj.Manual):
             isolated database locks.
             """
 
-            _full_table_name = full_name
+            full_table_name = full_name
             _analysis_prefix = prefix
 
             def __init__(self):

@@ -6,6 +6,7 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
+from functools import partial
 from multiprocessing import Pool, cpu_count
 from typing import List, Union
 
@@ -652,8 +653,9 @@ class Export(SpyglassMixin, dj.Computed):
                 update_analysis_for_dandi_standard(file, **kwargs)
             return
         with Pool(processes=n_processes) as pool:
-            pool.map(make_file_obj_id_unique, file_list)
-            pool.map(update_analysis_for_dandi_standard, file_list)
+            list(pool.imap_unordered(make_file_obj_id_unique, file_list))
+            update_fn = partial(update_analysis_for_dandi_standard, **kwargs)
+            list(pool.imap_unordered(update_fn, file_list))
 
     def _make_fileset_ids_unique(self, key, n_processes=1):
         """Make the object_id of each nwb in a dataset unique"""

@@ -242,6 +242,16 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
+        if (restr := self._get_node(ensure_names(table)).get("restr")) is None:
+            restr_list = self._get_restr_list(table)
+            if not restr_list:
+                return None
+            ft = self._get_ft(table)
+            self._set_node(
+                table,
+                "restr",
+                self._coerce_to_condition(ft, ft & restr_list),
+            )
         return self._get_node(ensure_names(table)).get("restr")
 
     def _get_restr_list(self, table):
@@ -313,8 +323,10 @@ class AbstractGraph(ABC):
         # Merge restrictions
         restr_list = self._get_restr_list(table) + [restriction]
         self._set_node(table, "restr_list", restr_list)
-        restriction = self._coerce_to_condition(ft, ft & restr_list)
-        self._set_node(table, "restr", restriction)
+        # restriction = self._coerce_to_condition(ft, ft & restr_list)
+        self._set_node(
+            table, "restr", None
+        )  # Placeholder to avoid redundant coercion
         return restriction
 
     @lru_cache(maxsize=128)
@@ -328,7 +340,7 @@ class AbstractGraph(ABC):
             ft = FreeTable(self.connection, table)
             self._set_node(table, "ft", ft)
 
-        return ft & restr
+        return ft & self._coerce_to_condition(ft, restr)
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
@@ -629,8 +641,7 @@ class AbstractGraph(ABC):
                 next_table, data = next_func(next_table).popitem()
 
             if (
-                next_table in self.visited
-                or next_table in self.no_visit  # Subclasses can set this
+                next_table in self.no_visit  # Subclasses can set this
                 or table == next_table
             ):
                 reason = (
@@ -650,6 +661,18 @@ class AbstractGraph(ABC):
 
             if next_restr == ["False"]:  # Stop cascade if empty restriction
                 continue
+
+            if next_table in self.visited:
+                # check if new restriction contains entries not in existing restriction
+                # if not, skip cascade to avoid redundant work
+                if not bool(
+                    self._get_ft_with_restr(next_table, next_restr)
+                    - self._get_restr_list(next_table)
+                ):
+                    self._log_truncate(
+                        f"Already cascaded: {self._camel(next_table)}"
+                    )
+                    continue
 
             self.cascade1(
                 table=next_table,
