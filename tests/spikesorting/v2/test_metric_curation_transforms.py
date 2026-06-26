@@ -16,6 +16,7 @@ import pytest
 
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
+    apply_snr_peak_sign,
     isi_violation_fraction,
     rules_payloads_match,
     sanitize_for_json,
@@ -241,3 +242,93 @@ def test_rules_payloads_match_does_not_conflate_bool_and_int():
     """bool is an int subclass; True must not match 1 through the numeric path."""
     assert not rules_payloads_match({"k": True}, {"k": 1})
     assert rules_payloads_match({"k": True}, {"k": True})
+
+
+# ---------- SIG-2: SNR peak_sign follows the sorter's polarity --------------
+
+
+@pytest.mark.parametrize(
+    "sorter_params,expected",
+    [
+        ({"peak_sign": "pos"}, "pos"),
+        ({"peak_sign": "both"}, "both"),
+        ({"detect_sign": 1}, "pos"),
+        ({"detect_sign": -1}, "neg"),
+        ({}, "neg"),  # no sign field -> SI default fallback
+        (None, "neg"),
+    ],
+)
+def test_apply_snr_peak_sign_injects_resolved_sign(sorter_params, expected):
+    """When ``snr`` is requested, the sorter's resolved peak_sign is injected
+    into ``metric_kwargs['snr']`` even if it carried no kwargs yet.
+
+    SNR was hard-coded ``peak_sign='neg'``, so a positive/bidirectional sorter
+    measured SNR on the most-negative channel instead of its true peak.
+    """
+    out = apply_snr_peak_sign(["snr", "isi_violation"], {}, sorter_params)
+    assert out["snr"]["peak_sign"] == expected
+
+
+def test_apply_snr_peak_sign_preserves_existing_snr_kwargs():
+    """An existing snr kwarg survives; only peak_sign is overridden."""
+    out = apply_snr_peak_sign(
+        ["snr"], {"snr": {"peak_mode": "extremum"}}, {"peak_sign": "pos"}
+    )
+    assert out["snr"] == {"peak_mode": "extremum", "peak_sign": "pos"}
+
+
+def test_apply_snr_peak_sign_noop_when_snr_not_requested():
+    """No snr metric -> kwargs are returned untouched (no snr key added)."""
+    kwargs = {"isi_violation": {"isi_threshold_ms": 2.0}}
+    out = apply_snr_peak_sign(["isi_violation"], kwargs, {"peak_sign": "pos"})
+    assert "snr" not in out
+    assert out == kwargs
+
+
+def test_apply_snr_peak_sign_does_not_mutate_input():
+    """The override returns a new mapping; the caller's dict is unchanged."""
+    kwargs = {"snr": {"peak_mode": "extremum"}}
+    apply_snr_peak_sign(["snr"], kwargs, {"peak_sign": "pos"})
+    assert kwargs == {"snr": {"peak_mode": "extremum"}}
+
+
+def test_snr_peak_sign_follows_sorter_polarity():
+    """End-to-end (hermetic): a positive-going planted sort computes SNR on its
+    POSITIVE-peak channel, and a negative-default sort's SNR is unchanged.
+
+    The planted unit has a +50 uV peak on channel 0 and a larger -100 uV
+    deflection on channel 1, so peak_sign decides which channel SNR is measured
+    on. Driving SI's ``compute_quality_metrics`` with the kwargs
+    ``apply_snr_peak_sign`` produces for a ``peak_sign='pos'`` sorter must give
+    the smaller (positive-peak) SNR and differ from the ``'neg'`` default --
+    which stays the regression-pinned value.
+    """
+    from spikeinterface.metrics.quality import compute_quality_metrics
+
+    from tests.spikesorting.v2.test_peak_sign_resolution import (
+        _pos_neg_analyzer,
+    )
+
+    analyzer, _ = _pos_neg_analyzer()
+    analyzer.compute(["noise_levels", "spike_amplitudes"])
+
+    def _snr(sorter_params):
+        kwargs = apply_snr_peak_sign(["snr"], {}, sorter_params)
+        df = compute_quality_metrics(
+            analyzer,
+            metric_names=["snr"],
+            metric_params={"snr": kwargs["snr"]},
+            skip_pc_metrics=True,
+            delete_existing_metrics=True,
+        )
+        return float(df["snr"].iloc[0])
+
+    snr_pos = _snr({"peak_sign": "pos"})  # follows the +channel
+    snr_neg = _snr({"peak_sign": "neg"})  # SI default, unchanged
+    snr_default = _snr({})  # no sign -> neg fallback
+
+    # The positive peak (+50) is smaller than the negative deflection (-100),
+    # so measuring on the positive channel yields a smaller SNR.
+    assert snr_pos < snr_neg
+    # The negative-default path is the regression pin: same as explicit 'neg'.
+    assert snr_default == pytest.approx(snr_neg)

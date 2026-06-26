@@ -30,6 +30,7 @@ import datajoint as dj
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._metric_curation import (
     apply_label_rules,
+    apply_snr_peak_sign,
     isi_violation_fraction,
     rules_payloads_match,
 )
@@ -58,6 +59,7 @@ from spyglass.spikesorting.v2._recipe_catalog import (
 from spyglass.spikesorting.v2.recording import RecordingSelection
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
+    SorterParameters,
     Sorting,
     SortingSelection,
 )
@@ -870,13 +872,25 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
             & {"auto_curation_rules_name": sel["auto_curation_rules_name"]}
         ).fetch(as_dict=True)
         sorting_key = {"sorting_id": sel["sorting_id"]}
+        # Resolve the SNR peak_sign from the sorter's configured polarity (the
+        # same mapping that drives per-unit attribution at sort time) instead of
+        # the hard-coded "neg" in the default metric rows; a no-op for
+        # negative-going sorts. Done here (the sanctioned DB-fetch stage) so the
+        # DB-free make_compute receives the corrected kwargs.
+        metric_names = list(qm["metric_names"])
+        sorter_params = (
+            SortingSelection * SorterParameters & sorting_key
+        ).fetch1("params")
+        metric_kwargs = apply_snr_peak_sign(
+            metric_names, dict(qm["metric_kwargs"] or {}), sorter_params
+        )
         return AnalyzerCurationFetched(
             sorting_id=str(sel["sorting_id"]),
             curation_id=int(sel["curation_id"]),
             metric_waveform_params_name=sel["metric_waveform_params_name"],
             nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
-            metric_names=list(qm["metric_names"]),
-            metric_kwargs=dict(qm["metric_kwargs"] or {}),
+            metric_names=metric_names,
+            metric_kwargs=metric_kwargs,
             template_metric_columns=list(qm["template_metric_columns"] or []),
             skip_pc_metrics=bool(qm["skip_pc_metrics"]),
             auto_merge_preset=acr["auto_merge_preset"],

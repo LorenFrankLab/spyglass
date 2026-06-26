@@ -40,6 +40,54 @@ def _is_finite_metric_value(value) -> bool:
         return False
 
 
+def apply_snr_peak_sign(
+    metric_names, metric_kwargs: dict, sorter_params
+) -> dict:
+    """Inject the sorter's resolved ``peak_sign`` into the ``snr`` metric kwargs.
+
+    SI's SNR is measured at each template's extremum for a configured
+    ``peak_sign`` (default ``"neg"``). The v2 default metric rows hard-code
+    ``peak_sign="neg"``, so a positive/bidirectional sorter (clusterless
+    ``peak_sign="pos"/"both"``, MountainSort ``detect_sign=1/0``) would measure
+    SNR on the most-negative channel instead of its true peak. Resolve the sign
+    from the sorter params (the same ``resolve_peak_sign`` mapping that drives
+    per-unit attribution) and override it whenever ``snr`` is requested -- even
+    if it carried no kwargs yet, otherwise a ``metric_names=["snr"]`` with no
+    ``metric_kwargs["snr"]`` would silently keep the hard-coded default. Any
+    other existing ``snr`` kwargs are preserved.
+
+    For negative-default sorts the resolved sign is ``"neg"``, so the kwargs
+    are numerically unchanged; only positive/bidirectional sorters move.
+
+    Returns a NEW mapping (the caller's dict is not mutated).
+
+    Parameters
+    ----------
+    metric_names : iterable of str
+        Requested quality-metric names.
+    metric_kwargs : dict
+        Per-metric kwargs mapping (``{metric_name: {...}}``).
+    sorter_params : Mapping or None
+        The validated ``SorterParameters.params`` blob for the sort.
+
+    Returns
+    -------
+    dict
+        ``metric_kwargs`` with ``snr.peak_sign`` set to the resolved sign when
+        ``snr`` is requested, else the input unchanged.
+    """
+    if "snr" not in metric_names:
+        return metric_kwargs
+    # Lazy import keeps this module import DB-free (utils pulls in heavier deps).
+    from spyglass.spikesorting.v2.utils import resolve_peak_sign
+
+    resolved = resolve_peak_sign(sorter_params)
+    return {
+        **metric_kwargs,
+        "snr": {**(metric_kwargs.get("snr") or {}), "peak_sign": resolved},
+    }
+
+
 def apply_label_rules(
     metrics_df: pd.DataFrame, rule_rows: list[dict]
 ) -> dict[int, list[str]]:
