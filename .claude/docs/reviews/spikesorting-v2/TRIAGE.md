@@ -122,6 +122,7 @@ Each row is one underlying problem; the many overlapping findings collapse here.
 | R35 | **Validation escape-hatches & payload-shape stability** — JSON-native/finite is enforced only as a fingerprint side effect, not a first-class insert invariant (bypassed by `allow_duplicate_params=True`; `_resolved_job_kwargs` blind-updates with no finite check; `threshold` is a bare float); `QualityMetricParameters`/`AutoCurationRules` skip the duplicate-content guard the docs imply; sort-time `curation_label` is a scalar while the docstring says a list; artifact-interval return shape flips array↔dict by source kind | SER-2, SER-3, SER-5, SER-6 | CONFIRMED | **NICE** | M | Hardening + contract consistency; SER-5 also has a code/docstring contradiction worth a quick fix. SER-3 overlaps R24. |
 | R36 | **Cheap test / single-source-of-truth wins that ease Phase 5** — tri-part NamedTuple contract tests cover only 3 of ~7 carriers (extend to Artifact/Concat/UnitMatch/recompute/DriftEstimate); 4 parallel catalogs of stage/lookup knowledge with one live drift (notebook says 3 defaults, 8 are seeded) — add consistency tests + fix the doc; slow integration setup is hand-rolled in 4 modules (add a `populate_single_session_chain` helper); insert/insert1/insert_default boilerplate not yet hoisted into the existing `ImmutableParamsLookup` mixin | MAINT-3, MAINT-4, MAINT-5, MAINT-8 | CONFIRMED | **SHOULD** | S–M | All cheap, low-risk, and reduce drift before Phase 5 touches these surfaces. MAINT-8 == R24. Note: the file-splitting half of MAINT-1/2 is **already-rejected** per the user's decision; keep only the "table owns schema+txn, service owns logic" rule for new code. |
 | R37 | **Stale scaffolding / contributor hazards** — the old phase-0 fixture-generation plan still describes the superseded ground-truth-in-`nwbfile.units` contract (current tests require `ProcessingModule["ground_truth"]` + empty `nwbfile.units`); clusterless smoke row named `5uv` but behavior is MAD; facade/module status text lags shipped surface (= R23) | EXT-8, SIG-7, MAINT-9 | CONFIRMED | **NICE/Phase-5** | S | EXT-8 can poison regenerated fixtures — mark the plan superseded. SIG-7 is naming hygiene. MAINT-9 folds into R23. |
+| R38 | **Decompose the remaining monolithic table classes (before Phase 5 piles on)** — `CurationV2` (~1968 lines) and the other public table classes still own source-routing, accessors, plotting delegates, and result formatting alongside schema + `make_*`. The genuinely monolithic remainders are `CurationV2.resolve_restriction` (~250-line source-routing classmethod) and the `CurationV2` accessor cluster (`get_recording`/`get_sorting`/`get_merged_sorting`/`summarize_curation`/`get_sort_metadata`); plus compat-wrapper public/private blurring | MAINT-1, MAINT-2, MAINT-7 | CONFIRMED | **SHOULD (pre-Phase-5)** | M–L | **Re-tiered 2026-06-25: the prior "don't split these files" directive was rescinded — pre-production, do what's best.** Phase 5 adds the `run_v2_pipeline` orchestrator + FigPack curation tables + presets, which extend exactly these modules; decomposing the source-routing + accessor layer into DB-free, directly-testable service modules FIRST means Phase 5 builds on clean seams. **Keep the anti-theater discipline:** much compute is already in `_recording_*`/`_sorting_*`/`_curation_plan`/`_selection_plan` — verify what is inline-and-pure before extracting; target `resolve_restriction` + the accessor cluster, not a line-count pass. |
 
 ---
 
@@ -136,21 +137,44 @@ Each row is one underlying problem; the many overlapping findings collapse here.
 - **R4** Fix sorter-output-freed-before-consumption (verify file-backed MS4 path first).
 
 ### SHOULD — during Phase 5 (cheap safety or in Phase-5 scope)
-R5 (analyzer cache lock/atomic publish — mirror the recording fix) · R8 (schema-init version backfill + stale-default audit) · R12 (route scratch to configured temp) · R14 (direct `_assert_v2_db_safe` on the two modules) · R15 (narrow the eager v2 merge-table probe) · R16 (reconcile dependency pins; pin numpy) · R18 (DESTR-6 negative-days validation; DESTR-8 orphan-sweep name filter; DESTR-2 remove dead in-place branch) · R20 (orchestrator/preflight polish — esp. ERR-1) · R22 (DOWN-6 Export.File leak) · R23 (docs/build cuts + stale status text) · R26-partial (CONFIG-8 conda-export guard) · **R28** (deny `update1` on selection masters; guard `CurationV2`/`SessionGroup` direct writes) · **R30** (concat electrode-space + fs compatibility checks; UnitMatch 2D-geometry guard) · **R31** (re-validate concat+artifact and shared-artifact at the compute boundary) · **R32** (sorter-dispatch execution mismatches) · **R34**-SEC-2 (`restrict_permission=True`; drop local `0o777`) · **R36** (cheap test/single-source-of-truth wins before Phase 5).
+R5 (analyzer cache lock/atomic publish — mirror the recording fix) · R8 (schema-init version backfill + stale-default audit) · R12 (route scratch to configured temp) · R14 (direct `_assert_v2_db_safe` on the two modules) · R15 (narrow the eager v2 merge-table probe) · R16 (reconcile dependency pins; pin numpy) · R18 (DESTR-6 negative-days validation; DESTR-8 orphan-sweep name filter; DESTR-2 remove dead in-place branch) · R20 (orchestrator/preflight polish — esp. ERR-1) · R22 (DOWN-6 Export.File leak) · R23 (docs/build cuts + stale status text) · R26-partial (CONFIG-8 conda-export guard) · **R28** (deny `update1` on selection masters; guard `CurationV2`/`SessionGroup` direct writes) · **R30** (concat electrode-space + fs compatibility checks; UnitMatch 2D-geometry guard) · **R31** (re-validate concat+artifact and shared-artifact at the compute boundary) · **R32** (sorter-dispatch execution mismatches) · **R34**-SEC-2 (`restrict_permission=True`; drop local `0o777`) · **R36** (cheap test/single-source-of-truth wins before Phase 5) · **R38** (decompose the monolithic table classes — `resolve_restriction` + the `CurationV2` accessor cluster — *before* Phase 5 extends them; anti-theater discipline applies) · **R10** (full metadata/lineage provenance into NWBs — promoted from NICE per the decision below) · **R6**-alias (version the runtime-semantics aliases) · **R7**-frozen (TrackedUnit consumes the already-frozen matchable universe) · **R9**-TEAM-1 (guard the session-global sort-group overwrite) · **R33**-matcher (store matcher backend version + collapse the misleading registry) · **R34**-SEC-1 (basename/path-confinement defense-in-depth).
 
 ### NICE — post-Phase-5
-R10 (NWB provenance) · R11 (explicit-timestamp perf) · R13 (job_kwargs wiring) · R17 (import boundary) · R19 (interval-orphan finder) · R21 (error taxonomy base) · R24 (selection-helper consistency) · R25 (recompute input fingerprints) · **R35** (validation escape-hatches + payload-shape) · **R37** (stale scaffolding; EXT-8 mark plan superseded) · remainder of R18/R26/R34.
+R11 (explicit-timestamp perf) · R13 (job_kwargs wiring) · R17 (import boundary) · R19 (interval-orphan finder) · R21 (error taxonomy base) · R24 (selection-helper consistency) · R25 (recompute input fingerprints) · **R35** (validation escape-hatches + payload-shape) · **R37** (stale scaffolding; EXT-8 mark plan superseded) · remainder of R18/R26/R34.
 
-### DECIDE — product/design decision needed first
-- **R9** Is `team_name` a tag or an enforced access boundary? (drives 9 findings)
-- **R6** Accept row-name recording identity (already leaning won't-do) vs. version the runtime-semantics aliases (recommend doing the alias-version subset).
-- **R7** Freeze curation/tracked-unit label snapshots vs. accept re-derivation.
-- **R10** Is portable off-DataJoint NWB export on the near-term roadmap? (gates NWB work)
-- **R33** How extensible should v2 actually be? (matcher/preset/sorter/viz plugin surfaces — currently advertised but closed; EXT-2 presets are Phase-5 scope)
-- **R34**-policy Document the trusted-operator model for `SorterParameters`/filename inputs (SEC-1/3/6), or add allowlists/confinement.
+### DECIDE — RESOLVED 2026-06-25 (see "Decisions" below)
+
+All Round-1/2 design decisions were made with the owner on 2026-06-25 under the
+"pre-production, do what's best" principle. The **only remaining open flag**:
+- **R9-PK** — should the session-global keys (`SortGroupV2`, `SharedArtifactGroup`,
+  `ExportSelection`) gain `owner` in their *primary key* to allow per-team
+  namespacing? This is the one non-additive change (it shifts `recording_id`
+  identity), so it's free now and a migration later. Default decision: **no**
+  (keeps v2 == v1; access *enforcement* remains a clean future additive PR).
+  Revisit only if per-team namespacing becomes likely.
 
 ### DONE — stale-fixed, close out
 R-na: **REPRO-1/TEST-1** (raw source pinned to `Raw.raw_object_id`, 385e7d31) · **REPRO-2/TEST-2** (`channel_name` maps by electrode row, 63e0ff5a) · **CONC-3/OBS-1** + OBS-7-recording (recording rebuild per-recording lock + atomic publish + content-drift fail-closed, d08c319b/db8d271e/18f05527) · **SCHEMA-5/DOCS-4/API-1** (`cache_hash`→`content_hash` in docs + flipped reclamation tests, e8e06553).
+
+---
+
+## Decisions (2026-06-25, agreed with owner)
+
+Made under the **"pre-production, no users, do what's best"** principle: settle
+the foundational (cheap-now / migration-later) choices, but ship the *cheap
+honest slice* of any feature-breadth item rather than building speculative
+frameworks. Evidence for the v1/v2 and additivity claims: [v1/recording.py:148-184](../../../../src/spyglass/spikesorting/v1/recording.py#L148-L184), [v2/recording.py:150-151](../../../../src/spyglass/spikesorting/v2/recording.py#L150-L151), [dj_mixin.py:18-19](../../../../src/spyglass/utils/dj_mixin.py#L18-L19).
+
+| Item | Decision | Rationale |
+|---|---|---|
+| **R6** recording identity | **Keep won't-do on full recipe-as-identity; DO the alias/runtime-semantics versioning** (preprocessing reference→filter order; `"auto"`/`dredge_fast` preset mappings) → fold into R8. | `content_hash` + rebuild-verify + R28 (deny `update1`) cover most of the risk; only the silent alias-meaning-change needs a version bump. → **SHOULD** |
+| **R7** curation/tracked-unit freezing | **DO the cheap fix now** (TrackedUnit consumes the universe `UnitMatch.make_fetch` already froze, closing the silent singleton-drop); **DEFER** the child-curation composition redesign to Phase-5 FigPack design + document current snapshot semantics. | Reproducibility fix is free (no schema); composition semantics are a real product question best decided alongside the curation-editing UX. → **SHOULD** + Phase-5 design |
+| **R9** team ownership | **`team_name` is a provenance tag, NOT an enforced boundary — do NOT build RBAC.** Fix the TEAM-1 session-global sort-group overwrite footgun. Enforcement stays a clean **future additive PR** (ownership columns already stored; no migration). | v2 == v1 here (v1 also stores `team_name` unenforced, same shared `cautious_delete`); real enforcement is additive. Only the session-global-key *PK* change is non-additive → tracked as the one open flag (R9-PK), default **no**. → **SHOULD** (TEAM-1) |
+| **R10** NWB provenance | **DO the full metadata/lineage provenance pass** (NWB-1,2,4,5,6,7,8 — source `object_id`, sorter+params, ids, member boundaries, merge map, matcher params). For the two large-array items (motion displacement field NWB-3; waveform/template arrays) **store the producing params/preset, not the array** (reproducible without bloat). | Owner confirmed the metadata is cheap to write into existing writers; only large arrays warrant a storage tradeoff. → **SHOULD** (promoted from NICE) |
+| **R33** extensibility | **Do NOT build matcher/sorter/viz plugin APIs** (SI already is the sorter layer; one matcher backend exists). Fix the honesty gap (docs → R23) + EXT-6 (validate custom rule labels at insert). For the matcher: **store backend module+version on the row and collapse/honest-up the misleading `replace`-able registry**. EXT-2 presets handled in Phase 5. | Plugin frameworks for a single implementation are speculative generality; the half-built matcher registry is a liability (silent code-swap, no provenance). → **SHOULD** (R33-matcher) + R23 docs |
+| **R34** security policy | **Document the trusted-operator model** (`SorterParameters` writers + ingestion are trusted; DB not internet-facing). Add cheap **basename/path-confinement** (SEC-1) as accident-prevention defense-in-depth + the SEC-2 permissions fix. **No** image/registry allowlist. | Matches reality and leanest-correct; allowlists are speculative. → **SHOULD** (SEC-1, SEC-2) + R23 docs |
+
+**One open flag (R9-PK):** add `owner` to the `SortGroupV2`/`SharedArtifactGroup`/`ExportSelection` primary keys (cheap now, migration later) only if per-team namespacing becomes likely. Default: **no** — revisit on demand.
 
 ---
 
@@ -166,15 +190,23 @@ definitions* — but the schema freeze is lifted pre-release and R1/R8/R28 requi
 new columns or guards, so confirm with the owner whether those changes are
 in-scope for Phase 5 or a dedicated pre-Phase-5 hardening PR.
 
-**Recommendation — two PRs before Phase 5 proper:**
+**Recommendation — three PRs before Phase 5 proper:**
 1. **Correctness PR (MUST):** R29 signal/numerical bugs (TIME-1, SIG-2, SIG-1),
    R27 AnalyzerCuration namespace, R4 sorter-output-freed, R3 preview-as-final
    guard. These are silent-wrong-science and don't depend on Phase 5.
 2. **Identity/provenance + cheap-hardening PR:** R1 reproducibility provenance,
    R28 master-row immutability, R5 analyzer cache lock, R30 concat compatibility,
    R32 dispatch mismatches, R34-SEC-2 permissions, R16 dependency pins, R36 tests.
+3. **Decomposition PR (R38):** extract `CurationV2.resolve_restriction` + the
+   accessor cluster into DB-free, directly-testable service modules **before**
+   the Phase-5 orchestrator/FigPack/preset work extends these god-modules.
+   Pre-production, no users → this is the cheapest time to fix the structure;
+   keep the anti-theater discipline (target the genuinely monolithic remainders,
+   not a line-count pass). Sequence this so it lands before, or as the first
+   commits of, the Phase-5 orchestrator work.
 
-Then Phase 5 absorbs the UX/docs/orchestrator cluster (R2, R20, R23, R33-presets).
+Then Phase 5 absorbs the UX/docs/orchestrator cluster (R2, R20, R23, R33-presets)
+on top of the cleaned boundaries.
 
 ## Appendix — full per-finding verdicts
 
@@ -499,13 +531,13 @@ and SER-7 (PARTIAL); none stale-fixed or false. "Root" maps each to a root issue
 ### maintainability-module-boundary-review.md
 | ID | Sev | Verdict | Root | One-line (+actionability) |
 |---|---|---|---|---|
-| MAINT-1 | High | CONFIRMED | R24 | Source-routing centralized but monolithic — LOW-VALUE; extraction adds indirection to a stable surface |
-| MAINT-2 | High | CONFIRMED | — | Public table classes mix responsibilities — ALREADY-REJECTED (file-split campaign over); keep the rule for new code |
+| MAINT-1 | High | CONFIRMED | R38 | Source-routing (`resolve_restriction`) centralized but monolithic — ACTIONABLE (extract to a DB-free, table-driven-tested module before Phase 5) |
+| MAINT-2 | High | CONFIRMED | R38 | Public table classes mix responsibilities — ACTIONABLE pre-Phase-5 (re-tiered 2026-06-25: "don't split" rescinded); decompose the `CurationV2` accessor cluster, anti-theater discipline applies |
 | MAINT-3 | Medium | CONFIRMED | R36 | Tri-part contract tests cover 3 of ~7 carriers — ACTIONABLE (extend tests; NamedTuple choice itself is settled) |
 | MAINT-4 | Medium | CONFIRMED | R36 | 4 parallel stage/lookup catalogs, one live drift (notebook 3 vs 8) — ACTIONABLE (consistency tests + doc fix) |
 | MAINT-5 | Medium | CONFIRMED | R36 | Slow integration setup hand-rolled in 4 test modules — ACTIONABLE (`populate_single_session_chain` helper) |
 | MAINT-6 | Medium | CONFIRMED | — | Fixture-fetch detection source-text coupled — LOW-VALUE/defer (machinery works today) |
-| MAINT-7 | Med-low | CONFIRMED | — | Private/public boundaries blurred by compat wrappers — LOW-VALUE (docs hygiene, no bug) |
+| MAINT-7 | Med-low | CONFIRMED | R38 | Private/public boundaries blurred by compat wrappers — fold into the R38 decomposition (clean the seams while extracting) |
 | MAINT-8 | Low | CONFIRMED | R24 | Lookup insert patterns duplicated — ACTIONABLE (hoist into existing `ImmutableParamsLookup`) |
 | MAINT-9 | Low | CONFIRMED | R23 | Docs/facade status text lags shipped surface (self-contradicting UnitMatch status) — PHASE-5 |
 | MAINT-10 | Low | CONFIRMED | R23 | Canonical notebook is both beginner path + advanced reference — PHASE-5 design call |
