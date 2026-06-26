@@ -60,6 +60,18 @@ from spyglass.spikesorting.v2._nwb_metadata_helpers import (  # noqa: F401
     resolve_conversion_and_offset,
 )
 
+# The artifact-detection IntervalList naming convention lives in the
+# stdlib-only _artifact_naming.py so the DB-free source-routing module
+# (_curation_routing) can import the parser without pulling DataJoint /
+# SpikeInterface through this barrel; re-exported here so existing
+# ``from .utils import artifact_detection_interval_list_name`` (etc.) call
+# sites are unchanged.
+from spyglass.spikesorting.v2._artifact_naming import (  # noqa: F401
+    _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX,
+    artifact_detection_interval_list_name,
+    parse_artifact_detection_interval_list_name,
+)
+
 
 @contextmanager
 def transaction_or_noop(connection):
@@ -630,38 +642,6 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
         if override:
             merged.update(override)
     return merged
-
-
-_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX = "artifact_detection_"
-
-
-def artifact_detection_interval_list_name(artifact_detection_id) -> str:
-    """Return the ``IntervalList.interval_list_name`` for an artifact detection.
-
-    Centralizes the convention
-    ``f"artifact_detection_{artifact_detection_id}"`` so the prefix lives in
-    one place; ``parse_artifact_detection_interval_list_name`` is its inverse.
-
-    The ``artifact_detection_`` prefix is intentional -- it disambiguates
-    artifact-detection-derived IntervalList rows from sort_valid_times / lfp /
-    etc. rows when grepping by name. A query that looks rows up by the bare
-    UUID returns empty; use this helper (or its inverse) instead.
-    """
-    return f"{_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX}{artifact_detection_id}"
-
-
-def parse_artifact_detection_interval_list_name(name: str):
-    """Return the artifact-detection id encoded in an IntervalList name.
-
-    Returns ``None`` if ``name`` is not in the artifact-named form,
-    matching the merge-dispatcher's "leave non-artifact names alone"
-    contract.
-    """
-    if isinstance(name, str) and name.startswith(
-        _ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX
-    ):
-        return name[len(_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX) :]
-    return None
 
 
 def get_spiking_sorting_v2_merge_ids(

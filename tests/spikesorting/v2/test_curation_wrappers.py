@@ -362,3 +362,32 @@ def test_summarize_curation_requires_full_pk(dj_conn):
 
     with pytest.raises(ValueError, match="sorting_id"):
         CurationV2.summarize_curation({"curation_id": 0})
+
+
+@pytest.mark.database
+def test_summarize_curation_pk_guard_runs_before_schema_access(
+    dj_conn, monkeypatch
+):
+    """The full-PK guard raises before importing ``SpikeSortingOutput``.
+
+    The merge import activates its ``dj.schema``, so the guard must run first.
+    Replace the merge module with a sentinel that explodes on any attribute
+    access: a guard that ran AFTER the import would surface that
+    ``AssertionError`` instead of the ``ValueError``.
+    """
+    import sys
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    class _Boom:
+        def __getattr__(self, name):
+            raise AssertionError(
+                f"summarize_curation accessed merge module .{name} before "
+                "the full-PK guard"
+            )
+
+    monkeypatch.setitem(
+        sys.modules, "spyglass.spikesorting.spikesorting_merge", _Boom()
+    )
+    with pytest.raises(ValueError, match="sorting_id"):
+        CurationV2.summarize_curation({"curation_id": 0})

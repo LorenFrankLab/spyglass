@@ -1,4 +1,4 @@
-"""Pure builder for the v2 curation insert plan.
+"""Pure builders for the v2 curation insert plan and read summary.
 
 ``CurationV2.insert_curation`` is split into a pure planning half (here)
 and a DB half (the table method). :func:`build_curation_insert_plan`
@@ -8,9 +8,14 @@ supplied labels against the source/written unit sets. The table method
 resolves the auto-increment ``curation_id`` (a DB query), stages the
 curated-units NWB, and runs the atomic insert transaction on the plan.
 
-Isolating the pure half makes the row-shaping + stray-label decision
-matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop)
-unit-testable without a DataJoint transaction.
+``CurationV2.summarize_curation`` is split the same way:
+:func:`build_curation_summary` assembles its return dict (including the
+``is_merge_preview`` derivation) from the already-fetched fields, while
+the table method keeps the PK guard and the DB fetches.
+
+Isolating the pure halves makes the row-shaping + stray-label decision
+matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop) and
+the summary formatting unit-testable without a DataJoint transaction.
 
 Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and
 stdlib logging.
@@ -141,3 +146,65 @@ def build_curation_insert_plan(
         unit_rows=unit_rows,
         kept_unit_to_contributors=kept_unit_to_contributors,
     )
+
+
+def build_curation_summary(
+    *,
+    sorting_id,
+    curation_id,
+    merges_applied,
+    description,
+    labels: dict,
+    merge_id,
+    merge_groups: dict,
+    n_units: int,
+) -> dict:
+    """Assemble the ``summarize_curation`` return dict.
+
+    Pure formatter: given the already-fetched curation fields, build the
+    notebook-printable summary. ``is_merge_preview`` is derived here from the
+    values in hand (not applied AND at least one >1-contributor merge group --
+    the same condition as ``has_unapplied_proposed_merges``) rather than
+    re-fetching. No database access.
+
+    Parameters
+    ----------
+    sorting_id
+        The sort's UUID (returned unchanged).
+    curation_id
+        The curation id within the sort; coerced to ``int`` in the result.
+    merges_applied
+        The stored ``merges_applied`` field; coerced to ``bool``.
+    description
+        The stored description; coerced to ``str``.
+    labels : dict
+        ``unit_id -> [label, ...]`` from ``UnitLabel``.
+    merge_id
+        The ``SpikeSortingOutput.CurationV2`` merge id, or ``None`` if the
+        curation is not merge-registered.
+    merge_groups : dict
+        ``{kept_unit_id: [contributor_unit_id, ...]}`` from
+        ``get_merge_groups`` (includes a 1-element self-entry per unit; real
+        merges have >1 contributor).
+    n_units : int
+        Count of ``CurationV2.Unit`` rows.
+
+    Returns
+    -------
+    dict
+        The ``summarize_curation`` summary.
+    """
+    is_merge_preview = not bool(merges_applied) and any(
+        len(contribs) > 1 for contribs in merge_groups.values()
+    )
+    return {
+        "sorting_id": sorting_id,
+        "curation_id": int(curation_id),
+        "n_units": n_units,
+        "labels": labels,
+        "merge_groups": merge_groups,
+        "merges_applied": bool(merges_applied),
+        "is_merge_preview": is_merge_preview,
+        "merge_id": merge_id,
+        "description": str(description),
+    }

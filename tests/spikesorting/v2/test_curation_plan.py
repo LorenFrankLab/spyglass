@@ -19,6 +19,7 @@ import pytest
 
 from spyglass.spikesorting.v2._curation_plan import (
     build_curation_insert_plan,
+    build_curation_summary,
     validate_label_unit_ids,
 )
 
@@ -138,3 +139,72 @@ def test_plan_truly_stray_label_raises():
             permissive_labels=False,
             curation_id=0,
         )
+
+
+# ---------- build_curation_summary -----------------------------------------
+
+
+def _summary(**overrides):
+    """A ``build_curation_summary`` call with sensible defaults."""
+    kwargs = dict(
+        sorting_id="s",
+        curation_id=0,
+        merges_applied=False,
+        description="d",
+        labels={0: ["mua"]},
+        merge_id=None,
+        merge_groups={0: [0], 1: [1]},
+        n_units=2,
+    )
+    kwargs.update(overrides)
+    return build_curation_summary(**kwargs)
+
+
+def test_build_curation_summary_is_merge_preview():
+    """is_merge_preview is True iff not applied AND a >1-contributor group."""
+    # Not applied + a real (>1-contributor) merge group -> preview.
+    assert (
+        _summary(merges_applied=False, merge_groups={0: [1, 2]})[
+            "is_merge_preview"
+        ]
+        is True
+    )
+    # Applied -> never a preview, even with a >1-contributor group.
+    assert (
+        _summary(merges_applied=True, merge_groups={0: [1, 2]})[
+            "is_merge_preview"
+        ]
+        is False
+    )
+    # Only single-contributor (self-entry) groups -> not a preview.
+    assert (
+        _summary(merges_applied=False, merge_groups={0: [0], 1: [1]})[
+            "is_merge_preview"
+        ]
+        is False
+    )
+
+
+def test_build_curation_summary_passthrough_and_coercions():
+    """Fields pass through; curation_id/merges_applied/description are coerced."""
+    summary = _summary(
+        sorting_id="sort-uuid",
+        curation_id=True,  # bool is an int subtype; int() -> 1
+        merges_applied=1,  # truthy non-bool -> bool() -> True
+        description=7,  # non-str -> str() -> "7"
+        labels={3: ["accept"]},
+        merge_id="merge-uuid",
+        merge_groups={3: [3]},
+        n_units=5,
+    )
+    assert summary == {
+        "sorting_id": "sort-uuid",
+        "curation_id": 1,
+        "n_units": 5,
+        "labels": {3: ["accept"]},
+        "merge_groups": {3: [3]},
+        "merges_applied": True,
+        "is_merge_preview": False,
+        "merge_id": "merge-uuid",
+        "description": "7",
+    }

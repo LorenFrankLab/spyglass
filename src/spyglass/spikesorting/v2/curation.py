@@ -1137,8 +1137,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         insert_curation : the expert write API.
         get_merge_groups : the merge-group provenance this summarizes.
         """
-        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-
+        # The full-PK guard MUST run before any DB/schema access: importing
+        # SpikeSortingOutput activates its dj.schema, so it is imported only
+        # after the guard (build_curation_summary is DB-free but kept here too
+        # so the guard is unambiguously the first statement).
         if (
             "sorting_id" not in curation_key
             or "curation_id" not in curation_key
@@ -1148,6 +1150,12 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 "'curation_id' (curation_id is only unique within a sort). "
                 f"Got keys: {sorted(curation_key)}."
             )
+
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+        from spyglass.spikesorting.v2._curation_plan import (
+            build_curation_summary,
+        )
+
         pk = {
             "sorting_id": curation_key["sorting_id"],
             "curation_id": curation_key["curation_id"],
@@ -1165,26 +1173,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
         merge_ids = (SpikeSortingOutput.CurationV2 & pk).fetch("merge_id")
         merge_id = merge_ids[0] if len(merge_ids) else None
 
-        # Derive ``is_merge_preview`` from the values already in hand rather
-        # than calling ``has_unapplied_proposed_merges`` (which would re-fetch
-        # ``merges_applied`` and rebuild the merge groups). This is its exact
-        # definition: not applied AND at least one >1-contributor group.
-        merge_groups = cls.get_merge_groups(pk)
-        is_merge_preview = not bool(merges_applied) and any(
-            len(contribs) > 1 for contribs in merge_groups.values()
+        # The pure formatter (DB-free) assembles the return dict and derives
+        # ``is_merge_preview`` from the values in hand rather than re-fetching
+        # via ``has_unapplied_proposed_merges``.
+        return build_curation_summary(
+            sorting_id=pk["sorting_id"],
+            curation_id=pk["curation_id"],
+            merges_applied=merges_applied,
+            description=description,
+            labels=labels,
+            merge_id=merge_id,
+            merge_groups=cls.get_merge_groups(pk),
+            n_units=len(cls.Unit & pk),
         )
-
-        return {
-            "sorting_id": pk["sorting_id"],
-            "curation_id": int(pk["curation_id"]),
-            "n_units": len(cls.Unit & pk),
-            "labels": labels,
-            "merge_groups": merge_groups,
-            "merges_applied": bool(merges_applied),
-            "is_merge_preview": is_merge_preview,
-            "merge_id": merge_id,
-            "description": str(description),
-        }
 
     # ---- Accessors -------------------------------------------------------
 
@@ -1499,129 +1500,44 @@ class CurationV2(SpyglassMixin, dj.Manual):
             If ``strict`` is True and ``key`` contains restriction keys
             that are not v2 columns.
         """
-        import uuid
-
+        from spyglass.spikesorting.v2._curation_routing import (
+            NO_ARTIFACT_RESTRICTION,
+            classify_and_normalize_restriction,
+        )
         from spyglass.spikesorting.v2.recording import RecordingSelection
         from spyglass.spikesorting.v2.sorting import SortingSelection
-        from spyglass.spikesorting.v2.utils import (
-            parse_artifact_detection_interval_list_name,
-        )
         from spyglass.utils import logger
 
-        rec_keys = [
-            "nwb_file_name",
-            "team_name",
-            "sort_group_id",
-            "interval_list_name",
-            "preprocessing_params_name",
-            "recording_id",
-        ]
-        # Concat-source restriction keys route through
-        # ``SortingSelection.ConcatenatedRecordingSource`` ->
-        # ``ConcatenatedRecordingSelection`` -> ``SessionGroup`` instead of the
-        # single-recording chain. ``motion_correction_params_name`` is included
-        # so a concat restriction can pin the motion recipe too.
-        concat_keys = [
-            "concat_recording_id",
-            "session_group_owner",
-            "session_group_name",
-            "motion_correction_params_name",
-        ]
-        sort_keys = [
-            "sorter",
-            "sorter_params_name",
-            "sorting_id",
-            "artifact_detection_id",
-        ]
-        curation_keys = ["curation_id"]
-        allowed = (
-            set(rec_keys)
-            | set(concat_keys)
-            | set(sort_keys)
-            | set(curation_keys)
+        # Pure key-classification / normalization (unknown-key handling,
+        # artifact-interval-name -> id mapping, uuid normalization, per-source
+        # split) lives in the DB-free ``_curation_routing`` module; this method
+        # owns only the DataJoint join assembly.
+        plan = classify_and_normalize_restriction(
+            key, restrict_by_artifact=restrict_by_artifact, strict=strict
         )
-        unknown = set(key) - allowed
-        if unknown:
-            if not strict:
-                # Lenient multi-source-dispatch path: an unknown key names a
-                # column from another pipeline, so this is not a v2 query.
-                # Return ``None`` so the caller contributes no v2 rows. The
-                # strict raise is reserved for a deliberate v2 query
-                # (sources=['v2'] or a direct resolve_restriction), where an
-                # unknown key is a typo.
-                return None
-            raise ValueError(
-                "CurationV2.resolve_restriction: "
-                f"unknown restriction keys {sorted(unknown)}. Allowed: "
-                f"{sorted(allowed)}."
-            )
-
-        key = key.copy()
-        # ``restrict_by_artifact`` maps the artifact-detection IntervalList
-        # convention (``f"artifact_detection_{artifact_detection_id}"``) back
-        # to the ``artifact_detection_id`` master-side column so the v2 join
-        # chain downstream resolves correctly.
-        if restrict_by_artifact and "interval_list_name" in key:
-            artifact_detection_id = parse_artifact_detection_interval_list_name(
-                key["interval_list_name"]
-            )
-            if artifact_detection_id is not None:
-                key["artifact_detection_id"] = artifact_detection_id
-                key.pop("interval_list_name", None)
-            elif "artifact_detection_id" not in key:
-                # The caller asked to restrict by artifact, but the
-                # interval name is not the
-                # ``artifact_detection_{uuid}`` form and no
-                # artifact_detection_id was supplied, so there is nothing to
-                # map. Warn instead of silently returning unrestricted ids.
-                logger.warning(
-                    "CurationV2.resolve_restriction: "
-                    "restrict_by_artifact=True but interval_list_name "
-                    f"{key['interval_list_name']!r} is not an "
-                    "'artifact_detection_{uuid}' interval and no "
-                    "artifact_detection_id was given; v2 results will NOT be "
-                    "artifact-restricted. Pass artifact_detection_id=... or "
-                    "use the artifact-detection interval to restrict."
-                )
-
-        # ``parse_artifact_detection_interval_list_name`` returns a str and a caller may
-        # pass either a str or a UUID, but ``artifact_detection_id`` is a uuid column.
-        # Normalize to a ``uuid.UUID`` so the ArtifactDetectionSource intersection below
-        # is unambiguous and a malformed id fails fast here rather than
-        # silently matching nothing.
-        if key.get("artifact_detection_id") is not None:
-            key["artifact_detection_id"] = uuid.UUID(
-                str(key["artifact_detection_id"])
-            )
+        if plan is None:
+            return None
+        if plan.unresolved_name_warning is not None:
+            logger.warning(plan.unresolved_name_warning)
 
         # Route through the input source the restriction names. A concat
-        # restriction (concat_recording_id / session-group / motion recipe)
-        # joins SortingSelection.ConcatenatedRecordingSource ->
-        # ConcatenatedRecordingSelection; otherwise the single-recording chain
-        # joins SortingSelection.RecordingSource -> RecordingSelection. The two
-        # sets are mutually exclusive (a sort has exactly one input source), so
-        # mixing them is a contradictory restriction and is rejected.
-        concat_restriction = {k: key[k] for k in concat_keys if k in key}
-        rec_restriction = {k: key[k] for k in rec_keys if k in key}
-        if concat_restriction and rec_restriction:
-            raise ValueError(
-                "CurationV2.resolve_restriction: cannot combine concat-source "
-                f"keys {sorted(concat_restriction)} with single-recording "
-                f"keys {sorted(rec_restriction)}; a sort has exactly one input "
-                "source. Restrict by one source family."
-            )
-        if concat_restriction:
+        # restriction joins SortingSelection.ConcatenatedRecordingSource ->
+        # ConcatenatedRecordingSelection; a single-recording restriction joins
+        # SortingSelection.RecordingSource -> RecordingSelection.
+        if plan.concat_restriction:
             from spyglass.spikesorting.v2.session_group import (
                 ConcatenatedRecordingSelection,
             )
 
-            concat_sel = ConcatenatedRecordingSelection & concat_restriction
+            concat_sel = (
+                ConcatenatedRecordingSelection & plan.concat_restriction
+            )
             sort_concat_source = (
                 SortingSelection.ConcatenatedRecordingSource * concat_sel.proj()
             )
             sort_master = SortingSelection * sort_concat_source.proj()
-        elif rec_restriction:
-            rec_table = RecordingSelection & rec_restriction
+        elif plan.rec_restriction:
+            rec_table = RecordingSelection & plan.rec_restriction
             sort_rec_source = (
                 SortingSelection.RecordingSource * rec_table.proj()
             )
@@ -1636,23 +1552,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # merge queries).
             sort_master = SortingSelection
         # ``artifact_detection_id`` lives on the optional ``SortingSelection.
-        # ArtifactDetectionSource`` part, NOT on ``SortingSelection`` -- it is absent
-        # from ``sort_master``'s heading, so a dict restriction with it is
-        # silently dropped (verified: the compiled SQL is identical with and
-        # without the key). Apply the non-artifact sort keys directly, then
-        # resolve ``artifact_detection_id`` through the part. In the v2 design
-        # the presence/absence of an ``ArtifactDetectionSource`` row IS the
-        # artifact-detection state, so ``artifact_detection_id=None`` means
-        # "no artifact-detection pass" (anti-join to sorts with no part row),
-        # NOT "match anything" -- only an absent key is a wildcard.
-        sort_restriction = {
-            k: key[k]
-            for k in sort_keys
-            if k in key and k != "artifact_detection_id"
-        }
-        sort_master = sort_master & sort_restriction
-        if "artifact_detection_id" in key:
-            if key["artifact_detection_id"] is None:
+        # ArtifactDetectionSource`` part, NOT on ``SortingSelection`` -- it is
+        # absent from ``sort_master``'s heading, so a dict restriction with it
+        # is silently dropped. Apply the non-artifact sort keys directly, then
+        # resolve ``artifact_detection_id`` through the part: a ``None`` id
+        # anti-joins (no artifact-detection pass), a UUID intersects, and the
+        # NO_ARTIFACT_RESTRICTION sentinel leaves the query unrestricted (only
+        # an absent key is a wildcard).
+        sort_master = sort_master & plan.sort_restriction
+        if plan.artifact_detection_id is not NO_ARTIFACT_RESTRICTION:
+            if plan.artifact_detection_id is None:
                 sort_master = (
                     sort_master
                     - SortingSelection.ArtifactDetectionSource.proj()
@@ -1660,12 +1569,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
             else:
                 artifact_detection_source = (
                     SortingSelection.ArtifactDetectionSource
-                    & {"artifact_detection_id": key["artifact_detection_id"]}
+                    & {"artifact_detection_id": plan.artifact_detection_id}
                 )
                 sort_master = sort_master & artifact_detection_source.proj()
 
-        curation_restriction = {k: key[k] for k in curation_keys if k in key}
-        return (cls * sort_master.proj("sorting_id")) & curation_restriction
+        return (
+            cls * sort_master.proj("sorting_id")
+        ) & plan.curation_restriction
 
     @classmethod
     def get_sort_metadata(cls, key) -> tuple:
