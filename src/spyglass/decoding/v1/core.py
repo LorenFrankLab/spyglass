@@ -1,15 +1,16 @@
 import datajoint as dj
 import numpy as np
 import pandas as pd
-from non_local_detector import (
+
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.decoding._non_local_detector_compat import (
+    NON_LOCAL_DETECTOR_AVAILABLE,
     ContFragClusterlessClassifier,
     ContFragSortedSpikesClassifier,
     NonLocalClusterlessDetector,
     NonLocalSortedSpikesDetector,
+    non_local_detector_version,
 )
-from non_local_detector import __version__ as non_local_detector_version
-
-from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
@@ -45,29 +46,38 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     pk = "decoding_param_name"
     sk = "decoding_params"
 
-    contents = [
-        {
-            pk: f"contfrag_clusterless_{non_local_detector_version}",
-            sk: ContFragClusterlessClassifier(),
-        },
-        {
-            pk: f"nonlocal_clusterless_{non_local_detector_version}",
-            sk: NonLocalClusterlessDetector(),
-        },
-        {
-            pk: f"contfrag_sorted_{non_local_detector_version}",
-            sk: ContFragSortedSpikesClassifier(),
-        },
-        {
-            pk: f"nonlocal_sorted_{non_local_detector_version}",
-            sk: NonLocalSortedSpikesDetector(),
-        },
-    ]
+    if NON_LOCAL_DETECTOR_AVAILABLE:
+        contents = [
+            {
+                pk: f"contfrag_clusterless_{non_local_detector_version}",
+                sk: ContFragClusterlessClassifier(),
+            },
+            {
+                pk: f"nonlocal_clusterless_{non_local_detector_version}",
+                sk: NonLocalClusterlessDetector(),
+            },
+            {
+                pk: f"contfrag_sorted_{non_local_detector_version}",
+                sk: ContFragSortedSpikesClassifier(),
+            },
+            {
+                pk: f"nonlocal_sorted_{non_local_detector_version}",
+                sk: NonLocalSortedSpikesDetector(),
+            },
+        ]
+    else:
+        contents = []
 
     @classmethod
     def insert_default(cls):
         """Insert default decoding parameters"""
-        cls.super().insert(cls.contents, skip_duplicates=True)
+        if not NON_LOCAL_DETECTOR_AVAILABLE:
+            logger.warning(
+                "Skipping insert of default decoding parameters: "
+                "'non_local_detector' is unavailable."
+            )
+            return
+        cls.insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
         """Override insert to convert classes to dict before inserting"""

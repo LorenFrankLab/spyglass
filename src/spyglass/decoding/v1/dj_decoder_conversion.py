@@ -4,12 +4,16 @@ so that datajoint can store them in tables."""
 import copy
 
 import datajoint as dj
-from non_local_detector import continuous_state_transitions as cst
-from non_local_detector import discrete_state_transitions as dst
-from non_local_detector import initial_conditions as ic
-from non_local_detector.environment import Environment
-from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
+
+from spyglass.decoding._non_local_detector_compat import (
+    Environment,
+    ObservationModel,
+    cst,
+    dst,
+    ic,
+    raise_if_unavailable,
+)
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -107,6 +111,7 @@ def restore_classes(params: dict) -> dict:
     converted_params : dict
         The converted parameters
     """
+    raise_if_unavailable()
 
     params = copy.deepcopy(params)
 
@@ -180,6 +185,8 @@ def _convert_environment_to_dict(env: Environment) -> dict:
 
 def convert_classes_to_dict(params: dict) -> dict:
     """Converts the classifier parameters into a dictionary so that datajoint can store it."""
+    raise_if_unavailable()
+
     params = copy.deepcopy(params)
     try:
         params["environments"] = [
