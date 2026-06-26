@@ -62,7 +62,7 @@ overrides only `insert`, and `CurationV2`/`SessionGroup` are plain `dj.Manual`.
 
 **Contract (implemented in phase-2):**
 
-- `SelectionMasterInsertGuard` gains an `update1(self, row, *, allow_master_mutation=False)` override that rejects in-place mutation by default, mirroring `ImmutableParamsLookup.update1`. This covers all six masters that mix it in: `RecordingSelection` (`recording.py:745`), `ArtifactDetectionSelection` (`artifact.py:441`), `SortingSelection` (`sorting.py:651`), `UnitMatchSelection` (`unit_matching.py:198`), `ConcatenatedRecordingSelection` (`session_group.py:330`), `AnalyzerCurationSelection` (`metric_curation.py:646`).
+- `SelectionMasterInsertGuard` gains an `update1(self, row, *, allow_master_mutation=False)` override that rejects in-place mutation by default, mirroring `ImmutableParamsLookup.update1`. This covers every selection master that mixes it in: `RecordingSelection` (`recording.py:745`), `ArtifactDetectionSelection` (`artifact.py:441`), `SortingSelection` (`sorting.py:651`), `UnitMatchSelection` (`unit_matching.py:198`), `ConcatenatedRecordingSelection` (`session_group.py:330`), and, after phase-1b/1c, `CurationEvaluationSelection` (the successor to the deleted `AnalyzerCurationSelection`).
 - `CurationV2` (`curation.py:65`) and `SessionGroup` (`session_group.py:65`) get the same insert + `update1` guard (they are not selection masters but are identity/provenance roots that dependents reference).
 
 **Do not weaken.** Any later phase that adds an identity-bearing column to a master

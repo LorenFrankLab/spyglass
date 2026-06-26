@@ -39,7 +39,16 @@ related task groups (A–E, the last added by the Round-3 reviews; review per gr
        super().update1(row)
    ```
 
-   This automatically covers all six masters that mix the guard in: `RecordingSelection` (`recording.py:745`), `ArtifactDetectionSelection` (`artifact.py:441`), `SortingSelection` (`sorting.py:651`), `UnitMatchSelection` (`unit_matching.py:198`), `ConcatenatedRecordingSelection` (`session_group.py:330`), `AnalyzerCurationSelection` (`metric_curation.py:646`).
+   This automatically covers all selection masters that mix the guard in:
+   `RecordingSelection` (`recording.py:745`),
+   `ArtifactDetectionSelection` (`artifact.py:441`),
+   `SortingSelection` (`sorting.py:651`),
+   `UnitMatchSelection` (`unit_matching.py:198`),
+   `ConcatenatedRecordingSelection` (`session_group.py:330`), and, after
+   phase-1b/1c, `CurationEvaluationSelection` (the successor to the deleted
+   `AnalyzerCurationSelection`). If phase-2 is executed before phase-1c on a
+   temporary integration branch, guard whichever metric-evaluation selection table
+   exists in that branch; the final merged order guards `CurationEvaluationSelection`.
 
 2. **Guard `CurationV2` and `SessionGroup` direct writes.** These are plain `dj.Manual` (`curation.py:65`, `session_group.py:65`). Add insert + `update1` denial that routes legitimate writes through the factory methods. Give each master an `insert`/`insert1`/`update1` override (a small shared mixin, e.g. `FactoryOnlyMaster`, or reuse `SelectionMasterInsertGuard`'s mechanism) that raises unless a keyword bypass is passed; then thread the bypass through the **two exact factory insert sites**: `CurationV2.insert_curation`'s master insert at **`curation.py:820`** (`cls.insert1(master_row)` → `cls.insert1(master_row, allow_master_mutation=...)`/the chosen bypass kwarg) and `SessionGroup.create_group`'s master insert at **`session_group.py:208`** (`cls.insert1({...})`). DataJoint forwards `insert1`'s `**kwargs` to `insert`, so the bypass reaches the override. **If you add the guard but forget the keyword at these two sites, `insert_curation`/`create_group` break immediately** — the regression tests (`test_curation_*`, `test_session_group_concat`) will catch it, but wire both sites. (`UnitLabel` already validates its own inserts — leave it.)
 

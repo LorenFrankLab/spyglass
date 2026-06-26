@@ -106,17 +106,47 @@ is the broader curation-editing model that Phase 5 UI/FigPack should build on.
    ```
 
    These helpers create **committed** child `CurationV2` rows. They never create
-   a preview row with unapplied proposed merges unless the caller opts into a
-   legacy compatibility method with an explicit name such as
-   `create_preview_curation`. Do not silently apply all suggested merges; require
-   either an explicit `merge_groups` argument or `use_all_suggested_merges=True`.
+   a preview row with unapplied proposed merges unless the caller opts into an
+   explicit draft method with a clear name such as `create_preview_curation`
+   (drafting a merge for review is a valid feature, just not the default
+   acceptance path). Do not silently apply all suggested merges; require either
+   an explicit `merge_groups` argument or `use_all_suggested_merges=True`.
 
-5. **Docs and changelog.** Update docs/notebooks to teach:
+5. **Remove `AnalyzerCuration` (replaced by `CurationEvaluation`).** Once the
+   acceptance helpers above exist, `CurationEvaluation` + `create_curation` /
+   `materialize_labels` fully replace the `AnalyzerCuration` auto-curate ->
+   `materialize_curation` flow. v2 is pre-production with **no
+   backwards-compatibility requirement**, so do not deprecate-and-keep it: delete
+   it outright (no deprecation warning, no compatibility window).
+   - migrate the remaining callers -- the `run_v2_pipeline` orchestrator's
+     auto-curation step, the canonical notebook, `docs/src/Features/SpikeSortingV2.md`,
+     the visualization facade/helpers (`visualization.py`, `_visualization.py`,
+     `_metric_curation_plots.py`), and the pipeline reporting text -- onto
+     `CurationEvaluation` with the acceptance helpers;
+   - add an explicit `CurationSource.curation_evaluation` value (or a deliberately
+     named successor if the enum is renamed) and have accepted evaluation children
+     use it instead of the legacy `analyzer_curation` provenance tag. Keep or map
+     the old enum value only if an in-tree fixture still needs to read a pre-1c
+     row during the same PR;
+   - delete `AnalyzerCuration`, `AnalyzerCurationSelection`, and their tests
+     (the phase-1 R27 guard tests go with them -- the raw/merged namespace bug
+     they covered no longer has a table to occur on; `CurationEvaluation`'s
+     `test_curation_evaluation_rejects_preview_curation` and the namespace
+     invariant are the surviving guards);
+   - keep the shared DB-free helpers `AnalyzerCuration` used
+     (`apply_snr_peak_sign`, `apply_label_rules`, `_compute_metrics`,
+     `_compute_merge_groups`) -- move any that lived as `AnalyzerCuration`
+     staticmethods onto `CurationEvaluation` or a shared module so nothing is
+     lost in the deletion.
+
+6. **Docs and changelog.** Update docs/notebooks to teach:
    - evaluate a committed curation with `CurationEvaluation`;
    - accept selected labels/merges into a new committed child;
    - re-evaluate the final child for final metrics;
    - preview curations are draft/legacy behavior, not canonical downstream
-     outputs.
+     outputs;
+   - `CHANGELOG.md`: `AnalyzerCuration` is removed; `CurationEvaluation` is the
+     curation-evaluation table.
 
 ## Deliberately not in this phase
 
@@ -125,8 +155,11 @@ is the broader curation-editing model that Phase 5 UI/FigPack should build on.
   semantics Phase 5 should present.
 - **Persistent curation-scoped analyzer cache.** Still deferred; phase-1b's
   evaluation path remains the owner of analyzer construction policy.
-- **Removing preview support entirely.** Existing preview rows can remain for
-  compatibility, but new canonical helpers should not create them by default.
+- **Removing preview support entirely.** A preview curation (`apply_merge=False`
+  with proposed merges) stays a valid *draft / review-before-commit* state -- it
+  is a feature, not a backwards-compat artifact. The canonical acceptance helpers
+  just must not create preview rows by default (committed children only); the
+  explicit `create_preview_curation` opt-in remains for drafting.
 
 ## Validation slice
 
@@ -138,6 +171,9 @@ is the broader curation-editing model that Phase 5 UI/FigPack should build on.
 | `test_curation_composition.py::test_child_labels_inherit_and_merge` (new) | Child curations inherit parent labels by default; a merged child unit receives the union of contributor labels unless explicitly overridden; `label_policy="replace"` clears inherited labels. |
 | `test_curation_evaluation.py::test_evaluation_materialize_creates_committed_child` (new) | `CurationEvaluation().create_curation(..., merge_groups=accepted)` creates a child with `assert_committed_curation` true; it does not create a preview row. |
 | `test_curation_evaluation.py::test_evaluation_acceptance_requires_explicit_merge_choice` (new) | Suggested merge groups are not silently applied unless `merge_groups` is passed or `use_all_suggested_merges=True`. |
+| `test_curation_evaluation.py::test_evaluation_child_source_is_curation_evaluation` (new) | Accepted evaluation children use the new `curation_source` provenance value, not the legacy `analyzer_curation` tag. |
+| `test_pipeline_facade.py::test_run_v2_pipeline_auto_curation_uses_curation_evaluation` (new/adapted) | After the removal, `run_v2_pipeline`'s auto-curation step produces a `CurationEvaluation` (and committed child via the acceptance helper); importing `AnalyzerCuration` / `AnalyzerCurationSelection` fails (table deleted, no lingering callers). |
+| `test_visualization_facade.py::test_visualization_uses_curation_evaluation_accessors` (new/adapted) | Plot/facade helpers read metrics and proposed merge groups from `CurationEvaluation`; no visualization path imports `AnalyzerCuration`. |
 | (regression) existing curation merge/dedup/disjoint-interval tests | Stored frames, cross-gap dedup, `obs_intervals`, and lazy/applied merge parity remain correct after the parent-composition refactor. |
 | (regression) phase-1b `test_final_metrics_recomputed_for_merged_unit` | Final metrics still compute over the final child after acceptance. |
 
@@ -164,3 +200,8 @@ Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
 - Evaluation acceptance helpers create committed child curations and never apply
   all suggested merges without explicit user intent.
 - Phase-1b evaluation still works unchanged over the final child.
+- `AnalyzerCuration` / `AnalyzerCurationSelection` are deleted (no deprecation
+  shim), no caller imports them (including docs, plotting helpers, pipeline
+  reporting, and tests), accepted evaluation children carry the new curation-source
+  provenance, and the shared compute/label helpers they used survive on
+  `CurationEvaluation` or a shared module.

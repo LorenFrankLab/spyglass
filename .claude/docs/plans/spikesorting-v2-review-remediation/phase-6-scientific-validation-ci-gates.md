@@ -19,7 +19,9 @@ after the code phases so the gates protect corrected behavior.
 - `.github/workflows/test-conda.yml` ~280-300 (`SPYGLASS_V2_REQUIRE_FIXTURES` list; drift fixture intentionally unfetched) and ~351-356 (fixtures fetched with `|| true`).
 - [tests/spikesorting/v2/test_drift_estimate.py:104-110](../../../../tests/spikesorting/v2/test_drift_estimate.py#L104-L110) (drift-free fixture, structural-only).
 - [tests/spikesorting/v2/single_session/test_ground_truth_parity.py:217-257](../../../../tests/spikesorting/v2/single_session/test_ground_truth_parity.py#L217-L257) (well-detected-subset floors).
-- [tests/spikesorting/v2/test_analyzer_curation.py:464-522](../../../../tests/spikesorting/v2/test_analyzer_curation.py#L464-L522) (synthetic auto-merge), [tests/spikesorting/v2/fixtures/fixtures_manifest.json](../../../../tests/spikesorting/v2/fixtures/fixtures_manifest.json) (structural-only manifest), [bench_efficiency.py](../spikesorting-v2/bench_efficiency.py) (manual script).
+- The existing synthetic auto-merge coverage (currently in
+  `tests/spikesorting/v2/test_analyzer_curation.py`, retargeted to
+  `CurationEvaluation` by phase-1c), [tests/spikesorting/v2/fixtures/fixtures_manifest.json](../../../../tests/spikesorting/v2/fixtures/fixtures_manifest.json) (structural-only manifest), [bench_efficiency.py](../spikesorting-v2/bench_efficiency.py) (manual script).
 
 **Contracts referenced:** none.
 
@@ -31,13 +33,13 @@ after the code phases so the gates protect corrected behavior.
 
 3. **Add all-unit / per-shank ground-truth floors (SVFR-3).** `test_ground_truth_parity.py` floors (`:217-257`) are computed over the well-detected subset, so a localized per-shank/region dropout passes. Add (a) an **all-unit** metric that includes missed units as zeros (e.g. fraction of planted units detected at accuracy ≥ threshold, over *all* planted, with a floor) and (b) a **per-shank** floor so a region with no recovered units fails. Apply to both the MS5 polymer gate and the looser MS4 gate (`:1739-1745`).
 
-4. **Validate auto-merge science on realistic data (SVFR-4).** The auto-merge proposal test is synthetic (`test_analyzer_curation.py:464-522`); the 128-ch test manually merges chosen units (not an oracle). Add a test that plants a known oversplit on the realistic 128-ch fixture and asserts `_compute_merge_groups` **proposes** the planted merge (recall) and does **not** propose cross-shank/distinct-unit merges (precision / negative control).
+4. **Validate auto-merge science on realistic data (SVFR-4).** The auto-merge proposal test is synthetic (retargeted to `CurationEvaluation` by phase-1c); the 128-ch test manually merges chosen units (not an oracle). Add a test that plants a known oversplit on the realistic 128-ch fixture and asserts the `CurationEvaluation` merge-suggestion path **proposes** the planted merge (recall) and does **not** propose cross-shank/distinct-unit merges (precision / negative control).
 
 5. **Manifest-gate fixture realism (SVFR-5).** Extend `fixtures_manifest.json` (and the generator, `generate_mearec.py:726-740`) with a `scientific_summary` per fixture: firing-rate distribution, SNR/amplitude quantiles, per-shank unit placement, and (for drift fixtures) the drift trajectory. Add a test that asserts each fixture's measured summary falls within committed bands — so a regenerated fixture that drifts out of the realistic regime fails CI.
 
 6. **Promote the highest-signal benchmarks to scheduled CI gates (SVFR-6).** `bench_efficiency.py` is a manual script under `.claude/docs/plans/`. Promote the highest-signal checks (UnitMatch dense-pair matrix RAM, concat split, artifact masking, clusterless all-spike extraction) to a scheduled (not per-PR) CI job with generous regression bounds, so a large performance regression is caught. Lower priority; may be a stretch item.
 
-7. **Fold in the science/coverage test gaps from Round 3** (small additions, same fixtures/machinery): concat-backed AnalyzerCuration populate+materialize E2E (ALSC-7); multi-day concat success-path populate (CONCS-7); concat NWB `obs_intervals` readback (CONCS-8); concat-backed downstream-consumer merge-id test (CONCS-5); export-completeness 3-file assertion (CNEP-6); disjoint-seam single-frame edge pin (AVTM-6). Each is a NEW(test) the code phases reference but don't own.
+7. **Fold in the science/coverage test gaps from Round 3** (small additions, same fixtures/machinery): concat-backed `CurationEvaluation` populate + acceptance-helper E2E (ALSC-7, replacing the old AnalyzerCuration materialize path after phase-1c); multi-day concat success-path populate (CONCS-7); concat NWB `obs_intervals` readback (CONCS-8); concat-backed downstream-consumer merge-id test (CONCS-5); export-completeness 3-file assertion (CNEP-6); disjoint-seam single-frame edge pin (AVTM-6). Each is a NEW(test) the code phases reference but don't own.
 
 8. **Docs.** Document the enforced ship criteria and their thresholds in the v2 testing/CI docs (what each gate asserts, the fixture it needs, and why the threshold is defensible).
 
@@ -56,10 +58,10 @@ This phase IS validation; its "tests" are the gates themselves. The meta-asserti
 | `test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth` (made required) | AUC > 0.85 on the published two-session fixture; **the CI job fails if the fixture is absent** (no longer skip-on-absent). |
 | `test_drift_estimate.py::test_drift_displacement_accuracy` (new) | recovered displacement matches the planted trajectory within the stated tolerance; **the CI job fails if the planted-drift fixture is absent** (made required, not skip-on-absent — same as the UnitMatch gate). |
 | `test_ground_truth_parity.py::test_all_unit_and_per_shank_floor` (new) | a synthetic localized per-shank dropout fails; the full 128-ch fixture passes the all-unit + per-shank floors. |
-| `test_analyzer_curation.py::test_auto_merge_proposes_planted_oversplit_realistic` (new) | proposes the planted oversplit; does not propose a cross-shank negative control. |
+| `test_curation_evaluation.py::test_auto_merge_proposes_planted_oversplit_realistic` (new) | proposes the planted oversplit through the `CurationEvaluation` merge-suggestion path; does not propose a cross-shank negative control. |
 | `test_fixture_realism.py::test_scientific_summary_within_bands` (new) | each fixture's measured firing-rate/SNR/drift summary is within committed bands. |
 | `test_ci_gates.py::test_benchmarks_scheduled_and_bounded` (new, task 6) | the scheduled (non-PR) benchmark workflow exists, covers the highest-signal checks (UnitMatch dense-pair RAM, concat split, artifact masking, clusterless all-spike extraction), and has explicit regression bounds. |
-| (task 7) `test_analyzer_curation.py::test_concat_backed_analyzer_curation_e2e` (ALSC-7) | a concat sort runs `AnalyzerCurationSelection → populate → materialize_curation` end-to-end. |
+| (task 7) `test_curation_evaluation.py::test_concat_backed_curation_evaluation_e2e` (ALSC-7) | a concat sort runs `CurationEvaluationSelection → populate → acceptance helper` end-to-end. |
 | (task 7) `test_session_group_concat.py::test_multi_day_concat_populates` (CONCS-7) | a multi-day group with an explicit/no-motion preset populates `ConcatenatedRecording` (success path, not just gating). |
 | (task 7) `test_session_group_concat.py::test_concat_units_nwb_obs_intervals_readback` (CONCS-8) | a concat-backed sort's NWB `obs_intervals` read back match the full-recording window. |
 | (task 7) `test_downstream_consumers.py::test_concat_merge_id_through_session_consumer` (CONCS-5) | a concat-backed merge id flows through a session-scoped downstream table without assuming single-session. |

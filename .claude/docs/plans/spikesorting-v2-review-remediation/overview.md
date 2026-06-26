@@ -161,10 +161,17 @@ Phase-5-scoped in the triage:
 ## Open Questions
 
 1. **R9-PK** — should `SortGroupV2`/`SharedArtifactGroup`/`ExportSelection` gain `owner` in their *primary key* to allow per-team namespacing? This is the only non-additive change (it shifts `recording_id` identity downstream), so it is free now and a migration later. **Current best answer: no** (keeps v2 == v1; access *enforcement* remains a clean future additive PR). Revisit only if per-team namespacing becomes likely. Not in any phase below; flagged here so the executor does not silently add it.
-2. **R27 semantics** (phase-1 / phase-1b) — decided: keep the phase-1 guard on
-   raw-sort `AnalyzerCuration`; do not re-base that table silently. phase-1b adds
-   the proper path, `CurationEvaluation`, which evaluates the committed
-   `CurationV2` unit set directly.
+2. **R27 semantics** (phase-1 / phase-1b / phase-1c) — decided: phase-1 guards
+   raw-sort `AnalyzerCuration` (no silent re-base); phase-1b adds the proper path
+   `CurationEvaluation`, which evaluates the committed `CurationV2` unit set
+   directly (including merged units). Because v2 is pre-production with no
+   backwards-compatibility requirement, `CurationEvaluation` then *replaces*
+   `AnalyzerCuration`: phase-1c migrates the remaining callers and DELETES
+   `AnalyzerCuration` outright (no deprecation window). It is kept only through
+   phase-1b because the auto-curate→materialize-child flow needs it until 1c's
+   acceptance helpers land. Downstream phases that used to mention
+   `AnalyzerCuration` are now interpreted as targeting `CurationEvaluation` and
+   its selection/result NWB writer after phase-1c.
 
 ## Estimated Effort
 

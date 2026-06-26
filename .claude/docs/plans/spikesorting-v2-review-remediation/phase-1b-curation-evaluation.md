@@ -28,8 +28,10 @@ child-curation editing or acceptance helpers; those are split into
    proposed labels are stored as evaluation results. Turning them into a new
    committed child curation is phase-1c.
 4. **Do not weaken the phase-1 `AnalyzerCuration` guard.** `AnalyzerCuration`
-   remains the raw-sort compatibility path. `CurationEvaluation` is the new path
-   for post-merge/final metrics.
+   stays the interim raw-sort path here; `CurationEvaluation` is the new path for
+   post-merge/final metrics and *replaces* `AnalyzerCuration`, which phase-1c
+   then deletes (pre-production, no backwards-compat — see "Deliberately not in
+   this phase").
 
 ## Inputs to read first
 
@@ -84,7 +86,11 @@ child-curation editing or acceptance helpers; those are split into
 
    The deterministic identity payload is
    `(sorting_id, curation_id, metric_params_name, auto_curation_rules_name,
-   metric_waveform_params_name)`, parallel to `AnalyzerCurationSelection`. The
+   metric_waveform_params_name)`, parallel to `AnalyzerCurationSelection`. This
+   payload is **byte-identical** to `AnalyzerCurationSelection`'s, so mint the id
+   under a DISTINCT namespace -- `deterministic_id("curation_evaluation",
+   identity)`, NOT `"analyzer_curation"` -- or the two tables would derive the
+   same uuid for the same logical inputs. The
    default `metric_waveform_params_name` is resolved exactly as today from the
    sort's source preprocessing recipe. Reuse `QualityMetricParameters`,
    `AutoCurationRules`, `apply_snr_peak_sign`, `apply_label_rules`,
@@ -92,37 +98,66 @@ child-curation editing or acceptance helpers; those are split into
    `AnalyzerCuration._compute_merge_groups`, and the existing analyzer-curation
    NWB serialization functions where possible.
 
-3. **Evaluate the curated sorting, with a raw-sort analyzer fast path.** Factor a
-   recording-only resolver out of
-   `_sorting_analyzer.reconstruct_recording_and_sorting`, for example
-   `reconstruct_recording_for_sorting(Sorting(), {"sorting_id": ...})`. Then
-   `CurationEvaluation.make_compute` should:
-   - fetch the artifact-masked or concat recording for `sorting_id`;
-   - fetch `curated_sorting = CurationV2.get_sorting(curation_key)`;
-   - compute metrics/labels/merge suggestions over the evaluated unit set;
-   - write the same three scratch tables as `AnalyzerCuration`.
+3. **Evaluate the curated sorting, with a raw-sort analyzer fast path.**
+   `CurationEvaluation` is a tri-part `dj.Computed` (`make_fetch` / `make_compute`
+   / `make_insert`, like `AnalyzerCuration`): **`make_compute` runs in a parallel
+   worker with NO DB access**, so ALL DB reads happen in `make_fetch`. Do NOT call
+   `CurationV2.get_sorting(curation_key)` from `make_compute` -- it does a
+   DB-backed curation/file metadata fetch before reading the NWB.
 
-   For committed root/label-only curations whose unit set is unchanged from the
-   raw sort (`merges_applied=False` and no unapplied proposed merges), use the
-   existing cached raw-sort analyzers via `Sorting().get_analyzer(...)` for the
-   display and optional metric recipes. This is a cheap fast path and avoids a
-   needless temporary analyzer in the common case.
+   In `make_fetch` resolve and thread through (a NamedTuple, per the make-stage
+   contract): the curated-units NWB **abs path**
+   (`AnalysisNwbfile.get_abs_path((CurationV2 & curation_key).fetch1("analysis_file_name"))`),
+   the exact `expected_unit_ids` from `(CurationV2.Unit & curation_key)`, the
+   `recording_id` and anything the recording resolver needs to rebuild the
+   recording, the raw-sort units NWB abs path + sampling frequency for any
+   cache-miss rebuild, the resolved display + (optional) metric waveform-param
+   names **and blobs**, the resolved analyzer cache folders (`analyzer_path(...)`)
+   for those recipes, the fetched `SorterParameters` row / resolved `job_kwargs`
+   needed by `_sorting_analyzer.build_analyzer`, and the sorter params for
+   `apply_snr_peak_sign`. The `merges_applied` and unapplied-merge flags from
+   task 1 also come from here, so `make_compute` knows which path to take without
+   a DB round-trip.
 
-   For committed merged curations, build temporary DISPLAY and optional whitened
-   METRIC analyzers over `(recording, curated_sorting)`. Do **not** publish these
-   analyzers into the canonical `analyzer_path(sorting_id, waveform_params_name)`
-   cache. Their identity is curation-scoped, not sorting-scoped, and phase-4a's
-   cache lifecycle is already busy. Use `TemporaryDirectory` and clean it on
-   success/failure. A persistent curation-analyzer cache can be a later
-   performance optimization once the scientific contract is correct.
+   `make_compute` (file / zarr I/O only) then:
+   - reconstructs the recording for `sorting_id` from the resolved inputs (factor
+     a DB-free recording-only `reconstruct_recording_for_sorting_from_resolved`
+     out of `_sorting_analyzer.reconstruct_recording_and_sorting`; the existing
+     public resolver may keep its DB-coupled wrapper, but the worker uses only
+     the fetched source/interval/artifact inputs);
+   - **fast path** -- committed root/label-only curation whose unit set is
+     unchanged from the raw sort (`merges_applied=False` and no unapplied proposed
+     merges): use the existing cached raw-sort analyzers for the display +
+     optional metric recipes and SKIP the curated-sorting rebuild entirely (the
+     raw analyzer's unit ids already equal `CurationV2.Unit` for these rows).
+     Because `Sorting().get_analyzer(...)` itself fetches DB state, do **not**
+     call it from `make_compute`; factor a DB-free
+     `load_or_rebuild_analyzer_from_resolved(...)` helper that receives
+     `sorting_id`, `n_units`, analyzer folder, waveform params blob, recording,
+     raw sorting reconstructed from the threaded units NWB path, sorter row, and
+     `job_kwargs`. Hold `analyzer_curation_lock(sorting_id)` around this
+     canonical-folder load/rebuild and metric-extension mutation. For
+     `expected_unit_ids == []`, bypass analyzer loading entirely and write empty
+     metric/label/merge tables;
+   - **merged path** -- build the curated `NumpySorting` from the threaded NWB
+     abs path via the `_units_nwb` readers (the same machinery `get_sorting` uses
+     internally, minus the DB fetch), then build temporary DISPLAY and optional
+     whitened METRIC analyzers over `(recording, curated_sorting)`;
+   - compute metrics/labels/merge suggestions over the evaluated unit set and
+     write the same three scratch tables as `AnalyzerCuration`.
+
+   Do **not** publish the temp analyzers into the canonical
+   `analyzer_path(sorting_id, waveform_params_name)` cache. Their identity is
+   curation-scoped, not sorting-scoped, and phase-4a's cache lifecycle is already
+   busy. Use `TemporaryDirectory` and clean it on success/failure. A persistent
+   curation-analyzer cache can be a later performance optimization once the
+   scientific contract is correct.
 
 4. **Make the unit namespace invariant explicit.** After computing metrics,
    assert:
 
    ```python
-   set(metrics_df.index.astype(int)) == set(
-       (CurationV2.Unit & curation_key).fetch("unit_id")
-   )
+   set(metrics_df.index.astype(int)) == set(expected_unit_ids)
    ```
 
    before labels, merge suggestions, or NWB writes. The same check belongs on
@@ -133,10 +168,14 @@ child-curation editing or acceptance helpers; those are split into
 5. **Docs and changelog.** Update:
    - `docs/src/Features/SpikeSortingV2.md`: replace "post-merge metrics are not
      yet available" with the committed-curation evaluation workflow;
-   - migration docs/notebooks: the pipeline returns or clearly points users to
-     the final committed `merge_id` and final `CurationEvaluation` key;
    - `CHANGELOG.md`: note that final metrics on merged units are now recomputed
      from the merged unit set.
+
+   Scope: document the `CurationEvaluation` workflow on the existing doc/notebook
+   surfaces only. The canonical-notebook overhaul (and the "return the final
+   curated `merge_id`" item, R2/DOCS-1) is owned by the Phase-5 UX work -- this
+   phase adds a pointer to `CurationEvaluation` there but does not rewrite the
+   notebook, so the two do not double-write conflicting instructions.
 
 ## Deliberately not in this phase
 
@@ -151,9 +190,15 @@ child-curation editing or acceptance helpers; those are split into
   numeric parity test is likely infeasible in the normal v2 test environment.
   This phase instead pins the v1 semantic contract and tests the v2 merged-unit
   metric values directly.
-- **Removing `AnalyzerCuration` entirely.** It can be deprecated or hidden from
-  docs later, but deleting/renaming the table is not necessary to ship correct
-  final metrics.
+- **Removing `AnalyzerCuration`.** Replaced by `CurationEvaluation`, but removed
+  in **phase-1c**, not here: this phase only *evaluates* committed curations, so
+  the auto-curate -> materialize-child flow (`run_v2_pipeline`, the notebook)
+  still needs `AnalyzerCuration` until phase-1c's acceptance helpers replace
+  `materialize_curation`. v2 is pre-production with **no backwards-compatibility
+  requirement**, so there is NO deprecation window or warning: phase-1c migrates
+  the remaining callers to `CurationEvaluation` + acceptance helpers and DELETES
+  `AnalyzerCuration` (table, selection, tests) outright. In this phase, keep it
+  as the guarded raw-sort path and add NO new callers.
 - **FigPack/manual UI design.** The evaluation contract should inform Phase 5,
   but this phase only adds the backend evaluation state model and tests.
 
@@ -162,9 +207,10 @@ child-curation editing or acceptance helpers; those are split into
 | Test | Asserts |
 | --- | --- |
 | `test_curation_evaluation.py::test_final_metrics_recomputed_for_merged_unit` (new) | Create a two-unit curation, commit a merge with `apply_merge=True`, populate `CurationEvaluation` with `metric_names=["num_spikes", "firing_rate"]`; `get_metrics` contains the fresh merged unit id, excludes absorbed contributor ids, and `num_spikes` equals `CurationV2.Unit.n_spikes` / the merged spike train length. This fails on the old raw-sort analyzer path. |
+| `test_curation_evaluation.py::test_merged_unit_waveform_metric_recomputed_not_inherited` (new) | Pins design contract #1's TEMPLATE half (not just spike-train metrics): a waveform-based metric (`snr`) for the merged unit is computed over the MERGED template, not inherited from a contributor. Plant two contributors with distinct template shapes (reuse the SIG-2 pos/neg planted templates) so the merged-template extremum is predictable; assert the merged unit's `snr` matches the merged-template value and differs from BOTH contributors' pre-merge `snr` (assert as an inequality / tolerance band, not an exact value -- it is data-dependent). |
 | `test_curation_evaluation.py::test_curation_evaluation_rejects_preview_curation` (new) | A curation with `apply_merge=False` and a real merge group is rejected at `CurationEvaluationSelection.insert_selection` and at `make_fetch` if a row was planted directly. |
 | `test_curation_evaluation.py::test_metric_namespace_matches_curation_units` (new) | Root, label-only child, and merged child evaluations all produce metric indexes exactly equal to `CurationV2.Unit` for that same key. |
-| `test_curation_evaluation.py::test_root_curation_uses_cached_raw_analyzer_fast_path` (new) | A committed root/label-only curation with unchanged unit set evaluates through `Sorting.get_analyzer` rather than building a temp curation analyzer; a merged curation does not use the fast path. |
+| `test_curation_evaluation.py::test_root_curation_uses_cached_raw_analyzer_fast_path` (new) | A committed root/label-only curation with unchanged unit set evaluates through the DB-free resolved raw-analyzer loader rather than building a temp curation analyzer; a merged curation does not use the fast path, and `make_compute` never calls `Sorting.get_analyzer`. |
 | `test_curation_evaluation.py::test_final_snr_peak_sign_uses_sorter_polarity` (new or adapted) | `CurationEvaluation` applies the same sorter-polarity SNR fix as `AnalyzerCuration`; positive-going/bidirectional sorts do not fall back to `"neg"`. |
 | `test_curation_evaluation.py::test_zero_unit_curation_evaluation_writes_empty_tables` (new) | A zero-unit committed curation writes empty metrics/labels/merge-suggestion tables and `get_metrics` returns an empty DataFrame. |
 | (regression) existing `test_analyzer_curation_over_merged_parent_rejected` | Still passes. `AnalyzerCuration` remains guarded; the new merged-unit metric path is `CurationEvaluation`, not raw-sort `AnalyzerCuration`. |
@@ -182,10 +228,16 @@ child-curation editing or acceptance helpers; those are split into
 ## Review
 
 Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
-- Final merged-unit metrics are computed from `CurationV2.get_sorting(curation_key)`,
-  not `Sorting().get_analyzer({"sorting_id": ...})`.
+- Final merged-unit metrics are computed over the committed curation's own unit
+  set (the curated-units NWB whose abs path `make_fetch` resolved), NOT the
+  raw-sort analyzer (`Sorting().get_analyzer({"sorting_id": ...})`); and
+  `make_compute` performs no DB read (no `CurationV2.get_sorting`,
+  `Sorting().get_analyzer`, `CurationV2.Unit.fetch`, or any other `fetch1` in
+  the parallel worker -- all DB inputs come from `make_fetch`).
 - Root/label-only curations with unchanged unit sets use the cached raw-sort
-  analyzer fast path, while merged curations use curation-scoped temp analyzers.
+  analyzer fast path through a DB-free resolved loader under
+  `analyzer_curation_lock`, while merged curations use curation-scoped temp
+  analyzers.
 - The metric index invariant is enforced before NWB write and before applying
   label rules.
 - Preview curations are rejected for evaluation; committed root, label-only, and
