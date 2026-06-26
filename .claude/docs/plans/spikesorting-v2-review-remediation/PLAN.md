@@ -1,6 +1,10 @@
 # Spike Sorting V2 Review Remediation — Implementation Plan
 
-**Status:** Not started.
+**Status:** In progress. **phase-0** (CurationV2 decomposition) is complete and
+merged to `spikesorting-v2`. **phase-4a's REL-4** task (concat-backed curation
+query routing) is complete on the `spikesorting-v2-rel4-preproc-routing` branch
+(it depended on phase-0). Phases 1, 2, 3a, 3b, the rest of 4a, 4b, 4c, and 6 are
+not started.
 
 Remediation of the verified findings from the 26-document Spike Sorting V2 review
 triage ([../../reviews/spikesorting-v2/TRIAGE.md](../../reviews/spikesorting-v2/TRIAGE.md)),

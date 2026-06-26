@@ -2,6 +2,12 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md)
 
+**Status: DONE — merged to `spikesorting-v2`.** Extracted `_artifact_naming.py`
+(task 1a), `_curation_routing.classify_and_normalize_restriction` (task 1), and
+`_curation_plan.build_curation_summary` (task 2); both new DB-free modules are
+registered in the import-boundary contract (task 3) with direct unit tests
+(task 4). Behavior-preserving; the irreducible DB routers stayed on the table.
+
 Behavior-preserving extraction (R38 / MAINT-1, MAINT-2). The goal is **clean seams
 before the Phase 5 UX overhaul extends these methods**, not a line-count reduction.
 Apply the anti-theater discipline: extract only genuinely pure logic that becomes
