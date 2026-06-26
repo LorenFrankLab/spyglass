@@ -409,10 +409,17 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         boundary, while the generic accessors warn (non-breaking for v0/v1
         consumers, consistent with ``CurationV2.get_sorting``). v0/v1 sources
         are skipped (preview semantics are v2-only).
+
+        Resolves the consumed merge_ids via ``merge_restrict`` (the same
+        part-aware routing ``get_spike_times`` -> ``fetch_nwb`` uses), NOT
+        ``cls & key``: a restriction on a parent attribute (e.g.
+        ``nwb_file_name``) is silently dropped by the master's merge_id-only
+        heading, so ``cls & key`` would match the WHOLE table and warn for
+        unrelated preview rows.
         """
         if CurationV2 is None:
             return
-        for mid in (cls & key).fetch("merge_id"):
+        for mid in cls.merge_restrict(key).fetch("merge_id"):
             part = cls.CurationV2 & {"merge_id": mid}
             if not part:
                 continue  # v0/v1 source
