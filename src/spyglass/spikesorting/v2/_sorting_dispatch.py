@@ -571,7 +571,16 @@ def run_si_sorter(
         else:
             effective_params = sorter_params
         try:
-            return sis.run_sorter(**run_kwargs, **effective_params)
+            raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
+            # R4: run_sorter returns a sorting that READS from sorter_temp_dir,
+            # which the outer finally cleans up -- downstream _build_analyzer /
+            # _stage_sorting_artifact would then read freed files. Sever the
+            # file backing here, while the temp dir still exists, by
+            # materializing the (small) spike trains into an in-memory
+            # NumpySorting. The return expression evaluates BEFORE either finally
+            # runs. with_metadata=True so unit properties/annotations survive
+            # (SI 0.104.3 default False drops them); this does NOT load traces.
+            return si.NumpySorting.from_sorting(raw_sorting, with_metadata=True)
         finally:
             if sj_kwargs:
                 # ``set_global_job_kwargs`` UPDATES (does not

@@ -12,6 +12,24 @@ from __future__ import annotations
 import pytest
 
 
+def _tiny_numpy_sorting():
+    """A minimal REAL in-memory sorting for ``run_sorter`` stubs.
+
+    ``run_si_sorter`` now materializes the sorter output via
+    ``NumpySorting.from_sorting`` (R4: sever the temp-dir file backing before
+    cleanup), so a stub must return a real sorting -- a placeholder ``object()``
+    no longer satisfies the materialize contract.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[np.array([10, 20, 30], dtype=np.int64)],
+        labels_list=[np.array([0, 0, 1], dtype=np.int64)],
+        sampling_frequency=30_000.0,
+    )
+
+
 def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
     """Drive Sorting._run_si_sorter with a cheap recording and a patched
     sis.run_sorter, returning (before_global, after_global, result_or_exc).
@@ -191,11 +209,14 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
     """SI's global job_kwargs are restored after a successful sort too."""
     import spikeinterface.sorters as sis
 
-    sentinel = object()
+    import spikeinterface as si
+
     before, after, result = _run_si_sorter_with_patched_run_sorter(
-        monkeypatch, lambda *a, **k: sentinel
+        monkeypatch, lambda *a, **k: _tiny_numpy_sorting()
     )
-    assert result is sentinel
+    # run_si_sorter materializes the sorter output (R4), so the result is an
+    # in-memory NumpySorting rather than the stub object identity.
+    assert isinstance(result, si.NumpySorting)
     # n_jobs=2 differs from SI's default n_jobs=1, so the sort genuinely
     # mutates the global mid-run; a removed restore would surface here as
     # after != before (the leaked n_jobs=2).
@@ -253,7 +274,9 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
 
     captured: dict = {}
     monkeypatch.setattr(
-        sis, "run_sorter", lambda **k: captured.update(k) or object()
+        sis,
+        "run_sorter",
+        lambda **k: captured.update(k) or _tiny_numpy_sorting(),
     )
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
@@ -341,7 +364,9 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
 
     captured: dict = {}
     monkeypatch.setattr(
-        sis, "run_sorter", lambda **k: captured.update(k) or object()
+        sis,
+        "run_sorter",
+        lambda **k: captured.update(k) or _tiny_numpy_sorting(),
     )
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
@@ -408,3 +433,39 @@ def test_v2_recording_chain_is_container_serializable():
     # The full sort-time composition: whiten(artifact-mask(recording)).
     composed = pinned_whiten(masked)
     assert _container_serializable(composed), "composed chain not serializable"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.usefixtures("dj_conn")
+def test_run_si_sorter_output_survives_tempdir_cleanup():
+    """R4: a real sorter run's output is readable AFTER run_si_sorter returns.
+
+    ``sis.run_sorter`` returns a sorting that READS from the sorter temp dir,
+    which ``run_si_sorter`` cleans up in its finally; downstream
+    ``_build_analyzer`` / ``_stage_sorting_artifact`` would then read freed
+    files. The fix materializes the spike trains into an in-memory
+    ``NumpySorting`` before cleanup. Use a real MountainSort5 run (a stub can't
+    reproduce the file backing).
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    rec, _gt = si.generate_ground_truth_recording(
+        durations=[10.0],
+        num_channels=4,
+        num_units=3,
+        seed=0,
+        sampling_frequency=30000.0,
+    )
+    result = Sorting._run_si_sorter(
+        "mountainsort5", {}, rec, "r4-tempdir-survival", {}
+    )
+    # Severed from the temp dir: an in-memory NumpySorting, not file-backed.
+    assert isinstance(result, si.NumpySorting)
+    # Spike trains still read back after the temp dir is gone.
+    unit_ids = list(result.get_unit_ids())
+    assert unit_ids, "MS5 should detect the planted units"
+    for uid in unit_ids:
+        assert result.get_unit_spike_train(uid) is not None
