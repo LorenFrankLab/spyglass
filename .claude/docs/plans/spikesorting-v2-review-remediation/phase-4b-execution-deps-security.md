@@ -51,6 +51,10 @@ none warrants its own.
 
 12. **Docs.** CHANGELOG entries for each fix; the security-trust subsection (task 5) and the migration note for the dependency pin.
 
+## Additional tasks (Round-3 reviews)
+
+13. **UCI-6 / DOWN-5 — `get_unit_brain_regions` drops chronic-identity disambiguators.** `TrackedUnit.get_unit_brain_regions` fetches `(sorting_id, curation_id, unit_id)` but returns only `(sorting_id, unit_id, region_name)` (`unit_matching.py:984-996`), dropping `curation_id`/`member_index`/`unitmatch_id`/`tracked_unit_id`/`nwb_file_name`/date at exactly the point chronic identity is resolved. Return the disambiguators. (Triaged under R22; R22's only other scheduled task here is DOWN-6. Bundle DOWN-4 `get_pairs` zero-pair schema and DOWN-3=CNEP-2 — note CNEP-2 lands in phase-1 — as the downstream-contract cluster if convenient.)
+
 ## Deliberately not in this phase
 
 - **Team access enforcement / RBAC** (R9 decided non-goal) — only the TEAM-1 visibility fix.

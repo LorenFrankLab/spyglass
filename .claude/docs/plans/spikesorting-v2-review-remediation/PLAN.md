@@ -36,5 +36,9 @@ For agent invocation, **load only the slice you need**:
   - [phase-2-identity-integrity.md](phase-2-identity-integrity.md) — master-row immutability, runtime-alias versioning, TrackedUnit frozen universe, schema-init upgrade safety (R28, R6, R7, R8).
   - [phase-3a-row-provenance.md](phase-3a-row-provenance.md) — effective seed, producing versions, UnitMatch bundle params, matcher backend version into computed rows (R1, R33-matcher).
   - [phase-3b-nwb-provenance.md](phase-3b-nwb-provenance.md) — source/sorter/params/lineage metadata into the NWB writers; params-not-arrays for motion/waveforms (R10).
-  - [phase-4a-cache-concurrency-compat.md](phase-4a-cache-concurrency-compat.md) — analyzer-cache lock + atomic publish, concat compatibility, bypass revalidation, temp routing (R5, R30, R31, R12).
-  - [phase-4b-execution-deps-security.md](phase-4b-execution-deps-security.md) — dispatch mismatches, dependency pins, permissions/path/trust-docs, db-guard, merge probe, footguns, Export.File leak, conda guard (R32, R16, R34, R14, R15, R18, R22, R26).
+  - [phase-4a-cache-concurrency-compat.md](phase-4a-cache-concurrency-compat.md) — analyzer-cache lock + atomic publish, concat compatibility, bypass revalidation, temp routing (R5, R30, R31, R12) + Round-3 analyzer/temp tasks (ALSC-3/4, CLUST-2).
+  - [phase-4b-execution-deps-security.md](phase-4b-execution-deps-security.md) — dispatch mismatches, dependency pins, permissions/path/trust-docs, db-guard, merge probe, footguns, Export.File leak, conda guard (R32, R16, R34, R14, R15, R18, R22, R26) + UCI-6 downstream disambiguators.
+  - [phase-4c-concat-lifecycle-integrity.md](phase-4c-concat-lifecycle-integrity.md) — **new (Round 3):** concat verify-on-read + rebuild + recompute parity, frozen member-set identity, split-back spike conservation (R40, R39-concat, CONCS-3).
+  - [phase-6-scientific-validation-ci-gates.md](phase-6-scientific-validation-ci-gates.md) — **new (Round 3):** publish gating fixtures + make ship criteria required in CI, drift/auto-merge/ground-truth science gates, fixture-realism bands (R41 / SVFR-1..6) + Round-3 science test gaps.
+
+Round-3 reviews also added tasks to phases 1, 2, and 3a (see each phase's "Additional tasks (Round-3 reviews)" section) and doc items to the Phase-5 edit.

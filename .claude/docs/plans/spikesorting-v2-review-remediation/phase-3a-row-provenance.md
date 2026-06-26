@@ -56,6 +56,12 @@ is **secondary, never identity** — a parity test confirms ids are unchanged.
 
 7. **Docs.** CHANGELOG: new provenance columns on `Sorting`/`UnitMatch`, the `MatcherParameters` bundle-param fields (note: changes the matcher params schema version and `unitmatch_id` for any non-default bundle settings — acceptable pre-production), the matcher-registry honesty change.
 
+## Additional tasks (Round-3 reviews)
+
+8. **ALSC-5 — bind AnalyzerCuration output to its source provenance.** `AnalyzerCuration` stores only `AnalysisNwbfile` + three object_ids (`metric_curation.py:838-845`); compute loads mutable cache folders at runtime. Add secondary provenance attrs to the `AnalyzerCuration` row: the source analyzer recipe name(s) + analyzer manifest/hash, the sorting/recording `content_hash`, and the SI version — and a stale-detection helper (compare stored vs current). Same never-identity rule as above.
+
+9. **CLUST-3 — persist clusterless unit semantics.** `run_clusterless_thresholder` emits all peaks as one unit (`_sorting_dispatch.py:393-396`); nothing persisted distinguishes a threshold-crossing "unit" from a sorted neuron, so UnitMatch / merge / `get_sort_metadata` surfaces can mistake it. Persist a `unit_semantics` marker (e.g. `"clusterless_threshold_crossings"` vs `"sorted_units"`) on the sort row or expose it via `CurationV2.get_sort_metadata`, and have the consuming surfaces honor it. (Enhancement; small.)
+
 ## Deliberately not in this phase
 
 - **Writing provenance into NWB** — that is phase-3b (reads these same field names).

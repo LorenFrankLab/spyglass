@@ -86,6 +86,14 @@ depends on another phase.
 
 7. **Docs.** Add a CHANGELOG entry per fix under the v2 section. No user-facing API docs change shape (behavior corrections); note the SNR-polarity and no-filter-offset corrections in the CHANGELOG so anyone who ran the affected combinations knows outputs changed.
 
+## Additional tasks (Round-3 reviews)
+
+8. **CNEP-1 — curated Units NWBs drop `obs_intervals` (data loss).** The sort-time writer writes per-unit `obs_intervals` (`_units_nwb.py:649-655`) but the curated writer (`_units_nwb.py:895-903`) omits it, and the source reader `read_units_abs_times_and_sample_indices` (`:100-147`) never reads it back — so any NWB-only firing-rate / presence-ratio / duration denominator over a curated export silently assumes the wrong observation window. Extend the reader to carry `obs_intervals` and the curated writer to write it per kept unit, with an explicit merge rule when merged contributors' intervals differ (intersection is the conservative choice — document it). This is a **scientific-data** column, not provenance, so it belongs here, not phase-3b.
+
+9. **CNEP-2 — all-unlabeled curated NWBs bypass `include_labels` (= DOWN-3/CLIFE-4).** The curated writer omits the `curation_label` column when all labels are empty (`_units_nwb.py:911`); the consumer skips filtering when the column is absent (`analysis/v1/group.py:236`), so `include_labels=["accept"]` returns **all** units instead of none. Fix at the consumer boundary: when `curation_label` is absent and an include/exclude filter is requested, synthesize empty label lists so an include-only selection returns no units (and an exclude-only returns all). (Triaged under R22 but had no scheduled task — landing it here.)
+
+10. **AVTM-2 + AVTM-3 — artifact valid-time ownership + mask-boundary validation.** `Sorting.make_fetch` fetches the artifact `IntervalList.valid_times` directly by reconstructed name (`sorting.py:1255-1265`), bypassing the strict ownership helper `read_artifact_removed_intervals` (`_artifact_intervals.py:597-720`) — so a partially-deleted artifact (missing ownership parts) or a hand-inserted same-name `IntervalList` can feed a sort. Route `make_fetch` through the ownership helper. Then add finite/in-envelope validation at the mask boundary (`_sorting_artifact_mask.apply_artifact_mask` + `_signal_math.frames_for_times`): reject NaN/Inf and out-of-recording-envelope intervals before the complement walk (currently only empty/shape/order are checked).
+
 ## Deliberately not in this phase
 
 - **Full re-base of AnalyzerCuration over merged sortings** (task 4 alternative) unless the owner picks it — default is the guard.

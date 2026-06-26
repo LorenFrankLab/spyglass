@@ -93,6 +93,20 @@ related task groups (review per group is fine).
 
 9. **Docs.** CHANGELOG entries for: the new `update1` deny on masters; the preprocessing version bump (note dev rows must be re-seeded); the new `UnitMatch.MatchableUnit` part; `verify_v2_default_catalog`. Update the migration doc (`docs/src/.../SpikeSortingV2_Migration.md`) with the version-bump + re-seed note.
 
+## Additional tasks (Round-3 reviews)
+
+### Group A (extends R28)
+
+10. **UCI-2 / REL-6 / CLIFE-5 — constrain `UnitMatch.Pair` to the pinned-curation universe.** `Pair` FKs each endpoint to `CurationV2.Unit.proj(...)` globally (`unit_matching.py:475-476`), so the schema only guarantees the unit exists in *some* curation, not in this selection's `MemberCuration`. Normal `make_insert` is safe only because it runs `canonicalize_match_pairs`; a raw/maintenance `Pair.insert` bypasses that. Add a validated `Pair.insert`/`insert1` override (or an FK to `MemberCuration`) that checks both endpoints against the selection's `MemberCuration`, rejects same-member and reversed-duplicate edges, and validates probability ranges. (R28 as originally written did not cover the Pair FK.)
+
+### Group E — shared-artifact member-set freeze (R39, artifact side)
+
+11. **AVTM-1 — freeze `SharedArtifactGroup` membership into `artifact_detection_id`.** The shared-group artifact identity payload is `{source_kind, artifact_detection_params_name, shared_artifact_group_name}` only (`_selection_identity.py:259-263`); `ArtifactDetection.make_compute` reads **live** `SharedArtifactGroup.Member` and the part is unguarded, so the scanned set can change under a fixed `artifact_detection_id`. Apply the **same member-snapshot pattern phase-4c uses for concat**: fold an ordered member-set fingerprint into the artifact identity, or store a snapshot and validate current-vs-snapshot at compute. (Sibling of phase-4c CONCS-1; keep the two implementations consistent.)
+
+### Group C (extends R7)
+
+12. **UCI-5 — geometry preflight before dense bundle extraction.** The channel-position compatibility check lives inside the backend `match()` (`_unitmatch_backend.py:239-257`), which runs only *after* `extract_unitmatch_bundle` builds dense per-session bundles (`unit_matching.py:794`). Add an ordered channel-id/position preflight to `UnitMatchSelection.insert_selection` (or `make_fetch`) so a cross-day geometry mismatch fails fast, before the expensive extraction.
+
 ## Deliberately not in this phase
 
 - **Full recording construction-recipe-as-identity** (R6 full) — decided non-goal; identity stays name-based, this phase only makes semantics changes *detectable*/versioned.

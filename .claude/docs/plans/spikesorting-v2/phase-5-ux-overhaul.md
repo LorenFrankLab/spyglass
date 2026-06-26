@@ -50,6 +50,14 @@ part of the Phase 5 PRs:
 - **R7-composition — child-curation composition semantics.** Decide, as part of the FigPack curation-editing design, whether a child curation should **inherit** parent labels/merges or remain a raw-sort **snapshot** (current behavior: snapshot — a child of a labeled/merged parent does not inherit). Document the chosen semantics in the notebook/docs; until decided, document the current snapshot behavior explicitly (CLIFE-2).
 - **MAINT-10 — notebook structure.** The canonical `10_Spike_SortingV2` notebook is both a beginner walkthrough and an advanced reference; decide whether to mark the advanced sections clearly optional or split a first-hour path. Design call for this phase.
 
+**Round-3 doc items** (verified in the triage's third round; all doc/notebook-only):
+- **MIG-4** — `SpikeSortingV2.md:1121` says unknown restriction keys "raise ValueError"; the default path is **lenient** (strict only when `sources` is passed). Correct the wording.
+- **MIG-5** — add a single consolidated v1→v2 porting recipe (v1 selection → `run_v2_pipeline` → root → final curation → final `merge_id` → downstream/export); currently scattered across pages.
+- **MIG-6** — `SpikeSortingV2_Migration.md:38-39` wrongly says "v1 used `apply_merges`" (v1 is also singular `apply_merge`). Fix.
+- **MIG-3 residual** — beyond the new cross-session notebook, update or remove the stale `13_UnitMatch_Cross_Session.py` ("before a DataJoint wrapper is written") and the `10_Spike_SortingV2_dev_walkthrough.ipynb` concat-"not yet wired" text.
+- **ALSC-8 / CNEP-7 / CLUST-5** — link `SpikeSortingV2StorageManagement.md` into the nav (also a R23 item) and add an analyzer `delete_files`/rebuild worked example; add a v2 `final_merge_id` branch to the downstream notebooks (`42_Decoding_SortedSpikes`, `11_Spike_Sorting_Analysis`); add a v2 clusterless waveform-feature notebook (the current `40_...` is v1-first).
+- **AVTM-5** — fix the inaccurate `ArtifactDetectionParameters` docstring (claims `insert_default` ships only `none`/`default`; it ships four rows) and document the artifact / shared-group construction semantics for users.
+
 These items must not alter Phase 1–4 *table definitions* (the Phase 5 constraint
 below still holds); the remediation plan owns all schema changes.
 

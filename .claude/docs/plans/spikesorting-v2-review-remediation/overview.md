@@ -20,9 +20,19 @@ the owner-agreed disposition for each is in its "Decisions" section.
 - **phases 2, 3a, 3b, 4a, 4b** build on the current structure and are mutually
   independent except: phase-3b (NWB provenance) reads the columns phase-3a adds, so
   **3a precedes 3b**.
+- **phase-4c (concat lifecycle/integrity, Round 3)** overlaps phase-4a's concat-compat
+  work in `_concat_recording.py` — whichever lands second rebases. Its cheap
+  verify-`content_hash`-on-read half (task 2) is not deferrable; its concat-recompute
+  half (task 3) may be deferred to first concat-data retention.
+- **phase-6 (scientific-validation/CI gates, Round 3)** is best done **last** — it adds
+  CI gates that should protect the *corrected* behavior from phases 1–4c, so run it
+  after them. Its task 1 (publish + require the gating fixtures) is the shared blocker
+  for the rest of the phase.
 - The companion **Phase 5 adjustments** (below) are edits to the *existing*
   `../spikesorting-v2/phase-5-ux-overhaul.md`, applied as part of this work so the
-  Phase 5 executor inherits the decided docs/orchestrator items.
+  Phase 5 executor inherits the decided docs/orchestrator items (plus the Round-3 doc
+  items MIG-4/5/6, the stale `13_`/`dev_walkthrough` notebooks, ALSC-8, CLUST-5, CNEP-7,
+  AVTM-5).
 
 ## Current codebase integration points
 

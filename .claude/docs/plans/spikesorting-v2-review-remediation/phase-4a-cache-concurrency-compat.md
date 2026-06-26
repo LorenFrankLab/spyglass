@@ -34,6 +34,20 @@ rows at compute time; route scratch to the configured temp dir.
 
 7. **Docs.** CHANGELOG: analyzer cache is now lock-guarded + atomic-published (mirrors the recording artifact); concat compatibility now checks electrode identity/region/fs; UnitMatch geometry is 2D-guarded; scratch honors the configured temp dir.
 
+## Additional tasks (Round-3 reviews)
+
+8. **Add `add_extensions` to the R5 lock site list (ALSC-2).** Task 1's enumeration of canonical-folder mutations must also include `Sorting.add_extensions` → `ensure_extensions` (`sorting.py:1977-1983`), which mutates the analyzer folder unlocked.
+
+9. **ALSC-3 — validate the analyzer recipe before touching the filesystem.** `load_or_rebuild_analyzer` computes `analyzer_path(...)` and may `rmtree` the folder (`_sorting_analyzer.py:210-234`) before the recipe row is fetched/validated; `waveform_params_name` reaching `get_analyzer` is an un-FK'd free string (the path-safety regex is insert-time only, `sorting.py:633`). Validate the recipe name (path-safety) and, for `rebuild=True`, the recipe row, **before** any filesystem load/delete; add `../bad` / `bad/name` tests for `rebuild=True` and `False`.
+
+10. **ALSC-4 — don't silently discard unverified analyzer extensions on recompute.** Recompute hashes only `ANALYZER_RECOMPUTE_EXTENSIONS` (random_spikes/templates/waveforms, `_recompute.py:26`) but `_delete_analyzer_folders` `rmtree`s the whole `.zarr` (`recompute.py:1317`), dropping unhashed curation/visualization extensions (amplitudes, correlograms, PCs, quality_metrics). Make the ephemeral-vs-tracked extension policy explicit: either store an extension manifest and only authorize deletion of tracked extensions, or document+log that the full folder (incl. derived extensions) is intentionally regeneratable scratch.
+
+11. **CLUST-2 — third temp site.** Route the clusterless waveform-feature scratch to the configured temp dir: add `dir=spyglass_temp_dir` to `tempfile.TemporaryDirectory(prefix="v2_clusterless_wf_")` at `waveform_features.py:388` (a third site beyond the two in task 6).
+
+12. **CONCS-4 residual — dtype/gain/offset in concat compat.** Task 3 adds the sampling-frequency check; also add dtype + gain/offset (scaling-metadata) equality to `assert_concat_compatible` so members with mismatched scaling can't be silently concatenated.
+
+13. **ALSC-6 — analyzer recompute round-trip test.** Add a `dry_run=False` analyzer-recompute test that removes the folder, sets `deleted=1`, and rebuilds — the analyzer analog of the recording `test_delete_files_round_trip` (none exists today; the only analyzer recompute test is `dry_run=True`).
+
 ## Deliberately not in this phase
 
 - **A general analyzer-cache RAM/disk budget estimator** (PERF perf items) — NICE, not here.

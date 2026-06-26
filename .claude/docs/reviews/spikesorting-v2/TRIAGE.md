@@ -8,8 +8,8 @@ Pydantic presets, notebook/docs) is next.**
 
 ## What this is
 
-A consolidated, **claim-verified** triage of the **26 review documents** in this
-directory (~207 individual findings), verified in **two rounds** as the reviews
+A consolidated, **claim-verified** triage of the **34 review documents** in this
+directory (~259 individual findings), verified in **three rounds** as the reviews
 arrived. Every finding was re-checked against the current code by independent
 verification agents (read-only; one agent per thematic cluster), then key
 correctness/identity claims were spot-checked directly. Some reviews were written
@@ -22,8 +22,16 @@ correctness/identity claims were spot-checked directly. Some reviews were writte
   (signal-units-preprocessing), MOTION (motion-drift-spatial), TIME
   (timebase-sample-index), DISP (sorter-dispatch-execution), SEC
   (security-external-boundary), SER (serialization-payload), MAINT
-  (maintainability-module-boundary). Root issues **R27–R37** below are new from
-  this round; many Round-2 findings are duplicates that map onto existing R#.
+  (maintainability-module-boundary). Root issues **R27–R37** are new from this round.
+- **Round 3** (8 reviews, ~52 findings): ALSC (analyzer-lifecycle-storage), CLUST
+  (clusterless-non-si-sorter-path), CONCS (concat-session-group-semantics), AVTM
+  (artifact-valid-time-masking), CNEP (curated-nwb-export-provenance), UCI
+  (unitmatch-chronic-identity), SVFR (scientific-validation-fixture-realism), MIG
+  (v1-v2-migration-workflow). Root issues **R39–R41** are new from this round
+  (member-set identity freezing, concat artifact lifecycle parity, scientific-
+  validation/CI gates). Most Round-3 findings are duplicates that map onto existing
+  R# or are now-scheduled in remediation phases; the genuinely-new ones drove two
+  new plan phases (phase-4c, phase-6) and added tasks to phases 1/2/3a/4a/4b.
 
 ### Verification method
 
@@ -34,22 +42,22 @@ correctness/identity claims were spot-checked directly. Some reviews were writte
 - Cross-review duplicates were clustered into distinct *root issues* (the
   decision unit below). Finding IDs use a per-review prefix.
 
-### Verdict tally (~207 findings)
+### Verdict tally (~259 findings)
 
 | Verdict | Count | Notes |
 |---|---|---|
-| CONFIRMED | ~183 | true against current code |
+| CONFIRMED | ~232 | true against current code |
 | STALE-FIXED | 9 | already resolved — close out (see §Done); all from Round 1 |
-| PARTIAL | ~13 | partly true / narrowed by a recent fix |
+| PARTIAL | ~18 | partly true / narrowed by a recent fix |
 | FALSE | 0 | — |
 | UNVERIFIABLE | 0 | — |
 
-Round 2 found **0 stale-fixed and 0 false** — its 10 reviews target areas the
-recent fix commits did not touch, so all 77 findings stand (2 PARTIAL: SEC-5,
-SER-7). Already-fixed by post-review commits (385e7d31, 63e0ff5a, 12286892,
-d08c319b, db8d271e, e8e06553, 18f05527): **CONC-3, OBS-1, REPRO-1, REPRO-2,
-TEST-1, TEST-2, SCHEMA-5, DOCS-4, API-1** (plus the recording-breadcrumb half of
-OBS-7).
+Rounds 2 and 3 found **0 stale-fixed and 0 false** — those reviews target areas the
+recent fix commits did not touch, so all findings stand (Round-3 PARTIALs: CLUST-4
+inert, CONCS-2 partial-vs-phase-3b, UCI-3 partial-vs-phase-3a). Already-fixed by
+post-review commits (385e7d31, 63e0ff5a, 12286892, d08c319b, db8d271e, e8e06553,
+18f05527): **CONC-3, OBS-1, REPRO-1, REPRO-2, TEST-1, TEST-2, SCHEMA-5, DOCS-4,
+API-1** (plus the recording-breadcrumb half of OBS-7).
 
 ## Triage philosophy (pre-production, no users, Phase 5 next)
 
@@ -123,6 +131,9 @@ Each row is one underlying problem; the many overlapping findings collapse here.
 | R36 | **Cheap test / single-source-of-truth wins that ease Phase 5** — tri-part NamedTuple contract tests cover only 3 of ~7 carriers (extend to Artifact/Concat/UnitMatch/recompute/DriftEstimate); 4 parallel catalogs of stage/lookup knowledge with one live drift (notebook says 3 defaults, 8 are seeded) — add consistency tests + fix the doc; slow integration setup is hand-rolled in 4 modules (add a `populate_single_session_chain` helper); insert/insert1/insert_default boilerplate not yet hoisted into the existing `ImmutableParamsLookup` mixin | MAINT-3, MAINT-4, MAINT-5, MAINT-8 | CONFIRMED | **SHOULD** | S–M | All cheap, low-risk, and reduce drift before Phase 5 touches these surfaces. MAINT-8 == R24. Note: the file-splitting half of MAINT-1/2 is **already-rejected** per the user's decision; keep only the "table owns schema+txn, service owns logic" rule for new code. |
 | R37 | **Stale scaffolding / contributor hazards** — the old phase-0 fixture-generation plan still describes the superseded ground-truth-in-`nwbfile.units` contract (current tests require `ProcessingModule["ground_truth"]` + empty `nwbfile.units`); clusterless smoke row named `5uv` but behavior is MAD; facade/module status text lags shipped surface (= R23) | EXT-8, SIG-7, MAINT-9 | CONFIRMED | **NICE/Phase-5** | S | EXT-8 can poison regenerated fixtures — mark the plan superseded. SIG-7 is naming hygiene. MAINT-9 folds into R23. |
 | R38 | **Decompose the remaining monolithic table classes (before Phase 5 piles on)** — `CurationV2` (~1968 lines) and the other public table classes still own source-routing, accessors, plotting delegates, and result formatting alongside schema + `make_*`. The genuinely monolithic remainders are `CurationV2.resolve_restriction` (~250-line source-routing classmethod) and the `CurationV2` accessor cluster (`get_recording`/`get_sorting`/`get_merged_sorting`/`summarize_curation`/`get_sort_metadata`); plus compat-wrapper public/private blurring | MAINT-1, MAINT-2, MAINT-7 | CONFIRMED | **SHOULD (pre-Phase-5)** | M–L | **Re-tiered 2026-06-25: the prior "don't split these files" directive was rescinded — pre-production, do what's best.** Phase 5 adds the `run_v2_pipeline` orchestrator + FigPack curation tables + presets, which extend exactly these modules; decomposing the source-routing + accessor layer into DB-free, directly-testable service modules FIRST means Phase 5 builds on clean seams. **Keep the anti-theater discipline:** much compute is already in `_recording_*`/`_sorting_*`/`_curation_plan`/`_selection_plan` — verify what is inline-and-pure before extracting; target `resolve_restriction` + the accessor cluster, not a line-count pass. |
+| R39 | **Member-set identity is not frozen (concat + shared-artifact)** — `concat_recording_id` is content-addressed from group name + param names only (`session_group.py:353-358`), and the shared-artifact `artifact_detection_id` from group name + params only (`_selection_identity.py:259-263`); compute/split/validation then read **live, unguarded** `SessionGroup.Member` / `SharedArtifactGroup.Member`, so an index-preserving membership change retargets a materialized output under a stable id. Includes the split-back silent spike-drop (CONCS-3). | CONCS-1, AVTM-1, CONCS-3 | CONFIRMED | **SHOULD** | M | The decided R28 (`update1` deny on the *master*) and R6-won't-do do NOT close part-row drift. Fix: freeze the ordered member set into a `MemberSnapshot`/fingerprint and validate current-vs-snapshot at fetch/compute/split (and assert split-back assigns every spike). Scheduled into **phase-4c** (concat) + a phase-2 task (shared-artifact). |
+| R40 | **Concat artifact lifecycle parity** — `ConcatenatedRecording` stores a `content_hash` (`session_group.py:589`) but `get_recording` never verifies it and has no rebuild-on-missing; there are **no** concat analogues of `RecordingArtifactVersions`/`RecordingArtifactRecompute` or the locked atomic `_rebuild_nwb_artifact`. A missing/drifted concat NWB is currently an unrecoverable hard failure, yet concat feeds sorting/analyzer/reporting. | CONCS-2 | CONFIRMED | **SHOULD/DECIDE** | L | A whole subsystem `Recording` has and `ConcatenatedRecording` lacks; equal in scope to the shipped recording-recompute work. **New phase-4c.** If real concat data won't be retained before Phase 5, the rebuild/recompute half may be deferred — but the cheap verify-`content_hash`-on-read guard should land regardless (else a missing file reads stale/garbage silently). |
+| R41 | **Scientific-validation / CI-gate enforcement** — the UnitMatch AUC>0.85 ship criterion (`test_unitmatch.py:1547`) and all drift/auto-merge/ground-truth science gates are skip-on-absent (fixture URLs still `None`, fetched in CI with `\|\| true`, never in `SPYGLASS_V2_REQUIRE_FIXTURES`); ground-truth floors compute over the well-detected subset only (miss localized dropout); fixture realism is byte/structure-gated only; benchmarks are manual scripts, not regression gates. | SVFR-1..6 | CONFIRMED | **SHOULD** | L | A green CI run can mean "code paths shaped right," not "science held." Coherent new theme orthogonal to the code-remediation phases. **New phase-6.** Shared blocker: publish the two-session + drift fixtures and make their gates required, not skip-on-absent. |
 
 ---
 
@@ -137,7 +148,7 @@ Each row is one underlying problem; the many overlapping findings collapse here.
 - **R4** Fix sorter-output-freed-before-consumption (verify file-backed MS4 path first).
 
 ### SHOULD — during Phase 5 (cheap safety or in Phase-5 scope)
-R5 (analyzer cache lock/atomic publish — mirror the recording fix) · R8 (schema-init version backfill + stale-default audit) · R12 (route scratch to configured temp) · R14 (direct `_assert_v2_db_safe` on the two modules) · R15 (narrow the eager v2 merge-table probe) · R16 (reconcile dependency pins; pin numpy) · R18 (DESTR-6 negative-days validation; DESTR-8 orphan-sweep name filter; DESTR-2 remove dead in-place branch) · R20 (orchestrator/preflight polish — esp. ERR-1) · R22 (DOWN-6 Export.File leak) · R23 (docs/build cuts + stale status text) · R26-partial (CONFIG-8 conda-export guard) · **R28** (deny `update1` on selection masters; guard `CurationV2`/`SessionGroup` direct writes) · **R30** (concat electrode-space + fs compatibility checks; UnitMatch 2D-geometry guard) · **R31** (re-validate concat+artifact and shared-artifact at the compute boundary) · **R32** (sorter-dispatch execution mismatches) · **R34**-SEC-2 (`restrict_permission=True`; drop local `0o777`) · **R36** (cheap test/single-source-of-truth wins before Phase 5) · **R38** (decompose the monolithic table classes — `resolve_restriction` + the `CurationV2` accessor cluster — *before* Phase 5 extends them; anti-theater discipline applies) · **R10** (full metadata/lineage provenance into NWBs — promoted from NICE per the decision below) · **R6**-alias (version the runtime-semantics aliases) · **R7**-frozen (TrackedUnit consumes the already-frozen matchable universe) · **R9**-TEAM-1 (guard the session-global sort-group overwrite) · **R33**-matcher (store matcher backend version + collapse the misleading registry) · **R34**-SEC-1 (basename/path-confinement defense-in-depth).
+R5 (analyzer cache lock/atomic publish — mirror the recording fix) · R8 (schema-init version backfill + stale-default audit) · R12 (route scratch to configured temp) · R14 (direct `_assert_v2_db_safe` on the two modules) · R15 (narrow the eager v2 merge-table probe) · R16 (reconcile dependency pins; pin numpy) · R18 (DESTR-6 negative-days validation; DESTR-8 orphan-sweep name filter; DESTR-2 remove dead in-place branch) · R20 (orchestrator/preflight polish — esp. ERR-1) · R22 (DOWN-6 Export.File leak) · R23 (docs/build cuts + stale status text) · R26-partial (CONFIG-8 conda-export guard) · **R28** (deny `update1` on selection masters; guard `CurationV2`/`SessionGroup` direct writes) · **R30** (concat electrode-space + fs compatibility checks; UnitMatch 2D-geometry guard) · **R31** (re-validate concat+artifact and shared-artifact at the compute boundary) · **R32** (sorter-dispatch execution mismatches) · **R34**-SEC-2 (`restrict_permission=True`; drop local `0o777`) · **R36** (cheap test/single-source-of-truth wins before Phase 5) · **R38** (decompose the monolithic table classes — `resolve_restriction` + the `CurationV2` accessor cluster — *before* Phase 5 extends them; anti-theater discipline applies) · **R10** (full metadata/lineage provenance into NWBs — promoted from NICE per the decision below) · **R6**-alias (version the runtime-semantics aliases) · **R7**-frozen (TrackedUnit consumes the already-frozen matchable universe) · **R9**-TEAM-1 (guard the session-global sort-group overwrite) · **R33**-matcher (store matcher backend version + collapse the misleading registry) · **R34**-SEC-1 (basename/path-confinement defense-in-depth) · **R39** (freeze the ordered member set into concat + shared-artifact identity; validate split-back — phase-4c + phase-2) · **R40** (concat artifact lifecycle parity — **new phase-4c**; at minimum verify `content_hash` on read) · **R41** (scientific-validation / CI-gate enforcement — **new phase-6**).
 
 ### NICE — post-Phase-5
 R11 (explicit-timestamp perf) · R13 (job_kwargs wiring) · R17 (import boundary) · R19 (interval-orphan finder) · R21 (error taxonomy base) · R24 (selection-helper consistency) · R25 (recompute input fingerprints) · **R35** (validation escape-hatches + payload-shape) · **R37** (stale scaffolding; EXT-8 mark plan superseded) · remainder of R18/R26/R34.
@@ -541,3 +552,95 @@ and SER-7 (PARTIAL); none stale-fixed or false. "Root" maps each to a root issue
 | MAINT-8 | Low | CONFIRMED | R24 | Lookup insert patterns duplicated — ACTIONABLE (hoist into existing `ImmutableParamsLookup`) |
 | MAINT-9 | Low | CONFIRMED | R23 | Docs/facade status text lags shipped surface (self-contradicting UnitMatch status) — PHASE-5 |
 | MAINT-10 | Low | CONFIRMED | R23 | Canonical notebook is both beginner path + advanced reference — PHASE-5 design call |
+
+---
+
+## Appendix (Round 3) — full per-finding verdicts
+
+8 reviews added after Round 2. All 52 findings CONFIRMED (3 PARTIAL: CLUST-4,
+CONCS-2, UCI-3); none stale-fixed or false. "Root / placement" maps each to a root
+issue and the phase that now owns it.
+
+### analyzer-lifecycle-storage-contracts-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| ALSC-1 | High | CONFIRMED | R27 / phase-1 | AnalyzerCuration computes over the raw-sort analyzer, ignores selected curation (= CLIFE-1) |
+| ALSC-2 | Med-high | CONFIRMED | R5 / phase-4a | Analyzer folder mutation not under one lock / atomic publish (add `add_extensions` to the site list) |
+| ALSC-3 | Med-high | CONFIRMED | NEW / phase-4a | Explicit analyzer recipe names touch/`rmtree` the folder before recipe-row validation |
+| ALSC-4 | Medium | CONFIRMED | NEW / phase-4a | Recompute hashes only 3 base extensions but `rmtree`s the whole `.zarr` (unverified extensions lost) |
+| ALSC-5 | Medium | CONFIRMED | NEW / phase-3a | AnalyzerCuration output row carries no source-analyzer/sorting content provenance |
+| ALSC-6 | Medium | CONFIRMED | NEW(test) / phase-4a | No `dry_run=False` analyzer-recompute delete round-trip test |
+| ALSC-7 | Medium | CONFIRMED | NEW(test) / phase-6 | No true concat-backed AnalyzerCuration populate+materialize E2E test |
+| ALSC-8 | Med-low | CONFIRMED | DOC / phase-5 | Storage-management docs unlinked from nav, recording-heavy |
+
+### clusterless-non-si-sorter-path-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| CLUST-1 | Med-high | CONFIRMED | R32 / phase-4b | Clusterless accepts container `execution_params` but always runs local (= DISP-1) |
+| CLUST-2 | Medium | CONFIRMED | NEW / phase-4a | Clusterless waveform-feature scratch (`waveform_features.py:388`) bypasses configured temp (3rd site) |
+| CLUST-3 | Medium | CONFIRMED | NEW(enh) / phase-3a | One-unit clusterless output has no persisted semantics flag; mistakable for a sorted neuron |
+| CLUST-4 | Med-low | PARTIAL | NEW(enh) / phase-1 follow-up | Feature extraction doesn't reconcile peak-sign with sorter (real but inert on the shipped amplitude path) |
+| CLUST-5 | Low | CONFIRMED | DOC / phase-5 | Public clusterless waveform-feature notebook still v1-first |
+
+### concat-session-group-semantics-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| CONCS-1 | High | CONFIRMED | R39 / phase-4c | `concat_recording_id` stable while live `SessionGroup.Member` membership drifts |
+| CONCS-2 | High | PARTIAL | R40 / phase-4c | ConcatenatedRecording lacks Recording's verify-on-read + rebuild + recompute lifecycle |
+| CONCS-3 | Medium | CONFIRMED | R39 / phase-4c | Split-back silently drops spikes outside stored boundaries (no count/coverage check) |
+| CONCS-4 | Medium | CONFIRMED | R30 / phase-4a | Concat compat omits sampling-frequency (covered) + dtype/gain/offset (residual) |
+| CONCS-5 | Medium | CONFIRMED | NEW(test/doc) / phase-5+6 | Concat merge ids look session-local to downstream consumers; no concat-backed consumer test |
+| CONCS-6 | Med-low | CONFIRMED | DOC/enh / phase-5 | Split-back is in-memory only; no persistence bridge to per-member workflows |
+| CONCS-7 | Med-low | CONFIRMED | NEW(test) / phase-6 | Multi-day concat documented; no success-path populate test |
+| CONCS-8 | Low | CONFIRMED | NEW(test) / phase-6 | Concat NWB `obs_intervals` not readback-tested |
+
+### artifact-valid-time-masking-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| AVTM-1 | Med-high | CONFIRMED | R39 / phase-2 | Shared-artifact-group membership not frozen into `artifact_detection_id`; compute reads live members |
+| AVTM-2 | Medium | CONFIRMED | NEW / phase-1 | `Sorting.make_fetch` fetches artifact `valid_times` directly, bypassing the ownership helper |
+| AVTM-3 | Medium | CONFIRMED | NEW / phase-1 | Non-empty `valid_times` not finite/in-envelope validated at the mask boundary |
+| AVTM-4 | Med-low | CONFIRMED | R31 / phase-4a | Concat+artifact rejected at insert + (phase-4a) at compute; residual DB-level rejection test |
+| AVTM-5 | Med-low | CONFIRMED | DOC / phase-5 | Artifact/shared-group semantics underdocumented; `ArtifactDetectionParameters` docstring inaccurate |
+| AVTM-6 | Low | CONFIRMED | NEW(test) / phase-6 | Disjoint-seam single-frame edge acknowledged in code; pin it with a test |
+
+### curated-nwb-export-provenance-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| CNEP-1 | High | CONFIRMED | NEW / phase-1 | **Curated Units NWBs drop `obs_intervals`** the sort-time writer writes — silent data loss for NWB-only rate/presence denominators |
+| CNEP-2 | High | CONFIRMED | NEW / phase-1 | All-unlabeled curated NWBs bypass `include_labels` filtering → returns all units (= DOWN-3/CLIFE-4) |
+| CNEP-3 | Medium | CONFIRMED | R10 / phase-3b | Curated NWBs thin without DB context (merge-lineage scratch) |
+| CNEP-4 | Medium | CONFIRMED | R10 / phase-3b | Concat-backed curated export/provenance not covered (+ export test residual) |
+| CNEP-5 | Med-low | CONFIRMED | R10 / phase-3b | Materialized analyzer curations lack metric linkage back-reference in the curated NWB |
+| CNEP-6 | Low | CONFIRMED | NEW(test) / phase-3b | Export-completeness docs promise 3 files; test asserts 2 |
+| CNEP-7 | Low | CONFIRMED | DOC / phase-5 | Downstream notebooks steer users to v1-only joins |
+
+### unitmatch-chronic-identity-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| UCI-1 | High | CONFIRMED | R7 / phase-2 | `TrackedUnit` re-derives universe from current labels (= REPRO-6/REL-7; phase-2 frozen `MatchableUnit`) |
+| UCI-2 | High | CONFIRMED | NEW / phase-2 | `UnitMatch.Pair` FK projects to all `CurationV2.Unit`, not the pinned-curation universe (= REL-6/CLIFE-5) |
+| UCI-3 | Med-high | PARTIAL | R1 / phase-3a | Effective matcher/bundle params not frozen with the graph (bundle params covered; `TrackedUnit` threshold-freeze residual) |
+| UCI-4 | Medium | CONFIRMED | R10 / phase-3b | UnitMatch NWB pair-only, not self-describing (= NWB-8) |
+| UCI-5 | Medium | CONFIRMED | NEW(enh) / phase-2 | Same-probe/channel-universe mismatch fails late, after dense bundle extraction (add preflight) |
+| UCI-6 | Med-low | CONFIRMED | NEW / phase-4b | `get_unit_brain_regions` drops disambiguators (= DOWN-5; expand R22 task) |
+
+### scientific-validation-fixture-realism-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| SVFR-1 | High | CONFIRMED | R41 / phase-6 | UnitMatch AUC>0.85 ship criterion is `assert`ed but skip-on-absent (fixture URLs `None`, not required in CI) |
+| SVFR-2 | High | CONFIRMED | R41 / phase-6 | No drift/motion scientific-validation test (drift fixture intentionally not fetched) |
+| SVFR-3 | Med-high | CONFIRMED | R41 / phase-6 | Ground-truth floors computed over the well-detected subset; localized region dropout passes |
+| SVFR-4 | Medium | CONFIRMED | R41 / phase-6 | Auto-merge proposal precision/recall not validated on realistic 128-ch data |
+| SVFR-5 | Medium | CONFIRMED | R41 / phase-6 | Fixture realism manifest is byte/structure only (no firing-rate/SNR/drift bands) |
+| SVFR-6 | Med-low | CONFIRMED | R41 / phase-6 | `bench_efficiency.py` is a manual script, not a CI regression gate |
+
+### v1-v2-migration-workflow-review.md
+| ID | Sev | Verdict | Root / placement | One-line |
+|---|---|---|---|---|
+| MIG-1 | High | CONFIRMED | R2 / phase-5 | Docs steer downstream to the uncurated root `merge_id` (= API-2/DOCS-1) |
+| MIG-2 | High | CONFIRMED | R23 / phase-5 | Migration/status docs mark shipped UnitMatch/concat as pending/placeholder (= API-3/DOCS-3) |
+| MIG-3 | Medium | PARTIAL | R23 / phase-5 | Notebooks stale for shipped workflows; phase-5 adds a new notebook but leaves stale `13_`/`dev_walkthrough` |
+| MIG-4 | Medium | CONFIRMED | NEW(doc) / phase-5 | Docs say unknown restriction keys "raise"; default path is lenient (strict only when `sources` passed) |
+| MIG-5 | Med-low | CONFIRMED | NEW(doc) / phase-5 | No single consolidated v1→v2 porting recipe (scattered across pages) |
+| MIG-6 | Low | CONFIRMED | NEW(doc) / phase-5 | `apply_merge` migration wording wrong (claims v1 used `apply_merges`; v1 is also singular) |
