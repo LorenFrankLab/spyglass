@@ -39,6 +39,7 @@ class CurationSource(str, Enum):
     manual = "manual"
     analyzer_curation = "analyzer_curation"
     figpack = "figpack"
+    curation_evaluation = "curation_evaluation"
 
 
 class CurationLabel(str, Enum):

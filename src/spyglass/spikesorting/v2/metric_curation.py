@@ -2521,3 +2521,187 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         return read_merge_suggestions(
             abs_path, row["merge_suggestions_object_id"]
         )
+
+    # ---- acceptance helpers (evaluation outputs -> committed curation) ----
+
+    def _evaluated_curation_key(self, key) -> dict:
+        """Resolve a CurationEvaluation key to its evaluated curation key."""
+        sel = (CurationEvaluationSelection & key).fetch1()
+        return {
+            "sorting_id": sel["sorting_id"],
+            "curation_id": int(sel["curation_id"]),
+        }
+
+    def _resolve_accepted_merges(
+        self, key, merge_groups, use_all_suggested_merges
+    ) -> list[list[int]]:
+        """Resolve the merge groups to accept (explicit, all-suggested, none).
+
+        Never applies all suggested merges implicitly: the caller must pass an
+        explicit ``merge_groups`` OR ``use_all_suggested_merges=True``. Returns
+        the >=2-member groups (in the evaluated curation's own unit namespace).
+        """
+        if merge_groups is not None and use_all_suggested_merges:
+            raise ValueError(
+                "CurationEvaluation acceptance: pass either merge_groups or "
+                "use_all_suggested_merges=True, not both."
+            )
+        if use_all_suggested_merges:
+            source = self.get_merge_groups(key)
+        elif merge_groups is not None:
+            source = merge_groups
+        else:
+            return []
+        return [[int(u) for u in group] for group in source if len(group) >= 2]
+
+    def create_curation(
+        self,
+        key,
+        *,
+        merge_groups=None,
+        use_all_suggested_merges: bool = False,
+        labels: dict | None = None,
+        label_policy: str = "inherit",
+        description: str = "accepted from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Accept a ``CurationEvaluation``'s outputs into a COMMITTED child.
+
+        Creates a new committed child ``CurationV2`` row branched off the
+        evaluated curation, in that curation's own unit namespace. The child is
+        always committed (``assert_committed_curation`` true) -- it never leaves
+        a preview row with unapplied proposed merges; use
+        :meth:`create_preview_curation` for an explicit draft.
+
+        Merges are applied ONLY when the caller is explicit: pass
+        ``merge_groups`` (the exact accepted groups, in the evaluated
+        curation's namespace) or ``use_all_suggested_merges=True`` (apply every
+        >=2-member suggestion this evaluation proposed). Neither -> a
+        labels-only committed child.
+
+        Labels default to the evaluation's proposed labels
+        (:meth:`get_labels`); pass ``labels`` to override, or ``label_policy``
+        to control inheritance from the parent (see
+        ``CurationV2.insert_curation``). Accepted children carry the
+        ``curation_source='curation_evaluation'`` provenance.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationEvaluation`` row.
+        merge_groups : list[list[int]] or None
+            Explicit accepted merge groups in the evaluated curation's unit
+            namespace. ``None`` (with ``use_all_suggested_merges=False``) makes
+            this a labels-only acceptance.
+        use_all_suggested_merges : bool
+            Apply every >=2-member suggested merge group instead of an explicit
+            list. Mutually exclusive with ``merge_groups``.
+        labels : dict or None
+            ``{unit_id: [label, ...]}`` to write; ``None`` defaults to the
+            evaluation's proposed labels.
+        label_policy : str
+            ``"inherit"`` (default) or ``"replace"`` -- see
+            ``CurationV2.insert_curation``.
+        description : str
+            Free-text description for the child curation.
+        allow_custom_labels : bool
+            Forwarded to ``CurationV2.insert_curation``.
+        reuse_existing : bool
+            Reuse an existing matching child instead of staging a new NWB
+            (idempotent re-acceptance). Defaults True.
+
+        Returns
+        -------
+        dict
+            ``{"sorting_id", "curation_id"}`` of the committed child curation.
+        """
+        curation_key = self._evaluated_curation_key(key)
+        accepted = self._resolve_accepted_merges(
+            key, merge_groups, use_all_suggested_merges
+        )
+        effective_labels = self.get_labels(key) if labels is None else labels
+        return CurationV2.insert_curation(
+            {"sorting_id": curation_key["sorting_id"]},
+            labels=effective_labels or None,
+            merge_groups=accepted or None,
+            apply_merge=bool(accepted),
+            parent_curation_id=curation_key["curation_id"],
+            description=description,
+            curation_source="curation_evaluation",
+            label_policy=label_policy,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def materialize_labels(
+        self,
+        key,
+        *,
+        labels: dict | None = None,
+        label_policy: str = "inherit",
+        description: str = "accepted labels from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Accept only the evaluation's proposed LABELS into a committed child.
+
+        A thin :meth:`create_curation` wrapper with no merges -- the common
+        "apply the auto-curation labels, keep the unit set" acceptance. Every
+        unit of the evaluated curation is preserved; ``labels`` defaults to the
+        evaluation's proposed labels. Returns the child's
+        ``{"sorting_id", "curation_id"}``.
+        """
+        return self.create_curation(
+            key,
+            merge_groups=None,
+            use_all_suggested_merges=False,
+            labels=labels,
+            label_policy=label_policy,
+            description=description,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def create_preview_curation(
+        self,
+        key,
+        *,
+        merge_groups=None,
+        use_all_suggested_merges: bool = False,
+        labels: dict | None = None,
+        label_policy: str = "inherit",
+        description: str = "draft from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Create a DRAFT (preview) child from the evaluation's outputs.
+
+        The explicit opt-in for drafting a merge for review before committing:
+        the proposed merges are recorded in ``CurationV2.MergeGroup`` WITHOUT
+        being applied (``apply_merge=False``), so the child is a preview --
+        ``has_unapplied_proposed_merges`` is True and downstream consumers
+        reject it until it is committed. Distinct from :meth:`create_curation`,
+        which only ever produces committed children. Same merge-choice
+        contract: pass ``merge_groups`` or ``use_all_suggested_merges=True`` to
+        draft merges (otherwise this is a labels-only child).
+
+        Returns the child's ``{"sorting_id", "curation_id"}``.
+        """
+        curation_key = self._evaluated_curation_key(key)
+        accepted = self._resolve_accepted_merges(
+            key, merge_groups, use_all_suggested_merges
+        )
+        effective_labels = self.get_labels(key) if labels is None else labels
+        return CurationV2.insert_curation(
+            {"sorting_id": curation_key["sorting_id"]},
+            labels=effective_labels or None,
+            merge_groups=accepted or None,
+            apply_merge=False,
+            parent_curation_id=curation_key["curation_id"],
+            description=description,
+            curation_source="curation_evaluation",
+            label_policy=label_policy,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )

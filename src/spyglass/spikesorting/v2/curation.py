@@ -4,9 +4,10 @@ Tables (all final-shape under the zero-migration policy):
     CurationV2 (+ Unit + UnitLabel) -- Manual; lineage via parent_curation_id.
 
 ``curation_source`` is restricted to true CurationV2 provenance values
-(``manual``, ``analyzer_curation``, ``figpack``). External or
-ground-truth NWB Units continue to use ``ImportedSpikeSorting``; v2 does
-NOT duplicate them into ``CurationV2``.
+(``manual``, ``figpack``, ``curation_evaluation`` -- a child accepted from a
+``CurationEvaluation`` output; ``analyzer_curation`` is a legacy value kept on
+the enum for back-compat). External or ground-truth NWB Units continue to use
+``ImportedSpikeSorting``; v2 does NOT duplicate them into ``CurationV2``.
 
 ``insert_curation`` registers each curation atomically across the
 master, ``Unit``, and ``UnitLabel`` parts plus the
@@ -85,7 +86,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
     -> AnalysisNwbfile
     object_id: varchar(72)
     merges_applied=0: bool
-    curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack')
+    curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'curation_evaluation')
     description: varchar(255)
     """
 
