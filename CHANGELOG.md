@@ -219,6 +219,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `DandiValidation` tables for tracking dandi compliance during export #1584
 - Save disk checks as csv, predict runway of primary data directory #1611
 - Fix package scanning without database import #1621
+- Allow `RestrGraph` to inspect tables outside of Spyglass #1595
 
 ### Pipelines
 
