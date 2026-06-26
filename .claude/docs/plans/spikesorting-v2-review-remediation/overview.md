@@ -65,7 +65,7 @@ Touched (all paths under `src/spyglass/spikesorting/`):
 - `pyproject.toml:58,69`, `environments/environment_spikesorting_v2.yml:56` — dependency pins. **phase-4b.**
 - `utils/mixins/analysis.py:205-227,300-302,316-318,341-348`, `v2/_sorting_dispatch.py:486`, `common_nwbfile.py:107`, v2 writers — permissions/path/conda. **phase-4b.**
 - `v2/metric_curation.py:73`, `v2/recompute.py:67` — `_assert_v2_db_safe()`. **phase-4b.**
-- `spikesorting_merge.py:36-44,127-134` — narrow the eager v2 probe. **phase-4b.**
+- `spikesorting_merge.py:36-44,127-134` — log/surface the eager v2 probe failure while preserving the broad fallback (do NOT narrow the except). **phase-4b.**
 - `v2/recompute.py:1216-1217`, `v2/sorting.py:2274-2278`, `v2/_recording_nwb.py:258-275`, `common/common_usage.py:547-550` — footguns + Export.File leak. **phase-4b.**
 
 Left alone (explicit non-targets): all Phase 1–4 *table primary keys* (no PK changes — see R9-PK below); the recording content-fingerprint identity (R6 full recipe — decided won't-do); v0/v1 spike-sorting modules; the `cautious_delete`/`Session.Experimenter` permission model (unchanged, matches v1).

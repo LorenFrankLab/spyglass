@@ -25,7 +25,7 @@ after the code phases so the gates protect corrected behavior.
 
 ## Tasks
 
-1. **Publish the gating fixtures and make their gates required (SVFR-1, SVFR-2 — shared blocker, do first).** Upload the two-session UnitMatch fixture and the planted-drift fixture (`mearec_polymer_128ch_drift_120s`) to the fixture host, fill the `None` URLs in `fixtures/_fetch.py:93-94`, fetch them in CI **without** `|| true`, and make their gates **required** (absence fails, not skips). **Mind the CI step ordering:** today the global required-fixture list is enforced *before* the main v2 pytest step, while the two-session/UnitMatch fixtures are fetched later in the **matching-extra** job. So do NOT blindly add them to the global `SPYGLASS_V2_REQUIRE_FIXTURES` (that would fail the main step, which never had them) — instead scope a *matching-extra* required-fixture set enforced in the matching-extra pytest step *after* its download, **or** move the two-session/drift download ahead of the global required-fixture gate. This step turns the existing `assert auc > 0.85` (`test_unitmatch.py:1547`) into a real, enforced ship gate and unblocks task 2.
+1. **Publish/require the gating fixtures (SVFR-1, SVFR-2 — shared blocker, do first).** The **planted-drift** fixture (`mearec_polymer_128ch_drift_120s`) is already **hosted** in `fixtures/_fetch.py:81` but is nightly/manual — not fetched in the main job and with no science test referencing it (task 2 adds the test). The **two-session** UnitMatch fixtures (`..._2sessions_s1`/`s2`) still have `None` URLs (`fixtures/_fetch.py:93-94`) and must be uploaded + their URLs filled. Then fetch both **without** `|| true` in the lane that needs them and make their gates **required** (absence fails, not skips). **Mind the CI step ordering:** today the global required-fixture list is enforced *before* the main v2 pytest step, while the two-session/UnitMatch fixtures are fetched later in the **matching-extra** job. So do NOT blindly add them to the global `SPYGLASS_V2_REQUIRE_FIXTURES` (that would fail the main step, which never had them) — instead scope a *matching-extra* required-fixture set enforced in the matching-extra pytest step *after* its download, **or** move the two-session/drift download ahead of the global required-fixture gate. This step turns the existing `assert auc > 0.85` (`test_unitmatch.py:1547`) into a real, enforced ship gate and unblocks task 2.
 
 2. **Add a planted-drift displacement-accuracy gate (SVFR-2).** The current drift fixture is drift-free, so `test_drift_estimate.py` asserts only structure. Using the planted-drift fixture from task 1, add a test that runs `DriftEstimate` (or `correct_motion`) and asserts the recovered displacement matches the planted trajectory within a stated tolerance (e.g. median abs error < X µm) — a real science assertion, not a finiteness check. State the tolerance and its justification in the test.
 
@@ -62,8 +62,10 @@ This phase IS validation; its "tests" are the gates themselves. The meta-asserti
 
 ## Fixtures
 
-The **deliverable** of task 1 is the published two-session + planted-drift fixtures
-(currently `None` URLs). Tasks 3–4 reuse the realistic 128-ch polymer fixture; task 5
+The **deliverable** of task 1 is the published + required **two-session** fixtures
+(currently `None` URLs at `_fetch.py:93-94`); the **planted-drift** fixture is
+already hosted (`_fetch.py:81`) and just needs to be fetched + gated. Tasks 3–4
+reuse the realistic 128-ch polymer fixture; task 5
 extends the manifest for every fixture. Task 7 reuses `chronic_2_session_minirec`,
 `populated_sorting_with_curation`, and the existing MEArec fixtures.
 

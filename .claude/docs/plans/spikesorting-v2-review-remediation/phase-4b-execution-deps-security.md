@@ -73,7 +73,7 @@ none warrants its own.
 | `test_security.py::test_v2_artifacts_not_world_writable` (new) | a populated recording/units artifact has mode `0o644`; local sorter scratch is not `0o777`. |
 | `test_security.py::test_nwb_filename_traversal_rejected` (new) | a `nwb_file_name` with `..`/separator/absolute path raises. |
 | `test_import_boundaries.py::test_metric_curation_and_recompute_call_db_guard` (new) | importing/declaring `metric_curation` + `recompute` against a non-local DB host raises via `_assert_v2_db_safe` (patch the host). |
-| `test_merge_probe.py::test_unexpected_v2_import_error_surfaces` (new) | a non-ImportError raised during the v2 probe is not swallowed (the broad-except narrowing). |
+| `test_merge_probe.py::test_unexpected_v2_import_error_is_logged` (new) | an unexpected error during the v2 probe is `logger.warning`-surfaced (not silent) while the broad `except` still tolerates it; a DB-safety `RuntimeError` (non-localhost) is still tolerated, not propagated. |
 | `test_recompute.py::test_negative_days_rejected` (new) | `delete_files(days_since_creation=-1)` raises `ValueError`. |
 | `test_analyzer_lifecycle.py::test_orphan_sweep_ignores_nonmatching_dirs` (new) | a non-`{uuid}__*.zarr` directory under the analyzer root is never a deletion candidate. |
 | `test_export.py::test_export_file_rows_removed_on_overwrite` (new) | re-exporting a `paper_id`/`analysis_id` leaves no stale `Export.File` rows. |
@@ -93,7 +93,7 @@ two-team sort-group setup built from `_ingest_helpers.py`.
 Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
 - Each of the 11 fixes has a test asserting the new behavior; the happy-path regressions pass.
 - The security fixes default-close (artifacts `0o644`, traversal rejected) without breaking the container UID path (scratch chmod still applied for container backends).
-- The merge-probe narrowing still degrades gracefully in a real v0/v1 env (ImportError path intact).
+- The merge-probe `except` stays broad (NOT narrowed) — it logs/surfaces the failure but still tolerates a DB-safety `RuntimeError` on a non-localhost DB, so v0/v1 envs on production still load the merge table.
 - TEAM-1 is a visibility fix only (no enforcement added); the R9 / R33 / R9-PK non-goals are honored.
 - The Export.File fix deletes `File` (not a third `delete_quick` on `Table`).
 - CHANGELOG + the security-trust docs subsection are present; no plan/phase references in code or tests.
