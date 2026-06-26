@@ -1414,6 +1414,81 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def is_committed_curation(cls, key, *, merges_applied=None) -> bool:
+        """Return whether a curation is a committed (final) curation state.
+
+        Committed states -- the root, a label-only child, and an applied-merge
+        child -- are valid downstream curations: their ``CurationV2.Unit`` set is
+        the unit namespace a consumer (decoding, evaluation) reads. A PREVIEW
+        curation (``apply_merge=False`` with a real >=2-unit proposed merge
+        group) is a draft: it still carries every original unit and only records
+        the proposed merge in ``MergeGroup``, so its unit set is not the final
+        merged set. ``is_committed_curation`` is the exact negation of
+        :meth:`has_unapplied_proposed_merges`; named affirmatively because the
+        evaluation boundary asks "may I score this curation?".
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+        merges_applied : bool, optional
+            The row's ``merges_applied`` value when the caller already holds it;
+            passing it skips the redundant scalar fetch (and the ``MergeGroup``
+            fetch on the already-applied / root path).
+
+        Returns
+        -------
+        bool
+            ``True`` for root / label-only / applied-merge rows; ``False`` for
+            preview rows.
+        """
+        return not cls.has_unapplied_proposed_merges(
+            key, merges_applied=merges_applied
+        )
+
+    @classmethod
+    def assert_committed_curation(
+        cls, key, *, context: str = "", merges_applied=None
+    ) -> None:
+        """Raise if ``key`` is a preview curation; no-op for committed states.
+
+        The guard at every evaluation boundary (``CurationEvaluation``): a
+        preview curation has unapplied proposed merges, so scoring it would
+        attach metrics to the UNMERGED preview units rather than the final
+        merged unit set the user intends. Mirrors
+        ``_assert_curation_not_merged`` (the R27 raw-namespace guard) but in the
+        opposite direction -- there the danger is a merged parent under a
+        raw-sort analyzer; here it is a NOT-yet-merged preview under a
+        committed-state evaluation.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row.
+        context : str, optional
+            Caller label woven into the error message (e.g.
+            ``"CurationEvaluation"``).
+        merges_applied : bool, optional
+            The row's ``merges_applied`` value when already held by the caller.
+
+        Raises
+        ------
+        ValueError
+            If the curation is a preview (has unapplied proposed merges).
+        """
+        if cls.is_committed_curation(key, merges_applied=merges_applied):
+            return
+        where = f"{context}: " if context else ""
+        raise ValueError(
+            f"{where}curation {dict(key)} is a preview/draft curation "
+            "(apply_merge=False with a proposed merge group that has not been "
+            "applied), not a committed curation state. Evaluating it would "
+            "score the UNMERGED preview units instead of the final merged unit "
+            "set. Commit the merge first (create_merged_curation / "
+            "insert_curation(apply_merge=True)), then evaluate that curation."
+        )
+
+    @classmethod
     def resolve_restriction(
         cls,
         key: dict,
