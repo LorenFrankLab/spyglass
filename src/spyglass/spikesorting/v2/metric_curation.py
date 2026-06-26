@@ -270,10 +270,8 @@ class CurationEvaluationFetched(NamedTuple):
     curated_units_abs_path: str
     expected_unit_ids: list[int]
     use_fast_path: bool
-    display_waveform_params_name: str
     display_waveform_params: dict
     display_analyzer_folder: str
-    metric_waveform_params_name: str
     metric_waveform_params: dict
     metric_analyzer_folder: str
     metric_names: list[str]
@@ -2141,12 +2139,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             curated_units_abs_path=curated_units_abs_path,
             expected_unit_ids=expected_unit_ids,
             use_fast_path=use_fast_path,
-            display_waveform_params_name=display_waveform_params_name,
             display_waveform_params=display_waveform_params,
             display_analyzer_folder=str(
                 analyzer_path(sorting_id, display_waveform_params_name)
             ),
-            metric_waveform_params_name=metric_waveform_params_name,
             metric_waveform_params=metric_waveform_params,
             metric_analyzer_folder=str(
                 analyzer_path(sorting_id, metric_waveform_params_name)
@@ -2184,10 +2180,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         curated_units_abs_path,
         expected_unit_ids,
         use_fast_path,
-        display_waveform_params_name,
         display_waveform_params,
         display_analyzer_folder,
-        metric_waveform_params_name,
         metric_waveform_params,
         metric_analyzer_folder,
         metric_names,
