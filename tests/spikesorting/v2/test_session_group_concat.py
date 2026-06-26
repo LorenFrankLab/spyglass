@@ -887,6 +887,90 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     )
 
 
+@pytest.mark.slow
+def test_preproc_restriction_includes_concat_and_recording_curations(
+    same_day_group,
+):
+    """A ``{preprocessing_params_name}`` restriction matches BOTH source families.
+
+    ``preprocessing_params_name`` lives on both ``RecordingSelection`` and
+    ``ConcatenatedRecordingSelection``, so a bare preprocessing-recipe query
+    must surface a recording-backed AND a concat-backed curation that share the
+    recipe (the recording-only routing silently dropped the concat one), and
+    ``{concat_recording_id, preprocessing_params_name}`` must be accepted as a
+    valid concat restriction rather than rejected as contradictory.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+    )
+
+    grp = same_day_group
+    preproc = grp["preprocessing_params_name"]
+    _ensure_clusterless_sorter_params()
+
+    # A concat-backed sort + curation under the shared preprocessing recipe.
+    concat_pk = _populate_concat(grp["group_key"], preproc)
+    concat_sort = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+        }
+    )
+    Sorting.populate(concat_sort, reserve_jobs=False)
+    concat_curation = CurationV2.insert_curation(sorting_key=concat_sort)
+    concat_merge_id = (
+        SpikeSortingOutput.CurationV2 & concat_curation
+    ).fetch1("merge_id")
+
+    # A single-recording sort + curation on a member, SAME preproc recipe.
+    rec_sort = SortingSelection.insert_selection(
+        {
+            "recording_id": grp["recording_pks"][0]["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+        }
+    )
+    Sorting.populate(rec_sort, reserve_jobs=False)
+    rec_curation = CurationV2.insert_curation(sorting_key=rec_sort)
+    rec_merge_id = (SpikeSortingOutput.CurationV2 & rec_curation).fetch1(
+        "merge_id"
+    )
+    assert concat_merge_id != rec_merge_id
+
+    # The bare preprocessing-recipe restriction surfaces BOTH families.
+    by_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+        {"preprocessing_params_name": preproc}, sources=["v2"]
+    )
+    assert concat_merge_id in by_preproc
+    assert rec_merge_id in by_preproc
+
+    # The cross-source branch genuinely FILTERS (rather than falling through to
+    # "all sorts"): an unmatched recipe surfaces neither family.
+    by_absent_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+        {"preprocessing_params_name": "no_such_preproc_recipe"},
+        sources=["v2"],
+    )
+    assert concat_merge_id not in by_absent_preproc
+    assert rec_merge_id not in by_absent_preproc
+
+    # {concat_recording_id, preprocessing_params_name} is a valid pair (no
+    # contradiction): it returns the concat curation and discriminates AGAINST
+    # the recording-backed one (proving it filters rather than matching both).
+    by_concat_and_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "preprocessing_params_name": preproc,
+        },
+        sources=["v2"],
+    )
+    assert concat_merge_id in by_concat_and_preproc
+    assert rec_merge_id not in by_concat_and_preproc
+
+
 # ---------- memory / runtime measurement ----------------------------------
 
 

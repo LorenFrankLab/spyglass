@@ -30,14 +30,16 @@ from spyglass.spikesorting.v2._artifact_naming import (
 
 logger = logging.getLogger("spyglass")
 
-# Single-recording source restriction keys: route through
-# ``SortingSelection.RecordingSource`` -> ``RecordingSelection``.
+# Single-recording-ONLY source restriction keys: route through
+# ``SortingSelection.RecordingSource`` -> ``RecordingSelection``. These columns
+# exist only on the single-recording selection, NOT on
+# ``ConcatenatedRecordingSelection`` (see ``_SHARED_SOURCE_KEYS`` for the
+# preprocessing recipe, which lives on both).
 _REC_KEYS = (
     "nwb_file_name",
     "team_name",
     "sort_group_id",
     "interval_list_name",
-    "preprocessing_params_name",
     "recording_id",
 )
 # Concat-source restriction keys: route through
@@ -51,6 +53,14 @@ _CONCAT_KEYS = (
     "session_group_name",
     "motion_correction_params_name",
 )
+# Cross-source restriction keys: columns present on BOTH ``RecordingSelection``
+# and ``ConcatenatedRecordingSelection`` (the preprocessing recipe is shared by
+# single-recording and concat sources). A shared key filters whichever source
+# family the restriction routes to, and -- with no source-specific key -- must
+# match BOTH families (a broad ``{preprocessing_params_name}`` query must not
+# silently drop concat-backed curations). It NEVER triggers the
+# concat-vs-recording contradiction, since it is not exclusive to either.
+_SHARED_SOURCE_KEYS = ("preprocessing_params_name",)
 # Sort-level keys (``artifact_detection_id`` lives on the optional
 # ``SortingSelection.ArtifactDetectionSource`` part, so it is resolved
 # separately from the other sort keys by the join assembly).
@@ -62,7 +72,11 @@ _SORT_KEYS = (
 )
 _CURATION_KEYS = ("curation_id",)
 _ALLOWED_KEYS = frozenset(
-    _REC_KEYS + _CONCAT_KEYS + _SORT_KEYS + _CURATION_KEYS
+    _REC_KEYS
+    + _CONCAT_KEYS
+    + _SHARED_SOURCE_KEYS
+    + _SORT_KEYS
+    + _CURATION_KEYS
 )
 
 # Sentinel distinguishing "the restriction names no artifact_detection_id"
@@ -78,7 +92,10 @@ class RestrictionPlan(NamedTuple):
 
     Each ``*_restriction`` dict is the subset of the (normalized) restriction
     routing to that source / sort / curation table; any may be ``{}``.
-    ``artifact_detection_id`` is the resolved id the optional
+    ``shared_restriction`` carries cross-source keys (the preprocessing recipe)
+    present on both source selections: the join assembly applies it to whichever
+    family routes, or matches both families when no source-specific key is
+    given. ``artifact_detection_id`` is the resolved id the optional
     ``SortingSelection.ArtifactDetectionSource`` part is restricted by: a
     ``uuid.UUID`` intersects that part, ``None`` anti-joins it (sorts with no
     artifact-detection pass), and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
@@ -92,6 +109,7 @@ class RestrictionPlan(NamedTuple):
 
     rec_restriction: dict
     concat_restriction: dict
+    shared_restriction: dict
     sort_restriction: dict
     curation_restriction: dict
     artifact_detection_id: object
@@ -114,8 +132,9 @@ def classify_and_normalize_restriction(
     unresolved-name warning. Returns ``None`` on the lenient (``strict=False``)
     unrecognized-key bail-out; raises ``ValueError`` on an unrecognized key
     when ``strict=True`` and on a contradictory concat+recording restriction.
-    Pure: no DataJoint, no DB. This is a refactor -- it must produce
-    byte-identical routing, not a reinterpretation.
+    A cross-source key (the preprocessing recipe) goes into
+    ``shared_restriction`` and never triggers that contradiction. Pure: no
+    DataJoint, no DB.
     """
     unknown = set(key) - _ALLOWED_KEYS
     if unknown:
@@ -177,6 +196,9 @@ def classify_and_normalize_restriction(
     # rejected.
     concat_restriction = {k: key[k] for k in _CONCAT_KEYS if k in key}
     rec_restriction = {k: key[k] for k in _REC_KEYS if k in key}
+    # Cross-source keys (the preprocessing recipe) are NOT counted toward the
+    # concat-vs-recording contradiction -- they live on both source selections.
+    shared_restriction = {k: key[k] for k in _SHARED_SOURCE_KEYS if k in key}
     if concat_restriction and rec_restriction:
         # On the normal (non-raising) path the unresolved-name warning is
         # emitted at the table boundary. This path raises before returning, so
@@ -213,6 +235,7 @@ def classify_and_normalize_restriction(
     return RestrictionPlan(
         rec_restriction=rec_restriction,
         concat_restriction=concat_restriction,
+        shared_restriction=shared_restriction,
         sort_restriction=sort_restriction,
         curation_restriction=curation_restriction,
         artifact_detection_id=artifact_detection_id,

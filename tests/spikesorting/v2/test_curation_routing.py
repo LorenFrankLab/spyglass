@@ -84,6 +84,39 @@ def test_classify_routes_concat_only_keys():
     assert plan.rec_restriction == {}
 
 
+def test_classify_preproc_is_cross_source_shared_key():
+    """``preprocessing_params_name`` lives on both RecordingSelection and
+    ConcatenatedRecordingSelection, so it classifies as a shared (cross-source)
+    restriction -- not recording-only -- and triggers no contradiction, letting
+    a broad preproc query reach both source families."""
+    plan = _classify({"preprocessing_params_name": "default"})
+    assert plan.shared_restriction == {"preprocessing_params_name": "default"}
+    assert plan.rec_restriction == {}
+    assert plan.concat_restriction == {}
+
+
+def test_classify_accepts_concat_recording_id_with_preproc():
+    """``{concat_recording_id, preprocessing_params_name}`` is a valid concat
+    restriction (the recipe is on ConcatenatedRecordingSelection), NOT a
+    contradiction -- the concat key routes, the shared preproc filters it."""
+    plan = _classify(
+        {"concat_recording_id": "c", "preprocessing_params_name": "default"}
+    )
+    assert plan.concat_restriction == {"concat_recording_id": "c"}
+    assert plan.shared_restriction == {"preprocessing_params_name": "default"}
+    assert plan.rec_restriction == {}
+
+
+def test_classify_recording_id_with_preproc_splits_rec_and_shared():
+    """A single-recording key + preproc keeps the recording key in the rec
+    restriction and the cross-source preproc in the shared restriction."""
+    plan = _classify(
+        {"recording_id": "r", "preprocessing_params_name": "default"}
+    )
+    assert plan.rec_restriction == {"recording_id": "r"}
+    assert plan.shared_restriction == {"preprocessing_params_name": "default"}
+
+
 def test_classify_normalizes_artifact_id_and_warning():
     """Artifact-name -> UUID id; raw uuid string -> UUID; unresolved name ->
     captured warning (not raised); explicit None preserved for the anti-join."""
@@ -166,6 +199,7 @@ def test_classify_does_not_emit_include_exclude_directive():
     assert set(plan._fields) == {
         "rec_restriction",
         "concat_restriction",
+        "shared_restriction",
         "sort_restriction",
         "curation_restriction",
         "artifact_detection_id",

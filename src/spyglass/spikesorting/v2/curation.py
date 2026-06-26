@@ -1505,6 +1505,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             classify_and_normalize_restriction,
         )
         from spyglass.spikesorting.v2.recording import RecordingSelection
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+        )
         from spyglass.spikesorting.v2.sorting import SortingSelection
         from spyglass.utils import logger
 
@@ -1523,30 +1526,48 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # Route through the input source the restriction names. A concat
         # restriction joins SortingSelection.ConcatenatedRecordingSource ->
         # ConcatenatedRecordingSelection; a single-recording restriction joins
-        # SortingSelection.RecordingSource -> RecordingSelection.
+        # SortingSelection.RecordingSource -> RecordingSelection. A cross-source
+        # ``shared_restriction`` (the preprocessing recipe) filters whichever
+        # family routes, since it lives on both source selections.
         if plan.concat_restriction:
-            from spyglass.spikesorting.v2.session_group import (
-                ConcatenatedRecordingSelection,
-            )
-
-            concat_sel = (
-                ConcatenatedRecordingSelection & plan.concat_restriction
-            )
+            concat_sel = ConcatenatedRecordingSelection & {
+                **plan.concat_restriction,
+                **plan.shared_restriction,
+            }
             sort_concat_source = (
                 SortingSelection.ConcatenatedRecordingSource * concat_sel.proj()
             )
             sort_master = SortingSelection * sort_concat_source.proj()
         elif plan.rec_restriction:
-            rec_table = RecordingSelection & plan.rec_restriction
+            rec_table = RecordingSelection & {
+                **plan.rec_restriction,
+                **plan.shared_restriction,
+            }
             sort_rec_source = (
                 SortingSelection.RecordingSource * rec_table.proj()
             )
             sort_master = SortingSelection * sort_rec_source.proj()
+        elif plan.shared_restriction:
+            # A cross-source key with NO source-specific key (e.g. a bare
+            # ``{preprocessing_params_name}`` query) must match BOTH families:
+            # sorts whose RecordingSource recipe matches OR whose
+            # ConcatenatedRecordingSource recipe matches. Routing through one
+            # family only would silently drop the other.
+            rec_match = SortingSelection.RecordingSource * (
+                RecordingSelection & plan.shared_restriction
+            ).proj()
+            concat_match = SortingSelection.ConcatenatedRecordingSource * (
+                ConcatenatedRecordingSelection & plan.shared_restriction
+            ).proj()
+            sort_master = SortingSelection & [
+                rec_match.proj(),
+                concat_match.proj(),
+            ]
         else:
-            # No source-specific key (an unrestricted v2 query or a
-            # sort-/curation-only restriction): match BOTH source families.
-            # Every SortingSelection has exactly one input source, so the
-            # master itself IS the recording-source union concat-source set --
+            # No source-specific or cross-source key (an unrestricted v2 query
+            # or a sort-/curation-only restriction): match BOTH source families.
+            # Every SortingSelection has exactly one input source, so the master
+            # itself IS the recording-source union concat-source set --
             # restricting through one source part here would silently drop the
             # other (the bug that omitted concat-backed curations from broad v2
             # merge queries).
