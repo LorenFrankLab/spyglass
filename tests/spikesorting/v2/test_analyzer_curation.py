@@ -493,6 +493,17 @@ def test_analyzer_curation_over_merged_parent_rejected(
             AnalyzerCuration().make_fetch(
                 {"analyzer_curation_id": bypass_id}
             )
+        # insert_selection must FAIL EARLY on the merged parent rather than
+        # hand back the planted bad row (the guard runs before find-existing).
+        with pytest.raises(ValueError, match="applied merges"):
+            AnalyzerCurationSelection.insert_selection(
+                {
+                    "sorting_id": merged["sorting_id"],
+                    "curation_id": merged["curation_id"],
+                    "metric_params_name": "minimal",
+                    "auto_curation_rules_name": "none",
+                }
+            )
 
         # A label-only child leaves raw unit-ids intact -> still a legit target.
         label_only = CurationV2.insert_curation(

@@ -774,10 +774,6 @@ class AnalyzerCurationSelection(
             field="analyzer_curation_id",
         )
 
-        existing = cls._find_existing_pk(identity, analyzer_curation_id)
-        if existing is not None:
-            return existing
-
         parent_key = {
             "sorting_id": key["sorting_id"],
             "curation_id": key["curation_id"],
@@ -785,14 +781,21 @@ class AnalyzerCurationSelection(
         merges_applied, upstream_source = (CurationV2 & parent_key).fetch1(
             "merges_applied", "curation_source"
         )
-        # R27: reject auto-curating a parent that applied merges (the guard is
-        # re-asserted in make_fetch so an allow_direct_insert / legacy row
-        # cannot reach the merged-namespace compute path).
+        # R27: reject auto-curating a parent that applied merges BEFORE the
+        # find-existing early-return, so a legacy / allow_direct_insert selection
+        # over a merged parent fails loudly here instead of being handed back as
+        # a "valid" row (it is also re-asserted in make_fetch / materialize, so
+        # the merged-namespace compute path stays unreachable).
         _assert_curation_not_merged(
             key["sorting_id"],
             key["curation_id"],
             merges_applied=merges_applied,
         )
+
+        existing = cls._find_existing_pk(identity, analyzer_curation_id)
+        if existing is not None:
+            return existing
+
         if upstream_source == "analyzer_curation":
             # A label-only auto-curation parent (merges_applied=False, caught
             # above) is a legitimate chaining target -- kept a WARNING, not a
