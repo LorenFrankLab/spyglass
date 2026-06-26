@@ -81,6 +81,8 @@ is **secondary, never identity** — a parity test confirms ids are unchanged.
 | `test_matcher_params.py::test_bundle_params_in_identity` (new) | two `MatcherParameters` rows differing only in `ms_before` yield different `matcher_params_name`-derived `unitmatch_id`s; the bundle params reach `extract_unitmatch_bundle`. |
 | `test_matcher_params.py::test_bundle_seed_override_rejected` (new) | a `MatcherParameters` row whose `job_kwargs` carries a `random_seed` different from the `seed` field is rejected at insert (or, if folded, yields a distinct `unitmatch_id`) — closes the seed-override disagreement. |
 | `test_provenance.py::test_ids_unchanged_after_provenance_columns` (new) | `sorting_id`/`unitmatch_id` for a fixed selection equal the pre-change deterministic values (provenance is secondary, not identity). Pin the expected uuids. |
+| `test_analyzer_curation.py::test_analyzer_curation_records_source_provenance` (new, ALSC-5) | the `AnalyzerCuration` row carries the source analyzer recipe name(s) + manifest/hash, the sorting/recording `content_hash`, and the SI version; the stale-detection helper flags a row whose stored source hash diverges from current. |
+| `test_provenance.py::test_clusterless_unit_semantics_persisted` (new, CLUST-3) | a clusterless sort records `unit_semantics="clusterless_threshold_crossings"` (vs `"sorted_units"`); the consuming surfaces (`get_sort_metadata`/UnitMatch/merge) can read it. |
 | (regression) `test_sorter_parameters.py`, `test_unitmatch.py`, `test_matcher_params.py`, `test_recompute.py` | existing identity/runtime tests pass; the matcher default re-seed is idempotent. |
 
 ## Fixtures

@@ -89,7 +89,7 @@ related task groups (review per group is fine).
        defaults). Raise DuplicateParameterContentError-style error if strict."""
    ```
 
-   Call it (non-strict, log warnings) at the end of `initialize_v2_defaults`, and expose it for an admin to run strict. This closes SCHEMA-2/SCHEMA-3 and, with task 4, flags a pre-order-change preprocessing dev row.
+   Call it (non-strict, log warnings) at the end of `initialize_v2_defaults`, and expose it for an admin to run strict. This closes SCHEMA-2/SCHEMA-3 — it flags a stored same-name **shipped-default** row whose content diverged from the reseeded default. (It does **not** back-detect which old *dev* rows predate the preprocessing order flip — same version, identical blob; see task 4. Don't claim that.)
 
 9. **Docs.** CHANGELOG entries for: the new `update1` deny on masters; the preprocessing version bump (note dev rows must be re-seeded); the new `UnitMatch.MatchableUnit` part; `verify_v2_default_catalog`. Update the migration doc (`docs/src/.../SpikeSortingV2_Migration.md`) with the version-bump + re-seed note.
 
@@ -121,7 +121,7 @@ related task groups (review per group is fine).
 | `test_selection_identity.py::test_update1_rejected_all_masters` (new) | parametrized over all six selection masters + `CurationV2` + `SessionGroup`: `cls.update1(changed_row)` raises `DataJointError` match `"not supported"`; `allow_master_mutation=True`/factory-bypass succeeds. Mirrors `test_sorter_parameters_update1_rejected_in_place`. |
 | `test_selection_identity.py::test_curationv2_direct_insert_rejected` (new) | `CurationV2.insert1(row)` raises; `CurationV2.insert_curation(...)` still succeeds (factory bypass works). Same for `SessionGroup.create_group`. |
 | `test_integrity.py::test_audit_source_part_integrity` (new) | dual *recording*-source rows are flagged; a zero-source master is flagged; **a valid `RecordingSource + ArtifactDetectionSource` sorting is NOT flagged** (artifact part excluded from the count); a clean single-recording-source master is not flagged. |
-| `test_params_validation.py::test_preprocessing_runtime_version_pinned` (new/extended) | the preprocessing runtime-order version equals a checked-in expected constant (a future silent order change fails). |
+| `test_params_validation.py::test_preprocessing_runtime_version_pinned` (new/extended) | the preprocessing runtime-order version equals a checked-in expected constant **AND** the actual runtime call order is pinned (extend `test_preprocessing_order.py`'s `["bandpass_filter","common_reference","remove_channels"]` order-signature assertion), so a future order change without a version bump fails — pinning the constant alone is insufficient. |
 | `test_concat_recording.py::test_resolved_motion_preset_persisted` (new) | a concat built with `preset="auto"` stores the resolved `"rigid_fast"` (not `"auto"`) and the alias-version constant. |
 | `test_unitmatch.py::test_tracked_unit_uses_frozen_universe_after_relabel` (new) | freeze a UnitMatch, relabel a member unit, populate `TrackedUnit`: the node universe matches the frozen `MatchableUnit` rows (singleton not dropped) — **fails before** the frozen-universe change. |
 | `test_parameter_identity.py::test_outer_version_backfilled_for_all_lookups` (new) | inserting a Preprocessing/Artifact/Motion/Waveform row with `params_schema_version` omitted backfills it from the blob (drift check still trips on an explicit mismatch). |

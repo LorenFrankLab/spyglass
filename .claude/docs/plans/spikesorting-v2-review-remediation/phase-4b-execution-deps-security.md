@@ -70,7 +70,7 @@ none warrants its own.
 | `test_sorter_parameters.py::test_legacy_seeder_skips_matlab` (new) | `insert_default_legacy_si_sorters` does not create local MATLAB rows (or creates container ones). |
 | `test_sorting_dispatch.py::test_whiten_interception_allowlisted` (new) | a curated MS sorter's `whiten=True` is intercepted (external whitening); a generic sorter's `whiten` is passed through unchanged. |
 | `test_dependency_contract.py::test_numpy_pinned_and_si_contracts_agree` (new) | `pyproject` pins `numpy>=2,<3`; the env-file SI spec matches the pyproject pin (parse both). |
-| `test_security.py::test_v2_artifacts_not_world_writable` (new) | a populated recording/units artifact has mode `0o644`; local sorter scratch is not `0o777`. |
+| `test_security.py::test_v2_artifacts_not_world_writable` (new) | a populated recording/units artifact has mode `0o644`; **local** sorter scratch is not `0o777`; **but a container-backend run still `chmod 0o777`s its scratch** (the UID-mismatch positive case — an impl that drops the chmod entirely must fail). |
 | `test_security.py::test_nwb_filename_traversal_rejected` (new) | a `nwb_file_name` with `..`/separator/absolute path raises. |
 | `test_import_boundaries.py::test_metric_curation_and_recompute_call_db_guard` (new) | importing/declaring `metric_curation` + `recompute` against a non-local DB host raises via `_assert_v2_db_safe` (patch the host). |
 | `test_merge_probe.py::test_unexpected_v2_import_error_is_logged` (new) | an unexpected error during the v2 probe is `logger.warning`-surfaced (not silent) while the broad `except` still tolerates it; a DB-safety `RuntimeError` (non-localhost) is still tolerated, not propagated. |
