@@ -198,6 +198,48 @@ def _get_recording_timestamps(
     return timestamps
 
 
+def intersect_interval_sets(interval_sets):
+    """Intersect a list of ``(n, 2)`` sorted, non-overlapping interval arrays.
+
+    Returns the ``(m, 2)`` float array of time spans contained in EVERY input
+    set -- the conservative observation window for a merged unit whose
+    contributors have differing ``obs_intervals`` (CNEP-1). Each input is a
+    ``(n, 2)`` ``[start, end]`` array assumed sorted by start and disjoint (the
+    sort-time writer's ``obs_intervals`` shape). An empty input list returns an
+    empty ``(0, 2)`` array; a single set returns itself. Identical inputs (the
+    common single-sort case, where every unit shares one window) return that
+    shared window unchanged.
+    """
+    import numpy as np
+
+    sets = [
+        np.asarray(s, dtype=float).reshape(-1, 2)
+        for s in interval_sets
+        if s is not None
+    ]
+    if not sets:
+        return np.empty((0, 2), dtype=float)
+    acc = sets[0]
+    for other in sets[1:]:
+        merged = []
+        i = j = 0
+        while i < len(acc) and j < len(other):
+            lo = max(acc[i, 0], other[j, 0])
+            hi = min(acc[i, 1], other[j, 1])
+            if lo < hi:
+                merged.append((lo, hi))
+            # Advance whichever interval ends first (standard two-pointer
+            # interval intersection over two sorted, disjoint sets).
+            if acc[i, 1] < other[j, 1]:
+                i += 1
+            else:
+                j += 1
+        acc = np.asarray(merged, dtype=float).reshape(-1, 2)
+        if acc.size == 0:
+            break
+    return acc
+
+
 def _consolidate_intervals(intervals, timestamps):
     """Convert ``(start_time, stop_time)`` second intervals to frame indices.
 

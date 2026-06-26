@@ -289,7 +289,7 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     _write_units_nwb_with_samples(
         p_full, [(4, [0.1, 0.2, 0.3], [10, 20, 30]), (9, [], [])]
     )
-    abs_c, samp_c = read_units_abs_times_and_sample_indices(str(p_full))
+    abs_c, samp_c, _obs_c = read_units_abs_times_and_sample_indices(str(p_full))
     abs_s = read_units_abs_spike_times(str(p_full))
     samp_s = read_units_spike_sample_indices(str(p_full))
     assert set(abs_c) == set(abs_s)
@@ -299,14 +299,20 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
     # (b) legacy file without the column -> sample_indices is None
     p_legacy = tmp_path / "legacy.nwb"
     _write_units_nwb(p_legacy, [[0.1, 0.2]])
-    abs_l, samp_l = read_units_abs_times_and_sample_indices(str(p_legacy))
+    abs_l, samp_l, _obs_l = read_units_abs_times_and_sample_indices(
+        str(p_legacy)
+    )
     assert samp_l is None
     assert np.array_equal(abs_l[0], read_units_abs_spike_times(str(p_legacy))[0])
 
-    # (c) empty Units table -> ({}, {})
+    # (c) empty Units table -> ({}, {}, {})
     p_empty = tmp_path / "empty.nwb"
     _write_units_nwb(p_empty, [])
-    assert read_units_abs_times_and_sample_indices(str(p_empty)) == ({}, {})
+    assert read_units_abs_times_and_sample_indices(str(p_empty)) == (
+        {},
+        {},
+        {},
+    )
 
 
 def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
@@ -331,7 +337,7 @@ def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
     )
 
     # Subset: only units 4 and 9 are read (unit 7 is never materialized).
-    abs_sub, samp_sub = read_units_abs_times_and_sample_indices(
+    abs_sub, samp_sub, _obs_sub = read_units_abs_times_and_sample_indices(
         str(p), unit_ids={4, 9}
     )
     assert set(abs_sub) == {4, 9}
@@ -340,11 +346,13 @@ def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
     np.testing.assert_array_equal(samp_sub[9], [99])
 
     # None reads every unit (unchanged default behavior).
-    abs_all, _ = read_units_abs_times_and_sample_indices(str(p), unit_ids=None)
+    abs_all, _, _ = read_units_abs_times_and_sample_indices(
+        str(p), unit_ids=None
+    )
     assert set(abs_all) == {4, 7, 9}
 
     # A requested id absent from the table is skipped, not an error.
-    abs_missing, _ = read_units_abs_times_and_sample_indices(
+    abs_missing, _, _ = read_units_abs_times_and_sample_indices(
         str(p), unit_ids={4, 999}
     )
     assert set(abs_missing) == {4}

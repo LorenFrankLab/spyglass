@@ -98,25 +98,30 @@ def read_units_spike_sample_indices(abs_path) -> dict | None:
 
 
 def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
-    """Open the units NWB ONCE and return ``(abs_times, sample_indices_or_None)``.
+    """Open the units NWB ONCE; return ``(abs_times, sample_indices, obs)``.
 
-    Combined reader for callers that need BOTH columns (curated-units write +
-    lazy-merge preview), so a single ``NWBHDF5IO`` open replaces two. Matches the
-    single-column readers' semantics exactly: ``abs_times`` is
-    ``{unit_id: abs_spike_times}`` (``{}`` for an empty/absent Units table) and
-    ``sample_indices`` is ``{unit_id: spike_sample_index}``, ``None`` when the
-    ``spike_sample_index`` column is absent (legacy/manual files), or ``{}`` for
-    an empty Units table. Use the single-column readers on the fast paths that
-    need only one column.
+    Combined reader for callers that need these columns (curated-units write +
+    lazy-merge preview), so a single ``NWBHDF5IO`` open replaces several.
+    ``abs_times`` is ``{unit_id: abs_spike_times}`` (``{}`` for an empty/absent
+    Units table); ``sample_indices`` is ``{unit_id: spike_sample_index}``,
+    ``None`` when the ``spike_sample_index`` column is absent (legacy/manual
+    files), or ``{}`` for an empty Units table; ``obs`` is
+    ``{unit_id: obs_intervals}`` (the per-unit ``(n, 2)`` observation window),
+    ``None`` when the ``obs_intervals`` column is absent (legacy files), or
+    ``{}`` for an empty Units table. The curated writer carries ``obs`` forward
+    so a curated export keeps the correct observation window (CNEP-1); without
+    it, NWB-only firing-rate / presence-ratio / duration denominators over a
+    curated export silently assume the full session.
 
     ``unit_ids`` (optional iterable of int): when given, read ONLY those units'
-    spike trains / sample frames rather than every unit -- so a curation that
-    keeps a subset of a large multi-day sort never materializes the discarded
-    units' trains. ``None`` (the default) reads every unit, for the preview /
-    full-write paths that need all of them (see ``curation_source_unit_ids``). A
-    requested id absent from the table is skipped: the caller's kept-set is
-    authoritative, and a genuinely-missing source unit surfaces as a downstream
-    KeyError exactly as it did before this filter existed.
+    spike trains / sample frames / obs rather than every unit -- so a curation
+    that keeps a subset of a large multi-day sort never materializes the
+    discarded units' data. ``None`` (the default) reads every unit, for the
+    preview / full-write paths that need all of them (see
+    ``curation_source_unit_ids``). A requested id absent from the table is
+    skipped: the caller's kept-set is authoritative, and a genuinely-missing
+    source unit surfaces as a downstream KeyError exactly as it did before this
+    filter existed.
     """
     import numpy as np
     import pynwb
@@ -126,7 +131,7 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
         nwbf = io.read()
         units = nwbf.units
         if units is None or len(units) == 0:
-            return {}, {}
+            return {}, {}, {}
         rows = [
             (row_ind, int(uid))
             for row_ind, uid in enumerate(np.asarray(units.id[:], dtype=int))
@@ -137,14 +142,25 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
             uid: np.asarray(spike_times[row_ind], dtype=float)
             for row_ind, uid in rows
         }
-        if SPIKE_SAMPLE_INDEX_COLUMN not in units.colnames:
-            return abs_times, None
-        sample_col = units[SPIKE_SAMPLE_INDEX_COLUMN]
-        sample_indices = {
-            uid: np.asarray(sample_col[row_ind], dtype=np.int64)
-            for row_ind, uid in rows
-        }
-        return abs_times, sample_indices
+        if SPIKE_SAMPLE_INDEX_COLUMN in units.colnames:
+            sample_col = units[SPIKE_SAMPLE_INDEX_COLUMN]
+            sample_indices = {
+                uid: np.asarray(sample_col[row_ind], dtype=np.int64)
+                for row_ind, uid in rows
+            }
+        else:
+            sample_indices = None
+        # ``obs_intervals`` is a built-in (optional) NWB Units column; legacy /
+        # hand-written files may omit it -> ``None``.
+        if "obs_intervals" in units.colnames:
+            obs_col = units["obs_intervals"]
+            obs = {
+                uid: np.asarray(obs_col[row_ind], dtype=float)
+                for row_ind, uid in rows
+            }
+        else:
+            obs = None
+        return abs_times, sample_indices, obs
 
 
 def curation_source_unit_ids(kept_unit_to_contributors, apply_merge):
@@ -723,7 +739,7 @@ def write_curated_units_nwb(
     # merge contributors for apply_merge=True, every unit for the apply_merge=
     # False preview (see curation_source_unit_ids). A large multi-day sort
     # otherwise materializes the discarded units' spike trains here too.
-    abs_times_by_uid, sample_indices_by_uid = (
+    abs_times_by_uid, sample_indices_by_uid, obs_intervals_by_uid = (
         read_units_abs_times_and_sample_indices(
             src_abs_path,
             unit_ids=curation_source_unit_ids(
@@ -745,6 +761,7 @@ def write_curated_units_nwb(
             labels=labels,
             abs_times_by_uid=abs_times_by_uid,
             sample_indices_by_uid=sample_indices_by_uid,
+            obs_intervals_by_uid=obs_intervals_by_uid,
         )
     except Exception:
         from spyglass.spikesorting.v2.recording import (
@@ -757,6 +774,27 @@ def write_curated_units_nwb(
         raise
 
 
+def _curated_obs_intervals(kept_uid, contribs, apply_merge, obs_intervals_by_uid):
+    """Per-unit ``obs_intervals`` for one curated/kept unit, or ``None``.
+
+    ``None`` when the source NWB carried no ``obs_intervals`` column (legacy).
+    A merged unit (``apply_merge`` with >1 contributor) gets the INTERSECTION of
+    its contributors' windows -- the conservative choice, so a unit is reported
+    observed only where EVERY contributor was observed; in practice every unit of
+    one sort shares the same window, so the intersection equals that shared
+    window. A singleton / preview unit keeps its own window.
+    """
+    if obs_intervals_by_uid is None:
+        return None
+    from spyglass.spikesorting.v2._signal_math import intersect_interval_sets
+
+    if apply_merge and len(contribs) > 1:
+        return intersect_interval_sets(
+            [obs_intervals_by_uid[int(u)] for u in contribs]
+        )
+    return obs_intervals_by_uid[int(kept_uid)]
+
+
 def _write_curated_units_nwb_body(
     *,
     analysis_file_name,
@@ -766,12 +804,16 @@ def _write_curated_units_nwb_body(
     labels,
     abs_times_by_uid,
     sample_indices_by_uid,
+    obs_intervals_by_uid,
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
 
     Split out of :func:`write_curated_units_nwb` so its staged-file cleanup-on-
     error wrapper stays a thin try/except. Returns ``(analysis_file_name,
-    units_object_id, nwb_file_name, n_spikes_by_uid)``.
+    units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
+    (``{unit_id: (n, 2) array}`` or ``None`` for a legacy source) carries the
+    per-unit observation window forward so a curated export keeps the correct
+    firing-rate / presence-ratio / duration denominator (CNEP-1).
     """
     import numpy as np
     import pynwb
@@ -837,7 +879,12 @@ def _write_curated_units_nwb_body(
                         if sample_indices_by_uid is None
                         else sample_indices_by_uid[int(kept_uid)]
                     )
-                write_specs.append((int(kept_uid), spike_times, spike_indices))
+                obs = _curated_obs_intervals(
+                    kept_uid, contribs, apply_merge, obs_intervals_by_uid
+                )
+                write_specs.append(
+                    (int(kept_uid), spike_times, spike_indices, obs)
+                )
         else:
             write_specs = [
                 (
@@ -847,6 +894,9 @@ def _write_curated_units_nwb_body(
                         None
                         if sample_indices_by_uid is None
                         else sample_indices_by_uid[int(uid)]
+                    ),
+                    _curated_obs_intervals(
+                        uid, [uid], apply_merge, obs_intervals_by_uid
                     ),
                 )
                 for uid in sorted(abs_times_by_uid)
@@ -858,7 +908,7 @@ def _write_curated_units_nwb_body(
         # caller overrides ``unit_rows`` with this map.
         n_spikes_by_uid = {
             int(uid): int(len(spike_times))
-            for uid, spike_times, _spike_indices in write_specs
+            for uid, spike_times, _spike_indices, _obs in write_specs
         }
 
         if write_specs:
@@ -888,7 +938,7 @@ def _write_curated_units_nwb_body(
                     index=True,
                 )
             all_labels: list[list[str]] = []
-            for unit_id, spike_times, spike_indices in write_specs:
+            for unit_id, spike_times, spike_indices, obs in write_specs:
                 lbl_list = labels.get(int(unit_id), [])
                 label_list = [CurationLabel.normalize(lbl) for lbl in lbl_list]
                 all_labels.append(label_list)
@@ -899,6 +949,14 @@ def _write_curated_units_nwb_body(
                 if sample_indices_by_uid is not None:
                     unit_kwargs[SPIKE_SAMPLE_INDEX_COLUMN] = np.asarray(
                         spike_indices, dtype=np.int64
+                    )
+                # CNEP-1: carry the per-unit observation window forward so a
+                # curated export keeps the correct firing-rate / presence-ratio
+                # / duration denominator. Omitted only for a legacy source NWB
+                # that had no obs_intervals column (obs is None).
+                if obs is not None:
+                    unit_kwargs["obs_intervals"] = np.asarray(
+                        obs, dtype=np.float64
                     )
                 nwbf.add_unit(**unit_kwargs)
             # Only add the column when at least one unit

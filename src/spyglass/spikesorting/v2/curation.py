@@ -1743,8 +1743,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
         # Both columns are needed (dedup is in absolute time, frames are reused
         # when present) -- read them from a single NWB open.
-        abs_times, sample_indices = read_units_abs_times_and_sample_indices(
-            abs_path
+        abs_times, sample_indices, _obs = (
+            read_units_abs_times_and_sample_indices(abs_path)
         )
         if sample_indices is not None:
             return build_lazy_merged_sorting_from_samples(
