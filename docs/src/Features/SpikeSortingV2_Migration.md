@@ -136,9 +136,12 @@ Most post-sort (curation / metric) surfaces now have v2 replacements. Use the
 v1 chain only for features still listed as pending.
 
 - **Available in v2** — `metric_curation` now provides
-  `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`,
-  and `AnalyzerCuration`. This replaces v1 `MetricCuration` for SI quality
-  metrics, auto-labels, and merge suggestions. Like v1's
+  `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`,
+  and `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
+  metrics, auto-labels, and merge suggestions. Unlike v1 (which scored the raw
+  sort), `CurationEvaluation` scores a **committed `CurationV2`** row in that
+  curation's own unit namespace, and its `create_curation` / `materialize_labels`
+  helpers accept the proposals into a committed child. Like v1's
   `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
   metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,
   `silhouette`) are computed on a **whitened** metric analyzer (decorrelated
@@ -146,10 +149,12 @@ v1 chain only for features still listed as pending.
   `amplitude_cutoff`, `firing_rate`, `isi_violation`, …) stay on the unwhitened
   display analyzer — so expect PC/NN values to differ from any earlier
   single-analyzer v2 run (re-curate against the new scores). The metric recipe
-  is tracked on `AnalyzerCurationSelection.metric_waveform_params_name`.
-- **Folded into AnalyzerCuration** — the v1 `BurstPair` table was not cloned as
+  is tracked on `CurationEvaluationSelection.metric_waveform_params_name`. (The
+  interim `AnalyzerCuration` raw-sort table was removed in favor of
+  `CurationEvaluation`.)
+- **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned as
   a new DataJoint table. Its notebook plotting helpers are available from
-  `AnalyzerCuration` (`plot_correlograms`, `investigate_pair_xcorrel`,
+  `CurationEvaluation` (`plot_correlograms`, `investigate_pair_xcorrel`,
   `investigate_pair_peaks`, `plot_peak_over_time`), while per-pair quantitative
   `BurstPairUnit` tables remain v1-only.
 - **Available in v2** — `RecordingRecompute` is replaced by two explicit
@@ -163,9 +168,9 @@ v1 chain only for features still listed as pending.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
-| Metric / auto-merge curation | v1 still available for legacy rows | `AnalyzerCuration` (`QualityMetricParameters`, `AutoCurationRules`) |
+| Metric / auto-merge curation | v1 still available for legacy rows | `CurationEvaluation` (`QualityMetricParameters`, `AutoCurationRules`) |
 | FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation views (roadmap) |
-| Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `AnalyzerCuration` plotting helpers; no v2 `BurstPair` table |
+| Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table |
 | Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
 | Concatenated recording / session group | (no v1 equivalent) | session-group concatenation (roadmap) |
 | Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | cross-session unit matching (roadmap) |

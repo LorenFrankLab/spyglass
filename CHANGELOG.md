@@ -98,11 +98,13 @@ them if you computed results on a pre-fix build.
   most-negative channel instead of its true peak. SNR now uses the sorter's
   resolved sign (matching per-unit attribution). Negative-going sorts (the
   defaults) are numerically unchanged; *positive/bidirectional sorts change.*
-- **AnalyzerCuration over a merged parent is rejected (R27).** Auto-curating a
-  curation that applied merges (`merges_applied=True`) scored the raw-sort
-  unit-id namespace against the merged units, landing labels on the wrong units;
-  `AnalyzerCurationSelection.insert_selection` now raises. Label-only children
-  and root curations are still valid targets.
+- **Curation metrics are scored in the curation's own unit namespace (R27).**
+  Scoring a merged curation against the raw-sort unit-id namespace landed
+  metrics/labels on the wrong units. The curation-metric path
+  (`CurationEvaluation`, which superseded the interim `AnalyzerCuration` table)
+  now recomputes metrics over the committed curation's own units -- a merged
+  unit over its merged train -- and rejects preview/draft curations rather than
+  scoring their unmerged units.
 - **Sorter output survives temp-dir cleanup (R4).** `run_si_sorter` now
   materializes the sorter's file-backed output into an in-memory `NumpySorting`
   before its temp dir is cleaned, so downstream analyzer/artifact staging no
@@ -139,8 +141,7 @@ contributor.
 - `CurationEvaluationSelection.insert_selection` pairs a committed curation with
   metric / auto-rule / metric-waveform params; it **rejects preview curations**
   (`apply_merge=False` with an unapplied proposed merge) at insert and again at
-  the compute boundary, and mints its content-addressed id under a distinct
-  namespace from `AnalyzerCurationSelection`.
+  the compute boundary.
 - `CurationEvaluation.populate` reuses the cached raw-sort analyzer for a
   committed root/label-only curation (unit set unchanged) and builds a
   curation-scoped temporary analyzer over the merged sorting for an applied-merge
@@ -148,8 +149,33 @@ contributor.
   metric index is asserted to equal the curation's `CurationV2.Unit` set before
   any output is written. `get_metrics` / `get_labels` / `get_merge_groups`
   read the proposals back; committing them into a child curation is a later step.
-- `AnalyzerCuration` (the raw-sort auto-curation path) is unchanged and remains
-  guarded against merged parents.
+
+#### Spike Sorting v2: parent-state curation composition and evaluation acceptance
+
+Child curations now edit their **parent's committed state**, and
+`CurationEvaluation` proposals are explicitly accepted into committed children;
+the interim `AnalyzerCuration` table is removed.
+
+- **Parent-state composition.** `CurationV2.insert_curation` sources a child's
+  unit rows, spike trains, labels, and merge namespace from the parent
+  `CurationV2` row (not raw `Sorting.Unit`), so a merged-parent unit id is a
+  valid input and absorbed raw units are not resurrected. Raw-contributor
+  provenance stays queryable on `CurationV2.MergeGroup` (expanded through the
+  parent's provenance); the immediate parent operation is recorded in the new
+  `CurationV2.ParentMergeGroup` part.
+- **Label inheritance.** `insert_curation` gains `label_policy`
+  (`"inherit"` default / `"replace"`): a child inherits its parent's labels by
+  default, and a committed merge inherits the union of its contributors' labels.
+- **Acceptance helpers.** `CurationEvaluation.create_curation` /
+  `materialize_labels` commit an evaluation's proposed labels (and explicitly
+  chosen merges -- never all suggestions implicitly) into a committed child
+  carrying `curation_source='curation_evaluation'`; `create_preview_curation` is
+  the explicit draft opt-in.
+- **`AnalyzerCuration` / `AnalyzerCurationSelection` removed.** v2 is
+  pre-production with no back-compat requirement, so the interim raw-sort
+  auto-curation tables are deleted outright in favor of `CurationEvaluation` and
+  the acceptance helpers. Their shared SI-compute / visualization helpers moved
+  onto `CurationEvaluation`.
 
 #### Spike Sorting v2 recording reclamation round-trips via a content fingerprint
 
@@ -225,13 +251,15 @@ Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
 
 #### Spike Sorting v2: analyzer-driven curation + recompute verification
 
-`AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair` into one
-computed table that walks a sort's `SortingAnalyzer` extensions to compute
-SpikeInterface 0.104 quality metrics, propose merges (via
+`CurationEvaluation` consolidates v1's `MetricCuration` + `BurstPair` into one
+computed table that walks a committed curation's `SortingAnalyzer` extensions to
+compute SpikeInterface 0.104 quality metrics, propose merges (via
 `compute_merge_unit_groups` presets), and propose auto-curation labels.
 Proposals are written to three NWB tables (`quality_metrics`,
-`merge_suggestions`, `proposed_labels`); `materialize_curation()` commits them
-into a child `CurationV2` row (`curation_source='analyzer_curation'`).
+`merge_suggestions`, `proposed_labels`); `create_curation()` /
+`materialize_labels()` commit them into a child `CurationV2` row
+(`curation_source='curation_evaluation'`). (This subsumes the interim
+`AnalyzerCuration` table, which was removed -- see above.)
 
 - New parameter Lookups: `QualityMetricParameters` (validates metric names
   against the installed SpikeInterface; `franklab_default` / `neuropixels_default`
@@ -488,7 +516,7 @@ dropping; `restrict_by_artifact=True` now honors the v2
   (`v1/curation.py:404-428`). v2 stores merge provenance in the
   `CurationV2.MergeGroup` part table (queryable via
   `CurationV2.get_merge_groups(key)`) and defers metric columns to
-  the `AnalyzerCuration` stage. Pure-NWB consumers (DANDI export,
+  the `CurationEvaluation` stage. Pure-NWB consumers (DANDI export,
   external tools) lose these columns; DataJoint consumers gain the
   queryable + FK-validated shape.
 - **`SharedArtifactGroup` cross-recording artifact detection
@@ -702,8 +730,8 @@ cross-referenced here, not duplicated.
   ([curation.py:109](./src/spyglass/spikesorting/v2/curation.py#L109)).
 - `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
   ([curation.py:112](./src/spyglass/spikesorting/v2/curation.py#L112)).
-- `MetricCuration` is replaced by `AnalyzerCuration`; v1 `BurstPair` plotting
-  helpers are folded into `AnalyzerCuration` while the stored per-pair
+- `MetricCuration` is replaced by `CurationEvaluation`; v1 `BurstPair` plotting
+  helpers are folded into `CurationEvaluation` while the stored per-pair
   `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
   the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
   verification families. `FigURLCuration` remains v1-only until the FigPack
@@ -778,7 +806,7 @@ cross-referenced here, not duplicated.
 - `MetricCuration` chain (`MetricCuration`, `MetricCurationParameters`,
   `WaveformParameters`, `MetricParameters`) is replaced for v2 rows by
   `QualityMetricParameters`, `AutoCurationRules`,
-  `AnalyzerCurationSelection`, and `AnalyzerCuration`
+  `CurationEvaluationSelection`, and `CurationEvaluation`
   ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
   Waveform re-extraction via a separate `WaveformParameters` row is not
   preserved; v2 reads waveforms from the `SortingAnalyzer`.
@@ -786,7 +814,7 @@ cross-referenced here, not duplicated.
   is pending
   ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
 - `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
-  per-pair quantitative metrics; use `AnalyzerCuration` for the ported
+  per-pair quantitative metrics; use `CurationEvaluation` for the ported
   correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
   helpers.
 - `RecordingRecompute` chain is replaced by

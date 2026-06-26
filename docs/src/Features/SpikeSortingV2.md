@@ -34,7 +34,6 @@ RecordingSelection --> Recording          (bandpass + common reference)
                                                                    CurationV2 -+--> SpikeSortingOutput.CurationV2
                                                                         |
                                                                         v
-                                                        AnalyzerCurationSelection --> AnalyzerCuration
                                                         CurationEvaluationSelection --> CurationEvaluation
 ```
 
@@ -81,16 +80,15 @@ coexist under one merge surface.
     by `parent_curation_id`. `insert_curation` is the single entry point;
     every row is automatically registered on `SpikeSortingOutput.CurationV2`
     so downstream consumers can key off `merge_id`.
-- **`AnalyzerCurationSelection` / `AnalyzerCuration`** -- post-sort SI analyzer
-    extension growth, quality metrics, auto-curation labels, merge suggestions,
-    and BurstPair-style plots over the **raw** sort. Proposals are persisted to
-    NWB; committing them to sorting output remains an explicit
-    `materialize_curation` step.
-- **`CurationEvaluationSelection` / `CurationEvaluation`** -- final quality
-    metrics over a **committed** `CurationV2` row, scored in that curation's own
-    unit namespace (a merged unit's metrics are recomputed over the merged
-    template, not inherited). Preview/draft curations are rejected. See
-    [Final metrics over a committed curation](#final-metrics-over-a-committed-curation-curationevaluation).
+- **`CurationEvaluationSelection` / `CurationEvaluation`** -- post-sort SI
+    analyzer extension growth, quality metrics, auto-curation labels, merge
+    suggestions, and BurstPair-style plots over a **committed** `CurationV2` row,
+    scored in that curation's own unit namespace (a merged unit's metrics are
+    recomputed over the merged template, not inherited). Proposals are persisted
+    to NWB; committing them to a child curation is an explicit
+    `create_curation` / `materialize_labels` step. Preview/draft curations are
+    rejected. Replaces the removed `AnalyzerCuration`. See
+    [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
     verification families for safely reclaiming preprocessed recording/artifact
     NWBs and analyzer folders after a current-environment content match.
@@ -482,30 +480,38 @@ control); they pre-fill `parent_curation_id` / `apply_merge` by name.
 `summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
 `merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
 
-### Quality metrics and auto-curation (`AnalyzerCuration`)
+### Quality metrics, evaluation, and acceptance (`CurationEvaluation`)
 
-`AnalyzerCuration` replaces v1's `MetricCuration` + `BurstPair`. It walks a
-sort's `SortingAnalyzer` extensions to compute SpikeInterface quality metrics,
-propose merges, and propose auto-curation labels. The proposals are written to
-NWB; turning them into a new `CurationV2` row is an explicit step
-(`materialize_curation`).
+`CurationEvaluation` replaces v1's `MetricCuration` + `BurstPair`. It scores a
+**committed** `CurationV2` row in that curation's **own** unit namespace: it
+walks the curation's `SortingAnalyzer` extensions to compute SpikeInterface
+quality metrics, propose merge suggestions, and propose auto-curation labels. A
+merged unit gets SNR / ISI-violation / PC-NN separation recomputed over its
+**merged** template -- never inherited from the highest-amplitude contributor.
+The proposals are written to NWB; turning them into a committed child
+`CurationV2` is an explicit step (`create_curation` / `materialize_labels`).
 
 ```python
 from spyglass.spikesorting.v2.metric_curation import (
-    AnalyzerCuration,
-    AnalyzerCurationSelection,
+    CurationEvaluation,
+    CurationEvaluationSelection,
     QualityMetricParameters,
     AutoCurationRules,
 )
+from spyglass.spikesorting.v2.curation import CurationV2
 
 # Default Lookup rows are installed by initialize_v2_defaults().
-QualityMetricParameters().show_available_metrics()  # returns SI metric names you can request
+QualityMetricParameters().show_available_metrics()  # SI metric names you can request
 
-# Select a (CurationV2 row x metric-params x auto-rules) and populate.
-sel = AnalyzerCurationSelection.insert_selection(
+# Evaluate a COMMITTED curation (root, label-only, or applied-merge). The root
+# curation run_v2_pipeline returns is committed.
+curation = {
+    "sorting_id": run_summary["sorting_id"],
+    "curation_id": run_summary["curation_id"],
+}
+sel = CurationEvaluationSelection.insert_selection(
     {
-        "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["curation_id"],
+        **curation,
         # snr/isi/firing/num_spikes/presence_ratio/amplitude_cutoff/nn_advanced(PCA)
         "metric_params_name": "franklab_default",
         # Frank-lab default: nn_noise_overlap > 0.1 -> noise, isi_violation > 0.02
@@ -514,15 +520,28 @@ sel = AnalyzerCurationSelection.insert_selection(
         "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
     }
 )
-AnalyzerCuration.populate(sel)
+CurationEvaluation.populate(sel)
 
-metrics = AnalyzerCuration.get_metrics(sel)          # DataFrame, NaN -> None on read
-labels = AnalyzerCuration.get_labels(sel)            # {unit_id: [label, ...]}
-merges = AnalyzerCuration.get_merge_groups(sel)      # [[unit_id, ...], ...]
+metrics = CurationEvaluation.get_metrics(sel)        # DataFrame, indexed by the curation's unit ids
+labels = CurationEvaluation.get_labels(sel)          # {unit_id: [label, ...]}
+merges = CurationEvaluation.get_merge_groups(sel)    # [[unit_id, ...], ...] suggestions
 
-# Commit the proposals into a child CurationV2 (curation_source='analyzer_curation').
-child = AnalyzerCuration().materialize_curation(sel)
+# Accept the proposals into a COMMITTED child CurationV2
+# (curation_source='curation_evaluation'):
+child = CurationEvaluation().materialize_labels(sel)          # proposed labels only
+child = CurationEvaluation().create_curation(                 # labels + chosen merges
+    sel, merge_groups=[[u0, u1]]                              # explicit accepted groups
+)
+child = CurationEvaluation().create_curation(                 # or accept every suggestion
+    sel, use_all_suggested_merges=True
+)
 ```
+
+Acceptance never applies merges implicitly: `create_curation` commits a
+labels-only child unless you pass an explicit `merge_groups` **or**
+`use_all_suggested_merges=True`. It always produces a **committed** child (no
+preview rows). To draft a merge for review before committing, use the explicit
+`create_preview_curation` opt-in instead.
 
 Notes:
 
@@ -538,86 +557,63 @@ Notes:
 
 #### Population QC plot and burst-pair views
 
-`AnalyzerCuration.plot_units_qc(sel)` renders the population QC overview --
+`CurationEvaluation.plot_units_qc(sel)` renders the population QC overview --
 one histogram per quality metric (NaN dropped) plus a unit-depth scatter
 colored by a chosen metric -- the "do these units look reasonable?" companion
 to the per-unit `describe_units` table. Pass `axes=...` to embed it in a
 custom matplotlib layout; the method returns the axes it drew into. The v1
-`BurstPair` notebook workflow is ported onto `AnalyzerCuration` as `plot_correlograms`,
-`investigate_pair_xcorrel`, `investigate_pair_peaks`, and `plot_peak_over_time`
-(reading the analyzer's `correlograms` / `waveforms` extensions; no separate
-`BurstPair` table).
+`BurstPair` notebook workflow is ported onto `CurationEvaluation` as
+`plot_correlograms`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and
+`plot_peak_over_time` (reading the analyzer's `correlograms` / `waveforms`
+extensions; no separate `BurstPair` table).
 
-#### The auto-curate -> manual-merge curation flow
+#### The evaluate -> accept -> merge curation flow
 
-Auto-curation runs on the RAW sort and proposes labels on the raw unit ids, so
-it comes BEFORE applying merges:
+Curation is iterative; each child edits its **parent's committed state** (see
+"Parent-state composition" below), so a merged-parent unit id is a valid input
+and the absorbed raw units are never resurrected:
 
-1. **Auto-curate.** Run `AnalyzerCuration` on the root curation (or on a
-   label-only child, e.g. after manual noise-tagging -- both leave the raw unit
-   ids intact). The rule set above proposes labels; `materialize_curation`
-   commits them to a child `CurationV2`. Inspect with `plot_units_qc(sel)` and
-   `get_metrics(sel)`.
+1. **Evaluate + label.** Run `CurationEvaluation` on the root curation, inspect
+   `get_metrics(sel)` / `plot_units_qc(sel)`, then `materialize_labels(sel)` to
+   commit the proposed labels into a child.
 2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
    drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
    `investigate_pair_xcorrel` / `investigate_pair_peaks`, then commit the merge
-   with `CurationV2.insert_curation(..., merge_groups=..., apply_merge=True)`
-   (or the `create_merged_curation` wrapper) to produce a merged `CurationV2`.
+   with `CurationV2.create_merged_curation(..., parent_curation_id=child)` (the
+   child inherits the parent's labels by default).
+3. **Re-evaluate the final child.** Run `CurationEvaluation` on the committed
+   merged curation for final metrics -- merged units are scored over their
+   merged templates in the curation's own namespace.
 
-**Auto-curation over a merged curation is rejected.** `AnalyzerCuration` builds
-its analyzer from the **raw** sort and attaches the proposed labels back to the
-parent `curation_id`. Applying merges renumbers the unit-id namespace, so running
-`AnalyzerCuration` on a merged curation would score the raw units and land the
-labels on the wrong (merged) units. `AnalyzerCurationSelection.insert_selection`
-therefore **raises** on a parent with `merges_applied=True` -- auto-curate first
-(step 1), apply merges last (step 2).
-
-#### Final metrics over a committed curation (`CurationEvaluation`)
-
-`AnalyzerCuration` scores the **raw** sort (so it can propose labels on the raw
-unit ids before merges are applied). To get quality metrics on the **final**
-curated unit set -- including merged units, scored over their merged spike
-trains and templates rather than inherited from a contributor -- evaluate the
-committed curation with `CurationEvaluation`:
-
-```python
-from spyglass.spikesorting.v2.metric_curation import (
-    CurationEvaluation,
-    CurationEvaluationSelection,
-)
-
-# `merged` is a committed CurationV2 row (root, label-only, or applied-merge),
-# e.g. from create_merged_curation(...).
-sel = CurationEvaluationSelection.insert_selection(
-    {
-        "sorting_id": merged["sorting_id"],
-        "curation_id": merged["curation_id"],
-        "metric_params_name": "franklab_default",
-        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
-    }
-)
-CurationEvaluation.populate(sel)
-
-metrics = CurationEvaluation.get_metrics(sel)        # indexed by the curation's unit ids
-labels = CurationEvaluation.get_labels(sel)          # {unit_id: [label, ...]}
-merges = CurationEvaluation.get_merge_groups(sel)    # further-merge suggestions
-```
-
-`CurationEvaluation` evaluates a curation in **its own** unit namespace: the
-metric index is exactly that curation's `CurationV2.Unit` set, so a merged unit
-gets SNR / ISI-violation / PC-NN separation recomputed over the **merged**
-template -- never inherited from the highest-amplitude contributor. A committed
-root or label-only curation (unit set unchanged from the raw sort) reuses the
-cached raw-sort analyzer; a merged curation builds a curation-scoped temporary
-analyzer over the merged sorting (cleaned immediately, never cached). Its metrics
-and merge suggestions are **proposals**; turning them into a new committed child
-curation is a later step.
+A committed root or label-only curation (unit set unchanged from the raw sort)
+reuses the cached raw-sort analyzer; a merged curation builds a curation-scoped
+temporary analyzer over the merged sorting (cleaned immediately, never cached).
 
 A **preview** curation (`apply_merge=False` with a proposed-but-unapplied merge
-group) is a draft, not a final state: `CurationEvaluation` rejects it (evaluating
-it would score the unmerged preview units). Commit the merge first
+group) is a draft, not a final state: `CurationEvaluation` **rejects** it
+(evaluating it would score the unmerged preview units). Commit the merge first
 (`create_merged_curation` / `insert_curation(..., apply_merge=True)`), then
 evaluate that curation.
+
+#### Parent-state composition and label inheritance
+
+A child curation (`parent_curation_id != -1`) composes from its **parent
+`CurationV2`** state, not the raw sort: its unit rows, spike trains, labels, and
+merge namespace all come from the parent. So a child of a merged parent can
+reference the parent's fresh merged unit ids (a further merge picks up from
+where the parent left off) and the absorbed raw units are not resurrected.
+
+- **Raw provenance stays queryable.** `CurationV2.MergeGroup` always records the
+  original `Sorting.Unit` contributors (a child's parent-namespace contributors
+  are expanded through the parent's `MergeGroup`), so "which raw units made this
+  kept unit?" is one restriction. The immediate parent operation ("which parent
+  units were merged here?") is recorded separately in
+  `CurationV2.ParentMergeGroup`.
+- **Labels inherit by default.** `insert_curation(..., label_policy="inherit")`
+  (the default) starts a child from its parent's labels and overlays the
+  supplied `labels` per unit; a committed merge inherits the **union** of its
+  contributors' labels, so labels on absorbed contributors do not vanish. Pass
+  `label_policy="replace"` to make the supplied labels the whole child state.
 
 ### Stage-by-stage (custom pipeline preset)
 
