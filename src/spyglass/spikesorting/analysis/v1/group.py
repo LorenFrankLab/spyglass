@@ -242,6 +242,34 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     compress(sorting_spike_times, include_unit)
                 )
                 file_unit_ids = list(compress(file_unit_ids, include_unit))
+            elif group_labels is None:
+                # CNEP-2: an all-unlabeled curated NWB omits the label column,
+                # so the filter above is skipped and an include-only selection
+                # would wrongly return ALL units. Synthesize empty per-unit
+                # label lists so the filter still applies: include-only -> no
+                # units, exclude-only -> all units. This branch runs regardless
+                # of test_mode -- unlike the column-present path above, an
+                # exclude filter over empty labels keeps EVERY unit, so it
+                # cannot empty the shared default_exclusion fixtures (whose
+                # units carry labels in a present column, handled above).
+                include_filter = (
+                    list(include_labels) if include_labels is not None else []
+                )
+                exclude_filter = (
+                    list(exclude_labels) if exclude_labels is not None else []
+                )
+                if include_filter or exclude_filter:
+                    include_unit = SortedSpikesGroup.filter_units(
+                        [[] for _ in sorting_spike_times],
+                        include_filter,
+                        exclude_filter,
+                    )
+                    sorting_spike_times = list(
+                        compress(sorting_spike_times, include_unit)
+                    )
+                    file_unit_ids = list(
+                        compress(file_unit_ids, include_unit)
+                    )
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:

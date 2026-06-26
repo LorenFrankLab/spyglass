@@ -480,3 +480,88 @@ def test_filter_units():
         f(["noise", "accept"], [], ["noise"]),
         np.array([False, True]),
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_all_unlabeled_curation_include_label_filters(populated_sorting):
+    """CNEP-2: an include/exclude filter applies even when the curated NWB
+    omits the label column (every unit unlabeled).
+
+    An all-unlabeled curated export drops the ``curation_label`` column, so the
+    column-present filter path is skipped and an include-only selection used to
+    return ALL units. The consumer now synthesizes empty per-unit label lists:
+    ``include_labels=["accept"]`` returns NO units; ``exclude_labels=["noise"]``
+    returns ALL units.
+    """
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    _pk, merge_id = _make_v2_root_curation(populated_sorting)
+    UnitSelectionParams().insert_default()
+    UnitSelectionParams().insert1(
+        {
+            "unit_filter_params_name": "cnep2_include_accept",
+            "include_labels": ["accept"],
+            "exclude_labels": [],
+        },
+        skip_duplicates=True,
+    )
+    UnitSelectionParams().insert1(
+        {
+            "unit_filter_params_name": "cnep2_exclude_noise",
+            "include_labels": [],
+            "exclude_labels": ["noise"],
+        },
+        skip_duplicates=True,
+    )
+
+    recording_id = (
+        SortingSelection.RecordingSource & populated_sorting
+    ).fetch1("recording_id")
+    nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
+
+    def _n_units(filter_name):
+        gname = f"cnep2_{filter_name}"
+        existing = SortedSpikesGroup & {
+            "sorted_spikes_group_name": gname,
+            "nwb_file_name": nwb,
+        }
+        if existing:
+            existing.super_delete(warn=False)
+        SortedSpikesGroup().create_group(
+            group_name=gname,
+            nwb_file_name=nwb,
+            unit_filter_params_name=filter_name,
+            keys=[{"spikesorting_merge_id": merge_id}],
+        )
+        spike_times = SortedSpikesGroup.fetch_spike_data(
+            {"sorted_spikes_group_name": gname, "nwb_file_name": nwb}
+        )
+        return len(spike_times)
+
+    try:
+        n_total = _n_units("all_units")
+        assert n_total > 0, "baseline curation must contribute units"
+        # All units are unlabeled -> none carry "accept" -> none returned.
+        assert _n_units("cnep2_include_accept") == 0
+        # None carry "noise" -> all kept.
+        assert _n_units("cnep2_exclude_noise") == n_total
+    finally:
+        for filter_name in (
+            "all_units",
+            "cnep2_include_accept",
+            "cnep2_exclude_noise",
+        ):
+            grp = SortedSpikesGroup & {
+                "sorted_spikes_group_name": f"cnep2_{filter_name}",
+                "nwb_file_name": nwb,
+            }
+            if grp:
+                grp.super_delete(warn=False)

@@ -75,6 +75,58 @@ v2 reads the signal the `RecordingSelection` lineage actually points at:
 Both were silent failures: the resulting recording/sorting rows look valid but
 describe the wrong signal.
 
+#### Spike Sorting v2 silent-wrong-science correctness fixes
+
+A set of correctness fixes to v2 paths that silently produced or consumed wrong
+scientific values. Each was a silent failure (no error, plausible-looking
+output). **Outputs change** for the affected combinations noted below; re-run
+them if you computed results on a pre-fix build.
+
+- **Sample-aligned interval boundaries no longer drop an edge sample (TIME-1).**
+  The rate-based frame mapping snapped boundaries that land exactly on a sample
+  line, which float round-off in `(time - t_start) * fs` could otherwise push
+  off by `ceil`/`floor`; it now agrees with the searchsorted timestamp path.
+- **No-filter referencing no longer double-counts the DC offset (SIG-1).** On
+  the `no_filter` preprocessing preset, re-referencing left `channel_offsets` at
+  the parent value, so the persisted ElectricalSeries offset double-counted the
+  DC on readback. The offset is now zeroed after referencing (the default
+  bandpass preset is unchanged — the filter already zeroes it). *Affects sorts
+  run with `no_filter` + a reference mode.*
+- **SNR `peak_sign` follows the sorter's polarity (SIG-2).** SNR was hard-coded
+  `peak_sign="neg"`, so a positive/bidirectional sorter (clusterless
+  `peak_sign="pos"/"both"`, MountainSort `detect_sign=1/0`) measured SNR on the
+  most-negative channel instead of its true peak. SNR now uses the sorter's
+  resolved sign (matching per-unit attribution). Negative-going sorts (the
+  defaults) are numerically unchanged; *positive/bidirectional sorts change.*
+- **AnalyzerCuration over a merged parent is rejected (R27).** Auto-curating a
+  curation that applied merges (`merges_applied=True`) scored the raw-sort
+  unit-id namespace against the merged units, landing labels on the wrong units;
+  `AnalyzerCurationSelection.insert_selection` now raises. Label-only children
+  and root curations are still valid targets.
+- **Sorter output survives temp-dir cleanup (R4).** `run_si_sorter` now
+  materializes the sorter's file-backed output into an in-memory `NumpySorting`
+  before its temp dir is cleaned, so downstream analyzer/artifact staging no
+  longer read freed files.
+- **Preview (unapplied-merge) curations are guarded (R3).** `UnitMatch` now
+  rejects a member curation with unapplied proposed merges (matching unmerged
+  units across sessions is wrong), and `SpikeSortingOutput.get_spike_times`
+  warns when a consumed merge is such a preview curation (the strict decoding
+  raise is unchanged).
+- **Curated-units NWBs carry `obs_intervals` (CNEP-1).** The curated writer
+  dropped the per-unit observation window and the reader never read it back, so
+  NWB-only firing-rate / presence-ratio / duration denominators over a curated
+  export assumed the full session. Curated exports now carry `obs_intervals`
+  (a merged unit gets the conservative intersection of its contributors').
+- **Label filters apply to all-unlabeled curated exports (CNEP-2).** An
+  all-unlabeled curated NWB omits the label column, so `include_labels=["accept"]`
+  returned every unit instead of none; the consumer now applies the filter
+  against synthesized empty labels (include-only → none, exclude-only → all).
+- **Artifact valid-time ownership + mask-boundary validation (AVTM-2/3).**
+  `Sorting.make_fetch` resolves the artifact-removed intervals through the strict
+  ownership helper (rejecting a partially-deleted artifact or a hand-inserted
+  same-name `IntervalList`), and `apply_artifact_mask` now rejects non-finite or
+  out-of-recording-envelope intervals instead of silently under-masking.
+
 #### Spike Sorting v2 recording reclamation round-trips via a content fingerprint
 
 Reclaiming a preprocessed recording's disk
