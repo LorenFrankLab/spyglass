@@ -398,28 +398,27 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
     @classmethod
-    def _warn_preview_merge_ids(cls, key) -> None:
-        """Warn for any consumed merge_id that is a v2 preview curation.
+    def _warn_preview_merge_ids(cls, merge_ids) -> None:
+        """Warn for any CONSUMED merge_id that is a v2 preview curation.
 
         A ``CurationV2`` created with ``apply_merge=False`` records proposed
         merges in ``MergeGroup`` without applying them; the generic accessors
         return the UNMERGED (oversplit) units for such a curation. Mirrors the
-        merge_id->curation resolution in ``assert_decoding_merge_ids_ok`` but
-        WARNS instead of raising -- the strict raise stays on the decoding
-        boundary, while the generic accessors warn (non-breaking for v0/v1
-        consumers, consistent with ``CurationV2.get_sorting``). v0/v1 sources
-        are skipped (preview semantics are v2-only).
+        per-merge_id resolution in ``assert_decoding_merge_ids_ok`` but WARNS
+        instead of raising -- the strict raise stays on the decoding boundary,
+        while the generic accessors warn (non-breaking for v0/v1 consumers,
+        consistent with ``CurationV2.get_sorting``). v0/v1 sources are skipped
+        (preview semantics are v2-only).
 
-        Resolves the consumed merge_ids via ``merge_restrict`` (the same
-        part-aware routing ``get_spike_times`` -> ``fetch_nwb`` uses), NOT
-        ``cls & key``: a restriction on a parent attribute (e.g.
-        ``nwb_file_name``) is silently dropped by the master's merge_id-only
-        heading, so ``cls & key`` would match the WHOLE table and warn for
-        unrelated preview rows.
+        Takes the EXPLICIT merge_ids the caller actually consumed (resolved by
+        ``fetch_nwb(return_merge_ids=True)``), so the warning mirrors exactly
+        what the accessor reads -- no restriction re-resolution, which would
+        miss a restriction stored on ``self`` and could not route (or would
+        crash on) a parent-attribute key the way ``fetch_nwb`` does.
         """
         if CurationV2 is None:
             return
-        for mid in cls.merge_restrict(key).fetch("merge_id"):
+        for mid in merge_ids:
             part = cls.CurationV2 & {"merge_id": mid}
             if not part:
                 continue  # v0/v1 source
@@ -469,14 +468,20 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     def get_spike_times(self, key):
         """Get spike times for the group"""
-        # Warn (do not raise) if a consumed merge is a v2 preview curation whose
-        # proposed merges are unapplied -- the returned trains are the UNMERGED
-        # units. get_spike_times is the common sink (get_firing_rate ->
-        # get_spike_indicator -> get_spike_times), so warn here once rather than
-        # in all three. The strict raise stays on the decoding boundary.
-        type(self)._warn_preview_merge_ids(key)
+        # Resolve the files AND their merge_ids in one fetch_nwb pass so the
+        # preview warning sees EXACTLY the merges consumed here -- fetch_nwb
+        # honors both this instance's restriction and ``key`` and routes
+        # parent-attribute restrictions, which a separate (cls & key) /
+        # merge_restrict resolution could not. Warn (don't raise) if a consumed
+        # merge is a v2 preview curation whose proposed merges are unapplied:
+        # the returned trains are the UNMERGED units. get_spike_times is the
+        # common sink (get_firing_rate -> get_spike_indicator ->
+        # get_spike_times), so warn here once; the strict raise stays on the
+        # decoding boundary.
+        nwb_files, merge_ids = self.fetch_nwb(key, return_merge_ids=True)
+        type(self)._warn_preview_merge_ids(merge_ids)
         spike_times = []
-        for nwb_file in self.fetch_nwb(key):
+        for nwb_file in nwb_files:
             # V1 uses 'object_id', V0 uses 'units'
             file_loc = "object_id" if "object_id" in nwb_file else "units"
             units = nwb_file[file_loc]
