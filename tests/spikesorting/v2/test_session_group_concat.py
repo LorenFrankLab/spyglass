@@ -888,6 +888,60 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
 
 
 @pytest.mark.slow
+def test_curation_evaluation_populates_over_concat_sort(same_day_group):
+    """CurationEvaluation evaluates a committed curation over a CONCAT-backed
+    sort end-to-end.
+
+    Exercises the source-aware concat branch of ``make_fetch`` (it resolves the
+    recording through ``ConcatenatedRecording.get_recording``, not a per-member
+    ``Recording``) and the DB-free concat reconstruction in ``make_compute``;
+    the metrics must index the curation's units.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    _ensure_clusterless_sorter_params()
+    initialize_v2_defaults()  # metric / auto-rule / waveform Lookup rows
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    assert int((Sorting & sort_pk).fetch1("n_units")) > 0
+
+    curation = CurationV2.insert_curation(sorting_key=sort_pk)
+    sel = CurationEvaluationSelection.insert_selection(
+        {
+            **curation,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+
+    metrics = CurationEvaluation.get_metrics(sel)
+    expected = {
+        int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
+    }
+    assert set(metrics.index) == expected
+
+
+@pytest.mark.slow
 def test_preproc_restriction_includes_concat_and_recording_curations(
     same_day_group,
 ):
