@@ -6,8 +6,9 @@ Make the v2 NWB artifacts self-describing (R10). The writers currently persist
 results (traces, spikes, pairs, metrics) but no source/sorter/params/lineage, so a
 shared NWB can't be understood without the DataJoint DB. Write the **metadata** —
 which is cheap — into each writer; for the two **large-array** items store the
-producing params, not the array. Depends on phase-3a (reuses the same provenance
-field names / version strings).
+producing params, not the array. Depends on **phase-3a** (reuses the same provenance
+field names / version strings) **and phase-2** (task 6 writes the *resolved* motion
+preset that phase-2 stores on the concat row).
 
 **Inputs to read first:**
 
@@ -29,7 +30,7 @@ field names / version strings).
 
 3. **Curated Units NWB: merge lineage.** In the curated writer (`_units_nwb.py` ~864-945), serialize the kept→contributor mapping (`CurationV2.MergeGroup`) as a scratch table so the merge lineage is in the file (currently reconstructed only from the DB). For `apply_merge=True` write the kept-unit→contributors map; for `apply_merge=False` write the proposed groups with an explicit "proposed, not applied" flag.
 
-4. **UnitMatch NWB self-description.** In `_unitmatch_nwb.build_pairs_table` (or a companion scratch alongside it), add: `unitmatch_id`, `session_group_name`, `matcher_params_name`, and the per-member `(member_index, sorting_id, curation_id, session_start_time)` map. The pairs table currently carries only per-pair side ids (`_unitmatch_nwb.py:30-38`); add the session/params context so the file is interpretable standalone.
+4. **UnitMatch NWB self-description.** In `_unitmatch_nwb.build_pairs_table` (or a companion scratch alongside it), add: `unitmatch_id`, `session_group_name`, `matcher_params_name`, the per-member `(member_index, sorting_id, curation_id, session_start_time)` map, **and the producer provenance fields from the shared contract** (`matcher_backend`, `matcher_backend_version`, `spikeinterface_version`) — re-emitting the same values phase-3a stores on the `UnitMatch` row. The pairs table currently carries only per-pair side ids (`_unitmatch_nwb.py:30-38`); add the session/params/provenance context so the file is interpretable standalone.
 
 5. **AnalyzerCuration NWB inputs.** In `write_analyzer_curation_tables` (`_metric_curation_nwb.py` ~166-196), add the metric param set + kwargs, the whitened/display recipe names, and the auto-merge preset/rules as scratch metadata alongside the existing result tables.
 
@@ -51,7 +52,7 @@ field names / version strings).
 | `test_nwb_provenance.py::test_recording_nwb_carries_source_provenance` (new file — note `tests/spikesorting/v2/test_recording.py` does NOT exist; recording read-back tests live in `test_recording_provenance.py`/`test_disjoint_readback.py`) | after `Recording.populate`, the artifact NWB provenance scratch carries the **full task-1 set**: raw source `object_id`, `recording_id`, `preprocessing_params_name`, **`sort_group_id`, resolved reference mode, bad-channel handling**, and `spikeinterface_version` (assert each, not a subset). |
 | `test_nwb_provenance.py::test_units_nwb_carries_per_unit_and_source_metadata` (new) | the sort-time Units NWB has `peak_amplitude_uv`/`peak_electrode_id`/`n_spikes`/`brain_region` unit columns matching `Sorting.Unit`, AND the **full task-2 source scratch**: `recording_id`/`concat_recording_id`, `sorter` + sorter params, `artifact_detection_id`, `display_waveform_params_name`, and the phase-3a versions/seed (assert each). |
 | `test_nwb_provenance.py::test_curated_nwb_carries_merge_lineage` (new) | a merged curation's NWB contains the kept→contributor map matching `CurationV2.MergeGroup`; a preview curation marks groups "not applied". |
-| `test_nwb_provenance.py::test_unitmatch_nwb_self_describes` (new) | the UnitMatch NWB carries `unitmatch_id`/`session_group_name`/`matcher_params_name` + the member map. |
+| `test_nwb_provenance.py::test_unitmatch_nwb_self_describes` (new) | the UnitMatch NWB carries `unitmatch_id`/`session_group_name`/`matcher_params_name` + the member map, **plus the producer provenance fields from the shared contract** (`matcher_backend`, `matcher_backend_version`, `spikeinterface_version`) so the file re-emits the same values phase-3a stored on the row. |
 | `test_nwb_provenance.py::test_analyzer_curation_nwb_carries_inputs` (new, task 5) | the AnalyzerCuration NWB carries the metric param set + kwargs, the whitened/display recipe names, and the auto-merge preset/rules alongside the result tables. |
 | `test_nwb_provenance.py::test_concat_nwb_reconstructs_member_boundaries` (new) | the concat NWB's embedded member provenance + boundaries reproduce `split_sorting_by_session`'s mapping without reading live `SessionGroup.Member`; the resolved motion preset+kwargs are present, the displacement field is not. |
 | (regression) `test_recording.py`, `single_session/test_curation_*`, `test_unitmatch.py`, `test_session_group_concat.py` round-trip/read tests | existing read paths unaffected by the added scratch. |

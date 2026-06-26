@@ -107,7 +107,7 @@ phase-4b pins `numpy>=2,<3` (currently bare `pyproject.toml:58`) and reconciles 
 | phase-0 extraction subtly changes accessor behavior | Extraction keeps public classmethods as thin wrappers; behavior pinned by the existing accessor tests (listed in phase-0) which must pass unchanged. Anti-theater: only genuinely pure logic is moved; DB routers stay on the table. |
 | phase-3a adds identity-bearing columns → could shift deterministic ids | Provenance columns are **secondary attributes**, never primary-key / identity inputs (per shared-contracts). Effective-seed *capture* changes stored data but not existing ids; a parity test confirms ids are unchanged for a fixed input. |
 | phase-1 SNR-polarity fix changes metric values for existing test sorts | Default sorts are negative-going, so the resolved `peak_sign` stays `"neg"` and values are unchanged; the new behavior only affects positive/bidirectional sorters. A regression test pins the negative-default value. |
-| phase-2 frozen-universe persistence adds a column to `UnitMatch` | Pre-production, schema freeze lifted — additive column, no migration. Covered by the existing TrackedUnit tests + a new relabel-divergence test. |
+| phase-2 frozen-universe persistence adds a `UnitMatch.MatchableUnit` part table | Pre-production, schema freeze lifted — additive part table, no migration. Covered by the existing TrackedUnit tests + a new relabel-divergence test. |
 | phase-0 vs phases 1–4 file overlap | Sequence phase-1 first (urgent); rebase whichever of phase-0 / 2–4 lands second. Conflicts are mechanical (different methods in the same file). |
 
 ## Rollout Strategy
@@ -141,7 +141,7 @@ Phase-5-scoped in the triage:
 
 - phase-0: ~+400 LOC service modules / −250 LOC from `curation.py` bodies (net small; mostly moved), + tests.
 - phase-1: ~6 surgical fixes, ~+250 LOC incl. repro tests.
-- phase-2: ~+300 LOC (one guard mixin, alias-version fields, one `UnitMatch` column, schema-init audit) + tests.
+- phase-2: ~+300 LOC (one guard mixin, alias-version fields, the `UnitMatch.MatchableUnit` part table, schema-init audit) + tests.
 - phase-3a: ~+250 LOC (provenance columns across 3–4 tables + capture logic) + tests.
 - phase-3b: ~+300 LOC (writer metadata across 5 writers) + tests.
 - phase-4a: ~+250 LOC (lock wiring + 3 compat checks + temp `dir=`) + tests.
