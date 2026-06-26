@@ -22,25 +22,32 @@ repointed.
 
 1. **Extract the `resolve_restriction` pure half into a new DB-free module `_curation_routing.py`.** Create `src/spyglass/spikesorting/v2/_curation_routing.py` following the `_curation_plan.py` header convention (no `spyglass.common`, no `utils` heavy barrel, no `dj.schema` at import; stdlib + `_enums` only). Move the key-classification / unknown-key / artifact-interval-name / uuid-normalization logic (`curation.py:1511-1595`) into:
 
+   **Behavior-preserving — do NOT invent new semantics.** The current code produces *normalized per-source restriction dicts* and applies an `artifact_detection_id=None` **anti-join** plus an unresolved-name **warning**; it has no "exclude/include directive" abstraction. The helper must return exactly the normalized pieces the current join assembly consumes, plus a warning flag — not a new include/exclude vocabulary:
+
    ```python
    class RestrictionPlan(NamedTuple):
-       rec_restriction: dict        # may be {}
-       concat_restriction: dict     # may be {}
-       sort_restriction: dict       # may be {}
-       curation_restriction: dict   # may be {}
-       artifact_directive: tuple    # ("exclude" | "include" | None, artifact_detection_id | None)
+       rec_restriction: dict          # normalized; may be {}
+       concat_restriction: dict       # normalized; may be {}
+       sort_restriction: dict         # normalized; may be {}
+       curation_restriction: dict     # normalized; may be {}
+       artifact_detection_id: object  # UUID | None  (None preserves the current anti-join)
+       restrict_by_artifact: bool     # threaded through unchanged
+       unresolved_name_warning: str | None  # emit at the table boundary, preserving the current warning
 
    def classify_and_normalize_restriction(
        key: dict, *, restrict_by_artifact: bool, strict: bool,
    ) -> "RestrictionPlan | None":
-       """Classify a user restriction into per-source dicts + an artifact directive.
-
-       Returns None when strict=False and the key carries an unrecognized field
-       (the lenient bail-out the table method turns into a None return). Raises
-       ValueError on an unrecognized field when strict=True, and on a contradictory
-       concat+recording restriction. Pure: no DataJoint, no DB.
+       """Classify+normalize a user restriction into the exact per-source dicts the
+       current join assembly consumes, plus the artifact_detection_id (None ⇒ the
+       existing anti-join) and any unresolved-name warning. Returns None on the
+       lenient (strict=False) unrecognized-key bail-out; raises ValueError on an
+       unrecognized key when strict=True and on a contradictory concat+recording
+       restriction. Pure: no DataJoint, no DB. This is a refactor — it must produce
+       byte-identical routing, not a reinterpretation.
        """
    ```
+
+   `resolve_restriction` (the classmethod) emits `unresolved_name_warning` via `logger.warning` (preserving the current warning), then assembles the joins (current `curation.py:1597-1668`) from the dicts + `artifact_detection_id` exactly as today (including the `None` anti-join).
 
    **Prerequisite (task 1a):** `parse_artifact_detection_interval_list_name` is currently defined **only in `utils.py:653`** (the DB-heavy barrel — `utils.py:12-13` imports `datajoint`+`spikeinterface` at module top), so `_curation_routing` cannot import it without failing the import-boundary test in task 3. First extract `parse_artifact_detection_interval_list_name`, its inverse, and the `_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX` constant (`utils.py:635-664`) into a small DB-free module (a new `_artifact_naming.py`, or fold into existing DB-free `_curation_transforms.py`), re-exported from `utils` for back-compat, and add it to `_DB_FREE_SERVICE_MODULES`. Then `_curation_routing` imports the parser from that DB-free module. `resolve_restriction` (the classmethod) then calls `classify_and_normalize_restriction(...)`, returns `None` if it returns `None`, and assembles the DataJoint joins (current `curation.py:1597-1668`) from the returned dicts. Behavior is identical.
 

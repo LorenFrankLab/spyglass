@@ -44,7 +44,7 @@ the owner-agreed disposition for each is in its "Decisions" section.
 Touched (all paths under `src/spyglass/spikesorting/`):
 
 - `v2/curation.py:1415-1668` — `resolve_restriction`: pure key-classification half (1511-1595) extracted; DataJoint join assembly preserved on the table. **phase-0.**
-- `v2/curation.py:1102-1187,1191-1240,1263-1379,1670-1702,1754-1829` — accessor cluster (`summarize_curation`/`get_recording`/`get_sorting`/`get_sort_metadata`/`get_merged_sorting`): pure cores extracted, public classmethods kept as thin wrappers. **phase-0.**
+- `v2/curation.py:1102-1187` — `summarize_curation`: pure formatter core (`build_curation_summary`) extracted; the rest of the accessor cluster (`get_recording`/`get_sort_metadata` are irreducible DB routers, `get_sorting`/`get_merged_sorting` already delegate compute to `_units_nwb`) **stays on the table**. **phase-0.**
 - `v2/_recording_restriction.py:274-280` — `_consolidate_regular_intervals` float→frame snapping. **phase-1.**
 - `v2/_recording_preprocessing.py:188-232` + `v2/_nwb_metadata_helpers.py:59-66` — offset zeroing after referencing on the no-filter path. **phase-1.**
 - `v2/metric_curation.py:255,273,1101-1115` — SNR `peak_sign` resolved from sorter polarity. **phase-1.**
@@ -131,7 +131,7 @@ Phase-5-scoped in the triage:
 ## Open Questions
 
 1. **R9-PK** — should `SortGroupV2`/`SharedArtifactGroup`/`ExportSelection` gain `owner` in their *primary key* to allow per-team namespacing? This is the only non-additive change (it shifts `recording_id` identity downstream), so it is free now and a migration later. **Current best answer: no** (keeps v2 == v1; access *enforcement* remains a clean future additive PR). Revisit only if per-team namespacing becomes likely. Not in any phase below; flagged here so the executor does not silently add it.
-2. **R27 semantics** (phase-1) — confirm with the owner whether AnalyzerCuration over a merged parent should re-base metrics on the parent's unit set (the fix) or be rejected at selection time (a guard). The phase-1 task implements re-base; if the owner prefers reject, the task swaps to a selection-time guard. Default: re-base.
+2. **R27 semantics** (phase-1) — confirm with the owner whether AnalyzerCuration over a merged parent should be **rejected** at selection time (a guard) or **re-based** onto the parent's merged unit set. **Default: guard** (this is what phase-1 task 4 implements — reject when `merges_applied is True`); re-base is the larger alternative, only by explicit owner decision.
 
 ## Estimated Effort
 

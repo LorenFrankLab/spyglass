@@ -55,8 +55,11 @@ depends on another phase.
        SortingSelection * SorterParameters & {"sorting_id": sel["sorting_id"]}
    ).fetch1("params")
    resolved = resolve_peak_sign(sorter_params)
-   if "snr" in metric_kwargs:
-       metric_kwargs = {**metric_kwargs, "snr": {**metric_kwargs["snr"], "peak_sign": resolved}}
+   # Trigger whenever snr is REQUESTED, even if it carries no kwargs yet
+   # (otherwise a metric_names=["snr"] with no metric_kwargs["snr"] keeps the
+   # hard-coded default). Preserve any existing snr kwargs.
+   if "snr" in metric_names:
+       metric_kwargs = {**metric_kwargs, "snr": {**(metric_kwargs.get("snr") or {}), "peak_sign": resolved}}
    ```
 
    For negative-default sorts `resolved == "neg"` so values are unchanged; only positive/bidirectional sorters (clusterless `peak_sign="pos"/"both"`, MS `detect_sign=1/0`) change — to the correct channel. Leave the default rows' `"neg"` as the fallback.
