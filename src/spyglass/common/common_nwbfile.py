@@ -834,7 +834,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not dry_run:
                 registry.unblock_new_inserts()
 
-    def check_all_files(self, resolve_tables: bool = False) -> dict:
+    def check_all_files(
+        self, resolve_tables: bool = False, verbose: bool = False
+    ) -> dict:
         """Check files across all analysis tables for issues.
 
         Iterates through common and all custom AnalysisNwbfile tables,
@@ -886,7 +888,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             self._info_msg(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
             issue_count = file_checker.check_files(
-                analysis_tbl, deleted_files=deleted_files
+                analysis_tbl, deleted_files=deleted_files, verbose=verbose
             )
             results[tbl_name] = issue_count
 
