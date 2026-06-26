@@ -331,6 +331,122 @@ def populated_sorting_with_curation(populated_sorting):
     _clear_curations_for(populated_sorting)
 
 
+#: Smoke fixture used by the planted-two-unit sort below.
+_PREVIEW_FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
+)
+
+
+@pytest.fixture(scope="package")
+def planted_two_unit_sort(dj_conn):
+    """A populated Sorting with two planted units (so a merge group exists).
+
+    Shared in conftest (rather than a single test module) so the merge-aware
+    tests across modules -- the preview-merge warnings and the R27
+    merged-parent guard -- resolve the SAME populated sort without a fragile
+    cross-module import. The smoke sort yields only one MEArec unit, so this
+    monkeypatches ``Sorting._run_sorter`` to plant two units on the real
+    recording. Tests clear curations around themselves for isolation.
+    """
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        copy_and_insert_nwb,
+    )
+
+    if not _PREVIEW_FIXTURE_PATH.exists():
+        pytest.skip(f"Fixture {_PREVIEW_FIXTURE_PATH.name} not found.")
+
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    nwb = copy_and_insert_nwb(
+        _PREVIEW_FIXTURE_PATH, dest_name="mearec_preview.nwb"
+    )
+    session = {"nwb_file_name": nwb}
+    _clean_session_v2(session)
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 preview"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb)
+    sg = int(sorted((SortGroupV2 & session).fetch("sort_group_id"))[0])
+    rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb,
+            "sort_group_id": sg,
+            "interval_list_name": "raw data valid times",
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    if not (Recording & rec_pk):
+        Recording.populate(rec_pk, reserve_jobs=False)
+    art_pk = ArtifactDetectionSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    (Sorting & sort_pk).super_delete(warn=False)
+
+    def _plant(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+    ):
+        samples = np.array(
+            [500, 1500, 2500, 3500, 4500, 600, 1600, 2600, 3600, 4600],
+            dtype=np.int64,
+        )
+        labels = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        Sorting.populate(sort_pk, reserve_jobs=False)
+    finally:
+        mp.undo()
+    if len(Sorting.Unit & sort_pk) < 2:
+        pytest.skip("planted sort did not yield >=2 units")
+    yield sort_pk
+    _clear_curations_for(sort_pk)
+    _clean_session_v2(session)
+
+
 #: ``session_group_owner`` LabTeam used by the chronic concat fixture and its
 #: tests. Named once so the fixture's setup/teardown cleanup and the tests that
 #: create groups under it cannot drift.

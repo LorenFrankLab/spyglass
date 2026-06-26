@@ -409,6 +409,82 @@ def test_analyzer_curation_selection_warns_on_auto_source(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_analyzer_curation_over_merged_parent_rejected(
+    planted_two_unit_sort, analyzer_curation_defaults
+):
+    """R27: AnalyzerCuration over a parent that APPLIED merges is rejected.
+
+    ``merges_applied=True`` renumbers the unit-id namespace (merged units get
+    fresh ids), so building the analyzer over the raw sort and attaching the
+    proposed labels to the merged curation would land them on the wrong units.
+    A root curation, and a LABEL-only child (labels but no applied merges,
+    which leave the raw unit-ids intact), must still succeed -- the
+    false-positive the guard must not trigger.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    assert len(unit_ids) >= 2, "need >=2 units to plant a merge"
+
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+
+        # A root curation is a legitimate target.
+        root_sel = AnalyzerCurationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        assert root_sel
+
+        # A merged child (apply_merge=True) renumbers the namespace -> reject.
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            parent_curation_id=root["curation_id"],
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
+        )
+        with pytest.raises(ValueError, match="applied merges"):
+            AnalyzerCurationSelection.insert_selection(
+                {
+                    **merged,
+                    "metric_params_name": "minimal",
+                    "auto_curation_rules_name": "none",
+                }
+            )
+
+        # A label-only child leaves raw unit-ids intact -> still a legit target.
+        label_only = CurationV2.insert_curation(
+            sorting_key,
+            parent_curation_id=root["curation_id"],
+            labels={unit_ids[0]: ["noise"]},
+        )
+        label_sel = AnalyzerCurationSelection.insert_selection(
+            {
+                **label_only,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        assert label_sel
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_analyzer_curation_viz_renders(
     populated_sorting_with_curation, analyzer_curation_defaults
 ):

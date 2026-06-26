@@ -735,16 +735,42 @@ class AnalyzerCurationSelection(
         if existing is not None:
             return existing
 
-        upstream_source = (
-            CurationV2
-            & {"sorting_id": key["sorting_id"], "curation_id": key["curation_id"]}
-        ).fetch1("curation_source")
+        parent_key = {
+            "sorting_id": key["sorting_id"],
+            "curation_id": key["curation_id"],
+        }
+        merges_applied, upstream_source = (CurationV2 & parent_key).fetch1(
+            "merges_applied", "curation_source"
+        )
+        # R27: an AnalyzerCuration over a parent that APPLIED merges scores the
+        # raw-sort unit-id namespace against the parent's merged/renumbered
+        # units, so the proposed labels land on the wrong units. merges_applied
+        # is the ONLY thing that renumbers the namespace -- labels (noise/
+        # reject) leave the raw unit-ids intact, so a label-only child is a
+        # legitimate chaining target (auto-curate after manual noise-tagging).
+        # Reject only the applied-merge case; do NOT compare unit-id sets, which
+        # would falsely reject every label-only child.
+        if merges_applied:
+            raise ValueError(
+                "AnalyzerCuration cannot be inserted on curation "
+                f"{key['curation_id']} of sort {key['sorting_id']}: that "
+                "curation has applied merges (merges_applied=True), which "
+                "renumbers the unit-id namespace. Computing metrics over the "
+                "raw sort and attaching the proposed labels to the merged "
+                "curation would land them on the wrong units. Run "
+                "auto-curation on a curation with no applied merges (e.g. the "
+                "root curation, or a label-only child); apply merges "
+                "afterward if needed."
+            )
         if upstream_source == "analyzer_curation":
+            # A label-only auto-curation parent (merges_applied=False, caught
+            # above) is a legitimate chaining target -- kept a WARNING, not a
+            # raise, so re-curating after a prior auto-label pass still works.
             logger.warning(
                 "AnalyzerCuration is being inserted on a CurationV2 row with "
                 "curation_source='analyzer_curation' (already auto-curated). "
-                "Metrics will be computed over post-merge templates, which is "
-                "usually not intended."
+                "Metrics will be computed over the prior auto-curation's "
+                "labels, which is usually not intended."
             )
 
         new_key = {**identity, "analyzer_curation_id": analyzer_curation_id}

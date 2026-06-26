@@ -11,111 +11,12 @@ must NOT warn.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
 import pytest
 
-from tests.spikesorting.v2._ingest_helpers import (
-    clear_curations_for,
-    copy_and_insert_nwb,
-)
+from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-_FIXTURE_PATH = (
-    Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
-)
-
-
-@pytest.fixture(scope="module")
-def planted_two_unit_sort(dj_conn):
-    """A populated Sorting with two planted units (so a merge group exists)."""
-    from tests.spikesorting.v2._ingest_helpers import (
-        _clean_session_v2,
-    )
-
-    if not _FIXTURE_PATH.exists():
-        pytest.skip(f"Fixture {_FIXTURE_PATH.name} not found.")
-
-    import spikeinterface as si
-
-    from spyglass.common.common_lab import LabTeam
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-        SortGroupV2,
-    )
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    nwb = copy_and_insert_nwb(_FIXTURE_PATH, dest_name="mearec_preview.nwb")
-    session = {"nwb_file_name": nwb}
-    _clean_session_v2(session)
-    initialize_v2_defaults()
-    LabTeam.insert1(
-        {"team_name": "v2_test_team", "team_description": "v2 preview"},
-        skip_duplicates=True,
-    )
-    if not (SortGroupV2 & session):
-        SortGroupV2.set_group_by_shank(nwb_file_name=nwb)
-    sg = int(sorted((SortGroupV2 & session).fetch("sort_group_id"))[0])
-    rec_pk = RecordingSelection.insert_selection(
-        {
-            "nwb_file_name": nwb,
-            "sort_group_id": sg,
-            "interval_list_name": "raw data valid times",
-            "preprocessing_params_name": "default",
-            "team_name": "v2_test_team",
-        }
-    )
-    if not (Recording & rec_pk):
-        Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
-        {
-            "recording_id": rec_pk["recording_id"],
-            "artifact_detection_params_name": "none",
-        }
-    )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    sort_pk = SortingSelection.insert_selection(
-        {
-            "recording_id": rec_pk["recording_id"],
-            "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            "artifact_detection_id": art_pk["artifact_detection_id"],
-        }
-    )
-    (Sorting & sort_pk).super_delete(warn=False)
-
-    def _plant(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
-    ):
-        samples = np.array(
-            [500, 1500, 2500, 3500, 4500, 600, 1600, 2600, 3600, 4600],
-            dtype=np.int64,
-        )
-        labels = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.int32)
-        return si.NumpySorting.from_samples_and_labels(
-            samples_list=[samples],
-            labels_list=[labels],
-            sampling_frequency=recording.get_sampling_frequency(),
-        )
-
-    mp = pytest.MonkeyPatch()
-    try:
-        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
-        Sorting.populate(sort_pk, reserve_jobs=False)
-    finally:
-        mp.undo()
-    if len(Sorting.Unit & sort_pk) < 2:
-        pytest.skip("planted sort did not yield >=2 units")
-    yield sort_pk
-    clear_curations_for(sort_pk)
-    _clean_session_v2(session)
+# ``planted_two_unit_sort`` lives in conftest.py (shared across the merge-aware
+# test modules; see that fixture's docstring).
 
 
 @pytest.mark.slow
