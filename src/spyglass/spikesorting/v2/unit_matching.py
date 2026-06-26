@@ -1011,7 +1011,7 @@ def _normalize_member_identity(nwb_file_name, sort_group_id, interval_list_name,
     )
 
 
-def _curation_member_identity(sorting_id):
+def _curation_member_identity(sorting_id, *, exc_class=ValueError):
     """Resolve a single-session curation's owning member identity.
 
     Walks ``SortingSelection.resolve_source -> RecordingSelection`` to recover
@@ -1019,14 +1019,17 @@ def _curation_member_identity(sorting_id):
     curation was sorted from -- the tuple a ``SessionGroup.Member`` row carries.
     Per-member pinning supports single-session sorts only; concat-backed sorts
     are out of scope (a concat sort has one curation for the whole
-    concatenation, not one per member).
+    concatenation, not one per member). ``exc_class`` is the exception to raise
+    for a concat-backed sort -- the caller passes ``UnitMatchSelectionIntegrityError``
+    so the concat rejection matches the type of the other member-validation
+    failures (it defaults to ``ValueError`` for standalone use).
     """
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     source = SortingSelection.resolve_source({"sorting_id": sorting_id})
     if source.kind != "recording":
-        raise ValueError(
+        raise exc_class(
             f"UnitMatchSelection: sorting_id {sorting_id} is concat-backed; "
             "per-member curation pinning supports single-session sorts only. "
             "Concat identity matching is out of scope for this build."
@@ -1078,7 +1081,9 @@ def _validate_member_curations(members, choices_by_member, exc_class):
             member["interval_list_name"],
             member["team_name"],
         )
-        curation_identity = _curation_member_identity(sorting_id)
+        curation_identity = _curation_member_identity(
+            sorting_id, exc_class=exc_class
+        )
         if curation_identity != member_identity:
             raise exc_class(
                 f"UnitMatchSelection: member_index {member_index} "

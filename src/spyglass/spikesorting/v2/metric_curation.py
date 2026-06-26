@@ -7,7 +7,7 @@ merges, and propose auto-curation labels in the curation's OWN unit namespace
 (a merged unit is scored over its merged spike train, never inherited from the
 highest-amplitude contributor). The proposed labels/merges are written to NWB;
 turning them into a committed child ``CurationV2`` row is an explicit user
-action (``CurationEvaluation.create_curation`` / ``materialize_labels``).
+action (``CurationEvaluation.create_curation`` / ``replace_labels``).
 
 Tables
 ------
@@ -927,7 +927,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     inherited from the highest-amplitude contributor. Outputs (metrics, proposed
     labels, merge suggestions) are written to three NWB scratch tables and are
     PROPOSALS; the acceptance helpers (``create_curation`` /
-    ``materialize_labels`` / ``create_preview_curation``) commit them into a
+    ``replace_labels`` / ``overlay_labels`` / ``create_preview_curation``)
+    commit them into a
     child ``CurationV2`` row.
 
     Routing: a committed root / label-only curation (unit set unchanged from the
@@ -1511,8 +1512,15 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """Resolve the merge groups to accept (explicit, all-suggested, none).
 
         Never applies all suggested merges implicitly: the caller must pass an
-        explicit ``merge_groups`` OR ``use_all_suggested_merges=True``. Returns
-        the >=2-member groups (in the evaluated curation's own unit namespace).
+        explicit ``merge_groups`` OR ``use_all_suggested_merges=True``.
+
+        CALLER-SUPPLIED ``merge_groups`` are returned VERBATIM (only coerced to
+        ints) -- they are NOT silently filtered, so a singleton/empty group
+        reaches ``CurationV2.insert_curation``'s >=2-member typo guard and
+        raises instead of degrading into a labels-only child. Only the PERSISTED
+        suggestions (``use_all_suggested_merges``) are filtered to the real
+        (>=2-member) groups, since the stored suggestion set is not a caller
+        typo. All ids are in the evaluated curation's own unit namespace.
         """
         if merge_groups is not None and use_all_suggested_merges:
             raise ValueError(
@@ -1520,12 +1528,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "use_all_suggested_merges=True, not both."
             )
         if use_all_suggested_merges:
-            source = self.get_merge_groups(key)
-        elif merge_groups is not None:
-            source = merge_groups
-        else:
-            return []
-        return [[int(u) for u in group] for group in source if len(group) >= 2]
+            return [
+                [int(u) for u in group]
+                for group in self.get_merge_groups(key)
+                if len(group) >= 2
+            ]
+        if merge_groups is not None:
+            return [[int(u) for u in group] for group in merge_groups]
+        return []
 
     def create_curation(
         self,
@@ -1620,30 +1630,66 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             reuse_existing=reuse_existing,
         )
 
-    def materialize_labels(
+    def replace_labels(
         self,
         key,
         *,
         labels: dict | None = None,
-        label_policy: str = "replace",
-        description: str = "accepted labels from curation evaluation",
+        description: str = "evaluation labels (replace)",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
     ) -> dict:
-        """Accept only the evaluation's proposed LABELS into a committed child.
+        """Accept the evaluation verdict: make the child's labels EQUAL it.
 
-        A thin :meth:`create_curation` wrapper with no merges -- the common
-        "apply the auto-curation labels, keep the unit set" acceptance. Every
-        unit of the evaluated curation is preserved; ``labels`` defaults to the
-        evaluation's proposed labels. Returns the child's
-        ``{"sorting_id", "curation_id"}``.
+        The authoritative "use this evaluation's labels" path (label-only, no
+        merges) -- the child's labels are exactly ``labels`` (defaulting to the
+        evaluation's proposed labels), CLEARING any label the evaluation does
+        not propose. A unit no longer flagged loses a stale ``reject`` /
+        ``noise`` (v1 "final auto-curation writes the full label state"), so it
+        is not silently dropped from the matchable-unit set. This is the default
+        final-metrics path; use :meth:`overlay_labels` to instead keep the
+        current labels. (UI: "Use Evaluation Labels".)
+
+        Returns the child's ``{"sorting_id", "curation_id"}``.
         """
         return self.create_curation(
             key,
             merge_groups=None,
             use_all_suggested_merges=False,
             labels=labels,
-            label_policy=label_policy,
+            label_policy="replace",
+            description=description,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def overlay_labels(
+        self,
+        key,
+        *,
+        labels: dict | None = None,
+        description: str = "evaluation labels (overlay)",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Overlay the evaluation's labels ON TOP of the curation's current ones.
+
+        The manual-curation path (label-only, no merges): KEEP the evaluated
+        curation's existing labels and add/override only the proposed ones.
+        Deliberately a different method from :meth:`replace_labels` so the
+        "keep my labels" choice is visible at the call site rather than a quiet
+        flag -- overlaying can retain prior auto labels, which
+        :meth:`replace_labels` (the default verdict path) clears.
+        (UI: "Overlay Evaluation Labels".)
+
+        Returns the child's ``{"sorting_id", "curation_id"}``.
+        """
+        return self.create_curation(
+            key,
+            merge_groups=None,
+            use_all_suggested_merges=False,
+            labels=labels,
+            label_policy="inherit",
             description=description,
             allow_custom_labels=allow_custom_labels,
             reuse_existing=reuse_existing,

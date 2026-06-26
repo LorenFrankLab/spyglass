@@ -148,8 +148,8 @@ contributor.
   curation (cleaned immediately, never published to the analyzer cache). The
   metric index is asserted to equal the curation's `CurationV2.Unit` set before
   any output is written. `get_metrics` / `get_labels` / `get_merge_groups`
-  read the proposals back; the `create_curation` / `materialize_labels`
-  acceptance helpers (below) commit them into a child curation.
+  read the proposals back; the `create_curation` / `replace_labels` /
+  `overlay_labels` acceptance helpers (below) commit them into a child curation.
 
 #### Spike Sorting v2: parent-state curation composition and evaluation acceptance
 
@@ -167,11 +167,14 @@ the interim `AnalyzerCuration` table is removed.
 - **Label inheritance.** `insert_curation` gains `label_policy`
   (`"inherit"` default / `"replace"`): a child inherits its parent's labels by
   default, and a committed merge inherits the union of its contributors' labels.
-- **Acceptance helpers.** `CurationEvaluation.create_curation` /
-  `materialize_labels` commit an evaluation's proposed labels (and explicitly
-  chosen merges -- never all suggestions implicitly) into a committed child
-  carrying `curation_source='curation_evaluation'`; `create_preview_curation` is
-  the explicit draft opt-in.
+- **Acceptance helpers.** `CurationEvaluation.create_curation` (merges +
+  labels), `replace_labels` (use the evaluation's label verdict -- clears
+  stale labels, the default final-metrics path) and `overlay_labels` (keep the
+  curation's current labels and add the proposed ones) commit an evaluation's
+  outputs into a committed child carrying
+  `curation_source='curation_evaluation'`; merges are never applied implicitly
+  (pass `merge_groups` or `use_all_suggested_merges=True`), and
+  `create_preview_curation` is the explicit draft opt-in.
 - **`AnalyzerCuration` / `AnalyzerCurationSelection` removed.** v2 is
   pre-production with no back-compat requirement, so the interim raw-sort
   auto-curation tables are deleted outright in favor of `CurationEvaluation` and
@@ -258,7 +261,7 @@ compute SpikeInterface 0.104 quality metrics, propose merges (via
 `compute_merge_unit_groups` presets), and propose auto-curation labels.
 Proposals are written to three NWB tables (`quality_metrics`,
 `merge_suggestions`, `proposed_labels`); `create_curation()` /
-`materialize_labels()` commit them into a child `CurationV2` row
+`replace_labels()` / `overlay_labels()` commit them into a child `CurationV2` row
 (`curation_source='curation_evaluation'`). (This subsumes the interim
 `AnalyzerCuration` table, which was removed -- see above.)
 

@@ -140,7 +140,7 @@ v1 chain only for features still listed as pending.
   and `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
   metrics, auto-labels, and merge suggestions. Unlike v1 (which scored the raw
   sort), `CurationEvaluation` scores a **committed `CurationV2`** row in that
-  curation's own unit namespace, and its `create_curation` / `materialize_labels`
+  curation's own unit namespace, and its `create_curation` / `replace_labels`
   helpers accept the proposals into a committed child. Like v1's
   `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
   metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,

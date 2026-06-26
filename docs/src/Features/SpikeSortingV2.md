@@ -86,7 +86,7 @@ coexist under one merge surface.
     scored in that curation's own unit namespace (a merged unit's metrics are
     recomputed over the merged template, not inherited). Proposals are persisted
     to NWB; committing them to a child curation is an explicit
-    `create_curation` / `materialize_labels` step. Preview/draft curations are
+    `create_curation` / `replace_labels` step. Preview/draft curations are
     rejected. Replaces the removed `AnalyzerCuration`. See
     [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
@@ -489,7 +489,7 @@ quality metrics, propose merge suggestions, and propose auto-curation labels. A
 merged unit gets SNR / ISI-violation / PC-NN separation recomputed over its
 **merged** template -- never inherited from the highest-amplitude contributor.
 The proposals are written to NWB; turning them into a committed child
-`CurationV2` is an explicit step (`create_curation` / `materialize_labels`).
+`CurationV2` is an explicit step (`create_curation` / `replace_labels`).
 
 ```python
 from spyglass.spikesorting.v2.metric_curation import (
@@ -527,21 +527,33 @@ labels = CurationEvaluation.get_labels(sel)          # {unit_id: [label, ...]}
 merges = CurationEvaluation.get_merge_groups(sel)    # [[unit_id, ...], ...] suggestions
 
 # Accept the proposals into a COMMITTED child CurationV2
-# (curation_source='curation_evaluation'):
-child = CurationEvaluation().materialize_labels(sel)          # proposed labels only
-child = CurationEvaluation().create_curation(                 # labels + chosen merges
-    sel, merge_groups=[[u0, u1]]                              # explicit accepted groups
-)
-child = CurationEvaluation().create_curation(                 # or accept every suggestion
-    sel, use_all_suggested_merges=True
-)
+# (curation_source='curation_evaluation'). Labels are two VISIBLY DIFFERENT
+# choices, not a quiet flag:
+child = CurationEvaluation().replace_labels(sel)   # USE the evaluation verdict:
+#   child labels == the evaluation's labels; a unit the rules no longer flag
+#   loses its stale reject/noise (the default final-metrics path).
+child = CurationEvaluation().overlay_labels(sel)   # KEEP current labels + add
+#   the proposed ones (the manual-curation path).
+# Merges are never applied implicitly -- pass them (or every suggestion):
+child = CurationEvaluation().create_curation(sel, merge_groups=[[u0, u1]])
+child = CurationEvaluation().create_curation(sel, use_all_suggested_merges=True)
 ```
+
+`replace_labels` (default verdict) and `overlay_labels` (keep + add) are
+deliberately separate methods so the label choice is explicit at the call site
+-- `replace_labels` clears labels the evaluation does not propose (v1's "final
+auto-curation writes the full label state", so a no-longer-flagged unit is not
+silently excluded downstream), while `overlay_labels` retains the curation's
+current labels. (In a UI these are the "Use Evaluation Labels" and "Overlay
+Evaluation Labels" actions.)
 
 Acceptance never applies merges implicitly: `create_curation` commits a
 labels-only child unless you pass an explicit `merge_groups` **or**
-`use_all_suggested_merges=True`. It always produces a **committed** child (no
-preview rows). To draft a merge for review before committing, use the explicit
-`create_preview_curation` opt-in instead.
+`use_all_suggested_merges=True` (a caller-supplied singleton/empty group is
+rejected by the same >=2-member typo guard as `insert_curation`, not silently
+dropped). It always produces a **committed** child (no preview rows). To draft a
+merge for review before committing, use the explicit `create_preview_curation`
+opt-in instead.
 
 Notes:
 
@@ -567,6 +579,16 @@ custom matplotlib layout; the method returns the axes it drew into. The v1
 `plot_peak_over_time` (reading the analyzer's `correlograms` / `waveforms`
 extensions; no separate `BurstPair` table).
 
+**These analyzer-backed plots are for RAW-unit-equivalent curations** (the
+root, or a label-only child of one) -- they read the raw sort's display
+analyzer, whose unit namespace is the raw sort. On a **merged** curation (or a
+label-only child of one) they **raise** rather than silently render the wrong
+units; inspect a merged curation through the routed `get_metrics(sel)` /
+`get_merge_groups(sel)` accessors (which carry the curation's own namespace), or
+run the burst-pair plots on the pre-merge curation. Building these plots over
+curation-scoped (merged) analyzers is deferred (it needs the persistent
+curation-scoped analyzer cache).
+
 #### The evaluate -> accept -> merge curation flow
 
 Curation is iterative; each child edits its **parent's committed state** (see
@@ -574,7 +596,7 @@ Curation is iterative; each child edits its **parent's committed state** (see
 and the absorbed raw units are never resurrected:
 
 1. **Evaluate + label.** Run `CurationEvaluation` on the root curation, inspect
-   `get_metrics(sel)` / `plot_units_qc(sel)`, then `materialize_labels(sel)` to
+   `get_metrics(sel)` / `plot_units_qc(sel)`, then `replace_labels(sel)` to
    commit the proposed labels into a child.
 2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
    drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /

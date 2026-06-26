@@ -942,6 +942,49 @@ def test_curation_evaluation_populates_over_concat_sort(same_day_group):
 
 
 @pytest.mark.slow
+def test_unit_match_rejects_concat_backed_curation_member(same_day_group):
+    """A concat-backed curation cannot be a UnitMatch member (per-member
+    pinning is single-session only), and the rejection raises the member-
+    validation exception type, not a bare ValueError.
+    """
+    from spyglass.spikesorting.v2 import unit_matching as um
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    _ensure_clusterless_sorter_params()
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+        }
+    )
+    Sorting.populate(sort_pk, reserve_jobs=False)
+
+    # The member-identity resolver rejects a concat sort; with the validator's
+    # exc_class it raises UnitMatchSelectionIntegrityError (a RuntimeError),
+    # matching the other member-validation failures rather than a bare
+    # ValueError.
+    with pytest.raises(UnitMatchSelectionIntegrityError, match="concat-backed"):
+        um._curation_member_identity(
+            sort_pk["sorting_id"],
+            exc_class=UnitMatchSelectionIntegrityError,
+        )
+    # The default (standalone) call still raises a plain ValueError.
+    with pytest.raises(ValueError, match="concat-backed"):
+        um._curation_member_identity(sort_pk["sorting_id"])
+
+
+@pytest.mark.slow
 def test_preproc_restriction_includes_concat_and_recording_curations(
     same_day_group,
 ):
