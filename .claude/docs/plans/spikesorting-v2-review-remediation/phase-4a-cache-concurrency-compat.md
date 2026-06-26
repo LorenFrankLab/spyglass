@@ -93,5 +93,5 @@ Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
 - The recording-side pattern is genuinely mirrored (same lock semantics, same atomic-publish + rollback shape).
 - `assert_concat_compatible` rejects mismatched fs; the DB-level caller rejects mismatched electrode identity/region.
 - UnitMatch saves 2D positions with a shape guard; the bypass-revalidation raises at compute.
-- Both temp dirs pass `dir=spyglass_temp_dir`.
+- All three bare-temp sites (UnitMatch, recompute, clusterless waveform-features) pass `dir=spyglass_temp_dir`.
 - Tests exercise real branches (not tautologies); no plan/phase references in code or tests.

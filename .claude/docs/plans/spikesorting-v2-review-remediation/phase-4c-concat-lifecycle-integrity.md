@@ -43,7 +43,7 @@ conservation. Independent of phases 1–3; overlaps phase-4a's concat-compat wor
 | --- | --- |
 | `test_session_group_concat.py::test_concat_id_changes_with_member_set` (new) | two SessionGroups identical in name+params but differing in member identity produce **different** `concat_recording_id` (or, if snapshot-validate chosen, a post-materialization member edit raises `ConcatMemberDriftError` at `get_recording`/`split`). |
 | `test_session_group_concat.py::test_concat_get_recording_rebuilds_on_missing` (new) | deleting the concat NWB then calling `get_recording` rebuilds it (no error); a corrupted/drifted file raises `RecordingContentDriftError`. Mirrors `test_get_recording_rebuilds_on_missing_cache`. |
-| `test_session_group_concat.py::test_concat_split_conserves_all_spikes` (new) | `split_sorting_by_session` output spike counts sum to the input count; a boundary set that doesn't cover the full range raises `ConcatSplitError` (no silent drop). |
+| `test_session_group_concat.py::test_concat_split_conserves_all_spikes` (new) | **per-spike/frame membership** is preserved — every input (unit, frame) appears in exactly one member's output and the back-mapped frames match (not just summed counts, which a drop+duplicate could satisfy); a boundary set that doesn't cover the full range raises `ConcatSplitError`. |
 | `test_recompute.py::test_concat_recompute_round_trip` (new, if task 3 done) | concat `delete_files(dry_run=False)` removes the folder, marks `deleted=1`, and rebuilds — mirrors the recording round-trip. |
 | (regression) `test_session_group_concat.py` existing concat populate/split/region tests | unchanged behavior on the happy path. |
 

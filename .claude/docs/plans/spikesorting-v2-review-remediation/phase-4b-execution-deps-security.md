@@ -80,7 +80,7 @@ none warrants its own.
 | `test_analysis_mixin.py::test_conda_export_failure_does_not_abort_write` (new) | with `conda` absent (patched), the NWB write completes and records the unavailable marker. |
 | `test_recording.py::test_sortgroup_overwrite_preview_lists_cross_team_downstream` (new) | the overwrite preview enumerates downstream rows owned by other teams. |
 | `test_recording.py::test_inplace_writer_does_not_unlink_canonical_on_failure` (new, R18/DESTR-2) | a failed in-place rebuild does not unlink the canonical artifact (dead branch removed, or guarded to refuse unlinking a canonical path). |
-| `test_unitmatch.py::test_get_unit_brain_regions_keeps_disambiguators` (new, UCI-6) | `get_unit_brain_regions` returns `curation_id`/`tracked_unit_id`/`member_index`/`nwb_file_name` (not just `sorting_id`/`unit_id`/`region_name`). |
+| `test_unitmatch.py::test_get_unit_brain_regions_keeps_disambiguators` (new, UCI-6) | `get_unit_brain_regions` returns `curation_id`/`tracked_unit_id`/`member_index`/`nwb_file_name`/**`unitmatch_id`**/**recording date** (not just `sorting_id`/`unit_id`/`region_name`). |
 | (regression) the existing `test_sorting_dispatch.py`, `test_recompute.py`, `test_sorter_parameters.py`, export, and import-boundary suites | unchanged behavior on the happy paths. |
 
 ## Fixtures
@@ -93,7 +93,7 @@ two-team sort-group setup built from `_ingest_helpers.py`.
 ## Review
 
 Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
-- Each of the 11 fixes has a test asserting the new behavior; the happy-path regressions pass.
+- Each fix (the numbered tasks + the Round-3 UCI-6 addition) has a test asserting the new behavior; the happy-path regressions pass.
 - The security fixes default-close (artifacts `0o644`, traversal rejected) without breaking the container UID path (scratch chmod still applied for container backends).
 - The merge-probe `except` stays broad (NOT narrowed) — it logs/surfaces the failure but still tolerates a DB-safety `RuntimeError` on a non-localhost DB, so v0/v1 envs on production still load the merge table.
 - TEAM-1 is a visibility fix only (no enforcement added); the R9 / R33 / R9-PK non-goals are honored.

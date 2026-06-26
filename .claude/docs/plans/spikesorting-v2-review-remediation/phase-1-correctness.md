@@ -115,7 +115,7 @@ depends on another phase.
 | `test_sorting_dispatch.py::test_run_si_sorter_output_survives_tempdir_cleanup` (new, integration) | a real sorter run returns a sorting whose `get_unit_spike_train(...)` is readable **after** `run_si_sorter` returns (temp dir gone); a `NumpySorting` is returned. Marked `slow`. |
 | `test_preview_merge_warning.py::test_get_spike_times_warns_on_preview_merge` (new) | `SpikeSortingOutput().get_spike_times({"merge_id": preview_id})` emits the preview warning; a non-preview merge does not. |
 | `test_unitmatch.py::test_unitmatch_selection_rejects_preview_member` (new) | `UnitMatchSelection.insert_selection` **and** a direct-insert that reaches `make_fetch` (bypassing `insert_selection`) both raise when a member curation has unapplied proposed merges — both guard sites are exercised. |
-| `test_curated_nwb.py::test_curated_units_carry_obs_intervals` (new, CNEP-1) | a curated export NWB has per-unit `obs_intervals` matching the source sort (artifact-backed case included); **and a merged unit whose contributors have differing `obs_intervals` gets the intersection** (the documented merge rule); **fails before** the writer/reader change. |
+| `test_curated_nwb.py::test_curated_units_carry_obs_intervals` (new, CNEP-1) | a curated export NWB has per-unit `obs_intervals` matching the source sort (artifact-backed case included); **`read_units_abs_times_and_sample_indices` returns the `obs_intervals`** (reader-level assert, so a writer-only fix that doesn't extend the reader fails); **and a merged unit whose contributors have differing `obs_intervals` gets the intersection** (the documented merge rule); **fails before** the writer/reader change. |
 | `test_downstream_consumers.py::test_all_unlabeled_curation_include_label_filters` (new, CNEP-2) | `include_labels=["accept"]` over an all-unlabeled v2 curation returns **no** units (not all); `exclude_labels` returns all; **fails before** the consumer-boundary fix. |
 | `test_artifact_integration.py::test_make_fetch_routes_through_ownership_helper` (new, AVTM-2) | a sort whose artifact row is missing its ownership part rows (or a hand-inserted same-name `IntervalList`) raises via `read_artifact_removed_intervals`; the helper is called with `as_dict=True` and the absent-key case raises clearly. |
 | `test_artifact_mask.py::test_mask_rejects_nonfinite_and_out_of_envelope` (new, AVTM-3) | `apply_artifact_mask` raises on NaN/Inf or out-of-recording-envelope intervals before the complement walk. |
@@ -131,7 +131,7 @@ depends on another phase.
 ## Review
 
 Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
-- Each of the 6 bugs has a repro test that fails on the pre-fix code and passes after (the reviewer should `git stash` the fix and watch the test fail, or trust the PR's before/after evidence).
+- Each task (the 6 core bugs + the Round-3 additions CNEP-1/CNEP-2/AVTM-2/AVTM-3) has a repro test that fails on the pre-fix code and passes after (the reviewer should `git stash` the fix and watch the test fail, or trust the PR's before/after evidence).
 - The TIME-1 `atol` is documented as a float-error tolerance, not a behavioral knob; the snap doesn't change correctly-representable boundaries.
 - SIG-2 leaves negative-default sorts numerically identical (regression pin present); SIG-1 leaves the default-bandpass path unchanged.
 - R27 implements the guard (not silent re-base) unless the owner confirmed re-base; the error message is actionable.

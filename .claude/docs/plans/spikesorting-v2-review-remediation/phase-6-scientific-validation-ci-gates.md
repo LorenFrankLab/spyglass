@@ -19,7 +19,7 @@ after the code phases so the gates protect corrected behavior.
 - `.github/workflows/test-conda.yml` ~280-300 (`SPYGLASS_V2_REQUIRE_FIXTURES` list; drift fixture intentionally unfetched) and ~351-356 (fixtures fetched with `|| true`).
 - [tests/spikesorting/v2/test_drift_estimate.py:104-110](../../../../tests/spikesorting/v2/test_drift_estimate.py#L104-L110) (drift-free fixture, structural-only).
 - [tests/spikesorting/v2/single_session/test_ground_truth_parity.py:217-257](../../../../tests/spikesorting/v2/single_session/test_ground_truth_parity.py#L217-L257) (well-detected-subset floors).
-- [tests/spikesorting/v2/test_analyzer_curation.py:464-522](../../../../tests/spikesorting/v2/test_analyzer_curation.py#L464-L522) (synthetic auto-merge), [tests/spikesorting/v2/fixtures/fixtures_manifest.json](../../../../tests/spikesorting/v2/fixtures/fixtures_manifest.json) (structural-only manifest), [.claude/docs/plans/spikesorting-v2/bench_efficiency.py](bench_efficiency.py) (manual script).
+- [tests/spikesorting/v2/test_analyzer_curation.py:464-522](../../../../tests/spikesorting/v2/test_analyzer_curation.py#L464-L522) (synthetic auto-merge), [tests/spikesorting/v2/fixtures/fixtures_manifest.json](../../../../tests/spikesorting/v2/fixtures/fixtures_manifest.json) (structural-only manifest), [bench_efficiency.py](../spikesorting-v2/bench_efficiency.py) (manual script).
 
 **Contracts referenced:** none.
 

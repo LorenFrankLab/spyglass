@@ -75,9 +75,11 @@ is **secondary, never identity** — a parity test confirms ids are unchanged.
 
 | Test | Asserts |
 | --- | --- |
-| `test_provenance.py::test_sorting_row_records_effective_seed_and_versions` (new) | after a populate, `Sorting` row has non-null `spikeinterface_version` and an `effective_random_seed` equal to the seed the dispatch used; a per-row `random_seed` overrides ambient and is the stored value. |
+| `test_provenance.py::test_sorting_row_records_effective_seed_and_versions` (new) | after a populate, `Sorting` row has non-null `spikeinterface_version`, **`sorter_version` == the sorter package distribution version (NULL for clusterless)**, and an `effective_random_seed` equal to the seed the dispatch used; a per-row `random_seed` overrides ambient and is the stored value. |
 | `test_provenance.py::test_ambient_seed_warns` (new) | setting `dj.config['custom']['spikesorting_v2_job_kwargs'] = {"random_seed": 7}` with no per-row seed emits the ambient-seed warning and stores 7. |
-| `test_provenance.py::test_unitmatch_records_backend_version` (new) | `UnitMatch` row has `matcher_backend` (module path) + `matcher_backend_version` == `importlib.metadata.version("unitmatchpy")`. |
+| `test_provenance.py::test_unitmatch_records_backend_version` (new) | `UnitMatch` row has non-null `spikeinterface_version`, `matcher_backend` (module path) + `matcher_backend_version` == `importlib.metadata.version("unitmatchpy")`. |
+| `test_recompute.py::test_analyzer_manifest_marks_noise_levels_unseeded` (new, task 4) | the analyzer manifest lists each base extension with its effective params, with `noise_levels` explicitly marked unseeded (not silently implying a pinned seed). |
+| `test_matcher_protocol.py::test_registry_no_silent_reroute` (new, task 5) | re-registering the `"unitmatch"` name without the explicit maintenance flag raises (or the prior backend's provenance is preserved) — a name can no longer silently mean different code. |
 | `test_matcher_params.py::test_bundle_params_in_identity` (new) | two `MatcherParameters` rows differing only in `ms_before` yield different `matcher_params_name`-derived `unitmatch_id`s; the bundle params reach `extract_unitmatch_bundle`. |
 | `test_matcher_params.py::test_bundle_seed_override_rejected` (new) | a `MatcherParameters` row whose `job_kwargs` carries a `random_seed` different from the `seed` field is rejected at insert (or, if folded, yields a distinct `unitmatch_id`) — closes the seed-override disagreement. |
 | `test_provenance.py::test_ids_unchanged_after_provenance_columns` (new) | `sorting_id`/`unitmatch_id` for a fixed selection equal the pre-change deterministic values (provenance is secondary, not identity). Pin the expected uuids. |
