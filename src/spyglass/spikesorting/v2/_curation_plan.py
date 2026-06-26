@@ -86,8 +86,9 @@ def validate_label_unit_ids(
     if truly_stray:
         message = (
             "CurationV2.insert_curation: labels reference unit_id(s) "
-            f"{sorted(truly_stray)} that are neither in Sorting.Unit "
-            "nor in the curated unit set for "
+            f"{sorted(truly_stray)} that are neither in the source unit set "
+            "(the raw sort for a root curation, or the parent curation for a "
+            "child) nor in the curated unit set for "
             f"sorting_id={sorting_id} (apply_merge={apply_merge}). "
             f"Curated unit_ids: {sorted(written_unit_ids)}."
         )

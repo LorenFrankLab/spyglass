@@ -61,7 +61,7 @@ def test_labels_on_written_units_pass(caplog):
 
 def test_truly_stray_label_raises_by_default():
     """A key in neither source nor written is a typo -> raise by default."""
-    with pytest.raises(ValueError, match="neither in Sorting.Unit"):
+    with pytest.raises(ValueError, match="neither in the source unit set"):
         _validate({9: ["mua"]}, source={0, 1}, written={0, 1})
 
 
@@ -71,7 +71,7 @@ def test_truly_stray_label_warn_and_drop_when_permissive(caplog):
         _validate({9: ["mua"]}, source={0, 1}, written={0, 1}, permissive=True)
     messages = [r.getMessage() for r in caplog.records if r.name == "spyglass"]
     assert any(
-        "neither in Sorting.Unit" in msg and "ignored" in msg
+        "neither in the source unit set" in msg and "ignored" in msg
         for msg in messages
     )
 
@@ -129,7 +129,7 @@ def test_plan_apply_merge_assigns_fresh_id_and_inherits_peak():
 
 def test_plan_truly_stray_label_raises():
     """The builder surfaces the stray-label typo guard end-to-end."""
-    with pytest.raises(ValueError, match="neither in Sorting.Unit"):
+    with pytest.raises(ValueError, match="neither in the source unit set"):
         build_curation_insert_plan(
             sorting_id="s",
             sorting_units=[_unit(0)],
