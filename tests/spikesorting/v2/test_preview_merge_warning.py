@@ -108,3 +108,58 @@ def test_assert_decoding_merge_ids_raises_on_preview_merge(
             SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_id])
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_get_spike_times_warns_on_preview_merge(
+    planted_two_unit_sort, monkeypatch
+):
+    """R3 (generic accessor): get_spike_times WARNS when a consumed merge_id is
+    a preview (apply_merge=False) curation with unapplied proposed merges; an
+    applied-merge curation does NOT warn. Warning (not raising) keeps v0/v1
+    consumers working; the strict raise stays on the decoding boundary.
+    """
+    import spyglass.spikesorting.spikesorting_merge as merge_mod
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    root = CurationV2.insert_curation(sorting_key=planted_two_unit_sort)
+    preview = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort,
+        parent_curation_id=root["curation_id"],
+        merge_groups=[[unit_ids[0], unit_ids[1]]],
+        apply_merge=False,
+    )
+    applied = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort,
+        parent_curation_id=root["curation_id"],
+        merge_groups=[[unit_ids[0], unit_ids[1]]],
+        apply_merge=True,
+    )
+    preview_id = (SpikeSortingOutput.CurationV2 & preview).fetch1("merge_id")
+    applied_id = (SpikeSortingOutput.CurationV2 & applied).fetch1("merge_id")
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        merge_mod.logger,
+        "warning",
+        lambda msg, *a, **k: seen.append(str(msg)),
+    )
+    try:
+        SpikeSortingOutput().get_spike_times({"merge_id": preview_id})
+        assert any("apply_merge=False" in s for s in seen), (
+            f"expected a preview-merge warning; got {seen}"
+        )
+        seen.clear()
+        SpikeSortingOutput().get_spike_times({"merge_id": applied_id})
+        assert not any("apply_merge=False" in s for s in seen), (
+            f"applied-merge curation must not warn; got {seen}"
+        )
+    finally:
+        clear_curations_for(planted_two_unit_sort)

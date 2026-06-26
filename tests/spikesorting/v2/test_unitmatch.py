@@ -737,6 +737,161 @@ def test_insert_selection_idempotent_and_hash_sensitive(
 
 
 @pytest.mark.slow
+def test_unitmatch_selection_rejects_preview_member(
+    two_session_curated_group, monkeypatch
+):
+    """R3: matching UNMERGED units across sessions is rejected at BOTH guard
+    sites.
+
+    A member curation created with apply_merge=False (proposed merges recorded
+    but not applied) would feed oversplit units into the matcher.
+    ``insert_selection`` (ValueError) and ``UnitMatch.make_fetch``
+    (UnitMatchSelectionIntegrityError, via a direct-insert that bypasses
+    insert_selection) must both raise. The fixture's clusterless sort yields a
+    single unit, so plant a 2-unit sort on member 0's recording to host a real
+    proposed merge.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
+
+    grp = two_session_curated_group
+    rec_id = (
+        SortingSelection.RecordingSource & grp["sort_pks"][0]
+    ).fetch1("recording_id")
+
+    # A distinct clusterless params name -> a distinct content-addressed sort on
+    # member 0's recording, so the planted 2-unit sort does not collide with the
+    # fixture's shared single-unit sort.
+    two_unit_params = "minirec_clusterless_two_unit_r3"
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": two_unit_params,
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+
+    def _plant(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+    ):
+        samples = np.array([500, 1000, 1500, 600, 1100, 1600], dtype=np.int64)
+        labels = np.array([0, 0, 0, 1, 1, 1], dtype=np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    two_unit_sort = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_id,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": two_unit_params,
+        }
+    )
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        if not (Sorting & two_unit_sort):
+            Sorting.populate(two_unit_sort, reserve_jobs=False)
+    finally:
+        mp.undo()
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & two_unit_sort).fetch("unit_id")
+    )
+    assert len(unit_ids) >= 2, "planted sort must yield >=2 units"
+
+    clear_curations_for(two_unit_sort)
+    try:
+        root0 = CurationV2.insert_curation(
+            sorting_key={"sorting_id": two_unit_sort["sorting_id"]}
+        )
+        preview0 = CurationV2.insert_curation(
+            sorting_key={"sorting_id": two_unit_sort["sorting_id"]},
+            parent_curation_id=root0["curation_id"],
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=False,
+        )
+        root_choice = {
+            "sorting_id": root0["sorting_id"],
+            "curation_id": root0["curation_id"],
+        }
+        preview_choice = {
+            "sorting_id": preview0["sorting_id"],
+            "curation_id": preview0["curation_id"],
+        }
+
+        # Site 1: insert_selection rejects a pinned preview member.
+        with pytest.raises(ValueError, match="apply_merge=False"):
+            UnitMatchSelection.insert_selection(
+                grp["owner"],
+                grp["group_name"],
+                "unitmatch_default",
+                {0: preview_choice, 1: grp["choices"][1]},
+            )
+
+        # Site 2: a direct-insert selection (bypassing insert_selection) is
+        # rejected when UnitMatch.make_fetch validates. Build a valid selection
+        # with the member-0 ROOT, then swap member 0's part to the preview
+        # curation. make_fetch's _validate_member_curations runs before the
+        # curation_set_hash check, so the preview guard fires on the swap.
+        pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            "unitmatch_default",
+            {0: root_choice, 1: grp["choices"][1]},
+        )
+        master_row = (UnitMatchSelection & pk).fetch1()
+        parts = (UnitMatchSelection.MemberCuration & pk).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        (UnitMatchSelection & pk).super_delete(warn=False)
+        UnitMatchSelection.insert1(master_row, allow_direct_insert=True)
+        for part in parts:
+            if int(part["member_index"]) == 0:
+                part["curation_id"] = preview0["curation_id"]
+        UnitMatchSelection.MemberCuration.insert(parts, allow_direct_insert=True)
+        try:
+            with pytest.raises(
+                UnitMatchSelectionIntegrityError, match="apply_merge=False"
+            ):
+                UnitMatch().make_fetch(pk)
+        finally:
+            (UnitMatchSelection & pk).super_delete(warn=False)
+    finally:
+        clear_curations_for(two_unit_sort)
+        (Sorting & two_unit_sort).super_delete(warn=False)
+        (SortingSelection & two_unit_sort).super_delete(warn=False)
+        (
+            SorterParameters & {"sorter_params_name": two_unit_params}
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_insert_selection_rejects_forged_master_with_mismatched_parts(
     two_session_curated_group,
 ):

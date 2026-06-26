@@ -398,6 +398,39 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
     @classmethod
+    def _warn_preview_merge_ids(cls, key) -> None:
+        """Warn for any consumed merge_id that is a v2 preview curation.
+
+        A ``CurationV2`` created with ``apply_merge=False`` records proposed
+        merges in ``MergeGroup`` without applying them; the generic accessors
+        return the UNMERGED (oversplit) units for such a curation. Mirrors the
+        merge_id->curation resolution in ``assert_decoding_merge_ids_ok`` but
+        WARNS instead of raising -- the strict raise stays on the decoding
+        boundary, while the generic accessors warn (non-breaking for v0/v1
+        consumers, consistent with ``CurationV2.get_sorting``). v0/v1 sources
+        are skipped (preview semantics are v2-only).
+        """
+        if CurationV2 is None:
+            return
+        for mid in (cls & key).fetch("merge_id"):
+            part = cls.CurationV2 & {"merge_id": mid}
+            if not part:
+                continue  # v0/v1 source
+            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            if CurationV2.has_unapplied_proposed_merges(
+                {"sorting_id": sorting_id, "curation_id": curation_id}
+            ):
+                logger.warning(
+                    f"merge_id {mid} is a CurationV2 curation "
+                    f"(sorting_id={sorting_id}, curation_id={curation_id}) "
+                    "created with apply_merge=False whose proposed merges are "
+                    "NOT applied; the returned spike times are for the UNMERGED "
+                    "(oversplit) units. Re-curate with apply_merge=True (or pick "
+                    "a curation whose merges are applied) if you intended the "
+                    "merged units."
+                )
+
+    @classmethod
     def get_sorting(cls, key):
         """get the sorting associated with a spike sorting output"""
         source_table = source_class_dict[
@@ -429,6 +462,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     def get_spike_times(self, key):
         """Get spike times for the group"""
+        # Warn (do not raise) if a consumed merge is a v2 preview curation whose
+        # proposed merges are unapplied -- the returned trains are the UNMERGED
+        # units. get_spike_times is the common sink (get_firing_rate ->
+        # get_spike_indicator -> get_spike_times), so warn here once rather than
+        # in all three. The strict raise stays on the decoding boundary.
+        type(self)._warn_preview_merge_ids(key)
         spike_times = []
         for nwb_file in self.fetch_nwb(key):
             # V1 uses 'object_id', V0 uses 'units'
