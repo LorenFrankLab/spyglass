@@ -38,26 +38,30 @@ depends on another phase.
 2. **SIG-1 — zero channel offsets after referencing.** On the `no_filter` preset there is no bandpass to remove DC, so `common_reference` re-references DC-laden traces but leaves `channel_offsets` intact (`_recording_preprocessing.py:188-232`); `resolve_conversion_and_offset` (`_nwb_metadata_helpers.py:59-66`) then persists the **parent** offset, double-counting it on readback. After each `common_reference` branch (both `"specific"` and `"global_median"`), reset the offset so the persisted ElectricalSeries offset describes the re-referenced signal — matching what the bandpass path already does (bandpass zeroes the offset):
 
    ```python
-   # after common_reference (+ remove_channels) on each branch:
-   recording = recording.set_channel_offsets(0.0)
+   # after common_reference (+ remove_channels) on each branch.
+   # IMPORTANT: set_channel_offsets mutates IN PLACE and returns None (verified
+   # against SI 0.104.3) -- a bare statement, NOT `recording = ...` (that would
+   # set recording to None and crash the subsequent steps).
+   recording.set_channel_offsets(0.0)
    ```
 
-   (Use the SI 0.104 API actually present — confirm `set_channel_offsets` vs `set_property("offset_to_uV", ...)` by reading the recording object; the intent is: post-reference offset is 0.) The default bandpass preset is unaffected (offset already 0 there).
+   The default bandpass preset is unaffected (the filter already zeroes the offset). The science is correct: under referencing the per-channel constant DC cancels, so the persisted offset should be 0.
 
-3. **SIG-2 — resolve SNR `peak_sign` from the sorter, not a hard-coded `"neg"`.** Unit attribution already honors sorter polarity via `resolve_peak_sign(sorter_params)` (`sorting.py:2606-2621`), but SNR is hard-coded `peak_sign="neg"` (`metric_curation.py:255,273`) and passed to SI unchanged (`:1101-1115`). At metric-compute time, override the snr `peak_sign` with the sorter-resolved value (the sorter is the single authority, same as attribution). In the voltage-metric compute path, fetch the sorter params for the `sorting_id` and inject:
+3. **SIG-2 — resolve SNR `peak_sign` from the sorter, not a hard-coded `"neg"`.** Unit attribution already honors sorter polarity via `resolve_peak_sign(sorter_params)` (`sorting.py:2605-2609`), but SNR is hard-coded `peak_sign="neg"` (`metric_curation.py:255,273`) and the `metric_kwargs` flow to SI unchanged (`compute_quality_metrics(metric_params=...)`, `:1101-1115`; verified `snr` survives the `voltage_names` filter and nothing re-defaults it). Resolve the peak sign in **`AnalyzerCuration.make_fetch`** (`metric_curation.py:851`, the sanctioned DB-fetch stage where `sel["sorting_id"]` is in scope) — NOT in the `_compute_metrics` staticmethod (`:1031`, which has neither `sorting_id` nor the right param name; its parameter is `metric_kwargs`, not `metric_params`). Mirror the attribution fetch at `sorting.py:2605-2609`, then override the resolved sign in `metric_kwargs["snr"]` and thread it through to `make_compute`/`_compute_metrics`:
 
    ```python
+   # in make_fetch, where sel["sorting_id"] is available:
    sorter_params = (
-       SortingSelection * SorterParameters & {"sorting_id": sorting_id}
+       SortingSelection * SorterParameters & {"sorting_id": sel["sorting_id"]}
    ).fetch1("params")
    resolved = resolve_peak_sign(sorter_params)
-   if "snr" in metric_params:
-       metric_params = {**metric_params, "snr": {**metric_params["snr"], "peak_sign": resolved}}
+   if "snr" in metric_kwargs:
+       metric_kwargs = {**metric_kwargs, "snr": {**metric_kwargs["snr"], "peak_sign": resolved}}
    ```
 
    For negative-default sorts `resolved == "neg"` so values are unchanged; only positive/bidirectional sorters (clusterless `peak_sign="pos"/"both"`, MS `detect_sign=1/0`) change — to the correct channel. Leave the default rows' `"neg"` as the fallback.
 
-4. **R27 — stop AnalyzerCuration from scoring the raw-sort namespace under a merged parent.** `AnalyzerCuration.make_compute` loads the analyzer for `{"sorting_id"}` (`metric_curation.py:916,933`) and `materialize_curation` attaches the resulting labels to `parent_curation_id=sel["curation_id"]` (`:1399-1417`); when the parent applied merges, the unit-id namespaces disagree and labels land on the wrong units. **Default fix (guard):** extend the existing chaining guard in `AnalyzerCurationSelection.insert_selection` (`metric_curation.py:738-748`, which already rejects an `analyzer_curation` parent) to also reject any parent curation whose unit namespace differs from the raw sort — i.e. `merges_applied` is True, or the parent is a non-root curation with labels that drop/alter units. Raise an actionable error directing the user to run auto-curation on a pass-through (root) curation. Add the namespace check via `CurationV2` (`merges_applied` fetch + `get_matchable_unit_ids` comparison to the raw `Sorting.Unit` set).
+4. **R27 — stop AnalyzerCuration from scoring the raw-sort namespace under a merged parent.** `AnalyzerCuration.make_compute` loads the analyzer for `{"sorting_id"}` (`metric_curation.py:933`) and `materialize_curation` attaches the resulting labels to `parent_curation_id=sel["curation_id"]` (`:1399-1417`); when the parent applied merges, the unit-id namespaces disagree and labels land on the wrong units. **Default fix (guard):** the existing chaining handling in `AnalyzerCurationSelection.insert_selection` (`metric_curation.py:740-748`) currently only **`logger.warning`s** for an `analyzer_curation` parent and proceeds — it does NOT raise. Add a hard `raise` for the genuine namespace-divergence case and decide explicitly whether the existing `analyzer_curation`-on-`analyzer_curation` warning should also become a raise (don't silently convert it). **The only thing that changes the unit-id namespace is `merges_applied=True`** (it collapses/renumbers via `get_merged_sorting`); labels (`noise`/`reject`) do NOT — they leave the raw unit-ids intact, so a label-only child is a *legitimate* chaining target (auto-curate after manual noise-tagging). Therefore gate the raise on `merges_applied is True` **only** — fetch it via `(CurationV2 & parent_key).fetch1("merges_applied")`. Do **not** compare `get_matchable_unit_ids` to the raw `Sorting.Unit` set: that would falsely reject every label-only child. Raise an actionable error directing the user to run auto-curation on a curation with no applied merges.
 
    **Alternative (re-base) — only if the owner confirms** (overview Open Question 2): instead of rejecting, build the analyzer over the parent curation's merged sorting (`CurationV2.get_merged_sorting`) so metrics reflect the curation's units. This is larger; default to the guard unless directed otherwise.
 
@@ -66,8 +70,10 @@ depends on another phase.
    ```python
    try:
        raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
-       # Sever the temp-dir file backing before the finally cleans it up:
-       return si.NumpySorting.from_sorting(raw_sorting)
+       # Sever the temp-dir file backing before the finally cleans it up.
+       # with_metadata=True so unit properties/annotations survive (default
+       # False drops them; verified against SI 0.104.3).
+       return si.NumpySorting.from_sorting(raw_sorting, with_metadata=True)
    finally:
        ...  # existing job-kwargs restore + sorter_temp_dir.cleanup()
    ```
@@ -76,7 +82,7 @@ depends on another phase.
 
 6. **R3 — guard preview/unmerged curations.** `CurationV2.has_unapplied_proposed_merges` (`curation.py:1381-1413`) exists and gates the decoding path (`spikesorting_merge.py:379`) but not the generic accessors or UnitMatch.
    - **UnitMatch (raise — matching unmerged units is unambiguously wrong):** in `UnitMatchSelection.insert_selection` (`unit_matching.py:286-297`), for each member's `{sorting_id, curation_id}`, call `CurationV2.has_unapplied_proposed_merges(curation_key)` and raise `ValueError` if True, with a message telling the user to apply or drop the proposed merges first. (Also add the same check defensively in `make_fetch`'s member loop, `:587-625`.)
-   - **Generic accessors (warn — consistent with `get_sorting`, non-breaking for v0/v1):** add a `logger.warning` in `get_spike_times`/`get_spike_indicator`/`get_firing_rate` (`spikesorting_merge.py:430-478,540-574`) when a consumed merge_id resolves to a v2 curation with unapplied proposed merges. Reuse the merge_id→curation resolution already used by `assert_decoding_merge_ids_ok` (`:379`); factor it into a small `_warn_preview_merge_ids(key)` helper the three accessors call. Keep the strict **raise** on the decoding path unchanged.
+   - **Generic accessors (warn — consistent with `get_sorting`, non-breaking for v0/v1):** add the `logger.warning` **only in `get_spike_times`** (`spikesorting_merge.py:430-445`), which is the common sink — `get_firing_rate` → `get_spike_indicator` → `get_spike_times`, so warning in all three would fire 3× per `get_firing_rate` call. Trigger it when a consumed merge_id resolves to a v2 curation with unapplied proposed merges. Reuse the merge_id→curation resolution already used by `assert_decoding_merge_ids_ok` (`:369-388`), factored into a small `_warn_preview_merge_ids(key)` helper. Keep the strict **raise** on the decoding path unchanged.
 
 7. **Docs.** Add a CHANGELOG entry per fix under the v2 section. No user-facing API docs change shape (behavior corrections); note the SNR-polarity and no-filter-offset corrections in the CHANGELOG so anyone who ran the affected combinations knows outputs changed.
 

@@ -26,6 +26,11 @@ the owner-agreed disposition for each is in its "Decisions" section.
 
 ## Current codebase integration points
 
+> **Line numbers are point-in-time** (captured at plan-authoring HEAD) and may have
+> drifted by a few lines — a code-review pass found fixture refs off by ~1. Treat
+> them as "confirm by reading," not literal; the symbol/function names are the
+> reliable anchor.
+
 Touched (all paths under `src/spyglass/spikesorting/`):
 
 - `v2/curation.py:1415-1668` — `resolve_restriction`: pure key-classification half (1511-1595) extracted; DataJoint join assembly preserved on the table. **phase-0.**

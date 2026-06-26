@@ -42,7 +42,7 @@ repointed.
        """
    ```
 
-   Import `parse_artifact_detection_interval_list_name` from its DB-free definition module (grep for `def parse_artifact_detection_interval_list_name`; import from that module, **not** from `utils`, to keep `_curation_routing` import-light). `resolve_restriction` (the classmethod) then calls `classify_and_normalize_restriction(...)`, returns `None` if it returns `None`, and assembles the DataJoint joins (current `curation.py:1597-1668`) from the returned dicts. Behavior is identical.
+   **Prerequisite (task 1a):** `parse_artifact_detection_interval_list_name` is currently defined **only in `utils.py:653`** (the DB-heavy barrel — `utils.py:12-13` imports `datajoint`+`spikeinterface` at module top), so `_curation_routing` cannot import it without failing the import-boundary test in task 3. First extract `parse_artifact_detection_interval_list_name`, its inverse, and the `_ARTIFACT_DETECTION_INTERVAL_LIST_PREFIX` constant (`utils.py:635-664`) into a small DB-free module (a new `_artifact_naming.py`, or fold into existing DB-free `_curation_transforms.py`), re-exported from `utils` for back-compat, and add it to `_DB_FREE_SERVICE_MODULES`. Then `_curation_routing` imports the parser from that DB-free module. `resolve_restriction` (the classmethod) then calls `classify_and_normalize_restriction(...)`, returns `None` if it returns `None`, and assembles the DataJoint joins (current `curation.py:1597-1668`) from the returned dicts. Behavior is identical.
 
 2. **Extract the `summarize_curation` pure formatter into `_curation_plan.py`.** Add:
 

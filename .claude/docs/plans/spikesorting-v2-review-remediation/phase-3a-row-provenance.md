@@ -32,6 +32,8 @@ is **secondary, never identity** — a parity test confirms ids are unchanged.
 
    It reuses `_resolved_job_kwargs`' merge but additionally inspects whether `random_seed` came from the ambient layers (compare ambient-merged vs per-row) and `logger.warning`s once if so. Route the seed sites (`_sorting_dispatch.py:340,513`, `_sorting_analyzer.py:649`) and the value stored below through this helper so the stored seed equals the used seed.
 
+   **This is a (defensible) behavior change, not pure capture — call it out.** The three seed sites currently read **only the per-row `job_kwargs` blob** (`.get("random_seed", 0)`); they ignore SI globals / `dj.config`. Routing them through `resolve_effective_seed` means an ambient `dj.config['custom']['spikesorting_v2_job_kwargs']['random_seed']` that is currently ignored would now **take effect** (per-row still wins — correct precedence). Document this in the CHANGELOG and pin a regression test that a per-row seed still overrides ambient. **Do not store-without-routing:** if you store `resolve_effective_seed(...)` but leave the sites reading the per-row blob, the stored value diverges from the used value whenever an ambient seed exists.
+
 2. **`Sorting` provenance columns.** Add to the `Sorting` master definition (`sorting.py:1135`, before the closing `"""`), as secondary attributes:
 
    ```
