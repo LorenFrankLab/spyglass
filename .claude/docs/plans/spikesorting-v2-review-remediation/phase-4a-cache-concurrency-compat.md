@@ -36,7 +36,7 @@ rows at compute time; route scratch to the configured temp dir.
 
 ## Additional tasks (Round-3 reviews)
 
-8. **Add `add_extensions` to the R5 lock site list (ALSC-2).** Task 1's enumeration of canonical-folder mutations must also include `Sorting.add_extensions` → `ensure_extensions` (`sorting.py:1977-1983`), which mutates the analyzer folder unlocked.
+8. **(ALSC-2 — folded into task 1.)** `Sorting.add_extensions` → `ensure_extensions` (`sorting.py:1977-1983`) is already in task 1's lock-site list; no separate work. Left here only as the explicit ALSC-2 → task-1 traceability link.
 
 9. **ALSC-3 — validate the analyzer recipe before touching the filesystem.** `load_or_rebuild_analyzer` computes `analyzer_path(...)` and may `rmtree` the folder (`_sorting_analyzer.py:210-234`) before the recipe row is fetched/validated; `waveform_params_name` reaching `get_analyzer` is an un-FK'd free string (the path-safety regex is insert-time only, `sorting.py:633`). Validate the recipe name (path-safety) and, for `rebuild=True`, the recipe row, **before** any filesystem load/delete; add `../bad` / `bad/name` tests for `rebuild=True` and `False`.
 

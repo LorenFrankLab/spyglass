@@ -5,8 +5,8 @@
 Close the identity/schema gaps that are cheapest to fix while pre-production: master
 rows can be silently retargeted (R28), runtime-semantics aliases change meaning under
 a fixed version (R6), `TrackedUnit` re-derives its universe instead of using the
-frozen one (R7), and schema-init isn't an upgrade workflow (R8). One PR; four
-related task groups (review per group is fine).
+frozen one (R7), and schema-init isn't an upgrade workflow (R8). One PR; **five**
+related task groups (A–E, the last added by the Round-3 reviews; review per group is fine).
 
 **Inputs to read first:**
 

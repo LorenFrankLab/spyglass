@@ -146,3 +146,5 @@ Phase-5-scoped in the triage:
 - phase-3b: ~+300 LOC (writer metadata across 5 writers) + tests.
 - phase-4a: ~+250 LOC (lock wiring + 3 compat checks + temp `dir=`) + tests.
 - phase-4b: ~+200 LOC (many small, localized fixes) + tests.
+- phase-4c: ~+400 LOC (member snapshot + concat verify-on-read/rebuild; +recompute tables if not deferred) + tests.
+- phase-6: mostly CI/fixtures + new science assertions — small LOC, but gated on publishing the two-session fixtures.

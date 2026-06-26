@@ -54,11 +54,17 @@ This phase IS validation; its "tests" are the gates themselves. The meta-asserti
 | Gate | Asserts |
 | --- | --- |
 | `test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth` (made required) | AUC > 0.85 on the published two-session fixture; **the CI job fails if the fixture is absent** (no longer skip-on-absent). |
-| `test_drift_estimate.py::test_drift_displacement_accuracy` (new) | recovered displacement matches the planted trajectory within the stated tolerance. |
+| `test_drift_estimate.py::test_drift_displacement_accuracy` (new) | recovered displacement matches the planted trajectory within the stated tolerance; **the CI job fails if the planted-drift fixture is absent** (made required, not skip-on-absent — same as the UnitMatch gate). |
 | `test_ground_truth_parity.py::test_all_unit_and_per_shank_floor` (new) | a synthetic localized per-shank dropout fails; the full 128-ch fixture passes the all-unit + per-shank floors. |
 | `test_analyzer_curation.py::test_auto_merge_proposes_planted_oversplit_realistic` (new) | proposes the planted oversplit; does not propose a cross-shank negative control. |
 | `test_fixture_realism.py::test_scientific_summary_within_bands` (new) | each fixture's measured firing-rate/SNR/drift summary is within committed bands. |
-| task 7 gaps | the six Round-3 science/coverage tests pass and pin their contracts. |
+| `test_ci_gates.py::test_benchmarks_scheduled_and_bounded` (new, task 6) | the scheduled (non-PR) benchmark workflow exists, covers the highest-signal checks (UnitMatch dense-pair RAM, concat split, artifact masking, clusterless all-spike extraction), and has explicit regression bounds. |
+| (task 7) `test_analyzer_curation.py::test_concat_backed_analyzer_curation_e2e` (ALSC-7) | a concat sort runs `AnalyzerCurationSelection → populate → materialize_curation` end-to-end. |
+| (task 7) `test_session_group_concat.py::test_multi_day_concat_populates` (CONCS-7) | a multi-day group with an explicit/no-motion preset populates `ConcatenatedRecording` (success path, not just gating). |
+| (task 7) `test_session_group_concat.py::test_concat_units_nwb_obs_intervals_readback` (CONCS-8) | a concat-backed sort's NWB `obs_intervals` read back match the full-recording window. |
+| (task 7) `test_downstream_consumers.py::test_concat_merge_id_through_session_consumer` (CONCS-5) | a concat-backed merge id flows through a session-scoped downstream table without assuming single-session. |
+| (task 7) `test_export_safety.py::test_export_includes_intermediate_sort_nwb` (CNEP-6) | `Export.File` contains the intermediate sort NWB the docs promise (3 files, not 2). |
+| (task 7) `test_artifact_mask.py::test_single_frame_seam_edge` (AVTM-6) | the disjoint-seam single-frame edge is pinned. |
 
 ## Fixtures
 
