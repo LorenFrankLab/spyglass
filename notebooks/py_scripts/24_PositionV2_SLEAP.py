@@ -266,12 +266,15 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 # %% [markdown]
 # ### Step 2 — Define body parts and skeleton
 #
-# The skeleton's bodyparts must match the keypoints in your `.slp` file.
+# The skeleton's bodyparts and edges must match the keypoints and connections
+# in your `.slp` file.  Edit both together — `training_edges` references the
+# names in `training_bodyparts`.
 
 # %%
-# List the body parts your SLEAP model will track. These must match the
-# node names in your .slp labels file.
+# List the body parts your SLEAP model will track and the skeleton edges
+# (pairs of connected bodyparts).  Both must match your .slp labels file.
 training_bodyparts = ["A", "B"]
+training_edges = [("A", "B")]
 
 # %% [markdown]
 # ### Step 3 — Configure params, selection, and train
@@ -306,7 +309,7 @@ if RUN_SLEAP_TRAINING:
         {
             "skeleton_id": "sleap_train_AB",
             "bodyparts": training_bodyparts,
-            "edges": [("A", "B")],
+            "edges": training_edges,
         },
         check_duplicates=False,
         skip_duplicates=True,
