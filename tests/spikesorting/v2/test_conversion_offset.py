@@ -69,6 +69,76 @@ def test_heterogeneous_offset_raises():
         )
 
 
+def _no_filter_params(operator="median"):
+    """A validated ``no_filter`` preset (bandpass disabled) for the given
+    common-reference operator."""
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        CommonReferenceParams,
+        PreprocessingParamsSchema,
+    )
+
+    return PreprocessingParamsSchema(
+        bandpass_filter=None,
+        common_reference=CommonReferenceParams(operator=operator),
+    )
+
+
+@pytest.mark.parametrize(
+    "reference_mode,reference_id",
+    [("global_median", None), ("specific", 0)],
+)
+def test_no_filter_reference_zeroes_channel_offset(
+    reference_mode, reference_id
+):
+    """On the ``no_filter`` preset there is no bandpass to remove DC, so
+    ``common_reference`` re-references DC-laden traces but leaves
+    ``channel_offsets`` at the parent value -- ``resolve_conversion_and_offset``
+    would then persist the parent DC, double-counting it on readback. After
+    referencing the offset must be zeroed (the per-channel constant DC cancels
+    under referencing), matching what the bandpass path already does.
+
+    Fails before SIG-1 (offsets stay at 1000 uV).
+    """
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_pre_motion_preprocessing,
+    )
+
+    rec = _rec([0.195] * 4, [1000.0] * 4)
+    out, _ = apply_pre_motion_preprocessing(
+        rec,
+        reference_mode=reference_mode,
+        reference_electrode_id=reference_id,
+        sort_group_channel_ids=[0, 1, 2, 3],
+        validated=_no_filter_params(),
+    )
+    np.testing.assert_array_equal(
+        out.get_channel_offsets(),
+        np.zeros(out.get_num_channels()),
+    )
+
+
+def test_no_filter_no_reference_preserves_offset():
+    """Guard against over-zeroing: with ``reference_mode='none'`` no
+    referencing runs, so a genuine DC offset must be carried through (the fix
+    zeroes ONLY after a ``common_reference`` branch)."""
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_pre_motion_preprocessing,
+    )
+
+    rec = _rec([0.195] * 4, [1000.0] * 4)
+    out, _ = apply_pre_motion_preprocessing(
+        rec,
+        reference_mode="none",
+        reference_electrode_id=None,
+        sort_group_channel_ids=[0, 1, 2, 3],
+        validated=_no_filter_params(),
+    )
+    np.testing.assert_array_equal(
+        out.get_channel_offsets(),
+        np.full(out.get_num_channels(), 1000.0),
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_offset_round_trips_through_populate(dj_conn, monkeypatch):

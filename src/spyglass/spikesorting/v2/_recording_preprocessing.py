@@ -210,6 +210,15 @@ def apply_pre_motion_preprocessing(
                 "reference channel in for subtraction."
             )
         recording = recording.remove_channels([int(reference_electrode_id)])
+        # Referencing re-references the (possibly DC-laden) traces but leaves
+        # channel_offsets at the parent value; on the no_filter preset there is
+        # no bandpass to remove DC, so the persisted ElectricalSeries offset
+        # would double-count it on readback. Under referencing the per-channel
+        # constant DC cancels, so the offset describing the re-referenced signal
+        # is 0 -- matching what the bandpass path already produces.
+        # set_channel_offsets mutates IN PLACE and returns None (SI 0.104.3):
+        # a bare statement, NOT ``recording = ...``.
+        recording.set_channel_offsets(0.0)
     elif reference_mode == "global_median":
         # A global reference on a single-channel group zeroes the signal: the
         # per-sample median (or mean) across one channel IS that channel, so
@@ -230,6 +239,10 @@ def apply_pre_motion_preprocessing(
             operator=validated.common_reference.operator,
             dtype=np.float64,
         )
+        # Zero the per-channel offset after referencing (see the 'specific'
+        # branch): the common DC cancels, so the persisted offset must describe
+        # the re-referenced signal, not the parent DC. In place; returns None.
+        recording.set_channel_offsets(0.0)
     elif reference_mode != "none":
         raise ValueError(
             "Recording.make: invalid reference_mode "
