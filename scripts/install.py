@@ -608,8 +608,13 @@ class CondaManager:
 
         env_file_path = REPO_ROOT / env_file
 
+        # Let conda stream its own progress/prompts directly to the terminal.
+        # Capturing its output (the previous behavior) hid conda's
+        # confirmation prompt, so `conda env create` blocked invisibly on
+        # stdin and the installer appeared to stall with no report. "-y"
+        # auto-confirms so the command runs non-interactively.
         try:
-            with subprocess.Popen(
+            subprocess.run(
                 [
                     conda_cmd,
                     "env",
@@ -618,25 +623,10 @@ class CondaManager:
                     str(env_file_path),
                     "-n",
                     self.env_name,
+                    "-y",
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            ) as process:
-                for line in process.stdout:
-                    if any(
-                        kw in line
-                        for kw in ["Solving", "Downloading", "Extracting"]
-                    ):
-                        print(".", end="", flush=True)
-                Console.print("")
-
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    process.returncode, conda_cmd
-                )
-
+                check=True,
+            )
             Console.success(f"Environment '{self.env_name}' created")
 
         except subprocess.CalledProcessError as e:
@@ -661,11 +651,19 @@ class CondaManager:
         package_spec = str(REPO_ROOT)
         if extras:
             package_spec = f"{package_spec}[{','.join(extras)}]"
+
+        # Stream pip's output directly to the terminal so progress and any
+        # errors stay visible; hiding it made a multi-minute install
+        # indistinguishable from a stall. `conda run` buffers the child's
+        # output by default, so "--no-capture-output" is required for it to
+        # actually stream (not capturing at the subprocess layer is not
+        # enough on its own).
         try:
             subprocess.run(
                 [
                     conda_cmd,
                     "run",
+                    "--no-capture-output",
                     "-n",
                     self.env_name,
                     "pip",
@@ -674,45 +672,18 @@ class CondaManager:
                     package_spec,
                 ],
                 check=True,
-                capture_output=True,
-                text=True,
             )
             Console.success("Spyglass installed")
         except subprocess.CalledProcessError as e:
-            error_output = e.stderr if e.stderr else str(e)
-            error_lower = error_output.lower()
-
-            # Platform-specific disk space command
             disk_space_cmd = "dir" if sys.platform == "win32" else "df -h"
-
-            if "no space left" in error_lower or "disk" in error_lower:
-                primary_cause = "Disk space is full"
-                primary_fix = (
-                    f"Free up disk space: {disk_space_cmd} shows usage"
-                )
-            elif "connection" in error_lower or "timeout" in error_lower:
-                primary_cause = "Network connection issue"
-                primary_fix = "Check internet connection and retry"
-            elif "permission" in error_lower or "access" in error_lower:
-                primary_cause = "Permission denied"
-                primary_fix = "Check write permissions in the install directory"
-            else:
-                primary_cause = "Package installation failed"
-                primary_fix = (
-                    f"Update pip: {conda_cmd} run -n {self.env_name} "
-                    "pip install --upgrade pip"
-                )
-
             raise RuntimeError(
-                f"Failed to install spyglass package.\n\n"
-                f"Most likely cause: {primary_cause}\n"
-                f"Recommended fix: {primary_fix}\n\n"
-                f"If that doesn't help, try these steps:\n"
+                "Failed to install spyglass package. "
+                "See the pip output above for the specific error.\n\n"
+                "Common fixes:\n"
                 f"  1. Update pip: {conda_cmd} run -n {self.env_name} pip install --upgrade pip\n"
                 f"  2. Check disk space: {disk_space_cmd}\n"
-                f"  3. Check network connection\n"
-                f"  4. Retry the installation\n\n"
-                f"Error details: {error_output[:500]}"
+                "  3. Check network connection\n"
+                "  4. Retry the installation"
             ) from e
 
 
