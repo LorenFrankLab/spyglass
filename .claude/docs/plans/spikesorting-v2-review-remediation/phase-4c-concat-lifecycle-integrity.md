@@ -6,8 +6,10 @@
 (R40, CONCS-2), and its identity floats free of its actual member set (R39 / CONCS-1,
 CONCS-3). This phase brings concat to parity: verify-on-read + rebuild + recompute
 lifecycle, a frozen member snapshot tied into identity/split, and split-back spike
-conservation. Independent of phases 1–3; overlaps phase-4a's concat-compat work
-(`_concat_recording.py`) so whichever lands second rebases.
+conservation. Independent of phases 1–3, but **lands after phase-4a**: this phase
+assumes phase-4a's concat-compatibility checks (electrode/region/fs — R30/CONCS-4)
+are in place and adds the lifecycle/identity layer on top. Both edit
+`_concat_recording.py`, so phase-4c rebases onto phase-4a.
 
 **Inputs to read first:**
 

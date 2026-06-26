@@ -20,8 +20,9 @@ the owner-agreed disposition for each is in its "Decisions" section.
   REL-4 task (concat-curation query routing) edits the routing helper phase-0
   extracts, so land REL-4 **after** phase-0.
 - **phases 2, 3a, 3b, 4a, 4b** build on the current structure and are mutually
-  independent except: phase-3b (NWB provenance) reads the columns phase-3a adds, so
-  **3a precedes 3b**.
+  independent except: phase-3b (NWB provenance) reads the columns/values phase-3a
+  **and phase-2** add, so **phase-2 and phase-3a both precede phase-3b** (3b writes
+  phase-3a's provenance fields and phase-2's resolved motion preset into the NWB).
 - **phase-4c (concat lifecycle/integrity, Round 3)** overlaps phase-4a's concat-compat
   work in `_concat_recording.py` — whichever lands second rebases. Its cheap
   verify-`content_hash`-on-read half (task 2) is not deferrable; its concat-recompute
