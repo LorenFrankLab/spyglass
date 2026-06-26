@@ -143,18 +143,25 @@ def recording_key_for_sorting(sorting_key) -> dict:
 def _curation_sorting_key(curation_evaluation_key) -> dict:
     """Resolve a ``CurationEvaluation`` key to its sort's ``{"sorting_id": ...}``.
 
-    A trivial provenance lookup on ``CurationEvaluationSelection`` (the same one
+    A provenance lookup on ``CurationEvaluationSelection`` (the same one
     ``CurationEvaluation._analyzer_for`` does); the analyzer build/load itself
-    stays the single responsibility of ``Sorting.get_analyzer``.
+    stays the single responsibility of ``Sorting.get_analyzer``. The SI-analyzer
+    plot helpers that call this render over the RAW sort's display analyzer, so
+    a merged curation (or a label-only child of one) is rejected here -- its
+    namespace differs from the raw sort and the plot would mix namespaces.
     """
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluationSelection,
+        _assert_curation_in_raw_namespace,
     )
 
-    sorting_id = (
-        CurationEvaluationSelection & curation_evaluation_key
-    ).fetch1("sorting_id")
-    return {"sorting_id": sorting_id}
+    sel = (CurationEvaluationSelection & curation_evaluation_key).fetch1()
+    _assert_curation_in_raw_namespace(
+        sel["sorting_id"],
+        int(sel["curation_id"]),
+        context="visualization SI-analyzer plot",
+    )
+    return {"sorting_id": sel["sorting_id"]}
 
 
 # ---- recording inspection ------------------------------------------------

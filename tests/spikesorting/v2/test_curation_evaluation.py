@@ -1103,3 +1103,237 @@ def test_analyzer_curation_table_removed():
         from spyglass.spikesorting.v2.metric_curation import (  # noqa: F401
             AnalyzerCuration,
         )
+
+
+# ---------- review round 2: routing / label-state / namespace guards --------
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_evaluate_label_only_child_of_merged_parent(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """A label-only child of a merged parent (merges_applied=False but a
+    non-raw unit namespace) is evaluated over ITS OWN units, not the raw sort.
+
+    Regression for the fast-path routing: ``use_fast_path`` keys on whether the
+    curation's unit set equals the raw sort's, not on ``merges_applied`` -- the
+    label-only child here has merges_applied=False yet carries the merged id, so
+    the cached raw analyzer (raw unit ids) must NOT be used. Exercises the
+    owner-suggested chain: accept a merge, evaluate the merged child, materialize
+    labels, evaluate the label-only grandchild.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    merged_id = max(unit_ids) + 1
+    metric_params = _ensure_counts_metric_params()
+    clear_curations_for(planted_two_unit_sort)
+
+    def _eval(curation_key):
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **curation_key,
+                "metric_params_name": metric_params,
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+        return sel
+
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        # Accept a merge into a committed merged child; evaluate it.
+        merged = CurationEvaluation().create_curation(
+            _eval(root), merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        assert set(
+            int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
+        ) == {merged_id}
+        eval_merged = _eval(merged)
+        assert set(CurationEvaluation.get_metrics(eval_merged).index) == {
+            merged_id
+        }
+
+        # Materialize labels into a label-only grandchild (merges_applied=False,
+        # but its namespace is the MERGED set {merged_id}).
+        grandchild = CurationEvaluation().materialize_labels(
+            eval_merged, labels={merged_id: ["mua"]}
+        )
+        assert not bool((CurationV2 & grandchild).fetch1("merges_applied"))
+        assert set(
+            int(u) for u in (CurationV2.Unit & grandchild).fetch("unit_id")
+        ) == {merged_id}
+
+        # The blocker: evaluating that label-only child must score {merged_id},
+        # NOT the raw sort units (which the old `not merges_applied` fast path
+        # would have loaded, tripping the namespace invariant).
+        eval_grandchild = _eval(grandchild)
+        assert set(
+            CurationEvaluation.get_metrics(eval_grandchild).index
+        ) == {merged_id}
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_acceptance_replace_clears_stale_labels(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """Accepting an evaluation writes the FULL auto-curation label state, so a
+    prior label the new evaluation does not propose is cleared (not inherited).
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        # A curation with a prior reject on unit 0.
+        root = CurationV2.insert_curation(
+            sorting_key=sorting_key, labels={unit_ids[0]: ["reject"]}
+        )
+        # Evaluate it with the inert "none" rules -> NO proposed labels.
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+        # Default acceptance (replace) writes the empty auto verdict, clearing
+        # the stale reject -- so the unit is not silently excluded downstream.
+        child = CurationEvaluation().materialize_labels(sel)
+        child_labels = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
+        }
+        assert child_labels == set(), child_labels
+        # Opting into inherit keeps the prior reject.
+        inherited = CurationEvaluation().materialize_labels(
+            sel, label_policy="inherit"
+        )
+        inh_labels = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & inherited).fetch(as_dict=True)
+        }
+        assert (unit_ids[0], "reject") in inh_labels
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_acceptance_merge_drops_absorbed_contributor_label(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """When create_curation applies a merge, a label on an absorbed contributor
+    does not silently attach to the merged unit -- it is dropped (re-evaluate
+    the merged child to label it). The drop is warned, not silent.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    merged_id = max(unit_ids) + 1
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        # A label on unit 0, which the accepted merge absorbs -> dropped; the
+        # merged unit is unlabeled (label it by re-evaluating the merged child).
+        # unit 0 is absorbed by the merge -> its label warn-drops (not a
+        # truly-stray key, so no permissive flag needed).
+        child = CurationEvaluation().create_curation(
+            sel,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            labels={unit_ids[0]: ["noise"]},
+        )
+        assert set(
+            int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
+        ) == {merged_id}
+        assert len(CurationV2.UnitLabel & child) == 0
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_analyzer_backed_helpers_reject_merged_curation(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The raw-analyzer notebook/SI helpers refuse a merged curation rather
+    than silently rendering it in the wrong (raw) unit namespace.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2 import visualization as ssviz
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        merged = CurationV2.create_merged_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            parent_curation_id=root["curation_id"],
+        )
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **merged,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        # No populate needed: the namespace guard fires before any analyzer load.
+        with pytest.raises(ValueError, match="namespace"):
+            CurationEvaluation().get_waveforms(sel)
+        with pytest.raises(ValueError, match="namespace"):
+            ssviz.plot_si_quality_metrics(sel)
+    finally:
+        clear_curations_for(planted_two_unit_sort)

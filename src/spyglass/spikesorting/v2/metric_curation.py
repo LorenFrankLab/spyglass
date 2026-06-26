@@ -184,6 +184,42 @@ def _assert_is_metric_recipe(waveform_params_name: str) -> None:
         )
 
 
+def _assert_curation_in_raw_namespace(
+    sorting_id, curation_id, *, context: str
+) -> None:
+    """Raise unless the curation's unit set equals the raw sort's unit set.
+
+    The raw-sort DISPLAY analyzer's unit namespace is the raw sort. A merged
+    curation -- or a label-only child of a merged parent -- carries merged unit
+    ids absent from the raw sort, so reading its waveforms / correlograms /
+    peak amplitudes off the raw analyzer would silently mix namespaces. The
+    analyzer-backed notebook/plot helpers therefore reject such a curation and
+    point the caller at the routed ``get_metrics`` / ``get_merge_groups``
+    accessors (which carry the curation's own unit namespace) or at plotting the
+    raw sort directly.
+    """
+    curation_units = {
+        int(u)
+        for u in (
+            CurationV2.Unit
+            & {"sorting_id": sorting_id, "curation_id": curation_id}
+        ).fetch("unit_id")
+    }
+    raw_units = {
+        int(u) for u in (Sorting.Unit & {"sorting_id": sorting_id}).fetch("unit_id")
+    }
+    if curation_units != raw_units:
+        raise ValueError(
+            f"{context}: curation (sorting_id={sorting_id}, "
+            f"curation_id={curation_id}) has a unit namespace that differs from "
+            "the raw sort (it is a merged curation or a label-only child of "
+            "one), so the raw-sort display analyzer cannot render it in the "
+            "curation's namespace. Use the routed get_metrics() / "
+            "get_merge_groups() accessors (curation namespace), or plot the raw "
+            "sort directly via the sorting_id."
+        )
+
+
 class CurationEvaluationFetched(NamedTuple):
     """DB inputs for ``CurationEvaluation.make_compute`` (no DB I/O in compute).
 
@@ -1027,12 +1063,19 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         expected_unit_ids = sorted(
             int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")
         )
+        raw_unit_ids = sorted(
+            int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+        )
 
-        # Routing: a committed row (previews already rejected) uses the cached
-        # raw-sort analyzer fast path when it applied no merges (root /
-        # label-only -> unit set == raw sort); an applied-merge row builds a
-        # curation-scoped temp analyzer over the merged sorting.
-        use_fast_path = not bool(merges_applied)
+        # Routing: the cached raw-sort analyzer fast path is valid ONLY when the
+        # curation's unit set IS the raw sort's unit set (a root, or a label-only
+        # child of a non-merged ancestor) -- then the cached analyzer already
+        # carries exactly these units. ``merges_applied`` is NOT the
+        # discriminator: a label-only child of a MERGED parent has
+        # merges_applied=False but its namespace includes merged parent ids
+        # absent from the raw sort, so it must build a curation-scoped temp
+        # analyzer over the curated sorting (same as an applied-merge row).
+        use_fast_path = set(expected_unit_ids) == set(raw_unit_ids)
 
         display_waveform_params_name = resolve_display_waveform_params_name(
             Sorting(), sorting_id
@@ -1491,7 +1534,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         merge_groups=None,
         use_all_suggested_merges: bool = False,
         labels: dict | None = None,
-        label_policy: str = "inherit",
+        label_policy: str = "replace",
         description: str = "accepted from curation evaluation",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
@@ -1511,10 +1554,15 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         labels-only committed child.
 
         Labels default to the evaluation's proposed labels
-        (:meth:`get_labels`); pass ``labels`` to override, or ``label_policy``
-        to control inheritance from the parent (see
-        ``CurationV2.insert_curation``). Accepted children carry the
-        ``curation_source='curation_evaluation'`` provenance.
+        (:meth:`get_labels`) and, with the default ``label_policy="replace"``,
+        are the child's FULL label state -- the auto-curation verdict, not
+        layered on the parent's labels. This matches v1 (a re-evaluation writes
+        the complete label state), so a unit the rules no longer flag is not
+        left carrying a stale ``reject`` / ``noise`` from an earlier curation
+        (which would silently drop it from the matchable-unit set downstream).
+        Pass ``label_policy="inherit"`` to instead overlay the proposals on the
+        parent's labels, or ``labels`` to supply the state explicitly. Accepted
+        children carry the ``curation_source='curation_evaluation'`` provenance.
 
         Parameters
         ----------
@@ -1529,9 +1577,17 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             list. Mutually exclusive with ``merge_groups``.
         labels : dict or None
             ``{unit_id: [label, ...]}`` to write; ``None`` defaults to the
-            evaluation's proposed labels.
+            evaluation's proposed labels. The proposed labels are in the
+            evaluated curation's PRE-merge namespace: when this call also
+            applies a merge, a label on a unit absorbed by that merge cannot
+            attach to the fresh merged unit and is dropped with a warning -- the
+            merged unit's labels come from RE-EVALUATING the merged child (the
+            recommended accept-merge-then-evaluate workflow), not from the
+            pre-merge proposals. Combine merges + labels in one call only when
+            the labels are on surviving (non-absorbed) units.
         label_policy : str
-            ``"inherit"`` (default) or ``"replace"`` -- see
+            ``"replace"`` (default for acceptance: the proposed labels are the
+            full label state) or ``"inherit"`` -- see
             ``CurationV2.insert_curation``.
         description : str
             Free-text description for the child curation.
@@ -1569,7 +1625,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         key,
         *,
         labels: dict | None = None,
-        label_policy: str = "inherit",
+        label_policy: str = "replace",
         description: str = "accepted labels from curation evaluation",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
@@ -1600,7 +1656,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         merge_groups=None,
         use_all_suggested_merges: bool = False,
         labels: dict | None = None,
-        label_policy: str = "inherit",
+        label_policy: str = "replace",
         description: str = "draft from curation evaluation",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
@@ -1954,8 +2010,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "the sort-time waveform subsample (full re-extraction is not "
                 "supported)."
             )
-        sorting_id = (CurationEvaluationSelection & key).fetch1("sorting_id")
-        analyzer = Sorting().get_analyzer({"sorting_id": sorting_id})
+        sel = (CurationEvaluationSelection & key).fetch1()
+        _assert_curation_in_raw_namespace(
+            sel["sorting_id"],
+            int(sel["curation_id"]),
+            context="CurationEvaluation.get_waveforms",
+        )
+        analyzer = Sorting().get_analyzer({"sorting_id": sel["sorting_id"]})
         return _WaveformsAccessor(analyzer)
 
     def _analyzer_for(self, key):
@@ -1965,13 +2026,19 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         through here, so they all read real waveforms / amplitudes / positions
         -- never the whitened metric analyzer (which is built only for the PC/NN
         cluster-separation metrics). ``get_analyzer`` with no recipe name
-        resolves the sort's stored display recipe. NOTE: this is the RAW sort's
-        display analyzer (its unit-id namespace is the raw sort); the routed
-        ``get_metrics()`` / ``get_merge_groups()`` accessors carry the
-        curation's own (possibly merged) namespace.
+        resolves the sort's stored display recipe. This is the RAW sort's
+        display analyzer, so it is REJECTED for a merged curation (or a
+        label-only child of one) whose unit namespace differs from the raw sort
+        -- those would mix namespaces. The routed ``get_metrics()`` /
+        ``get_merge_groups()`` accessors carry the curation's own namespace.
         """
-        sorting_id = (CurationEvaluationSelection & key).fetch1("sorting_id")
-        return Sorting().get_analyzer({"sorting_id": sorting_id})
+        sel = (CurationEvaluationSelection & key).fetch1()
+        _assert_curation_in_raw_namespace(
+            sel["sorting_id"],
+            int(sel["curation_id"]),
+            context="CurationEvaluation analyzer-backed plot",
+        )
+        return Sorting().get_analyzer({"sorting_id": sel["sorting_id"]})
 
     def plot_units_qc(
         self, key, *, metric_names=None, color_metric: str = "snr", axes=None
