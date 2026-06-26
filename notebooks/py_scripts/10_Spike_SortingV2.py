@@ -42,8 +42,8 @@ from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.metric_curation import (
-    AnalyzerCuration,
-    AnalyzerCurationSelection,
+    CurationEvaluation,
+    CurationEvaluationSelection,
 )
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
@@ -235,7 +235,7 @@ run_summary = run_v2_pipeline(
 # inflated by blanked segments), `peak_amplitude_uv`, `peak_electrode_id`, and
 # `brain_region`. It reads only sort-time metadata (no waveform recompute);
 # deeper SNR / ISI / nearest-neighbour metrics are computed by the
-# analyzer-driven curation step in section 7 below (`AnalyzerCuration`). The raw
+# curation-evaluation step in section 7 below (`CurationEvaluation`). The raw
 # `run_summary` dict carries the same fields programmatically
 # (`run_summary["merge_id"]`, `run_summary["n_units"]`).
 
@@ -250,31 +250,34 @@ describe_units(run_summary["sorting_id"])
 # labels curation *accepts* are the canonical set `CurationV2.label_options()`
 # (the `CurationLabel` enum); custom labels need `allow_custom_labels=True`.
 #
-# Curation is a loop, and the second analyzer pass is not redundant:
+# Curation is a loop built on `CurationEvaluation`, which scores a **committed**
+# curation in that curation's OWN unit namespace (a merged unit is scored over
+# its merged template, not inherited from a contributor):
 #
-# 1. **Auto-curate** — `AnalyzerCuration` walks the sort's analyzer, computes
-#    quality metrics, and proposes labels from a rule set;
-#    `materialize_curation` commits them to a child curation.
-# 2. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
+# 1. **Evaluate** the committed curation — `CurationEvaluation` walks its
+#    analyzer, computes quality metrics, and proposes labels from a rule set.
+# 2. **Accept** the proposals into a committed child — `replace_labels` writes
+#    the evaluation's label verdict (the final-metrics path); `create_curation`
+#    accepts explicit merges too.
+# 3. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
 #    drift) — find burst pairs with `plot_by_sort_group_ids` /
 #    `investigate_pair_*`, then merge them with `create_merged_curation`.
-# 3. **Re-run auto-curation on the merged curation** — merging changes each
-#    unit's template (and so its SNR / ISI-violation fraction / PC-NN
-#    separation), so metrics over the *post-merge* templates are the numbers of
-#    record.
+# 4. **Re-evaluate the merged curation** — merging changes each unit's template
+#    (and so its SNR / ISI-violation fraction / PC-NN separation), so metrics
+#    over the *post-merge* templates are the numbers of record.
 #
 # > Interactive web curation (label/merge in a browser) is coming via FigPack
 # > in a later release; it will slot in here.
 
 CurationV2.summarize_curation(run_summary)
 
-# ### 7a. Automatic curation (pass 1)
+# ### 7a. Evaluate the root curation (pass 1)
 #
-# Pair the root curation with a quality-metric recipe and an auto-curation rule
-# set, then populate. `franklab_default` computes `snr` / `isi_violation` /
-# `firing_rate` / `num_spikes` / `presence_ratio` / `amplitude_cutoff` /
-# `nn_advanced` (PCA); `franklab_default_auto_curation_2026_06` labels
-# `nn_noise_overlap > 0.1` units `noise` and `isi_violation > 0.02` (>2%
+# Pair the (committed) root curation with a quality-metric recipe and an
+# auto-curation rule set, then populate. `franklab_default` computes `snr` /
+# `isi_violation` / `firing_rate` / `num_spikes` / `presence_ratio` /
+# `amplitude_cutoff` / `nn_advanced` (PCA); `franklab_default_auto_curation_2026_06`
+# labels `nn_noise_overlap > 0.1` units `noise` and `isi_violation > 0.02` (>2%
 # refractory violations) `reject`. `plot_units_qc` is the population
 # "do these units look reasonable?" view; `get_metrics` returns the per-unit
 # table.
@@ -283,7 +286,7 @@ CurationV2.summarize_curation(run_summary)
 # whitened PCA analyzer, so it can take minutes on a real session (it is
 # idempotent, so a re-run reuses the result instead of recomputing).
 
-auto_sel = AnalyzerCurationSelection.insert_selection(
+eval_sel = CurationEvaluationSelection.insert_selection(
     {
         "sorting_id": run_summary["sorting_id"],
         "curation_id": run_summary["curation_id"],
@@ -291,23 +294,23 @@ auto_sel = AnalyzerCurationSelection.insert_selection(
         "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
     }
 )
-AnalyzerCuration.populate(auto_sel)
-AnalyzerCuration().plot_units_qc(auto_sel)
-AnalyzerCuration.get_metrics(auto_sel)
+CurationEvaluation.populate(eval_sel)
+CurationEvaluation().plot_units_qc(eval_sel)
+CurationEvaluation.get_metrics(eval_sel)
 
 # #### Reading the labels: proposals to verify, not verdicts
 #
 # The rule set proposes labels from thresholds — a starting point, not a
 # verdict. Before trusting a `noise` / `reject` tag, cross-check the unit:
 #
-# - **Refractory dip** — `AnalyzerCuration().plot_correlograms(auto_sel)`: a real
-#   single unit has a central dip in its autocorrelogram; a symmetric, dip-free
-#   autocorrelogram is a noise signature.
+# - **Refractory dip** — `CurationEvaluation().plot_correlograms(eval_sel)`: a
+#   real single unit has a central dip in its autocorrelogram; a symmetric,
+#   dip-free autocorrelogram is a noise signature.
 # - **The interneuron trap** — a fast-spiking interneuron raises ISI violations
 #   and sits just around the `nn_noise_overlap` noise threshold. If its waveform
 #   is narrow, its refractory dip clean, and its firing stable, it is a cell, not
 #   noise — don't reject it on the metric alone.
-# - **Amplitude over time** — `AnalyzerCuration().get_peak_amps(auto_sel)`: a
+# - **Amplitude over time** — `CurationEvaluation().get_peak_amps(eval_sel)`: a
 #   slow, smooth amplitude drift across a place-field traversal is a place cell,
 #   not multi-unit activity; sharp amplitude steps or several distinct bands are
 #   MUA.
@@ -317,7 +320,7 @@ AnalyzerCuration.get_metrics(auto_sel)
 # waveform widths and bursting, so the thresholds and tells above can mislead
 # there.
 
-# ### 7b. Find burst pairs to merge, then commit the auto labels
+# ### 7b. Find burst pairs to merge, then accept the auto labels
 #
 # `plot_by_sort_group_ids` scatters waveform similarity vs cross-correlogram
 # asymmetry, one point per unit pair — high-similarity, asymmetric pairs are
@@ -326,25 +329,31 @@ AnalyzerCuration.get_metrics(auto_sel)
 # bursts with an amplitude decrement that MountainSort oversplits into a parent +
 # a shorter-waveform daughter — exactly the high-similarity, short-lag-asymmetric
 # pair this scatter surfaces, so merging them reassembles one cell.
-# `materialize_curation` then commits the proposed auto labels into a child
-# curation you merge on top of.
+# `replace_labels` then writes the evaluation's label verdict into a committed
+# child you merge on top of (it CLEARS any earlier label the evaluation no
+# longer proposes — the authoritative "use the evaluation's labels" path; use
+# `overlay_labels` instead to KEEP existing labels and only add the proposed
+# ones).
 
-AnalyzerCuration().plot_by_sort_group_ids(auto_sel)
-auto_curation = AnalyzerCuration().materialize_curation(auto_sel)
-auto_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
+CurationEvaluation().plot_by_sort_group_ids(eval_sel)
+labeled_curation = CurationEvaluation().replace_labels(eval_sel)
+labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 
-# ### 7c. Manual merge, then the final auto-curation pass (pass 2)
+# ### 7c. Manual merge, then the final evaluation pass (pass 2)
 #
 # List the burst pairs you decided to merge in step 7b in `merge_groups_to_apply`
 # (each a list of ≥2 unit ids, e.g. `[[3, 7]]`). It starts EMPTY so a run-all
 # never merges arbitrary units — fill it in after inspecting 7b, then re-run.
 # When you merge, `create_merged_curation` (intent-first sugar over
 # `insert_curation` with `apply_merge=True`) branches off the auto-labeled
-# curation, and `AnalyzerCuration` runs once more on the merged curation: the
-# metrics over the post-merge templates are the final numbers of record.
-# `materialize_curation` commits those final labels so downstream code keys off
-# the curated result, not the uncurated root curation. (Leaving the list empty
-# keeps the auto-labeled curation from 7b as the result — no merge applied.)
+# curation, and `CurationEvaluation` runs once more on the MERGED curation: the
+# metrics over the post-merge templates are the final numbers of record. The
+# analyzer-backed plots (`plot_units_qc`, `plot_correlograms`, ...) are
+# raw-unit-curation only and RAISE on a merged curation, so read the merged
+# result with `get_metrics` (it carries the curation's own merged namespace).
+# `replace_labels` commits those final labels so downstream code keys off the
+# curated result, not the uncurated root curation. (Leaving the list empty keeps
+# the auto-labeled curation from 7b as the result — no merge applied.)
 
 merge_groups_to_apply = []  # e.g. [[3, 7]] after inspecting step 7b
 
@@ -352,11 +361,11 @@ if merge_groups_to_apply:
     merged = CurationV2.create_merged_curation(
         sorting_key={"sorting_id": run_summary["sorting_id"]},
         merge_groups=merge_groups_to_apply,
-        parent_curation_id=auto_curation["curation_id"],
+        parent_curation_id=labeled_curation["curation_id"],
         description="manual burst-pair merge",
         reuse_existing=True,
     )
-    final_sel = AnalyzerCurationSelection.insert_selection(
+    final_eval_sel = CurationEvaluationSelection.insert_selection(
         {
             "sorting_id": run_summary["sorting_id"],
             "curation_id": merged["curation_id"],
@@ -364,12 +373,12 @@ if merge_groups_to_apply:
             "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
         }
     )
-    AnalyzerCuration.populate(final_sel)
-    display(AnalyzerCuration.get_metrics(final_sel))  # over merged templates
-    final_curation = AnalyzerCuration().materialize_curation(final_sel)
+    CurationEvaluation.populate(final_eval_sel)
+    display(CurationEvaluation.get_metrics(final_eval_sel))  # merged templates
+    final_curation = CurationEvaluation().replace_labels(final_eval_sel)
 else:
-    final_curation = auto_curation  # no manual merge yet; use the 7b result
-    final_sel = auto_sel  # the analyzer-curation selection of record
+    final_curation = labeled_curation  # no manual merge yet; use the 7b result
+    final_eval_sel = eval_sel  # the curation-evaluation selection of record
 
 final_summary = CurationV2.summarize_curation(final_curation)
 final_merge_id = final_summary["merge_id"]
@@ -377,7 +386,7 @@ final_summary
 
 # ### 7d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
 #
-# Over the final curated result (`final_sel` from section 7c — post-merge if you
+# Over the final curated result (`final_eval_sel` from section 7c — post-merge if you
 # merged, the pass-1 auto curation otherwise), `get_metrics` returns a
 # waveform-shape column next to the quality metrics: `trough_half_width` — the
 # half-amplitude width of the spike trough, in seconds, read from the unwhitened
@@ -394,7 +403,7 @@ final_summary
 # wider post-trough window than the hippocampus display recipe's 0.5 ms and clip
 # there — they are reliable on the wider cortex/fallback window.)
 
-shape = AnalyzerCuration.get_metrics(final_sel)[
+shape = CurationEvaluation.get_metrics(final_eval_sel)[
     ["firing_rate", "trough_half_width"]
 ].dropna()
 
@@ -437,7 +446,7 @@ print(
 # discoverable namespace — `visualization` (import it as `ssviz`) — that wraps
 # SpikeInterface's own widgets/exporters behind Spyglass keys, so you
 # tab-complete a single module instead of hunting for plot methods across
-# `Recording`, `Sorting`, and `AnalyzerCuration`. `available_visualizations()`
+# `Recording`, `Sorting`, and `CurationEvaluation`. `available_visualizations()`
 # catalogs every visualization/export helper with a one-line description, the key
 # it takes, what it wraps, and whether it can fill in a missing analyzer
 # extension (the `recording_key_for_sorting` convenience used below is a key
@@ -447,7 +456,7 @@ print(
 # **preprocessed** recording; sorting/waveform/location widgets read the sort's
 # **display** (unwhitened) analyzer, so you see real µV waveforms and real probe
 # positions — never the whitened metric analyzer. `plot_metrics` plots the
-# routed `AnalyzerCuration.get_metrics()` table (the same numbers as section 7),
+# routed `CurationEvaluation.get_metrics()` table (the same numbers as section 7),
 # while the raw SpikeInterface metric widgets are separately named
 # (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
 # extensions directly. `plot_potential_merges` shows the **persisted**
@@ -484,7 +493,7 @@ unit_ids = list(Sorting().get_sorting(sorting_key).get_unit_ids())
 if unit_ids:
     ssviz.plot_unit_summary(sorting_key, unit_ids[0], compute_missing=True)
 
-ssviz.plot_metrics(final_sel)  # the routed Spyglass metric table, plotted
+ssviz.plot_metrics(final_eval_sel)  # the routed Spyglass metric table, plotted
 # -
 
 # ## 8. Downstream: choose the output accessor
