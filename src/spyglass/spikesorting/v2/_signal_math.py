@@ -670,6 +670,17 @@ def frames_for_times(recording, times_s, *, segment_index=0):
     import numpy as np
 
     times = np.atleast_1d(np.asarray(times_s, dtype=np.float64))
+    # AVTM-3: reject non-finite query times. searchsorted sorts NaN as +inf, so
+    # a NaN/Inf query silently maps to frame n (or 0) instead of failing. Note
+    # this guards ONLY finiteness: out-of-range *finite* times intentionally
+    # clamp to [0, n] (the searchsorted contract the artifact-mask complement
+    # walk depends on, pinned by test_frames_for_times_matches_full_vector_*).
+    if not np.all(np.isfinite(times)):
+        raise ValueError(
+            "frames_for_times: query times contain non-finite (NaN/Inf) "
+            f"values: {np.asarray(times_s).tolist()!r}. searchsorted-based "
+            "frame mapping would silently mis-map them (NaN sorts as +inf)."
+        )
     n = int(recording.get_num_samples(segment_index=segment_index))
     lo = np.zeros(times.shape, dtype=np.int64)
     hi = np.full(times.shape, n, dtype=np.int64)

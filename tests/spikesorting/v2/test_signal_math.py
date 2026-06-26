@@ -235,6 +235,22 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
     )
 
 
+@pytest.mark.parametrize(
+    "bad", [float("nan"), float("inf"), float("-inf")]
+)
+def test_frames_for_times_rejects_non_finite(bad):
+    """AVTM-3: a NaN/Inf query time raises (searchsorted would map NaN to +inf
+    and silently mis-map). Out-of-range FINITE times still clamp -- that
+    searchsorted contract is pinned by the matches_full_vector test above."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._signal_math import frames_for_times
+
+    rec = _recording_for_kind("rate", 1000)
+    with pytest.raises(ValueError, match="non-finite"):
+        frames_for_times(rec, np.array([0.001, bad]))
+
+
 @pytest.mark.parametrize("kind", ["rate", "contiguous", "disjoint"])
 def test_base_intervals_and_gaps_matches_full_vector(kind):
     """``base_intervals_and_gaps`` reproduces the full-vector base intervals AND
