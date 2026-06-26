@@ -781,3 +781,66 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
         (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
         (SortingSelection & sort_pk).super_delete(warn=False)
         (ArtifactDetection & art_pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_make_fetch_raises_when_recording_absent_from_interval_dict(
+    artifact_e2e_session, monkeypatch
+):
+    """AVTM-2: make_fetch selects this recording's array from the helper's
+    per-nwb dict and raises clearly when the key is absent (rather than feeding
+    a dict to the mask)."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactDetectionSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    recording_id = artifact_e2e_session["recording_id"]
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+
+    for sid in (
+        SortingSelection.RecordingSource & {"recording_id": recording_id}
+    ).fetch("sorting_id"):
+        (SortingSelection & {"sorting_id": sid}).super_delete(warn=False)
+    art_pk = ArtifactDetectionSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    # Helper returns a dict for a DIFFERENT nwb (e.g. a shared-group source that
+    # lost this member's row): make_fetch must raise, not feed a dict to the
+    # mask. make_fetch re-imports the helper from _artifact_intervals at call
+    # time, so patch it on the SOURCE module (not on `sorting`).
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._artifact_intervals."
+        "read_artifact_removed_intervals",
+        lambda key, as_dict=False: {"some_other_session.nwb": [[0.0, 1.0]]},
+    )
+    try:
+        with pytest.raises(ValueError, match="not found among"):
+            Sorting().make_fetch(sort_pk)
+    finally:
+        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+        (SortingSelection & sort_pk).super_delete(warn=False)
+        (ArtifactDetection & art_pk).super_delete(warn=False)
