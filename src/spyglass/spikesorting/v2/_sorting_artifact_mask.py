@@ -103,6 +103,16 @@ def apply_artifact_mask(
             "_apply_artifact_mask: valid_times must be an (n, 2) array "
             f"of (start, end) seconds; got shape {valid_times.shape}."
         )
+    # AVTM-3: reject NaN/Inf before any comparison. NaN slips silently through
+    # the < / sorted checks below (every NaN comparison is False), so a
+    # non-finite interval would otherwise under-mask instead of failing loudly.
+    if not np.all(np.isfinite(valid_times)):
+        raise ValueError(
+            "apply_artifact_mask: valid_times contains non-finite (NaN/Inf) "
+            f"values: {valid_times.tolist()!r}. The artifact-removed intervals "
+            "must be finite seconds; a non-finite bound signals an "
+            "alignment/units error upstream."
+        )
     starts = valid_times[:, 0]
     ends = valid_times[:, 1]
     if np.any(ends < starts):
@@ -164,6 +174,24 @@ def apply_artifact_mask(
             f"backward (t_first={t_first}, t_last={t_last}); the persisted "
             "recording's monotonic timestamp invariant is violated and the "
             "searchsorted frame mapping would silently mis-mask."
+        )
+    # AVTM-3: reject intervals outside the recording envelope before the walk.
+    # The complement walk silently clips to [t_first, t_last], so an interval
+    # starting before the first sample or ending past the last (a units/
+    # alignment error -- e.g. ms vs s) would be quietly ignored rather than
+    # flagged. Tolerate one sample-period of float slop at each endpoint.
+    envelope_tol = 1.0 / assert_positive_sampling_frequency(
+        recording.get_sampling_frequency(), context="apply_artifact_mask: "
+    )
+    if starts.min() < t_first - envelope_tol or ends.max() > (
+        t_last + envelope_tol
+    ):
+        raise ValueError(
+            "apply_artifact_mask: valid_times "
+            f"{valid_times.tolist()!r} fall outside the recording envelope "
+            f"[{t_first}, {t_last}] seconds (tol={envelope_tol:g}s); an "
+            "interval before the first or past the last sample signals an "
+            "alignment/units error (e.g. milliseconds vs seconds)."
         )
     # Walk the valid intervals left-to-right in seconds, collecting the
     # complement (artifact gaps) as ``(start_time, end_time)`` pairs;
