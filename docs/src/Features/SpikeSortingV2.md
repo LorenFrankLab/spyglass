@@ -541,27 +541,35 @@ custom matplotlib layout; the method returns the axes it drew into. The v1
 (reading the analyzer's `correlograms` / `waveforms` extensions; no separate
 `BurstPair` table).
 
-#### The auto -> manual-merge -> auto curation loop
+#### The auto-curate -> manual-merge curation flow
 
-Curation is a loop, and the second analyzer pass is not redundant:
+Auto-curation runs on the RAW sort and proposes labels on the raw unit ids, so
+it comes BEFORE applying merges:
 
-1. **Auto-curate.** Run `AnalyzerCuration` on the root curation (the rule set
-   above proposes labels; `materialize_curation` commits them to a child
-   `CurationV2`). Inspect with `plot_units_qc(sel)` and `get_metrics(sel)`.
+1. **Auto-curate.** Run `AnalyzerCuration` on the root curation (or on a
+   label-only child, e.g. after manual noise-tagging -- both leave the raw unit
+   ids intact). The rule set above proposes labels; `materialize_curation`
+   commits them to a child `CurationV2`. Inspect with `plot_units_qc(sel)` and
+   `get_metrics(sel)`.
 2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
    drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
    `investigate_pair_xcorrel` / `investigate_pair_peaks`, then commit the merge
    with `CurationV2.insert_curation(..., merge_groups=..., apply_merge=True)`
    (or the `create_merged_curation` wrapper) to produce a merged `CurationV2`.
-3. **Re-run auto-curation on the merged curation.** Metrics computed over the
-   *post-merge* templates are the numbers of record: merging changes a unit's
-   waveform, SNR, ISI-violation fraction, and PC/NN separation, so the labels
-   and metrics that matter are the ones recomputed after the merge. Select a new
-   `AnalyzerCuration` on the merged `curation_id` and populate it for the final
-   metrics and labels.
 
-The second pass is therefore not a repeat of the first -- it re-derives quality
-metrics over the merged unit set, which the first (pre-merge) pass could not see.
+**Auto-curation over a merged curation is rejected.** `AnalyzerCuration` builds
+its analyzer from the **raw** sort and attaches the proposed labels back to the
+parent `curation_id`. Applying merges renumbers the unit-id namespace, so running
+`AnalyzerCuration` on a merged curation would score the raw units and land the
+labels on the wrong (merged) units. `AnalyzerCurationSelection.insert_selection`
+therefore **raises** on a parent with `merges_applied=True` -- auto-curate first
+(step 1), apply merges last (step 2).
+
+Recomputing quality metrics over the *post-merge* templates (a unit's SNR /
+ISI-violation / PC-NN separation change after merging) is **not yet available**:
+it requires building the analyzer over the merged sorting rather than the raw
+sort. Until then, a merged unit's stored metrics are inherited from its
+highest-amplitude contributor, not recomputed.
 
 ### Stage-by-stage (custom pipeline preset)
 

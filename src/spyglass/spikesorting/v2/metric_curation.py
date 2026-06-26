@@ -139,6 +139,45 @@ def _nwb_file_name_for_sorting(sorting_key: dict) -> str:
     return Sorting.resolve_anchor_nwb_file_name(sorting_key)
 
 
+def _assert_curation_not_merged(
+    sorting_id, curation_id, *, merges_applied=None
+) -> None:
+    """R27 guard: reject auto-curating a parent that APPLIED merges.
+
+    ``AnalyzerCuration`` builds its analyzer over the RAW sort
+    (``get_analyzer({"sorting_id"})``) and ``materialize_curation`` attaches the
+    proposed labels to the parent ``curation_id``. When the parent applied
+    merges (``merges_applied=True``) the unit-id namespace is renumbered, so the
+    labels land on the wrong units. ``merges_applied`` is the ONLY thing that
+    renumbers the namespace -- labels (noise/reject) leave the raw unit-ids
+    intact -- so a label-only child (and the root) stays a legitimate chaining
+    target; do NOT compare unit-id sets, which would falsely reject every
+    label-only child.
+
+    Enforced at BOTH ``insert_selection`` (fail early at create) and
+    ``make_fetch`` (re-assert at the compute boundary, mirroring the
+    ``_assert_is_metric_recipe`` re-check), so a row planted via
+    ``allow_direct_insert`` or created before this guard cannot reach the
+    merged-namespace compute path. ``merges_applied`` may be passed in to skip
+    the redundant fetch when the caller already holds it.
+    """
+    if merges_applied is None:
+        merges_applied = (
+            CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
+        ).fetch1("merges_applied")
+    if merges_applied:
+        raise ValueError(
+            f"AnalyzerCuration on curation {curation_id} of sort "
+            f"{sorting_id} is not allowed: that curation has applied merges "
+            "(merges_applied=True), which renumbers the unit-id namespace. "
+            "Computing metrics over the raw sort and attaching the proposed "
+            "labels to the merged curation would land them on the wrong "
+            "units. Run auto-curation on a curation with no applied merges "
+            "(e.g. the root curation, or a label-only child); apply merges "
+            "afterward if needed."
+        )
+
+
 def _requested_pc_metrics(metric_names) -> list[str]:
     """PC/NN metrics among ``metric_names`` (route to the whitened analyzer).
 
@@ -687,9 +726,13 @@ class AnalyzerCurationSelection(
 
         Raises ``DuplicateSelectionError`` if any existing row for this
         identity carries a non-deterministic id (a raw ``dj.insert`` bypass or
-        a legacy row). Warns (does not raise) when the upstream ``CurationV2``
-        was itself produced by auto-curation -- running metrics over post-merge
-        templates is usually not intended, but is occasionally deliberate.
+        a legacy row). Raises ``ValueError`` (R27) when the parent curation has
+        APPLIED merges (``merges_applied=True``): the analyzer is built over the
+        raw sort, so its labels cannot be attached to the merged/renumbered
+        namespace -- auto-curate a curation with no applied merges instead. Warns
+        (does not raise) when the parent is a label-only auto-curation
+        (``curation_source='analyzer_curation'``, ``merges_applied=False``),
+        which is a legitimate chaining target.
         """
         from spyglass.spikesorting.v2._selection_identity import (
             assert_supplied_id_matches,
@@ -742,26 +785,14 @@ class AnalyzerCurationSelection(
         merges_applied, upstream_source = (CurationV2 & parent_key).fetch1(
             "merges_applied", "curation_source"
         )
-        # R27: an AnalyzerCuration over a parent that APPLIED merges scores the
-        # raw-sort unit-id namespace against the parent's merged/renumbered
-        # units, so the proposed labels land on the wrong units. merges_applied
-        # is the ONLY thing that renumbers the namespace -- labels (noise/
-        # reject) leave the raw unit-ids intact, so a label-only child is a
-        # legitimate chaining target (auto-curate after manual noise-tagging).
-        # Reject only the applied-merge case; do NOT compare unit-id sets, which
-        # would falsely reject every label-only child.
-        if merges_applied:
-            raise ValueError(
-                "AnalyzerCuration cannot be inserted on curation "
-                f"{key['curation_id']} of sort {key['sorting_id']}: that "
-                "curation has applied merges (merges_applied=True), which "
-                "renumbers the unit-id namespace. Computing metrics over the "
-                "raw sort and attaching the proposed labels to the merged "
-                "curation would land them on the wrong units. Run "
-                "auto-curation on a curation with no applied merges (e.g. the "
-                "root curation, or a label-only child); apply merges "
-                "afterward if needed."
-            )
+        # R27: reject auto-curating a parent that applied merges (the guard is
+        # re-asserted in make_fetch so an allow_direct_insert / legacy row
+        # cannot reach the merged-namespace compute path).
+        _assert_curation_not_merged(
+            key["sorting_id"],
+            key["curation_id"],
+            merges_applied=merges_applied,
+        )
         if upstream_source == "analyzer_curation":
             # A label-only auto-curation parent (merges_applied=False, caught
             # above) is a legitimate chaining target -- kept a WARNING, not a
@@ -885,6 +916,12 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         # metric analyzer here would silently compute PC/NN metrics in the wrong
         # space rather than fail.
         _assert_is_metric_recipe(sel["metric_waveform_params_name"])
+        # R27: re-assert the parent curation has no applied merges, even though
+        # insert_selection already guarded it -- a row planted via
+        # allow_direct_insert (or created before this guard existed) would
+        # otherwise reach the merged-namespace compute path and attach labels to
+        # the wrong units (same bypass rationale as the metric-recipe re-check).
+        _assert_curation_not_merged(sel["sorting_id"], sel["curation_id"])
         qm = (
             QualityMetricParameters
             & {"metric_params_name": sel["metric_params_name"]}
@@ -1437,6 +1474,11 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
         ``{sorting_id, curation_id}`` key.
         """
         sel = (AnalyzerCurationSelection & key).fetch1()
+        # R27: re-assert here too -- a pre-existing (legacy / allow_direct_insert)
+        # AnalyzerCuration over a merged parent must not attach its raw-sort
+        # labels onto the merged namespace, even if it was computed before the
+        # make_fetch guard existed.
+        _assert_curation_not_merged(sel["sorting_id"], sel["curation_id"])
         sorting_key = {"sorting_id": sel["sorting_id"]}
         labels = self.get_labels(key)
         merge_groups = [g for g in self.get_merge_groups(key) if len(g) >= 2]

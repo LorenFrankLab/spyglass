@@ -465,6 +465,35 @@ def test_analyzer_curation_over_merged_parent_rejected(
                 }
             )
 
+        # Defense-in-depth: a selection planted via allow_direct_insert
+        # (bypassing insert_selection's guard, or a legacy pre-guard row) must
+        # STILL be rejected at the compute boundary -- make_fetch re-asserts the
+        # parent is not merged, so the merged-namespace analyzer path is
+        # unreachable.
+        from spyglass.spikesorting.v2._selection_identity import (
+            deterministic_id,
+        )
+        from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+
+        bypass_identity = {
+            "sorting_id": merged["sorting_id"],
+            "curation_id": merged["curation_id"],
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+            "metric_waveform_params_name": (
+                "franklab_cortex_metric_waveforms"
+            ),
+        }
+        bypass_id = deterministic_id("analyzer_curation", bypass_identity)
+        AnalyzerCurationSelection().insert1(
+            {**bypass_identity, "analyzer_curation_id": bypass_id},
+            allow_direct_insert=True,
+        )
+        with pytest.raises(ValueError, match="applied merges"):
+            AnalyzerCuration().make_fetch(
+                {"analyzer_curation_id": bypass_id}
+            )
+
         # A label-only child leaves raw unit-ids intact -> still a legit target.
         label_only = CurationV2.insert_curation(
             sorting_key,
@@ -481,6 +510,35 @@ def test_analyzer_curation_over_merged_parent_rejected(
         assert label_sel
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_make_fetch_resolves_snr_peak_sign_from_sorter(
+    populated_sorting_with_curation, analyzer_curation_defaults
+):
+    """SIG-2 production wiring: AnalyzerCuration.make_fetch injects the sorter's
+    resolved peak_sign into ``metric_kwargs['snr']`` on a real sort. The default
+    MS5 sort carries ``detect_sign=-1`` -> ``'neg'`` (the regression-pinned
+    value), confirming the helper is wired into the DB-fetch stage."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        AnalyzerCuration,
+        AnalyzerCurationSelection,
+    )
+
+    sel = AnalyzerCurationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    try:
+        fetched = AnalyzerCuration().make_fetch(sel)
+        assert "snr" in fetched.metric_names
+        assert fetched.metric_kwargs["snr"]["peak_sign"] == "neg"
+    finally:
+        (AnalyzerCurationSelection & sel).delete(safemode=False)
 
 
 @pytest.mark.slow
