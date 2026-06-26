@@ -195,6 +195,118 @@ def test_parent_operation_provenance_records_parent_units(merged_parent):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
+    merged_parent,
+):
+    """A PREVIEW child of a merged parent reads/applies its proposed merge in
+    the PARENT namespace (via ParentMergeGroup), not the raw MergeGroup.
+
+    This pins the own-namespace path that `get_merge_groups` /
+    `has_unapplied_proposed_merges` / `get_merged_sorting` take for a child:
+    proposing to further-merge the parent's merged unit id is a valid draft, is
+    reported as a preview (not silently committed), and the lazy merge collapses
+    the parent units over the child's stored trains.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort_pk = merged_parent["sort_pk"]
+    parent = merged_parent["parent"]
+    merged_id = merged_parent["merged_id"]  # 3
+    child_merged_id = max(merged_parent["parent_units"]) + 1  # 4
+
+    preview = CurationV2.propose_merge_curation(
+        sort_pk,
+        merge_groups=[[2, merged_id]],
+        parent_curation_id=parent["curation_id"],
+        description="preview further-merge of a merged parent",
+    )
+
+    # Preview keeps every parent unit; the own-namespace merge view is the
+    # PARENT namespace (ParentMergeGroup), so [2, 3] reads as a real proposed
+    # merge -- NOT misread from the raw MergeGroup (where unit 3 -> raw [0,1]).
+    assert set(
+        int(u) for u in (CurationV2.Unit & preview).fetch("unit_id")
+    ) == {2, merged_id}
+    own_groups = CurationV2.get_merge_groups(preview)
+    assert sorted(own_groups[2]) == [2, merged_id]
+    assert CurationV2.has_unapplied_proposed_merges(preview) is True
+    assert CurationV2.is_committed_curation(preview) is False
+
+    # Lazy merge applies [2, 3] over the child's stored parent-namespace trains,
+    # assigning max(parent units)+1; spike count is conserved (raw 0+1+2).
+    raw_sorting = Sorting().get_sorting(sort_pk)
+    expected_n = sum(
+        len(raw_sorting.get_unit_spike_train(unit_id=u)) for u in (0, 1, 2)
+    )
+    merged = CurationV2().get_merged_sorting(preview)
+    assert set(int(u) for u in merged.get_unit_ids()) == {child_merged_id}
+    assert len(merged.get_unit_spike_train(unit_id=child_merged_id)) == (
+        expected_n
+    )
+    # Raw provenance for the preview's proposed-merge leader still expands to
+    # the original raw units, queryable on MergeGroup.
+    raw_contribs = {
+        int(r["contributor_unit_id"])
+        for r in (CurationV2.MergeGroup & preview & {"unit_id": 2}).fetch(
+            as_dict=True
+        )
+    }
+    assert raw_contribs == {0, 1, 2}, raw_contribs
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_grandchild_composition_chains_raw_and_parent_provenance(
+    planted_three_unit_sort,
+):
+    """A child-of-a-child keeps raw provenance chained to Sorting.Unit and
+    parent-op provenance in its immediate parent's namespace.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sort_pk)
+        # Child A merges raw [0,1] -> 3; units {2, 3}.
+        child_a = CurationV2.create_merged_curation(
+            sort_pk, merge_groups=[[0, 1]], parent_curation_id=root["curation_id"]
+        )
+        # Grandchild B merges A's units [2, 3] -> 4; units {4}. Unit 3 is a
+        # fresh A-namespace id absent from Sorting.Unit.
+        grandchild_b = CurationV2.create_merged_curation(
+            sort_pk,
+            merge_groups=[[2, 3]],
+            parent_curation_id=child_a["curation_id"],
+        )
+        assert set(
+            int(u) for u in (CurationV2.Unit & grandchild_b).fetch("unit_id")
+        ) == {4}
+
+        # Raw provenance chains all the way back to the original raw units.
+        raw_contribs = {
+            int(r["contributor_unit_id"])
+            for r in (
+                CurationV2.MergeGroup & grandchild_b & {"unit_id": 4}
+            ).fetch(as_dict=True)
+        }
+        assert raw_contribs == {0, 1, 2}, raw_contribs
+
+        # Parent-op provenance is in child A's namespace (the immediate parent).
+        parent_op = {
+            int(r["parent_unit_id"])
+            for r in (
+                CurationV2.ParentMergeGroup & grandchild_b & {"unit_id": 4}
+            ).fetch(as_dict=True)
+        }
+        assert parent_op == {2, 3}, parent_op
+    finally:
+        clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_child_labels_inherit_and_merge(planted_three_unit_sort):
     """Child curations inherit parent labels by default; a merged child unit
     receives the UNION of contributor labels unless explicitly overridden;

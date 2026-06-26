@@ -1,11 +1,13 @@
 """Pure curation transforms behind ``CurationV2``.
 
-These three functions are the dependency-light core of v2 curation --
-label-value validation, ``UnitLabel``-row validation, and the post-merge
-``CurationV2.Unit`` row construction (merge-group validation,
+These four functions are the dependency-light core of v2 curation --
+label-value validation, ``UnitLabel``-row validation, parent/supplied label
+composition (inherit vs. replace; union on a committed merge), and the
+post-merge ``CurationV2.Unit`` row construction (merge-group validation,
 ``kept_unit_to_contributors`` mapping, and the per-unit row build). They
-are pure Python: given the already-fetched ``Sorting.Unit`` rows and the
-caller's label / merge-group payloads, they decide WHAT to insert without
+are pure Python: given the already-fetched source ``Unit`` rows (raw
+``Sorting.Unit`` for a root, the parent ``CurationV2.Unit`` for a child) and
+the caller's label / merge-group payloads, they decide WHAT to insert without
 touching the database.
 
 Why this lives in its own module rather than in ``curation.py``:

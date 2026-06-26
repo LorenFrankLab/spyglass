@@ -1034,6 +1034,61 @@ def test_evaluation_child_source_is_curation_evaluation(
         clear_curations_for(planted_two_unit_sort)
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_evaluation_create_preview_curation_is_a_rejected_draft(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """``create_preview_curation`` produces a DRAFT (preview) child, not a
+    committed one, and that draft is then rejected at the evaluation boundary.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+
+        preview = CurationEvaluation().create_preview_curation(
+            sel, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        # It is a draft, not committed: every unit preserved + proposed merge.
+        assert CurationV2.is_committed_curation(preview) is False
+        assert CurationV2.has_unapplied_proposed_merges(preview) is True
+        assert (CurationV2 & preview).fetch1("curation_source") == (
+            "curation_evaluation"
+        )
+        # And evaluating that draft is rejected (would score unmerged units).
+        with pytest.raises(ValueError, match="preview"):
+            CurationEvaluationSelection.insert_selection(
+                {
+                    **preview,
+                    "metric_params_name": "minimal",
+                    "auto_curation_rules_name": "none",
+                }
+            )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
 def test_analyzer_curation_table_removed():
     """AnalyzerCuration / AnalyzerCurationSelection are deleted (no shim).
 

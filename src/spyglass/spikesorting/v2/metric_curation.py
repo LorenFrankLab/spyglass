@@ -890,7 +890,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     gets metrics recomputed over its merged spike trains/templates, never
     inherited from the highest-amplitude contributor. Outputs (metrics, proposed
     labels, merge suggestions) are written to three NWB scratch tables and are
-    PROPOSALS: turning them into a committed child curation is a later phase.
+    PROPOSALS; the acceptance helpers (``create_curation`` /
+    ``materialize_labels`` / ``create_preview_curation``) commit them into a
+    child ``CurationV2`` row.
 
     Routing: a committed root / label-only curation (unit set unchanged from the
     raw sort) reuses the cached raw-sort analyzers (the fast path); a committed

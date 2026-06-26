@@ -205,9 +205,13 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``parent_unit_id`` is a plain int, NOT a DataJoint FK: a child of a
         merged parent may reference a fresh ``max+1`` merged id that exists
         only in the parent ``CurationV2.Unit`` set and not in ``Sorting.Unit``,
-        so it cannot be FK'd to the raw sort. ``insert_curation`` validates
-        each ``parent_unit_id`` against the parent curation's unit set in
-        Python instead. Only child curations (``parent_curation_id != -1``)
+        so it cannot be FK'd to the raw sort. Membership in the parent's unit
+        set is guaranteed by construction rather than by an explicit validator:
+        ``insert_curation`` builds these rows from
+        ``kept_unit_to_contributors``, whose contributors come from the parent
+        ``Unit`` rows themselves (``build_curated_unit_rows`` rejects any
+        merge-group member not in that set). Only child curations
+        (``parent_curation_id != -1``)
         get these rows; a root curation composes from the raw sort and has
         none. A 1-element self-entry is recorded per pass-through child unit so
         every child ``Unit`` row has at least one ``ParentMergeGroup`` row
@@ -900,6 +904,24 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # Raw provenance: union the parent contributors' raw contributors
             # (deduped + sorted) so a unit physically derived from raw N
             # appears once, queryable, and FK-satisfiable against Sorting.Unit.
+            # Every parent unit has a MergeGroup self-entry when the parent was
+            # created via insert_curation; a missing key means the parent lacks
+            # raw provenance (e.g. hand-inserted, bypassing insert_curation) --
+            # surface that as a named integrity error rather than a bare
+            # KeyError mid-transaction.
+            missing = [
+                int(p)
+                for p in parent_contributors
+                if int(p) not in parent_raw_contributors
+            ]
+            if missing:
+                raise ValueError(
+                    "CurationV2.insert_curation: parent unit(s) "
+                    f"{sorted(missing)} have no CurationV2.MergeGroup raw "
+                    "provenance, so a child's raw contributors cannot be "
+                    "resolved. The parent curation must have been created via "
+                    "insert_curation (every unit gets a MergeGroup self-entry)."
+                )
             raw_ids = sorted(
                 {
                     int(raw)

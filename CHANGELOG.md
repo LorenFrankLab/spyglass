@@ -148,7 +148,8 @@ contributor.
   curation (cleaned immediately, never published to the analyzer cache). The
   metric index is asserted to equal the curation's `CurationV2.Unit` set before
   any output is written. `get_metrics` / `get_labels` / `get_merge_groups`
-  read the proposals back; committing them into a child curation is a later step.
+  read the proposals back; the `create_curation` / `materialize_labels`
+  acceptance helpers (below) commit them into a child curation.
 
 #### Spike Sorting v2: parent-state curation composition and evaluation acceptance
 
