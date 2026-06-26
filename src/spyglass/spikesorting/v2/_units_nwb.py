@@ -692,6 +692,8 @@ def write_curated_units_nwb(
     kept_unit_to_contributors: dict,
     apply_merge: bool,
     labels: dict,
+    *,
+    source_units_abs_path: str | None = None,
 ) -> tuple[str, str, str, dict]:
     """Write the curated-units NWB.
 
@@ -700,6 +702,13 @@ def write_curated_units_nwb(
     unit_id to the length of its STORED (post cross-unit dedup) spike
     train, so the caller can override ``CurationV2.Unit.n_spikes`` and
     keep the ``n_spikes == len(get_sorting train)`` invariant.
+
+    ``source_units_abs_path`` selects WHERE the source spike trains are read
+    from. ``None`` (a root curation) reads the raw ``Sorting`` units NWB, so
+    ``kept_unit_to_contributors`` is in the raw-sort unit namespace. A child
+    curation passes its PARENT curation's units NWB; the kept/contributor ids
+    are then in the parent's unit namespace, so a merged-parent id composes
+    correctly and absorbed raw contributors are not resurrected.
 
     With ``apply_merge=True`` the kept unit's spike train is the
     sorted union of its contributors' spike trains and its id is a
@@ -728,13 +737,19 @@ def write_curated_units_nwb(
         {"sorting_id": sorting_id}
     )
 
-    # Source the pre-curation units' ABSOLUTE spike times plus Spyglass's
-    # sample-frame sidecar straight from the Sorting units NWB. Absolute seconds
-    # keep the curated NWB interoperable and gap-correct; sample frames let
-    # Spyglass reconstruct sortings without reading the full recording timeline.
-    src_abs_path = AnalysisNwbfile.get_abs_path(
-        (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
-    )
+    # Source the units' ABSOLUTE spike times plus Spyglass's sample-frame
+    # sidecar. A root curation reads the raw Sorting units NWB; a child reads
+    # its PARENT curation's units NWB (``source_units_abs_path``) so stored
+    # frames, dedup, and obs_intervals compose from the actual parent state.
+    # Absolute seconds keep the curated NWB interoperable and gap-correct;
+    # sample frames let Spyglass reconstruct sortings without reading the full
+    # recording timeline.
+    if source_units_abs_path is None:
+        src_abs_path = AnalysisNwbfile.get_abs_path(
+            (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
+        )
+    else:
+        src_abs_path = source_units_abs_path
     # Read ONLY the source units this curation will write: kept singletons +
     # merge contributors for apply_merge=True, every unit for the apply_merge=
     # False preview (see curation_source_unit_ids). A large multi-day sort

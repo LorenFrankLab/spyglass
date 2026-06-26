@@ -109,6 +109,15 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # against final unit_ids).
     merged_id = max(units) + 1
 
+    # A child curation composes from its PARENT's committed state, so the
+    # applied-merge curation and the preview below both branch off a plain
+    # ROOT (whose unit set IS the raw sort) -- the raw merge_groups
+    # [head, absorbed] are valid in the root's namespace. A child of the
+    # MERGED curation could not reference the absorbed ids (they no longer
+    # exist in the merged parent's unit set); that is the parent-state
+    # composition contract.
+    root_pk = CurationV2.insert_curation(sorting_key=sort_pk)
+
     # v1 parity (``v1/curation.py:391``): labels on the FRESH merged id
     # (max+1) attach to the merged unit; labels on absorbed contributors
     # are silently dropped (v1 writes labels by iterating final
@@ -119,6 +128,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         labels={merged_id: ["mua"], absorbed: ["noise"]},
         merge_groups=merge_groups,
         apply_merge=True,
+        parent_curation_id=root_pk["curation_id"],
         description="merge_groups regression",
     )
     label_pairs = {
@@ -206,13 +216,15 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     # --- v1-parity PREVIEW half (apply_merge=False), reusing the sort.
     # A preview curation keeps EVERY original unit (the contributor is
     # NOT dropped) + the contributor's label, and records the proposed
-    # merge in MergeGroup; get_merged_sorting applies it lazily.
+    # merge in MergeGroup; get_merged_sorting applies it lazily. Branched
+    # off the SAME plain root as the applied-merge curation (its namespace
+    # is the raw sort), so [head, absorbed] are valid inputs.
     preview_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
         labels={absorbed: ["mua"]},
         merge_groups=merge_groups,
         apply_merge=False,
-        parent_curation_id=pk["curation_id"],
+        parent_curation_id=root_pk["curation_id"],
         description="merge_groups preview (apply_merge=False)",
     )
     preview_unit_ids = set(

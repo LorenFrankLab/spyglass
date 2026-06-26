@@ -208,3 +208,86 @@ def test_build_curation_summary_passthrough_and_coercions():
         "merge_id": "merge-uuid",
         "description": "7",
     }
+
+
+# ---------- compose_curation_labels (inherit / replace) --------------------
+
+
+def _compose(parent, supplied, kept, *, policy="inherit", apply_merge=False):
+    from spyglass.spikesorting.v2._curation_transforms import (
+        compose_curation_labels,
+    )
+
+    return compose_curation_labels(
+        parent_labels=parent,
+        supplied_labels=supplied,
+        kept_unit_to_contributors=kept,
+        label_policy=policy,
+        apply_merge=apply_merge,
+    )
+
+
+def test_compose_labels_root_inherit_is_supplied_only():
+    """A root (empty parent_labels) under 'inherit' yields the supplied set."""
+    out = _compose({}, {0: ["mua"]}, {0: [0], 1: [1]})
+    assert out == {0: ["mua"]}
+
+
+def test_compose_labels_child_inherits_parent_per_unit():
+    """A preview child inherits each parent unit's own labels (no union)."""
+    out = _compose(
+        {2: ["mua"], 3: ["noise"]},
+        {},
+        {2: [2], 3: [3]},
+        apply_merge=False,
+    )
+    assert out == {2: ["mua"], 3: ["noise"]}
+
+
+def test_compose_labels_committed_merge_unions_contributor_labels():
+    """A committed merge inherits the UNION of its contributors' labels."""
+    out = _compose(
+        {2: ["mua"], 3: ["noise"]},
+        {},
+        {4: [2, 3]},
+        apply_merge=True,
+    )
+    assert out == {4: ["mua", "noise"]}
+
+
+def test_compose_labels_explicit_override_replaces_inherited_unit():
+    """A supplied entry overrides the inherited value for that unit only."""
+    out = _compose(
+        {2: ["mua"], 3: ["noise"]},
+        {4: ["accept"]},
+        {4: [2, 3]},
+        apply_merge=True,
+    )
+    assert out == {4: ["accept"]}
+
+
+def test_compose_labels_explicit_empty_clears_inherited():
+    """A supplied empty list clears the inherited labels for that unit."""
+    out = _compose(
+        {2: ["mua"], 3: ["noise"]},
+        {2: []},
+        {2: [2], 3: [3]},
+        apply_merge=False,
+    )
+    assert out == {3: ["noise"]}
+
+
+def test_compose_labels_replace_drops_inherited():
+    """'replace' makes the supplied labels the whole child state."""
+    out = _compose(
+        {2: ["mua"], 3: ["noise"]},
+        {2: ["accept"]},
+        {2: [2], 3: [3]},
+        policy="replace",
+    )
+    assert out == {2: ["accept"]}
+
+
+def test_compose_labels_rejects_bad_policy():
+    with pytest.raises(ValueError, match="label_policy"):
+        _compose({}, {}, {0: [0]}, policy="merge")

@@ -118,6 +118,90 @@ def validate_labels(labels: dict, allow_custom_labels: bool = False) -> None:
                 )
 
 
+def compose_curation_labels(
+    *,
+    parent_labels: dict[int, list[str]],
+    supplied_labels: dict[int, list[str]],
+    kept_unit_to_contributors: dict[int, list[int]],
+    label_policy: str,
+    apply_merge: bool,
+) -> dict[int, list[str]]:
+    """Resolve a child curation's effective label state.
+
+    A child curation edits its parent's committed state, so by default it
+    inherits the parent's labels (``label_policy="inherit"``); a caller wanting
+    the supplied labels to be the whole child state passes
+    ``label_policy="replace"``. Root curations have an empty ``parent_labels``,
+    so ``"inherit"`` reduces to "supplied labels only" -- the historical
+    full-state insert.
+
+    Inheritance is identity-preserving except across a committed merge:
+
+    * ``apply_merge=True`` -- a kept unit (possibly a fresh merged id) inherits
+      the UNION of its contributors' parent labels, so labels on absorbed
+      contributors do not disappear when the merge is committed.
+    * ``apply_merge=False`` (preview) -- every parent unit passes through 1:1,
+      so each written unit inherits only its OWN parent labels (the proposed
+      merge does not yet combine label state).
+
+    Supplied labels are then overlaid per unit (an explicit override wins over
+    the inherited value, and an explicit empty list clears it). Units that end
+    up with no labels are dropped from the result.
+
+    Parameters
+    ----------
+    parent_labels : dict[int, list[str]]
+        ``{parent_unit_id: [label, ...]}`` from the parent curation's
+        ``UnitLabel`` rows. Empty for a root curation.
+    supplied_labels : dict[int, list[str]]
+        The caller's normalized ``{unit_id: [label, ...]}`` payload (keyed in
+        the child/parent unit namespace).
+    kept_unit_to_contributors : dict[int, list[int]]
+        ``{kept_unit_id: [source contributor ids]}`` for the child, in the
+        source (parent) namespace.
+    label_policy : str
+        ``"inherit"`` (default) or ``"replace"``.
+    apply_merge : bool
+        Whether the child commits the merges (union on the merged unit) or
+        previews them (per-unit identity inheritance).
+
+    Returns
+    -------
+    dict[int, list[str]]
+        The effective ``{unit_id: [label, ...]}`` for the child, empty-valued
+        units omitted.
+    """
+    if label_policy not in ("inherit", "replace"):
+        raise ValueError(
+            "CurationV2.insert_curation: label_policy must be 'inherit' or "
+            f"'replace'; got {label_policy!r}."
+        )
+    if label_policy == "replace":
+        result = {int(k): list(v) for k, v in supplied_labels.items()}
+        return {k: v for k, v in result.items() if v}
+
+    inherited: dict[int, list[str]] = {}
+    for kept_uid, contributors in kept_unit_to_contributors.items():
+        kept_uid = int(kept_uid)
+        if apply_merge:
+            union: set[str] = set()
+            for contributor in contributors:
+                union.update(parent_labels.get(int(contributor), []))
+            if union:
+                inherited[kept_uid] = sorted(union)
+        else:
+            own = parent_labels.get(kept_uid, [])
+            if own:
+                inherited[kept_uid] = list(own)
+
+    result = dict(inherited)
+    for unit_id, labels in supplied_labels.items():
+        # An explicit supplied entry overrides the inherited value for that
+        # unit (an empty list clears it; the trailing filter drops it).
+        result[int(unit_id)] = list(labels)
+    return {k: v for k, v in result.items() if v}
+
+
 def build_curated_unit_rows(
     sorting_id,
     sorting_units: list[dict],

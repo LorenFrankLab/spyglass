@@ -57,6 +57,8 @@ if TYPE_CHECKING:
     import pandas as pd
     import spikeinterface as si
 
+    from spyglass.spikesorting.v2._curation_plan import CurationInsertPlan
+
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
 
@@ -189,6 +191,35 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ---
         """
 
+    class ParentMergeGroup(SpyglassMixinPart):
+        """Per-merge-group provenance in the IMMEDIATE PARENT's namespace.
+
+        Records the parent-curation operation that produced each child unit:
+        which PARENT ``CurationV2.Unit`` ids were composed into this child
+        unit. Distinct from ``MergeGroup`` (raw ``Sorting.Unit`` contributors)
+        so neither structure has to mean both -- ``MergeGroup`` answers "which
+        original raw units contributed?" and ``ParentMergeGroup`` answers
+        "which parent units did this child operation merge?".
+
+        ``parent_unit_id`` is a plain int, NOT a DataJoint FK: a child of a
+        merged parent may reference a fresh ``max+1`` merged id that exists
+        only in the parent ``CurationV2.Unit`` set and not in ``Sorting.Unit``,
+        so it cannot be FK'd to the raw sort. ``insert_curation`` validates
+        each ``parent_unit_id`` against the parent curation's unit set in
+        Python instead. Only child curations (``parent_curation_id != -1``)
+        get these rows; a root curation composes from the raw sort and has
+        none. A 1-element self-entry is recorded per pass-through child unit so
+        every child ``Unit`` row has at least one ``ParentMergeGroup`` row
+        keyed by its own ``unit_id`` -- the own-namespace merge view
+        (``get_merge_groups``) reads this for a child.
+        """
+
+        definition = """
+        -> CurationV2.Unit
+        parent_unit_id: int
+        ---
+        """
+
     @classmethod
     def insert_curation(
         cls,
@@ -202,6 +233,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         reuse_existing: bool = False,
         permissive_labels: bool = False,
         allow_custom_labels: bool = False,
+        label_policy: str = "inherit",
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
@@ -291,6 +323,15 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``UnitLabel.insert`` part-table validation so a custom label
             survives the whole path. Distinct from ``permissive_labels``,
             which governs stray unit-id keys, not label values.
+        label_policy
+            How a CHILD curation (``parent_curation_id != -1``) composes its
+            labels with the parent's. ``"inherit"`` (default) starts from the
+            parent's labels and overlays the supplied ``labels`` per unit (a
+            committed merge inherits the UNION of its contributors' labels, so
+            labels on absorbed contributors do not vanish). ``"replace"`` makes
+            the supplied ``labels`` the entire child state. A root curation has
+            no parent, so ``"inherit"`` reduces to the supplied labels (the
+            historical full-state insert).
 
         Returns
         -------
@@ -343,14 +384,31 @@ class CurationV2(SpyglassMixin, dj.Manual):
         if existing_root is not None:
             return existing_root
 
-        curation_id, unit_rows, kept_unit_to_contributors = (
+        # Resolve the composition SOURCE: a root composes from the raw sort; a
+        # child composes from its parent curation's committed state (units,
+        # trains, label/merge namespace), so a merged-parent id is a valid
+        # input and the absorbed raw contributors are not resurrected.
+        (
+            source_units,
+            source_units_abs_path,
+            parent_raw_contributors,
+            parent_labels,
+        ) = cls._resolve_curation_source(
+            sorting_id=sorting_id,
+            parent_curation_id=parent_curation_id,
+            raw_sorting_units=sorting_units,
+        )
+
+        curation_id, unit_rows, kept_unit_to_contributors, labels = (
             cls._build_curation_insert_plan(
                 sorting_id=sorting_id,
-                sorting_units=sorting_units,
+                sorting_units=source_units,
                 merge_groups=merge_groups,
                 apply_merge=apply_merge,
                 labels=labels,
                 permissive_labels=permissive_labels,
+                parent_labels=parent_labels,
+                label_policy=label_policy,
             )
         )
         if parent_curation_id != -1 and reuse_existing:
@@ -385,6 +443,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 apply_merge=apply_merge,
                 labels=labels,
                 unit_rows=unit_rows,
+                source_units_abs_path=source_units_abs_path,
             )
         )
 
@@ -402,6 +461,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 unit_rows=unit_rows,
                 labels=labels,
                 kept_unit_to_contributors=kept_unit_to_contributors,
+                parent_raw_contributors=parent_raw_contributors,
                 allow_custom_labels=allow_custom_labels,
             )
         except Exception:
@@ -638,6 +698,64 @@ class CurationV2(SpyglassMixin, dj.Manual):
         return None
 
     @classmethod
+    def _resolve_curation_source(
+        cls,
+        *,
+        sorting_id,
+        parent_curation_id: int,
+        raw_sorting_units: list[dict],
+    ) -> tuple[list[dict], str | None, dict[int, list[int]] | None, dict]:
+        """Resolve where a curation composes its units / trains / labels from.
+
+        A root curation (``parent_curation_id == -1``) composes from the raw
+        sort; a child composes from its PARENT ``CurationV2`` row. Returns
+        ``(source_units, source_units_abs_path, parent_raw_contributors,
+        parent_labels)``:
+
+        * ``source_units`` -- the source ``Unit`` rows the merge/label plan is
+          built over (raw ``Sorting.Unit`` for a root, parent
+          ``CurationV2.Unit`` for a child). Both shapes carry ``unit_id`` + the
+          peak ``Electrode`` FK + ``peak_amplitude_uv`` + ``n_spikes``.
+        * ``source_units_abs_path`` -- the units NWB to read source spike
+          trains from (``None`` for a root -> the raw Sorting NWB; the parent
+          curation's NWB for a child).
+        * ``parent_raw_contributors`` -- ``{parent_unit_id: [raw contributor
+          ids]}`` from the PARENT's ``MergeGroup`` (always raw by invariant),
+          so a child's parent-namespace contributors can be expanded back to
+          raw provenance. ``None`` for a root (its contributors are already
+          raw).
+        * ``parent_labels`` -- the parent's ``{unit_id: [label, ...]}`` for
+          label inheritance (``{}`` for a root).
+        """
+        if parent_curation_id == -1:
+            return raw_sorting_units, None, None, {}
+
+        parent_key = {
+            "sorting_id": sorting_id,
+            "curation_id": parent_curation_id,
+        }
+        source_units = (cls.Unit & parent_key).fetch(
+            as_dict=True, order_by="unit_id"
+        )
+        source_units_abs_path = AnalysisNwbfile.get_abs_path(
+            (cls & parent_key).fetch1("analysis_file_name")
+        )
+        parent_raw_contributors: dict[int, list[int]] = {}
+        for row in (cls.MergeGroup & parent_key).fetch(
+            "unit_id", "contributor_unit_id", as_dict=True
+        ):
+            parent_raw_contributors.setdefault(
+                int(row["unit_id"]), []
+            ).append(int(row["contributor_unit_id"]))
+        parent_labels = cls._labels_by_unit(parent_key)
+        return (
+            source_units,
+            source_units_abs_path,
+            parent_raw_contributors,
+            parent_labels,
+        )
+
+    @classmethod
     def _build_curation_insert_plan(
         cls,
         sorting_id,
@@ -646,14 +764,19 @@ class CurationV2(SpyglassMixin, dj.Manual):
         apply_merge: bool,
         labels: dict,
         permissive_labels: bool,
-    ) -> tuple[int, list[dict], dict[int, list[int]]]:
+        parent_labels: dict | None = None,
+        label_policy: str = "inherit",
+    ) -> "CurationInsertPlan":
         """Resolve the curation_id and build the curated ``Unit`` rows.
 
         Resolves the auto-increment ``curation_id`` (the one DB-coupled
-        step) and delegates row shaping + label-key validation to the
-        DB-free :func:`._curation_plan.build_curation_insert_plan`. Returns
-        ``(curation_id, unit_rows, kept_unit_to_contributors)`` -- the
-        :class:`._curation_plan.CurationInsertPlan` namedtuple, which
+        step) and delegates row shaping, label composition, and label-key
+        validation to the DB-free
+        :func:`._curation_plan.build_curation_insert_plan`. ``sorting_units``
+        are the SOURCE units (raw for a root, parent ``CurationV2.Unit`` for a
+        child); ``parent_labels`` + ``label_policy`` drive label inheritance.
+        Returns the :class:`._curation_plan.CurationInsertPlan` namedtuple
+        ``(curation_id, unit_rows, kept_unit_to_contributors, labels)``, which
         unpacks positionally.
         """
         from spyglass.spikesorting.v2._curation_plan import (
@@ -673,6 +796,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
             labels=labels,
             permissive_labels=permissive_labels,
             curation_id=curation_id,
+            parent_labels=parent_labels,
+            label_policy=label_policy,
         )
 
     @classmethod
@@ -683,6 +808,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         apply_merge: bool,
         labels: dict,
         unit_rows: list[dict],
+        source_units_abs_path: str | None = None,
     ) -> tuple[str, str, str]:
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
 
@@ -691,7 +817,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
         overwrites each ``unit_rows`` entry's ``n_spikes`` (mutated in
         place) with the staged train's actual post-dedup length so the
         ``Unit.n_spikes == len(get_sorting train)`` invariant holds for
-        cross-unit duplicate removal. Returns ``(analysis_file_name,
+        cross-unit duplicate removal. ``source_units_abs_path`` (``None`` for a
+        root -> raw Sorting NWB; the parent curation's NWB for a child) selects
+        which units NWB the source spike trains come from, so a child composes
+        from the parent state. Returns ``(analysis_file_name,
         units_object_id, staged_parent_nwb)``. This MUST run OUTSIDE the
         DB transaction -- it is heavy filesystem IO and the caller cleans
         up the staged file if the later insert fails.
@@ -709,6 +838,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             kept_unit_to_contributors=kept_unit_to_contributors,
             apply_merge=apply_merge,
             labels=labels,
+            source_units_abs_path=source_units_abs_path,
         )
         # ``n_spikes`` must equal the length of the STORED (post-dedup)
         # train. ``build_curated_unit_rows`` estimated it from the raw
@@ -719,6 +849,81 @@ class CurationV2(SpyglassMixin, dj.Manual):
             if row["unit_id"] in n_spikes_by_uid:
                 row["n_spikes"] = n_spikes_by_uid[row["unit_id"]]
         return analysis_file_name, units_object_id, staged_parent_nwb
+
+    @staticmethod
+    def _build_merge_provenance_rows(
+        *,
+        sorting_id,
+        curation_id: int,
+        kept_unit_to_contributors: dict[int, list[int]],
+        parent_raw_contributors: dict[int, list[int]] | None,
+    ) -> tuple[list[dict], list[dict]]:
+        """Build the raw ``MergeGroup`` + parent ``ParentMergeGroup`` rows.
+
+        Returns ``(merge_group_rows, parent_merge_group_rows)``.
+
+        For a ROOT (``parent_raw_contributors is None``) the contributors in
+        ``kept_unit_to_contributors`` are already raw ``Sorting.Unit`` ids, so
+        ``MergeGroup`` rows are written verbatim and there is no parent
+        operation (``parent_merge_group_rows`` is empty).
+
+        For a CHILD the contributors are PARENT ``CurationV2.Unit`` ids. Each
+        is expanded through the parent's raw provenance
+        (``parent_raw_contributors``) so ``MergeGroup`` stays raw + FK-safe
+        (a fresh merged parent id is never written there), while the immediate
+        parent operation is recorded verbatim in ``ParentMergeGroup`` (parent
+        namespace, validated against the parent unit set by construction --
+        every contributor came from the parent ``Unit`` rows).
+        """
+        if parent_raw_contributors is None:
+            merge_group_rows = [
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                    "unit_id": int(kept_uid),
+                    "contributor_unit_id": int(contributor_uid),
+                }
+                for kept_uid, contributors in kept_unit_to_contributors.items()
+                for contributor_uid in contributors
+            ]
+            return merge_group_rows, []
+
+        merge_group_rows = []
+        parent_merge_group_rows = []
+        for kept_uid, parent_contributors in (
+            kept_unit_to_contributors.items()
+        ):
+            kept_uid = int(kept_uid)
+            # Raw provenance: union the parent contributors' raw contributors
+            # (deduped + sorted) so a unit physically derived from raw N
+            # appears once, queryable, and FK-satisfiable against Sorting.Unit.
+            raw_ids = sorted(
+                {
+                    int(raw)
+                    for parent_uid in parent_contributors
+                    for raw in parent_raw_contributors[int(parent_uid)]
+                }
+            )
+            merge_group_rows.extend(
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                    "unit_id": kept_uid,
+                    "contributor_unit_id": raw,
+                }
+                for raw in raw_ids
+            )
+            # Immediate parent operation: which parent units were composed.
+            parent_merge_group_rows.extend(
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                    "unit_id": kept_uid,
+                    "parent_unit_id": int(parent_uid),
+                }
+                for parent_uid in sorted(int(u) for u in parent_contributors)
+            )
+        return merge_group_rows, parent_merge_group_rows
 
     @classmethod
     def _insert_curation_rows_transaction(
@@ -735,17 +940,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
         unit_rows: list[dict],
         labels: dict,
         kept_unit_to_contributors: dict,
+        parent_raw_contributors: dict | None,
         allow_custom_labels: bool,
     ) -> None:
         """Insert the master/Unit/UnitLabel/MergeGroup rows atomically.
 
         Runs the ``transaction_or_noop`` block: registers the already
         staged AnalysisNwbfile row, inserts the CurationV2 master + part
-        rows, and registers the ``SpikeSortingOutput.CurationV2`` merge
-        row. The curated-units NWB was staged OUTSIDE this transaction
-        (see :meth:`_stage_curation_artifact`) so the transaction stays
-        short; on failure the caller removes the staged file (the DB rows
-        roll back here).
+        rows (including raw ``MergeGroup`` and, for a child,
+        ``ParentMergeGroup``), and registers the
+        ``SpikeSortingOutput.CurationV2`` merge row. The curated-units NWB was
+        staged OUTSIDE this transaction (see :meth:`_stage_curation_artifact`)
+        so the transaction stays short; on failure the caller removes the
+        staged file (the DB rows roll back here).
+
+        ``parent_raw_contributors`` (``{parent_unit_id: [raw ids]}``, ``None``
+        for a root) lets a child's parent-namespace ``kept_unit_to_contributors``
+        be expanded back to raw ``Sorting.Unit`` ids for ``MergeGroup`` (which
+        stays raw + FK'd), while the immediate parent operation is recorded
+        verbatim in ``ParentMergeGroup`` (parent namespace, validated, not
+        FK'd).
         """
         master_row = {
             "sorting_id": sorting_id,
@@ -792,25 +1006,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
             SpikeSortingOutput,
         )
 
-        # Persist per-unit merge provenance for queryable
-        # bulk-audit. ``kept_unit_to_contributors`` carries 1-element
-        # self-entries for every ``CurationV2.Unit`` row that is not
-        # itself a merge target (unmerged units always, and -- for
-        # apply_merge=False preview -- the absorbed contributors that
-        # remain in Unit), so every Unit row has at least one
+        # Persist per-unit merge provenance for queryable bulk-audit.
+        # ``kept_unit_to_contributors`` carries 1-element self-entries for every
+        # ``CurationV2.Unit`` row that is not itself a merge target (unmerged
+        # units always, and -- for apply_merge=False preview -- the absorbed
+        # contributors that remain in Unit), so every Unit row has at least one
         # MergeGroup row keyed by its own ``unit_id``. Joining
-        # ``Unit * MergeGroup`` on unit_id therefore preserves every
-        # unit in both modes.
-        merge_group_rows = [
-            {
-                "sorting_id": sorting_id,
-                "curation_id": curation_id,
-                "unit_id": kept_uid,
-                "contributor_unit_id": int(contributor_uid),
-            }
-            for kept_uid, contributors in kept_unit_to_contributors.items()
-            for contributor_uid in contributors
-        ]
+        # ``Unit * MergeGroup`` on unit_id therefore preserves every unit.
+        #
+        # For a root the contributors ARE raw ``Sorting.Unit`` ids. For a child
+        # they are PARENT ``CurationV2.Unit`` ids, so ``MergeGroup`` (raw + FK'd)
+        # expands them through the parent's raw provenance, and the immediate
+        # parent operation is recorded verbatim in ``ParentMergeGroup``.
+        merge_group_rows, parent_merge_group_rows = (
+            cls._build_merge_provenance_rows(
+                sorting_id=sorting_id,
+                curation_id=curation_id,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                parent_raw_contributors=parent_raw_contributors,
+            )
+        )
 
         with transaction_or_noop(cls.connection):
             # Register the analysis file row FIRST inside the
@@ -830,6 +1045,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
                 )
             if merge_group_rows:
                 cls.MergeGroup.insert(merge_group_rows)
+            if parent_merge_group_rows:
+                cls.ParentMergeGroup.insert(parent_merge_group_rows)
             SpikeSortingOutput._merge_insert(
                 [
                     {
@@ -931,6 +1148,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         parent_curation_id: int = -1,
         description: str = "",
         reuse_existing: bool = False,
+        label_policy: str = "inherit",
     ) -> dict:
         """Record proposed merges WITHOUT applying them (reviewable).
 
@@ -984,6 +1202,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             parent_curation_id=parent_curation_id,
             description=description,
             reuse_existing=reuse_existing,
+            label_policy=label_policy,
         )
 
     @classmethod
@@ -995,6 +1214,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         parent_curation_id: int = -1,
         description: str = "",
         reuse_existing: bool = False,
+        label_policy: str = "inherit",
     ) -> dict:
         """Create a new curation with merges applied (committed unit set).
 
@@ -1048,6 +1268,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             parent_curation_id=parent_curation_id,
             description=description,
             reuse_existing=reuse_existing,
+            label_policy=label_policy,
         )
 
     @classmethod
@@ -1713,20 +1934,26 @@ class CurationV2(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
-        """Return ``{kept_unit_id: [contributor_unit_id, ...]}`` for a curation.
+        """Return this curation's merge groups in ITS OWN unit namespace.
 
-        Reads the ``CurationV2.MergeGroup`` part rows and groups them by
-        kept unit. Every ``CurationV2.Unit`` row has at least one
-        ``MergeGroup`` entry keyed by its own ``unit_id`` -- unmerged
-        units and (in apply_merge=False preview) absorbed contributors
-        carry a 1-element self-entry. ``len(merge_groups[X]) > 1`` means
-        unit X is the kept-unit leader of a (proposed or applied) merge;
-        to find merges X is a contributor TO (preview mode), query
-        ``CurationV2.MergeGroup`` directly by ``contributor_unit_id``.
+        ``{kept_unit_id: [contributor_unit_id, ...]}`` where the contributor
+        ids are in the curation's own (composition) namespace -- the namespace
+        its ``CurationV2.Unit`` rows live in. A root curation composes from the
+        raw sort, so this is the raw ``MergeGroup``; a CHILD composes from its
+        parent, so this is the parent-namespace ``ParentMergeGroup`` (a child
+        of a merged parent inherits raw-contributor entries on ``MergeGroup``
+        that are NOT proposed merges of its own, so reading ``MergeGroup`` here
+        would misreport a committed child as a preview). Every
+        ``CurationV2.Unit`` row has at least one own-namespace entry keyed by
+        its own ``unit_id`` (a 1-element self-entry for a pass-through unit);
+        ``len(merge_groups[X]) > 1`` means unit X is the kept-unit leader of a
+        (proposed or applied) merge.
 
-        Used by ``get_merged_sorting`` (which filters
-        ``len(contribs) > 1``, so self-entries are auto-skipped) and
-        exposed publicly so users can do bulk-audit queries directly.
+        Used by ``get_merged_sorting`` (which filters ``len(contribs) > 1``, so
+        self-entries are auto-skipped) and ``has_unapplied_proposed_merges``.
+        For RAW-contributor provenance ("which original raw units contributed
+        to kept unit X?") query the ``CurationV2.MergeGroup`` part directly --
+        it always stays in the raw ``Sorting.Unit`` namespace.
 
         Parameters
         ----------
@@ -1737,24 +1964,32 @@ class CurationV2(SpyglassMixin, dj.Manual):
         -------
         dict[int, list[int]]
             ``{kept_unit_id: [contributor_unit_id, ...]}`` with sorted
-            contributor lists.
+            contributor lists, in the curation's own unit namespace.
         """
-        # ``order_by`` makes BOTH the outer dict key order and the
-        # contributor list order deterministic (DataJoint gives no
-        # ordering without it). ``units_to_merge`` -- and therefore the
-        # ids SI's MergeUnitsSorting assigns on the lazy merge path --
-        # depends on the dict insertion order; an unordered fetch would
-        # let DB row-order quirks leak into the lazy merged-unit ids.
-        rows = (cls.MergeGroup & key).fetch(
+        # A child records its parent-namespace operation in ParentMergeGroup;
+        # a root has none, so its own namespace IS the raw MergeGroup. The
+        # presence of ParentMergeGroup rows is the child discriminator (a child
+        # always has at least the per-unit self-entries).
+        if cls.ParentMergeGroup & key:
+            part, contributor_field = cls.ParentMergeGroup, "parent_unit_id"
+        else:
+            part, contributor_field = cls.MergeGroup, "contributor_unit_id"
+        # ``order_by`` makes BOTH the outer dict key order and the contributor
+        # list order deterministic (DataJoint gives no ordering without it).
+        # ``units_to_merge`` -- and therefore the ids SI's MergeUnitsSorting
+        # assigns on the lazy merge path -- depends on the dict insertion
+        # order; an unordered fetch would let DB row-order quirks leak into the
+        # lazy merged-unit ids.
+        rows = (part & key).fetch(
             "unit_id",
-            "contributor_unit_id",
+            contributor_field,
             as_dict=True,
-            order_by=("unit_id", "contributor_unit_id"),
+            order_by=("unit_id", contributor_field),
         )
         groups: dict[int, list[int]] = {}
         for row in rows:
             uid = int(row["unit_id"])
-            groups.setdefault(uid, []).append(int(row["contributor_unit_id"]))
+            groups.setdefault(uid, []).append(int(row[contributor_field]))
         # Sort contributor lists deterministically so callers can
         # rely on stable ordering when comparing across runs.
         for uid in groups:
