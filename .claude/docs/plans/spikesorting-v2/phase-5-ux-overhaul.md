@@ -27,9 +27,31 @@ unless Phase 0c explicitly ports a narrow shim.
   and curation round-trip only against the verified FigPack API.
 - Extend the canonical v2 notebook/docs so v2 is easier to use while v0/v1
   remain available.
+- Fold in the review-triage items scoped to Phase 5 — see [Review-triage items folded into Phase 5](#review-triage-items-folded-into-phase-5) below.
 - Run the source documentation-density pass (trim over-commenting, promote prose into rendered NumPy sections), coordinated with [DOCSTRING-AUDIT.md](DOCSTRING-AUDIT.md) so the two passes don't fight.
 - Run end-to-end notebook/orchestrator tests in the isolated database. Production-connected real-data smoke is optional and must use the explicit production-smoke gate with test schemas/temp output directories.
 - Run the Phase 5 validation goals plus `code_graph.py describe/path` for FigPack tables.
+
+## Review-triage items folded into Phase 5
+
+Added 2026-06-25 from the Spike Sorting V2 review triage
+([../../reviews/spikesorting-v2/TRIAGE.md](../../reviews/spikesorting-v2/TRIAGE.md)),
+which the owner agreed are Phase-5-scoped. The non-Phase-5 findings are in the
+separate remediation plan
+([../spikesorting-v2-review-remediation/PLAN.md](../spikesorting-v2-review-remediation/PLAN.md));
+**that plan's phase-0 decomposition must merge before this Phase 5 work begins**, so
+the orchestrator/FigPack changes here extend a decomposed `CurationV2`. Do these as
+part of the Phase 5 PRs:
+
+- **R2 / DOCS-1 / API-2 — final curated `merge_id`, not the root.** The notebook and `docs/src/.../SpikeSortingV2.md` currently steer users to `run_v2_pipeline`'s returned `merge_id`, which is the **root** (`parent_curation_id=-1`, uncurated) curation. Update the orchestrator docs/notebook so the carried-forward `merge_id` is the **final curated** output. (Verified: `_pipeline_run.py:403-423` inserts the root curation and returns its merge_id.)
+- **R20 — orchestrator / preflight polish.** While extending `pipeline.py`/preflight: add the required `"raw data valid times"` interval check to preflight (ERR-1 — `make_fetch` does an unconditional `fetch1("valid_times")` that a partial ingest can miss); surface structured `stage` + `original_error_type` fields on `continue_on_error` batch-failure results (ERR-7); distinguish selection-vs-computed in preflight expected ids (OBS-5); raise typed errors (not bare `KeyError`/FK) from `SessionGroup.create_group` and the malformed-input paths (ERR-2/ERR-4).
+- **R23 / MAINT-9 — docs honesty + build cuts.** Fix the self-contradicting "not yet available / placeholder" status text for the shipped UnitMatch/concat surfaces in `SpikeSortingV2.md` and `SpikeSortingV2_Migration.md` (and the stale `pipeline.py` module docstring "come in later versions"); add `SpikeSortingV2StorageManagement.md` to the docs nav (`mkdocs.yml`) and feature index; fix the `mkdocs.yaml`/`mkdosc.yaml` typo in `docs/README.md`+`build-docs.sh`, the broken generic `Export.md` example, and the unset `version_string` fallback in `build-docs.sh`.
+- **R33-EXT-2 — presets are a Phase-5 deliverable (not a plugin API).** Provide a clean, documented preset surface; do **not** build a generic `register_pipeline_preset` plugin framework (R33 decided non-goal). **R33-matcher:** the matcher docs must state "UnitMatchPy is the matcher," matching the registry-honesty change shipped in remediation phase-3a; do not advertise matcher pluggability.
+- **R7-composition — child-curation composition semantics.** Decide, as part of the FigPack curation-editing design, whether a child curation should **inherit** parent labels/merges or remain a raw-sort **snapshot** (current behavior: snapshot — a child of a labeled/merged parent does not inherit). Document the chosen semantics in the notebook/docs; until decided, document the current snapshot behavior explicitly (CLIFE-2).
+- **MAINT-10 — notebook structure.** The canonical `10_Spike_SortingV2` notebook is both a beginner walkthrough and an advanced reference; decide whether to mark the advanced sections clearly optional or split a first-hour path. Design call for this phase.
+
+These items must not alter Phase 1–4 *table definitions* (the Phase 5 constraint
+below still holds); the remediation plan owns all schema changes.
 
 **Inputs to read first:**
 

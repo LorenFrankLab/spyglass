@@ -1,0 +1,134 @@
+# Phase 2 — Identity & relational integrity
+
+[← back to PLAN.md](PLAN.md) · [overview](overview.md)
+
+Close the identity/schema gaps that are cheapest to fix while pre-production: master
+rows can be silently retargeted (R28), runtime-semantics aliases change meaning under
+a fixed version (R6), `TrackedUnit` re-derives its universe instead of using the
+frozen one (R7), and schema-init isn't an upgrade workflow (R8). One PR; four
+related task groups (review per group is fine).
+
+**Inputs to read first:**
+
+- [src/spyglass/spikesorting/v2/utils.py:171-254](../../../../src/spyglass/spikesorting/v2/utils.py#L171-L254) (`SelectionMasterInsertGuard`) and [:257-309](../../../../src/spyglass/spikesorting/v2/utils.py#L257-L309) (`ImmutableParamsLookup.update1` — the pattern to mirror); [:317-351](../../../../src/spyglass/spikesorting/v2/utils.py#L317-L351) (`find_orphaned_masters`).
+- [src/spyglass/spikesorting/v2/curation.py:64-65](../../../../src/spyglass/spikesorting/v2/curation.py#L64-L65), [session_group.py:55-83](../../../../src/spyglass/spikesorting/v2/session_group.py#L55-L83) — plain `dj.Manual` masters.
+- [src/spyglass/spikesorting/v2/_params/preprocessing.py:7,106-135](../../../../src/spyglass/spikesorting/v2/_params/preprocessing.py#L106-L135); [_selection_identity.py:40-46](../../../../src/spyglass/spikesorting/v2/_selection_identity.py#L40-L46); [_concat_recording.py:22,93-146](../../../../src/spyglass/spikesorting/v2/_concat_recording.py#L93-L146); [recording.py:2200-2223](../../../../src/spyglass/spikesorting/v2/recording.py#L2200-L2223) (`DriftEstimate`).
+- [src/spyglass/spikesorting/v2/unit_matching.py:438-457](../../../../src/spyglass/spikesorting/v2/unit_matching.py#L438-L457) (`UnitMatch` def), [:587-625](../../../../src/spyglass/spikesorting/v2/unit_matching.py#L587-L625) (freeze), [:864-907](../../../../src/spyglass/spikesorting/v2/unit_matching.py#L864-L907) (`TrackedUnit.make` re-derivation).
+- [src/spyglass/spikesorting/v2/_lookup_validation.py:83-93,264-282](../../../../src/spyglass/spikesorting/v2/_lookup_validation.py#L83-L93); [__init__.py:18-61](../../../../src/spyglass/spikesorting/v2/__init__.py#L18-L61); [sorting.py:320-323](../../../../src/spyglass/spikesorting/v2/sorting.py#L320-L323) (the one backfill that exists).
+
+**Contracts referenced:** [Master-row identity immutability](shared-contracts.md#master-row-identity-immutability) — this phase implements it.
+
+## Tasks
+
+### Group A — R28 master-row immutability + source-part audit
+
+1. **Add an `update1` deny to `SelectionMasterInsertGuard`.** Mirror `ImmutableParamsLookup.update1` (`utils.py:282-309`):
+
+   ```python
+   def update1(self, row, *, allow_master_mutation=False):
+       """Reject in-place mutation: a selection master's secondary columns feed
+       its deterministic id; mutating them retargets the id under live
+       dependents. Insert a new selection instead."""
+       if not allow_master_mutation:
+           raise dj.errors.DataJointError(
+               f"In-place update1 of {self.__class__.__name__} is not supported: "
+               "its identity is derived from these columns. Insert a new selection "
+               "via insert_selection(). Pass allow_master_mutation=True only for a "
+               "deliberate maintenance edit of a row with no live references."
+           )
+       super().update1(row)
+   ```
+
+   This automatically covers all six masters that mix the guard in: `RecordingSelection` (`recording.py:745`), `ArtifactDetectionSelection` (`artifact.py:441`), `SortingSelection` (`sorting.py:651`), `UnitMatchSelection` (`unit_matching.py:198`), `ConcatenatedRecordingSelection` (`session_group.py:330`), `AnalyzerCurationSelection` (`metric_curation.py:646`).
+
+2. **Guard `CurationV2` and `SessionGroup` direct writes.** These are plain `dj.Manual` (`curation.py:65`, `session_group.py:65`). Add insert + `update1` denial that routes legitimate writes through the factory methods. Give each master an `insert`/`insert1`/`update1` override (a small shared mixin, e.g. `FactoryOnlyMaster`, or reuse `SelectionMasterInsertGuard`'s mechanism) that raises unless a keyword bypass is passed; then thread the bypass through the factory transactions: `CurationV2.insert_curation`'s master insert and `SessionGroup.create_group`'s master insert pass the bypass flag. The existing `insert_curation` / `create_group` tests must still pass. (`UnitLabel` already validates its own inserts — leave it.)
+
+3. **Add a multi-source integrity audit.** `find_orphaned_masters` (`utils.py:347-351`) flags only **zero-source** masters; a master with **two** source-part rows is caught lazily only when `resolve_source` runs. Add a sibling:
+
+   ```python
+   def audit_source_part_integrity(master_table, part_tables) -> list[dict]:
+       """Return masters whose source-part row count != 1 (0 = orphan, >1 =
+       ambiguous source). Complements find_orphaned_masters' zero-only check."""
+   ```
+
+   Use it for `SortingSelection` (Recording/Concat/Artifact source parts) and `ArtifactDetectionSelection` (Recording/SharedArtifactGroup source parts).
+
+### Group B — R6 runtime-alias versioning
+
+4. **Mark the preprocessing runtime-order change as a distinct version and enforce it.** Bump `PREPROCESSING_SCHEMA_VERSION` (`_params/preprocessing.py:7`) so the current filter→reference runtime order is a versioned state (the v3 change shipped under an unchanged version — `:106-135`). Re-seed the shipped default rows at the new version. Add/extend a test that pins the documented runtime semantics to a checked-in expected version so a **future** silent order change fails CI. (Identity stays name-based by design — R6's full-recipe-as-identity is a decided non-goal; this makes a semantics change *detectable*, which combined with task 9 below flags pre-change dev rows.)
+
+5. **Store the resolved motion/drift preset, not just the alias.** `resolve_motion_correction` maps `"auto"`→`AUTO_SAME_DAY_PRESET="rigid_fast"` (`_concat_recording.py:22,136-145`); `DriftEstimate` hardcodes `_DEFAULT_PRESET="dredge_fast"` (`recording.py:2200`). Persist the **resolved** preset string as a secondary attribute on the concat row and on `DriftEstimate` (DriftEstimate already stores `motion_preset` as a secondary attr — confirm it stores the resolved value, not the alias), and add an `AUTO_SAME_DAY_PRESET_VERSION` module constant so a change to the alias mapping is a visible, test-pinned bump rather than a silent re-meaning.
+
+### Group C — R7 frozen matchable universe
+
+6. **Persist the frozen matchable universe and have `TrackedUnit` consume it.** The matchable set is frozen in `UnitMatch.make_fetch` (`unit_matching.py:592-623`) but only transiently in `member_plan`; `TrackedUnit.make` re-derives `node_universe` from **current** labels (`:890-906`), so a relabel between the two stages silently drops singletons. Add a part table to persist the frozen set:
+
+   ```python
+   class MatchableUnit(SpyglassMixin, dj.Part):
+       definition = """
+       -> master                 # UnitMatch
+       member_index: int
+       sorting_id: uuid
+       curation_id: int
+       unit_id: int
+       """
+   ```
+
+   `UnitMatch.make_insert` writes it from `member_plan["matchable_unit_ids"]`. `TrackedUnit.make` (`:890-906`) reads `node_universe` from `UnitMatch.MatchableUnit & key` instead of calling `CurationV2().get_matchable_unit_ids(...)`. Keep `derive_tracked_units`' loud failure for edges outside the (now frozen) universe.
+
+### Group D — R8 schema-init upgrade safety
+
+7. **Generalize the outer-version backfill.** Only `SorterParameters` backfills the outer `params_schema_version` from the blob (`sorting.py:320-323`); the single-schema Lookups rely on the column default, so `_assert_schema_version_matches` early-returns when the column is omitted (`_lookup_validation.py:83-93`). Move the backfill into `validate_lookup_rows` (`_lookup_validation.py:130-139`) as a default `per_row_hook` behavior: when `params_schema_version` is absent, fill it from the validated blob's `schema_version` before the drift check, for every Lookup.
+
+8. **Add a stale-default content audit.** `initialize_v2_defaults` (`__init__.py:18-61`) re-runs each `insert_default()` idempotently and never compares a stored same-name row's *content* to the shipped content (`reject_duplicate_parameter_content` skips existing-PK rows — `_lookup_validation.py:264-281`). Add:
+
+   ```python
+   def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
+       """For each shipped default name already in the DB, compare the stored
+       content fingerprint to the shipped content. Return mismatches (stale
+       defaults). Raise DuplicateParameterContentError-style error if strict."""
+   ```
+
+   Call it (non-strict, log warnings) at the end of `initialize_v2_defaults`, and expose it for an admin to run strict. This closes SCHEMA-2/SCHEMA-3 and, with task 4, flags a pre-order-change preprocessing dev row.
+
+9. **Docs.** CHANGELOG entries for: the new `update1` deny on masters; the preprocessing version bump (note dev rows must be re-seeded); the new `UnitMatch.MatchableUnit` part; `verify_v2_default_catalog`. Update the migration doc (`docs/src/.../SpikeSortingV2_Migration.md`) with the version-bump + re-seed note.
+
+## Deliberately not in this phase
+
+- **Full recording construction-recipe-as-identity** (R6 full) — decided non-goal; identity stays name-based, this phase only makes semantics changes *detectable*/versioned.
+- **Child-curation composition semantics** (R7 composition / CLIFE-2) — a Phase-5 FigPack design decision (overview "Phase 5 adjustments"); here only the frozen-universe drift is fixed.
+- **PK changes** to session-global keys (R9-PK) — see overview Open Question 1; not in this plan.
+- **Provenance columns** (effective seed, versions) — phase-3a.
+
+## Validation slice
+
+| Test | Asserts |
+| --- | --- |
+| `test_selection_identity.py::test_update1_rejected_all_masters` (new) | parametrized over all six selection masters + `CurationV2` + `SessionGroup`: `cls.update1(changed_row)` raises `DataJointError` match `"not supported"`; `allow_master_mutation=True`/factory-bypass succeeds. Mirrors `test_sorter_parameters_update1_rejected_in_place`. |
+| `test_selection_identity.py::test_curationv2_direct_insert_rejected` (new) | `CurationV2.insert1(row)` raises; `CurationV2.insert_curation(...)` still succeeds (factory bypass works). Same for `SessionGroup.create_group`. |
+| `test_integrity.py::test_audit_source_part_integrity_flags_multi_source` (new) | a master with two source-part rows is returned by `audit_source_part_integrity`; a clean master is not. |
+| `test_params_validation.py::test_preprocessing_runtime_version_pinned` (new/extended) | the preprocessing runtime-order version equals a checked-in expected constant (a future silent order change fails). |
+| `test_concat_recording.py::test_resolved_motion_preset_persisted` (new) | a concat built with `preset="auto"` stores the resolved `"rigid_fast"` (not `"auto"`) and the alias-version constant. |
+| `test_unitmatch.py::test_tracked_unit_uses_frozen_universe_after_relabel` (new) | freeze a UnitMatch, relabel a member unit, populate `TrackedUnit`: the node universe matches the frozen `MatchableUnit` rows (singleton not dropped) — **fails before** the frozen-universe change. |
+| `test_parameter_identity.py::test_outer_version_backfilled_for_all_lookups` (new) | inserting a Preprocessing/Artifact/Motion/Waveform row with `params_schema_version` omitted backfills it from the blob (drift check still trips on an explicit mismatch). |
+| `test_pipeline_run.py::test_verify_v2_default_catalog_flags_stale` (new) | seed a default, mutate the stored blob, `verify_v2_default_catalog()` returns the mismatch; a clean catalog returns `[]`. |
+| (regression) `single_session/test_curation_*`, `test_session_group_concat.py`, `test_unitmatch.py::test_tracked_unit_make_seeds_singletons`, `test_initialize_v2_defaults_is_idempotent` | factory inserts, concat, normal TrackedUnit populate, and idempotent init all still pass. |
+
+## Fixtures
+
+Master `update1`/insert guards and the source-part audit are mostly DB-free or use
+the minimal `dj_conn` + a single inserted selection. The frozen-universe test reuses
+`two_session_curated_group` (`test_unitmatch.py:508`) + a relabel of one member. The
+schema-init tests reuse the default-seeding fixtures. The concat-preset test reuses
+`chronic_2_session_minirec` (`conftest.py:340`).
+
+## Review
+
+Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
+- `update1` is rejected on every selection master AND `CurationV2`/`SessionGroup`; the existing `insert_curation`/`create_group` paths still insert (factory bypass wired correctly, not left broken).
+- The frozen-universe change persists `MatchableUnit` and `TrackedUnit` reads it; the relabel-divergence test fails on pre-change code.
+- The preprocessing version bump re-seeds shipped rows and the runtime-version pin test would catch a future silent change.
+- The outer-version backfill applies to all Lookups, not just `SorterParameters`; the drift check still trips on explicit mismatch.
+- `verify_v2_default_catalog` detects same-name content drift and is wired into `initialize_v2_defaults` non-strict.
+- No PK changes; provenance columns are not added here (that's 3a).
+- CHANGELOG + migration-doc updates present; no plan/phase references in code or tests.

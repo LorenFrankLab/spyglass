@@ -1,0 +1,73 @@
+# Phase 3b — NWB metadata/lineage provenance
+
+[← back to PLAN.md](PLAN.md) · [overview](overview.md)
+
+Make the v2 NWB artifacts self-describing (R10). The writers currently persist
+results (traces, spikes, pairs, metrics) but no source/sorter/params/lineage, so a
+shared NWB can't be understood without the DataJoint DB. Write the **metadata** —
+which is cheap — into each writer; for the two **large-array** items store the
+producing params, not the array. Depends on phase-3a (reuses the same provenance
+field names / version strings).
+
+**Inputs to read first:**
+
+- [shared-contracts.md#producer-provenance-field-set](shared-contracts.md#producer-provenance-field-set) — field names shared with 3a.
+- [src/spyglass/spikesorting/v2/_recording_nwb.py:225-245](../../../../src/spyglass/spikesorting/v2/_recording_nwb.py#L225-L245) — recording ElectricalSeries write (`add_acquisition` at 243).
+- [src/spyglass/spikesorting/v2/_units_nwb.py:626-664](../../../../src/spyglass/spikesorting/v2/_units_nwb.py#L626-L664) — sort-time Units writer (`add_unit_column`/`add_unit`); the curated writer (`write_curated_units_nwb` / `_write_curated_units_nwb_body`, ~864-945).
+- [src/spyglass/spikesorting/v2/_unitmatch_nwb.py:27-92](../../../../src/spyglass/spikesorting/v2/_unitmatch_nwb.py#L27-L92) — `build_pairs_table` (per-pair columns only; no session map/params).
+- [src/spyglass/spikesorting/v2/_metric_curation_nwb.py](../../../../src/spyglass/spikesorting/v2/_metric_curation_nwb.py) — `write_analyzer_curation_tables` (~166-196; three result-only scratch tables).
+- [src/spyglass/spikesorting/v2/session_group.py](../../../../src/spyglass/spikesorting/v2/session_group.py) — concat write (~876-884) + `MemberBoundary` (~592-600).
+- DB rows that already hold the metadata to write: [sorting.py:1162-1169](../../../../src/spyglass/spikesorting/v2/sorting.py#L1162-L1169) (`Sorting.Unit`: Electrode, `peak_amplitude_uv`, `n_spikes`), [curation.py](../../../../src/spyglass/spikesorting/v2/curation.py) `CurationV2.MergeGroup` (~154), `Raw.raw_object_id`.
+
+**Contracts referenced:** [Producer provenance field set](shared-contracts.md#producer-provenance-field-set).
+
+## Tasks
+
+1. **Recording NWB source provenance.** In `_recording_nwb.write_nwb_artifact` (around the ElectricalSeries write, `_recording_nwb.py:230-245`), write the construction provenance as NWB scratch / `general` metadata (not into the data path): raw source `object_id` (`Raw.raw_object_id`), `recording_id`, `preprocessing_params_name`, `sort_group_id`, the resolved reference mode, bad-channel handling, and the `spikeinterface_version`. Use `nwbfile.add_scratch(...)` or a small `general`-level container keyed under a stable name (e.g. `spyglass_v2_recording_provenance`). The metadata is small scalars/strings — write it directly. (The processed series itself stays in `acquisition`; the NWB-10 "processed under acquisition" cosmetic is out of scope.)
+
+2. **Sorting Units NWB: per-unit + source metadata.** In the sort-time Units writer (`_units_nwb.py:626-655`), add unit columns from the already-fetched `Sorting.Unit` data: `peak_amplitude_uv`, `peak_electrode_id`, `n_spikes`, and `brain_region` (via the `Sorting.Unit * Electrode * BrainRegion` values). Add file-level provenance scratch: source `recording_id`/`concat_recording_id`, `sorter`, sorter params, `artifact_detection_id`, `display_waveform_params_name`, and the phase-3a versions/seed. Thread the needed values into `write_units_nwb`'s signature (the caller `Sorting._write_units_nwb` has them or can fetch them).
+
+3. **Curated Units NWB: merge lineage.** In the curated writer (`_units_nwb.py` ~864-945), serialize the kept→contributor mapping (`CurationV2.MergeGroup`) as a scratch table so the merge lineage is in the file (currently reconstructed only from the DB). For `apply_merge=True` write the kept-unit→contributors map; for `apply_merge=False` write the proposed groups with an explicit "proposed, not applied" flag.
+
+4. **UnitMatch NWB self-description.** In `_unitmatch_nwb.build_pairs_table` (or a companion scratch alongside it), add: `unitmatch_id`, `session_group_name`, `matcher_params_name`, and the per-member `(member_index, sorting_id, curation_id, session_start_time)` map. The pairs table currently carries only per-pair side ids (`_unitmatch_nwb.py:30-38`); add the session/params context so the file is interpretable standalone.
+
+5. **AnalyzerCuration NWB inputs.** In `write_analyzer_curation_tables` (`_metric_curation_nwb.py` ~166-196), add the metric param set + kwargs, the whitened/display recipe names, and the auto-merge preset/rules as scratch metadata alongside the existing result tables.
+
+6. **Concat NWB reconstructability + large-array params.** In the concat write (`session_group.py` ~876-884), write the ordered member provenance (per member: source NWB, `recording_id`, interval, frame start/end, time transform) and the `MemberBoundary` data **into the file**, so a split is reconstructable from the NWB (not only from live `SessionGroup.Member`). For the **motion** large-array item (NWB-3): write the resolved motion **preset + kwargs** (from phase-2's stored resolved preset), NOT the displacement field — document the field as DB/derivable. Same principle for waveform/template arrays elsewhere: write the producing params, not the arrays.
+
+7. **Docs.** CHANGELOG: each writer now embeds provenance; note the scratch container names so downstream readers can find them. Add a short "what provenance is in each v2 NWB" subsection to `docs/src/.../SpikeSortingV2.md`.
+
+## Deliberately not in this phase
+
+- **Storing the motion displacement field or waveform/template arrays in NWB** — decided: store the producing params/preset, document the array as derivable (avoids bloating every NWB).
+- **Moving the processed recording out of `acquisition`** (NWB-10) — cosmetic, out of scope.
+- **Row-level provenance columns** — phase-3a; this phase only *writes* those values into the NWB.
+- **Changing any identity** — provenance only.
+
+## Validation slice
+
+| Test | Asserts |
+| --- | --- |
+| `test_nwb_provenance.py::test_recording_nwb_carries_source_provenance` (new) | after `Recording.populate`, reading the artifact NWB yields the raw source `object_id`, `recording_id`, `preprocessing_params_name`, and `spikeinterface_version` from the provenance scratch. |
+| `test_nwb_provenance.py::test_units_nwb_carries_per_unit_and_source_metadata` (new) | the sort-time Units NWB has `peak_amplitude_uv`/`peak_electrode_id`/`n_spikes`/`brain_region` unit columns matching `Sorting.Unit`, and source `sorter`/`recording_id` scratch. |
+| `test_nwb_provenance.py::test_curated_nwb_carries_merge_lineage` (new) | a merged curation's NWB contains the kept→contributor map matching `CurationV2.MergeGroup`; a preview curation marks groups "not applied". |
+| `test_nwb_provenance.py::test_unitmatch_nwb_self_describes` (new) | the UnitMatch NWB carries `unitmatch_id`/`session_group_name`/`matcher_params_name` + the member map. |
+| `test_nwb_provenance.py::test_concat_nwb_reconstructs_member_boundaries` (new) | the concat NWB's embedded member provenance + boundaries reproduce `split_sorting_by_session`'s mapping without reading live `SessionGroup.Member`; the resolved motion preset+kwargs are present, the displacement field is not. |
+| (regression) `test_recording.py`, `single_session/test_curation_*`, `test_unitmatch.py`, `test_session_group_concat.py` round-trip/read tests | existing read paths unaffected by the added scratch. |
+
+## Fixtures
+
+Reuse `populated_sorting` (`conftest.py:215`) and `populated_sorting_with_curation`
+(`conftest.py:312`) for recording/units; `two_session_curated_group`
+(`test_unitmatch.py:508`) for UnitMatch; `chronic_2_session_minirec`
+(`conftest.py:340`) for concat. Each test reads the produced NWB via `pynwb` and
+asserts the provenance container contents.
+
+## Review
+
+Before opening the PR, dispatch `code-reviewer` against the diff. Confirm:
+- Each writer embeds the specified provenance; the round-trip tests read it back from the file (not the DB).
+- Large arrays (motion field, waveforms) are NOT written — only their producing params; the docstring/CHANGELOG says where the array is derivable.
+- Provenance field names match phase-3a / shared-contracts exactly.
+- Added scratch does not break existing NWB read paths (regression tests pass); the data path (ElectricalSeries, spike trains) is unchanged.
+- Docs list what provenance lives in each v2 NWB; no plan/phase references in code or tests.
