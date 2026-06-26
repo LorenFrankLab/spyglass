@@ -271,8 +271,21 @@ def _consolidate_regular_intervals(
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[np.argsort(intervals[:, 0])]
 
-    rel_start = (intervals[:, 0] - t_start) * sampling_frequency
-    rel_stop = (intervals[:, 1] - t_start) * sampling_frequency
+    def _snap_to_grid(frames, atol: float = 1e-6):
+        """Snap frame coordinates within ``atol`` of an integer onto it.
+
+        ``atol`` is a float-error tolerance, NOT a behavioral knob: 1e-6
+        frames is < 1 ns at 30 kHz, far below any real sample spacing, so it
+        only absorbs the round-off in ``(time - t_start) * fs`` for a boundary
+        that sits exactly on a sample line. Without it, ``ceil``/``floor``
+        drop the edge sample and disagree with the searchsorted
+        ``_consolidate_intervals`` path used for explicit timestamps.
+        """
+        rounded = np.round(frames)
+        return np.where(np.abs(frames - rounded) <= atol, rounded, frames)
+
+    rel_start = _snap_to_grid((intervals[:, 0] - t_start) * sampling_frequency)
+    rel_stop = _snap_to_grid((intervals[:, 1] - t_start) * sampling_frequency)
     start_indices = np.ceil(rel_start).astype(np.int64)
     stop_indices = (np.floor(rel_stop).astype(np.int64) + 1).astype(np.int64)
 

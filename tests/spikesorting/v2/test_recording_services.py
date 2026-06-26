@@ -100,6 +100,43 @@ def test_regular_interval_consolidation_matches_timestamp_search():
     np.testing.assert_array_equal(out, expected)
 
 
+def test_regular_interval_consolidation_snaps_grid_boundaries():
+    """Boundaries placed exactly on sample lines must not lose the edge sample
+    to float round-off.
+
+    At ``fs=30000`` / ``t_start=17.0`` the products ``(t0 + k/fs - t0) * fs``
+    drift off the integer ``k`` by ~1e-11 (e.g. ``4.000000000026`` and
+    ``8.999999999979``). Without snapping, ``ceil`` pushes the start sample
+    forward and ``floor`` pulls the stop sample back, dropping the first and
+    last samples relative to the searchsorted timestamp path. The snapped
+    rate-based path must agree with ``_consolidate_intervals`` exactly.
+    """
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _consolidate_regular_intervals,
+    )
+    from spyglass.spikesorting.v2.utils import _consolidate_intervals
+
+    fs = 30000.0
+    t_start = 17.0
+    n_samples = 12
+    timestamps = t_start + np.arange(n_samples, dtype=float) / fs
+    # Sample-aligned boundaries whose float products land just off the integer.
+    intervals = np.array([[t_start + 4 / fs, t_start + 9 / fs]])
+
+    expected = _consolidate_intervals(intervals, timestamps)
+    out = _consolidate_regular_intervals(
+        intervals,
+        n_samples=n_samples,
+        sampling_frequency=fs,
+        t_start=t_start,
+    )
+
+    np.testing.assert_array_equal(out, expected)
+    # Pin the intended frames so a future regression to the searchsorted path
+    # can't silently move both sides together.
+    np.testing.assert_array_equal(out, np.array([[4, 10]]))
+
+
 def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
     """Lazy timestamp overrides expose array-like indexing while allocating only
     requested slices."""
