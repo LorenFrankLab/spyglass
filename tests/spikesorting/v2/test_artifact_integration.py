@@ -717,3 +717,67 @@ def test_artifact_compute_kernels_import_without_db():
         "artifact compute kernels must import without a DB dependency\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
+    """AVTM-2: Sorting.make_fetch resolves artifact-removed intervals via the
+    strict ownership helper (read_artifact_removed_intervals, as_dict=True).
+
+    The prior direct ``IntervalList & reconstructed_name`` fetch would accept a
+    partially-deleted artifact whose ownership ArtifactRemovedInterval part rows
+    are gone (the IntervalList row itself still resolves by name). Routing
+    through the helper makes that case fail loudly instead of feeding a stale /
+    foreign same-name interval list into the sort.
+    """
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactDetectionSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    recording_id = artifact_e2e_session["recording_id"]
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+
+    art_pk = ArtifactDetectionSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": "none",
+        }
+    )
+    if not (ArtifactDetection & art_pk):
+        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            "artifact_detection_id": art_pk["artifact_detection_id"],
+        }
+    )
+    try:
+        # Happy path: make_fetch resolves obs_intervals through the helper.
+        fetched = Sorting().make_fetch(sort_pk)
+        assert fetched.obs_intervals is not None
+
+        # Simulate a partially-deleted artifact: drop ONLY the ownership part
+        # row (delete_quick -> no cascade, so the ArtifactDetection master, the
+        # SortingSelection, and the IntervalList row all survive -- the old
+        # by-name fetch would still "succeed"). The helper-routed make_fetch
+        # must now raise on the missing ownership parts.
+        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+        with pytest.raises(ValueError, match="ArtifactRemovedInterval"):
+            Sorting().make_fetch(sort_pk)
+    finally:
+        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+        (SortingSelection & sort_pk).super_delete(warn=False)
+        (ArtifactDetection & art_pk).super_delete(warn=False)
