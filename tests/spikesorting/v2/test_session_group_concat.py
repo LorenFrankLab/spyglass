@@ -888,16 +888,17 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
 
 
 @pytest.mark.slow
-def test_curation_evaluation_populates_over_concat_sort(same_day_group):
-    """CurationEvaluation evaluates a committed curation over a CONCAT-backed
-    sort end-to-end.
+def test_concat_curation_evaluation_acceptance_creates_committed_child(
+    same_day_group, curation_evaluation_defaults
+):
+    """A concat-backed evaluation can be accepted into a committed child.
 
     Exercises the source-aware concat branch of ``make_fetch`` (it resolves the
     recording through ``ConcatenatedRecording.get_recording``, not a per-member
     ``Recording``) and the DB-free concat reconstruction in ``make_compute``;
-    the metrics must index the curation's units.
+    then accepts labels with ``replace_labels`` and re-evaluates the accepted
+    child to prove the normal curation workflow works for concat-backed sorts.
     """
-    from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -913,7 +914,6 @@ def test_curation_evaluation_populates_over_concat_sort(same_day_group):
         grp["group_key"], grp["preprocessing_params_name"]
     )
     _ensure_clusterless_sorter_params()
-    initialize_v2_defaults()  # metric / auto-rule / waveform Lookup rows
     sort_pk = SortingSelection.insert_selection(
         {
             "concat_recording_id": concat_pk["concat_recording_id"],
@@ -939,6 +939,26 @@ def test_curation_evaluation_populates_over_concat_sort(same_day_group):
         int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
     }
     assert set(metrics.index) == expected
+
+    child = CurationEvaluation().replace_labels(sel)
+    assert CurationV2.is_committed_curation(child)
+    assert (CurationV2 & child).fetch1("curation_source") == (
+        "curation_evaluation"
+    )
+    assert set(
+        int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
+    ) == expected
+
+    child_sel = CurationEvaluationSelection.insert_selection(
+        {
+            **child,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(child_sel, reserve_jobs=False)
+    child_metrics = CurationEvaluation.get_metrics(child_sel)
+    assert set(child_metrics.index) == expected
 
 
 @pytest.mark.slow

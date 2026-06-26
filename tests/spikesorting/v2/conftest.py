@@ -571,6 +571,26 @@ def planted_three_unit_sort(dj_conn):
     _clean_session_v2(session)
 
 
+@pytest.fixture
+def curation_evaluation_defaults(dj_conn):
+    """Ensure the default metric/auto-curation/waveform Lookup rows exist.
+
+    The Lookup rows a ``CurationEvaluation`` needs ("minimal" metrics, "none"
+    auto-curation rules, default waveform window) -- the curation-eval subset of
+    ``initialize_v2_defaults``. Shared here so every eval-based test (curation,
+    UnitMatch, concat) reuses it instead of re-seeding defaults in-body.
+    """
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+
+
 #: ``session_group_owner`` LabTeam used by the chronic concat fixture and its
 #: tests. Named once so the fixture's setup/teardown cleanup and the tests that
 #: create groups under it cannot drift.

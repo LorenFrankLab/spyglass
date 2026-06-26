@@ -221,20 +221,8 @@ def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
 
 
 # ---------- CurationEvaluationSelection -------------------------------------
-
-
-@pytest.fixture
-def curation_evaluation_defaults(dj_conn):
-    """Ensure the default metric/auto-curation/waveform Lookup rows exist."""
-    from spyglass.spikesorting.v2.metric_curation import (
-        AutoCurationRules,
-        QualityMetricParameters,
-    )
-    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
-
-    QualityMetricParameters.insert_default()
-    AutoCurationRules.insert_default()
-    AnalyzerWaveformParameters.insert_default()
+# ``curation_evaluation_defaults`` (metric/auto-rule/waveform Lookup rows) is a
+# shared fixture in conftest.py.
 
 
 @pytest.mark.slow
@@ -1110,18 +1098,17 @@ def test_analyzer_curation_table_removed():
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_evaluate_label_only_child_of_merged_parent(
+def test_workflow_evaluate_accept_merge_reevaluate_replace_labels_final_child(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """A label-only child of a merged parent (merges_applied=False but a
-    non-raw unit namespace) is evaluated over ITS OWN units, not the raw sort.
+    """Common curation workflow ends on final metrics for the final child.
 
-    Regression for the fast-path routing: ``use_fast_path`` keys on whether the
-    curation's unit set equals the raw sort's, not on ``merges_applied`` -- the
-    label-only child here has merges_applied=False yet carries the merged id, so
-    the cached raw analyzer (raw unit ids) must NOT be used. Exercises the
-    owner-suggested chain: accept a merge, evaluate the merged child, materialize
-    labels, evaluate the label-only grandchild.
+    Evaluate the root, accept an explicit merge with ``create_curation``,
+    re-evaluate the committed merged child, accept the final label verdict with
+    ``replace_labels``, then re-evaluate that final child. The label-only final
+    child has ``merges_applied=False`` but a merged unit namespace, so routing
+    must key on the actual curation unit set rather than blindly reusing the raw
+    analyzer whenever ``merges_applied`` is false.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -1157,42 +1144,65 @@ def test_evaluate_label_only_child_of_merged_parent(
         merged = CurationEvaluation().create_curation(
             _eval(root), merge_groups=[[unit_ids[0], unit_ids[1]]]
         )
+        assert CurationV2.is_committed_curation(merged)
+        assert (CurationV2 & merged).fetch1("curation_source") == (
+            "curation_evaluation"
+        )
         assert set(
             int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
         ) == {merged_id}
         eval_merged = _eval(merged)
-        assert set(CurationEvaluation.get_metrics(eval_merged).index) == {
-            merged_id
-        }
+        merged_metrics = CurationEvaluation.get_metrics(eval_merged)
+        assert set(merged_metrics.index) == {merged_id}
+        assert int(merged_metrics.loc[merged_id, "num_spikes"]) == int(
+            (CurationV2.Unit & merged & {"unit_id": merged_id}).fetch1(
+                "n_spikes"
+            )
+        )
 
-        # Materialize labels into a label-only grandchild (merges_applied=False,
-        # but its namespace is the MERGED set {merged_id}).
-        grandchild = CurationEvaluation().replace_labels(
+        # Accept labels into a label-only grandchild (merges_applied=False, but
+        # its namespace is the MERGED set {merged_id}).
+        final_child = CurationEvaluation().replace_labels(
             eval_merged, labels={merged_id: ["mua"]}
         )
-        assert not bool((CurationV2 & grandchild).fetch1("merges_applied"))
+        assert CurationV2.is_committed_curation(final_child)
+        assert (CurationV2 & final_child).fetch1("curation_source") == (
+            "curation_evaluation"
+        )
+        assert not bool((CurationV2 & final_child).fetch1("merges_applied"))
         assert set(
-            int(u) for u in (CurationV2.Unit & grandchild).fetch("unit_id")
+            int(u) for u in (CurationV2.Unit & final_child).fetch("unit_id")
         ) == {merged_id}
 
-        # The blocker: evaluating that label-only child must score {merged_id},
-        # NOT the raw sort units (which the old `not merges_applied` fast path
-        # would have loaded, tripping the namespace invariant).
-        eval_grandchild = _eval(grandchild)
-        assert set(
-            CurationEvaluation.get_metrics(eval_grandchild).index
-        ) == {merged_id}
+        labels = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & final_child).fetch(as_dict=True)
+        }
+        assert labels == {(merged_id, "mua")}
+
+        final_eval = _eval(final_child)
+        final_metrics = CurationEvaluation.get_metrics(final_eval)
+        assert set(final_metrics.index) == {merged_id}
+        assert int(final_metrics.loc[merged_id, "num_spikes"]) == int(
+            (CurationV2.Unit & final_child & {"unit_id": merged_id}).fetch1(
+                "n_spikes"
+            )
+        )
     finally:
         clear_curations_for(planted_two_unit_sort)
 
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_acceptance_replace_clears_stale_labels(
+def test_workflow_replace_labels_clears_stale_auto_labels_overlay_preserves_manual_labels(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """Accepting an evaluation writes the FULL auto-curation label state, so a
-    prior label the new evaluation does not propose is cleared (not inherited).
+    """The two label-acceptance actions encode distinct user intent.
+
+    ``replace_labels`` writes the evaluation verdict as the full label state, so
+    a prior auto label the new evaluation does not propose is cleared.
+    ``overlay_labels`` preserves the user's current/manual labels and overlays
+    only the evaluation's proposals.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
