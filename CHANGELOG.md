@@ -127,6 +127,30 @@ them if you computed results on a pre-fix build.
   same-name `IntervalList`), and `apply_artifact_mask` now rejects non-finite or
   out-of-recording-envelope intervals instead of silently under-masking.
 
+#### Spike Sorting v2: final quality metrics over committed curations
+
+`CurationEvaluation` adds the post-merge metric path the R27 guard left missing:
+it scores an existing committed `CurationV2` row (root, label-only, or
+applied-merge) in **that curation's own unit namespace**. A merged unit's
+metrics (SNR / ISI-violation / PC-NN separation) are now **recomputed over the
+merged spike trains and templates**, not inherited from the highest-amplitude
+contributor.
+
+- `CurationEvaluationSelection.insert_selection` pairs a committed curation with
+  metric / auto-rule / metric-waveform params; it **rejects preview curations**
+  (`apply_merge=False` with an unapplied proposed merge) at insert and again at
+  the compute boundary, and mints its content-addressed id under a distinct
+  namespace from `AnalyzerCurationSelection`.
+- `CurationEvaluation.populate` reuses the cached raw-sort analyzer for a
+  committed root/label-only curation (unit set unchanged) and builds a
+  curation-scoped temporary analyzer over the merged sorting for an applied-merge
+  curation (cleaned immediately, never published to the analyzer cache). The
+  metric index is asserted to equal the curation's `CurationV2.Unit` set before
+  any output is written. `get_metrics` / `get_labels` / `get_merge_groups`
+  read the proposals back; committing them into a child curation is a later step.
+- `AnalyzerCuration` (the raw-sort auto-curation path) is unchanged and remains
+  guarded against merged parents.
+
 #### Spike Sorting v2 recording reclamation round-trips via a content fingerprint
 
 Reclaiming a preprocessed recording's disk
