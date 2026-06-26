@@ -351,29 +351,38 @@ def test_summarize_unregistered_merge_id_none(populated_sorting):
     assert CurationV2.summarize_curation(key)["merge_id"] is None
 
 
+# Either PK field alone is a partial key (neither is globally unique on its
+# own), so the guard must reject both a ``curation_id``-only and a
+# ``sorting_id``-only key -- parametrized so a regression on either branch is
+# caught.
+_PARTIAL_CURATION_KEYS = [{"curation_id": 0}, {"sorting_id": "s"}]
+
+
 @pytest.mark.database
-def test_summarize_curation_requires_full_pk(dj_conn):
+@pytest.mark.parametrize("partial_key", _PARTIAL_CURATION_KEYS)
+def test_summarize_curation_requires_full_pk(dj_conn, partial_key):
     """summarize_curation rejects a key lacking sorting_id or curation_id.
 
-    The guard prevents a ``curation_id``-only key (not globally unique) from
-    silently restricting to the wrong rows; it raises before any DB access.
+    The guard prevents a partial key (neither field is globally unique alone)
+    from silently restricting to the wrong rows; it raises before any DB access.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     with pytest.raises(ValueError, match="sorting_id"):
-        CurationV2.summarize_curation({"curation_id": 0})
+        CurationV2.summarize_curation(partial_key)
 
 
 @pytest.mark.database
+@pytest.mark.parametrize("partial_key", _PARTIAL_CURATION_KEYS)
 def test_summarize_curation_pk_guard_runs_before_schema_access(
-    dj_conn, monkeypatch
+    dj_conn, monkeypatch, partial_key
 ):
     """The full-PK guard raises before importing ``SpikeSortingOutput``.
 
-    The merge import activates its ``dj.schema``, so the guard must run first.
-    Replace the merge module with a sentinel that explodes on any attribute
-    access: a guard that ran AFTER the import would surface that
-    ``AssertionError`` instead of the ``ValueError``.
+    The merge import activates its ``dj.schema``, so the guard must run first --
+    for EITHER missing PK field. Replace the merge module with a sentinel that
+    explodes on any attribute access: a guard that ran AFTER the import would
+    surface that ``AssertionError`` instead of the ``ValueError``.
     """
     import sys
 
@@ -390,4 +399,4 @@ def test_summarize_curation_pk_guard_runs_before_schema_access(
         sys.modules, "spyglass.spikesorting.spikesorting_merge", _Boom()
     )
     with pytest.raises(ValueError, match="sorting_id"):
-        CurationV2.summarize_curation({"curation_id": 0})
+        CurationV2.summarize_curation(partial_key)
