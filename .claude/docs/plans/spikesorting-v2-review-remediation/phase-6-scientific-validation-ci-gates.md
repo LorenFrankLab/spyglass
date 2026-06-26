@@ -14,7 +14,7 @@ after the code phases so the gates protect corrected behavior.
 **Inputs to read first:**
 
 - [tests/spikesorting/v2/test_unitmatch.py:1407-1412](../../../../tests/spikesorting/v2/test_unitmatch.py#L1407-L1412) (skip-on-absent) and [:1547](../../../../tests/spikesorting/v2/test_unitmatch.py#L1547) (`assert auc > 0.85`).
-- [tests/spikesorting/v2/fixtures/_fetch.py:93-94](../../../../tests/spikesorting/v2/fixtures/_fetch.py#L93-L94) (two-session/drift fixture URLs still `None`).
+- [tests/spikesorting/v2/fixtures/_fetch.py:93-94](../../../../tests/spikesorting/v2/fixtures/_fetch.py#L93-L94) (**two-session** fixture URLs still `None`) and [:81](../../../../tests/spikesorting/v2/fixtures/_fetch.py#L81) (the **drift** fixture is hosted but nightly/manual — not fetched in the main lane).
 - [tests/spikesorting/v2/conftest.py:163-168](../../../../tests/spikesorting/v2/conftest.py#L163-L168) (honest-green gate: absent + not-required ⇒ skip) and the `SPYGLASS_V2_REQUIRE_FIXTURES` mechanism.
 - `.github/workflows/test-conda.yml` ~280-300 (`SPYGLASS_V2_REQUIRE_FIXTURES` list; drift fixture intentionally unfetched) and ~351-356 (fixtures fetched with `|| true`).
 - [tests/spikesorting/v2/test_drift_estimate.py:104-110](../../../../tests/spikesorting/v2/test_drift_estimate.py#L104-L110) (drift-free fixture, structural-only).

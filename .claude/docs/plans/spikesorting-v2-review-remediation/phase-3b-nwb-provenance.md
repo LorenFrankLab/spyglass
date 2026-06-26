@@ -52,6 +52,7 @@ field names / version strings).
 | `test_nwb_provenance.py::test_units_nwb_carries_per_unit_and_source_metadata` (new) | the sort-time Units NWB has `peak_amplitude_uv`/`peak_electrode_id`/`n_spikes`/`brain_region` unit columns matching `Sorting.Unit`, and source `sorter`/`recording_id` scratch. |
 | `test_nwb_provenance.py::test_curated_nwb_carries_merge_lineage` (new) | a merged curation's NWB contains the kept→contributor map matching `CurationV2.MergeGroup`; a preview curation marks groups "not applied". |
 | `test_nwb_provenance.py::test_unitmatch_nwb_self_describes` (new) | the UnitMatch NWB carries `unitmatch_id`/`session_group_name`/`matcher_params_name` + the member map. |
+| `test_nwb_provenance.py::test_analyzer_curation_nwb_carries_inputs` (new, task 5) | the AnalyzerCuration NWB carries the metric param set + kwargs, the whitened/display recipe names, and the auto-merge preset/rules alongside the result tables. |
 | `test_nwb_provenance.py::test_concat_nwb_reconstructs_member_boundaries` (new) | the concat NWB's embedded member provenance + boundaries reproduce `split_sorting_by_session`'s mapping without reading live `SessionGroup.Member`; the resolved motion preset+kwargs are present, the displacement field is not. |
 | (regression) `test_recording.py`, `single_session/test_curation_*`, `test_unitmatch.py`, `test_session_group_concat.py` round-trip/read tests | existing read paths unaffected by the added scratch. |
 

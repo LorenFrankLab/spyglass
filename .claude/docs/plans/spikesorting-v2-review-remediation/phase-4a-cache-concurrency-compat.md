@@ -63,6 +63,7 @@ rows at compute time; route scratch to the configured temp dir.
 | --- | --- |
 | `test_analyzer_lifecycle.py::test_concurrent_build_does_not_corrupt_cache` (new) | with the per-sort lock, a build publishes atomically (a reader during a rebuild sees a complete folder); assert `os.replace` is used and the temp folder is gone after success. (Concurrency simulated by asserting the temp-then-replace sequence, not a true race.) |
 | `test_analyzer_lifecycle.py::test_delete_and_recompute_hold_lock` (new) | `Sorting.delete` and `recompute._delete_analyzer_folders` acquire `analyzer_curation_lock` (patch the lock to record acquisition). |
+| `test_analyzer_lifecycle.py::test_load_and_add_extensions_hold_lock` (new) | the read/load path (`get_analyzer`/`load_or_rebuild_analyzer`) AND `Sorting.add_extensions`→`ensure_extensions` acquire `analyzer_curation_lock` (patch the lock to record acquisition) — so the publish move-aside window is reader-safe. |
 | `test_concat_recording.py::test_assert_concat_compatible_rejects_mismatched_fs` (new) | members with different sampling frequencies raise. |
 | `test_session_group_concat.py::test_concat_rejects_mismatched_electrode_space` (new) | two members with same channel ids/coords but different electrode keys/regions raise at concat build. |
 | `test_unitmatch_backend.py::test_bundle_geometry_is_2d` (new) | a 3D-probe recording yields a saved `(n,2)` `channel_positions.npy`; a shape guard rejects non-2D. |

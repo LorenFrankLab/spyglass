@@ -115,6 +115,10 @@ depends on another phase.
 | `test_sorting_dispatch.py::test_run_si_sorter_output_survives_tempdir_cleanup` (new, integration) | a real sorter run returns a sorting whose `get_unit_spike_train(...)` is readable **after** `run_si_sorter` returns (temp dir gone); a `NumpySorting` is returned. Marked `slow`. |
 | `test_preview_merge_warning.py::test_get_spike_times_warns_on_preview_merge` (new) | `SpikeSortingOutput().get_spike_times({"merge_id": preview_id})` emits the preview warning; a non-preview merge does not. |
 | `test_unitmatch.py::test_unitmatch_selection_rejects_preview_member` (new) | `UnitMatchSelection.insert_selection` with a member curation that has unapplied proposed merges raises `ValueError`. |
+| `test_curated_nwb.py::test_curated_units_carry_obs_intervals` (new, CNEP-1) | a curated export NWB has per-unit `obs_intervals` matching the source sort (artifact-backed case included); **fails before** the writer/reader change. |
+| `test_downstream_consumers.py::test_all_unlabeled_curation_include_label_filters` (new, CNEP-2) | `include_labels=["accept"]` over an all-unlabeled v2 curation returns **no** units (not all); `exclude_labels` returns all; **fails before** the consumer-boundary fix. |
+| `test_artifact_integration.py::test_make_fetch_routes_through_ownership_helper` (new, AVTM-2) | a sort whose artifact row is missing its ownership part rows (or a hand-inserted same-name `IntervalList`) raises via `read_artifact_removed_intervals`; the helper is called with `as_dict=True` and the absent-key case raises clearly. |
+| `test_artifact_mask.py::test_mask_rejects_nonfinite_and_out_of_envelope` (new, AVTM-3) | `apply_artifact_mask` raises on NaN/Inf or out-of-recording-envelope intervals before the complement walk. |
 | (regression) `test_recording_services.py::test_regular_interval_consolidation_matches_timestamp_search`, `test_peak_sign_resolution.py` suite, `test_analyzer_curation.py::test_analyzer_curation_materializes_real_labels`, `test_sorting_dispatch.py` existing 15 tests, `test_downstream_consumers.py` shape tests | unchanged. |
 
 ## Fixtures

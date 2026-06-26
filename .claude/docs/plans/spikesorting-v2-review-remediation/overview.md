@@ -11,12 +11,14 @@ the owner-agreed disposition for each is in its "Decisions" section.
 
 - **phase-1 (correctness) ships first** — these are silent-wrong-science bugs and
   do not depend on any other phase.
-- **phase-0 (decomposition) is independent of phases 1–4** and may proceed in
+- **phase-0 (decomposition) is largely independent of phases 1–4** and may proceed in
   parallel; its only hard constraint is that it **merges before the Phase 5 UX
   overhaul** begins (so Phase 5 extends the decomposed `CurationV2`, not the
   god-module). Whichever of phase-0 / phases 1–4 lands second rebases — they touch
   overlapping files (`curation.py`, `metric_curation.py`), so expect mechanical
-  conflict resolution, not logical conflict.
+  conflict resolution, not logical conflict. **One real dependency:** phase-4a's
+  REL-4 task (concat-curation query routing) edits the routing helper phase-0
+  extracts, so land REL-4 **after** phase-0.
 - **phases 2, 3a, 3b, 4a, 4b** build on the current structure and are mutually
   independent except: phase-3b (NWB provenance) reads the columns phase-3a adds, so
   **3a precedes 3b**.
@@ -113,8 +115,10 @@ phase-4b pins `numpy>=2,<3` (currently bare `pyproject.toml:58`) and reconciles 
 Replace-in-place. Pre-production, no users, schema freeze lifted, so schema
 additions (phases 2, 3a) need no migration or deprecation window. Each phase is one
 PR, merged behind the standard heavy-suite gate. Recommended merge order:
-phase-1 → phase-2 → phase-3a → phase-3b → phase-4a → phase-4b, with phase-0 merged
-at any point before the Phase 5 UX work starts.
+phase-1 → phase-2 → phase-3a → phase-3b → phase-4a → phase-4b → phase-4c → phase-6,
+with phase-0 merged at any point before the Phase 5 UX work starts (and before
+phase-4a's REL-4 task). phase-4c (concat lifecycle) can also land any time after
+phase-4a; phase-6 (CI gates) is best **last**, so it protects the corrected behavior.
 
 ## Phase 5 adjustments (companion edit to `../spikesorting-v2/phase-5-ux-overhaul.md`)
 

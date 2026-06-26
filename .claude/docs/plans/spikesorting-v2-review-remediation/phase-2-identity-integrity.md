@@ -126,6 +126,9 @@ related task groups (review per group is fine).
 | `test_unitmatch.py::test_tracked_unit_uses_frozen_universe_after_relabel` (new) | freeze a UnitMatch, relabel a member unit, populate `TrackedUnit`: the node universe matches the frozen `MatchableUnit` rows (singleton not dropped) — **fails before** the frozen-universe change. |
 | `test_parameter_identity.py::test_outer_version_backfilled_for_all_lookups` (new) | inserting a Preprocessing/Artifact/Motion/Waveform row with `params_schema_version` omitted backfills it from the blob (drift check still trips on an explicit mismatch). |
 | `test_pipeline_run.py::test_verify_v2_default_catalog_flags_stale` (new) | seed a default, mutate the stored blob, `verify_v2_default_catalog()` returns the mismatch; a clean catalog returns `[]`. |
+| `test_unitmatch.py::test_pair_insert_rejects_unpinned_curation` (new, UCI-2) | a raw `UnitMatch.Pair.insert` referencing a unit outside the selection's `MemberCuration`, or a same-member/reversed-duplicate edge, raises; the canonical `make_insert` path is unaffected. |
+| `test_artifact_integration.py::test_shared_group_member_set_frozen` (new, AVTM-1) | editing `SharedArtifactGroup.Member` after materialization changes the `artifact_detection_id` (or raises a member-drift error at compute) — the scanned set can't change under a fixed id. |
+| `test_unitmatch.py::test_geometry_preflight_fails_before_extraction` (new, UCI-5) | a member with mismatched channel ids/positions is rejected at `insert_selection`/`make_fetch`, before any dense bundle extraction runs. |
 | (regression) `single_session/test_curation_*`, `test_session_group_concat.py`, `test_unitmatch.py::test_tracked_unit_make_seeds_singletons`, `test_initialize_v2_defaults_is_idempotent` | factory inserts, concat, normal TrackedUnit populate, and idempotent init all still pass. |
 
 ## Fixtures

@@ -79,6 +79,8 @@ none warrants its own.
 | `test_export.py::test_export_file_rows_removed_on_overwrite` (new) | re-exporting a `paper_id`/`analysis_id` leaves no stale `Export.File` rows. |
 | `test_analysis_mixin.py::test_conda_export_failure_does_not_abort_write` (new) | with `conda` absent (patched), the NWB write completes and records the unavailable marker. |
 | `test_recording.py::test_sortgroup_overwrite_preview_lists_cross_team_downstream` (new) | the overwrite preview enumerates downstream rows owned by other teams. |
+| `test_recording.py::test_inplace_writer_does_not_unlink_canonical_on_failure` (new, R18/DESTR-2) | a failed in-place rebuild does not unlink the canonical artifact (dead branch removed, or guarded to refuse unlinking a canonical path). |
+| `test_unitmatch.py::test_get_unit_brain_regions_keeps_disambiguators` (new, UCI-6) | `get_unit_brain_regions` returns `curation_id`/`tracked_unit_id`/`member_index`/`nwb_file_name` (not just `sorting_id`/`unit_id`/`region_name`). |
 | (regression) the existing `test_sorting_dispatch.py`, `test_recompute.py`, `test_sorter_parameters.py`, export, and import-boundary suites | unchanged behavior on the happy paths. |
 
 ## Fixtures

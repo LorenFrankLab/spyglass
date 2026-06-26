@@ -104,6 +104,6 @@ Before opening the PR for this phase, dispatch `code-reviewer` against the diff.
 - Every task is implemented as specified; the extraction is behavior-preserving (all regression tests pass unchanged).
 - The "Deliberately not in this phase" list is honored — `get_recording`/`get_sort_metadata` are not extracted, `get_sorting`/`get_merged_sorting` keep their on-table warning emission, and no preview-guard behavior changed (that's phase-1).
 - `_curation_routing` is genuinely DB-free (import-boundary test passes); it imports the artifact-name parser from a DB-free module, not `utils`.
-- New DB-free tests exercise real branching (unknown-key strict/lenient, source classification, artifact directive, is_merge_preview), not tautologies; shared setup is in fixtures.
+- New DB-free tests exercise real branching (unknown-key strict/lenient, source classification, `artifact_detection_id` normalization + unresolved-name warning, is_merge_preview), not tautologies; shared setup is in fixtures. The routing helper must NOT introduce an `exclude/include` directive — it returns normalized restrictions + `artifact_detection_id` + a warning flag.
 - Docstrings / test names / module names don't reference this plan or "phase 0".
 - No call sites needed repointing (public classmethods unchanged); confirm by grepping callers of `resolve_restriction` / the five accessors.
