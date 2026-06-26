@@ -294,7 +294,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             Free-text curation description.
         curation_source
             Provenance for how this curation row was created. Must be one of
-            'manual' (default), 'analyzer_curation', or 'figpack'.
+            'manual' (default), 'figpack', or 'curation_evaluation' (a
+            child accepted from a CurationEvaluation). 'analyzer_curation' is a
+            legacy value retained on the enum.
         reuse_existing : bool, optional
             When a root curation already exists for the sorting and the
             caller passes non-default parameters (labels / merge_groups /

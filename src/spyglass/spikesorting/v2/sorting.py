@@ -1143,7 +1143,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     # back -- never re-resolved -- on every later rebuild, so the analyzer is
     # deterministic for a sorting_id. It is NOT a free per-sort knob and is NOT
     # part of sorting_id identity. The whitened METRIC recipe is carried on
-    # AnalyzerCurationSelection.metric_waveform_params_name, not here.
+    # CurationEvaluationSelection.metric_waveform_params_name, not here.
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
     # (sorting_id, display_waveform_params_name) via _analyzer_cache.analyzer_path.
@@ -1915,7 +1915,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             The analyzer recipe to load. ``None`` (default) loads the sort's
             stored DISPLAY recipe (``display_waveform_params_name``); a caller
             needing the whitened metric recipe (e.g. the PC/NN cluster-
-            separation metrics in ``AnalyzerCuration``) passes it explicitly.
+            separation metrics in ``CurationEvaluation``) passes it explicitly.
             A missing or invalid folder is rebuilt for whichever recipe is
             requested (unless ``rebuild=False``).
         rebuild : bool, optional
@@ -1952,7 +1952,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     ) -> list[str]:
         """Add SortingAnalyzer extensions in place; return the ones computed.
 
-        Convenience for callers (and ``AnalyzerCuration``) that need
+        Convenience for callers (and ``CurationEvaluation``) that need
         extensions beyond the sort-time base set. Only extensions NOT already
         present are computed, so the call is idempotent and never recomputes
         ``waveforms`` / ``templates`` (recomputing a parent cascade-deletes its

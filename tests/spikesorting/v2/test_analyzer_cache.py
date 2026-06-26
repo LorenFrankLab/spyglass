@@ -157,9 +157,9 @@ def test_analyzer_cache_import_pulls_no_db_layer_modules():
 
 
 class TestAnalyzerCurationLock:
-    """Per-sort lock serializing concurrent ``AnalyzerCuration`` mutation.
+    """Per-sort lock serializing concurrent ``CurationEvaluation`` mutation.
 
-    ``AnalyzerCuration`` runs with ``_parallel_make=True``; two curation jobs
+    ``CurationEvaluation`` runs with ``_parallel_make=True``; two curation jobs
     for the SAME sort load the same shared analyzer-cache folder(s)
     (``analyzer_path(sorting_id, ...)``) and each persists extensions and
     ``quality_metrics`` (with ``delete_existing_metrics=True``) into them -- a

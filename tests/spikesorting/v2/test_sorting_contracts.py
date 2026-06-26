@@ -83,39 +83,6 @@ def test_sorting_fetched_matches_make_compute_signature():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_analyzer_curation_tuples_match_make_signatures():
-    """AnalyzerCuration's tri-part NamedTuples are POSITIONAL wire contracts.
-
-    The dispatch splats ``make_fetch`` -> ``make_compute(key, *fetched)`` and
-    ``make_compute`` -> ``make_insert(key, *computed)`` positionally, so the
-    field order of ``AnalyzerCurationFetched`` / ``AnalyzerCurationComputed``
-    must match the corresponding parameter order. ``metric_waveform_params_name``
-    was inserted mid-tuple in both ``AnalyzerCurationFetched`` and
-    ``make_compute`` -- a misalignment would silently mis-bind every later slot
-    (str-adjacent object ids) without a TypeError.
-    """
-    import inspect
-
-    from spyglass.spikesorting.v2.metric_curation import (
-        AnalyzerCuration,
-        AnalyzerCurationComputed,
-        AnalyzerCurationFetched,
-    )
-
-    compute_params = list(
-        inspect.signature(AnalyzerCuration.make_compute).parameters
-    )
-    assert compute_params[:2] == ["self", "key"]
-    assert tuple(compute_params[2:]) == AnalyzerCurationFetched._fields
-
-    insert_params = list(
-        inspect.signature(AnalyzerCuration.make_insert).parameters
-    )
-    assert insert_params[:2] == ["self", "key"]
-    assert tuple(insert_params[2:]) == AnalyzerCurationComputed._fields
-
-
-@pytest.mark.usefixtures("dj_conn")
 def test_curation_evaluation_tuples_match_make_signatures():
     """CurationEvaluation's tri-part NamedTuples are POSITIONAL wire contracts.
 

@@ -860,7 +860,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     assert (merge_regions["region_resolution"] == "anchor_member").all()
 
     # Reporting / analyzer-curation provenance is concat-aware (no crash on the
-    # empty RecordingSource join): the AnalyzerCuration NWB anchor resolves to
+    # empty RecordingSource join): the CurationEvaluation NWB anchor resolves to
     # the first member, and describe_units computes firing rate against the
     # concat recording's total_duration_s.
     from spyglass.spikesorting.v2.metric_curation import (

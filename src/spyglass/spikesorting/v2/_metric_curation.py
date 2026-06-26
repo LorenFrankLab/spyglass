@@ -1,6 +1,6 @@
 """DB-free transform helpers for analyzer-driven quality-metric curation.
 
-Pure logic shared by ``AnalyzerCuration`` (the ``@schema`` table lives in
+Pure logic shared by ``CurationEvaluation`` (the ``@schema`` table lives in
 ``metric_curation.py``): turning quality-metric columns into per-unit labels,
 sanitizing non-finite metric values before serialization, and reproducing
 Spyglass's ``isi_violation`` fraction. Keeping these here -- importable with

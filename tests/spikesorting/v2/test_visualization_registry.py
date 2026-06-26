@@ -107,7 +107,7 @@ def test_available_visualizations_lists_documented_helpers():
     assert set(table["key_type"]) <= {
         "recording",
         "sorting",
-        "analyzer_curation",
+        "curation_evaluation",
     }
 
 
@@ -120,7 +120,7 @@ def test_available_visualizations_routes_metrics_to_spyglass_not_si():
     """
     table = available_visualizations().set_index("name")
     assert table.loc["plot_metrics", "implementation"] == (
-        "spyglass AnalyzerCuration.get_metrics"
+        "spyglass CurationEvaluation.get_metrics"
     )
     assert "spikeinterface" not in table.loc["plot_metrics", "implementation"]
     assert table.loc["plot_si_quality_metrics", "implementation"].startswith(
@@ -258,7 +258,7 @@ def test_notebook_uses_visualization_facade():
     Asserts the walkthrough imports the single ``visualization`` namespace and
     drives it (``available_visualizations`` + at least one ``ssviz`` plot call),
     so users tab-complete one module rather than hunting plot methods across the
-    ``Recording`` / ``Sorting`` / ``AnalyzerCuration`` table classes.
+    ``Recording`` / ``Sorting`` / ``CurationEvaluation`` table classes.
     """
     if not _NOTEBOOK.exists():
         pytest.skip(f"notebook {_NOTEBOOK.name} not found")

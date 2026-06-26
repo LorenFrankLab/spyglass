@@ -8,7 +8,7 @@ curations with SpikeInterface widgets / exporters::
     ssviz.available_visualizations()
     ssviz.plot_recording_traces(recording_key)
     ssviz.plot_sorting_summary(sorting_key, backend="spikeinterface_gui")
-    ssviz.plot_metrics(analyzer_curation_key)
+    ssviz.plot_metrics(curation_evaluation_key)
 
 These wrappers are intentionally thin: Spyglass resolves the DataJoint key and
 chooses the correct recording / analyzer / metric table; SpikeInterface owns the
@@ -23,9 +23,9 @@ Routing (the load-bearing invariant, see the table contract):
   ``Sorting.get_analyzer`` with no ``waveform_params_name`` -- so they show real
   waveforms / locations / templates. They NEVER read the whitened metric analyzer.
 - The official metric overview (``plot_metrics``) plots the Spyglass-routed
-  ``AnalyzerCuration.get_metrics()`` table (configured quality metrics plus the
+  ``CurationEvaluation.get_metrics()`` table (configured quality metrics plus the
   surfaced waveform-shape columns), not an SI analyzer extension.
-- Potential-merge plots pass the **persisted** ``AnalyzerCuration.get_merge_groups()``
+- Potential-merge plots pass the **persisted** ``CurationEvaluation.get_merge_groups()``
   suggestions to SI; they never recompute merge candidates at plot time.
 
 Plot helpers are read-only by default: a richer widget that needs a missing
@@ -140,19 +140,19 @@ def recording_key_for_sorting(sorting_key) -> dict:
     return dict(source.key)
 
 
-def _curation_sorting_key(analyzer_curation_key) -> dict:
-    """Resolve an ``AnalyzerCuration`` key to its sort's ``{"sorting_id": ...}``.
+def _curation_sorting_key(curation_evaluation_key) -> dict:
+    """Resolve a ``CurationEvaluation`` key to its sort's ``{"sorting_id": ...}``.
 
-    A trivial provenance lookup on ``AnalyzerCurationSelection`` (the same one
-    ``AnalyzerCuration._analyzer_for`` does); the analyzer build/load itself stays
-    the single responsibility of ``Sorting.get_analyzer``.
+    A trivial provenance lookup on ``CurationEvaluationSelection`` (the same one
+    ``CurationEvaluation._analyzer_for`` does); the analyzer build/load itself
+    stays the single responsibility of ``Sorting.get_analyzer``.
     """
     from spyglass.spikesorting.v2.metric_curation import (
-        AnalyzerCurationSelection,
+        CurationEvaluationSelection,
     )
 
     sorting_id = (
-        AnalyzerCurationSelection & analyzer_curation_key
+        CurationEvaluationSelection & curation_evaluation_key
     ).fetch1("sorting_id")
     return {"sorting_id": sorting_id}
 
@@ -325,10 +325,10 @@ def plot_unit_locations(
 # ---- metric / merge inspection (curation key) ----------------------------
 
 
-def plot_metrics(analyzer_curation_key, *, backend="matplotlib", **kwargs):
+def plot_metrics(curation_evaluation_key, *, backend="matplotlib", **kwargs):
     """Plot the official Spyglass-routed quality-metric table.
 
-    A Spyglass-owned matplotlib plot of ``AnalyzerCuration.get_metrics()`` -- the
+    A Spyglass-owned matplotlib plot of ``CurationEvaluation.get_metrics()`` -- the
     routed metric provenance, including any split display-vs-whitened metrics and
     the surfaced waveform-shape columns, shown exactly as Spyglass persists them.
     This is deliberately NOT SI ``plot_quality_metrics`` (which
@@ -343,14 +343,14 @@ def plot_metrics(analyzer_curation_key, *, backend="matplotlib", **kwargs):
             "metric table and has no SpikeInterface backend. For SI-native "
             "backends use plot_si_quality_metrics / plot_si_template_metrics."
         )
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
-    metrics = AnalyzerCuration.get_metrics(analyzer_curation_key)
+    metrics = CurationEvaluation.get_metrics(curation_evaluation_key)
     return plot_metrics_figure(metrics, **kwargs)
 
 
 def plot_si_quality_metrics(
-    analyzer_curation_key,
+    curation_evaluation_key,
     *,
     compute_missing=False,
     backend="matplotlib",
@@ -370,7 +370,7 @@ def plot_si_quality_metrics(
     """
     import spikeinterface.widgets as sw
 
-    sorting_key = _curation_sorting_key(analyzer_curation_key)
+    sorting_key = _curation_sorting_key(curation_evaluation_key)
     analyzer = _display_analyzer_with_extensions(
         sorting_key,
         _viz.SI_METRIC_WIDGET_EXTENSIONS["plot_si_quality_metrics"],
@@ -381,7 +381,7 @@ def plot_si_quality_metrics(
 
 
 def plot_si_template_metrics(
-    analyzer_curation_key,
+    curation_evaluation_key,
     *,
     compute_missing=False,
     backend="matplotlib",
@@ -401,7 +401,7 @@ def plot_si_template_metrics(
     """
     import spikeinterface.widgets as sw
 
-    sorting_key = _curation_sorting_key(analyzer_curation_key)
+    sorting_key = _curation_sorting_key(curation_evaluation_key)
     analyzer = _display_analyzer_with_extensions(
         sorting_key,
         _viz.SI_METRIC_WIDGET_EXTENSIONS["plot_si_template_metrics"],
@@ -412,11 +412,11 @@ def plot_si_template_metrics(
 
 
 def plot_potential_merges(
-    analyzer_curation_key, *, backend="ipywidgets", **kwargs
+    curation_evaluation_key, *, backend="ipywidgets", **kwargs
 ):
     """Plot the persisted potential-merge suggestions (SI ``plot_potential_merges``).
 
-    Passes the **persisted** ``AnalyzerCuration.get_merge_groups()`` suggestions
+    Passes the **persisted** ``CurationEvaluation.get_merge_groups()`` suggestions
     (groups of >=2 units) to SI ``plot_potential_merges`` over the display
     analyzer. It never calls ``compute_merge_unit_groups`` / recomputes
     candidates at plot time -- that could use a different analyzer / preset /
@@ -428,13 +428,13 @@ def plot_potential_merges(
     backend in SI 0.104.3 (notebook-local interactivity, not web publishing), so
     that is the default here rather than ``matplotlib``.
     """
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     import spikeinterface.widgets as sw
 
     groups = [
         group
-        for group in AnalyzerCuration.get_merge_groups(analyzer_curation_key)
+        for group in CurationEvaluation.get_merge_groups(curation_evaluation_key)
         if len(group) >= 2
     ]
     if not groups:
@@ -443,7 +443,7 @@ def plot_potential_merges(
             "curation, so there is nothing to plot. Run auto-merge first; this "
             "wrapper never recomputes merge candidates at plot time."
         )
-    sorting_key = _curation_sorting_key(analyzer_curation_key)
+    sorting_key = _curation_sorting_key(curation_evaluation_key)
     analyzer = _display_analyzer_with_extensions(
         sorting_key,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_potential_merges"],
@@ -474,7 +474,7 @@ def export_si_report(
     extension already exists on the display analyzer (this wrapper never computes
     it). If present, those are raw SI display-analyzer metrics, NOT the routed
     Spyglass metric table: the official metrics live in
-    ``AnalyzerCuration.get_metrics()`` (write them beside the report with
+    ``CurationEvaluation.get_metrics()`` (write them beside the report with
     ``get_metrics(curation_key).to_csv(...)`` if needed). No cloud upload or
     publishing happens.
     """
@@ -514,12 +514,12 @@ def export_to_phy(sorting_key, output_folder, **kwargs):
       exists (e.g. after a raw ``plot_si_quality_metrics(..., compute_missing=True)``
       diagnostic). Those are raw SI display-analyzer metrics, NOT the routed
       Spyglass metric table, so they are off by default to keep
-      ``AnalyzerCuration.get_metrics()`` the single source of official metrics.
+      ``CurationEvaluation.get_metrics()`` the single source of official metrics.
 
     SI still computes the display-safe ``template_similarity`` / ``spike_amplitudes``
     extensions it needs for the export. For the exact Spyglass-routed metric table
     beside the Phy folder, write it explicitly from
-    ``AnalyzerCuration.get_metrics(curation_key).to_csv(...)``. No cloud upload or
+    ``CurationEvaluation.get_metrics(curation_key).to_csv(...)``. No cloud upload or
     publishing happens.
     """
     from spyglass.spikesorting.v2.sorting import Sorting

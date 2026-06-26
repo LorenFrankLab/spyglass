@@ -154,15 +154,15 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_metrics",
-        "key_type": "analyzer_curation",
-        "implementation": "spyglass AnalyzerCuration.get_metrics",
+        "key_type": "curation_evaluation",
+        "implementation": "spyglass CurationEvaluation.get_metrics",
         "backend_default": "matplotlib",
         "compute_missing": False,
         "description": "Histograms of the routed Spyglass quality-metric table",
     },
     {
         "name": "plot_si_quality_metrics",
-        "key_type": "analyzer_curation",
+        "key_type": "curation_evaluation",
         "implementation": "spikeinterface.widgets.plot_quality_metrics",
         "backend_default": "matplotlib",
         "compute_missing": True,
@@ -172,7 +172,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_si_template_metrics",
-        "key_type": "analyzer_curation",
+        "key_type": "curation_evaluation",
         "implementation": "spikeinterface.widgets.plot_template_metrics",
         "backend_default": "matplotlib",
         "compute_missing": True,
@@ -182,7 +182,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_potential_merges",
-        "key_type": "analyzer_curation",
+        "key_type": "curation_evaluation",
         # PotentialMergesWidget supports only the interactive ipywidgets backend.
         "implementation": "spikeinterface.widgets.plot_potential_merges",
         "backend_default": "ipywidgets",
@@ -226,9 +226,9 @@ def available_visualizations() -> pd.DataFrame:
     (the ``recording_key_for_sorting`` key resolver is a public convenience but
     not a visualization, so it is intentionally not catalogued here), listing a
     one-line ``description``, the DataJoint key type it accepts (``recording`` /
-    ``sorting`` / ``analyzer_curation``), the underlying implementation target (a
+    ``sorting`` / ``curation_evaluation``), the underlying implementation target (a
     SpikeInterface widget/exporter or the Spyglass-routed
-    ``AnalyzerCuration.get_metrics`` table), the default plotting backend
+    ``CurationEvaluation.get_metrics`` table), the default plotting backend
     (``None`` for the exporters, which take no backend), and whether the helper
     can compute missing display-safe extensions via an explicit
     ``compute_missing=True`` opt-in.
@@ -282,8 +282,8 @@ def format_missing_extension_error(
         lines.append(
             "For the official Spyglass quality metrics (the routed metric "
             "table, including surfaced waveform-shape columns), use "
-            "ssviz.plot_metrics(analyzer_curation_key) instead -- it reads "
-            "AnalyzerCuration.get_metrics(), not the raw SI analyzer extension."
+            "ssviz.plot_metrics(curation_evaluation_key) instead -- it reads "
+            "CurationEvaluation.get_metrics(), not the raw SI analyzer extension."
         )
     return " ".join(lines)
 
@@ -291,7 +291,7 @@ def format_missing_extension_error(
 def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     """Render the Spyglass-routed quality-metric table as a histogram grid.
 
-    A Spyglass-owned plot of exactly what ``AnalyzerCuration.get_metrics()``
+    A Spyglass-owned plot of exactly what ``CurationEvaluation.get_metrics()``
     persists -- the configured SpikeInterface quality metrics plus the surfaced
     waveform-shape (template) columns (``trough_half_width`` by default) -- so
     the displayed values are the routed metric provenance, not a re-derivation
@@ -304,7 +304,7 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     ----------
     metrics_df : pandas.DataFrame
         Per-unit metric table indexed by ``unit_id`` (the
-        ``AnalyzerCuration.get_metrics`` return value).
+        ``CurationEvaluation.get_metrics`` return value).
     columns : list of str, optional
         Subset of columns to histogram; defaults to every numeric column in
         display order.

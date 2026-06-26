@@ -1,6 +1,6 @@
 """DB-free plotting + analyzer-extraction helpers for analyzer curation.
 
-The ``@schema`` ``AnalyzerCuration`` methods delegate here so the rendering /
+The ``@schema`` ``CurationEvaluation`` methods delegate here so the rendering /
 SortingAnalyzer-reading logic stays importable and unit-testable without a
 DataJoint connection. ``plot_units_qc_figure`` takes plain data (a metrics
 DataFrame + unit locations) and returns the matplotlib axes it drew into; the
@@ -398,7 +398,7 @@ def burst_pair_metrics_from_analyzer(
 
     All four legs are template- or spike-time-derived, so callers pass the
     UNWHITENED display analyzer (whitening distorts ``template_similarity`` and
-    the ``unit_locations`` positions): ``AnalyzerCuration`` loads it via
+    the ``unit_locations`` positions): ``CurationEvaluation`` loads it via
     ``_analyzer_for``, the same display analyzer the merge engine runs on. The
     diagnostic is an independent corroboration of those suggestions (it differs
     in similarity metric, see above), not a reproduction of them.

@@ -1,6 +1,6 @@
 """DB-free NWB (de)serialization for analyzer-curation outputs.
 
-``AnalyzerCuration`` writes three scratch tables into one AnalysisNwbfile:
+``CurationEvaluation`` writes three scratch tables into one AnalysisNwbfile:
 
 ``quality_metrics``
     a wide table, one row per unit, one column per quality metric. NaN is

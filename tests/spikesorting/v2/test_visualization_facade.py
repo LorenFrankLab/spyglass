@@ -2,8 +2,8 @@
 
 These exercise the key -> recording/analyzer/metric routing without populating a
 sort: SI widget/exporter functions, ``Sorting.get_analyzer`` /
-``Recording.get_recording`` / ``AnalyzerCuration.get_metrics`` /
-``AnalyzerCuration.get_merge_groups`` and the curation->sort resolver are
+``Recording.get_recording`` / ``CurationEvaluation.get_metrics`` /
+``CurationEvaluation.get_merge_groups`` and the curation->sort resolver are
 monkeypatched with fakes, and the assertions pin which analyzer (display vs
 whitened) and which extensions each helper touches. The ``db_unit`` mark is for
 the schema-class imports (Docker MySQL only); nothing here populates. Real
@@ -92,7 +92,7 @@ def test_table_delegates_call_facade_if_present(dj_conn):
     and contains no ``spikeinterface`` import or duplicate key/analyzer routing
     of its own.
     """
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -106,10 +106,10 @@ def test_table_delegates_call_facade_if_present(dj_conn):
         Sorting.plot_unit_locations: "plot_unit_locations",
         Sorting.export_si_report: "export_si_report",
         Sorting.export_to_phy: "export_to_phy",
-        AnalyzerCuration.plot_metrics: "plot_metrics",
-        AnalyzerCuration.plot_si_quality_metrics: "plot_si_quality_metrics",
-        AnalyzerCuration.plot_si_template_metrics: "plot_si_template_metrics",
-        AnalyzerCuration.plot_potential_merges: "plot_potential_merges",
+        CurationEvaluation.plot_metrics: "plot_metrics",
+        CurationEvaluation.plot_si_quality_metrics: "plot_si_quality_metrics",
+        CurationEvaluation.plot_si_template_metrics: "plot_si_template_metrics",
+        CurationEvaluation.plot_potential_merges: "plot_potential_merges",
     }
     for method, facade_name in delegates.items():
         source = inspect.getsource(method)
@@ -453,21 +453,21 @@ def test_sorting_plot_unit_locations_requires_extension_or_opt_in(
 
 
 @pytest.mark.db_unit
-def test_analyzer_curation_plot_metrics_uses_spyglass_metrics_by_default(
+def test_curation_evaluation_plot_metrics_uses_spyglass_metrics_by_default(
     dj_conn, monkeypatch
 ):
     """``plot_metrics`` plots ``get_metrics()``; SI ``plot_quality_metrics`` unused."""
     import pandas as pd
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     metrics = pd.DataFrame(
         {"snr": [3.0, 4.0], "trough_half_width": [0.2, 0.25]},
         index=pd.Index([0, 1], name="unit_id"),
     )
     monkeypatch.setattr(
-        AnalyzerCuration, "get_metrics", classmethod(lambda cls, key: metrics)
+        CurationEvaluation, "get_metrics", classmethod(lambda cls, key: metrics)
     )
 
     def _must_not_call(*a, **k):
@@ -488,7 +488,7 @@ def test_plot_metrics_rejects_non_matplotlib_backend(dj_conn):
 
 
 @pytest.mark.db_unit
-def test_analyzer_curation_plot_si_quality_metrics_uses_display_analyzer(
+def test_curation_evaluation_plot_si_quality_metrics_uses_display_analyzer(
     dj_conn, monkeypatch
 ):
     """The SI-native quality view uses the display analyzer (wpn=None)."""
@@ -513,7 +513,7 @@ def test_analyzer_curation_plot_si_quality_metrics_uses_display_analyzer(
 
 
 @pytest.mark.db_unit
-def test_analyzer_curation_plot_si_template_metrics_uses_display_analyzer(
+def test_curation_evaluation_plot_si_template_metrics_uses_display_analyzer(
     dj_conn, monkeypatch
 ):
     """The SI-native template-metric view uses the display analyzer only."""
@@ -570,11 +570,11 @@ def test_plot_potential_merges_uses_persisted_merge_groups(
     import spikeinterface.curation as sic
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     # Persisted groups: one real merge (>=2) plus a singleton to be dropped.
     monkeypatch.setattr(
-        AnalyzerCuration,
+        CurationEvaluation,
         "get_merge_groups",
         classmethod(lambda cls, key: [[1, 2], [3]]),
     )
@@ -611,10 +611,10 @@ def test_plot_potential_merges_errors_when_no_persisted_suggestions(
     dj_conn, monkeypatch
 ):
     """No persisted >=2 suggestion -> clear error, still no recompute."""
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     monkeypatch.setattr(
-        AnalyzerCuration,
+        CurationEvaluation,
         "get_merge_groups",
         classmethod(lambda cls, key: [[3]]),
     )
@@ -728,7 +728,7 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
     assert wpn == [None]
     # PC features off by default (no principal_components on the display path),
     # and raw SI display-analyzer metric TSVs off by default (the routed
-    # AnalyzerCuration.get_metrics() stays the single source of official metrics).
+    # CurationEvaluation.get_metrics() stays the single source of official metrics).
     assert captured["kwargs"]["compute_pc_features"] is False
     assert captured["kwargs"]["add_quality_metrics"] is False
     assert captured["kwargs"]["add_template_metrics"] is False
@@ -755,7 +755,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     import spikeinterface.exporters as sie
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     fake = _FakeAnalyzer(
         [
@@ -774,7 +774,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
         ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
     )
     monkeypatch.setattr(
-        AnalyzerCuration,
+        CurationEvaluation,
         "get_merge_groups",
         classmethod(lambda cls, key: [[1, 2]]),
     )

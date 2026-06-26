@@ -92,7 +92,7 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
 def analyzer_curation_lock(sorting_id, *, timeout: float = -1):
     """Return a cross-process lock serializing analyzer-cache mutation per sort.
 
-    ``AnalyzerCuration`` runs with ``_parallel_make=True``, so two curation jobs
+    ``CurationEvaluation`` runs with ``_parallel_make=True``, so two curation jobs
     for the SAME sort can run concurrently. Both load the same shared
     analyzer-cache folder(s) (``analyzer_path(sorting_id, ...)``) via
     ``Sorting.get_analyzer`` and each persists extensions and ``quality_metrics``

@@ -294,45 +294,6 @@ def test_curation_evaluation_selection_rejects_preview(
         clear_curations_for(planted_two_unit_sort)
 
 
-@pytest.mark.slow
-@pytest.mark.integration
-def test_curation_evaluation_id_distinct_from_analyzer_curation(
-    planted_two_unit_sort, curation_evaluation_defaults
-):
-    """The two tables derive DIFFERENT ids for byte-identical logical inputs.
-
-    The CurationEvaluation identity payload (sorting_id, curation_id,
-    metric_params_name, auto_curation_rules_name, metric_waveform_params_name) is
-    byte-identical to AnalyzerCurationSelection's, so the id must be minted under
-    a distinct namespace or the two would collide.
-    """
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.metric_curation import (
-        AnalyzerCurationSelection,
-        CurationEvaluationSelection,
-    )
-
-    sorting_key = dict(planted_two_unit_sort)
-    clear_curations_for(planted_two_unit_sort)
-    try:
-        root = CurationV2.insert_curation(sorting_key=sorting_key)
-        common = {
-            **root,
-            "metric_params_name": "minimal",
-            "auto_curation_rules_name": "none",
-        }
-        eval_sel = CurationEvaluationSelection.insert_selection(common)
-        ac_sel = AnalyzerCurationSelection.insert_selection(common)
-        assert (
-            eval_sel["curation_evaluation_id"]
-            != ac_sel["analyzer_curation_id"]
-        )
-    finally:
-        clear_curations_for(planted_two_unit_sort)
-
-
 # ---------- CurationEvaluation end-to-end (committed-curation metrics) -------
 
 
@@ -477,7 +438,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
 
     Drives the exact compute path CurationEvaluation uses for an applied-merge
     curation -- ``build_analyzer`` over the merged sorting, then
-    ``AnalyzerCuration._compute_metrics`` -- with two planted contributors whose
+    ``CurationEvaluation._compute_metrics`` -- with two planted contributors whose
     distinct templates make the merged-template extremum predictable. The merged
     unit's snr must differ from BOTH contributors' pre-merge snr (it cannot have
     been inherited) and be smaller (the merged template extremum is diluted).
@@ -485,7 +446,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
-    from spyglass.spikesorting.v2.metric_curation import AnalyzerCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     rec, two, merged = _two_distinct_template_inputs()
     waveform_params = {
@@ -514,7 +475,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
         # and persist into the zarr, so the real path needs no reattach (the
         # DB-backed merged tests cover that).
         analyzer.set_temporary_recording(rec)
-        df = AnalyzerCuration._compute_metrics(
+        df = CurationEvaluation._compute_metrics(
             analyzer,
             None,
             ["snr"],
@@ -730,7 +691,7 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
 ):
     """make_fetch injects the sorter's resolved peak_sign into snr kwargs.
 
-    Same SIG-2 fix as AnalyzerCuration: the planted MS5 sort carries
+    Same SIG-2 fix as CurationEvaluation: the planted MS5 sort carries
     ``detect_sign=-1`` -> ``'neg'`` (the regression-pinned value), confirming the
     helper is wired into CurationEvaluation's DB-fetch stage.
     """
@@ -1071,3 +1032,19 @@ def test_evaluation_child_source_is_curation_evaluation(
         assert source != "analyzer_curation"
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+def test_analyzer_curation_table_removed():
+    """AnalyzerCuration / AnalyzerCurationSelection are deleted (no shim).
+
+    CurationEvaluation fully replaces the legacy raw-sort auto-curation table;
+    importing the old names must fail so no caller can keep using them.
+    """
+    import spyglass.spikesorting.v2.metric_curation as mc
+
+    assert not hasattr(mc, "AnalyzerCuration")
+    assert not hasattr(mc, "AnalyzerCurationSelection")
+    with pytest.raises(ImportError):
+        from spyglass.spikesorting.v2.metric_curation import (  # noqa: F401
+            AnalyzerCuration,
+        )

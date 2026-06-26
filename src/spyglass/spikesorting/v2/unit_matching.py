@@ -86,7 +86,7 @@ class UnitMatchComputed(NamedTuple):
     """Compute -> insert carrier (DeepHash-stable scalars only).
 
     The pair rows themselves are read back from the staged NWB in
-    ``make_insert`` rather than carried here, mirroring ``AnalyzerCuration``.
+    ``make_insert`` rather than carried here, mirroring ``CurationEvaluation``.
     """
 
     analysis_file_name: str
@@ -481,7 +481,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
     # Tri-part make so the heavy curation reads, dense bundle extraction,
     # matcher execution, and NWB write run OUTSIDE the DB transaction (mirroring
-    # Recording / Sorting / AnalyzerCuration). Only the row inserts run inside
+    # Recording / Sorting / CurationEvaluation). Only the row inserts run inside
     # the framework-provided transaction.
     _parallel_make = True
 
@@ -693,7 +693,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
 
         Runs inside the framework's tri-part insert transaction. The Pair rows
         are read back from the staged NWB (the canonical written pairs) rather
-        than threaded through the compute carrier, mirroring ``AnalyzerCuration``.
+        than threaded through the compute carrier, mirroring ``CurationEvaluation``.
         On failure the staged file is unlinked before re-raising.
         """
         from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
