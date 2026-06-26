@@ -579,8 +579,13 @@ def run_si_sorter(
             # materializing the (small) spike trains into an in-memory
             # NumpySorting. The return expression evaluates BEFORE either finally
             # runs. with_metadata=True so unit properties/annotations survive
-            # (SI 0.104.3 default False drops them); this does NOT load traces.
-            return si.NumpySorting.from_sorting(raw_sorting, with_metadata=True)
+            # (SI 0.104.3 default False drops them); copy_spike_vector=True
+            # forces an owned copy of the spike vector (the SI default False can
+            # leave it aliasing a memmap into the temp dir for some sorter
+            # outputs). Neither flag loads traces.
+            return si.NumpySorting.from_sorting(
+                raw_sorting, with_metadata=True, copy_spike_vector=True
+            )
         finally:
             if sj_kwargs:
                 # ``set_global_job_kwargs`` UPDATES (does not
