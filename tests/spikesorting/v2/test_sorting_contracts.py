@@ -116,6 +116,39 @@ def test_analyzer_curation_tuples_match_make_signatures():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_curation_evaluation_tuples_match_make_signatures():
+    """CurationEvaluation's tri-part NamedTuples are POSITIONAL wire contracts.
+
+    The dispatch splats ``make_fetch`` -> ``make_compute(key, *fetched)`` and
+    ``make_compute`` -> ``make_insert(key, *computed)`` positionally, so the
+    field order of ``CurationEvaluationFetched`` / ``CurationEvaluationComputed``
+    must match the corresponding parameter order. The fetched carrier is long
+    (30 fields, several str-adjacent: abs paths / folders / recipe blobs), so a
+    reorder -- or a dropped/added field on only one side -- would silently
+    mis-bind later slots without a TypeError. Pin it.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationComputed,
+        CurationEvaluationFetched,
+    )
+
+    compute_params = list(
+        inspect.signature(CurationEvaluation.make_compute).parameters
+    )
+    assert compute_params[:2] == ["self", "key"]
+    assert tuple(compute_params[2:]) == CurationEvaluationFetched._fields
+
+    insert_params = list(
+        inspect.signature(CurationEvaluation.make_insert).parameters
+    )
+    assert insert_params[:2] == ["self", "key"]
+    assert tuple(insert_params[2:]) == CurationEvaluationComputed._fields
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_recording_fetched_matches_make_compute_signature():
     """The tri-part dispatch splats ``RecordingFetched`` POSITIONALLY into
     ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
