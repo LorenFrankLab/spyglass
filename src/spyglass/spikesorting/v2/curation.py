@@ -1435,16 +1435,20 @@ class CurationV2(SpyglassMixin, dj.Manual):
           ``SortingSelection.ConcatenatedRecordingSource`` ->
           ``SortingSelection``;
         - with no source key, both source families are matched (a broad query
-          must not silently drop concat-backed curations).
+          must not silently drop concat-backed curations);
+        - ``preprocessing_params_name`` is a CROSS-SOURCE key -- it lives on
+          both the recording and concat selections -- so it filters whichever
+          family routes and, alone, matches both.
 
         So a cross-table restriction over the v2 part-table convention keys --
         the recording keys (``nwb_file_name``, ``team_name``, ``sort_group_id``,
-        ``interval_list_name``, ``preprocessing_params_name``, ``recording_id``,
-        ``artifact_detection_id``), the concat keys above, and the shared sort /
-        curation keys (``sorter``, ``sorter_params_name``, ``sorting_id``,
-        ``curation_id``) -- resolves to the ``CurationV2`` rows it selects.
-        Mixing recording and concat source keys is rejected (a sort has exactly
-        one input source).
+        ``interval_list_name``, ``recording_id``, ``artifact_detection_id``), the
+        cross-source ``preprocessing_params_name``, the concat keys above, and
+        the shared sort / curation keys (``sorter``, ``sorter_params_name``,
+        ``sorting_id``, ``curation_id``) -- resolves to the ``CurationV2`` rows
+        it selects. Mixing recording and concat source keys is rejected (a sort
+        has exactly one input source); ``preprocessing_params_name`` may combine
+        with either.
 
         This method is the SINGLE owner of v2's source-part join topology.
         ``SpikeSortingOutput._get_restricted_merge_ids_v2`` delegates here

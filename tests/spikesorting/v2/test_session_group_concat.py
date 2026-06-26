@@ -900,9 +900,12 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
     ``{concat_recording_id, preprocessing_params_name}`` must be accepted as a
     valid concat restriction rather than rejected as contradictory.
     """
+    import uuid
+
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
     )
@@ -912,6 +915,7 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
     _ensure_clusterless_sorter_params()
 
     # A concat-backed sort + curation under the shared preprocessing recipe.
+    # (The concat lineage is torn down by the ``same_day_group`` fixture.)
     concat_pk = _populate_concat(grp["group_key"], preproc)
     concat_sort = SortingSelection.insert_selection(
         {
@@ -935,40 +939,86 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
         }
     )
     Sorting.populate(rec_sort, reserve_jobs=False)
-    rec_curation = CurationV2.insert_curation(sorting_key=rec_sort)
-    rec_merge_id = (SpikeSortingOutput.CurationV2 & rec_curation).fetch1(
-        "merge_id"
-    )
-    assert concat_merge_id != rec_merge_id
+    try:
+        rec_curation = CurationV2.insert_curation(sorting_key=rec_sort)
+        rec_merge_id = (SpikeSortingOutput.CurationV2 & rec_curation).fetch1(
+            "merge_id"
+        )
+        assert concat_merge_id != rec_merge_id
 
-    # The bare preprocessing-recipe restriction surfaces BOTH families.
-    by_preproc = SpikeSortingOutput().get_restricted_merge_ids(
-        {"preprocessing_params_name": preproc}, sources=["v2"]
-    )
-    assert concat_merge_id in by_preproc
-    assert rec_merge_id in by_preproc
+        # The bare preprocessing-recipe restriction surfaces BOTH families.
+        by_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+            {"preprocessing_params_name": preproc}, sources=["v2"]
+        )
+        assert concat_merge_id in by_preproc
+        assert rec_merge_id in by_preproc
 
-    # The cross-source branch genuinely FILTERS (rather than falling through to
-    # "all sorts"): an unmatched recipe surfaces neither family.
-    by_absent_preproc = SpikeSortingOutput().get_restricted_merge_ids(
-        {"preprocessing_params_name": "no_such_preproc_recipe"},
-        sources=["v2"],
-    )
-    assert concat_merge_id not in by_absent_preproc
-    assert rec_merge_id not in by_absent_preproc
+        # The cross-source branch genuinely FILTERS (rather than falling through
+        # to "all sorts"): an unmatched recipe surfaces neither family.
+        by_absent_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+            {"preprocessing_params_name": "no_such_preproc_recipe"},
+            sources=["v2"],
+        )
+        assert concat_merge_id not in by_absent_preproc
+        assert rec_merge_id not in by_absent_preproc
 
-    # {concat_recording_id, preprocessing_params_name} is a valid pair (no
-    # contradiction): it returns the concat curation and discriminates AGAINST
-    # the recording-backed one (proving it filters rather than matching both).
-    by_concat_and_preproc = SpikeSortingOutput().get_restricted_merge_ids(
-        {
-            "concat_recording_id": concat_pk["concat_recording_id"],
-            "preprocessing_params_name": preproc,
-        },
-        sources=["v2"],
-    )
-    assert concat_merge_id in by_concat_and_preproc
-    assert rec_merge_id not in by_concat_and_preproc
+        # {concat_recording_id, preprocessing_params_name} is a valid pair (no
+        # contradiction). The concat branch must APPLY the shared preproc filter,
+        # not merely route on concat_recording_id: the matching recipe returns
+        # the concat curation, a mismatched recipe excludes it, and it never
+        # surfaces the recording-backed one.
+        by_concat_and_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+            {
+                "concat_recording_id": concat_pk["concat_recording_id"],
+                "preprocessing_params_name": preproc,
+            },
+            sources=["v2"],
+        )
+        assert concat_merge_id in by_concat_and_preproc
+        assert rec_merge_id not in by_concat_and_preproc
+        by_concat_wrong_preproc = (
+            SpikeSortingOutput().get_restricted_merge_ids(
+                {
+                    "concat_recording_id": concat_pk["concat_recording_id"],
+                    "preprocessing_params_name": "no_such_preproc_recipe",
+                },
+                sources=["v2"],
+            )
+        )
+        assert concat_merge_id not in by_concat_wrong_preproc
+
+        # The post-union artifact filter still applies in the cross-source
+        # branch: an artifact id neither (artifact-free) sort has excludes both,
+        # while artifact_detection_id=None (no artifact pass) keeps both.
+        by_preproc_unknown_artifact = (
+            SpikeSortingOutput().get_restricted_merge_ids(
+                {
+                    "preprocessing_params_name": preproc,
+                    "artifact_detection_id": str(uuid.uuid4()),
+                },
+                sources=["v2"],
+            )
+        )
+        assert concat_merge_id not in by_preproc_unknown_artifact
+        assert rec_merge_id not in by_preproc_unknown_artifact
+        by_preproc_no_artifact = (
+            SpikeSortingOutput().get_restricted_merge_ids(
+                {
+                    "preprocessing_params_name": preproc,
+                    "artifact_detection_id": None,
+                },
+                sources=["v2"],
+            )
+        )
+        assert concat_merge_id in by_preproc_no_artifact
+        assert rec_merge_id in by_preproc_no_artifact
+    finally:
+        # ``same_day_group`` teardown only follows concat lineage, so the
+        # recording-backed sort must be cleaned explicitly or its merge row
+        # leaks into later broad preproc queries (order-dependent failures).
+        clear_curations_for(rec_sort)
+        (Sorting & rec_sort).super_delete(warn=False)
+        (SortingSelection & rec_sort).super_delete(warn=False)
 
 
 # ---------- memory / runtime measurement ----------------------------------
