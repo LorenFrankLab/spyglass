@@ -729,7 +729,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     """Dependency + content inventory for a ``Sorting``'s analyzer folders.
 
     One row per (sort, analyzer recipe): a sort's stored DISPLAY recipe plus
-    any whitened METRIC recipe an ``AnalyzerCurationSelection`` references. The
+    any whitened METRIC recipe a ``CurationEvaluationSelection`` references. The
     whitened and unwhitened analyzers for one ``sorting_id`` are inventoried
     (and recomputed) independently, keyed by ``waveform_params_name`` -- their
     folders are ``{sorting_id}__{waveform_params_name}.zarr`` and never collide.
@@ -753,12 +753,12 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         into existence). A sort with no curation has just its one display row.
         """
         from spyglass.spikesorting.v2.metric_curation import (
-            AnalyzerCurationSelection,
+            CurationEvaluationSelection,
         )
 
         # All (sort, recipe) pairs, restricted to those actually in use: a
         # sort's stored display recipe OR a metric recipe a PC-requesting
-        # curation references. An OR-list semijoin on the clean
+        # curation evaluation references. An OR-list semijoin on the clean
         # (sorting_id, waveform_params_name) cross product -- not a union of
         # dj.U aggregations, whose headings cannot be joined (DataJoint
         # Union.create -> heading.join KeyError).
@@ -772,7 +772,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         # because it is a SECONDARY (CurationV2) FK attr, not the selection's
         # uuid PK -- a bare proj() would drop it and the semijoin would match on
         # waveform_params_name alone (leaking a recipe onto every sort).
-        is_metric = AnalyzerCurationSelection.pc_requesting().proj(
+        is_metric = CurationEvaluationSelection.pc_requesting().proj(
             "sorting_id", waveform_params_name="metric_waveform_params_name"
         )
         return all_pairs & [is_display, is_metric]

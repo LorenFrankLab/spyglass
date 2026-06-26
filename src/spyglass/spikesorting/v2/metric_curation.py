@@ -1952,6 +1952,22 @@ class CurationEvaluationSelection(
             return {"curation_evaluation_id": deterministic_id}
         return None
 
+    @classmethod
+    def pc_requesting(cls):
+        """Selections whose QualityMetricParameters request PC/NN metrics.
+
+        Joined to ``QualityMetricParameters`` and restricted to
+        ``skip_pc_metrics=0`` -- the set whose evaluation builds a whitened
+        metric analyzer (CurationEvaluation's fast path loads/builds the
+        canonical ``analyzer_path(sorting_id, metric_waveform_params_name)``
+        folder for PC/NN metrics). The single source of truth for which metric
+        recipes are "in use", so the recompute key_source and the orphan-folder
+        audit cannot drift apart. Carries ``sorting_id`` (a secondary CurationV2
+        FK attr) and ``metric_waveform_params_name`` for the caller to project /
+        fetch.
+        """
+        return cls * QualityMetricParameters & "skip_pc_metrics = 0"
+
 
 @schema
 class CurationEvaluation(SpyglassMixin, dj.Computed):

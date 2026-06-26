@@ -502,14 +502,14 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
 
 
 def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
-    """A metric (whitened) folder referenced by an AnalyzerCurationSelection is
+    """A metric (whitened) folder referenced by a CurationEvaluationSelection is
     retained; an unreferenced metric folder is a disk-side orphan.
 
     The whitened metric analyzer is built on demand for PC/NN metrics, so its
     ``{sid}__{metric_recipe}.zarr`` folder is not a sort's display recipe -- but
-    a referencing curation selection means it is in active use and must NOT be
-    swept as an orphan. An identically-shaped folder for a metric recipe no
-    selection references still is an orphan.
+    a referencing curation-evaluation selection means it is in active use and
+    must NOT be swept as an orphan. An identically-shaped folder for a metric
+    recipe no selection references still is an orphan.
     """
     import shutil
     import uuid
@@ -518,7 +518,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.metric_curation import (
-        AnalyzerCurationSelection,
+        CurationEvaluationSelection,
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -534,17 +534,17 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     for folder in (display_folder, referenced, unreferenced):
         folder.mkdir(parents=True, exist_ok=True)
 
-    # Plant a PC-requesting curation selection referencing the cortex metric
-    # recipe. Only (sorting_id, metric_params_name, metric_waveform_params_name)
-    # matter to the orphan finder's join, so the other FK fields are stubbed
-    # with FK checks off.
+    # Plant a PC-requesting curation-evaluation selection referencing the cortex
+    # metric recipe. Only (sorting_id, metric_params_name,
+    # metric_waveform_params_name) matter to the orphan finder's join, so the
+    # other FK fields are stubbed with FK checks off.
     conn = dj.conn()
-    acid = uuid.uuid4()
+    ceid = uuid.uuid4()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        AnalyzerCurationSelection.insert1(
+        CurationEvaluationSelection.insert1(
             {
-                "analyzer_curation_id": acid,
+                "curation_evaluation_id": ceid,
                 "sorting_id": sid,
                 "curation_id": 0,
                 "metric_params_name": "franklab_default",
@@ -562,7 +562,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         disk = set(report["disk_side"])
         assert str(referenced) not in disk, (
-            "a metric folder referenced by AnalyzerCurationSelection must be "
+            "a metric folder referenced by CurationEvaluationSelection must be "
             "retained, not swept as a disk-side orphan"
         )
         assert str(unreferenced) in disk, (
@@ -575,7 +575,8 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                AnalyzerCurationSelection & {"analyzer_curation_id": acid}
+                CurationEvaluationSelection
+                & {"curation_evaluation_id": ceid}
             ).delete_quick()
             (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
         finally:
@@ -601,7 +602,7 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
 
     from spyglass.spikesorting.v2 import recompute as rc
     from spyglass.spikesorting.v2.metric_curation import (
-        AnalyzerCurationSelection,
+        CurationEvaluationSelection,
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -613,13 +614,13 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
     sid_skip = uuid.uuid4()  # a sort with only a skip-PC curation
     _insert_bypassed_sorting_row(sid_pc, n_units=3)  # display = _DISPLAY
     _insert_bypassed_sorting_row(sid_skip, n_units=3)  # display = _DISPLAY
-    acid_pc, acid_skip = uuid.uuid4(), uuid.uuid4()
+    ceid_pc, ceid_skip = uuid.uuid4(), uuid.uuid4()
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        AnalyzerCurationSelection.insert1(
+        CurationEvaluationSelection.insert1(
             {
-                "analyzer_curation_id": acid_pc,
+                "curation_evaluation_id": ceid_pc,
                 "sorting_id": sid_pc,
                 "curation_id": 0,
                 "metric_params_name": "franklab_default",
@@ -630,9 +631,9 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
             },
             allow_direct_insert=True,
         )
-        AnalyzerCurationSelection.insert1(
+        CurationEvaluationSelection.insert1(
             {
-                "analyzer_curation_id": acid_skip,
+                "curation_evaluation_id": ceid_skip,
                 "sorting_id": sid_skip,
                 "curation_id": 0,
                 "metric_params_name": "minimal",
@@ -672,10 +673,10 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                AnalyzerCurationSelection
+                CurationEvaluationSelection
                 & [
-                    {"analyzer_curation_id": acid_pc},
-                    {"analyzer_curation_id": acid_skip},
+                    {"curation_evaluation_id": ceid_pc},
+                    {"curation_evaluation_id": ceid_skip},
                 ]
             ).delete_quick()
             (
