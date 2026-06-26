@@ -129,6 +129,78 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
     return dict(row.fetch1("params"))
 
 
+def _load_analyzer_folder_or_rebuild(
+    folder, *, rebuild, rebuild_fn, recipe_label, sorting_id
+):
+    """Load an analyzer folder; rebuild via ``rebuild_fn`` on missing/invalid.
+
+    The shared folder load/invalid-rebuild/missing-rebuild policy behind both
+    :func:`load_or_rebuild_analyzer` (DB-coupled rebuild that re-fetches the
+    sorting) and :func:`load_or_rebuild_analyzer_from_resolved` (DB-free rebuild
+    from already-resolved inputs). ``rebuild_fn`` is the zero-arg callable that
+    (re)builds ``folder`` from the canonical sorting; the two callers differ
+    only in how they source that build, not in the load/clean/raise policy.
+
+    ``recipe_label`` identifies the analyzer recipe in error messages (the
+    recipe name for the DB-coupled path, the folder for the resolved path);
+    ``sorting_id`` is for the same messages. ``rebuild=False`` raises
+    ``AnalyzerFolderMissingError`` / ``AnalyzerFolderInvalidError`` instead of
+    rebuilding (the recompute audit observes the reclaimed/corrupt state).
+    """
+    import shutil
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.exceptions import (
+        AnalyzerFolderInvalidError,
+        AnalyzerFolderMissingError,
+    )
+
+    if folder.exists():
+        try:
+            return si.load_sorting_analyzer(folder)
+        except Exception as exc:
+            message = (
+                "Sorting.get_analyzer: analyzer folder for "
+                f"sorting_id={sorting_id!r}, recipe={recipe_label!r} "
+                f"exists but could not be loaded ({folder}). The regeneratable "
+                "analyzer cache is invalid, likely from a killed build, partial "
+                "cleanup, or out-of-band corruption."
+            )
+            if not rebuild:
+                raise AnalyzerFolderInvalidError(
+                    message
+                    + " The no-rebuild loader surfaces this state for the "
+                    "recompute audit instead of rebuilding."
+                ) from exc
+            from spyglass.utils import logger
+
+            logger.warning(
+                f"{message} Removing it and rebuilding. Original error: {exc!r}"
+            )
+            try:
+                shutil.rmtree(folder, ignore_errors=False)
+            except Exception as cleanup_exc:
+                raise AnalyzerFolderInvalidError(
+                    message
+                    + " Failed to remove the invalid folder before rebuilding; "
+                    "manual cleanup is required."
+                ) from cleanup_exc
+
+    if not folder.exists():
+        if not rebuild:
+            raise AnalyzerFolderMissingError(
+                "Sorting.get_analyzer(rebuild=False): analyzer folder for "
+                f"sorting_id={sorting_id!r}, recipe={recipe_label!r} is "
+                f"absent ({folder}). The regeneratable analyzer cache was removed "
+                "out of band; the no-rebuild loader surfaces the missing state "
+                "for the recompute audit instead of rebuilding. Use the default "
+                "rebuild=True path to reconstruct it."
+            )
+        rebuild_fn()
+    return si.load_sorting_analyzer(folder)
+
+
 def load_or_rebuild_analyzer(
     sorting_table, key, waveform_params_name=None, *, rebuild=True
 ):
@@ -173,11 +245,7 @@ def load_or_rebuild_analyzer(
     AnalyzerFolderInvalidError
         If ``rebuild=False`` and the analyzer folder exists but cannot be loaded.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        AnalyzerFolderInvalidError,
-        AnalyzerFolderMissingError,
-        ZeroUnitAnalyzerError,
-    )
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
 
     # Resolve the canonical sorting_id from the matched row rather than
     # assuming ``key`` literally carries "sorting_id" -- a general
@@ -201,60 +269,171 @@ def load_or_rebuild_analyzer(
             sorting_table, sorting_id
         )
 
-    import shutil
-
-    import spikeinterface as si
-
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     folder = analyzer_path(sorting_id, waveform_params_name)
-    if folder.exists():
-        try:
-            return si.load_sorting_analyzer(folder)
-        except Exception as exc:
-            message = (
-                "Sorting.get_analyzer: analyzer folder for "
-                f"sorting_id={sorting_id!r}, recipe={waveform_params_name!r} "
-                f"exists but could not be loaded ({folder}). The regeneratable "
-                "analyzer cache is invalid, likely from a killed build, partial "
-                "cleanup, or out-of-band corruption."
-            )
-            if not rebuild:
-                raise AnalyzerFolderInvalidError(
-                    message
-                    + " The no-rebuild loader surfaces this state for the "
-                    "recompute audit instead of rebuilding."
-                ) from exc
-            from spyglass.utils import logger
-
-            logger.warning(
-                f"{message} Removing it and rebuilding. Original error: {exc!r}"
-            )
-            try:
-                shutil.rmtree(folder, ignore_errors=False)
-            except Exception as cleanup_exc:
-                raise AnalyzerFolderInvalidError(
-                    message
-                    + " Failed to remove the invalid folder before rebuilding; "
-                    "manual cleanup is required."
-                ) from cleanup_exc
-
-    if not folder.exists():
-        if not rebuild:
-            raise AnalyzerFolderMissingError(
-                "Sorting.get_analyzer(rebuild=False): analyzer folder for "
-                f"sorting_id={sorting_id!r}, recipe={waveform_params_name!r} is "
-                f"absent ({folder}). The regeneratable analyzer cache was removed "
-                "out of band; the no-rebuild loader surfaces the missing state "
-                "for the recompute audit instead of rebuilding. Use the default "
-                "rebuild=True path to reconstruct it."
-            )
-        rebuild_analyzer_folder(
+    return _load_analyzer_folder_or_rebuild(
+        folder,
+        rebuild=rebuild,
+        rebuild_fn=lambda: rebuild_analyzer_folder(
             sorting_table,
             {"sorting_id": sorting_id},
             waveform_params_name=waveform_params_name,
+        ),
+        recipe_label=waveform_params_name,
+        sorting_id=sorting_id,
+    )
+
+
+def load_or_rebuild_analyzer_from_resolved(
+    *,
+    sorting_id,
+    n_units,
+    analyzer_folder,
+    waveform_params,
+    recording,
+    sorting,
+    sorter_row,
+    job_kwargs,
+    rebuild=True,
+):
+    """Load (or rebuild) a canonical analyzer folder from resolved inputs.
+
+    The DB-FREE counterpart of :func:`load_or_rebuild_analyzer`: the caller's
+    ``make_fetch`` already resolved ``sorting_id`` / ``n_units`` / the analyzer
+    cache folder / the recipe params blob, plus the recording + canonical
+    ``sorting`` + ``SorterParameters`` row + job kwargs a cache-miss rebuild
+    needs, so this runs inside a tri-part ``make_compute`` with NO DB access.
+    Same folder load / invalid-rebuild / missing-rebuild policy as the
+    DB-coupled loader (the shared :func:`_load_analyzer_folder_or_rebuild`), but
+    the rebuild path calls :func:`build_analyzer` with the passed
+    recording/sorting instead of re-fetching them through
+    ``rebuild_analyzer_folder``.
+
+    Parameters
+    ----------
+    sorting_id : str
+        The sort whose analyzer is loaded (folder identity + messages).
+    n_units : int
+        The sort's unit count; ``0`` raises ``ZeroUnitAnalyzerError`` (SI cannot
+        build an analyzer over zero units), mirroring the DB-coupled loader.
+    analyzer_folder : pathlib.Path
+        The canonical cache folder (``analyzer_path(sorting_id, recipe_name)``)
+        resolved by the caller -- carries the recipe identity.
+    waveform_params : dict
+        The resolved ``AnalyzerWaveformParameters`` blob for the recipe.
+    recording : si.BaseRecording
+        The (artifact-masked) recording, used only on a cache-miss rebuild.
+    sorting : si.BaseSorting
+        The canonical sorting reconstructed from the units NWB, used only on a
+        cache-miss rebuild.
+    sorter_row : dict
+        The fetched ``SorterParameters`` row for the rebuild.
+    job_kwargs : dict
+        Resolved job kwargs for the rebuild.
+    rebuild : bool, optional
+        ``True`` (default) rebuilds a missing/invalid folder; ``False`` raises
+        (parity with ``load_or_rebuild_analyzer``).
+
+    Returns
+    -------
+    spikeinterface.SortingAnalyzer
+        The loaded analyzer.
+    """
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+    if int(n_units) == 0:
+        raise ZeroUnitAnalyzerError(
+            "load_or_rebuild_analyzer_from_resolved: sorting_id="
+            f"{sorting_id!r} has zero units; no SortingAnalyzer exists (SI "
+            "cannot build one over zero units)."
         )
-    return si.load_sorting_analyzer(folder)
+    return _load_analyzer_folder_or_rebuild(
+        analyzer_folder,
+        rebuild=rebuild,
+        rebuild_fn=lambda: build_analyzer(
+            sorting,
+            recording,
+            {"sorting_id": sorting_id},
+            sorter_row=sorter_row,
+            job_kwargs=job_kwargs,
+            analyzer_folder=analyzer_folder,
+            waveform_params=waveform_params,
+        ),
+        recipe_label=analyzer_folder.name,
+        sorting_id=sorting_id,
+    )
+
+
+def reconstruct_recording_for_sorting_from_resolved(
+    *,
+    recording_row,
+    source_kind,
+    artifact_valid_times=None,
+    artifact_detection_id=None,
+    recording_id=None,
+):
+    """Reconstruct a sort's (artifact-masked) recording from resolved inputs.
+
+    The DB-FREE half of :func:`reconstruct_recording_and_sorting`: every DB
+    input (the cached recording / concat row, the artifact id + valid_times) is
+    resolved by the caller's ``make_fetch`` and threaded in, so this runs inside
+    a tri-part ``make_compute`` with NO DB access. Reads the cached preprocessed
+    recording NWB directly (the same series ``Recording().get_recording`` reads),
+    annotates ``is_filtered=True``, and applies the artifact mask for a
+    single-recording artifact-backed sort -- exactly the recording
+    ``build_analyzer`` starts from. A concat source observes the full recording
+    (no artifact pass), matching ``reconstruct_recording_and_sorting``.
+
+    Parameters
+    ----------
+    recording_row : dict
+        The cached ``Recording`` (single source) or ``ConcatenatedRecording``
+        (concat source) row, carrying ``analysis_file_name`` and
+        ``electrical_series_path``.
+    source_kind : str
+        ``"recording"`` or ``"concatenated_recording"``; only a single-recording
+        source has an artifact pass.
+    artifact_valid_times : np.ndarray, optional
+        The artifact-removed valid-times array (shape ``(n_intervals, 2)``)
+        resolved in make_fetch; required when masking applies.
+    artifact_detection_id : optional
+        ``None`` means no artifact pass; otherwise threaded to
+        ``apply_artifact_mask`` (also gates whether the mask is applied).
+    recording_id : optional
+        Threaded to ``apply_artifact_mask`` for provenance/logging.
+
+    Returns
+    -------
+    si.BaseRecording
+        The (artifact-masked) filtered-annotated recording.
+    """
+    import spikeinterface.extractors as se
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    abs_path = AnalysisNwbfile.get_abs_path(recording_row["analysis_file_name"])
+    recording = se.read_nwb_recording(
+        abs_path,
+        electrical_series_path=recording_row["electrical_series_path"],
+        load_time_vector=True,
+    )
+    # Match Recording().get_recording: the cached artifact is already bandpass +
+    # common-referenced, so annotate is_filtered to stop a downstream SI consumer
+    # from re-filtering an already-filtered recording.
+    recording.annotate(is_filtered=True)
+    if source_kind == "recording" and artifact_detection_id is not None:
+        from spyglass.spikesorting.v2._sorting_artifact_mask import (
+            apply_artifact_mask,
+        )
+
+        recording = apply_artifact_mask(
+            recording,
+            artifact_valid_times,
+            artifact_detection_id=artifact_detection_id,
+            recording_id=recording_id,
+        )
+    return recording
 
 
 def reconstruct_recording_and_sorting(sorting_table, key):
