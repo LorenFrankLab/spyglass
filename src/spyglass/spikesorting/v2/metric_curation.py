@@ -246,6 +246,58 @@ class AnalyzerCurationComputed(NamedTuple):
     nwb_file_name: str
 
 
+class CurationEvaluationFetched(NamedTuple):
+    """DB inputs for ``CurationEvaluation.make_compute`` (no DB I/O in compute).
+
+    Everything ``make_compute`` needs to reconstruct the recording + curated /
+    raw sorting and load-or-build the analyzers is resolved here (the only stage
+    allowed DB access). ``use_fast_path`` records the committed-state routing
+    decision (root/label-only -> cached raw-sort analyzer; merged -> temp
+    curation analyzer) so the worker does not re-query the curation.
+    """
+
+    sorting_id: str
+    curation_id: int
+    nwb_file_name: str
+    source_kind: str
+    recording_id: str | None
+    artifact_detection_id: str | None
+    artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
+    recording_row: dict
+    fs: float
+    raw_units_abs_path: str
+    raw_n_units: int
+    curated_units_abs_path: str
+    expected_unit_ids: list[int]
+    use_fast_path: bool
+    display_waveform_params_name: str
+    display_waveform_params: dict
+    display_analyzer_folder: str
+    metric_waveform_params_name: str
+    metric_waveform_params: dict
+    metric_analyzer_folder: str
+    metric_names: list[str]
+    metric_kwargs: dict[str, dict]
+    template_metric_columns: list[str]
+    skip_pc_metrics: bool
+    auto_merge_preset: str
+    auto_merge_kwargs: dict
+    rule_rows: list[dict]
+    sorter_row: dict
+    analyzer_job_kwargs: dict
+    metric_job_kwargs: dict
+
+
+class CurationEvaluationComputed(NamedTuple):
+    """Compute -> insert carrier (DeepHash-stable strings only)."""
+
+    analysis_file_name: str
+    metrics_object_id: str
+    merge_suggestions_object_id: str
+    proposed_labels_object_id: str
+    nwb_file_name: str
+
+
 @schema
 class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Which quality metrics to compute and their per-metric kwargs.
@@ -1726,3 +1778,752 @@ class _WaveformsAccessor:
 
     def get_waveforms(self, unit_id):
         return self._waveforms.get_waveforms_one_unit(unit_id)
+
+
+@schema
+class CurationEvaluationSelection(
+    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+):
+    """A committed ``CurationV2`` row paired with metric / auto-rule params.
+
+    Unlike ``AnalyzerCurationSelection`` -- which builds its analyzer over the
+    RAW sort and therefore rejects a merged parent (R27) -- ``CurationEvaluation``
+    scores the curation in ITS OWN unit namespace, so a committed applied-merge
+    curation is a valid target. What it rejects instead is a PREVIEW curation
+    (``apply_merge=False`` with an unapplied proposed merge): evaluating that
+    would score the unmerged preview units rather than the final merged set.
+
+    Like the other deterministic-id selection masters, a raw ``insert`` /
+    ``insert1`` is blocked; use ``insert_selection`` (which passes
+    ``allow_direct_insert=True`` for its already-validated insert).
+    """
+
+    definition = """
+    curation_evaluation_id: uuid
+    ---
+    -> CurationV2
+    -> QualityMetricParameters
+    -> AutoCurationRules
+    -> AnalyzerWaveformParameters.proj(metric_waveform_params_name="waveform_params_name")
+    """
+
+    @classmethod
+    def insert_selection(cls, key: dict) -> dict:
+        """Insert or find a curation-evaluation selection; return PK-only dict.
+
+        The ``curation_evaluation_id`` PK is content-addressed (a ``uuid5`` of
+        the logical identity ``(sorting_id, curation_id, metric_params_name,
+        auto_curation_rules_name, metric_waveform_params_name)``) under the
+        DISTINCT ``"curation_evaluation"`` namespace. That payload is
+        byte-identical to ``AnalyzerCurationSelection``'s, so minting it under
+        the same ``"analyzer_curation"`` namespace would derive the SAME uuid
+        for the same logical inputs and the two tables would collide -- the
+        namespace is what keeps the evaluation row's identity separate.
+
+        ``metric_waveform_params_name`` (the whitened analyzer recipe the PC/NN
+        metrics compute on) defaults to the sort's region metric row, resolved
+        from the sort source's preprocessing recipe -- the same source-aware
+        resolution ``AnalyzerCurationSelection`` uses. Pass it explicitly to
+        override.
+
+        Raises ``ValueError`` when the parent curation is a PREVIEW (unapplied
+        proposed merges) -- evaluate a committed curation instead. Raises
+        ``DuplicateSelectionError`` if an existing row for this identity carries
+        a non-deterministic id.
+        """
+        from spyglass.spikesorting.v2._selection_identity import (
+            assert_supplied_id_matches,
+            deterministic_id,
+        )
+        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+
+        metric_waveform_params_name = key.get("metric_waveform_params_name")
+        if metric_waveform_params_name is None:
+            # Default = the sort's region metric (whitened) recipe, resolved
+            # source-aware from the source preprocessing recipe (recording or
+            # concat). ``[1]`` is the metric element of the (display, metric)
+            # pair.
+            preproc = (
+                SortingSelection.resolve_source_preprocessing_params_name(
+                    {"sorting_id": key["sorting_id"]}
+                )
+            )
+            metric_waveform_params_name = waveform_params_for_preprocessing(
+                preproc
+            )[1]
+
+        # Reject a display/unwhitened recipe before folding it into identity;
+        # the shipped default resolves a metric row, so this only fires on a bad
+        # explicit value (re-checked in make_fetch for an allow_direct_insert
+        # bypass).
+        _assert_is_metric_recipe(metric_waveform_params_name)
+
+        parent_key = {
+            "sorting_id": key["sorting_id"],
+            "curation_id": key["curation_id"],
+        }
+        # Reject a preview/draft curation BEFORE the find-existing early-return,
+        # so a legacy / allow_direct_insert selection over a preview fails loudly
+        # here rather than being handed back as a "valid" row (also re-asserted
+        # in make_fetch so the preview compute path stays unreachable).
+        CurationV2.assert_committed_curation(
+            parent_key, context="CurationEvaluation"
+        )
+
+        identity = {
+            "sorting_id": key["sorting_id"],
+            "curation_id": key["curation_id"],
+            "metric_params_name": key["metric_params_name"],
+            "auto_curation_rules_name": key["auto_curation_rules_name"],
+            "metric_waveform_params_name": metric_waveform_params_name,
+        }
+        curation_evaluation_id = deterministic_id(
+            "curation_evaluation", identity
+        )
+        assert_supplied_id_matches(
+            key.get("curation_evaluation_id"),
+            curation_evaluation_id,
+            field="curation_evaluation_id",
+        )
+
+        existing = cls._find_existing_pk(identity, curation_evaluation_id)
+        if existing is not None:
+            return existing
+
+        new_key = {
+            **identity,
+            "curation_evaluation_id": curation_evaluation_id,
+        }
+        try:
+            cls.insert1(new_key, allow_direct_insert=True)
+        except Exception as exc:  # noqa: BLE001 - re-raised unless dup-PK race
+            if not _is_duplicate_key_error(exc):
+                raise
+            existing = cls._find_existing_pk(identity, curation_evaluation_id)
+            if existing is None:
+                raise
+            return existing
+        return {"curation_evaluation_id": curation_evaluation_id}
+
+    @classmethod
+    def insert_by_curation_id(
+        cls,
+        sorting_id,
+        curation_id,
+        metric_params_name,
+        auto_curation_rules_name,
+    ) -> dict:
+        """Insert a curation-evaluation selection for a curation (v1 analog).
+
+        Assemble the content-addressed selection key from a curation
+        (``sorting_id`` + ``curation_id``) and the named quality-metric /
+        auto-rule rows, then delegate to :meth:`insert_selection`. Returns the
+        PK-only dict.
+        """
+        return cls.insert_selection(
+            {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "metric_params_name": metric_params_name,
+                "auto_curation_rules_name": auto_curation_rules_name,
+            }
+        )
+
+    @classmethod
+    def _find_existing_pk(cls, identity, deterministic_id):
+        """Return the PK-only dict for ``identity`` or None; guard bad ids."""
+        from spyglass.spikesorting.v2.exceptions import (
+            DuplicateSelectionError,
+        )
+
+        existing_ids = (cls & identity).fetch("curation_evaluation_id")
+        bypassed = [
+            cid
+            for cid in existing_ids
+            if uuid.UUID(str(cid)) != deterministic_id
+        ]
+        if bypassed:
+            raise DuplicateSelectionError(
+                "CurationEvaluationSelection has duplicate selection rows for "
+                f"{identity} with non-deterministic id(s) "
+                f"{sorted(map(str, bypassed))} (expected the content-addressed "
+                f"{deterministic_id}). This is an integrity bug -- a row was "
+                "inserted bypassing insert_selection."
+            )
+        if len(existing_ids):
+            return {"curation_evaluation_id": deterministic_id}
+        return None
+
+
+@schema
+class CurationEvaluation(SpyglassMixin, dj.Computed):
+    """Quality metrics / merge suggestions / labels over a committed curation.
+
+    The post-merge / final-metric path: scores an existing committed
+    ``CurationV2`` row in that curation's OWN unit namespace -- a merged unit
+    gets metrics recomputed over its merged spike trains/templates, never
+    inherited from the highest-amplitude contributor. Outputs (metrics, proposed
+    labels, merge suggestions) are written to three NWB scratch tables and are
+    PROPOSALS: turning them into a committed child curation is a later phase.
+
+    Routing: a committed root / label-only curation (unit set unchanged from the
+    raw sort) reuses the cached raw-sort analyzers (the fast path); a committed
+    applied-merge curation builds curation-scoped temporary analyzers over the
+    merged sorting and cleans them immediately (never published to the canonical
+    analyzer cache).
+    """
+
+    definition = """
+    -> CurationEvaluationSelection
+    ---
+    -> AnalysisNwbfile
+    metrics_object_id: varchar(72)
+    merge_suggestions_object_id: varchar(72)
+    proposed_labels_object_id: varchar(72)
+    """
+
+    # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
+    # DB transaction. make_compute does NO DB I/O: every DB input is resolved in
+    # make_fetch and threaded through the carrier.
+    _parallel_make = True
+
+    def make_fetch(self, key) -> CurationEvaluationFetched:
+        """Resolve every DB input make_compute needs (no SI/NWB compute here).
+
+        Resolves the params, the recording-reconstruction inputs (so the
+        DB-free worker can rebuild the recording + sorting), the curated-units
+        NWB abs path + expected unit ids, the analyzer recipes + cache folders,
+        and the committed-state routing decision. Re-asserts the parent is a
+        committed (non-preview) curation and the metric recipe is whitened, so a
+        row planted via ``allow_direct_insert`` cannot reach the compute path.
+        """
+        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+        from spyglass.spikesorting.v2._artifact_intervals import (
+            read_artifact_removed_intervals,
+        )
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            fetch_waveform_params,
+            resolve_display_waveform_params_name,
+        )
+        from spyglass.spikesorting.v2.recording import Recording
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
+
+        sel = (CurationEvaluationSelection & key).fetch1()
+        sorting_id = str(sel["sorting_id"])
+        curation_id = int(sel["curation_id"])
+        curation_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+        sorting_key = {"sorting_id": sorting_id}
+
+        # Re-assert committed (reject a preview planted via allow_direct_insert)
+        # and the metric recipe is whitened (same bypass rationale as
+        # AnalyzerCuration.make_fetch).
+        merges_applied = (CurationV2 & curation_key).fetch1("merges_applied")
+        CurationV2.assert_committed_curation(
+            curation_key,
+            context="CurationEvaluation",
+            merges_applied=merges_applied,
+        )
+        _assert_is_metric_recipe(sel["metric_waveform_params_name"])
+
+        qm = (
+            QualityMetricParameters
+            & {"metric_params_name": sel["metric_params_name"]}
+        ).fetch1()
+        acr = (
+            AutoCurationRules
+            & {"auto_curation_rules_name": sel["auto_curation_rules_name"]}
+        ).fetch1()
+        rule_rows = (
+            AutoCurationRules.Rule
+            & {"auto_curation_rules_name": sel["auto_curation_rules_name"]}
+        ).fetch(as_dict=True)
+
+        metric_names = list(qm["metric_names"])
+        sorter_params = (
+            SortingSelection * SorterParameters & sorting_key
+        ).fetch1("params")
+        metric_kwargs = apply_snr_peak_sign(
+            metric_names, dict(qm["metric_kwargs"] or {}), sorter_params
+        )
+
+        # Recording reconstruction inputs. make_compute rebuilds the recording
+        # DB-free from these; self-heal the regeneratable cache here (the DB
+        # stage) so that read succeeds, mirroring Recording().get_recording's
+        # rebuild-if-missing (which AnalyzerCuration gets via get_analyzer).
+        source = SortingSelection.resolve_source(sorting_key)
+        artifact_detection_id = SortingSelection.resolve_artifact_detection(
+            sorting_key
+        )
+        if source.kind == "recording":
+            recording_id = source.key["recording_id"]
+            Recording().get_recording({"recording_id": recording_id})
+            recording_row = (
+                Recording & {"recording_id": recording_id}
+            ).fetch1()
+        else:  # concatenated_recording
+            recording_id = None
+            ConcatenatedRecording().get_recording(source.key)
+            recording_row = (ConcatenatedRecording & source.key).fetch1()
+        fs = float(recording_row["sampling_frequency"])
+
+        artifact_valid_times = None
+        if source.kind == "recording" and artifact_detection_id is not None:
+            from spyglass.spikesorting.v2.recording import RecordingSelection
+
+            nwb_file_name = (
+                RecordingSelection & {"recording_id": recording_id}
+            ).fetch1("nwb_file_name")
+            intervals_by_nwb = read_artifact_removed_intervals(
+                {"artifact_detection_id": artifact_detection_id},
+                as_dict=True,
+            )
+            if nwb_file_name not in intervals_by_nwb:
+                raise ValueError(
+                    "CurationEvaluation.make_fetch: artifact-removed intervals "
+                    f"for nwb_file_name={nwb_file_name!r} not found among "
+                    f"{sorted(intervals_by_nwb)} for artifact_detection_id="
+                    f"{artifact_detection_id!r}; the ArtifactDetection may be "
+                    "partially deleted."
+                )
+            artifact_valid_times = intervals_by_nwb[nwb_file_name]
+
+        raw_units_abs_path = AnalysisNwbfile.get_abs_path(
+            (Sorting & sorting_key).fetch1("analysis_file_name")
+        )
+        raw_n_units = int((Sorting & sorting_key).fetch1("n_units"))
+        curated_units_abs_path = AnalysisNwbfile.get_abs_path(
+            (CurationV2 & curation_key).fetch1("analysis_file_name")
+        )
+        expected_unit_ids = sorted(
+            int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")
+        )
+
+        # Routing: a committed row (previews already rejected) uses the cached
+        # raw-sort analyzer fast path when it applied no merges (root /
+        # label-only -> unit set == raw sort); an applied-merge row builds a
+        # curation-scoped temp analyzer over the merged sorting.
+        use_fast_path = not bool(merges_applied)
+
+        display_waveform_params_name = resolve_display_waveform_params_name(
+            Sorting(), sorting_id
+        )
+        display_waveform_params = fetch_waveform_params(
+            display_waveform_params_name
+        )
+        metric_waveform_params_name = sel["metric_waveform_params_name"]
+        metric_waveform_params = fetch_waveform_params(
+            metric_waveform_params_name
+        )
+
+        sorter_row = (
+            SorterParameters
+            & (
+                (SortingSelection & sorting_key).proj(
+                    "sorter", "sorter_params_name"
+                )
+            )
+        ).fetch1()
+
+        return CurationEvaluationFetched(
+            sorting_id=sorting_id,
+            curation_id=curation_id,
+            nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
+            source_kind=source.kind,
+            recording_id=recording_id,
+            artifact_detection_id=artifact_detection_id,
+            artifact_valid_times=artifact_valid_times,
+            recording_row=recording_row,
+            fs=fs,
+            raw_units_abs_path=raw_units_abs_path,
+            raw_n_units=raw_n_units,
+            curated_units_abs_path=curated_units_abs_path,
+            expected_unit_ids=expected_unit_ids,
+            use_fast_path=use_fast_path,
+            display_waveform_params_name=display_waveform_params_name,
+            display_waveform_params=display_waveform_params,
+            display_analyzer_folder=str(
+                analyzer_path(sorting_id, display_waveform_params_name)
+            ),
+            metric_waveform_params_name=metric_waveform_params_name,
+            metric_waveform_params=metric_waveform_params,
+            metric_analyzer_folder=str(
+                analyzer_path(sorting_id, metric_waveform_params_name)
+            ),
+            metric_names=metric_names,
+            metric_kwargs=metric_kwargs,
+            template_metric_columns=list(
+                qm["template_metric_columns"] or []
+            ),
+            skip_pc_metrics=bool(qm["skip_pc_metrics"]),
+            auto_merge_preset=acr["auto_merge_preset"],
+            auto_merge_kwargs=dict(acr["auto_merge_kwargs"] or {}),
+            rule_rows=list(rule_rows),
+            sorter_row=sorter_row,
+            analyzer_job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
+            metric_job_kwargs=_resolved_job_kwargs(
+                qm["job_kwargs"], acr["job_kwargs"]
+            ),
+        )
+
+    def make_compute(
+        self,
+        key,
+        sorting_id,
+        curation_id,
+        nwb_file_name,
+        source_kind,
+        recording_id,
+        artifact_detection_id,
+        artifact_valid_times,
+        recording_row,
+        fs,
+        raw_units_abs_path,
+        raw_n_units,
+        curated_units_abs_path,
+        expected_unit_ids,
+        use_fast_path,
+        display_waveform_params_name,
+        display_waveform_params,
+        display_analyzer_folder,
+        metric_waveform_params_name,
+        metric_waveform_params,
+        metric_analyzer_folder,
+        metric_names,
+        metric_kwargs,
+        template_metric_columns,
+        skip_pc_metrics,
+        auto_merge_preset,
+        auto_merge_kwargs,
+        rule_rows,
+        sorter_row,
+        analyzer_job_kwargs,
+        metric_job_kwargs,
+    ) -> CurationEvaluationComputed:
+        """Compute metrics / merges / labels over the committed curation.
+
+        NO DB I/O (tri-part contract): the recording + raw / curated sortings
+        are reconstructed from the threaded inputs, never via
+        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer`` (both DB-backed).
+        """
+        import tempfile
+        from pathlib import Path
+
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_curation_lock,
+        )
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            build_analyzer,
+            load_or_rebuild_analyzer_from_resolved,
+            reconstruct_recording_for_sorting_from_resolved,
+        )
+
+        analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        wants_pc = (not skip_pc_metrics) and bool(
+            _requested_pc_metrics(metric_names)
+        )
+
+        try:
+            # Zero-unit committed curation: nothing to analyze; write empty
+            # metric/merge/label tables (SI cannot build an analyzer over zero
+            # units). Reuse AnalyzerCuration's empty-table writer.
+            if not expected_unit_ids:
+                logger.warning(
+                    "CurationEvaluation: curation "
+                    f"(sorting_id={sorting_id}, curation_id={curation_id}) has "
+                    "zero units; writing empty metric/merge/label tables."
+                )
+                object_ids = AnalyzerCuration._write_empty(abs_path)
+                return CurationEvaluationComputed(
+                    analysis_file_name, *object_ids, nwb_file_name
+                )
+
+            recording = reconstruct_recording_for_sorting_from_resolved(
+                recording_row=recording_row,
+                source_kind=source_kind,
+                artifact_valid_times=artifact_valid_times,
+                artifact_detection_id=artifact_detection_id,
+                recording_id=recording_id,
+            )
+
+            if use_fast_path:
+                # Root / label-only: the cached raw-sort analyzers already carry
+                # this curation's unit set. Hold the per-sort lock around the
+                # canonical-folder load/rebuild + metric-extension mutation
+                # (_compute_metrics / _compute_merge_groups mutate the shared
+                # analyzer in place), exactly like AnalyzerCuration.
+                raw_sorting = self._sorting_from_units_nwb(
+                    raw_units_abs_path, recording_row, fs
+                )
+                with analyzer_curation_lock(sorting_id):
+                    display_analyzer = load_or_rebuild_analyzer_from_resolved(
+                        sorting_id=sorting_id,
+                        n_units=raw_n_units,
+                        analyzer_folder=Path(display_analyzer_folder),
+                        waveform_params=display_waveform_params,
+                        recording=recording,
+                        sorting=raw_sorting,
+                        sorter_row=sorter_row,
+                        job_kwargs=analyzer_job_kwargs,
+                    )
+                    metric_analyzer = None
+                    if wants_pc:
+                        metric_analyzer = (
+                            load_or_rebuild_analyzer_from_resolved(
+                                sorting_id=sorting_id,
+                                n_units=raw_n_units,
+                                analyzer_folder=Path(metric_analyzer_folder),
+                                waveform_params=metric_waveform_params,
+                                recording=recording,
+                                sorting=raw_sorting,
+                                sorter_row=sorter_row,
+                                job_kwargs=analyzer_job_kwargs,
+                            )
+                        )
+                    metrics_df, labels_by_unit, merge_groups = (
+                        self._evaluate_analyzers(
+                            display_analyzer,
+                            metric_analyzer,
+                            metric_names=metric_names,
+                            metric_kwargs=metric_kwargs,
+                            skip_pc_metrics=skip_pc_metrics,
+                            metric_job_kwargs=metric_job_kwargs,
+                            template_metric_columns=template_metric_columns,
+                            auto_merge_preset=auto_merge_preset,
+                            auto_merge_kwargs=auto_merge_kwargs,
+                            rule_rows=rule_rows,
+                            expected_unit_ids=expected_unit_ids,
+                        )
+                    )
+            else:
+                # Applied-merge: build curation-scoped TEMP analyzers over the
+                # merged curated sorting. Never published to the canonical
+                # analyzer cache (identity is curation-scoped, not sorting-
+                # scoped); cleaned on success and failure by TemporaryDirectory.
+                curated_sorting = self._sorting_from_units_nwb(
+                    curated_units_abs_path, recording_row, fs
+                )
+                compute_key = {"sorting_id": sorting_id}
+                with tempfile.TemporaryDirectory() as tmp:
+                    # ``.zarr`` suffix matches the SI zarr store create_sorting_
+                    # analyzer writes (SI forces it) so load_sorting_analyzer
+                    # resolves the same folder -- same convention as
+                    # analyzer_path for the canonical cache.
+                    display_folder = Path(tmp) / "display.zarr"
+                    build_analyzer(
+                        curated_sorting,
+                        recording,
+                        compute_key,
+                        sorter_row=sorter_row,
+                        job_kwargs=analyzer_job_kwargs,
+                        analyzer_folder=display_folder,
+                        waveform_params=display_waveform_params,
+                    )
+                    display_analyzer = si.load_sorting_analyzer(display_folder)
+                    metric_analyzer = None
+                    if wants_pc:
+                        metric_folder = Path(tmp) / "metric.zarr"
+                        build_analyzer(
+                            curated_sorting,
+                            recording,
+                            compute_key,
+                            sorter_row=sorter_row,
+                            job_kwargs=analyzer_job_kwargs,
+                            analyzer_folder=metric_folder,
+                            waveform_params=metric_waveform_params,
+                        )
+                        metric_analyzer = si.load_sorting_analyzer(
+                            metric_folder
+                        )
+                    metrics_df, labels_by_unit, merge_groups = (
+                        self._evaluate_analyzers(
+                            display_analyzer,
+                            metric_analyzer,
+                            metric_names=metric_names,
+                            metric_kwargs=metric_kwargs,
+                            skip_pc_metrics=skip_pc_metrics,
+                            metric_job_kwargs=metric_job_kwargs,
+                            template_metric_columns=template_metric_columns,
+                            auto_merge_preset=auto_merge_preset,
+                            auto_merge_kwargs=auto_merge_kwargs,
+                            rule_rows=rule_rows,
+                            expected_unit_ids=expected_unit_ids,
+                        )
+                    )
+
+            object_ids = write_analyzer_curation_tables(
+                abs_path,
+                metrics_df=metrics_df,
+                merge_groups=merge_groups,
+                labels_by_unit=labels_by_unit,
+                unit_ids=[int(u) for u in metrics_df.index],
+            )
+            return CurationEvaluationComputed(
+                analysis_file_name, *object_ids, nwb_file_name
+            )
+        except Exception:
+            AnalyzerCuration._cleanup_staged_file(analysis_file_name)
+            raise
+
+    def make_insert(
+        self,
+        key,
+        analysis_file_name,
+        metrics_object_id,
+        merge_suggestions_object_id,
+        proposed_labels_object_id,
+        nwb_file_name,
+    ) -> None:
+        """Register the analysis file and insert the row (atomic).
+
+        ``AnalysisNwbfile().add`` + ``insert1`` run inside
+        ``transaction_or_noop`` so a failed insert never orphans a registered
+        AnalysisNwbfile row (mirrors AnalyzerCuration); the staged analysis file
+        is removed on failure.
+        """
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
+
+        try:
+            with transaction_or_noop(self.connection):
+                AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+                self.insert1(
+                    {
+                        **key,
+                        "analysis_file_name": analysis_file_name,
+                        "metrics_object_id": metrics_object_id,
+                        "merge_suggestions_object_id": (
+                            merge_suggestions_object_id
+                        ),
+                        "proposed_labels_object_id": proposed_labels_object_id,
+                    }
+                )
+        except Exception:
+            AnalyzerCuration._cleanup_staged_file(analysis_file_name)
+            raise
+
+    # ---- compute helpers (DB-free; SI work) ------------------------------
+
+    @staticmethod
+    def _sorting_from_units_nwb(abs_path, recording_row, fs):
+        """Reconstruct a ``NumpySorting`` from a units NWB (no DB).
+
+        The same machinery ``CurationV2.get_sorting`` / ``Sorting.get_sorting``
+        use internally, minus the DB fetch: new files reconstruct from stored
+        sample frames; legacy files map absolute times to frames against the
+        recording timestamps. Works for both the raw-sort and curated-units NWB
+        (an applied-merge curated NWB already stores the MERGED unit set).
+        """
+        from spyglass.spikesorting.v2._units_nwb import (
+            numpysorting_from_abs_times,
+            numpysorting_from_sample_indices,
+            read_units_abs_spike_times,
+            read_units_spike_sample_indices,
+        )
+
+        sample_indices = read_units_spike_sample_indices(abs_path)
+        if sample_indices is not None:
+            return numpysorting_from_sample_indices(sample_indices, fs)
+        abs_times = read_units_abs_spike_times(abs_path)
+        return numpysorting_from_abs_times(abs_times, recording_row, fs)
+
+    def _evaluate_analyzers(
+        self,
+        display_analyzer,
+        metric_analyzer,
+        *,
+        metric_names,
+        metric_kwargs,
+        skip_pc_metrics,
+        metric_job_kwargs,
+        template_metric_columns,
+        auto_merge_preset,
+        auto_merge_kwargs,
+        rule_rows,
+        expected_unit_ids,
+    ):
+        """Compute metrics / labels / merge suggestions and enforce namespace.
+
+        Reuses ``AnalyzerCuration._compute_metrics`` / ``_compute_merge_groups``
+        and ``apply_label_rules`` over the curation's analyzers, then enforces
+        the unit-namespace invariant BEFORE labels/merges are returned (and
+        before the NWB write): the metric index must equal the curation's unit
+        set, and every suggested merge member must be a unit in that set. This
+        catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
+        preview row that slipped past selection.
+        """
+        metrics_df = AnalyzerCuration._compute_metrics(
+            display_analyzer,
+            metric_analyzer,
+            metric_names,
+            metric_kwargs,
+            skip_pc_metrics,
+            metric_job_kwargs,
+            template_metric_columns=template_metric_columns,
+        )
+        self._assert_unit_namespace(metrics_df, expected_unit_ids)
+        labels_by_unit = apply_label_rules(metrics_df, rule_rows)
+        merge_groups = AnalyzerCuration._compute_merge_groups(
+            display_analyzer,
+            auto_merge_preset,
+            auto_merge_kwargs,
+            metric_job_kwargs,
+        )
+        self._assert_merge_membership(merge_groups, expected_unit_ids)
+        return metrics_df, labels_by_unit, merge_groups
+
+    @staticmethod
+    def _assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
+        """Raise unless the metric index equals the curation's unit set."""
+        computed = {int(u) for u in metrics_df.index}
+        expected = {int(u) for u in expected_unit_ids}
+        if computed != expected:
+            raise ValueError(
+                "CurationEvaluation namespace invariant violated: computed "
+                f"metric unit ids {sorted(computed)} != the curation's unit set "
+                f"{sorted(expected)}. The metrics must be scored over the "
+                "evaluated curation's own units (e.g. the merged unit set), not "
+                "the raw-sort analyzer; this indicates a stale temp analyzer or "
+                "accidental raw-analyzer reuse."
+            )
+
+    @staticmethod
+    def _assert_merge_membership(merge_groups, expected_unit_ids) -> None:
+        """Raise unless every suggested merge member is a curation unit."""
+        expected = {int(u) for u in expected_unit_ids}
+        for group in merge_groups:
+            members = {int(u) for u in group}
+            if not members <= expected:
+                raise ValueError(
+                    "CurationEvaluation merge-suggestion invariant violated: "
+                    f"suggested merge {sorted(members)} contains units outside "
+                    f"the curation's unit set {sorted(expected)}."
+                )
+
+    # ---- fetch helpers (parity with AnalyzerCuration) --------------------
+
+    @classmethod
+    def get_metrics(cls, key):
+        """Return the quality-metrics table (DataFrame indexed by unit_id)."""
+        row = (cls & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return read_quality_metrics(abs_path, row["metrics_object_id"])
+
+    @classmethod
+    def get_labels(cls, key) -> dict:
+        """Return ``{unit_id: [label, ...]}`` for units with proposed labels."""
+        row = (cls & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return read_proposed_labels(abs_path, row["proposed_labels_object_id"])
+
+    @classmethod
+    def get_merge_groups(cls, key) -> list:
+        """Return proposed merge groups as a list of unit-id lists."""
+        row = (cls & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return read_merge_suggestions(
+            abs_path, row["merge_suggestions_object_id"]
+        )
