@@ -104,6 +104,24 @@ def _require_unitmatch() -> SimpleNamespace:
     )
 
 
+def _bundle_compute_kwargs(
+    seed: int, job_kwargs: dict | None
+) -> tuple[int, dict]:
+    """Resolve the bundle random seed + the SI ``compute`` job kwargs.
+
+    The bundle ``seed`` is authoritative: a stray ``random_seed`` in
+    ``job_kwargs`` (an ambient ``dj.config`` seed, or a value leaked from a
+    params blob) is stripped and IGNORED -- it never overrides ``seed``. Letting
+    it win would make the stored, identity-bearing ``seed`` disagree with the
+    seed actually used. ``random_seed`` is also not a valid
+    ``SortingAnalyzer.compute`` kwarg (SI raises "please remove
+    {'random_seed'}"), so stripping it is required regardless.
+    """
+    compute_job_kwargs = dict(job_kwargs or {})
+    compute_job_kwargs.pop("random_seed", None)
+    return seed, compute_job_kwargs
+
+
 def extract_unitmatch_bundle(
     session_dir,
     recording,
@@ -149,12 +167,7 @@ def extract_unitmatch_bundle(
     um = _require_unitmatch()
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
-    # ``random_seed`` is a Spyglass-side knob, NOT a valid
-    # ``SortingAnalyzer.compute`` kwarg (SI raises "please remove
-    # {'random_seed'}"). Use it to seed the random_spikes subsample and strip it
-    # from the compute job kwargs -- mirroring _sorting_analyzer.py.
-    compute_job_kwargs = dict(job_kwargs or {})
-    random_seed = compute_job_kwargs.pop("random_seed", seed)
+    random_seed, compute_job_kwargs = _bundle_compute_kwargs(seed, job_kwargs)
 
     half = recording.get_num_samples() // 2
     t_halves = []
@@ -258,6 +271,21 @@ class UnitMatchBackend:
     """The ``unitmatch`` cross-session matcher backend."""
 
     name = "unitmatch"
+
+    @staticmethod
+    def backend_version() -> str | None:
+        """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
+
+        The producing-library provenance the ``UnitMatch`` table records. Kept on
+        the backend (single source of truth) so the table does not hardcode the
+        package name; ``None`` rather than a guess when the package is missing.
+        """
+        import importlib.metadata
+
+        try:
+            return importlib.metadata.version("unitmatchpy")
+        except importlib.metadata.PackageNotFoundError:
+            return None
 
     def match(
         self,

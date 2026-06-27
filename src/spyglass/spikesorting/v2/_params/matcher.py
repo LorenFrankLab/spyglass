@@ -29,6 +29,18 @@ class UnitMatchParamsSchema(BaseModel):
         Hard upper bound on the graph size submitted to strict
         ``networkx.find_cliques``. Exceeding it raises
         ``TrackedUnitBudgetExceededError``. Default ``2000``.
+    ms_before, ms_after : float
+        Symmetric waveform window (ms) for the per-session UnitMatch bundle.
+        Identity-bearing: they change the dense templates the matcher compares,
+        so they live in the named params blob (not as silent
+        ``extract_unitmatch_bundle`` function defaults). Default ``1.5`` each.
+    max_spikes_per_unit : int
+        Random-spike cap per unit per cross-validation half when building the
+        bundle. Identity-bearing. Default ``100``.
+    seed : int
+        Seed for the bundle's random-spike subsample. Identity-bearing and
+        authoritative -- a ``random_seed`` in ``job_kwargs`` never overrides it.
+        Default ``0``.
     schema_version : int
         Bumped on breaking field changes; rows insert at the current version.
     """
@@ -38,4 +50,8 @@ class UnitMatchParamsSchema(BaseModel):
     match_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     tracked_unit_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     max_strict_nodes: int = Field(default=2000, ge=1)
+    ms_before: float = Field(default=1.5, gt=0.0)
+    ms_after: float = Field(default=1.5, gt=0.0)
+    max_spikes_per_unit: int = Field(default=100, ge=1)
+    seed: int = Field(default=0, ge=0)
     schema_version: int = 1

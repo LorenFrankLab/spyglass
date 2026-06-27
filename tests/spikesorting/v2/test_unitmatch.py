@@ -1402,6 +1402,56 @@ def test_degenerate_single_session_zero_pairs(two_session_curated_group):
     assert len(UnitMatch().get_pairs(pk)) == 0
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_unitmatch_computed_matches_make_insert_signature():
+    """The tri-part dispatch splats ``UnitMatchComputed`` POSITIONALLY into
+    ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
+    contract. The three provenance fields were appended to both -- a misalignment
+    would silently mis-bind the str-adjacent slots without a TypeError."""
+    import inspect
+
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchComputed,
+    )
+
+    params = list(inspect.signature(UnitMatch.make_insert).parameters)
+    assert params[:2] == ["self", "key"]
+    assert tuple(params[2:]) == UnitMatchComputed._fields
+
+
+@pytest.mark.slow
+def test_unitmatch_records_backend_version(two_session_curated_group):
+    """A populated UnitMatch row records the producer provenance: the SI version,
+    the resolved backend module path, and the backend package version -- resolved
+    from the registry even on the degenerate single-session path."""
+    import importlib.metadata
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+    row = (UnitMatch & pk).fetch1()
+    assert row["spikeinterface_version"] == si.__version__
+    assert row["matcher_backend"] == (
+        "spyglass.spikesorting.v2._unitmatch_backend"
+    )
+    assert row["matcher_backend_version"] == importlib.metadata.version(
+        "unitmatchpy"
+    )
+
+
 @pytest.mark.slow
 def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
     """Goal 7: a raw Pair referencing a unit absent from the pinned curation is

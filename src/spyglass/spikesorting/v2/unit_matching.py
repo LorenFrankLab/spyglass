@@ -99,6 +99,11 @@ class UnitMatchComputed(NamedTuple):
     # so ``make_insert`` writes ``UnitMatch.MatchableUnit`` and ``TrackedUnit``
     # reads the exact node universe the matcher saw, not current labels.
     matchable_units: list[dict]
+    # Producer provenance (secondary, never identity): SI version at match time,
+    # the resolved backend's module path, and the backend package version.
+    spikeinterface_version: str
+    matcher_backend: str
+    matcher_backend_version: str | None
 
 
 @schema
@@ -160,6 +165,19 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             schema_for=schema_for,
             table_name="MatcherParameters",
         )
+        # The bundle ``seed`` is an identity-bearing params field and is the
+        # single authoritative seed. A ``random_seed`` in the separate
+        # job_kwargs blob would be a second, NON-identity seed that the bundle
+        # extractor must ignore -- so reject it at insert rather than silently
+        # dropping it, which would mislead a user into thinking it took effect.
+        for row in validated:
+            job_kwargs = row.get("job_kwargs")
+            if job_kwargs and "random_seed" in job_kwargs:
+                raise ValueError(
+                    "MatcherParameters.job_kwargs must not contain "
+                    "'random_seed': the waveform-bundle seed is the identity-"
+                    "bearing params 'seed' field. Set 'seed' in params instead."
+                )
         reject_duplicate_parameter_content(
             self,
             validated,
@@ -506,6 +524,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     pairs_object_id: varchar(72)
     n_pairs: int
     matcher_runtime_s: float
+    spikeinterface_version: varchar(32)     # spikeinterface.__version__ at match time
+    matcher_backend: varchar(64)            # resolved backend module path
+    matcher_backend_version=null: varchar(64)  # backend package version, NULL if absent
     """
 
     class Pair(SpyglassMixinPart):
@@ -839,10 +860,24 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         table without calling the matcher backend. The anchor AnalysisNwbfile
         parent is the FIRST member's NWB (``member_plan`` is member_index-ordered).
         """
+        import spikeinterface as si
+
         from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
+        from spyglass.spikesorting.v2.matcher_protocol import get_matcher
         from spyglass.spikesorting.v2.recording import (
             _unlink_staged_analysis_file,
         )
+
+        # Producer provenance, resolved from the registry entry that WOULD run
+        # (even on the degenerate single-session path that skips the match), so
+        # the row always records which backend code produced it. Secondary, not
+        # identity.
+        backend = get_matcher(matcher_name)
+        spikeinterface_version = si.__version__
+        matcher_backend = type(backend).__module__
+        matcher_backend_version = getattr(
+            backend, "backend_version", lambda: None
+        )()
 
         anchor_nwb_file_name = member_plan[0]["nwb_file_name"]
         # Snapshot the frozen matchable universe from member_plan (resolved +
@@ -891,6 +926,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             matcher_runtime_s=float(runtime_s),
             anchor_nwb_file_name=anchor_nwb_file_name,
             matchable_units=matchable_units,
+            spikeinterface_version=spikeinterface_version,
+            matcher_backend=matcher_backend,
+            matcher_backend_version=matcher_backend_version,
         )
 
     def make_insert(
@@ -902,6 +940,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         matcher_runtime_s,
         anchor_nwb_file_name,
         matchable_units,
+        spikeinterface_version,
+        matcher_backend,
+        matcher_backend_version,
     ) -> None:
         """Register the analysis file + insert the master, Pair, and frozen
         ``MatchableUnit`` rows.
@@ -943,6 +984,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                         "pairs_object_id": pairs_object_id,
                         "n_pairs": len(pairs),
                         "matcher_runtime_s": matcher_runtime_s,
+                        "spikeinterface_version": spikeinterface_version,
+                        "matcher_backend": matcher_backend,
+                        "matcher_backend_version": matcher_backend_version,
                     }
                 )
                 # ``read_pairs`` returns exactly the Pair part columns
@@ -1012,10 +1056,18 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 full_sorting = CurationV2.get_sorting(curation_key)
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
                 session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
+                # The bundle window / subsample / seed come from the named,
+                # identity-bearing MatcherParameters params blob -- NOT the
+                # extract function defaults -- so the settings that produced each
+                # bundle are pinned to matcher_params_name and recorded.
                 extract_unitmatch_bundle(
                     session_dir,
                     recording,
                     sorting,
+                    ms_before=params["ms_before"],
+                    ms_after=params["ms_after"],
+                    max_spikes_per_unit=params["max_spikes_per_unit"],
+                    seed=params["seed"],
                     job_kwargs=resolved_job_kwargs,
                 )
                 session_inputs.append(
