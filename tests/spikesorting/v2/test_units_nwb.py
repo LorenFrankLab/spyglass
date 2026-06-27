@@ -568,10 +568,15 @@ def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
     prov = read_provenance_values(abs_path, SORTING_PROVENANCE)
     recording_id = SortingSelection.resolve_source(sort).key["recording_id"]
     artifact_detection_id = SortingSelection.resolve_artifact_detection(sort)
+    sel = (SortingSelection & sort).fetch1()
     assert prov["recording_id"] == str(recording_id)
     assert prov["concat_recording_id"] is None
     assert prov["sorter"] == "mountainsort5"
+    # The named sorter recipe + execution backend are recorded, not just the
+    # scientific params blob (execution_params can change the sorter output).
+    assert prov["sorter_params_name"] == sel["sorter_params_name"]
     assert isinstance(prov["sorter_params"], dict)
+    assert isinstance(prov["execution_params"], dict)
     assert prov["artifact_detection_id"] == str(artifact_detection_id)
     assert (
         prov["display_waveform_params_name"]

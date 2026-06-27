@@ -1694,7 +1694,11 @@ class Sorting(SpyglassMixin, dj.Computed):
             "recording_id": recording_id,
             "concat_recording_id": concat_recording_id,
             "sorter": sorter_row["sorter"],
+            "sorter_params_name": sorter_row["sorter_params_name"],
             "sorter_params": sorter_row["params"],
+            # The execution backend (container / engine) can change the sorter
+            # output, so it is part of the named-parameter-row provenance.
+            "execution_params": execution_params,
             "artifact_detection_id": sel_row.get("artifact_detection_id"),
             "display_waveform_params_name": display_waveform_params_name,
             "effective_random_seed": effective_random_seed,
