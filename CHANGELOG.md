@@ -51,6 +51,51 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: reproducibility provenance in computed rows
+
+Bakes the producer provenance into computed v2 rows while pre-production: the
+effective random seed, the producing library/sorter/matcher versions, and the
+UnitMatch waveform-bundle params. Provenance is **secondary, never identity** --
+a parity test pins `sorting_id` / `unitmatch_id` unchanged for a fixed input,
+and every new column is a secondary attribute.
+
+- **`Sorting` records the effective seed + producing versions.** New secondary
+  columns `effective_random_seed`, `spikeinterface_version`, and `sorter_version`
+  (the installed sorter distribution version, `NULL` for SI-internal sorters and
+  the in-process `clusterless_thresholder`). The effective seed is resolved with
+  the same precedence the sort consumes (`utils.resolve_effective_seed`), so the
+  stored seed equals the seed actually used. A `random_seed` supplied via the
+  ambient `dj.config['custom']['spikesorting_v2_job_kwargs']` layer already took
+  effect; it is now recorded and emits a one-time warning (it is process-global,
+  not pinned to a parameter row).
+- **`UnitMatch` records the producer provenance.** New secondary columns
+  `spikeinterface_version`, `matcher_backend` (the resolved backend module path),
+  and `matcher_backend_version` (the `unitmatchpy` distribution version).
+- **UnitMatch waveform-bundle params are now identity-bearing.**
+  `MatcherParameters` gains `ms_before` / `ms_after` / `max_spikes_per_unit` /
+  `seed` (defaults `1.5` / `1.5` / `100` / `0`, matching the prior
+  `extract_unitmatch_bundle` literals). They now flow from the named params blob
+  into the bundle extraction instead of being silent function defaults, so they
+  enter the `matcher_params_name` → `unitmatch_id` identity. The shipped
+  `unitmatch_default` row and its `unitmatch_id` are unchanged (the defaults
+  match and the id derives from the name, not the params content); only a NEW
+  named row with non-default bundle settings gets a distinct `unitmatch_id`. No
+  `params_schema_version` bump.
+- **Bundle seed is authoritative.** A `random_seed` in
+  `MatcherParameters.job_kwargs` is now rejected at insert (it duplicated the
+  identity-bearing `seed` field), and a stray `random_seed` in the resolved job
+  kwargs is stripped-and-ignored inside the bundle -- so the stored seed can
+  never disagree with the seed actually used.
+- **Matcher registry honesty.** `register_matcher` re-registers the SAME backend
+  class idempotently but rejects pointing a name at a DIFFERENT backend without
+  an explicit `replace=True` maintenance override; the built-in UnitMatch
+  registration no longer uses `replace=True`. UnitMatchPy is the single shipped
+  matcher backend.
+- **Unseeded base extensions are marked in the analyzer manifest.** The recompute
+  analyzer manifest now records a per-base-extension seed mode (`"unseeded"` for
+  `noise_levels`), so it no longer silently implies a pinned seed. `analyzer_hash`
+  is unchanged -- it is still derived from the extension content hashes only.
+
 #### Spike Sorting v2: identity & relational integrity hardening
 
 Closes a set of cheap-while-pre-production identity / schema gaps so a master

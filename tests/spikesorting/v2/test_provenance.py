@@ -229,3 +229,71 @@ def test_ambient_seed_warns(restore_custom_config, caplog):
         and "ambient" in r.getMessage().lower()
     ]
     assert len(ambient_warnings) == 1
+
+
+# --- never-identity parity ------------------------------------------------
+
+
+def test_sorting_id_unchanged_after_provenance_columns():
+    """The sorting_id derivation excludes the provenance columns, so a fixed
+    sorting selection identity still mints the pre-change deterministic id."""
+    from spyglass.spikesorting.v2._selection_identity import (
+        deterministic_id,
+        sorting_identity_payload,
+    )
+
+    payload = sorting_identity_payload(
+        sorter="mountainsort5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        recording_id="11111111-1111-5111-8111-111111111111",
+        artifact_detection_id="22222222-2222-5222-8222-222222222222",
+    )
+    assert (
+        str(deterministic_id("sorting", payload))
+        == "7c2c8e91-5ee7-53c4-977e-b34af0b5a9c8"
+    )
+
+
+def test_unitmatch_id_unchanged_after_provenance_columns():
+    """The unitmatch_id derivation excludes the provenance columns -- and the
+    new bundle params enter identity via matcher_params_name, NOT the
+    deterministic payload -- so a fixed selection identity still mints the
+    pre-change id."""
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+
+    identity = {
+        "session_group_owner": "team_a",
+        "session_group_name": "day1",
+        "matcher_params_name": "unitmatch_default",
+        "curation_set_hash": "0" * 64,
+    }
+    assert (
+        str(deterministic_id("unitmatch", identity))
+        == "9da8859b-d341-5bae-8fbb-90602d7a2a39"
+    )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_provenance_columns_are_secondary_not_identity():
+    """Every producer-provenance column is a SECONDARY attribute -- never in a
+    primary key -- so it can never fork a deterministic id."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    sorting_pk = set(Sorting.primary_key)
+    for col in (
+        "effective_random_seed",
+        "spikeinterface_version",
+        "sorter_version",
+    ):
+        assert col in Sorting.heading.secondary_attributes
+        assert col not in sorting_pk
+
+    unitmatch_pk = set(UnitMatch.primary_key)
+    for col in (
+        "spikeinterface_version",
+        "matcher_backend",
+        "matcher_backend_version",
+    ):
+        assert col in UnitMatch.heading.secondary_attributes
+        assert col not in unitmatch_pk
