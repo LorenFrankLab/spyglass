@@ -195,6 +195,50 @@ def test_parent_operation_provenance_records_parent_units(merged_parent):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_parent_merge_group_insert_rejects_invalid_provenance(merged_parent):
+    """A direct ParentMergeGroup insert cannot forge invalid provenance.
+
+    ``parent_unit_id`` is intentionally not a DataJoint FK (a merged parent id
+    is absent from ``Sorting.Unit``), so ``insert`` enforces the two invariants
+    ``get_merge_groups`` relies on: a ROOT curation gets no rows, and a child
+    row's ``parent_unit_id`` must be a unit in the immediate parent. Without the
+    guard a forged row could misclassify a committed curation as a preview or
+    break merged-sorting reconstruction.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = merged_parent["sort_pk"]
+    parent = merged_parent["parent"]  # a merged ROOT (no ParentMergeGroup rows)
+    merged_id = merged_parent["merged_id"]  # 3
+    parent_units = merged_parent["parent_units"]  # [2, 3]
+
+    # A ROOT curation must carry no ParentMergeGroup rows (their presence is the
+    # child discriminator), so a direct insert onto one is rejected.
+    assert not (CurationV2.ParentMergeGroup & parent)
+    with pytest.raises(ValueError, match="ROOT"):
+        CurationV2.ParentMergeGroup.insert1(
+            {**parent, "unit_id": merged_id, "parent_unit_id": merged_id}
+        )
+
+    # A child of the merged parent: its parent-namespace rows must reference
+    # parent units {2, 3} only. Raw unit 0 was absorbed into the merge and is
+    # NOT in the parent set -- exactly the resurrection the design forbids.
+    child = CurationV2.insert_curation(
+        sort_pk,
+        labels={merged_id: ["mua"]},
+        parent_curation_id=parent["curation_id"],
+        apply_merge=False,
+        description="child for provenance guard",
+    )
+    assert 0 not in parent_units
+    with pytest.raises(ValueError, match="not units in the parent curation"):
+        CurationV2.ParentMergeGroup.insert1(
+            {**child, "unit_id": merged_id, "parent_unit_id": 0}
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
     merged_parent,
 ):

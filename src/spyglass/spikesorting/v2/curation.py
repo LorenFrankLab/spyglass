@@ -205,9 +205,11 @@ class CurationV2(SpyglassMixin, dj.Manual):
         ``parent_unit_id`` is a plain int, NOT a DataJoint FK: a child of a
         merged parent may reference a fresh ``max+1`` merged id that exists
         only in the parent ``CurationV2.Unit`` set and not in ``Sorting.Unit``,
-        so it cannot be FK'd to the raw sort. Membership in the parent's unit
-        set is guaranteed by construction rather than by an explicit validator:
-        ``insert_curation`` builds these rows from
+        so it cannot be FK'd to the raw sort. Because the FK cannot do it,
+        membership in the parent's unit set is enforced on EVERY insert path by
+        the ``insert`` override below (not only by construction): a root
+        curation gets no rows and every ``parent_unit_id`` must be a unit in the
+        immediate parent. ``insert_curation`` builds these rows from
         ``kept_unit_to_contributors``, whose contributors come from the parent
         ``Unit`` rows themselves (``build_curated_unit_rows`` rejects any
         merge-group member not in that set). Only child curations
@@ -224,6 +226,82 @@ class CurationV2(SpyglassMixin, dj.Manual):
         parent_unit_id: int
         ---
         """
+
+        def insert1(self, row, **kwargs):
+            """Validate, then insert a single ``ParentMergeGroup`` row."""
+            self.insert([row], **kwargs)
+
+        def insert(self, rows, **kwargs):
+            """Insert parent-namespace merge rows, enforcing provenance.
+
+            ``parent_unit_id`` is deliberately not a DataJoint FK (a merged
+            parent id is absent from ``Sorting.Unit``), so the two invariants
+            that ``get_merge_groups`` relies on are enforced here -- on every
+            insert path, including a direct insert that bypasses
+            ``insert_curation``: a ROOT curation gets NO ``ParentMergeGroup``
+            rows (their mere presence is the child discriminator), and every
+            ``parent_unit_id`` must be a unit in the IMMEDIATE PARENT curation.
+            Without this a forged row could misclassify a committed curation as
+            a preview or break merged-sorting reconstruction.
+            """
+            rows = [dict(row) for row in rows]
+            if rows:
+                self._validate_parent_provenance(rows)
+            super().insert(rows, **kwargs)
+
+        @staticmethod
+        def _validate_parent_provenance(rows):
+            """Raise if any row violates the parent-namespace invariants."""
+            from collections import defaultdict
+
+            parents_by_curation: dict[tuple, set] = defaultdict(set)
+            for row in rows:
+                parents_by_curation[
+                    (row["sorting_id"], int(row["curation_id"]))
+                ].add(int(row["parent_unit_id"]))
+            for (sorting_id, curation_id), parent_uids in (
+                parents_by_curation.items()
+            ):
+                curation_key = {
+                    "sorting_id": sorting_id,
+                    "curation_id": curation_id,
+                }
+                parent_curation_ids = (CurationV2 & curation_key).fetch(
+                    "parent_curation_id"
+                )
+                if len(parent_curation_ids) != 1:
+                    raise ValueError(
+                        "ParentMergeGroup.insert: no CurationV2 row for "
+                        f"{curation_key}; insert the curation row first."
+                    )
+                parent_curation_id = int(parent_curation_ids[0])
+                if parent_curation_id == -1:
+                    raise ValueError(
+                        f"ParentMergeGroup.insert: curation {curation_key} is "
+                        "a ROOT (parent_curation_id=-1); a root composes from "
+                        "the raw sort and must have no ParentMergeGroup rows "
+                        "(their presence is the child discriminator in "
+                        "get_merge_groups)."
+                    )
+                parent_unit_set = {
+                    int(u)
+                    for u in (
+                        CurationV2.Unit
+                        & {
+                            "sorting_id": sorting_id,
+                            "curation_id": parent_curation_id,
+                        }
+                    ).fetch("unit_id")
+                }
+                stray = sorted(parent_uids - parent_unit_set)
+                if stray:
+                    raise ValueError(
+                        f"ParentMergeGroup.insert: parent_unit_id(s) {stray} "
+                        "are not units in the parent curation "
+                        f"(sorting_id={sorting_id}, "
+                        f"curation_id={parent_curation_id}); a row must "
+                        "reference a unit in the immediate parent's namespace."
+                    )
 
     @classmethod
     def insert_curation(

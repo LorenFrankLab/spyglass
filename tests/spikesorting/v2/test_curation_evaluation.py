@@ -1387,3 +1387,43 @@ def test_acceptance_rejects_caller_singleton_merge_group(
             )
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_create_preview_curation_requires_a_merge(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """A preview with no merge is rejected, not silently committed.
+
+    ``create_preview_curation`` is the explicit opt-in for drafting an
+    UNAPPLIED merge for review. Called with no merge it would otherwise produce
+    a normal committed labels-only child (apply_merge=False, no proposed
+    merge), contradicting the "preview/draft" contract -- so it raises and
+    points the caller at replace_labels/overlay_labels.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        # No merge_groups and use_all_suggested_merges defaults False -> raises
+        # before creating any child (no committed labels-only fallback).
+        with pytest.raises(ValueError, match="needs at least one merge"):
+            CurationEvaluation().create_preview_curation(sel)
+    finally:
+        clear_curations_for(planted_two_unit_sort)
