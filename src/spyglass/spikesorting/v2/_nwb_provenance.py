@@ -57,6 +57,26 @@ _NUMPY_FOR_PYTYPE = {
 }
 
 
+def _json_default(value):
+    """JSON encoder fallback for numpy scalars / arrays.
+
+    Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
+    rule thresholds, hash manifests), which deserialize as numpy scalars /
+    arrays; ``json.dumps`` cannot encode those natively.
+    """
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(
+        f"Object of type {type(value).__name__} is not JSON serializable"
+    )
+
+
 def _to_python(value):
     """Coerce a numpy / HDF5 scalar back to a native Python type."""
     if isinstance(value, np.integer):
@@ -97,7 +117,12 @@ def build_provenance_table(
                 name=_VALUE_COLUMN,
                 description="JSON-encoded provenance value",
                 data=np.asarray(
-                    [json.dumps(payload[k], sort_keys=True) for k in keys],
+                    [
+                        json.dumps(
+                            payload[k], sort_keys=True, default=_json_default
+                        )
+                        for k in keys
+                    ],
                     dtype=object,
                 ),
             ),

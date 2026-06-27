@@ -68,6 +68,38 @@ def test_scalar_provenance_round_trips_mixed_types(tmp_path):
     assert read["provenance_schema_version"] == PROVENANCE_SCHEMA_VERSION
 
 
+def test_scalar_provenance_coerces_numpy_values(tmp_path):
+    """Numpy scalars/arrays (DataJoint blob-fetch artifacts) serialize + read back.
+
+    Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
+    rule thresholds, hash manifests), which deserialize as numpy scalars/arrays;
+    plain ``json.dumps`` cannot encode those, so the helper coerces them.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        add_provenance_table,
+        read_provenance_values,
+    )
+
+    values = {
+        "threshold": np.float64(1.5),
+        "count": np.int64(7),
+        "flags": np.array([1, 2, 3]),
+        "ok": np.bool_(True),
+    }
+
+    nwbfile = _new_nwbfile()
+    add_provenance_table(nwbfile, "spyglass_v2_test_numpy", values)
+    path = _write(nwbfile, tmp_path)
+
+    read = read_provenance_values(path, "spyglass_v2_test_numpy")
+    assert read["threshold"] == 1.5
+    assert read["count"] == 7
+    assert read["flags"] == [1, 2, 3]
+    assert read["ok"] is True
+
+
 def test_long_provenance_table_round_trips_typed_rows(tmp_path):
     """A typed long table (one row per member) survives HDF5 with native types."""
     from spyglass.spikesorting.v2._nwb_provenance import (
