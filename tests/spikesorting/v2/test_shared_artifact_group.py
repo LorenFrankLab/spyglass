@@ -636,3 +636,95 @@ def test_read_artifact_removed_intervals_rejects_multiple_recording_part_rows():
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         _drop_fake_recording(rec_id)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_shared_group_member_set_frozen():
+    """A ``SharedArtifactGroup.Member`` edit after the selection is
+    created cannot silently change the scanned set under a fixed
+    ``artifact_detection_id``. ``insert_selection`` snapshots the ordered member
+    ``recording_id`` set onto ``SharedGroupSource.member_set_hash``;
+    ``ArtifactDetection.make_fetch`` re-derives it from the live members and
+    raises a member-drift error when they differ. A clean (unedited) selection
+    fetches without error.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionParameters,
+        ArtifactDetectionSelection,
+        SharedArtifactGroup,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        SharedArtifactGroupMemberDriftError,
+    )
+
+    import datajoint as dj
+
+    ArtifactDetectionParameters.insert_default()
+    session = "v2_member_freeze_.nwb"
+    rid_a = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
+    rid_b = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
+    rid_c = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
+    group_name = "v2_member_freeze_group"
+    art_pk = None
+    conn = dj.conn()
+    # Build the group + members directly: insert_group loads each member recording
+    # for a strict n_samples/dtype check (the fake recordings are not loadable), but
+    # insert_selection's hash snapshot and make_fetch's drift check only read member
+    # recording_ids -- never the recording. FK checks off because the fake session
+    # is not a real Session row.
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SharedArtifactGroup.insert1(
+            {"shared_artifact_group_name": group_name, "nwb_file_name": session},
+            allow_direct_insert=True,
+        )
+        SharedArtifactGroup.Member.insert(
+            [
+                {"shared_artifact_group_name": group_name, "recording_id": rid_a},
+                {"shared_artifact_group_name": group_name, "recording_id": rid_b},
+            ],
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        art_pk = ArtifactDetectionSelection.insert_selection(
+            {
+                "shared_artifact_group_name": group_name,
+                "artifact_detection_params_name": "default",
+            }
+        )
+        # Clean: the live member set matches the frozen snapshot.
+        ArtifactDetection().make_fetch(art_pk)
+
+        # Drift: add a member after the snapshot was taken.
+        SharedArtifactGroup.Member.insert1(
+            {"shared_artifact_group_name": group_name, "recording_id": rid_c}
+        )
+        with pytest.raises(
+            SharedArtifactGroupMemberDriftError, match="member set"
+        ):
+            ArtifactDetection().make_fetch(art_pk)
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            if art_pk is not None:
+                (
+                    ArtifactDetectionSelection.SharedGroupSource & art_pk
+                ).delete_quick()
+                (ArtifactDetectionSelection & art_pk).delete_quick()
+            (
+                SharedArtifactGroup.Member
+                & {"shared_artifact_group_name": group_name}
+            ).delete_quick()
+            (
+                SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        for rid in (rid_a, rid_b, rid_c):
+            _drop_fake_recording(rid)

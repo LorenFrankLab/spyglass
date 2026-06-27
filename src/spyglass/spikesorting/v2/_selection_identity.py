@@ -27,6 +27,7 @@ normalized to a single representation here so
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 
@@ -261,6 +262,36 @@ def artifact_detection_identity_payload(
         "artifact_detection_params_name": artifact_detection_params_name,
         "shared_artifact_group_name": shared_artifact_group_name,
     }
+
+
+def shared_group_member_set_hash(recording_ids) -> str:
+    """Content-address the member set of a ``SharedArtifactGroup``.
+
+    The sha256 hex digest over the SORTED member ``recording_id`` strings. The
+    shared-group artifact identity is ``{params, group_name}`` only, but
+    ``ArtifactDetection.make`` scans the LIVE ``SharedArtifactGroup.Member`` set,
+    so that set could change under a fixed ``artifact_detection_id``. This hash
+    is snapshotted onto ``ArtifactDetectionSelection.SharedGroupSource`` at
+    selection time; ``make_fetch`` re-derives it from the live members and
+    rejects a drift. Membership is a SET (order-independent), so the ids are
+    sorted before hashing -- a member added or removed changes the digest, a
+    re-query in a different row order does not.
+
+    Parameters
+    ----------
+    recording_ids : iterable
+        The member ``recording_id`` values (``uuid.UUID`` or ``str``); each is
+        stringified, so a freshly-passed str and a DB-fetched UUID agree.
+
+    Returns
+    -------
+    str
+        The 64-char sha256 hex digest.
+    """
+    ordered = sorted(str(recording_id) for recording_id in recording_ids)
+    return hashlib.sha256(
+        json.dumps(ordered, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def sorting_identity_payload(

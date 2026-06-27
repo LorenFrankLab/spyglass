@@ -468,12 +468,21 @@ class ArtifactDetectionSelection(
         """
 
     class SharedGroupSource(SpyglassMixinPart):
-        """Shared-group source for an artifact-detection selection."""
+        """Shared-group source for an artifact-detection selection.
+
+        ``member_set_hash`` snapshots the group's ordered member ``recording_id``
+        set at selection time (``shared_group_member_set_hash``). The artifact
+        identity is ``{params, group_name}`` only, so without this snapshot the
+        LIVE ``SharedArtifactGroup.Member`` set could change under a fixed
+        ``artifact_detection_id``; ``ArtifactDetection.make_fetch`` re-derives the
+        hash from the current members and rejects a drift.
+        """
 
         definition = """
         -> master
         ---
         -> SharedArtifactGroup
+        member_set_hash: char(64)   # frozen sha256 of the ordered member recording_id set
         """
 
     @classmethod
@@ -544,11 +553,21 @@ class ArtifactDetectionSelection(
             insert_default_path="ArtifactDetectionParameters.insert_default()",
         )
 
+        # Snapshot the shared group's member set onto the source part so a later
+        # SharedArtifactGroup.Member edit cannot change the scanned set under this
+        # fixed artifact_detection_id (the identity is params+group only). The
+        # recording source has no member set, so it inserts the plan row as-is.
+        source_row = dict(plan.source_row)
+        if plan.source_kind == "shared_artifact_group":
+            source_row["member_set_hash"] = cls._current_member_set_hash(
+                key["shared_artifact_group_name"]
+            )
+
         try:
             with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary.
                 cls.insert1(plan.master_row, allow_direct_insert=True)
-                source_part.insert1(plan.source_row)
+                source_part.insert1(source_row)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
@@ -581,6 +600,24 @@ class ArtifactDetectionSelection(
                 "master."
             ) from exc
         return {k: plan.master_row[k] for k in cls.primary_key}
+
+    @classmethod
+    def _current_member_set_hash(cls, shared_artifact_group_name) -> str:
+        """Hash the shared group's CURRENT member ``recording_id`` set.
+
+        Snapshotted onto ``SharedGroupSource`` at ``insert_selection`` and
+        re-derived in ``make_fetch`` to detect a ``SharedArtifactGroup.Member``
+        edit under a fixed ``artifact_detection_id``.
+        """
+        from spyglass.spikesorting.v2._selection_identity import (
+            shared_group_member_set_hash,
+        )
+
+        member_recording_ids = (
+            SharedArtifactGroup.Member
+            & {"shared_artifact_group_name": shared_artifact_group_name}
+        ).fetch("recording_id")
+        return shared_group_member_set_hash(member_recording_ids)
 
     @classmethod
     def _find_existing_pk(
@@ -825,6 +862,38 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             member_recording_ids = tuple(
                 str(m["recording_id"]) for m in members
             )
+            # Reject a member-set drift: the artifact_detection_id was minted for
+            # the member set frozen on SharedGroupSource.member_set_hash. If the
+            # LIVE set differs (a SharedArtifactGroup.Member added/removed since),
+            # scanning it would silently change the result under a fixed id.
+            # ``member_recording_ids`` is the set just resolved above; hashing it
+            # here -- rather than re-querying the members -- yields the same digest
+            # insert_selection minted (the helper sorts, and every member has a
+            # RecordingSelection so the join above is total).
+            from spyglass.spikesorting.v2._selection_identity import (
+                shared_group_member_set_hash,
+            )
+            from spyglass.spikesorting.v2.exceptions import (
+                SharedArtifactGroupMemberDriftError,
+            )
+
+            frozen_hash = (
+                ArtifactDetectionSelection.SharedGroupSource & key
+            ).fetch1("member_set_hash")
+            current_hash = shared_group_member_set_hash(member_recording_ids)
+            if current_hash != frozen_hash:
+                raise SharedArtifactGroupMemberDriftError(
+                    "ArtifactDetection.make: SharedArtifactGroup "
+                    f"{source.key['shared_artifact_group_name']!r} member set "
+                    f"changed since artifact_detection_id={key['artifact_detection_id']} "
+                    "was created (frozen member_set_hash "
+                    f"{frozen_hash[:12]} != current {current_hash[:12]}). The "
+                    "artifact_detection_id identity is params+group only, so "
+                    "insert_selection() returns this same id with its stale "
+                    "snapshot -- to scan the new membership, DELETE this selection "
+                    "and re-run insert_selection() (which re-snapshots the current "
+                    "members), or restore the group's members."
+                )
             member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
             # ``insert_group`` validated single-session, so the
             # ``nwb_file_name`` is unique; surface the canonical one
