@@ -134,6 +134,24 @@ METRIC_ANALYZER_HASH_EXTENSIONS = ANALYZER_RECOMPUTE_EXTENSIONS + (
     "principal_components",
 )
 
+#: Extensions hashed per evaluation analyzer role -- the single source of the
+#: role -> hashed-extensions mapping, shared by the store and stale-check sides.
+_ROLE_HASH_EXTENSIONS = {
+    "display": ANALYZER_RECOMPUTE_EXTENSIONS,
+    "metric": METRIC_ANALYZER_HASH_EXTENSIONS,
+}
+
+
+def analyzer_hash_for_role(analyzer, role: str) -> str:
+    """Content hash of ``analyzer`` over the extensions consumed for ``role``.
+
+    The per-role primitive behind :func:`analyzer_role_hashes` and the
+    stale-check re-hash, so both compute a role's hash identically.
+    """
+    return combined_hash(
+        hash_extension_data(analyzer, extensions=_ROLE_HASH_EXTENSIONS[role])
+    )
+
 
 def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
     """Return ``{role: content_hash}`` for the canonical analyzers consumed.
@@ -159,13 +177,9 @@ def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
     store (make_compute) and compare (detect_stale_source) sides so they cannot
     drift. ``metric_analyzer=None`` (no PC metrics) yields just the display entry.
     """
-    hashes = {"display": combined_hash(hash_extension_data(display_analyzer))}
+    hashes = {"display": analyzer_hash_for_role(display_analyzer, "display")}
     if metric_analyzer is not None:
-        hashes["metric"] = combined_hash(
-            hash_extension_data(
-                metric_analyzer, extensions=METRIC_ANALYZER_HASH_EXTENSIONS
-            )
-        )
+        hashes["metric"] = analyzer_hash_for_role(metric_analyzer, "metric")
     return hashes
 
 

@@ -1435,12 +1435,22 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             ``{"stale": bool, "reasons": list[str],
             "spikeinterface_version": {"stored", "current"},
             "source_analyzer_hashes": {"stored", "current"}}``. ``reasons`` names
-            each drifted field (``source_analyzer_hash:<role>`` per analyzer);
-            ``current`` is the re-hashed manifest (empty on the merged path).
+            each drifted field: ``source_analyzer_hash:<role>`` for a content
+            mismatch, or ``source_analyzer_missing:<role>`` /
+            ``source_analyzer_invalid:<role>`` when a regeneratable analyzer cache
+            was reclaimed or corrupted (reported as stale, never raised, since the
+            stored metrics can no longer be reproduced from it). ``current`` is
+            the re-hashed manifest (an absent/invalid role maps to ``None``; empty
+            on the merged path).
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._recompute import analyzer_role_hashes
+        from spyglass.spikesorting.v2._recompute import analyzer_hash_for_role
+        from spyglass.spikesorting.v2.exceptions import (
+            AnalyzerFolderInvalidError,
+            AnalyzerFolderMissingError,
+            ZeroUnitAnalyzerError,
+        )
         from spyglass.spikesorting.v2.sorting import Sorting
 
         row = (cls & key).fetch1()
@@ -1452,31 +1462,41 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             reasons.append("spikeinterface_version")
 
         # Re-hash each canonical analyzer the evaluation recorded consuming and
-        # compare per role. Reuse analyzer_role_hashes so the store and compare
-        # sides share ONE role -> hashed-extensions mapping (the metric role
-        # includes principal_components, which PC/NN metrics consume). Reload the
-        # display analyzer via the default recipe and, when the manifest recorded
-        # a metric role, the whitened metric analyzer. The merged path stored
-        # None, so only the SI version is checked there.
+        # compare per role, using the shared analyzer_hash_for_role primitive so
+        # the store and compare sides apply ONE role -> hashed-extensions mapping
+        # (the metric role includes principal_components). The "display" role
+        # reloads the default recipe, "metric" the whitened metric recipe. These
+        # analyzers are regeneratable scratch, so a reclaimed/corrupt cache is
+        # reported as stale per role -- NOT raised, which would abort the caller.
+        # The merged path stored None, so only the SI version is checked there.
         stored_hashes = row["source_analyzer_hashes"]
-        current_hashes: dict[str, str] = {}
+        current_hashes: dict[str, str | None] = {}
         if stored_hashes:
             sort_key = {"sorting_id": str(sel["sorting_id"])}
-            display = Sorting().get_analyzer(
-                sort_key, waveform_params_name=None, rebuild=False
-            )
-            metric = (
-                Sorting().get_analyzer(
-                    sort_key,
-                    waveform_params_name=sel["metric_waveform_params_name"],
-                    rebuild=False,
-                )
-                if "metric" in stored_hashes
-                else None
-            )
-            current_hashes = analyzer_role_hashes(display, metric)
+            recipe_for = {
+                "display": None,
+                "metric": sel["metric_waveform_params_name"],
+            }
             for role, stored in stored_hashes.items():
-                if current_hashes.get(role) != stored:
+                try:
+                    analyzer = Sorting().get_analyzer(
+                        sort_key,
+                        waveform_params_name=recipe_for[role],
+                        rebuild=False,
+                    )
+                # AnalyzerFolderInvalidError subclasses AnalyzerFolderMissingError,
+                # so catch the invalid/zero-unit cases first.
+                except (AnalyzerFolderInvalidError, ZeroUnitAnalyzerError):
+                    current_hashes[role] = None
+                    reasons.append(f"source_analyzer_invalid:{role}")
+                    continue
+                except AnalyzerFolderMissingError:
+                    current_hashes[role] = None
+                    reasons.append(f"source_analyzer_missing:{role}")
+                    continue
+                current = analyzer_hash_for_role(analyzer, role)
+                current_hashes[role] = current
+                if current != stored:
                     reasons.append(f"source_analyzer_hash:{role}")
 
         return {

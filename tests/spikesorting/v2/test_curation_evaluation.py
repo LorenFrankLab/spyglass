@@ -419,6 +419,20 @@ def test_curation_evaluation_records_source_provenance(
     hash_drift = CurationEvaluation.detect_stale_source(sel)
     assert hash_drift["stale"] is True
     assert "source_analyzer_hash:display" in hash_drift["reasons"]
+    monkeypatch.undo()
+
+    # A reclaimed/missing analyzer cache (regeneratable scratch) is reported as
+    # stale, not raised -- the stored metrics can no longer be reproduced.
+    from spyglass.spikesorting.v2.exceptions import AnalyzerFolderMissingError
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    def _raise_missing(self, key, *args, **kwargs):
+        raise AnalyzerFolderMissingError("analyzer folder reclaimed")
+
+    monkeypatch.setattr(Sorting, "get_analyzer", _raise_missing)
+    missing = CurationEvaluation.detect_stale_source(sel)
+    assert missing["stale"] is True
+    assert "source_analyzer_missing:display" in missing["reasons"]
 
 
 def test_curation_evaluation_pc_eval_records_both_roles(
