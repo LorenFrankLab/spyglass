@@ -501,7 +501,8 @@ _SOLO_NAME = "unitmatch_solo"
 
 
 def _ensure_minirec_clusterless_params():
-    """Insert the smoke clusterless sorter row (cheap minirec sort)."""
+    """Insert the smoke clusterless sorter row (used only by the clusterless
+    unit-semantics test, NOT the cross-session matching fixtures)."""
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     from tests.spikesorting.v2._smoke_constants import (
@@ -521,14 +522,60 @@ def _ensure_minirec_clusterless_params():
     return SMOKE_CLUSTERLESS_PARAM_NAME
 
 
+#: mountainsort5 params name for the planted minirec sorts. The sorts are
+#: PLANTED (``_run_sorter`` monkeypatched), so this row only exists for the
+#: selection FK + identity; the params are never run. A real sorter name gives
+#: the sort ``sorted_units`` semantics -- the right substrate for cross-session
+#: matching, which tracks sorted neurons, not clusterless threshold crossings.
+_MINIREC_MS5_PARAMS = "franklab_30khz_ms5_2026_06"
+
+
+def _ensure_minirec_ms5_params():
+    """Ensure the shipped mountainsort5 params row exists (idempotent)."""
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    SorterParameters.insert_default()
+    return _MINIREC_MS5_PARAMS
+
+
+def _plant_single_unit(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+):
+    """Plant one deterministic sorted unit spread across the recording.
+
+    Enough spikes (and span) for the split-half UnitMatch bundle extraction and
+    the display-analyzer template. Replaces a real sorter run via a
+    ``Sorting._run_sorter`` monkeypatch -- fast and deterministic.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    n = recording.get_num_samples()
+    samples = np.arange(1000, n - 1000, 5000, dtype=np.int64)
+    labels = np.zeros(len(samples), dtype=np.int32)
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples],
+        labels_list=[labels],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
 @pytest.fixture(scope="module")
 def two_session_curated_group(chronic_2_session_minirec):
     """Two single-session sorts + curations under one SessionGroup.
 
     Builds on the package-scoped chronic minirec substrate: creates a two-member
-    SessionGroup (and a one-member solo group for the degenerate case), sorts and
-    root-curates each same-day member with the cheap clusterless thresholder, and
-    yields the group identities plus the per-member curation choices. Tears down
+    SessionGroup (and a one-member solo group for the degenerate case), and
+    root-curates each same-day member with a PLANTED single-unit mountainsort5
+    sort (``_run_sorter`` monkeypatched -- fast, deterministic, and
+    ``sorted_units`` semantics, the right substrate for cross-session matching).
+    Yields the group identities plus the per-member curation choices; tears down
     its own UnitMatch lineage, groups, sorts, and curations afterward.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -547,7 +594,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     members = sub["same_day_members"]
     recording_pks = sub["recording_pks"]
 
-    sorter_params_name = _ensure_minirec_clusterless_params()
+    sorter_params_name = _ensure_minirec_ms5_params()
     MatcherParameters.insert_default()
 
     # Start clean: drop any leftover groups (and their UnitMatch lineage) for
@@ -558,25 +605,30 @@ def two_session_curated_group(chronic_2_session_minirec):
 
     sort_pks = []
     choices = {}
-    for index, rec_pk in enumerate(recording_pks):
-        sort_pk = SortingSelection.insert_selection(
-            {
-                "recording_id": rec_pk["recording_id"],
-                "sorter": "clusterless_thresholder",
-                "sorter_params_name": sorter_params_name,
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant_single_unit))
+        for index, rec_pk in enumerate(recording_pks):
+            sort_pk = SortingSelection.insert_selection(
+                {
+                    "recording_id": rec_pk["recording_id"],
+                    "sorter": "mountainsort5",
+                    "sorter_params_name": sorter_params_name,
+                }
+            )
+            if not (Sorting & sort_pk):
+                Sorting.populate(sort_pk, reserve_jobs=False)
+            sort_pks.append(sort_pk)
+            clear_curations_for(sort_pk)
+            curation_key = CurationV2.insert_curation(
+                sorting_key={"sorting_id": sort_pk["sorting_id"]}
+            )
+            choices[index] = {
+                "sorting_id": curation_key["sorting_id"],
+                "curation_id": curation_key["curation_id"],
             }
-        )
-        if not (Sorting & sort_pk):
-            Sorting.populate(sort_pk, reserve_jobs=False)
-        sort_pks.append(sort_pk)
-        clear_curations_for(sort_pk)
-        curation_key = CurationV2.insert_curation(
-            sorting_key={"sorting_id": sort_pk["sorting_id"]}
-        )
-        choices[index] = {
-            "sorting_id": curation_key["sorting_id"],
-            "curation_id": curation_key["curation_id"],
-        }
+    finally:
+        mp.undo()
 
     yield {
         "owner": owner,
@@ -820,14 +872,16 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 
 
 def _plant_two_unit_sort_on_first_member(grp):
-    """Plant a deterministic 2-unit clusterless sort on member 0's recording.
+    """Plant a deterministic 2-unit mountainsort5 sort on member 0's recording.
 
-    The chronic fixture's clusterless sort yields a single unit; a real merge
-    (or a real proposed merge) needs >=2. A distinct params name gives a
-    distinct content-addressed sort on the SAME recording, so the planted sort
-    shares member 0's identity without colliding with the fixture's single-unit
-    sort. Returns ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``;
-    the caller owns teardown (clear_curations_for + dropping the sort/params).
+    The chronic fixture's sort yields a single unit; a real merge (or a real
+    proposed merge) needs >=2. A distinct params name gives a distinct
+    content-addressed sort on the SAME recording, so the planted sort shares
+    member 0's identity without colliding with the fixture's single-unit sort.
+    The sort is PLANTED (``_run_sorter`` monkeypatched), so the params are never
+    run; a real sorter name keeps the units ``sorted_units``. Returns
+    ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``; the caller owns
+    teardown (clear_curations_for + dropping the sort/params).
     """
     import numpy as np
     import spikeinterface as si
@@ -837,17 +891,20 @@ def _plant_two_unit_sort_on_first_member(grp):
         Sorting,
         SortingSelection,
     )
-    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
 
     rec_id = (
         SortingSelection.RecordingSource & grp["sort_pks"][0]
     ).fetch1("recording_id")
-    two_unit_params = "minirec_clusterless_two_unit_r3"
+    two_unit_params = "minirec_ms5_two_unit"
+    default_ms5 = (
+        SorterParameters
+        & {"sorter": "mountainsort5", "sorter_params_name": _MINIREC_MS5_PARAMS}
+    ).fetch1("params")
     SorterParameters.insert1(
         {
-            "sorter": "clusterless_thresholder",
+            "sorter": "mountainsort5",
             "sorter_params_name": two_unit_params,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "params": dict(default_ms5),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -873,7 +930,7 @@ def _plant_two_unit_sort_on_first_member(grp):
     two_unit_sort = SortingSelection.insert_selection(
         {
             "recording_id": rec_id,
-            "sorter": "clusterless_thresholder",
+            "sorter": "mountainsort5",
             "sorter_params_name": two_unit_params,
         }
     )
@@ -900,7 +957,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
     ``create_preview_curation`` records proposed merges without applying them;
     matching that draft would feed oversplit units into the matcher. Both
     ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch`` must
-    reject it. The fixture's clusterless sort yields a single unit, so plant a
+    reject it. The fixture's planted sort yields a single unit, so plant a
     2-unit sort on member 0's recording to host a real proposed merge.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1470,38 +1527,88 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
 
 @pytest.mark.slow
 def test_clusterless_unit_semantics_derived_and_warned(
-    two_session_curated_group, caplog
+    chronic_2_session_minirec, caplog
 ):
     """A clusterless sort's units are threshold-crossings, not sorted neurons:
     CurationV2.get_unit_semantics derives that from the sorter, and
     UnitMatchSelection.insert_selection warns that matching them across sessions
     is degenerate -- a consuming surface honoring the semantics, not just a
-    column."""
+    column. Built standalone (a real clusterless sort + a solo group) because
+    the matching fixtures deliberately use a sorted-units sorter, exactly so
+    they do NOT match threshold crossings.
+    """
     import logging
 
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
         UnitMatchSelection,
         _warn_clusterless_match_once,
     )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    grp = two_session_curated_group
-    sid = grp["choices"][0]["sorting_id"]
-    assert (
-        CurationV2.get_unit_semantics({"sorting_id": sid})
-        == "clusterless_threshold_crossings"
+    sub = chronic_2_session_minirec
+    owner = sub["owner"]
+    member = sub["same_day_members"][0]
+    rec_pk = sub["recording_pks"][0]
+    group_name = "unitmatch_clusterless_warn"
+
+    MatcherParameters.insert_default()
+    params_name = _ensure_minirec_clusterless_params()
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": params_name,
+        }
     )
-
-    _warn_clusterless_match_once.cache_clear()
-    with caplog.at_level(logging.WARNING, logger="spyglass"):
-        UnitMatchSelection.insert_selection(
-            grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+    group_key = {
+        "session_group_owner": owner,
+        "session_group_name": group_name,
+    }
+    try:
+        if not (Sorting & sort_pk):
+            Sorting.populate(sort_pk, reserve_jobs=False)
+        clear_curations_for(sort_pk)
+        curation = CurationV2.insert_curation(
+            sorting_key={"sorting_id": sort_pk["sorting_id"]}
         )
-    assert any(
-        "threshold" in r.getMessage().lower()
-        and "neuron" in r.getMessage().lower()
-        for r in caplog.records
-    )
+        if not (SessionGroup & group_key):
+            SessionGroup.create_group(owner, group_name, [member])
+
+        assert (
+            CurationV2.get_unit_semantics(
+                {"sorting_id": sort_pk["sorting_id"]}
+            )
+            == "clusterless_threshold_crossings"
+        )
+
+        _warn_clusterless_match_once.cache_clear()
+        with caplog.at_level(logging.WARNING, logger="spyglass"):
+            UnitMatchSelection.insert_selection(
+                owner,
+                group_name,
+                "unitmatch_default",
+                {
+                    0: {
+                        "sorting_id": curation["sorting_id"],
+                        "curation_id": curation["curation_id"],
+                    }
+                },
+            )
+        assert any(
+            "threshold" in r.getMessage().lower()
+            and "neuron" in r.getMessage().lower()
+            for r in caplog.records
+        )
+    finally:
+        if SessionGroup & group_key:
+            (SessionGroup & group_key).super_delete(warn=False)
+        clear_curations_for(sort_pk)
+        (Sorting & sort_pk).super_delete(warn=False)
+        (SortingSelection & sort_pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
