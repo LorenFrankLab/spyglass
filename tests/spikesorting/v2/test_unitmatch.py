@@ -744,7 +744,7 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 
     This pins the downstream object users should select after curation:
     evaluate each member curation, accept the label verdict with
-    ``replace_labels``, then pin those committed children in
+    ``use_evaluation_labels``, then pin those committed children in
     ``UnitMatchSelection``. ``make_fetch`` must see the accepted child
     curation ids and their frozen matchable unit sets.
     """
@@ -769,7 +769,7 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
             }
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
-        child = CurationEvaluation().replace_labels(sel)
+        child = CurationEvaluation().use_evaluation_labels(sel)
         assert CurationV2.is_committed_curation(child)
         assert (CurationV2 & child).fetch1("curation_source") == (
             "curation_evaluation"
@@ -803,49 +803,29 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
         (UnitMatchSelection & pk).super_delete(warn=False)
 
 
-@pytest.mark.slow
-def test_unitmatch_rejects_curation_evaluation_preview_child(
-    two_session_curated_group, curation_evaluation_defaults
-):
-    """A ``CurationEvaluation`` preview child is not a UnitMatch input.
+def _plant_two_unit_sort_on_first_member(grp):
+    """Plant a deterministic 2-unit clusterless sort on member 0's recording.
 
-    ``create_preview_curation`` records proposed merges without applying them;
-    matching that draft would feed oversplit units into the matcher. Both
-    ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch`` must
-    reject it. The fixture's clusterless sort yields a single unit, so plant a
-    2-unit sort on member 0's recording to host a real proposed merge.
+    The chronic fixture's clusterless sort yields a single unit; a real merge
+    (or a real proposed merge) needs >=2. A distinct params name gives a
+    distinct content-addressed sort on the SAME recording, so the planted sort
+    shares member 0's identity without colliding with the fixture's single-unit
+    sort. Returns ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``;
+    the caller owns teardown (clear_curations_for + dropping the sort/params).
     """
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import (
-        UnitMatchSelectionIntegrityError,
-    )
-    from spyglass.spikesorting.v2.metric_curation import (
-        CurationEvaluation,
-        CurationEvaluationSelection,
-    )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         Sorting,
         SortingSelection,
     )
-    from spyglass.spikesorting.v2.unit_matching import (
-        UnitMatch,
-        UnitMatchSelection,
-    )
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
     from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
 
-    grp = two_session_curated_group
     rec_id = (
         SortingSelection.RecordingSource & grp["sort_pks"][0]
     ).fetch1("recording_id")
-
-    # A distinct clusterless params name -> a distinct content-addressed sort on
-    # member 0's recording, so the planted 2-unit sort does not collide with the
-    # fixture's shared single-unit sort.
     two_unit_params = "minirec_clusterless_two_unit_r3"
     SorterParameters.insert1(
         {
@@ -892,6 +872,44 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
         int(u) for u in (Sorting.Unit & two_unit_sort).fetch("unit_id")
     )
     assert len(unit_ids) >= 2, "planted sort must yield >=2 units"
+    return two_unit_sort, unit_ids, two_unit_params
+
+
+@pytest.mark.slow
+def test_unitmatch_rejects_curation_evaluation_preview_child(
+    two_session_curated_group, curation_evaluation_defaults
+):
+    """A ``CurationEvaluation`` preview child is not a UnitMatch input.
+
+    ``create_preview_curation`` records proposed merges without applying them;
+    matching that draft would feed oversplit units into the matcher. Both
+    ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch`` must
+    reject it. The fixture's clusterless sort yields a single unit, so plant a
+    2-unit sort on member 0's recording to host a real proposed merge.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchSelectionIntegrityError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    grp = two_session_curated_group
+    two_unit_sort, unit_ids, two_unit_params = (
+        _plant_two_unit_sort_on_first_member(grp)
+    )
 
     clear_curations_for(two_unit_sort)
     try:
@@ -905,6 +923,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
                 "auto_curation_rules_name": "none",
             }
         )
+        CurationEvaluation.populate(eval_sel, reserve_jobs=False)
         preview0 = CurationEvaluation().create_preview_curation(
             eval_sel,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
@@ -954,6 +973,77 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
                 UnitMatchSelectionIntegrityError, match="apply_merge=False"
             ):
                 UnitMatch().make_fetch(pk)
+        finally:
+            (UnitMatchSelection & pk).super_delete(warn=False)
+    finally:
+        clear_curations_for(two_unit_sort)
+        (Sorting & two_unit_sort).super_delete(warn=False)
+        (SortingSelection & two_unit_sort).super_delete(warn=False)
+        (
+            SorterParameters & {"sorter_params_name": two_unit_params}
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_unitmatch_accepts_committed_merged_child_member(
+    two_session_curated_group,
+):
+    """A committed APPLIED-MERGE child is a valid UnitMatch member.
+
+    Coverage otherwise pins label-only committed children (and rejects
+    previews); this pins the production merged shape: plant a 2-unit sort on
+    member 0's recording, COMMIT a merge into a child, pin it, and assert
+    make_fetch's member plan carries the child's MERGED unit set (one unit), not
+    the two pre-merge ids.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    initialize_v2_defaults()
+    grp = two_session_curated_group
+    two_unit_sort, unit_ids, two_unit_params = (
+        _plant_two_unit_sort_on_first_member(grp)
+    )
+
+    clear_curations_for(two_unit_sort)
+    try:
+        merged0 = CurationV2.create_merged_curation(
+            {"sorting_id": two_unit_sort["sorting_id"]},
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+        )
+        assert CurationV2.is_committed_curation(merged0)
+        merged_choice = {
+            "sorting_id": merged0["sorting_id"],
+            "curation_id": merged0["curation_id"],
+        }
+        expected = [
+            int(u) for u in CurationV2().get_matchable_unit_ids(merged_choice)
+        ]
+        assert len(expected) == 1  # two pre-merge units -> one merged unit
+
+        pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            "unitmatch_default",
+            {0: merged_choice, 1: grp["choices"][1]},
+        )
+        try:
+            fetched = UnitMatch().make_fetch(pk)
+            plan0 = next(
+                p for p in fetched.member_plan if int(p["member_index"]) == 0
+            )
+            assert int(plan0["curation_id"]) == int(merged0["curation_id"])
+            assert plan0["matchable_unit_ids"] == expected
         finally:
             (UnitMatchSelection & pk).super_delete(warn=False)
     finally:

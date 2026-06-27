@@ -856,7 +856,7 @@ def test_evaluation_acceptance_creates_committed_child(
 ):
     """``create_curation(..., merge_groups=accepted)`` makes a COMMITTED child.
 
-    ``replace_labels`` makes a committed labels-only child. Neither leaves
+    ``use_evaluation_labels`` makes a committed labels-only child. Neither leaves
     a preview row with unapplied proposed merges.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -897,7 +897,7 @@ def test_evaluation_acceptance_creates_committed_child(
         assert child_units == {max(unit_ids) + 1}
 
         # Labels-only acceptance -> committed child, full unit set preserved.
-        labeled_child = CurationEvaluation().replace_labels(
+        labeled_child = CurationEvaluation().use_evaluation_labels(
             sel, labels={unit_ids[0]: ["mua"]}
         )
         assert CurationV2.is_committed_curation(labeled_child)
@@ -1014,7 +1014,7 @@ def test_evaluation_child_source_is_curation_evaluation(
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
-        child = CurationEvaluation().replace_labels(sel)
+        child = CurationEvaluation().use_evaluation_labels(sel)
         source = (CurationV2 & child).fetch1("curation_source")
         assert source == "curation_evaluation"
         assert source != "analyzer_curation"
@@ -1098,14 +1098,14 @@ def test_analyzer_curation_table_removed():
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_workflow_evaluate_accept_merge_reevaluate_replace_labels_final_child(
+def test_workflow_evaluate_accept_merge_reevaluate_use_evaluation_labels_final_child(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """Common curation workflow ends on final metrics for the final child.
 
     Evaluate the root, accept an explicit merge with ``create_curation``,
     re-evaluate the committed merged child, accept the final label verdict with
-    ``replace_labels``, then re-evaluate that final child. The label-only final
+    ``use_evaluation_labels``, then re-evaluate that final child. The label-only final
     child has ``merges_applied=False`` but a merged unit namespace, so routing
     must key on the actual curation unit set rather than blindly reusing the raw
     analyzer whenever ``merges_applied`` is false.
@@ -1162,7 +1162,7 @@ def test_workflow_evaluate_accept_merge_reevaluate_replace_labels_final_child(
 
         # Accept labels into a label-only grandchild (merges_applied=False, but
         # its namespace is the MERGED set {merged_id}).
-        final_child = CurationEvaluation().replace_labels(
+        final_child = CurationEvaluation().use_evaluation_labels(
             eval_merged, labels={merged_id: ["mua"]}
         )
         assert CurationV2.is_committed_curation(final_child)
@@ -1194,15 +1194,15 @@ def test_workflow_evaluate_accept_merge_reevaluate_replace_labels_final_child(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_workflow_replace_labels_clears_stale_auto_labels_overlay_preserves_manual_labels(
+def test_label_actions_clear_stale_auto_and_preserve_manual_labels(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """The two label-acceptance actions encode distinct user intent.
 
-    ``replace_labels`` writes the evaluation verdict as the full label state, so
+    ``use_evaluation_labels`` writes the evaluation verdict as the full label state, so
     a prior auto label the new evaluation does not propose is cleared.
-    ``overlay_labels`` preserves the user's current/manual labels and overlays
-    only the evaluation's proposals.
+    ``overlay_evaluation_labels`` preserves the user's current/manual labels
+    and overlays only the evaluation's proposals.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -1232,16 +1232,16 @@ def test_workflow_replace_labels_clears_stale_auto_labels_overlay_preserves_manu
             }
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
-        # replace_labels writes the empty auto verdict, clearing the stale
+        # use_evaluation_labels writes the empty auto verdict, clearing the stale
         # reject -- so the unit is not silently excluded downstream.
-        child = CurationEvaluation().replace_labels(sel)
+        child = CurationEvaluation().use_evaluation_labels(sel)
         child_labels = {
             (int(r["unit_id"]), r["curation_label"])
             for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
         }
         assert child_labels == set(), child_labels
-        # overlay_labels keeps the prior reject.
-        inherited = CurationEvaluation().overlay_labels(sel)
+        # overlay_evaluation_labels keeps the prior reject.
+        inherited = CurationEvaluation().overlay_evaluation_labels(sel)
         inh_labels = {
             (int(r["unit_id"]), r["curation_label"])
             for r in (CurationV2.UnitLabel & inherited).fetch(as_dict=True)
@@ -1284,6 +1284,7 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
                 "auto_curation_rules_name": "none",
             }
         )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
         # A label on unit 0, which the accepted merge absorbs -> dropped; the
         # merged unit is unlabeled (label it by re-evaluating the merged child).
         # unit 0 is absorbed by the merge -> its label warn-drops (not a
@@ -1359,6 +1360,7 @@ def test_acceptance_rejects_caller_singleton_merge_group(
 
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
         CurationEvaluationSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -1377,10 +1379,10 @@ def test_acceptance_rejects_caller_singleton_merge_group(
                 "auto_curation_rules_name": "none",
             }
         )
-        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+        CurationEvaluation.populate(sel, reserve_jobs=False)
 
-        # labels={} so the singleton reaches insert_curation's guard without
-        # needing the evaluation populated (get_labels is skipped).
+        # labels={} so the singleton reaches insert_curation's >=2-member guard
+        # (the evaluation is populated; get_labels is skipped for the merge).
         with pytest.raises(ValueError, match="at least 2 units"):
             CurationEvaluation().create_curation(
                 sel, merge_groups=[[unit_ids[0]]], labels={}
@@ -1400,7 +1402,7 @@ def test_create_preview_curation_requires_a_merge(
     UNAPPLIED merge for review. Called with no merge it would otherwise produce
     a normal committed labels-only child (apply_merge=False, no proposed
     merge), contradicting the "preview/draft" contract -- so it raises and
-    points the caller at replace_labels/overlay_labels.
+    points the caller at use_evaluation_labels/overlay_evaluation_labels.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -1421,9 +1423,254 @@ def test_create_preview_curation_requires_a_merge(
                 "auto_curation_rules_name": "none",
             }
         )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
         # No merge_groups and use_all_suggested_merges defaults False -> raises
         # before creating any child (no committed labels-only fallback).
         with pytest.raises(ValueError, match="needs at least one merge"):
             CurationEvaluation().create_preview_curation(sel)
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_preview_merges_action_drafts_merge_without_fetching_labels(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """``preview_merges`` is the review action and does not apply eval labels."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    def _unexpected_get_labels(cls, key):
+        raise AssertionError("preview_merges should not fetch eval labels")
+
+    monkeypatch.setattr(
+        CurationEvaluation, "get_labels", classmethod(_unexpected_get_labels)
+    )
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+
+        preview = CurationEvaluation().preview_merges(
+            sel, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        assert CurationV2.is_committed_curation(preview) is False
+        assert CurationV2.has_unapplied_proposed_merges(preview) is True
+        assert (CurationV2 & preview).fetch1("curation_source") == (
+            "curation_evaluation"
+        )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_accept_merges_action_commits_without_fetching_labels(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """``accept_merges`` commits selected groups and leaves labels inherited."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    def _unexpected_get_labels(cls, key):
+        raise AssertionError("accept_merges should not fetch eval labels")
+
+    monkeypatch.setattr(
+        CurationEvaluation, "get_labels", classmethod(_unexpected_get_labels)
+    )
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(
+            sorting_key=sorting_key, labels={unit_ids[0]: ["mua"]}
+        )
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+
+        child = CurationEvaluation().accept_merges(
+            sel, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        assert CurationV2.is_committed_curation(child)
+        assert bool((CurationV2 & child).fetch1("merges_applied")) is True
+        assert (CurationV2 & child).fetch1("curation_source") == (
+            "curation_evaluation"
+        )
+        merged_id = max(unit_ids) + 1
+        labels = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
+        }
+        assert labels == {(merged_id, "mua")}
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_accept_all_suggested_merges_action_uses_persisted_suggestions(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """``accept_all_suggested_merges`` is explicit about using suggestions."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    suggestion = [[unit_ids[0], unit_ids[1]]]
+    monkeypatch.setattr(
+        CurationEvaluation,
+        "get_merge_groups",
+        classmethod(lambda cls, key: suggestion),
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+
+        child = CurationEvaluation().accept_all_suggested_merges(sel)
+        assert CurationV2.is_committed_curation(child)
+        assert bool((CurationV2 & child).fetch1("merges_applied")) is True
+        assert set(
+            int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
+        ) == {max(unit_ids) + 1}
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_accept_merge_actions_require_a_real_merge(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """Friendly merge actions raise rather than making labels-only children."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    monkeypatch.setattr(
+        CurationEvaluation,
+        "get_merge_groups",
+        classmethod(lambda cls, key: []),
+    )
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+
+        with pytest.raises(ValueError, match="accept_merges"):
+            CurationEvaluation().accept_merges(sel, merge_groups=[])
+        with pytest.raises(ValueError, match="accept_all_suggested_merges"):
+            CurationEvaluation().accept_all_suggested_merges(sel)
+        with pytest.raises(ValueError, match="preview_merges"):
+            CurationEvaluation().preview_merges(sel)
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_label_action_names_replace_and_overlay(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The intuitive label action names preserve replace/overlay semantics."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(
+            sorting_key=sorting_key, labels={unit_ids[0]: ["reject"]}
+        )
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+
+        replacement = CurationEvaluation().use_evaluation_labels(sel, labels={})
+        replacement_labels = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & replacement).fetch(as_dict=True)
+        }
+        assert replacement_labels == set()
+
+        overlay = CurationEvaluation().overlay_evaluation_labels(sel, labels={})
+        overlay_label_rows = {
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & overlay).fetch(as_dict=True)
+        }
+        assert overlay_label_rows == {(unit_ids[0], "reject")}
     finally:
         clear_curations_for(planted_two_unit_sort)

@@ -1,11 +1,12 @@
 """Pure curation transforms behind ``CurationV2``.
 
-These four functions are the dependency-light core of v2 curation --
-label-value validation, ``UnitLabel``-row validation, parent/supplied label
-composition (inherit vs. replace; union on a committed merge), and the
-post-merge ``CurationV2.Unit`` row construction (merge-group validation,
-``kept_unit_to_contributors`` mapping, and the per-unit row build). They
-are pure Python: given the already-fetched source ``Unit`` rows (raw
+These functions are the dependency-light core of v2 curation --
+label-value validation, ``UnitLabel``-row validation, manual/FigURL payload
+normalization (the v1/v2 spelling shim feeding ``save_manual_curation``),
+parent/supplied label composition (inherit vs. replace; union on a committed
+merge), and the post-merge ``CurationV2.Unit`` row construction (merge-group
+validation, ``kept_unit_to_contributors`` mapping, and the per-unit row build).
+They are pure Python: given the already-fetched source ``Unit`` rows (raw
 ``Sorting.Unit`` for a root, the parent ``CurationV2.Unit`` for a child) and
 the caller's label / merge-group payloads, they decide WHAT to insert without
 touching the database.
@@ -34,7 +35,7 @@ own.)
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from spyglass.spikesorting.v2._enums import CurationLabel
 
@@ -118,6 +119,178 @@ def validate_labels(labels: dict, allow_custom_labels: bool = False) -> None:
                     "allow_custom_labels=True to accept labels outside "
                     "the canonical set."
                 )
+
+
+def _payload_value(payload: Mapping, field_names: tuple[str, ...]):
+    """Return one payload value, rejecting contradictory aliases."""
+    present = [
+        name
+        for name in field_names
+        if name in payload and payload[name] is not None
+    ]
+    if not present:
+        return None
+    value = payload[present[0]]
+    for name in present[1:]:
+        if payload[name] != value:
+            raise ValueError(
+                "Curation payload contains multiple values for the same field "
+                f"({', '.join(present)}); pass only one spelling."
+            )
+    return value
+
+
+def _normalize_payload_labels(labels) -> dict[int, list[str]]:
+    """Normalize transport labels to ``{int unit_id: [label, ...]}``."""
+    if labels is None:
+        return {}
+    if not isinstance(labels, Mapping):
+        raise ValueError(
+            "Curation payload labels must be a mapping of unit_id to a list of "
+            f"labels; got {type(labels).__name__}."
+        )
+
+    normalized: dict[int, list[str]] = {}
+    for unit_id, unit_labels in labels.items():
+        if unit_labels is None:
+            normalized[int(unit_id)] = []
+            continue
+        if isinstance(unit_labels, str) or not isinstance(
+            unit_labels, (list, tuple)
+        ):
+            raise ValueError(
+                "Curation payload labels[unit_id] must be a list of labels; "
+                f"got {type(unit_labels).__name__} for unit_id={unit_id}."
+            )
+        normalized[int(unit_id)] = [
+            CurationLabel.normalize(label) for label in unit_labels
+        ]
+    return normalized
+
+
+def _iter_payload_merge_group(group) -> list[int]:
+    """Normalize one merge group, preserving singleton/empty typo guards."""
+    if isinstance(group, str) or not isinstance(group, Iterable):
+        raise ValueError(
+            "Curation payload merge groups must be lists of unit ids; got "
+            f"{type(group).__name__}."
+        )
+    return [int(unit_id) for unit_id in group]
+
+
+def _union_intersecting(groups: list[set[int]]) -> list[set[int]]:
+    """Union member sets that share any unit (connected components).
+
+    Matches v1's ``_union_intersecting_lists`` so a transitive association
+    chain ``{1: [2], 2: [3]}`` collapses to one group ``{1, 2, 3}`` instead of
+    overlapping ``{1, 2}`` / ``{2, 3}`` that would later double-assign a unit.
+    """
+    remaining = [set(group) for group in groups]
+    result: list[set[int]] = []
+    while remaining:
+        first, *rest = remaining
+        merged = True
+        while merged:
+            merged = False
+            for idx, other in enumerate(rest):
+                if first & other:
+                    first |= other
+                    del rest[idx]
+                    merged = True
+                    break
+        result.append(first)
+        remaining = rest
+    return result
+
+
+def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
+    """Normalize transport merge groups to ``list[list[int]]``.
+
+    Mapping input is the v1/FigURL per-unit association shape
+    ``{unit_id: [other_unit_ids...]}``; it is converted to full groups with
+    INTERSECTING associations unioned (v1 ``_merge_dict_to_list`` parity --
+    ``{1: [2], 2: [3]}`` becomes ``[[1, 2, 3]]``), dropping resulting singletons.
+    List input is preserved verbatim except for integer coercion so singleton or
+    empty groups still reach ``insert_curation``'s typo guard.
+    """
+    if merge_groups is None:
+        return []
+    if isinstance(merge_groups, Mapping):
+        association_sets: list[set[int]] = []
+        for unit_id, associated in merge_groups.items():
+            members = {int(unit_id)}
+            if associated is not None and not (
+                isinstance(associated, str) and associated == ""
+            ):
+                if isinstance(associated, str) or not isinstance(
+                    associated, Iterable
+                ):
+                    associated = [associated]
+                for member in associated:
+                    if member is None or (
+                        isinstance(member, str) and member == ""
+                    ):
+                        continue
+                    members.add(int(member))
+            association_sets.append(members)
+        return [
+            sorted(group)
+            for group in _union_intersecting(association_sets)
+            if len(group) >= 2
+        ]
+
+    if isinstance(merge_groups, str) or not isinstance(merge_groups, Iterable):
+        raise ValueError(
+            "Curation payload merge_groups must be a list of merge groups; got "
+            f"{type(merge_groups).__name__}."
+        )
+    return [_iter_payload_merge_group(group) for group in merge_groups]
+
+
+def normalize_curation_payload(
+    payload: Mapping | None = None,
+    *,
+    labels=None,
+    merge_groups=None,
+) -> tuple[dict[int, list[str]], list[list[int]]]:
+    """Normalize a manual/FigURL/FigPack curation payload.
+
+    Accepts the v1/FigURL JSON spellings (``labelsByUnit`` / ``mergeGroups``)
+    and the v2/Python spellings (``labels_by_unit`` / ``merge_groups``), plus
+    explicit ``labels=`` / ``merge_groups=`` kwargs for already-unpacked
+    payloads. Unit ids are coerced to ``int``; label values are coerced through
+    :class:`CurationLabel`; merge-group shape validation is left to
+    ``CurationV2.insert_curation`` so typos still produce the same errors there.
+    """
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            "Curation payload must be a mapping with labels/merge fields; got "
+            f"{type(payload).__name__}."
+        )
+
+    payload_labels = _payload_value(payload, ("labelsByUnit", "labels_by_unit"))
+    payload_merges = _payload_value(payload, ("mergeGroups", "merge_groups"))
+    if labels is not None and payload_labels is not None:
+        raise ValueError(
+            "Curation payload labels were provided both inside payload and via "
+            "labels=; pass only one source."
+        )
+    if merge_groups is not None and payload_merges is not None:
+        raise ValueError(
+            "Curation payload merge groups were provided both inside payload and "
+            "via merge_groups=; pass only one source."
+        )
+
+    return (
+        _normalize_payload_labels(
+            labels if labels is not None else payload_labels
+        ),
+        _normalize_payload_merge_groups(
+            merge_groups if merge_groups is not None else payload_merges
+        ),
+    )
 
 
 def compose_curation_labels(

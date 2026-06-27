@@ -422,3 +422,48 @@ def test_child_labels_inherit_and_merge(planted_three_unit_sort):
         assert labels_of(replace_child) == {2: {"accept"}}
     finally:
         clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_insert_curation_rejects_preview_parent(planted_two_unit_sort):
+    """A child cannot branch from a PREVIEW parent (anti-laundering).
+
+    A preview (apply_merge=False with an unapplied proposed merge) is a draft;
+    building a child on it would launder the draft into a committed-looking
+    curation and inherit the unapplied merge as raw provenance. insert_curation
+    rejects a preview parent -- commit or discard the draft first. A committed
+    parent (root / label-only / applied-merge) is unaffected.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        preview = CurationV2.propose_merge_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            parent_curation_id=root["curation_id"],
+        )
+        assert not CurationV2.is_committed_curation(preview)
+        with pytest.raises(ValueError, match="preview/draft"):
+            CurationV2.insert_curation(
+                sorting_key=sorting_key,
+                parent_curation_id=preview["curation_id"],
+                labels={unit_ids[0]: ["mua"]},
+            )
+        # Sanity: a committed parent still accepts a child (guard is
+        # preview-only, not "any child").
+        child = CurationV2.insert_curation(
+            sorting_key=sorting_key,
+            parent_curation_id=root["curation_id"],
+            labels={unit_ids[0]: ["mua"]},
+        )
+        assert CurationV2.is_committed_curation(child)
+    finally:
+        clear_curations_for(planted_two_unit_sort)

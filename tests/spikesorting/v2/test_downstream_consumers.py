@@ -565,3 +565,66 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
             }
             if grp:
                 grp.super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_downstream_consumer_reads_applied_merge_unit_set(planted_two_unit_sort):
+    """An APPLIED-MERGE committed child reaches the decoding consumer surfaces
+    with its MERGED unit set (not the pre-merge ids), via SpikeSortingOutput.
+
+    The rest of this module builds ROOT curations; this pins that the committed
+    merged unit set -- the production curation shape -- flows through the
+    merge-dispatch ``get_sorting`` / ``get_spike_times`` path a decoding consumer
+    keys off ``merge_id``.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    assert len(unit_ids) >= 2, "need >=2 units to form a merge"
+
+    def _drop_output_and_curations():
+        # Master-first: drop SpikeSortingOutput rows pointing at this sort's
+        # curations before clearing the curations (the merge master FK-pins them).
+        keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
+        if keys:
+            for mid in (SpikeSortingOutput.CurationV2 & keys).fetch("merge_id"):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+        clear_curations_for(planted_two_unit_sort)
+
+    _drop_output_and_curations()
+    try:
+        merged = CurationV2.create_merged_curation(
+            sorting_key, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        merged_unit_ids = sorted(
+            int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
+        )
+        assert len(merged_unit_ids) == 1, merged_unit_ids  # two merged into one
+        merged_uid = merged_unit_ids[0]
+
+        merge_id = (SpikeSortingOutput.CurationV2 & merged).fetch1("merge_id")
+
+        # get_sorting dispatches on the merge_id and yields the MERGED unit set.
+        sorting = SpikeSortingOutput().get_sorting({"merge_id": merge_id})
+        assert sorted(int(u) for u in sorting.get_unit_ids()) == merged_unit_ids
+
+        # get_spike_times: one per-unit array; its length is the merged unit's
+        # stored n_spikes (the authoritative post-merge, post-dedup count).
+        spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+        assert len(spike_times) == 1
+        n_spikes = int(
+            (CurationV2.Unit & merged & {"unit_id": merged_uid}).fetch1(
+                "n_spikes"
+            )
+        )
+        assert len(spike_times[0]) == n_spikes
+    finally:
+        _drop_output_and_curations()

@@ -271,6 +271,119 @@ def test_merge_wrappers_forward_args(populated_sorting):
 
 
 @pytest.mark.database
+def test_save_manual_curation_label_payload_child(populated_sorting):
+    """``save_manual_curation`` stores FigURL/FigPack label payloads as a child."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ids = _unit_ids(populated_sorting)
+    if not ids:
+        pytest.skip("need >=1 sort unit")
+    a = ids[0]
+    clear_curations_for(populated_sorting)
+    root = CurationV2.create_initial_curation(populated_sorting)
+
+    child = CurationV2.save_manual_curation(
+        populated_sorting,
+        parent_curation_id=root["curation_id"],
+        payload={"labelsByUnit": {str(a): ["mua"]}},
+        curation_source="figpack",
+    )
+
+    assert child["curation_id"] != root["curation_id"]
+    assert CurationV2.is_committed_curation(child)
+    assert (CurationV2 & child).fetch1("curation_source") == "figpack"
+    labels = {
+        (int(r["unit_id"]), r["curation_label"])
+        for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
+    }
+    assert labels == {(a, "mua")}
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_save_manual_curation_preview_merge_payload(polymer_60s_sort):
+    """``merge_action='preview'`` records a draft merge without applying it."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    clear_curations_for(polymer_60s_sort)
+    root = CurationV2.create_initial_curation(polymer_60s_sort)
+
+    preview = CurationV2.save_manual_curation(
+        polymer_60s_sort,
+        parent_curation_id=root["curation_id"],
+        payload={"mergeGroups": [[str(a), str(b)]]},
+        merge_action="preview",
+        curation_source="figpack",
+    )
+
+    assert CurationV2.is_committed_curation(preview) is False
+    assert CurationV2.has_unapplied_proposed_merges(preview) is True
+    assert bool((CurationV2 & preview).fetch1("merges_applied")) is False
+    assert (CurationV2 & preview).fetch1("curation_source") == "figpack"
+    units_after = {int(u) for u in (CurationV2.Unit & preview).fetch("unit_id")}
+    assert {a, b} <= units_after
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_save_manual_curation_commit_merge_inherits_parent_labels(
+    polymer_60s_sort,
+):
+    """Committed manual/FigPack merges inherit labels from contributors."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    unit_ids = _unit_ids(polymer_60s_sort)
+    merged_id = max(unit_ids) + 1
+    clear_curations_for(polymer_60s_sort)
+    root = CurationV2.create_initial_curation(
+        polymer_60s_sort, labels={a: ["mua"], b: ["noise"]}
+    )
+
+    child = CurationV2.save_manual_curation(
+        polymer_60s_sort,
+        parent_curation_id=root["curation_id"],
+        merge_groups=[[a, b]],
+        merge_action="commit",
+        curation_source="figpack",
+    )
+
+    assert CurationV2.is_committed_curation(child)
+    assert bool((CurationV2 & child).fetch1("merges_applied")) is True
+    assert (CurationV2 & child).fetch1("curation_source") == "figpack"
+    assert len(CurationV2.Unit & child) == len(unit_ids) - 1
+    labels = {
+        (int(r["unit_id"]), r["curation_label"])
+        for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
+    }
+    assert (merged_id, "mua") in labels
+    assert (merged_id, "noise") in labels
+
+
+@pytest.mark.database
+def test_save_manual_curation_rejects_root_reuse_with_payload(
+    populated_sorting,
+):
+    """Root reuse would ignore a manual payload, so require an explicit parent."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ids = _unit_ids(populated_sorting)
+    if not ids:
+        pytest.skip("need >=1 sort unit")
+    clear_curations_for(populated_sorting)
+    CurationV2.create_initial_curation(populated_sorting)
+
+    with pytest.raises(ValueError, match="reuse_existing=True"):
+        CurationV2.save_manual_curation(
+            populated_sorting,
+            payload={"labelsByUnit": {str(ids[0]): ["mua"]}},
+            curation_source="figpack",
+            reuse_existing=True,
+        )
+
+
+@pytest.mark.database
 @pytest.mark.slow
 def test_propose_merge_off_existing_initial_curation(polymer_60s_sort):
     """A merge proposal branches off an initial curation (DAG child)."""
@@ -400,3 +513,75 @@ def test_summarize_curation_pk_guard_runs_before_schema_access(
     )
     with pytest.raises(ValueError, match="sorting_id"):
         CurationV2.summarize_curation(partial_key)
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_merge_wrappers_forward_allow_custom_labels(planted_two_unit_sort):
+    """The merge wrappers forward allow_custom_labels, so a child inheriting a
+    custom (non-canonical) parent label does not fail the child insert.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        # A root carrying a CUSTOM label on unit 0 (needs the flag here too).
+        root = CurationV2.create_initial_curation(
+            sorting_key,
+            labels={unit_ids[0]: ["my_custom"]},
+            allow_custom_labels=True,
+        )
+        # Merging [0, 1] inherits unit 0's custom label onto the merged unit;
+        # without forwarding the flag the child insert re-rejects it.
+        with pytest.raises(ValueError, match="not in CurationLabel"):
+            CurationV2.create_merged_curation(
+                sorting_key,
+                merge_groups=[[unit_ids[0], unit_ids[1]]],
+                parent_curation_id=root["curation_id"],
+            )
+        merged = CurationV2.create_merged_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            parent_curation_id=root["curation_id"],
+            allow_custom_labels=True,
+        )
+        merged_labels = {
+            r["curation_label"]
+            for r in (CurationV2.UnitLabel & merged).fetch(as_dict=True)
+        }
+        assert "my_custom" in merged_labels
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_insert_curation_dedupes_repeated_labels(planted_two_unit_sort):
+    """A label repeated in the payload yields a single UnitLabel row, not a
+    duplicate (unit_id, curation_label) primary-key insert error.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(
+            sorting_key=sorting_key,
+            labels={unit_ids[0]: ["mua", "mua", "noise"]},
+        )
+        rows = sorted(
+            (int(r["unit_id"]), r["curation_label"])
+            for r in (CurationV2.UnitLabel & root).fetch(as_dict=True)
+        )
+        assert rows == [(unit_ids[0], "mua"), (unit_ids[0], "noise")]
+    finally:
+        clear_curations_for(planted_two_unit_sort)

@@ -26,6 +26,7 @@ import datajoint as dj
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._curation_transforms import (
+    normalize_curation_payload,
     validate_curation_label_rows,
     validate_labels,
 )
@@ -714,18 +715,38 @@ class CurationV2(SpyglassMixin, dj.Manual):
         without ``reuse_existing=True``.
         """
         if parent_curation_id != -1:
-            if not (
-                cls
-                & {
-                    "sorting_id": sorting_id,
-                    "curation_id": parent_curation_id,
-                }
-            ):
+            parent_key = {
+                "sorting_id": sorting_id,
+                "curation_id": parent_curation_id,
+            }
+            if not (cls & parent_key):
                 raise ValueError(
                     f"CurationV2.insert_curation: parent_curation_id="
                     f"{parent_curation_id} does not exist for sorting_id="
                     f"{sorting_id}. Pass parent_curation_id=-1 for a "
                     "root curation."
+                )
+            # Reject building on a PREVIEW/draft parent. A preview
+            # (apply_merge=False with an unapplied proposed merge) is not a
+            # committed state: a child of it would get self-only
+            # ParentMergeGroup rows -- so get_merge_groups /
+            # has_unapplied_proposed_merges would read the child as committed --
+            # AND its raw MergeGroup would inherit the parent's UNAPPLIED
+            # proposed merge as though it had been applied. Either way the
+            # draft is silently laundered into a committed-looking curation.
+            # Commit the draft (create_merged_curation /
+            # insert_curation(apply_merge=True) on the proposed groups) or
+            # discard it, then branch from the committed curation.
+            if not cls.is_committed_curation(parent_key):
+                raise ValueError(
+                    f"CurationV2.insert_curation: parent_curation_id="
+                    f"{parent_curation_id} (sorting_id={sorting_id}) is a "
+                    "preview/draft curation (apply_merge=False with an "
+                    "unapplied proposed merge); a child cannot branch from a "
+                    "preview. Commit the proposed merge first "
+                    "(create_merged_curation / insert_curation(apply_merge="
+                    "True)) or discard the preview, then branch from the "
+                    "committed curation."
                 )
         else:
             # Idempotency: if a root curation already exists for this
@@ -1084,17 +1105,27 @@ class CurationV2(SpyglassMixin, dj.Manual):
         # apply_merge=True it is the kept set, so a label on an
         # absorbed contributor is dropped with the unit.
         written_unit_ids = {row["unit_id"] for row in unit_rows}
-        unit_label_rows = [
-            {
-                "sorting_id": sorting_id,
-                "curation_id": curation_id,
-                "unit_id": unit_id,
-                "curation_label": CurationLabel.normalize(label),
-            }
-            for unit_id, lbls in labels.items()
-            if unit_id in written_unit_ids
-            for label in lbls
-        ]
+        # Dedupe (unit_id, label): a label repeated in the payload (or unioned
+        # in from a merge) would otherwise emit a duplicate UnitLabel row and
+        # fail the part's (unit_id, curation_label) primary key.
+        unit_label_rows = []
+        seen_unit_labels: set[tuple[int, str]] = set()
+        for unit_id, lbls in labels.items():
+            if unit_id not in written_unit_ids:
+                continue
+            for label in lbls:
+                normalized = CurationLabel.normalize(label)
+                if (unit_id, normalized) in seen_unit_labels:
+                    continue
+                seen_unit_labels.add((unit_id, normalized))
+                unit_label_rows.append(
+                    {
+                        "sorting_id": sorting_id,
+                        "curation_id": curation_id,
+                        "unit_id": unit_id,
+                        "curation_label": normalized,
+                    }
+                )
         # Auto-register into SpikeSortingOutput.CurationV2 so
         # downstream consumers (SortedSpikesGroup, decoding, etc.)
         # see the curation without the user having to call the
@@ -1191,6 +1222,8 @@ class CurationV2(SpyglassMixin, dj.Manual):
         sorting_key: dict,
         labels: dict | None = None,
         description: str = "",
+        *,
+        allow_custom_labels: bool = False,
     ) -> dict:
         """Create the initial curation (no merges) over a sort.
 
@@ -1208,6 +1241,9 @@ class CurationV2(SpyglassMixin, dj.Manual):
             ``insert_curation``).
         description
             Free-text description.
+        allow_custom_labels
+            Forwarded to ``insert_curation`` to accept labels outside the
+            canonical ``CurationLabel`` set.
 
         Returns
         -------
@@ -1223,6 +1259,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             labels=labels,
             parent_curation_id=-1,
             description=description,
+            allow_custom_labels=allow_custom_labels,
         )
 
     @staticmethod
@@ -1252,6 +1289,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         description: str = "",
         reuse_existing: bool = False,
         label_policy: str = "inherit",
+        allow_custom_labels: bool = False,
     ) -> dict:
         """Record proposed merges WITHOUT applying them (reviewable).
 
@@ -1306,6 +1344,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
             description=description,
             reuse_existing=reuse_existing,
             label_policy=label_policy,
+            allow_custom_labels=allow_custom_labels,
         )
 
     @classmethod
@@ -1318,6 +1357,7 @@ class CurationV2(SpyglassMixin, dj.Manual):
         description: str = "",
         reuse_existing: bool = False,
         label_policy: str = "inherit",
+        allow_custom_labels: bool = False,
     ) -> dict:
         """Create a new curation with merges applied (committed unit set).
 
@@ -1371,6 +1411,79 @@ class CurationV2(SpyglassMixin, dj.Manual):
             parent_curation_id=parent_curation_id,
             description=description,
             reuse_existing=reuse_existing,
+            label_policy=label_policy,
+            allow_custom_labels=allow_custom_labels,
+        )
+
+    @classmethod
+    def save_manual_curation(
+        cls,
+        sorting_key: dict,
+        *,
+        parent_curation_id: int = -1,
+        payload: dict | None = None,
+        labels: dict | None = None,
+        merge_groups: list[list[int]] | dict | None = None,
+        merge_action: str = "preview",
+        curation_source: str | CurationSource = "manual",
+        description: str = "manual curation",
+        reuse_existing: bool = False,
+        permissive_labels: bool = False,
+        allow_custom_labels: bool = False,
+        label_policy: str = "inherit",
+    ) -> dict:
+        """Save a manual/FigPack-style curation payload as the next curation.
+
+        This is the FigURL-compatible, payload-oriented public API: callers may
+        pass a v1-shaped payload (``labelsByUnit`` / ``mergeGroups``), a
+        v2-shaped payload (``labels_by_unit`` / ``merge_groups``), or already
+        unpacked ``labels=`` and ``merge_groups=``. ``merge_action`` makes the
+        review/commit choice explicit:
+
+        * ``"preview"`` / ``"propose"`` / ``"draft"`` stores merge groups as
+          unapplied proposals for review.
+        * ``"commit"`` / ``"apply"`` applies non-empty merge groups into the
+          child curation's unit set.
+        * with no merge groups, the result is a normal committed label-edit
+          child regardless of ``merge_action``.
+
+        Manual UI edits inherit parent labels by default because the user is
+        editing the visible parent curation state; pass ``label_policy="replace"``
+        when the payload is intended to be the full label state.
+        """
+        labels, merge_groups = normalize_curation_payload(
+            payload, labels=labels, merge_groups=merge_groups
+        )
+        action = str(merge_action).lower()
+        if action in ("preview", "propose", "draft"):
+            apply_merge = False
+        elif action in ("commit", "apply"):
+            apply_merge = bool(merge_groups)
+        else:
+            raise ValueError(
+                "CurationV2.save_manual_curation: merge_action must be "
+                "'preview' or 'commit' (aliases: 'propose'/'draft', 'apply'); "
+                f"got {merge_action!r}."
+            )
+
+        if reuse_existing and parent_curation_id == -1:
+            raise ValueError(
+                "CurationV2.save_manual_curation(reuse_existing=True) requires "
+                "an explicit parent_curation_id; root reuse would return the "
+                "existing root row and ignore the manual payload."
+            )
+
+        return cls.insert_curation(
+            sorting_key=sorting_key,
+            labels=labels or None,
+            merge_groups=merge_groups or None,
+            apply_merge=apply_merge,
+            parent_curation_id=parent_curation_id,
+            description=description,
+            curation_source=curation_source,
+            reuse_existing=reuse_existing,
+            permissive_labels=permissive_labels,
+            allow_custom_labels=allow_custom_labels,
             label_policy=label_policy,
         )
 
@@ -1788,20 +1901,18 @@ class CurationV2(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         key : dict
-            Restriction selecting a single ``CurationV2`` row; must include
-            ``sorting_id`` (used to read the raw ``Sorting.Unit`` set).
+            Restriction selecting a single ``CurationV2`` row.
 
         Returns
         -------
         bool
             ``True`` iff the curation unit set equals the raw sort's unit set.
         """
+        sorting_id = (cls & key).fetch1("sorting_id")
         curation_units = {int(u) for u in (cls.Unit & key).fetch("unit_id")}
         raw_units = {
             int(u)
-            for u in (
-                Sorting.Unit & {"sorting_id": key["sorting_id"]}
-            ).fetch("unit_id")
+            for u in (Sorting.Unit & {"sorting_id": sorting_id}).fetch("unit_id")
         }
         return curation_units == raw_units
 

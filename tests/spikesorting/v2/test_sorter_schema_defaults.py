@@ -81,16 +81,19 @@ def test_common_reference_params_operator_knob():
 
 
 def test_curation_source_enum_members():
-    """``CurationSource`` carries ``manual`` / ``analyzer_curation`` /
-    ``figpack`` (the set ``insert_curation`` coerces against).
+    """``CurationSource`` carries all insert-time provenance values.
 
-    Today only ``manual`` is exercised end-to-end; pinning the other two
-    members guards against a refactor dropping them (which would make a valid
-    curation_source raise at the insert boundary).
+    Pinning these members guards against a refactor dropping them, which would
+    make a valid curation_source raise at the insert boundary.
     """
     from spyglass.spikesorting.v2.utils import CurationSource
 
-    for value in ("manual", "analyzer_curation", "figpack"):
+    for value in (
+        "manual",
+        "analyzer_curation",
+        "figpack",
+        "curation_evaluation",
+    ):
         assert CurationSource(value).value == value
     with pytest.raises(ValueError):
         CurationSource("not_a_member")

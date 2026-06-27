@@ -22,6 +22,9 @@ from spyglass.spikesorting.v2._curation_plan import (
     build_curation_summary,
     validate_label_unit_ids,
 )
+from spyglass.spikesorting.v2._curation_transforms import (
+    normalize_curation_payload,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -36,6 +39,85 @@ def _unit(uid, amp=10.0, n=100, eid=0):
         "peak_amplitude_uv": amp,
         "n_spikes": n,
     }
+
+
+# ---------- normalize_curation_payload (FigURL/FigPack transport) ----------
+
+
+def test_normalize_curation_payload_accepts_figurl_spellings():
+    """The manual/FigURL-shaped payload normalizes to v2 insert inputs."""
+    labels, merge_groups = normalize_curation_payload(
+        {
+            "labelsByUnit": {"1": ["noise", "reject"], "2": []},
+            "mergeGroups": [["1", 3], [4, "5"]],
+        }
+    )
+    assert labels == {1: ["noise", "reject"], 2: []}
+    assert merge_groups == [[1, 3], [4, 5]]
+
+
+def test_normalize_curation_payload_accepts_python_spellings_and_kwargs():
+    """Snake-case payload keys and explicit kwargs share one normalizer."""
+    labels, merge_groups = normalize_curation_payload(
+        {"labels_by_unit": {"1": ["mua"]}, "merge_groups": [["1", "2"]]}
+    )
+    assert labels == {1: ["mua"]}
+    assert merge_groups == [[1, 2]]
+
+    labels, merge_groups = normalize_curation_payload(
+        labels={3: ["accept"]}, merge_groups=[[3, 4]]
+    )
+    assert labels == {3: ["accept"]}
+    assert merge_groups == [[3, 4]]
+
+
+def test_normalize_curation_payload_accepts_association_merge_map():
+    """The old per-unit association map deduplicates to full merge groups."""
+    _labels, merge_groups = normalize_curation_payload(
+        {"mergeGroups": {"1": ["2"], "2": ["1"], "3": []}}
+    )
+    assert merge_groups == [[1, 2]]
+
+
+def test_normalize_curation_payload_unions_intersecting_associations():
+    """A transitive association chain collapses to ONE group (v1 parity).
+
+    v1's ``_merge_dict_to_list`` unions intersecting associations, so
+    ``{1: [2], 2: [3]}`` is one group ``[1, 2, 3]`` -- not overlapping
+    ``[1, 2]`` / ``[2, 3]`` that would later double-assign unit 2 and fail.
+    Disjoint chains stay separate; pure singletons drop.
+    """
+    _labels, chain = normalize_curation_payload(
+        {"mergeGroups": {"1": ["2"], "2": ["3"]}}
+    )
+    assert chain == [[1, 2, 3]]
+
+    _labels, disjoint = normalize_curation_payload(
+        merge_groups={1: [2], 4: [5]}
+    )
+    assert sorted(disjoint) == [[1, 2], [4, 5]]
+
+    _labels, singletons = normalize_curation_payload(
+        merge_groups={1: [], 2: []}
+    )
+    assert singletons == []
+
+
+def test_normalize_curation_payload_rejects_duplicate_sources():
+    """Payload and kwarg sources cannot both set the same semantic field."""
+    with pytest.raises(ValueError, match="both inside payload and via labels"):
+        normalize_curation_payload({"labelsByUnit": {"1": ["mua"]}}, labels={})
+
+    with pytest.raises(
+        ValueError, match="both inside payload and via merge_groups"
+    ):
+        normalize_curation_payload({"mergeGroups": [[1, 2]]}, merge_groups=[])
+
+
+def test_normalize_curation_payload_rejects_scalar_label_value():
+    """A string label must be wrapped in a list; do not split characters."""
+    with pytest.raises(ValueError, match="must be a list of labels"):
+        normalize_curation_payload({"labelsByUnit": {"1": "noise"}})
 
 
 # ---------- validate_label_unit_ids (stray-label matrix) -------------------

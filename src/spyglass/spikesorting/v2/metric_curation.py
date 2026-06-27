@@ -7,7 +7,8 @@ merges, and propose auto-curation labels in the curation's OWN unit namespace
 (a merged unit is scored over its merged spike train, never inherited from the
 highest-amplitude contributor). The proposed labels/merges are written to NWB;
 turning them into a committed child ``CurationV2`` row is an explicit user
-action (``CurationEvaluation.create_curation`` / ``replace_labels``).
+action (``CurationEvaluation.create_curation`` /
+``use_evaluation_labels``).
 
 Tables
 ------
@@ -919,9 +920,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     inherited from the highest-amplitude contributor. Outputs (metrics, proposed
     labels, merge suggestions) are written to three NWB scratch tables and are
     PROPOSALS; the acceptance helpers (``create_curation`` /
-    ``replace_labels`` / ``overlay_labels`` / ``create_preview_curation``)
-    commit them into a
-    child ``CurationV2`` row.
+    ``use_evaluation_labels`` / ``overlay_evaluation_labels`` /
+    ``create_preview_curation``) commit them into a child ``CurationV2`` row.
 
     Routing: a committed root / label-only curation (unit set unchanged from the
     raw sort) reuses the cached raw-sort analyzers (the fast path); a committed
@@ -1488,7 +1488,25 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     # ---- acceptance helpers (evaluation outputs -> committed curation) ----
 
     def _evaluated_curation_key(self, key) -> dict:
-        """Resolve a CurationEvaluation key to its evaluated curation key."""
+        """Resolve a CurationEvaluation key to its evaluated curation key.
+
+        Requires the ``CurationEvaluation`` row to be POPULATED, not merely
+        selected. Acceptance writes ``curation_source='curation_evaluation'``
+        children, so the workflow contract is "evaluate, THEN accept": minting
+        an evaluation-sourced child from a bare selection (no computed
+        metrics/proposals) would be a provenance lie. The check holds even when
+        labels / merge groups are supplied explicitly -- the provenance tag
+        claims an evaluation backs the child regardless of how the merges/labels
+        were chosen.
+        """
+        if not (CurationEvaluation & key):
+            raise ValueError(
+                "CurationEvaluation acceptance requires a POPULATED evaluation "
+                f"(curation_source='curation_evaluation'); no CurationEvaluation "
+                f"row for {dict(key)}. Call CurationEvaluation.populate(key) "
+                "before accepting (create_curation / accept_merges / "
+                "preview_merges / use_evaluation_labels / ...)."
+            )
         sel = (CurationEvaluationSelection & key).fetch1()
         return {
             "sorting_id": sel["sorting_id"],
@@ -1619,7 +1637,124 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             reuse_existing=reuse_existing,
         )
 
-    def replace_labels(
+    def _require_merge_acceptance(
+        self,
+        key,
+        merge_groups,
+        use_all_suggested_merges: bool,
+        *,
+        action_name: str,
+    ) -> list[list[int]]:
+        """Resolve merge groups for an action method and require a real merge."""
+        accepted = self._resolve_accepted_merges(
+            key, merge_groups, use_all_suggested_merges
+        )
+        if not accepted:
+            raise ValueError(
+                f"CurationEvaluation.{action_name} needs at least one merge "
+                "group. Pass merge_groups=[[...]] or use a selection with "
+                "persisted merge suggestions."
+            )
+        return accepted
+
+    def preview_merges(
+        self,
+        key,
+        *,
+        merge_groups=None,
+        use_all_suggested_merges: bool = False,
+        labels: dict | None = None,
+        description: str = "draft merge(s) from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Draft selected merge suggestions without committing the merge.
+
+        Action-oriented alias for the review-before-commit workflow. By default
+        it drafts only merges and inherits the evaluated curation's labels; it
+        does not apply pre-merge evaluation labels to the draft.
+        """
+        accepted = self._require_merge_acceptance(
+            key,
+            merge_groups,
+            use_all_suggested_merges,
+            action_name="preview_merges",
+        )
+        return self.create_preview_curation(
+            key,
+            merge_groups=accepted,
+            use_all_suggested_merges=False,
+            labels={} if labels is None else labels,
+            label_policy="inherit",
+            description=description,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def accept_merges(
+        self,
+        key,
+        *,
+        merge_groups,
+        description: str = "accepted merge(s) from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Commit selected merge groups into a child curation.
+
+        This is the recommended merge-acceptance action: it commits the merged
+        unit set and inherits existing labels, but deliberately does NOT apply
+        pre-merge evaluation labels. Re-evaluate the merged child, then call
+        :meth:`use_evaluation_labels` or :meth:`overlay_evaluation_labels`.
+        ``allow_custom_labels`` is forwarded so an inherited custom (non-canonical)
+        parent label does not fail the child insert.
+        """
+        accepted = self._require_merge_acceptance(
+            key,
+            merge_groups,
+            False,
+            action_name="accept_merges",
+        )
+        return self.create_curation(
+            key,
+            merge_groups=accepted,
+            labels={},
+            label_policy="inherit",
+            description=description,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def accept_all_suggested_merges(
+        self,
+        key,
+        *,
+        description: str = "accepted all suggested merges from curation evaluation",
+        allow_custom_labels: bool = False,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Commit every persisted >=2-unit merge suggestion from this evaluation.
+
+        Inherits existing labels (``allow_custom_labels`` forwarded so an
+        inherited custom parent label does not fail the child insert).
+        """
+        accepted = self._require_merge_acceptance(
+            key,
+            None,
+            True,
+            action_name="accept_all_suggested_merges",
+        )
+        return self.create_curation(
+            key,
+            merge_groups=accepted,
+            labels={},
+            label_policy="inherit",
+            description=description,
+            allow_custom_labels=allow_custom_labels,
+            reuse_existing=reuse_existing,
+        )
+
+    def use_evaluation_labels(
         self,
         key,
         *,
@@ -1628,7 +1763,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
     ) -> dict:
-        """Accept the evaluation verdict: make the child's labels EQUAL it.
+        """Use the evaluation verdict as the child's full label state.
 
         The authoritative "use this evaluation's labels" path (label-only, no
         merges) -- the child's labels are exactly ``labels`` (defaulting to the
@@ -1636,8 +1771,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         not propose. A unit no longer flagged loses a stale ``reject`` /
         ``noise`` (v1 "final auto-curation writes the full label state"), so it
         is not silently dropped from the matchable-unit set. This is the default
-        final-metrics path; use :meth:`overlay_labels` to instead keep the
-        current labels. (UI: "Use Evaluation Labels".)
+        final-metrics path; use :meth:`overlay_evaluation_labels` to instead
+        keep the current labels.
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
@@ -1652,7 +1787,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             reuse_existing=reuse_existing,
         )
 
-    def overlay_labels(
+    def overlay_evaluation_labels(
         self,
         key,
         *,
@@ -1665,11 +1800,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         The manual-curation path (label-only, no merges): KEEP the evaluated
         curation's existing labels and add/override only the proposed ones.
-        Deliberately a different method from :meth:`replace_labels` so the
-        "keep my labels" choice is visible at the call site rather than a quiet
-        flag -- overlaying can retain prior auto labels, which
-        :meth:`replace_labels` (the default verdict path) clears.
-        (UI: "Overlay Evaluation Labels".)
+        Deliberately a different method from :meth:`use_evaluation_labels` so
+        the "keep my labels" choice is visible at the call site rather than a
+        quiet flag -- overlaying can retain prior auto labels, which
+        :meth:`use_evaluation_labels` (the default verdict path) clears.
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
@@ -1709,7 +1843,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         the latter must resolve at least one merge). With no merge this would
         otherwise produce a normal committed labels-only child, contradicting
         the "preview/draft" contract -- so it raises instead. For a committed
-        labels-only child use :meth:`replace_labels` / :meth:`overlay_labels`.
+        labels-only child use :meth:`use_evaluation_labels` /
+        :meth:`overlay_evaluation_labels`.
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
@@ -1723,7 +1858,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "review, so it needs at least one merge: pass "
                 "merge_groups=[[...]] or use_all_suggested_merges=True (with "
                 "proposed merges present). For a committed labels-only child, "
-                "use replace_labels() or overlay_labels() instead."
+                "call use_evaluation_labels() or overlay_evaluation_labels() "
+                "instead."
             )
         effective_labels = self.get_labels(key) if labels is None else labels
         return CurationV2.insert_curation(

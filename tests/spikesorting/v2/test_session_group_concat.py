@@ -896,8 +896,9 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     Exercises the source-aware concat branch of ``make_fetch`` (it resolves the
     recording through ``ConcatenatedRecording.get_recording``, not a per-member
     ``Recording``) and the DB-free concat reconstruction in ``make_compute``;
-    then accepts labels with ``replace_labels`` and re-evaluates the accepted
-    child to prove the normal curation workflow works for concat-backed sorts.
+    then accepts labels with ``use_evaluation_labels`` and re-evaluates the
+    accepted child to prove the normal curation workflow works for concat-backed
+    sorts.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -940,7 +941,7 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     }
     assert set(metrics.index) == expected
 
-    child = CurationEvaluation().replace_labels(sel)
+    child = CurationEvaluation().use_evaluation_labels(sel)
     assert CurationV2.is_committed_curation(child)
     assert (CurationV2 & child).fetch1("curation_source") == (
         "curation_evaluation"
@@ -1257,3 +1258,151 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
         assert total_s < 600, f"runtime {total_s:.0f} s exceeds 10 min"
     finally:
         clean_session_groups_for_owner(owner)
+
+
+@pytest.mark.slow
+def test_concat_applied_merge_through_downstream_and_evaluation(
+    same_day_group, curation_evaluation_defaults
+):
+    """A committed APPLIED-MERGE on a CONCAT-backed sort flows through
+    ``CurationV2.get_sorting``, ``SpikeSortingOutput.get_spike_times``, and
+    ``CurationEvaluation`` carrying its MERGED unit set.
+
+    Pins concat reconstruction + merged namespace together (the prior concern):
+    the concat clusterless sort's unit count is data-dependent, so plant a
+    deterministic 2-unit sort on the concat recording to host a real merge.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from tests.spikesorting.v2._smoke_constants import SMOKE_CLUSTERLESS_PARAMS
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    two_unit_params = "minirec_concat_two_unit_merge"
+    SorterParameters.insert1(
+        {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": two_unit_params,
+            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+        },
+        skip_duplicates=True,
+        allow_duplicate_params=True,
+    )
+
+    def _plant(
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
+    ):
+        samples = np.array([500, 1000, 1500, 600, 1100, 1600], dtype=np.int64)
+        labels = np.array([0, 0, 0, 1, 1, 1], dtype=np.int32)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[labels],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "concat_recording_id": concat_pk["concat_recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": two_unit_params,
+        }
+    )
+    sorting_key = {"sorting_id": sort_pk["sorting_id"]}
+
+    def _drop_output_and_curations():
+        keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
+        if keys:
+            for mid in (SpikeSortingOutput.CurationV2 & keys).fetch("merge_id"):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+        (CurationV2 & sorting_key).super_delete(warn=False)
+
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(Sorting, "_run_sorter", staticmethod(_plant))
+        if not (Sorting & sort_pk):
+            Sorting.populate(sort_pk, reserve_jobs=False)
+    finally:
+        mp.undo()
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
+    )
+    assert len(unit_ids) >= 2, "planted concat sort must yield >=2 units"
+
+    _drop_output_and_curations()
+    try:
+        merged = CurationV2.create_merged_curation(
+            sorting_key, merge_groups=[[unit_ids[0], unit_ids[1]]]
+        )
+        merged_units = sorted(
+            int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
+        )
+        assert len(merged_units) == 1, merged_units
+        merged_uid = merged_units[0]
+        n_spikes = int(
+            (CurationV2.Unit & merged & {"unit_id": merged_uid}).fetch1(
+                "n_spikes"
+            )
+        )
+
+        # CurationV2.get_sorting on the concat merged curation: the merged
+        # namespace (one unit), train = union of the two contributors.
+        sorting = CurationV2().get_sorting(merged)
+        assert sorted(int(u) for u in sorting.get_unit_ids()) == merged_units
+        raw = Sorting().get_sorting(sorting_key)
+        expected_n = sum(
+            len(raw.get_unit_spike_train(unit_id=u)) for u in unit_ids
+        )
+        assert n_spikes == expected_n
+        assert (
+            len(sorting.get_unit_spike_train(unit_id=merged_uid)) == expected_n
+        )
+
+        # SpikeSortingOutput downstream consumer dispatches on merge_id.
+        merge_id = (SpikeSortingOutput.CurationV2 & merged).fetch1("merge_id")
+        spike_times = SpikeSortingOutput().get_spike_times(
+            {"merge_id": merge_id}
+        )
+        assert len(spike_times) == 1
+        assert len(spike_times[0]) == n_spikes
+
+        # CurationEvaluation over the MERGED CONCAT curation exercises the concat
+        # reconstruction + merged-namespace analyzer together; metrics index the
+        # merged unit.
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **merged,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(sel, reserve_jobs=False)
+        assert set(CurationEvaluation.get_metrics(sel).index) == set(
+            merged_units
+        )
+    finally:
+        _drop_output_and_curations()
+        (Sorting & sort_pk).super_delete(warn=False)
+        (SortingSelection & sort_pk).super_delete(warn=False)
+        (
+            SorterParameters & {"sorter_params_name": two_unit_params}
+        ).super_delete(warn=False)
