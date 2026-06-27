@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -824,6 +825,70 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
         if override:
             merged.update(override)
     return merged
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_ambient_seed_once(seed: int) -> None:
+    """Emit the ambient-seed warning at most once per distinct seed value.
+
+    Deduped per ``seed`` value so a repeated populate (or several sort groups
+    sharing one ambient seed) does not spam the log, while a genuinely new
+    ambient seed is still surfaced. ``cache_clear()`` resets the dedup (used by
+    the unit tests).
+    """
+    from spyglass.utils import logger
+
+    logger.warning(
+        "spikesorting v2: random_seed=%s is supplied via the ambient "
+        "SI-global / dj.config['custom']['spikesorting_v2_job_kwargs'] layer, "
+        "not a per-row job_kwargs blob. It is used and recorded as the "
+        "effective seed, but an ambient seed is process-global rather than "
+        "pinned to a parameter row, so the run is harder to reproduce. Prefer "
+        "setting random_seed in the per-row job_kwargs.",
+        seed,
+    )
+
+
+def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
+    """Return the ``random_seed`` actually used by a v2 compute stage.
+
+    Resolves the seed through the same precedence the dispatch reads --
+    SpikeInterface globals, then ``dj.config['custom']['spikesorting_v2_job_kwargs']``,
+    then the per-row ``job_kwargs`` blob(s) -- so the value stored on a computed
+    row equals the value the sorter / analyzer consumed. The resolution bottoms
+    out on :func:`_resolved_job_kwargs`, the exact merge the seed sites read, so
+    the stored seed cannot drift from the used seed. Defaults to ``0``.
+
+    Emits a one-time warning (per distinct seed value) when a ``random_seed``
+    arrives via the ambient SI-global / ``dj.config`` layer rather than a
+    per-row blob -- a process-global ambient seed already takes effect, but it
+    is not pinned to a parameter row, so surfacing it keeps a non-reproducible
+    ambient seed visible rather than silent.
+
+    Parameters
+    ----------
+    *row_job_kwargs : dict or None
+        The per-row ``job_kwargs`` blob(s) governing this stage, in increasing
+        precedence order (a later argument wins). ``None`` / empty entries are
+        skipped, matching :func:`_resolved_job_kwargs`.
+
+    Returns
+    -------
+    int
+        The resolved effective random seed (``0`` when unset).
+    """
+    effective = int(_resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0))
+    per_row_has_seed = any(
+        isinstance(blob, Mapping) and "random_seed" in blob
+        for blob in row_job_kwargs
+    )
+    if not per_row_has_seed:
+        custom = dj.config.get("custom", {}) or {}
+        ambient = dict(si.get_global_job_kwargs())
+        ambient.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
+        if "random_seed" in ambient:
+            _warn_ambient_seed_once(int(ambient["random_seed"]))
+    return effective
 
 
 def get_spiking_sorting_v2_merge_ids(
