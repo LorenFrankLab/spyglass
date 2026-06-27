@@ -84,6 +84,24 @@ def sorter_distribution_version(sorter: str) -> str | None:
         return None
 
 
+def unit_semantics_for_sorter(sorter: str) -> str:
+    """Return the unit semantics a sorter produces.
+
+    ``"clusterless_threshold_crossings"`` for the clusterless thresholder, which
+    emits every detected peak as ONE pseudo-unit (a threshold-crossing event
+    stream, NOT a sorted neuron); ``"sorted_units"`` for any real spike sorter.
+    Derived from ``sorter`` (single source of truth) rather than stored, so it
+    cannot drift from the sort row. Consuming surfaces (e.g. cross-session
+    matching) use it to avoid treating a threshold-crossing pseudo-unit as a
+    trackable neuron.
+    """
+    return (
+        "clusterless_threshold_crossings"
+        if sorter == "clusterless_thresholder"
+        else "sorted_units"
+    )
+
+
 def is_container_backend(execution_params: dict) -> bool:
     """Return ``True`` when the validated execution row selects a container."""
     return execution_params.get("backend") in ("docker", "singularity")

@@ -2195,6 +2195,35 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         return sorter, nwb_file_name
 
     @classmethod
+    def get_unit_semantics(cls, key) -> str:
+        """Return the unit semantics of a sort: sorted units vs threshold crossings.
+
+        ``"clusterless_threshold_crossings"`` when the underlying sort is the
+        clusterless thresholder (its single "unit" is a threshold-crossing event
+        stream, not a sorted neuron) and ``"sorted_units"`` otherwise. Derived
+        from the sort's ``sorter`` (single source of truth) via
+        ``get_sort_metadata``, so it never drifts from the sort row. Consuming
+        surfaces use it to avoid treating a threshold-crossing pseudo-unit as a
+        trackable neuron.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction carrying ``sorting_id``.
+
+        Returns
+        -------
+        str
+            ``"clusterless_threshold_crossings"`` or ``"sorted_units"``.
+        """
+        from spyglass.spikesorting.v2._sorting_dispatch import (
+            unit_semantics_for_sorter,
+        )
+
+        sorter, _ = cls.get_sort_metadata(key)
+        return unit_semantics_for_sorter(sorter)
+
+    @classmethod
     def get_merge_groups(cls, key) -> dict[int, list[int]]:
         """Return this curation's merge groups in ITS OWN unit namespace.
 

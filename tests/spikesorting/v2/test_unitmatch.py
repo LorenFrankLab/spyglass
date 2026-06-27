@@ -28,6 +28,22 @@ import pytest
 # --------------------------------------------------------------------------- #
 
 
+def test_unit_semantics_for_sorter():
+    """unit_semantics is derived from the sorter (single source of truth): the
+    clusterless thresholder emits ONE threshold-crossing pseudo-unit, not a
+    sorted neuron; every real sorter emits sorted units."""
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        unit_semantics_for_sorter,
+    )
+
+    assert (
+        unit_semantics_for_sorter("clusterless_thresholder")
+        == "clusterless_threshold_crossings"
+    )
+    assert unit_semantics_for_sorter("mountainsort5") == "sorted_units"
+    assert unit_semantics_for_sorter("kilosort4") == "sorted_units"
+
+
 def _pair(a_curation, a_unit, b_curation, b_unit, prob=0.9):
     """Build a MatchPair from ``(sorting_id, curation_id)`` side keys."""
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
@@ -1449,6 +1465,42 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
     )
     assert row["matcher_backend_version"] == importlib.metadata.version(
         "unitmatchpy"
+    )
+
+
+@pytest.mark.slow
+def test_clusterless_unit_semantics_derived_and_warned(
+    two_session_curated_group, caplog
+):
+    """A clusterless sort's units are threshold-crossings, not sorted neurons:
+    CurationV2.get_unit_semantics derives that from the sorter, and
+    UnitMatchSelection.insert_selection warns that matching them across sessions
+    is degenerate -- a consuming surface honoring the semantics, not just a
+    column."""
+    import logging
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatchSelection,
+        _warn_clusterless_match_once,
+    )
+
+    grp = two_session_curated_group
+    sid = grp["choices"][0]["sorting_id"]
+    assert (
+        CurationV2.get_unit_semantics({"sorting_id": sid})
+        == "clusterless_threshold_crossings"
+    )
+
+    _warn_clusterless_match_once.cache_clear()
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        UnitMatchSelection.insert_selection(
+            grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        )
+    assert any(
+        "threshold" in r.getMessage().lower()
+        and "neuron" in r.getMessage().lower()
+        for r in caplog.records
     )
 
 

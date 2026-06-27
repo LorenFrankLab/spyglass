@@ -32,6 +32,7 @@ same biological unit recorded on different days. Four tables:
 
 from __future__ import annotations
 
+import functools
 import time
 from datetime import timezone
 from typing import TYPE_CHECKING, NamedTuple
@@ -60,6 +61,25 @@ if TYPE_CHECKING:
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_unit_matching")
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_clusterless_match_once(sorting_id: str) -> None:
+    """Warn once per clusterless sort that cross-session matching is degenerate.
+
+    A clusterless sort's single "unit" is a threshold-crossing event stream, not
+    a sorted neuron, so tracking it across sessions has no biological meaning.
+    Deduped per ``sorting_id`` so a repeated selection does not spam the log;
+    ``cache_clear()`` resets it (used by the tests).
+    """
+    logger.warning(
+        "UnitMatchSelection: sort %s was produced by the clusterless "
+        "thresholder -- its units are threshold-crossing events, NOT sorted "
+        "neurons (CurationV2.get_unit_semantics == "
+        "'clusterless_threshold_crossings'). Cross-session matching tracks "
+        "sorted neurons, so matching this member is degenerate.",
+        sorting_id,
+    )
 
 
 class UnitMatchFetched(NamedTuple):
@@ -318,6 +338,19 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # Validate coverage + per-member ownership BEFORE minting any row (a
         # wrong-member choice raises here, before the master or part inserts).
         _validate_member_curations(members, choices_by_member, ValueError)
+
+        # Honor unit semantics: warn (don't block -- the cheap clusterless
+        # thresholder is a valid sort) when a member's units are threshold
+        # crossings rather than sorted neurons, since matching them across
+        # sessions is biologically degenerate.
+        for member_sorting_id, _curation_id in choices_by_member.values():
+            if (
+                CurationV2.get_unit_semantics(
+                    {"sorting_id": member_sorting_id}
+                )
+                == "clusterless_threshold_crossings"
+            ):
+                _warn_clusterless_match_once(str(member_sorting_id))
 
         from spyglass.spikesorting.v2._matcher_graph import curation_set_hash
 
