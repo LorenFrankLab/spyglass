@@ -156,37 +156,96 @@ def test_analyzer_cache_import_pulls_no_db_layer_modules():
     )
 
 
-class TestAnalyzerCurationLock:
-    """Per-sort lock serializing concurrent ``CurationEvaluation`` mutation.
+class TestAnalyzerCacheLock:
+    """Per-sort lock serializing concurrent analyzer-cache mutation.
 
-    ``CurationEvaluation`` runs with ``_parallel_make=True``; two curation jobs
-    for the SAME sort load the same shared analyzer-cache folder(s)
-    (``analyzer_path(sorting_id, ...)``) and each persists extensions and
-    ``quality_metrics`` (with ``delete_existing_metrics=True``) into them -- a
-    concurrent write race on the shared zarr store.
-    ``analyzer_curation_lock(sorting_id)`` serializes those jobs so the on-disk
-    analyzer is mutated by one curation at a time. It is keyed on ``sorting_id``
-    (shared by every recipe folder of that sort), so curations of DIFFERENT
-    sorts still run concurrently. DB-free: only ``analyzer_cache_root`` resolves.
+    Every canonical-folder reader/writer/deleter (the populate build, the
+    self-healing read/rebuild path, ``remove_analyzer_cache``, the recompute
+    delete gate, and the ``CurationEvaluation`` raw-sort fast path) holds
+    ``analyzer_cache_lock(sorting_id)`` so the on-disk analyzer is mutated by one
+    job at a time and a reader never observes the brief move-aside window of an
+    atomic publish. The lock is keyed on ``sorting_id`` (shared by every recipe
+    folder of that sort), so jobs for DIFFERENT sorts still run concurrently.
+
+    The lock is **process-reentrant**: the read path acquires it while the
+    compute path already holds it (the fast path loads inside its own lock), so
+    a same-thread nested acquisition must NOT block. This is achieved by
+    memoizing one ``FileLock`` instance per lock-file path; filelock's instance
+    counter makes the nested ``with`` reentrant while separate processes (the
+    ``populate(processes=N)`` case) and separate threads still contend on the
+    OS-level lock. DB-free: only ``analyzer_cache_root`` resolves.
     """
 
-    def test_same_sort_is_mutually_exclusive(
+    def test_lock_is_memoized_per_sort(self, tmp_path, restore_custom_config):
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        # Same sort -> the SAME instance (so nested acquisition is reentrant).
+        assert analyzer_cache_lock("sid-A") is analyzer_cache_lock("sid-A")
+        # Different sorts -> distinct instances (and distinct lock files).
+        assert analyzer_cache_lock("sid-A") is not analyzer_cache_lock("sid-B")
+
+    def test_nested_acquisition_does_not_deadlock(
         self, tmp_path, restore_custom_config
     ):
+        """A nested acquisition of the same sort's lock must not block.
+
+        The read/load path acquires the lock while the compute path (e.g. the
+        ``CurationEvaluation`` fast path) already holds it for the same sort. A
+        per-call ``FileLock`` instance would self-deadlock here; the memoized,
+        reentrant lock returns instantly. The inner acquire uses a finite
+        timeout so a regression (reverting to non-memoized locks) fails as a
+        ``Timeout`` instead of hanging the suite.
+        """
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        with analyzer_cache_lock("sid-A"):
+            with analyzer_cache_lock("sid-A").acquire(timeout=5):
+                pass
+
+    def test_concurrent_thread_cannot_acquire_held_lock(
+        self, tmp_path, restore_custom_config
+    ):
+        """A different concurrent job (thread) of the same sort is excluded.
+
+        Reentrancy is same-thread only: a second thread acquiring the same
+        sort's lock while it is held must time out, so two parallel curation
+        jobs of one sort never mutate the shared analyzer concurrently. (Mirrors
+        the cross-process serialization of ``populate(processes=N)``.)
+        """
+        import threading
+
         import datajoint as dj
         from filelock import Timeout
 
         from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_curation_lock,
+            analyzer_cache_lock,
         )
 
         dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
-        held = analyzer_curation_lock("sid-A")
-        contender = analyzer_curation_lock("sid-A")
-        with held:
-            # A second curation of the same sort cannot acquire while held.
-            with pytest.raises(Timeout):
-                contender.acquire(timeout=0)
+        contender_result = {}
+
+        def contend():
+            try:
+                with analyzer_cache_lock("sid-A").acquire(timeout=0):
+                    contender_result["acquired"] = True
+            except Timeout:
+                contender_result["acquired"] = False
+
+        with analyzer_cache_lock("sid-A"):
+            thread = threading.Thread(target=contend)
+            thread.start()
+            thread.join()
+        assert contender_result["acquired"] is False
 
     def test_different_sorts_do_not_block(
         self, tmp_path, restore_custom_config
@@ -194,13 +253,13 @@ class TestAnalyzerCurationLock:
         import datajoint as dj
 
         from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_curation_lock,
+            analyzer_cache_lock,
         )
 
         dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
         # Both held simultaneously without a Timeout -> independent locks.
-        with analyzer_curation_lock("sid-A"):
-            with analyzer_curation_lock("sid-B").acquire(timeout=0):
+        with analyzer_cache_lock("sid-A"):
+            with analyzer_cache_lock("sid-B").acquire(timeout=0):
                 pass
 
     def test_lock_file_lives_under_cache_root(
@@ -209,13 +268,30 @@ class TestAnalyzerCurationLock:
         import datajoint as dj
 
         from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
             analyzer_cache_root,
+        )
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        lock = analyzer_cache_lock("sid-A")
+        assert Path(lock.lock_file).parent == analyzer_cache_root()
+
+    def test_curation_lock_is_compatibility_alias(
+        self, tmp_path, restore_custom_config
+    ):
+        """``analyzer_curation_lock`` is retained as an alias for the renamed
+        ``analyzer_cache_lock`` (its callers predate the rename)."""
+        import datajoint as dj
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
             analyzer_curation_lock,
         )
 
         dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
-        lock = analyzer_curation_lock("sid-A")
-        assert Path(lock.lock_file).parent == analyzer_cache_root()
+        assert analyzer_curation_lock is analyzer_cache_lock
+        # The alias resolves to the same memoized instance.
+        assert analyzer_curation_lock("sid-A") is analyzer_cache_lock("sid-A")
 
 
 # --------------------------------------------------------------------------- #

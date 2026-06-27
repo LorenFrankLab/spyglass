@@ -29,7 +29,17 @@ side-effect free.
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
+
+# Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
+# acquisition (the read path taking the lock while the compute path already
+# holds it) is reentrant rather than a self-deadlock -- see
+# ``analyzer_cache_lock``. The registry persists for the process lifetime (one
+# small entry per sort touched); ``_ANALYZER_LOCK_REGISTRY_GUARD`` serializes
+# the get-or-create so two threads cannot mint two instances for one path.
+_ANALYZER_LOCK_REGISTRY: dict = {}
+_ANALYZER_LOCK_REGISTRY_GUARD = threading.Lock()
 
 
 def analyzer_cache_root() -> Path:
@@ -89,50 +99,76 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     )
 
 
-def analyzer_curation_lock(sorting_id, *, timeout: float = -1):
-    """Return a cross-process lock serializing analyzer-cache mutation per sort.
+def analyzer_cache_lock(sorting_id, *, timeout: float = -1):
+    """Return a cross-process lock serializing analyzer-cache access per sort.
 
-    ``CurationEvaluation`` runs with ``_parallel_make=True``, so two curation jobs
-    for the SAME sort can run concurrently. Both load the same shared
-    analyzer-cache folder(s) (``analyzer_path(sorting_id, ...)``) via
-    ``Sorting.get_analyzer`` and each persists extensions and ``quality_metrics``
-    (``compute_quality_metrics(..., delete_existing_metrics=True)``) into them --
-    a concurrent write race on the shared zarr store that can corrupt the cache
-    or fail a job mid-write. Holding this lock around the load-and-compute region
-    lets one curation mutate the analyzer at a time.
+    Every canonical analyzer-cache folder reader/writer/deleter holds this lock:
+    the populate build, the self-healing read/rebuild path
+    (``Sorting.get_analyzer`` / ``load_or_rebuild_analyzer``), the atomic
+    publish, ``remove_analyzer_cache``, the recompute delete gate, and the
+    ``CurationEvaluation`` raw-sort fast path (which loads the shared analyzer
+    and persists extensions + ``quality_metrics`` into it). Holding the lock
+    around the load/mutate/publish region lets ONE job touch a sort's analyzer
+    at a time, so a concurrent build never corrupts the shared zarr store and a
+    reader never observes the brief move-aside window of an atomic publish.
 
     The lock is keyed on ``sorting_id`` (which every recipe folder of that sort
-    shares -- both the display and the whitened-metric analyzer), so it serializes
-    a sort's curations against each other while leaving curations of DIFFERENT
-    sorts free to run in parallel. The lock file lives under
+    shares -- both the display and the whitened-metric analyzer), so it
+    serializes one sort's jobs against each other while leaving jobs for
+    DIFFERENT sorts free to run in parallel. The lock file lives under
     ``analyzer_cache_root()`` next to the folders it guards.
 
-    This serializes processes on ONE machine (the standard
-    ``populate(processes=N)`` case). It does NOT coordinate across machines
-    sharing an NFS-mounted ``spikesorting_v2_analyzer_dir`` -- ``filelock``'s
-    OS-level lock is local; cross-host populate of the same sort would still
-    race. A regeneratable cache makes the worst case a rebuild, not data loss.
+    **Reentrant per process.** The read path acquires this lock while the
+    compute path already holds it for the same sort (the fast path loads inside
+    its own ``with`` block). A fresh ``FileLock`` per call would self-deadlock
+    there, so the instance is memoized per lock-file path: filelock's instance
+    counter makes a same-thread nested acquisition reentrant (instant), while a
+    DIFFERENT thread or a DIFFERENT process still contends on the OS-level lock.
+    ``populate(processes=N)`` (the standard parallel case) uses separate
+    processes, so cross-job serialization is preserved.
+
+    This serializes processes on ONE machine. It does NOT coordinate across
+    machines sharing an NFS-mounted ``spikesorting_v2_analyzer_dir`` --
+    ``filelock``'s OS-level lock is local; cross-host populate of the same sort
+    would still race. A regeneratable cache makes the worst case a rebuild, not
+    data loss.
 
     Parameters
     ----------
     sorting_id
-        The sorting whose analyzer-cache folders the curation will mutate.
+        The sorting whose analyzer-cache folders the job will access.
     timeout : float, optional
         Seconds to wait for the lock before raising ``filelock.Timeout``.
-        Default ``-1`` blocks indefinitely (wait your turn), which is the
-        intended serialize-don't-fail behavior; the lock releases when the
-        holding process exits, so a crashed job cannot wedge the next one.
+        Default ``-1`` blocks indefinitely (wait your turn), the intended
+        serialize-don't-fail behavior; the lock releases when the holding
+        process exits, so a crashed job cannot wedge the next one. Applied when
+        the per-sort instance is first created; later callers reuse that
+        instance (every internal caller uses the default), and ``.acquire``
+        accepts a per-call ``timeout`` override regardless.
 
     Returns
     -------
     filelock.FileLock
-        An unacquired lock; use it as a context manager or call ``.acquire()``.
+        A memoized, reentrant lock; use it as a context manager or call
+        ``.acquire()``.
     """
     from filelock import FileLock
 
     root = analyzer_cache_root()
     root.mkdir(parents=True, exist_ok=True)
-    return FileLock(str(root / f"{sorting_id}.curation.lock"), timeout=timeout)
+    lock_path = str(root / f"{sorting_id}.analyzer.lock")
+    with _ANALYZER_LOCK_REGISTRY_GUARD:
+        lock = _ANALYZER_LOCK_REGISTRY.get(lock_path)
+        if lock is None:
+            lock = FileLock(lock_path, timeout=timeout)
+            _ANALYZER_LOCK_REGISTRY[lock_path] = lock
+        return lock
+
+
+# Backwards-compatible alias: callers predating the cache-wide rename (the
+# ``CurationEvaluation`` fast path, the recording-lock docstring cross-ref) used
+# ``analyzer_curation_lock`` when the lock guarded only ``AnalyzerCuration``.
+analyzer_curation_lock = analyzer_cache_lock
 
 
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
