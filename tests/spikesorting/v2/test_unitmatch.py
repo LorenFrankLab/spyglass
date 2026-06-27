@@ -2613,3 +2613,61 @@ def test_geometry_preflight_fails_before_extraction(
         UnitMatchSelection.insert_selection(
             grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
         )
+
+
+@pytest.mark.slow
+def test_unitmatch_nwb_self_describes(two_session_curated_group):
+    """The UnitMatch NWB is interpretable standalone.
+
+    The pairs table carries only side ids; without the DB a reader cannot tell
+    which match run, session group, or matcher produced it. Assert the artifact
+    embeds the run/group/matcher header -- re-emitting the same producer
+    provenance phase-3a stored on the ``UnitMatch`` row (matcher backend, backend
+    version, SpikeInterface version) -- plus the per-member map.
+
+    Uses the single-member (solo) path so the provenance write is exercised
+    without the cross-session matcher (whose ground-truth correctness is the
+    polymer gate's job). The header and per-member map are written on this path
+    too: ``write_pairs_table`` runs and the backend is resolved regardless of
+    member count.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        UNITMATCH_MEMBERS,
+        UNITMATCH_PROVENANCE,
+        read_long_provenance,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    choice = grp["choices"][0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+
+    row = (UnitMatch & pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+
+    header = read_provenance_values(abs_path, UNITMATCH_PROVENANCE)
+    assert header["unitmatch_id"] == str(pk["unitmatch_id"])
+    assert header["session_group_owner"] == grp["owner"]
+    assert header["session_group_name"] == grp["solo_name"]
+    assert header["matcher_params_name"] == "unitmatch_default"
+    # Re-emits the EXACT producer provenance phase-3a stored on the row.
+    assert header["matcher_backend"] == row["matcher_backend"]
+    assert header["matcher_backend_version"] == row["matcher_backend_version"]
+    assert header["spikeinterface_version"] == row["spikeinterface_version"]
+
+    members = read_long_provenance(abs_path, UNITMATCH_MEMBERS)
+    by_index = {m["member_index"]: m for m in members}
+    assert set(by_index) == {0}
+    got = by_index[0]
+    assert got["sorting_id"] == str(choice["sorting_id"])
+    assert got["curation_id"] == int(choice["curation_id"])
+    # A real session start time (ISO 8601), not a placeholder.
+    assert "T" in got["session_start_time"]

@@ -92,17 +92,25 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
     )
 
 
-def write_pairs_table(abs_path: str, pairs: list[dict]) -> str:
+def write_pairs_table(
+    abs_path: str, pairs: list[dict], *, provenance_tables=None
+) -> str:
     """Append the pairs table to an existing analysis NWB; return its object id.
 
     Registering the file in the DataJoint ``AnalysisNwbfile`` table is the
     caller's responsibility (done inside the insert transaction).
+
+    ``provenance_tables`` (optional, from :mod:`._nwb_provenance`) are embedded
+    as scratch in the same write so the artifact is self-describing; ``None``
+    leaves only the pairs table.
     """
     table = build_pairs_table(pairs)
     with pynwb.NWBHDF5IO(path=abs_path, mode="a", load_namespaces=True) as io:
         nwbf = io.read()
         nwbf.add_scratch(table)
         object_id = table.object_id
+        for prov in provenance_tables or ():
+            nwbf.add_scratch(prov)
         io.write(nwbf)
     return object_id
 

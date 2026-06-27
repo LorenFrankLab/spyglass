@@ -100,6 +100,11 @@ class UnitMatchFetched(NamedTuple):
     params: dict
     job_kwargs: dict
     member_plan: list[dict]
+    # Selection identity re-emitted into the artifact NWB (provenance, not
+    # used in compute): the owning team, the group name, and the matcher recipe.
+    session_group_owner: str
+    session_group_name: str
+    matcher_params_name: str
 
 
 class UnitMatchComputed(NamedTuple):
@@ -881,10 +886,21 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             params=dict(params),
             job_kwargs=dict(job_kwargs or {}),
             member_plan=member_plan,
+            session_group_owner=sel["session_group_owner"],
+            session_group_name=sel["session_group_name"],
+            matcher_params_name=sel["matcher_params_name"],
         )
 
     def make_compute(
-        self, key, matcher_name, params, job_kwargs, member_plan
+        self,
+        key,
+        matcher_name,
+        params,
+        job_kwargs,
+        member_plan,
+        session_group_owner,
+        session_group_name,
+        matcher_params_name,
     ) -> UnitMatchComputed:
         """Extract bundles, run the matcher, and stage the pairs NWB.
 
@@ -895,6 +911,12 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            UNITMATCH_MEMBERS,
+            UNITMATCH_PROVENANCE,
+            build_long_provenance_table,
+            build_provenance_table,
+        )
         from spyglass.spikesorting.v2._unitmatch_nwb import write_pairs_table
         from spyglass.spikesorting.v2.matcher_protocol import get_matcher
         from spyglass.spikesorting.v2.recording import (
@@ -926,6 +948,43 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             for plan in member_plan
             for unit_id in plan["matchable_unit_ids"]
         ]
+        # Self-describing provenance: the run/group/matcher header (re-emitting
+        # the producer provenance phase-3a stores on the row) and the per-member
+        # map, so the pairs table -- side ids only -- is interpretable without
+        # the DB.
+        provenance_tables = [
+            build_provenance_table(
+                UNITMATCH_PROVENANCE,
+                {
+                    "unitmatch_id": str(key["unitmatch_id"]),
+                    "session_group_owner": session_group_owner,
+                    "session_group_name": session_group_name,
+                    "matcher_params_name": matcher_params_name,
+                    "matcher_backend": matcher_backend,
+                    "matcher_backend_version": matcher_backend_version,
+                    "spikeinterface_version": spikeinterface_version,
+                },
+            ),
+            build_long_provenance_table(
+                UNITMATCH_MEMBERS,
+                [
+                    {
+                        "member_index": int(plan["member_index"]),
+                        "sorting_id": str(plan["sorting_id"]),
+                        "curation_id": int(plan["curation_id"]),
+                        "session_start_time": str(plan["recording_date"]),
+                    }
+                    for plan in member_plan
+                ],
+                [
+                    ("member_index", int),
+                    ("sorting_id", str),
+                    ("curation_id", int),
+                    ("session_start_time", str),
+                ],
+            ),
+        ]
+
         analysis_file_name = AnalysisNwbfile().create(anchor_nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
@@ -943,7 +1002,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 oriented_pairs, runtime_s = self._extract_and_match(
                     member_plan, matcher_name, params, job_kwargs
                 )
-            pairs_object_id = write_pairs_table(abs_path, oriented_pairs)
+            pairs_object_id = write_pairs_table(
+                abs_path, oriented_pairs, provenance_tables=provenance_tables
+            )
         except Exception:
             # write_pairs_table may already have created the file on disk; unlink
             # it so a failed compute does not orphan staged scratch (mirrors
