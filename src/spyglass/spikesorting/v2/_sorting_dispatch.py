@@ -52,6 +52,37 @@ MATLAB_SORTER_STRIP_KWARGS = (
     "max_threads_per_process",
 )
 
+#: Sorter name -> the installed distribution whose version identifies the
+#: producing code. SI-internal sorters (``spykingcircus2`` / ``tridesclous2``)
+#: and the in-process ``clusterless_thresholder`` have no separate distribution
+#: -- their producing version IS ``spikeinterface.__version__`` (recorded
+#: separately) -- so they are deliberately absent and resolve to ``None``.
+_SORTER_DISTRIBUTIONS: dict[str, str] = {
+    "mountainsort4": "mountainsort4",
+    "mountainsort5": "mountainsort5",
+    "kilosort4": "kilosort",
+}
+
+
+def sorter_distribution_version(sorter: str) -> str | None:
+    """Return the installed distribution version of a sorter package, or None.
+
+    ``None`` for SI-internal sorters (``spykingcircus2`` / ``tridesclous2``),
+    the in-process ``clusterless_thresholder``, and any mapped sorter whose
+    distribution is not installed. Their producing version is
+    ``spikeinterface.__version__``, recorded separately; storing ``None`` rather
+    than guessing a version keeps the provenance honest.
+    """
+    import importlib.metadata
+
+    dist = _SORTER_DISTRIBUTIONS.get(sorter)
+    if dist is None:
+        return None
+    try:
+        return importlib.metadata.version(dist)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
 
 def is_container_backend(execution_params: dict) -> bool:
     """Return ``True`` when the validated execution row selects a container."""

@@ -53,6 +53,7 @@ from spyglass.spikesorting.v2._sorting_dispatch import (
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
+    sorter_distribution_version,
 )
 from spyglass.spikesorting.v2._sorting_units import (
     _to_int_unit_id,  # noqa: F401  re-exported for tests
@@ -81,6 +82,7 @@ from spyglass.spikesorting.v2.utils import (
     _validate_params,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
+    resolve_effective_seed,
     split_leading_restrictions,
     transaction_or_noop,
     unit_brain_region_df,
@@ -184,6 +186,14 @@ class SortingComputed(NamedTuple):
     display_waveform_params_name : str
         The resolved DISPLAY recipe name; stored on the ``Sorting`` row by
         ``make_insert`` so every later rebuild reads it back deterministically.
+    effective_random_seed : int
+        The random seed the sort actually used (``resolve_effective_seed``),
+        recorded as secondary provenance -- NOT identity.
+    spikeinterface_version : str
+        ``spikeinterface.__version__`` at sort time (secondary provenance).
+    sorter_version : str or None
+        Installed distribution version of the sorter package, or ``None`` for
+        in-process / SI-internal sorters (secondary provenance).
     """
 
     sorting_obj: "si.BaseSorting"
@@ -193,6 +203,9 @@ class SortingComputed(NamedTuple):
     recording_id: str
     nwb_file_name: str
     display_waveform_params_name: str
+    effective_random_seed: int
+    spikeinterface_version: str
+    sorter_version: str | None
 
 
 _assert_v2_db_safe()
@@ -1132,6 +1145,9 @@ class Sorting(SpyglassMixin, dj.Computed):
     n_units: int
     time_of_sort: datetime    # wall-clock time the sort was populated
     -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")
+    effective_random_seed=null: int     # seed actually used (resolve_effective_seed); provenance, NOT identity
+    spikeinterface_version: varchar(32) # spikeinterface.__version__ at sort time
+    sorter_version=null: varchar(64)    # sorter package distribution version, NULL for in-process sorters
     """
     # ``display_waveform_params_name`` is a secondary FK to
     # ``AnalyzerWaveformParameters``: it records which DISPLAY recipe produced
@@ -1538,6 +1554,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+        # Producer provenance (secondary, never identity). The effective seed
+        # is resolved from the SAME per-row blob ``job_kwargs`` was, so it bottoms
+        # out on ``_resolved_job_kwargs`` and equals the value the seed sites
+        # consume below (``job_kwargs['random_seed']``) -- stored == used, not a
+        # parallel computation that could drift.
+        import spikeinterface as si
+
+        effective_random_seed = resolve_effective_seed(sorter_row["job_kwargs"])
+        spikeinterface_version = si.__version__
+        sorter_version = sorter_distribution_version(sorter)
 
         sorting_obj = self._run_sorter(
             sorter=sorter,
@@ -1589,6 +1615,9 @@ class Sorting(SpyglassMixin, dj.Computed):
             recording_id=recording_id,
             nwb_file_name=nwb_file_name,
             display_waveform_params_name=display_waveform_params_name,
+            effective_random_seed=effective_random_seed,
+            spikeinterface_version=spikeinterface_version,
+            sorter_version=sorter_version,
         )
 
     def make_insert(
@@ -1601,6 +1630,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id,
         nwb_file_name,
         display_waveform_params_name,
+        effective_random_seed,
+        spikeinterface_version,
+        sorter_version,
     ):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
@@ -1635,6 +1667,12 @@ class Sorting(SpyglassMixin, dj.Computed):
         display_waveform_params_name : str
             The resolved DISPLAY recipe, persisted on the master row so every
             later rebuild reads it back deterministically.
+        effective_random_seed : int
+            Seed the sort actually used; secondary provenance, not identity.
+        spikeinterface_version : str
+            ``spikeinterface.__version__`` at sort time.
+        sorter_version : str or None
+            Sorter package distribution version, ``None`` for in-process sorters.
 
         Returns
         -------
@@ -1650,6 +1688,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                 recording_id=recording_id,
                 nwb_file_name=nwb_file_name,
                 display_waveform_params_name=display_waveform_params_name,
+                effective_random_seed=effective_random_seed,
+                spikeinterface_version=spikeinterface_version,
+                sorter_version=sorter_version,
             )
         except Exception:
             # Failure-mode B: registration failed after a successful
@@ -1704,6 +1745,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording_id,
         nwb_file_name,
         display_waveform_params_name,
+        effective_random_seed,
+        spikeinterface_version,
+        sorter_version,
     ):
         """Register the AnalysisNwbfile + master + Unit rows atomically.
 
@@ -1733,6 +1777,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "display_waveform_params_name": (
                         display_waveform_params_name
                     ),
+                    "effective_random_seed": effective_random_seed,
+                    "spikeinterface_version": spikeinterface_version,
+                    "sorter_version": sorter_version,
                 }
             )
             self._populate_unit_part(
