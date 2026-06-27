@@ -52,6 +52,39 @@ def hash_extension_data(
     return hashes
 
 
+#: Base analyzer extensions ``Sorting.make`` computes, in build order. Used to
+#: report each extension's seed mode in the recompute manifest (a superset of
+#: ``ANALYZER_RECOMPUTE_EXTENSIONS``, which is only the seed-pinned content the
+#: recompute hash covers).
+BASE_ANALYZER_EXTENSIONS = (
+    "random_spikes",
+    "noise_levels",
+    "templates",
+    "waveforms",
+)
+
+
+def analyzer_seed_modes(analyzer) -> dict[str, object]:
+    """Map each present base extension to its effective seed provenance.
+
+    Returns ``{extension: seed}`` when the extension's stored params carry an
+    explicit, non-``None`` ``seed`` (e.g. the seed-pinned ``random_spikes``
+    subsample), and ``{extension: "unseeded"}`` otherwise -- e.g. ``noise_levels``
+    (computed without an explicit seed) or any extension whose params hold no
+    seed. Surfacing this in the recompute manifest stops it from silently
+    implying a pinned seed for an extension that has none. Absent extensions are
+    omitted.
+    """
+    modes: dict[str, object] = {}
+    for name in BASE_ANALYZER_EXTENSIONS:
+        if not analyzer.has_extension(name):
+            continue
+        params = analyzer.get_extension(name).params or {}
+        seed = params.get("seed")
+        modes[name] = "unseeded" if seed is None else seed
+    return modes
+
+
 def hash_recording_traces(
     recording, *, rounding: int = 4, chunk_frames: int = 300_000
 ) -> dict[str, str]:

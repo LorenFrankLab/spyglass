@@ -34,6 +34,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_user import UserEnvironment
 from spyglass.spikesorting.v2._recompute import (
     ANALYZER_RECOMPUTE_EXTENSIONS,
+    analyzer_seed_modes,
     combined_hash,
     compare_hash_dicts,
     current_env_namespaces,
@@ -740,7 +741,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     -> AnalyzerWaveformParameters.proj(waveform_params_name="waveform_params_name")
     ---
     si_deps=null: blob          # spikeinterface version, etc.
-    analyzer_manifest=null: blob # extension_name -> content_hash mapping
+    analyzer_manifest=null: blob # extension_content_hashes + base_extension_seed_modes
     analyzer_hash: char(64)
     """
 
@@ -806,7 +807,15 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 waveform_params_name=key["waveform_params_name"],
                 rebuild=False,
             )
-            manifest = hash_extension_data(analyzer)
+            # The content hashes drive the recompute identity (analyzer_hash);
+            # the seed modes are SECONDARY provenance recorded alongside them, so
+            # the manifest does not silently imply a pinned seed for an unseeded
+            # base extension (e.g. noise_levels).
+            content_hashes = hash_extension_data(analyzer)
+            manifest = {
+                "extension_content_hashes": content_hashes,
+                "base_extension_seed_modes": analyzer_seed_modes(analyzer),
+            }
         except ZeroUnitAnalyzerError:
             manifest = {}
         except AnalyzerFolderInvalidError as exc:
@@ -836,7 +845,11 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         return AnalyzerVersionsComputed(
             si_deps=si_deps,
             analyzer_manifest=manifest,
-            analyzer_hash=combined_hash(manifest) if manifest else _ZERO_HASH,
+            analyzer_hash=(
+                combined_hash(content_hashes)
+                if content_hashes
+                else _ZERO_HASH
+            ),
         )
 
     def make_insert(self, key, si_deps, analyzer_manifest, analyzer_hash):

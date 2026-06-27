@@ -15,6 +15,51 @@ import pytest
 # ---------- DB-free comparison logic ----------------------------------------
 
 
+class _FakeExtension:
+    def __init__(self, params):
+        self.params = params
+
+
+class _FakeAnalyzer:
+    def __init__(self, extensions):
+        self._extensions = extensions
+
+    def has_extension(self, name):
+        return name in self._extensions
+
+    def get_extension(self, name):
+        return _FakeExtension(self._extensions[name])
+
+
+def test_analyzer_seed_modes_marks_noise_levels_unseeded():
+    """Each present base extension is mapped to its effective seed, with an
+    extension that carries no explicit seed (noise_levels) -- or an explicit
+    ``None`` seed -- marked ``"unseeded"``, so the manifest never silently
+    implies a pinned seed for an extension that has none."""
+    from spyglass.spikesorting.v2._recompute import analyzer_seed_modes
+
+    analyzer = _FakeAnalyzer(
+        {
+            "random_spikes": {"seed": 0, "max_spikes_per_unit": 20000},
+            "noise_levels": {},
+            "templates": {},
+            "waveforms": {"ms_before": 0.5, "ms_after": 0.5},
+        }
+    )
+    modes = analyzer_seed_modes(analyzer)
+    assert modes["random_spikes"] == 0
+    assert modes["noise_levels"] == "unseeded"
+    assert modes["templates"] == "unseeded"
+    assert modes["waveforms"] == "unseeded"
+    # An explicit seed=None is also "unseeded", not a spurious pinned seed.
+    none_seeded = _FakeAnalyzer({"random_spikes": {"seed": None}})
+    assert analyzer_seed_modes(none_seeded)["random_spikes"] == "unseeded"
+    # Absent extensions are not invented.
+    assert "templates" not in analyzer_seed_modes(
+        _FakeAnalyzer({"noise_levels": {}})
+    )
+
+
 def test_compare_hash_dicts_classifies_diffs():
     from spyglass.spikesorting.v2._recompute import compare_hash_dicts
 
@@ -300,6 +345,30 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
     SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
+
+
+def test_analyzer_manifest_marks_noise_levels_unseeded(
+    populated_sorting, clean_recompute
+):
+    """The analyzer manifest records each base extension's seed mode, marking
+    noise_levels unseeded; the content-addressed analyzer_hash is derived from
+    the extension content hashes ONLY, so the seed-mode provenance does not shift
+    the recompute identity."""
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
+
+    SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
+    row = (SortingAnalyzerVersions & populated_sorting).fetch1()
+    manifest = row["analyzer_manifest"]
+    seed_modes = manifest["base_extension_seed_modes"]
+    assert seed_modes["noise_levels"] == "unseeded"
+    # random_spikes records its effective (pinned) seed, not "unseeded".
+    assert seed_modes["random_spikes"] != "unseeded"
+    # analyzer_hash is the combined hash of the extension CONTENT hashes only --
+    # the seed modes are secondary provenance, not identity.
+    assert row["analyzer_hash"] == combined_hash(
+        manifest["extension_content_hashes"]
+    )
 
 
 @pytest.fixture
