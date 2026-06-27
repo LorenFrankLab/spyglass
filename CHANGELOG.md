@@ -95,6 +95,20 @@ and every new column is a secondary attribute.
   analyzer manifest now records a per-base-extension seed mode (`"unseeded"` for
   `noise_levels`), so it no longer silently implies a pinned seed. `analyzer_hash`
   is unchanged -- it is still derived from the extension content hashes only.
+- **`CurationEvaluation` records its source provenance.** New secondary columns
+  `spikeinterface_version` and `source_analyzer_hashes` -- a `role -> content_hash`
+  manifest of every canonical analyzer the metrics were computed over on the fast
+  path (`"display"` always, plus `"metric"` for a PC/NN eval); `NULL` for a
+  merged-curation evaluation (its temp analyzers are pinned by the committed
+  curation + recipe). A new `CurationEvaluation.detect_stale_source(key)` compares
+  the stored SI version and re-hashes each recorded analyzer to flag drift.
+- **Clusterless unit semantics are derived and honored.** A sort's units are
+  classified from its `sorter` (`CurationV2.get_unit_semantics`):
+  `"clusterless_threshold_crossings"` for the clusterless thresholder (its single
+  "unit" is a threshold-crossing event stream, not a sorted neuron) vs
+  `"sorted_units"`. `UnitMatchSelection.insert_selection` warns when a pinned
+  member is clusterless, since matching threshold crossings across sessions is
+  degenerate. Derived, not stored, so it cannot drift from `sorter`.
 
 #### Spike Sorting v2: identity & relational integrity hardening
 
