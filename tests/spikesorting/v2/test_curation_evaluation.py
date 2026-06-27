@@ -421,6 +421,49 @@ def test_curation_evaluation_records_source_provenance(
     assert "source_analyzer_hash:display" in hash_drift["reasons"]
 
 
+def test_curation_evaluation_pc_eval_records_both_roles(
+    populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
+):
+    """A PC/NN evaluation consumes BOTH the display and whitened metric analyzer,
+    so the provenance manifest records both roles and detect_stale_source flags
+    drift in the metric (PC) analyzer per role -- not just the display role."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    # franklab_default requests PC/NN metrics (skip_pc_metrics=False) -> the
+    # whitened metric analyzer is built + principal_components computed on it.
+    sel = CurationEvaluationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "franklab_default",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+    row = (CurationEvaluation & sel).fetch1()
+    assert set(row["source_analyzer_hashes"]) == {"display", "metric"}
+    assert CurationEvaluation.detect_stale_source(sel)["stale"] is False
+
+    # Perturb only the metric analyzer's hash (the one carrying
+    # principal_components): the metric role is flagged, the display role is not.
+    import spyglass.spikesorting.v2._recompute as rc
+
+    real_hash = rc.hash_extension_data
+
+    def fake_hash(analyzer, **kwargs):
+        if analyzer.has_extension("principal_components"):
+            return {"x": "deadbeef"}
+        return real_hash(analyzer, **kwargs)
+
+    monkeypatch.setattr(rc, "hash_extension_data", fake_hash)
+    drift = CurationEvaluation.detect_stale_source(sel)
+    assert drift["stale"] is True
+    assert "source_analyzer_hash:metric" in drift["reasons"]
+    assert "source_analyzer_hash:display" not in drift["reasons"]
+
+
 def _two_distinct_template_inputs():
     """A 4-channel recording + two-unit and merged sortings, distinct templates.
 

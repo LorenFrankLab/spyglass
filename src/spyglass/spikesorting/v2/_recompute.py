@@ -139,14 +139,25 @@ def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
     """Return ``{role: content_hash}`` for the canonical analyzers consumed.
 
     A ``CurationEvaluation`` always reads the ``"display"`` analyzer and, when it
-    requests PC/NN metrics, the whitened ``"metric"`` analyzer (on which it
-    computes ``principal_components``). This builds the provenance manifest
-    covering EVERY analyzer actually consumed -- the display role over the base
-    content extensions, the metric role additionally over
-    ``principal_components`` -- so a stale check can re-hash each one. The single
-    source of the role -> hashed-extensions mapping, shared by the store
-    (make_compute) and compare (detect_stale_source) sides so they cannot drift.
-    ``metric_analyzer=None`` (no PC metrics) yields just the display entry.
+    requests PC/NN metrics, the whitened ``"metric"`` analyzer. The hash for each
+    role covers the SEED/PARAM-DRIVEN content surfaces: the base content
+    extensions (``random_spikes``/``templates``/``waveforms`` -- their seed and
+    region waveform window are Spyglass-pinned), plus ``principal_components`` for
+    the metric role (Spyglass-pinned PCA params that recompute on a param
+    mismatch, so it can drift without an SI-version bump).
+
+    The DERIVED display extensions an evaluation also computes
+    (``spike_amplitudes``/``template_metrics``/``template_similarity``/...) are
+    NOT hashed directly: they are computed once with SpikeInterface DEFAULT params
+    (no Spyglass pinning, no param-driven recompute), so they are deterministic
+    given the base extensions (hashed) and the SI version (checked separately by
+    detect_stale_source) -- covered transitively. This keeps the manifest stable
+    (``template_metrics`` is a DataFrame, not cleanly content-hashable) while
+    still flagging every realistic drift path.
+
+    The single source of the role -> hashed-extensions mapping, shared by the
+    store (make_compute) and compare (detect_stale_source) sides so they cannot
+    drift. ``metric_analyzer=None`` (no PC metrics) yields just the display entry.
     """
     hashes = {"display": combined_hash(hash_extension_data(display_analyzer))}
     if metric_analyzer is not None:
