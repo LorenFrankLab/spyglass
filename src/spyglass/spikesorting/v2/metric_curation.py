@@ -1440,10 +1440,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._recompute import (
-            combined_hash,
-            hash_extension_data,
-        )
+        from spyglass.spikesorting.v2._recompute import analyzer_role_hashes
         from spyglass.spikesorting.v2.sorting import Sorting
 
         row = (cls & key).fetch1()
@@ -1454,27 +1451,32 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         if row["spikeinterface_version"] != current_version:
             reasons.append("spikeinterface_version")
 
-        # Re-hash each canonical analyzer the evaluation recorded consuming. The
-        # role -> recipe map mirrors make_compute: "display" uses the default
-        # DISPLAY recipe, "metric" the whitened metric recipe. The merged path
-        # stored None, so only the SI version is checked there.
+        # Re-hash each canonical analyzer the evaluation recorded consuming and
+        # compare per role. Reuse analyzer_role_hashes so the store and compare
+        # sides share ONE role -> hashed-extensions mapping (the metric role
+        # includes principal_components, which PC/NN metrics consume). Reload the
+        # display analyzer via the default recipe and, when the manifest recorded
+        # a metric role, the whitened metric analyzer. The merged path stored
+        # None, so only the SI version is checked there.
         stored_hashes = row["source_analyzer_hashes"]
         current_hashes: dict[str, str] = {}
         if stored_hashes:
             sort_key = {"sorting_id": str(sel["sorting_id"])}
-            recipe_for = {
-                "display": None,
-                "metric": sel["metric_waveform_params_name"],
-            }
-            for role, stored in stored_hashes.items():
-                analyzer = Sorting().get_analyzer(
+            display = Sorting().get_analyzer(
+                sort_key, waveform_params_name=None, rebuild=False
+            )
+            metric = (
+                Sorting().get_analyzer(
                     sort_key,
-                    waveform_params_name=recipe_for[role],
+                    waveform_params_name=sel["metric_waveform_params_name"],
                     rebuild=False,
                 )
-                current = combined_hash(hash_extension_data(analyzer))
-                current_hashes[role] = current
-                if current != stored:
+                if "metric" in stored_hashes
+                else None
+            )
+            current_hashes = analyzer_role_hashes(display, metric)
+            for role, stored in stored_hashes.items():
+                if current_hashes.get(role) != stored:
                     reasons.append(f"source_analyzer_hash:{role}")
 
         return {

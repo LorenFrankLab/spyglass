@@ -104,6 +104,7 @@ def test_analyzer_role_hashes_covers_display_and_metric():
             "random_spikes": np.arange(6, 12, dtype="int64"),
             "templates": np.full((2, 3), 5.0, dtype="float32"),
             "waveforms": np.full((2, 3), 7.0, dtype="float32"),
+            "principal_components": np.full((2, 3), 1.0, dtype="float32"),
         }
     )
 
@@ -118,8 +119,23 @@ def test_analyzer_role_hashes_covers_display_and_metric():
     both = analyzer_role_hashes(display, metric)
     assert set(both) == {"display", "metric"}
     assert both["display"] == display_only["display"]
-    assert both["metric"] == combined_hash(hash_extension_data(metric))
     assert both["metric"] != both["display"]
+
+    # The metric role hash includes principal_components (PC/NN metrics consume
+    # it), so a principal_components change is detected even when the base
+    # content extensions are unchanged.
+    metric_pc_changed = _HashFakeAnalyzer(
+        {
+            "random_spikes": np.arange(6, 12, dtype="int64"),
+            "templates": np.full((2, 3), 5.0, dtype="float32"),
+            "waveforms": np.full((2, 3), 7.0, dtype="float32"),
+            "principal_components": np.full((2, 3), 9.0, dtype="float32"),
+        }
+    )
+    assert (
+        analyzer_role_hashes(display, metric_pc_changed)["metric"]
+        != both["metric"]
+    )
 
 
 def test_compare_hash_dicts_classifies_diffs():

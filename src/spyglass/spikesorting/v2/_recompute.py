@@ -126,19 +126,35 @@ def combined_hash(hash_dict: dict[str, str]) -> str:
     return digest.hexdigest()
 
 
+#: Extensions hashed for the whitened METRIC analyzer: the base content set plus
+#: ``principal_components``, which PC/NN metrics compute and consume on it. Hashing
+#: only the base set would let a principal_components change on a PC/NN evaluation
+#: drift undetected. ``hash_extension_data`` skips any extension not present.
+METRIC_ANALYZER_HASH_EXTENSIONS = ANALYZER_RECOMPUTE_EXTENSIONS + (
+    "principal_components",
+)
+
+
 def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
     """Return ``{role: content_hash}`` for the canonical analyzers consumed.
 
     A ``CurationEvaluation`` always reads the ``"display"`` analyzer and, when it
-    requests PC/NN metrics, the whitened ``"metric"`` analyzer. This builds the
-    provenance manifest covering EVERY analyzer actually consumed, so a stale
-    check can re-hash each one -- missing the metric analyzer would let a
-    PC/NN evaluation drift undetected. ``metric_analyzer=None`` (no PC metrics)
-    yields just the display entry.
+    requests PC/NN metrics, the whitened ``"metric"`` analyzer (on which it
+    computes ``principal_components``). This builds the provenance manifest
+    covering EVERY analyzer actually consumed -- the display role over the base
+    content extensions, the metric role additionally over
+    ``principal_components`` -- so a stale check can re-hash each one. The single
+    source of the role -> hashed-extensions mapping, shared by the store
+    (make_compute) and compare (detect_stale_source) sides so they cannot drift.
+    ``metric_analyzer=None`` (no PC metrics) yields just the display entry.
     """
     hashes = {"display": combined_hash(hash_extension_data(display_analyzer))}
     if metric_analyzer is not None:
-        hashes["metric"] = combined_hash(hash_extension_data(metric_analyzer))
+        hashes["metric"] = combined_hash(
+            hash_extension_data(
+                metric_analyzer, extensions=METRIC_ANALYZER_HASH_EXTENSIONS
+            )
+        )
     return hashes
 
 
