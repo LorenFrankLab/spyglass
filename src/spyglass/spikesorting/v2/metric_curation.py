@@ -251,6 +251,12 @@ class CurationEvaluationFetched(NamedTuple):
     sorter_row: dict
     analyzer_job_kwargs: dict
     metric_job_kwargs: dict
+    # Recipe / param names re-emitted into the artifact NWB (provenance, not
+    # used in compute -- the resolved params/recipes above drive the work).
+    metric_params_name: str
+    auto_curation_rules_name: str
+    display_waveform_params_name: str
+    metric_waveform_params_name: str
 
 
 class CurationEvaluationComputed(NamedTuple):
@@ -1143,6 +1149,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             metric_job_kwargs=_resolved_job_kwargs(
                 qm["job_kwargs"], acr["job_kwargs"]
             ),
+            metric_params_name=sel["metric_params_name"],
+            auto_curation_rules_name=sel["auto_curation_rules_name"],
+            display_waveform_params_name=display_waveform_params_name,
+            metric_waveform_params_name=metric_waveform_params_name,
         )
 
     def make_compute(
@@ -1176,6 +1186,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         sorter_row,
         analyzer_job_kwargs,
         metric_job_kwargs,
+        metric_params_name,
+        auto_curation_rules_name,
+        display_waveform_params_name,
+        metric_waveform_params_name,
     ) -> CurationEvaluationComputed:
         """Compute metrics / merges / labels over the committed curation.
 
@@ -1190,6 +1204,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         from spyglass.spikesorting.v2._analyzer_cache import (
             analyzer_curation_lock,
+        )
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            CURATION_EVALUATION_PROVENANCE,
+            build_provenance_table,
         )
         from spyglass.spikesorting.v2._recompute import analyzer_role_hashes
         from spyglass.spikesorting.v2._sorting_analyzer import (
@@ -1352,12 +1370,45 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 if use_fast_path
                 else None
             )
+            # Self-describing provenance: the evaluation inputs (recipe names,
+            # metric set, auto-merge preset/rules), the evaluated curation, and
+            # the source provenance phase-3a stores on the row (analyzer-hash
+            # manifest, SI version) plus the upstream recording content hash --
+            # so the result tables are interpretable without the DB.
+            provenance_tables = [
+                build_provenance_table(
+                    CURATION_EVALUATION_PROVENANCE,
+                    {
+                        "sorting_id": str(sorting_id),
+                        "curation_id": int(curation_id),
+                        "metric_params_name": metric_params_name,
+                        "auto_curation_rules_name": auto_curation_rules_name,
+                        "display_waveform_params_name": (
+                            display_waveform_params_name
+                        ),
+                        "metric_waveform_params_name": (
+                            metric_waveform_params_name
+                        ),
+                        "metric_names": list(metric_names),
+                        "metric_kwargs": metric_kwargs,
+                        "auto_merge_preset": auto_merge_preset,
+                        "auto_merge_kwargs": auto_merge_kwargs,
+                        "auto_curation_rules": rule_rows,
+                        "source_kind": source_kind,
+                        "recording_id": recording_id,
+                        "recording_content_hash": recording_row["content_hash"],
+                        "spikeinterface_version": spikeinterface_version,
+                        "source_analyzer_hashes": source_analyzer_hashes,
+                    },
+                )
+            ]
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,
                 merge_groups=merge_groups,
                 labels_by_unit=labels_by_unit,
                 unit_ids=[int(u) for u in metrics_df.index],
+                provenance_tables=provenance_tables,
             )
             return CurationEvaluationComputed(
                 analysis_file_name,

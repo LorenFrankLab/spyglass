@@ -170,6 +170,7 @@ def write_analyzer_curation_tables(
     merge_groups: list[list[int]],
     labels_by_unit: dict[int, list[str]],
     unit_ids: list[int],
+    provenance_tables=None,
 ) -> tuple[str, str, str]:
     """Write the three curation tables into an existing analysis NWB file.
 
@@ -178,6 +179,10 @@ def write_analyzer_curation_tables(
     proposed_labels)``. Registering the file in the DataJoint
     ``AnalysisNwbfile`` table is the caller's responsibility (done inside the
     insert transaction).
+
+    ``provenance_tables`` (optional, from :mod:`._nwb_provenance`) are embedded
+    as scratch in the same write so the artifact is self-describing; ``None``
+    leaves only the result tables.
     """
     qm_table = build_quality_metrics_table(metrics_df)
     ms_table = build_merge_suggestions_table(merge_groups)
@@ -192,6 +197,8 @@ def write_analyzer_curation_tables(
             ms_table.object_id,
             pl_table.object_id,
         )
+        for prov in provenance_tables or ():
+            nwbf.add_scratch(prov)
         io.write(nwbf)
     return object_ids
 

@@ -435,6 +435,87 @@ def test_curation_evaluation_records_source_provenance(
     assert "source_analyzer_missing:display" in missing["reasons"]
 
 
+def test_curation_evaluation_nwb_carries_inputs(
+    populated_sorting_with_curation, curation_evaluation_defaults
+):
+    """The CurationEvaluation NWB embeds the evaluation inputs + source provenance.
+
+    Alongside the metric/merge/label result tables, the artifact carries the
+    metric param set + names, the display/metric recipe names, the auto-merge
+    preset, the evaluated sorting/curation, and re-emits the phase-3a source
+    provenance the row stores (analyzer-hash manifest, SI version) plus the
+    upstream recording content hash -- so the file is interpretable without the
+    DB.
+    """
+    import spikeinterface as si
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CURATION_EVALUATION_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    sel = CurationEvaluationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+    row = (CurationEvaluation & sel).fetch1()
+    fetched_sel = (CurationEvaluationSelection & sel).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+
+    prov = read_provenance_values(abs_path, CURATION_EVALUATION_PROVENANCE)
+
+    # Evaluated curation identity.
+    assert prov["sorting_id"] == str(
+        populated_sorting_with_curation["sorting_id"]
+    )
+    assert prov["curation_id"] == int(
+        populated_sorting_with_curation["curation_id"]
+    )
+    # Recipe / param names.
+    assert prov["metric_params_name"] == "minimal"
+    assert prov["auto_curation_rules_name"] == "none"
+    assert (
+        prov["metric_waveform_params_name"]
+        == fetched_sel["metric_waveform_params_name"]
+    )
+    assert prov["display_waveform_params_name"]
+    # Metric param set + auto-merge preset.
+    expected_metric_names = list(
+        (
+            QualityMetricParameters & {"metric_params_name": "minimal"}
+        ).fetch1("metric_names")
+    )
+    assert prov["metric_names"] == expected_metric_names
+    assert isinstance(prov["auto_merge_preset"], str)
+    # phase-3a source provenance, re-emitted from the row.
+    assert (
+        prov["spikeinterface_version"]
+        == row["spikeinterface_version"]
+        == si.__version__
+    )
+    assert prov["source_analyzer_hashes"] == row["source_analyzer_hashes"]
+    # Upstream recording content hash + source kind.
+    assert prov["source_kind"] == "recording"
+    recording_id = SortingSelection.resolve_source(
+        {"sorting_id": populated_sorting_with_curation["sorting_id"]}
+    ).key["recording_id"]
+    assert prov["recording_content_hash"] == (
+        Recording & {"recording_id": recording_id}
+    ).fetch1("content_hash")
+
+
 def test_curation_evaluation_pc_eval_records_both_roles(
     populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
 ):
