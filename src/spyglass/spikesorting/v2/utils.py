@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import numbers
 import os
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -876,8 +877,30 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
     -------
     int
         The resolved effective random seed (``0`` when unset).
+
+    Raises
+    ------
+    ValueError
+        If the resolved ``random_seed`` is not an integer (e.g. ``"7"`` or
+        ``7.9``). The seed sites consume this resolved value directly, so a
+        non-integer is rejected here -- BEFORE compute -- rather than silently
+        ``int()``-coerced (which would store ``7`` while the sorter saw the
+        original object). This is the call that runs first in ``make_compute``,
+        so a bad seed aborts the populate before any row is written.
     """
-    effective = int(_resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0))
+    resolved = _resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0)
+    # ``bool`` is an ``int`` subclass but never a valid seed; ``numbers.Integral``
+    # accepts Python and numpy integers (which are seed-equivalent to ``int``).
+    if isinstance(resolved, bool) or not isinstance(
+        resolved, numbers.Integral
+    ):
+        raise ValueError(
+            "spikesorting v2 random_seed must be an integer, got "
+            f"{resolved!r} ({type(resolved).__name__}). Set an int random_seed "
+            "in the per-row job_kwargs blob (or "
+            "dj.config['custom']['spikesorting_v2_job_kwargs'])."
+        )
+    effective = int(resolved)
     per_row_has_seed = any(
         isinstance(blob, Mapping) and "random_seed" in blob
         for blob in row_job_kwargs
