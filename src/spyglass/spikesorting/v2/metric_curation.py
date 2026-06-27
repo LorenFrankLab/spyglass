@@ -261,6 +261,11 @@ class CurationEvaluationComputed(NamedTuple):
     merge_suggestions_object_id: str
     proposed_labels_object_id: str
     nwb_file_name: str
+    # Producer provenance (secondary, never identity): SI version at eval time
+    # and the content hash of the canonical raw analyzer consumed on the fast
+    # path (``None`` for the merged-curation temp-analyzer path).
+    spikeinterface_version: str
+    source_analyzer_hash: str | None
 
 
 @schema
@@ -937,7 +942,18 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     metrics_object_id: varchar(72)
     merge_suggestions_object_id: varchar(72)
     proposed_labels_object_id: varchar(72)
+    spikeinterface_version: varchar(32)  # spikeinterface.__version__ at eval time
+    source_analyzer_hash=null: char(64)  # content hash of the canonical raw analyzer consumed (fast path); NULL for a merged-curation temp analyzer
     """
+    # ``source_analyzer_hash`` records the content the metrics were computed over
+    # ONLY on the fast path, where the canonical raw-sort analyzer is regeneratable
+    # scratch (not pinned in the schema) -- so ``detect_stale_source`` can re-hash
+    # it and flag drift. On the merged path the temp analyzer is built
+    # deterministically from the committed (immutable) curation unit set + the
+    # metric recipe, both reachable through the selection, so no snapshot is
+    # needed and the column is NULL. The evaluated curation identity + recipe
+    # names live on CurationEvaluationSelection (the row's FK parent), not
+    # duplicated here. Secondary provenance, never identity.
 
     # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
     # DB transaction. make_compute does NO DB I/O: every DB input is resolved in
@@ -1172,12 +1188,17 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._analyzer_cache import (
             analyzer_curation_lock,
         )
+        from spyglass.spikesorting.v2._recompute import (
+            combined_hash,
+            hash_extension_data,
+        )
         from spyglass.spikesorting.v2._sorting_analyzer import (
             build_analyzer,
             load_or_rebuild_analyzer_from_resolved,
             reconstruct_recording_for_sorting_from_resolved,
         )
 
+        spikeinterface_version = si.__version__
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         wants_pc = (not skip_pc_metrics) and bool(
@@ -1196,7 +1217,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 )
                 object_ids = self._write_empty(abs_path)
                 return CurationEvaluationComputed(
-                    analysis_file_name, *object_ids, nwb_file_name
+                    analysis_file_name,
+                    *object_ids,
+                    nwb_file_name,
+                    spikeinterface_version,
+                    None,
                 )
 
             recording = reconstruct_recording_for_sorting_from_resolved(
@@ -1312,6 +1337,16 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                         )
                     )
 
+            # On the fast path the metrics were computed over the canonical
+            # raw-sort analyzer -- regeneratable scratch not pinned in the
+            # schema -- so snapshot its content hash for stale detection. The
+            # merged path's temp analyzer is pinned by the committed curation +
+            # recipe (both reachable), so it records NULL.
+            source_analyzer_hash = (
+                combined_hash(hash_extension_data(display_analyzer))
+                if use_fast_path
+                else None
+            )
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,
@@ -1320,7 +1355,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 unit_ids=[int(u) for u in metrics_df.index],
             )
             return CurationEvaluationComputed(
-                analysis_file_name, *object_ids, nwb_file_name
+                analysis_file_name,
+                *object_ids,
+                nwb_file_name,
+                spikeinterface_version,
+                source_analyzer_hash,
             )
         except Exception:
             self._cleanup_staged_file(analysis_file_name)
@@ -1334,6 +1373,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         merge_suggestions_object_id,
         proposed_labels_object_id,
         nwb_file_name,
+        spikeinterface_version,
+        source_analyzer_hash,
     ) -> None:
         """Register the analysis file and insert the row (atomic).
 
@@ -1356,11 +1397,81 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             merge_suggestions_object_id
                         ),
                         "proposed_labels_object_id": proposed_labels_object_id,
+                        "spikeinterface_version": spikeinterface_version,
+                        "source_analyzer_hash": source_analyzer_hash,
                     }
                 )
         except Exception:
             self._cleanup_staged_file(analysis_file_name)
             raise
+
+    @classmethod
+    def detect_stale_source(cls, key) -> dict:
+        """Flag whether an evaluation's recorded source provenance still holds.
+
+        Compares the stored ``spikeinterface_version`` to the running SI version
+        and, for a fast-path evaluation (``source_analyzer_hash`` is non-NULL),
+        re-hashes the canonical raw-sort analyzer and compares it to the stored
+        hash -- so a regenerated/mutated analyzer cache, or a library upgrade,
+        surfaces as drift. A merged-curation evaluation stored
+        ``source_analyzer_hash=NULL`` (its temp analyzer is pinned by the
+        committed curation + recipe, both reachable), so only the SI version is
+        compared.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationEvaluation`` row.
+
+        Returns
+        -------
+        dict
+            ``{"stale": bool, "reasons": list[str],
+            "spikeinterface_version": {"stored", "current"},
+            "source_analyzer_hash": {"stored", "current"}}``. ``reasons`` names
+            each drifted field; ``current`` analyzer hash is ``None`` when the
+            evaluation has no stored analyzer hash (the merged path).
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._recompute import (
+            combined_hash,
+            hash_extension_data,
+        )
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        row = (cls & key).fetch1()
+        sel = (CurationEvaluationSelection & key).fetch1()
+        reasons: list[str] = []
+
+        current_version = si.__version__
+        if row["spikeinterface_version"] != current_version:
+            reasons.append("spikeinterface_version")
+
+        stored_analyzer_hash = row["source_analyzer_hash"]
+        current_analyzer_hash = None
+        if stored_analyzer_hash is not None:
+            analyzer = Sorting().get_analyzer(
+                {"sorting_id": str(sel["sorting_id"])}, rebuild=False
+            )
+            current_analyzer_hash = combined_hash(
+                hash_extension_data(analyzer)
+            )
+            if current_analyzer_hash != stored_analyzer_hash:
+                reasons.append("source_analyzer_hash")
+
+        return {
+            "stale": bool(reasons),
+            "reasons": reasons,
+            "spikeinterface_version": {
+                "stored": row["spikeinterface_version"],
+                "current": current_version,
+            },
+            "source_analyzer_hash": {
+                "stored": stored_analyzer_hash,
+                "current": current_analyzer_hash,
+            },
+        }
 
     # ---- compute helpers (DB-free; SI work) ------------------------------
 

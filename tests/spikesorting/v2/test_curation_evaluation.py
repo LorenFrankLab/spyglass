@@ -365,6 +365,60 @@ def test_final_metrics_recomputed_for_merged_unit(
         clear_curations_for(planted_two_unit_sort)
 
 
+def test_curation_evaluation_records_source_provenance(
+    populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
+):
+    """A fast-path (root-curation) evaluation records the SI version and the
+    canonical raw-sort analyzer's content hash; detect_stale_source is clean in
+    the same environment but flags a library-version drift and an analyzer-
+    content drift. The evaluated curation identity + recipe names live on the
+    selection FK, not duplicated on the row."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    sel = CurationEvaluationSelection.insert_selection(
+        {
+            **populated_sorting_with_curation,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )
+    CurationEvaluation.populate(sel, reserve_jobs=False)
+    row = (CurationEvaluation & sel).fetch1()
+    assert row["spikeinterface_version"] == si.__version__
+    # Fast path consumes the canonical raw analyzer -> its hash is recorded.
+    assert row["source_analyzer_hash"] is not None
+    # Evaluated identity is reachable via the selection FK, not duplicated.
+    fetched_sel = (CurationEvaluationSelection & sel).fetch1()
+    assert str(fetched_sel["sorting_id"]) == str(
+        populated_sorting_with_curation["sorting_id"]
+    )
+
+    # Same environment -> not stale.
+    assert CurationEvaluation.detect_stale_source(sel)["stale"] is False
+
+    # A SpikeInterface-version drift is flagged.
+    monkeypatch.setattr(si, "__version__", "0.0.0-test")
+    version_drift = CurationEvaluation.detect_stale_source(sel)
+    assert version_drift["stale"] is True
+    assert "spikeinterface_version" in version_drift["reasons"]
+    monkeypatch.undo()  # restore version before the analyzer-hash check
+
+    # An analyzer-content drift (a different re-hash) is flagged.
+    import spyglass.spikesorting.v2._recompute as rc
+
+    monkeypatch.setattr(
+        rc, "hash_extension_data", lambda analyzer, **k: {"x": "deadbeef"}
+    )
+    hash_drift = CurationEvaluation.detect_stale_source(sel)
+    assert hash_drift["stale"] is True
+    assert "source_analyzer_hash" in hash_drift["reasons"]
+
+
 def _two_distinct_template_inputs():
     """A 4-channel recording + two-unit and merged sortings, distinct templates.
 
