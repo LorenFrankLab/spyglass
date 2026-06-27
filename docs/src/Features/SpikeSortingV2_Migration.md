@@ -140,7 +140,7 @@ v1 chain only for features still listed as pending.
   and `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
   metrics, auto-labels, and merge suggestions. Unlike v1 (which scored the raw
   sort), `CurationEvaluation` scores a **committed `CurationV2`** row in that
-  curation's own unit namespace, and its `create_curation` / `replace_labels`
+  curation's own unit namespace, and its `create_curation` / `use_evaluation_labels`
   helpers accept the proposals into a committed child. Like v1's
   `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
   metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,
@@ -160,11 +160,12 @@ v1 chain only for features still listed as pending.
 - **Available in v2** — `RecordingRecompute` is replaced by two explicit
   verification families: `RecordingArtifactRecompute*` for recording/artifact
   NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
-- **Still pending** — `figpack_curation`, `unit_matching`, and
-  `matcher_protocol` remain import-safe placeholders that raise informative
-  errors on public-name import.
-- **Gated methods** — `ConcatenatedRecording` / `SessionGroup` exist in v2 but
-  their unimplemented methods raise `NotImplementedError`.
+- **Available in v2** — cross-session unit matching is delivered: `unit_matching`
+  and `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables (no longer
+  stubs), and `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
+  concatenate-and-sort.
+- **Still pending** — `figpack_curation` remains an import-safe placeholder that
+  raises an informative error on public-name import.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
@@ -172,8 +173,8 @@ v1 chain only for features still listed as pending.
 | FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation views (roadmap) |
 | Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table |
 | Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
-| Concatenated recording / session group | (no v1 equivalent) | session-group concatenation (roadmap) |
-| Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | cross-session unit matching (roadmap) |
+| Concatenated recording / session group | (no v1 equivalent) | same-day chronic concatenate-and-sort (available) |
+| Cross-session unit matching (`UnitMatch`) | (no v1 equivalent) | `UnitMatch` / `TrackedUnit` (available) |
 
 ## 5. What v1↔v2 comparisons WILL show
 

@@ -256,7 +256,7 @@ describe_units(run_summary["sorting_id"])
 #
 # 1. **Evaluate** the committed curation — `CurationEvaluation` walks its
 #    analyzer, computes quality metrics, and proposes labels from a rule set.
-# 2. **Accept** the proposals into a committed child — `replace_labels` writes
+# 2. **Accept** the proposals into a committed child — `use_evaluation_labels` writes
 #    the evaluation's label verdict (the final-metrics path); `create_curation`
 #    accepts explicit merges too.
 # 3. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
@@ -329,14 +329,14 @@ CurationEvaluation.get_metrics(eval_sel)
 # bursts with an amplitude decrement that MountainSort oversplits into a parent +
 # a shorter-waveform daughter — exactly the high-similarity, short-lag-asymmetric
 # pair this scatter surfaces, so merging them reassembles one cell.
-# `replace_labels` then writes the evaluation's label verdict into a committed
+# `use_evaluation_labels` then writes the evaluation's label verdict into a committed
 # child you merge on top of (it CLEARS any earlier label the evaluation no
 # longer proposes — the authoritative "use the evaluation's labels" path; use
-# `overlay_labels` instead to KEEP existing labels and only add the proposed
+# `overlay_evaluation_labels` instead to KEEP existing labels and only add the proposed
 # ones).
 
 CurationEvaluation().plot_by_sort_group_ids(eval_sel)
-labeled_curation = CurationEvaluation().replace_labels(eval_sel)
+labeled_curation = CurationEvaluation().use_evaluation_labels(eval_sel)
 labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 
 # ### 7c. Manual merge, then the final evaluation pass (pass 2)
@@ -351,7 +351,7 @@ labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 # analyzer-backed plots (`plot_units_qc`, `plot_correlograms`, ...) are
 # raw-unit-curation only and RAISE on a merged curation, so read the merged
 # result with `get_metrics` (it carries the curation's own merged namespace).
-# `replace_labels` commits those final labels so downstream code keys off the
+# `use_evaluation_labels` commits those final labels so downstream code keys off the
 # curated result, not the uncurated root curation. (Leaving the list empty keeps
 # the auto-labeled curation from 7b as the result — no merge applied.)
 
@@ -375,7 +375,7 @@ if merge_groups_to_apply:
     )
     CurationEvaluation.populate(final_eval_sel)
     display(CurationEvaluation.get_metrics(final_eval_sel))  # merged templates
-    final_curation = CurationEvaluation().replace_labels(final_eval_sel)
+    final_curation = CurationEvaluation().use_evaluation_labels(final_eval_sel)
 else:
     final_curation = labeled_curation  # no manual merge yet; use the 7b result
     final_eval_sel = eval_sel  # the curation-evaluation selection of record

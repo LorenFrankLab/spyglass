@@ -86,7 +86,7 @@ coexist under one merge surface.
     scored in that curation's own unit namespace (a merged unit's metrics are
     recomputed over the merged template, not inherited). Proposals are persisted
     to NWB; committing them to a child curation is an explicit
-    `create_curation` / `replace_labels` step. Preview/draft curations are
+    `create_curation` / `use_evaluation_labels` step. Preview/draft curations are
     rejected. Replaces the removed `AnalyzerCuration`. See
     [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
@@ -489,7 +489,7 @@ quality metrics, propose merge suggestions, and propose auto-curation labels. A
 merged unit gets SNR / ISI-violation / PC-NN separation recomputed over its
 **merged** template -- never inherited from the highest-amplitude contributor.
 The proposals are written to NWB; turning them into a committed child
-`CurationV2` is an explicit step (`create_curation` / `replace_labels`).
+`CurationV2` is an explicit step (`create_curation` / `use_evaluation_labels`).
 
 ```python
 from spyglass.spikesorting.v2.metric_curation import (
@@ -529,31 +529,69 @@ merges = CurationEvaluation.get_merge_groups(sel)    # [[unit_id, ...], ...] sug
 # Accept the proposals into a COMMITTED child CurationV2
 # (curation_source='curation_evaluation'). Labels are two VISIBLY DIFFERENT
 # choices, not a quiet flag:
-child = CurationEvaluation().replace_labels(sel)   # USE the evaluation verdict:
+child = CurationEvaluation().use_evaluation_labels(sel)   # USE the evaluation verdict:
 #   child labels == the evaluation's labels; a unit the rules no longer flag
 #   loses its stale reject/noise (the default final-metrics path).
-child = CurationEvaluation().overlay_labels(sel)   # KEEP current labels + add
+child = CurationEvaluation().overlay_evaluation_labels(sel)   # KEEP current labels + add
 #   the proposed ones (the manual-curation path).
-# Merges are never applied implicitly -- pass them (or every suggestion):
-child = CurationEvaluation().create_curation(sel, merge_groups=[[u0, u1]])
-child = CurationEvaluation().create_curation(sel, use_all_suggested_merges=True)
+# Merges are never applied implicitly -- accept them with the action methods:
+child = CurationEvaluation().accept_merges(sel, merge_groups=[[u0, u1]])  # commit chosen merges
+child = CurationEvaluation().accept_all_suggested_merges(sel)             # commit every suggestion
+draft = CurationEvaluation().preview_merges(sel, merge_groups=[[u0, u1]]) # unapplied draft to review
 ```
 
-`replace_labels` (default verdict) and `overlay_labels` (keep + add) are
-deliberately separate methods so the label choice is explicit at the call site
--- `replace_labels` clears labels the evaluation does not propose (v1's "final
-auto-curation writes the full label state", so a no-longer-flagged unit is not
-silently excluded downstream), while `overlay_labels` retains the curation's
-current labels. (In a UI these are the "Use Evaluation Labels" and "Overlay
-Evaluation Labels" actions.)
+**Use the action methods for the normal workflow.** `accept_merges` /
+`accept_all_suggested_merges` commit the merged unit set and **inherit** the
+curation's existing labels -- they deliberately do NOT apply the pre-merge
+evaluation labels (those are in the pre-merge namespace; a label on an absorbed
+unit cannot attach to the fresh merged unit). The recommended flow is
+accept-merge-then-evaluate: accept the merge, RE-EVALUATE the merged child, then
+write final labels with `use_evaluation_labels` / `overlay_evaluation_labels`.
+`preview_merges` drafts an unapplied merge for review (a preview row downstream
+consumers reject until committed); every merge action requires at least one real
+>=2-member group.
 
-Acceptance never applies merges implicitly: `create_curation` commits a
-labels-only child unless you pass an explicit `merge_groups` **or**
-`use_all_suggested_merges=True` (a caller-supplied singleton/empty group is
-rejected by the same >=2-member typo guard as `insert_curation`, not silently
-dropped). It always produces a **committed** child (no preview rows). To draft a
-merge for review before committing, use the explicit `create_preview_curation`
-opt-in instead.
+`use_evaluation_labels` (default verdict) and `overlay_evaluation_labels` (keep +
+add) are deliberately separate methods so the label choice is explicit at the
+call site -- `use_evaluation_labels` clears labels the evaluation does not
+propose (v1's "final auto-curation writes the full label state", a no-longer-flagged
+unit is not silently excluded downstream), while `overlay_evaluation_labels`
+retains the curation's current labels. (In a UI these are the "Use Evaluation
+Labels" and "Overlay Evaluation Labels" actions.)
+
+The lower-level `create_curation` is the **expert/combined** API (merges + labels
+in one call); note its `labels=None` default fetches and applies the
+evaluation's pre-merge labels, so prefer the action methods unless you are
+deliberately combining surviving-unit labels with a merge. `create_preview_curation`
+is the explicit expert draft opt-in behind `preview_merges`.
+
+#### Saving a manual FigURL-style payload
+
+Curation need not come from an evaluation. `CurationV2.save_manual_curation` is
+the payload-oriented entry point a manual / web-UI workflow posts to: it takes a
+v1/FigURL payload (`labelsByUnit` / `mergeGroups`), a v2 payload
+(`labels_by_unit` / `merge_groups`), or already-unpacked `labels=` /
+`merge_groups=`, and writes the next `CurationV2` row. `merge_action` makes the
+review/commit choice explicit (`"preview"` drafts unapplied merges, `"commit"`
+applies them); a v1 association map (`{"1": ["2"], "2": ["3"]}`) is unioned
+transitively into full groups (`[[1, 2, 3]]`), matching v1.
+
+```python
+from spyglass.spikesorting.v2.curation import CurationV2
+
+child = CurationV2.save_manual_curation(
+    {"sorting_id": sid},
+    parent_curation_id=root_id,                 # branch off a committed curation
+    payload={
+        "labelsByUnit": {"3": ["mua"]},         # FigURL spellings
+        "mergeGroups": {"5": ["6"]},
+    },
+    merge_action="commit",                      # apply the merge (vs "preview")
+)
+```
+
+This is the same JSON the FigPack **web** UI (still pending) would submit -- only
+the browser views are unimplemented, not the save path.
 
 Notes:
 
@@ -596,7 +634,7 @@ Curation is iterative; each child edits its **parent's committed state** (see
 and the absorbed raw units are never resurrected:
 
 1. **Evaluate + label.** Run `CurationEvaluation` on the root curation, inspect
-   `get_metrics(sel)` / `plot_units_qc(sel)`, then `replace_labels(sel)` to
+   `get_metrics(sel)` / `plot_units_qc(sel)`, then `use_evaluation_labels(sel)` to
    commit the proposed labels into a child.
 2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
    drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
@@ -1129,15 +1167,19 @@ calling them under SI 0.104 raises a clear `RuntimeError`.
 ## Status
 
 The single-session sort chain, analyzer-driven curation (metrics +
-auto-curation, above), and same-day chronic concatenate-and-sort (the
-[Chronic same-day recordings](#chronic-same-day-recordings) section below) are
-available now. Not yet available:
+auto-curation, above), same-day chronic concatenate-and-sort (the
+[Chronic same-day recordings](#chronic-same-day-recordings) section below), and
+cross-session unit matching ([Cross-session unit tracking](#cross-session-unit-tracking))
+are available now. Not yet available:
 
-- cross-session unit matching
-- FigPack web curation views
+- FigPack **web** curation views (the interactive browser UI)
 
-Unit matching and FigPack remain placeholder modules until their implementation
-phases land.
+Only the FigPack *web UI* is pending. The payload-save bridge it would post to is
+already available: `CurationV2.save_manual_curation` ingests a FigURL/FigPack-style
+JSON payload (or already-unpacked labels / merge groups) into the next curation
+(see [Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
+The `figpack_curation` module name itself remains an import-safe placeholder until
+the web views land.
 
 ## Streaming, parallel populate, and v1 parity
 
