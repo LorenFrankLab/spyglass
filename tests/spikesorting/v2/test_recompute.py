@@ -60,6 +60,68 @@ def test_analyzer_seed_modes_marks_noise_levels_unseeded():
     )
 
 
+class _HashFakeExtension:
+    def __init__(self, data):
+        self._data = data
+
+    def get_data(self):
+        return self._data
+
+
+class _HashFakeAnalyzer:
+    def __init__(self, extensions):
+        self._extensions = extensions
+
+    def has_extension(self, name):
+        return name in self._extensions
+
+    def get_extension(self, name):
+        return _HashFakeExtension(self._extensions[name])
+
+
+def test_analyzer_role_hashes_covers_display_and_metric():
+    """The source-provenance manifest covers EVERY canonical analyzer consumed:
+    the display analyzer always, and the metric analyzer when one was built
+    (PC/NN evaluations). Without the metric entry a PC evaluation could drift
+    through the metric analyzer undetected."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._recompute import (
+        analyzer_role_hashes,
+        combined_hash,
+        hash_extension_data,
+    )
+
+    display = _HashFakeAnalyzer(
+        {
+            "random_spikes": np.arange(6, dtype="int64"),
+            "templates": np.ones((2, 3), dtype="float32"),
+            "waveforms": np.full((2, 3), 2.0, dtype="float32"),
+        }
+    )
+    metric = _HashFakeAnalyzer(
+        {
+            "random_spikes": np.arange(6, 12, dtype="int64"),
+            "templates": np.full((2, 3), 5.0, dtype="float32"),
+            "waveforms": np.full((2, 3), 7.0, dtype="float32"),
+        }
+    )
+
+    # No metric analyzer (no PC metrics) -> display only.
+    display_only = analyzer_role_hashes(display)
+    assert set(display_only) == {"display"}
+    assert display_only["display"] == combined_hash(
+        hash_extension_data(display)
+    )
+
+    # PC/NN evaluation -> both analyzers captured, with distinct hashes.
+    both = analyzer_role_hashes(display, metric)
+    assert set(both) == {"display", "metric"}
+    assert both["display"] == display_only["display"]
+    assert both["metric"] == combined_hash(hash_extension_data(metric))
+    assert both["metric"] != both["display"]
+
+
 def test_compare_hash_dicts_classifies_diffs():
     from spyglass.spikesorting.v2._recompute import compare_hash_dicts
 

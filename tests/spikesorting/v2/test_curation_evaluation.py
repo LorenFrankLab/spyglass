@@ -390,8 +390,10 @@ def test_curation_evaluation_records_source_provenance(
     CurationEvaluation.populate(sel, reserve_jobs=False)
     row = (CurationEvaluation & sel).fetch1()
     assert row["spikeinterface_version"] == si.__version__
-    # Fast path consumes the canonical raw analyzer -> its hash is recorded.
-    assert row["source_analyzer_hash"] is not None
+    # Fast path consumes the canonical display analyzer -> recorded as a manifest
+    # ({role: hash}). "minimal" requests no PC metrics, so no metric analyzer.
+    assert set(row["source_analyzer_hashes"]) == {"display"}
+    assert row["source_analyzer_hashes"]["display"]
     # Evaluated identity is reachable via the selection FK, not duplicated.
     fetched_sel = (CurationEvaluationSelection & sel).fetch1()
     assert str(fetched_sel["sorting_id"]) == str(
@@ -408,7 +410,7 @@ def test_curation_evaluation_records_source_provenance(
     assert "spikeinterface_version" in version_drift["reasons"]
     monkeypatch.undo()  # restore version before the analyzer-hash check
 
-    # An analyzer-content drift (a different re-hash) is flagged.
+    # An analyzer-content drift (a different re-hash) is flagged per role.
     import spyglass.spikesorting.v2._recompute as rc
 
     monkeypatch.setattr(
@@ -416,7 +418,7 @@ def test_curation_evaluation_records_source_provenance(
     )
     hash_drift = CurationEvaluation.detect_stale_source(sel)
     assert hash_drift["stale"] is True
-    assert "source_analyzer_hash" in hash_drift["reasons"]
+    assert "source_analyzer_hash:display" in hash_drift["reasons"]
 
 
 def _two_distinct_template_inputs():

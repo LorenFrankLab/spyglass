@@ -126,6 +126,22 @@ def combined_hash(hash_dict: dict[str, str]) -> str:
     return digest.hexdigest()
 
 
+def analyzer_role_hashes(display_analyzer, metric_analyzer=None) -> dict:
+    """Return ``{role: content_hash}`` for the canonical analyzers consumed.
+
+    A ``CurationEvaluation`` always reads the ``"display"`` analyzer and, when it
+    requests PC/NN metrics, the whitened ``"metric"`` analyzer. This builds the
+    provenance manifest covering EVERY analyzer actually consumed, so a stale
+    check can re-hash each one -- missing the metric analyzer would let a
+    PC/NN evaluation drift undetected. ``metric_analyzer=None`` (no PC metrics)
+    yields just the display entry.
+    """
+    hashes = {"display": combined_hash(hash_extension_data(display_analyzer))}
+    if metric_analyzer is not None:
+        hashes["metric"] = combined_hash(hash_extension_data(metric_analyzer))
+    return hashes
+
+
 def compare_hash_dicts(
     old: dict[str, str], new: dict[str, str]
 ) -> tuple[bool, list[str], list[str], list[str]]:
