@@ -306,6 +306,40 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     """
 
 
+class SharedArtifactGroupMemberDriftError(RuntimeError):
+    """Raise when a shared artifact group's member set changed under a fixed id.
+
+    The shared-group ``artifact_detection_id`` identity is ``{params,
+    group_name}`` only, but ``ArtifactDetection.make`` scans the LIVE
+    ``SharedArtifactGroup.Member`` set. ``insert_selection`` snapshots the ordered
+    member ``recording_id`` set as ``SharedGroupSource.member_set_hash``;
+    ``make_fetch`` re-derives it from the current members and raises this when
+    they disagree -- a member was added or removed after the selection was
+    created, so the scanned set no longer matches what the id was minted for.
+    The ``artifact_detection_id`` identity is params + group name only (the
+    member set is a snapshot, not identity), so ``insert_selection`` returns this
+    same id with its stale snapshot; recovery is to DELETE this selection and
+    re-run ``insert_selection`` (which re-snapshots the current members), or to
+    restore the group's members -- not to silently scan a different set.
+    """
+
+
+class UnitMatchPairIntegrityError(RuntimeError):
+    """Raise when a ``UnitMatch.Pair`` row is outside the pinned curation universe.
+
+    ``Pair`` FKs each endpoint to ``CurationV2.Unit`` GLOBALLY, so the schema
+    only guarantees the unit exists in SOME curation -- not in the pinned
+    ``UnitMatchSelection.MemberCuration`` for this run. The canonical
+    ``make_insert`` path is safe because ``canonicalize_match_pairs`` orients and
+    dedupes within the pinned, matchable set, but a raw / maintenance
+    ``Pair.insert`` bypasses that. The validated ``Pair.insert`` override raises
+    this when an endpoint's ``(sorting_id, curation_id)`` is not a pinned member
+    curation, when both endpoints share one member (a unit cannot match itself
+    across sessions), when a reversed/duplicate undirected edge is re-inserted,
+    or when ``match_probability`` is outside ``[0, 1]``.
+    """
+
+
 class TrackedUnitBudgetExceededError(RuntimeError):
     """Raise when the strict tracked-unit graph exceeds its node budget.
 

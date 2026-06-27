@@ -94,6 +94,11 @@ class UnitMatchComputed(NamedTuple):
     n_pairs: int
     matcher_runtime_s: float
     anchor_nwb_file_name: str
+    # The FROZEN matchable universe (per-member ``{"member_index", "sorting_id"
+    # (str), "curation_id", "unit_id"}`` dicts), snapshotted from ``member_plan``
+    # so ``make_insert`` writes ``UnitMatch.MatchableUnit`` and ``TrackedUnit``
+    # reads the exact node universe the matcher saw, not current labels.
+    matchable_units: list[dict]
 
 
 @schema
@@ -321,6 +326,12 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         if existing is not None:
             return existing
 
+        # Geometry preflight: reject a cross-day / cross-probe geometry mismatch
+        # NOW, at selection time, before UnitMatch.make's expensive dense bundle
+        # extraction would hit it deep in the matcher. Only on the new-insert path
+        # (an idempotent re-call of an already-validated selection skips the I/O).
+        cls._assert_members_share_geometry(choices_by_member)
+
         master_row = {**identity, "unitmatch_id": unitmatch_id}
         part_rows = [
             {
@@ -349,6 +360,47 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 return existing
             raise
         return {"unitmatch_id": unitmatch_id}
+
+    @classmethod
+    def _member_channel_positions(cls, curation_key):
+        """Channel positions for one pinned member's curated recording.
+
+        Loads the curated recording (the same object ``UnitMatch.make`` extracts
+        bundles from) and returns its ``get_channel_locations()`` array. A thin
+        seam so the geometry preflight is unit-testable by patching this rather
+        than building a full SpikeInterface recording.
+        """
+        return CurationV2.get_recording(curation_key).get_channel_locations()
+
+    @classmethod
+    def _assert_members_share_geometry(cls, choices_by_member) -> None:
+        """Reject a cross-probe / cross-day geometry mismatch across members.
+
+        Loads each pinned member's curated-recording channel positions (cheap
+        metadata) and runs the same shared-probe check the matcher backend runs
+        post-extraction -- here as a preflight, so a mismatch fails at selection
+        time rather than deep in ``UnitMatch.make``'s dense bundle extraction.
+        Single-member selections skip (nothing to compare against).
+        """
+        if len(choices_by_member) < 2:
+            return
+        from spyglass.spikesorting.v2._unitmatch_backend import (
+            assert_consistent_channel_geometry,
+        )
+
+        named_positions = [
+            (
+                f"member_{member_index}",
+                cls._member_channel_positions(
+                    {
+                        "sorting_id": choices_by_member[member_index][0],
+                        "curation_id": choices_by_member[member_index][1],
+                    }
+                ),
+            )
+            for member_index in sorted(choices_by_member)
+        ]
+        assert_consistent_channel_geometry(named_positions)
 
     @classmethod
     def _find_existing_pk(
@@ -477,6 +529,153 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         match_probability: float
         drift_estimate_um=0.0: float
         fdr_estimate=NULL: float
+        """
+
+        def insert1(self, row, **kwargs):
+            """Validate one pair against the pinned curation universe, insert."""
+            self.insert([row], **kwargs)
+
+        def insert(self, rows, **kwargs):
+            """Validate every pair against the selection's ``MemberCuration``.
+
+            The ``Pair`` FKs guarantee each endpoint exists in SOME ``CurationV2``,
+            not in THIS selection's pinned ``MemberCuration``. The canonical
+            ``UnitMatch.make_insert`` path is safe because
+            ``canonicalize_match_pairs`` orients + dedupes within the pinned,
+            matchable set; a raw / maintenance ``insert`` bypasses that, so
+            re-validate here. Positional rows are normalized to dicts (and
+            validated) too, so a raw positional insert cannot slip past the guard.
+            For each row: both endpoints must be a pinned member curation, the two
+            endpoints must be different members (a unit cannot match itself across
+            sessions), the undirected edge must be new (no reversed / duplicate),
+            and ``match_probability`` must be in ``[0, 1]``.
+            """
+            from collections.abc import Mapping
+
+            from spyglass.spikesorting.v2.utils import _insert_row_to_dict
+
+            if isinstance(rows, Mapping):
+                rows = [rows]
+            attr_names = self.heading.names
+            normalized = [_insert_row_to_dict(row, attr_names) for row in rows]
+            # Per-unitmatch_id caches: the pinned member-curation set and the
+            # undirected edges already present (DB) plus those validated earlier
+            # in this batch, so a multi-pair insert does not re-query per row.
+            pinned_cache: dict = {}
+            seen_edges: dict = {}
+            for row in normalized:
+                self._validate_pair_row(row, pinned_cache, seen_edges)
+            super().insert(normalized, **kwargs)
+
+        def _validate_pair_row(self, row, pinned_cache, seen_edges) -> None:
+            """Reject a single ``Pair`` row outside the pinned curation universe."""
+            from spyglass.spikesorting.v2.exceptions import (
+                UnitMatchPairIntegrityError,
+            )
+
+            unitmatch_id = row.get("unitmatch_id")
+            if unitmatch_id is None:
+                # No master key to validate against; the FK layer rejects it.
+                return
+            probability = float(row["match_probability"])
+            if not 0.0 <= probability <= 1.0:
+                raise UnitMatchPairIntegrityError(
+                    "UnitMatch.Pair.insert: match_probability "
+                    f"{probability} is outside [0, 1]."
+                )
+            endpoint_a = (
+                str(row["session_a_sorting_id"]),
+                int(row["session_a_curation_id"]),
+            )
+            endpoint_b = (
+                str(row["session_b_sorting_id"]),
+                int(row["session_b_curation_id"]),
+            )
+            pinned = pinned_cache.get(unitmatch_id)
+            if pinned is None:
+                pinned = {
+                    (str(member["sorting_id"]), int(member["curation_id"]))
+                    for member in (
+                        UnitMatchSelection.MemberCuration
+                        & {"unitmatch_id": unitmatch_id}
+                    ).fetch("sorting_id", "curation_id", as_dict=True)
+                }
+                pinned_cache[unitmatch_id] = pinned
+            for label, endpoint in (("a", endpoint_a), ("b", endpoint_b)):
+                if endpoint not in pinned:
+                    raise UnitMatchPairIntegrityError(
+                        f"UnitMatch.Pair.insert: endpoint {label} curation "
+                        f"(sorting_id={endpoint[0]}, curation_id={endpoint[1]}) "
+                        "is not a pinned UnitMatchSelection.MemberCuration for "
+                        f"unitmatch_id={unitmatch_id}. A pair may only reference "
+                        "units from the selection's pinned curations. Use "
+                        "UnitMatchSelection.insert_selection() + populate()."
+                    )
+            if endpoint_a == endpoint_b:
+                raise UnitMatchPairIntegrityError(
+                    "UnitMatch.Pair.insert: both endpoints pin the same member "
+                    f"curation ({endpoint_a}); a unit cannot match itself across "
+                    "sessions. Cross-session pairs join two distinct members."
+                )
+            node_a = (*endpoint_a, int(row["unit_a_id"]))
+            node_b = (*endpoint_b, int(row["unit_b_id"]))
+            edge = frozenset((node_a, node_b))
+            batch = seen_edges.setdefault(
+                unitmatch_id, self._existing_pair_edges(unitmatch_id)
+            )
+            if edge in batch:
+                raise UnitMatchPairIntegrityError(
+                    "UnitMatch.Pair.insert: duplicate / reversed edge between "
+                    f"{node_a} and {node_b} for unitmatch_id={unitmatch_id}; the "
+                    "undirected pair already exists. Pairs are deduped + oriented "
+                    "by canonicalize_match_pairs."
+                )
+            batch.add(edge)
+
+        def _existing_pair_edges(self, unitmatch_id) -> set:
+            """Undirected edges already stored for one ``unitmatch_id``."""
+            existing = set()
+            for pair in (self & {"unitmatch_id": unitmatch_id}).fetch(
+                "session_a_sorting_id",
+                "session_a_curation_id",
+                "unit_a_id",
+                "session_b_sorting_id",
+                "session_b_curation_id",
+                "unit_b_id",
+                as_dict=True,
+            ):
+                node_a = (
+                    str(pair["session_a_sorting_id"]),
+                    int(pair["session_a_curation_id"]),
+                    int(pair["unit_a_id"]),
+                )
+                node_b = (
+                    str(pair["session_b_sorting_id"]),
+                    int(pair["session_b_curation_id"]),
+                    int(pair["unit_b_id"]),
+                )
+                existing.add(frozenset((node_a, node_b)))
+            return existing
+
+    class MatchableUnit(SpyglassMixinPart):
+        """The FROZEN matchable-unit universe this match ran over.
+
+        Snapshots, per member, the ``(sorting_id, curation_id, unit_id)`` triples
+        that survived the exclude-label filter in ``make_fetch`` -- the exact
+        node universe the matcher saw. ``TrackedUnit.make`` reads this instead of
+        re-deriving it from CURRENT curation labels, so a relabel between
+        ``UnitMatch`` and ``TrackedUnit`` populate cannot silently drop a
+        singleton (a unit the matcher saw but emitted no ``Pair`` for) from the
+        tracked-unit graph. A plain snapshot (not FK'd) by design: the value
+        records what was matched, not a live reference.
+        """
+
+        definition = """
+        -> master
+        member_index: int
+        sorting_id: uuid
+        curation_id: int
+        unit_id: int
         """
 
     # Tri-part make so the heavy curation reads, dense bundle extraction,
@@ -646,6 +845,19 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         )
 
         anchor_nwb_file_name = member_plan[0]["nwb_file_name"]
+        # Snapshot the frozen matchable universe from member_plan (resolved +
+        # validated in make_fetch) so make_insert persists exactly the node set
+        # the matcher saw -- independent of the matcher path taken below.
+        matchable_units = [
+            {
+                "member_index": int(plan["member_index"]),
+                "sorting_id": plan["sorting_id"],
+                "curation_id": int(plan["curation_id"]),
+                "unit_id": int(unit_id),
+            }
+            for plan in member_plan
+            for unit_id in plan["matchable_unit_ids"]
+        ]
         analysis_file_name = AnalysisNwbfile().create(anchor_nwb_file_name)
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
@@ -678,6 +890,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             n_pairs=len(oriented_pairs),
             matcher_runtime_s=float(runtime_s),
             anchor_nwb_file_name=anchor_nwb_file_name,
+            matchable_units=matchable_units,
         )
 
     def make_insert(
@@ -688,13 +901,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         n_pairs,
         matcher_runtime_s,
         anchor_nwb_file_name,
+        matchable_units,
     ) -> None:
-        """Register the analysis file + insert the master and Pair rows.
+        """Register the analysis file + insert the master, Pair, and frozen
+        ``MatchableUnit`` rows.
 
         Runs inside the framework's tri-part insert transaction. The Pair rows
         are read back from the staged NWB (the canonical written pairs) rather
-        than threaded through the compute carrier, mirroring ``CurationEvaluation``.
-        On failure the staged file is unlinked before re-raising.
+        than threaded through the compute carrier, mirroring ``CurationEvaluation``;
+        ``matchable_units`` is the frozen node universe snapshot carried from
+        ``make_compute``. On failure the staged file is unlinked before re-raising.
         """
         from spyglass.spikesorting.v2._unitmatch_nwb import read_pairs
         from spyglass.spikesorting.v2.recording import (
@@ -735,6 +951,11 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 # the full Pair row -- no second hand-maintained column list to
                 # drift from the NWB writer/reader.
                 self.Pair.insert([{**key, **pair} for pair in pairs])
+                # Persist the frozen matchable universe so TrackedUnit reads the
+                # exact node set the matcher saw, not current curation labels.
+                self.MatchableUnit.insert(
+                    [{**key, **unit} for unit in matchable_units]
+                )
         except Exception:
             _unlink_staged_analysis_file(
                 analysis_file_name, context="UnitMatch.make_insert"
@@ -864,16 +1085,15 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Derive tracked units from the pairwise ``UnitMatch.Pair`` graph.
 
-        ``node_universe`` is re-derived from the CURRENT curation labels
-        (``get_matchable_unit_ids``) at this populate time -- unlike
-        ``UnitMatch``, which froze its matchable set in ``make_fetch``. If a unit
-        that ``UnitMatch`` matched is relabeled (e.g. to ``noise``) AFTER
-        ``UnitMatch`` populated but before this runs, its ``UnitMatch.Pair`` edge
-        references a node no longer in ``node_universe`` and
-        ``derive_tracked_units`` raises (an edge endpoint absent from the node
-        universe). That is the intended loud failure: re-populate ``UnitMatch``
-        so both tables agree on the matchable set rather than tracking a stale
-        match.
+        ``node_universe`` is read from the FROZEN ``UnitMatch.MatchableUnit``
+        snapshot -- the exact matchable set ``UnitMatch.make_fetch`` resolved --
+        NOT re-derived from current curation labels. So a relabel between
+        ``UnitMatch`` and ``TrackedUnit`` populate cannot silently drop a
+        singleton (a unit the matcher saw but emitted no ``Pair`` for) from the
+        tracked-unit graph. ``derive_tracked_units`` still fails loudly if a
+        ``Pair`` edge endpoint is absent from the (frozen) universe -- a genuine
+        UnitMatch/MatchableUnit inconsistency that should never occur, since both
+        are written together in ``make_insert``.
         """
         from spyglass.spikesorting.v2._matcher_graph import (
             derive_tracked_units,
@@ -887,23 +1107,29 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         threshold = float(params.get("tracked_unit_threshold", 0.5))
         max_strict_nodes = int(params.get("max_strict_nodes", 2000))
 
-        member_curations = (UnitMatchSelection.MemberCuration & key).fetch(
-            as_dict=True
-        )
-        node_universe = []
-        for row in member_curations:
-            curation_key = {
-                "sorting_id": row["sorting_id"],
-                "curation_id": int(row["curation_id"]),
-            }
-            for unit_id in CurationV2().get_matchable_unit_ids(curation_key):
-                node_universe.append(
-                    (
-                        str(row["sorting_id"]),
-                        int(row["curation_id"]),
-                        int(unit_id),
-                    )
-                )
+        # Canonicalize on read to derive_tracked_units' node identity:
+        # MatchableUnit stores (sorting_id uuid, curation_id, unit_id); the graph
+        # keys on (str(sorting_id), int(curation_id), int(unit_id)).
+        node_universe = [
+            (
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                int(row["unit_id"]),
+            )
+            for row in (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
+        ]
+        # A populated UnitMatch always wrote a non-empty MatchableUnit snapshot
+        # (make_fetch rejects a member with zero matchable units), so an empty
+        # snapshot under an existing UnitMatch means the row predates the
+        # MatchableUnit part. Fail loud rather than silently deriving zero tracked
+        # units (or raising obscurely on a Pair edge outside an empty universe).
+        if not node_universe:
+            raise ValueError(
+                "TrackedUnit.make: UnitMatch row "
+                f"{key} has no UnitMatch.MatchableUnit snapshot (it predates the "
+                "frozen-universe part). Re-populate UnitMatch (delete + populate) "
+                "so the matchable set is recorded before deriving tracked units."
+            )
 
         edges = [
             (

@@ -211,6 +211,49 @@ def _zero_center(waveform: np.ndarray) -> np.ndarray:
     )
 
 
+def assert_consistent_channel_geometry(named_positions) -> None:
+    """Reject sessions that do not share one probe geometry.
+
+    UnitMatch derives geometry from the FIRST session's channel positions and
+    runs per-channel loops that require every session to share that geometry;
+    cross-probe / cross-day geometry matching is out of scope. This pure check
+    raises a clear ``ValueError`` on the first session whose positions differ
+    (by shape or value) from the first session's. Shared by the backend
+    ``match()`` (after bundle extraction) and ``UnitMatchSelection.insert_selection``
+    (a preflight BEFORE the expensive dense bundle extraction), so both reject a
+    geometry mismatch the same way.
+
+    Parameters
+    ----------
+    named_positions : sequence of (label, ndarray)
+        Ordered ``(session_label, channel_positions)`` pairs. Fewer than two
+        sessions trivially passes (nothing to compare against).
+
+    Raises
+    ------
+    ValueError
+        On the first session whose channel-position array differs from the
+        first session's (shape mismatch or not ``np.allclose``).
+    """
+    named_positions = list(named_positions)
+    if len(named_positions) < 2:
+        return
+    ref_label, ref_positions = named_positions[0]
+    ref_positions = np.asarray(ref_positions)
+    for label, positions in named_positions[1:]:
+        positions = np.asarray(positions)
+        if positions.shape != ref_positions.shape or not np.allclose(
+            positions, ref_positions
+        ):
+            raise ValueError(
+                "UnitMatch requires all sessions to share one probe geometry "
+                "(cross-probe / cross-day geometry matching is out of scope), "
+                f"but session {label} has channel positions {positions.shape} "
+                f"that differ from session {ref_label}'s {ref_positions.shape}. "
+                "Group only sessions recorded on the same probe."
+            )
+
+
 class UnitMatchBackend:
     """The ``unitmatch`` cross-session matcher backend."""
 
@@ -240,21 +283,16 @@ class UnitMatchBackend:
         # the first session's channel positions and runs per-channel loops that
         # require every session to share that geometry. Cross-probe matching is
         # out of scope, so reject mismatched geometry up front with a clear error
-        # rather than letting UnitMatch fail deep in a shape mismatch.
+        # rather than letting UnitMatch fail deep in a shape mismatch. The same
+        # check runs as a preflight in UnitMatchSelection.insert_selection (before
+        # bundle extraction); this is the post-extraction backstop.
+        assert_consistent_channel_geometry(
+            [
+                (s.session_key, np.load(s.channel_positions_path))
+                for s in session_inputs
+            ]
+        )
         raw_positions = np.load(session_inputs[0].channel_positions_path)
-        for other in session_inputs[1:]:
-            other_positions = np.load(other.channel_positions_path)
-            if other_positions.shape != raw_positions.shape or not np.allclose(
-                other_positions, raw_positions
-            ):
-                raise ValueError(
-                    "UnitMatch requires all sessions to share one probe "
-                    "geometry (cross-probe matching is out of scope), but "
-                    f"session {other.session_key} has channel positions "
-                    f"{other_positions.shape} that differ from session "
-                    f"{session_inputs[0].session_key}'s {raw_positions.shape}. "
-                    "Group only sessions recorded on the same probe."
-                )
 
         session_dirs = [str(s.waveform_dir) for s in session_inputs]
         param["KS_dirs"] = session_dirs

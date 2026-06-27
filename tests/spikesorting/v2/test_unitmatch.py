@@ -1403,11 +1403,15 @@ def test_degenerate_single_session_zero_pairs(two_session_curated_group):
 
 
 @pytest.mark.slow
-def test_pair_fk_rejects_unknown_unit(two_session_curated_group):
-    """Goal 7: a Pair referencing a unit absent from the pinned curation is
-    rejected by the DataJoint foreign key."""
-    import datajoint as dj
-
+def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
+    """Goal 7: a raw Pair referencing a unit absent from the pinned curation is
+    rejected. The validated ``Pair.insert`` guard now fronts the
+    DataJoint foreign key: the bogus pair's second endpoint pins member 1's
+    curation, which is NOT in the solo selection's ``MemberCuration``, so the
+    guard rejects it (before the FK, which remains as defense-in-depth)."""
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchPairIntegrityError,
+    )
     from spyglass.spikesorting.v2.unit_matching import (
         UnitMatch,
         UnitMatchSelection,
@@ -1425,12 +1429,12 @@ def test_pair_fk_rejects_unknown_unit(two_session_curated_group):
         "session_a_sorting_id": side_a["sorting_id"],
         "session_a_curation_id": side_a["curation_id"],
         "unit_a_id": 10**9,  # no such curated unit
-        "session_b_sorting_id": side_b["sorting_id"],
+        "session_b_sorting_id": side_b["sorting_id"],  # member 1: not pinned here
         "session_b_curation_id": side_b["curation_id"],
         "unit_b_id": 10**9,
         "match_probability": 0.9,
     }
-    with pytest.raises(dj.errors.IntegrityError):
+    with pytest.raises(UnitMatchPairIntegrityError, match="not a pinned"):
         UnitMatch.Pair.insert1(bogus, allow_direct_insert=True)
 
 
@@ -1465,6 +1469,92 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
         assert row["policy_used"] == "strict"
     # Member rows reference the pinned curated units (FK-validated).
     assert len(TrackedUnit.Member & pk) == n_matchable
+
+
+def _install_fixture_pairer(
+    monkeypatch,
+    *,
+    matcher_name: str,
+    matcher_params_name: str,
+    pairs: list[list[int]],
+    probability: float = 0.99,
+    seen_unit_ids: list[list[int]] | None = None,
+):
+    """Register a lightweight matcher and stub bundle extraction for DB tests."""
+    from pydantic import BaseModel, ConfigDict, Field
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+    from spyglass.spikesorting.v2.matcher_protocol import MatchPair
+    from spyglass.spikesorting.v2.matcher_protocol import register_matcher
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    class _FixtureMatcherParams(BaseModel):
+        """Params schema for a test-only matcher."""
+
+        model_config = ConfigDict(extra="forbid")
+        tracked_unit_threshold: float = 0.5
+        max_strict_nodes: int = 2000
+        probability: float = 0.99
+        pairs: list = Field(default_factory=list)
+        schema_version: int = 1
+
+    class _FixturePairer:
+        """Emits the listed (unit_a, unit_b) pairs."""
+
+        name = matcher_name
+
+        def match(self, session_inputs, params):
+            left = session_inputs[0].session_key
+            right = session_inputs[1].session_key
+            return [
+                MatchPair(
+                    session_a_sorting_id=str(left["sorting_id"]),
+                    session_a_curation_id=int(left["curation_id"]),
+                    unit_a_id=int(pair_a),
+                    session_b_sorting_id=str(right["sorting_id"]),
+                    session_b_curation_id=int(right["curation_id"]),
+                    unit_b_id=int(pair_b),
+                    match_probability=float(params.get("probability", 0.99)),
+                )
+                for pair_a, pair_b in params.get("pairs", [])
+            ]
+
+    def _noop_extract(session_dir, recording, sorting, **kwargs):
+        Path(session_dir).mkdir(parents=True, exist_ok=True)
+        if seen_unit_ids is not None:
+            seen_unit_ids.append([int(u) for u in sorting.get_unit_ids()])
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
+    )
+
+    saved = (dict(mp._MATCHER_REGISTRY), dict(mp._SCHEMA_REGISTRY))
+    register_matcher(_FixturePairer(), _FixtureMatcherParams)
+    try:
+        MatcherParameters().insert1(
+            {
+                "matcher_params_name": matcher_params_name,
+                "matcher": matcher_name,
+                "params": {"pairs": pairs, "probability": probability},
+            },
+            skip_duplicates=True,
+        )
+    except Exception:
+        _restore_matcher_registry(saved)
+        raise
+    return saved
+
+
+def _restore_matcher_registry(saved_registry) -> None:
+    """Undo a test-only matcher registration."""
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+
+    saved_matchers, saved_schemas = saved_registry
+    mp._MATCHER_REGISTRY.clear()
+    mp._MATCHER_REGISTRY.update(saved_matchers)
+    mp._SCHEMA_REGISTRY.clear()
+    mp._SCHEMA_REGISTRY.update(saved_schemas)
 
 
 @pytest.mark.slow
@@ -1632,6 +1722,240 @@ def test_make_runs_full_matcher_table_path(
         mp._MATCHER_REGISTRY.update(saved_matchers)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_schemas)
+
+
+@pytest.mark.slow
+def test_full_unitmatch_workflow_with_accepted_evaluation_children(
+    two_session_curated_group, curation_evaluation_defaults, monkeypatch
+):
+    """The user workflow runs end-to-end from accepted eval children.
+
+    Evaluate each member curation, accept the evaluation labels into committed
+    ``CurationV2`` children, pin those exact children in ``UnitMatchSelection``,
+    then run ``UnitMatch.populate`` / ``get_pairs`` / ``TrackedUnit.populate``.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    accepted_choices = {}
+    accepted_children = []
+    matcher_params_name = "fixture_eval_child_pairer_params"
+    saved_registry = None
+    selection_pk = None
+    try:
+        for member_index, choice in grp["choices"].items():
+            sel = CurationEvaluationSelection.insert_selection(
+                {
+                    **choice,
+                    "metric_params_name": "minimal",
+                    "auto_curation_rules_name": "none",
+                }
+            )
+            CurationEvaluation.populate(sel, reserve_jobs=False)
+            child = CurationEvaluation().use_evaluation_labels(
+                sel,
+                description="unitmatch workflow accepted labels",
+                reuse_existing=False,
+            )
+            assert CurationV2.is_committed_curation(child)
+            assert (CurationV2 & child).fetch1("curation_source") == (
+                "curation_evaluation"
+            )
+            accepted_children.append(child)
+            accepted_choices[int(member_index)] = {
+                "sorting_id": child["sorting_id"],
+                "curation_id": child["curation_id"],
+            }
+
+        matchable = {
+            member_index: [
+                int(u) for u in CurationV2().get_matchable_unit_ids(choice)
+            ]
+            for member_index, choice in accepted_choices.items()
+        }
+        if any(len(units) == 0 for units in matchable.values()):
+            pytest.skip("minirec sort produced no matchable units to pair")
+        unit_a, unit_b = matchable[0][0], matchable[1][0]
+
+        saved_registry = _install_fixture_pairer(
+            monkeypatch,
+            matcher_name="fixture_eval_child_pairer",
+            matcher_params_name=matcher_params_name,
+            pairs=[[unit_a, unit_b]],
+            probability=0.97,
+        )
+        selection_pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            matcher_params_name,
+            accepted_choices,
+        )
+        UnitMatch.populate(selection_pk, reserve_jobs=False)
+
+        assert (UnitMatch & selection_pk).fetch1("n_pairs") == 1
+        frozen = {
+            (
+                int(row["member_index"]),
+                str(row["sorting_id"]),
+                int(row["curation_id"]),
+                int(row["unit_id"]),
+            )
+            for row in (UnitMatch.MatchableUnit & selection_pk).fetch(as_dict=True)
+        }
+        for member_index, choice in accepted_choices.items():
+            for unit_id in matchable[member_index]:
+                assert (
+                    member_index,
+                    str(choice["sorting_id"]),
+                    int(choice["curation_id"]),
+                    unit_id,
+                ) in frozen
+
+        pairs_df = UnitMatch().get_pairs(selection_pk)
+        assert len(pairs_df) == 1
+        assert int(pairs_df.iloc[0]["unit_a_id"]) == unit_a
+        assert int(pairs_df.iloc[0]["unit_b_id"]) == unit_b
+        assert pairs_df.iloc[0]["match_probability"] == pytest.approx(0.97)
+
+        TrackedUnit.populate(selection_pk, reserve_jobs=False)
+        matched = [
+            row
+            for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
+            if row["n_sessions_observed"] == 2
+        ]
+        assert len(matched) == 1
+        assert matched[0]["median_match_probability"] == pytest.approx(0.97)
+    finally:
+        if selection_pk is not None:
+            (UnitMatch & selection_pk).super_delete(warn=False)
+            (UnitMatchSelection & selection_pk).super_delete(warn=False)
+        (
+            MatcherParameters & {"matcher_params_name": matcher_params_name}
+        ).super_delete(warn=False)
+        if saved_registry is not None:
+            _restore_matcher_registry(saved_registry)
+        for child in accepted_children:
+            (CurationV2 & child).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_unitmatch_populate_with_committed_merged_child_member(
+    two_session_curated_group, monkeypatch
+):
+    """A committed merged child can run through full ``UnitMatch.populate``.
+
+    This extends the make-fetch coverage: the populate path must load the merged
+    child's ``CurationV2.get_sorting`` result, select the merged unit, write a
+    pair row, and allow ``TrackedUnit`` to group that merged unit with another
+    member's unit.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    grp = two_session_curated_group
+    two_unit_sort, unit_ids, two_unit_params = (
+        _plant_two_unit_sort_on_first_member(grp)
+    )
+    sorting_key = {"sorting_id": two_unit_sort["sorting_id"]}
+    clear_curations_for(two_unit_sort)
+
+    matcher_params_name = "fixture_merged_child_pairer_params"
+    selection_pk = None
+    seen_unit_ids: list[list[int]] = []
+    saved_registry = None
+    try:
+        merged0 = CurationV2.create_merged_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+        )
+        assert CurationV2.is_committed_curation(merged0)
+        merged_choice = {
+            "sorting_id": merged0["sorting_id"],
+            "curation_id": merged0["curation_id"],
+        }
+        merged_matchable = [
+            int(u) for u in CurationV2().get_matchable_unit_ids(merged_choice)
+        ]
+        assert len(merged_matchable) == 1
+        merged_uid = merged_matchable[0]
+
+        member1_choice = grp["choices"][1]
+        member1_matchable = [
+            int(u) for u in CurationV2().get_matchable_unit_ids(member1_choice)
+        ]
+        if not member1_matchable:
+            pytest.skip("member 1 minirec sort produced no matchable units")
+        unit_b = member1_matchable[0]
+
+        saved_registry = _install_fixture_pairer(
+            monkeypatch,
+            matcher_name="fixture_merged_child_pairer",
+            matcher_params_name=matcher_params_name,
+            pairs=[[merged_uid, unit_b]],
+            probability=0.98,
+            seen_unit_ids=seen_unit_ids,
+        )
+        selection_pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            matcher_params_name,
+            {0: merged_choice, 1: member1_choice},
+        )
+        UnitMatch.populate(selection_pk, reserve_jobs=False)
+
+        assert [merged_uid] in seen_unit_ids
+        assert (UnitMatch & selection_pk).fetch1("n_pairs") == 1
+        pair = (UnitMatch.Pair & selection_pk).fetch1()
+        assert str(pair["session_a_sorting_id"]) == str(merged_choice["sorting_id"])
+        assert int(pair["session_a_curation_id"]) == int(
+            merged_choice["curation_id"]
+        )
+        assert int(pair["unit_a_id"]) == merged_uid
+        assert int(pair["unit_b_id"]) == unit_b
+
+        TrackedUnit.populate(selection_pk, reserve_jobs=False)
+        matched = [
+            row
+            for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
+            if row["n_sessions_observed"] == 2
+        ]
+        assert len(matched) == 1
+    finally:
+        if selection_pk is not None:
+            (UnitMatch & selection_pk).super_delete(warn=False)
+            (UnitMatchSelection & selection_pk).super_delete(warn=False)
+        (
+            MatcherParameters & {"matcher_params_name": matcher_params_name}
+        ).super_delete(warn=False)
+        if saved_registry is not None:
+            _restore_matcher_registry(saved_registry)
+        clear_curations_for(two_unit_sort)
+        (Sorting & sorting_key).super_delete(warn=False)
+        (SortingSelection & sorting_key).super_delete(warn=False)
+        (
+            SorterParameters & {"sorter_params_name": two_unit_params}
+        ).super_delete(warn=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -1874,3 +2198,209 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
             clear_curations_for(sort_pk)
         for nwb_file_name in nwb_file_names:
             _clean_session_v2({"nwb_file_name": nwb_file_name})
+
+
+@pytest.mark.slow
+def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
+    """A raw ``UnitMatch.Pair.insert`` outside the selection's pinned
+    ``MemberCuration`` -- an unpinned-curation endpoint, a same-member edge, a
+    reversed / duplicate edge, or an out-of-range ``match_probability`` -- raises
+    ``UnitMatchPairIntegrityError``.
+
+    Validates against the pinned ``MemberCuration`` rows (created by
+    ``insert_selection``), so it needs no populated ``UnitMatch`` -- the
+    single-unit chronic fixture is degenerate for the matcher backend. The
+    canonical ``make_insert`` path routes through this same validated
+    ``Pair.insert`` and is covered by the multi-unit end-to-end matcher tests
+    (which populate successfully and would fail here if the guard rejected valid,
+    oriented, deduped pairs).
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        UnitMatchPairIntegrityError,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+    )
+    try:
+        members = (UnitMatchSelection.MemberCuration & pk).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        m0, m1 = members[0], members[1]
+        node0 = (
+            str(m0["sorting_id"]),
+            int(m0["curation_id"]),
+            int(
+                (
+                    CurationV2.Unit
+                    & {
+                        "sorting_id": m0["sorting_id"],
+                        "curation_id": m0["curation_id"],
+                    }
+                ).fetch("unit_id")[0]
+            ),
+        )
+        node1 = (
+            str(m1["sorting_id"]),
+            int(m1["curation_id"]),
+            int(
+                (
+                    CurationV2.Unit
+                    & {
+                        "sorting_id": m1["sorting_id"],
+                        "curation_id": m1["curation_id"],
+                    }
+                ).fetch("unit_id")[0]
+            ),
+        )
+
+        def pair_row(a, b, *, prob=0.9, idx=900):
+            return {
+                "unitmatch_id": pk["unitmatch_id"],
+                "pair_index": idx,
+                "session_a_sorting_id": a[0],
+                "session_a_curation_id": a[1],
+                "unit_a_id": a[2],
+                "session_b_sorting_id": b[0],
+                "session_b_curation_id": b[1],
+                "unit_b_id": b[2],
+                "match_probability": prob,
+            }
+
+        # Out-of-range match_probability.
+        with pytest.raises(UnitMatchPairIntegrityError, match="outside"):
+            UnitMatch.Pair.insert1(pair_row(node0, node1, prob=1.5))
+
+        # Endpoint pinned to a curation NOT in this selection's MemberCuration
+        # (a fake curation: the guard checks the pinned set before the FK fires).
+        unpinned = (str(uuid.uuid4()), 0, 0)
+        with pytest.raises(UnitMatchPairIntegrityError, match="not a pinned"):
+            UnitMatch.Pair.insert1(pair_row(unpinned, node1))
+
+        # Same-member edge (both endpoints pin member 0): a unit cannot match
+        # itself across sessions.
+        with pytest.raises(UnitMatchPairIntegrityError, match="same member"):
+            UnitMatch.Pair.insert1(pair_row(node0, node0))
+
+        # Reversed / duplicate undirected edge within one batch.
+        with pytest.raises(
+            UnitMatchPairIntegrityError, match="duplicate / reversed"
+        ):
+            UnitMatch.Pair.insert(
+                [
+                    pair_row(node0, node1, idx=901),
+                    pair_row(node1, node0, idx=902),
+                ]
+            )
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_tracked_unit_uses_frozen_universe_after_relabel(
+    two_session_curated_group,
+):
+    """``TrackedUnit`` reads ``UnitMatch``'s FROZEN ``MatchableUnit``
+    snapshot, not current curation labels. Relabeling a singleton (no-``Pair``)
+    member unit to ``noise`` AFTER ``UnitMatch`` populated must NOT drop it from
+    the tracked-unit graph -- the frozen universe keeps it. Fails on pre-change
+    code, where ``TrackedUnit.make`` re-derived the universe from current labels
+    and dropped the relabeled unit.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    choice = grp["choices"][0]
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+    )
+    # Solo group -> degenerate make (0 pairs, no matcher backend) but still
+    # freezes the MatchableUnit snapshot.
+    UnitMatch.populate(pk, reserve_jobs=False)
+    frozen = {
+        (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
+        for r in (UnitMatch.MatchableUnit & pk).fetch(as_dict=True)
+    }
+    assert frozen, "MatchableUnit snapshot should be non-empty"
+    target_unit = sorted(int(unit) for _, _, unit in frozen)[0]
+
+    noise_label = {**choice, "unit_id": target_unit, "curation_label": "noise"}
+    try:
+        # Relabel the frozen singleton so the CURRENT matchable set excludes it.
+        CurationV2.UnitLabel.insert1(noise_label)
+        assert target_unit not in [
+            int(u) for u in CurationV2().get_matchable_unit_ids(choice)
+        ], "relabel should drop the unit from the CURRENT matchable set"
+
+        TrackedUnit.populate(pk, reserve_jobs=False)
+        tracked_units = {
+            int(member["unit_id"])
+            for member in (TrackedUnit.Member & pk).fetch(as_dict=True)
+        }
+        assert target_unit in tracked_units, (
+            "the relabeled singleton must survive in TrackedUnit: UnitMatch's "
+            "frozen MatchableUnit -- not current labels -- is the node universe"
+        )
+    finally:
+        (CurationV2.UnitLabel & noise_label).delete(safemode=False)
+        (TrackedUnit & pk).delete(safemode=False)
+        (UnitMatchSelection & pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_geometry_preflight_fails_before_extraction(
+    two_session_curated_group, monkeypatch
+):
+    """A cross-probe / cross-day channel-geometry mismatch is rejected at
+    ``UnitMatchSelection.insert_selection`` -- BEFORE any dense bundle extraction
+    runs (extraction lives in ``UnitMatch.make``, which never runs here)."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    grp = two_session_curated_group
+    sid0 = str(grp["choices"][0]["sorting_id"])
+
+    def fake_positions(curation_key):
+        # member 0: 4-channel probe; the other member: 8-channel -> mismatch.
+        n = 4 if str(curation_key["sorting_id"]) == sid0 else 8
+        return np.zeros((n, 2))
+
+    monkeypatch.setattr(
+        UnitMatchSelection,
+        "_member_channel_positions",
+        staticmethod(fake_positions),
+    )
+    # Force the new-insert path so the preflight runs even though this selection
+    # may already exist from an earlier test (no shared-state mutation).
+    monkeypatch.setattr(
+        UnitMatchSelection,
+        "_find_existing_pk",
+        classmethod(lambda cls, *a, **k: None),
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "dense bundle extraction ran before the geometry preflight"
+        )
+
+    monkeypatch.setattr(_unitmatch_backend, "extract_unitmatch_bundle", _boom)
+
+    with pytest.raises(ValueError, match="probe geometry"):
+        UnitMatchSelection.insert_selection(
+            grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        )
