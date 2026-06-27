@@ -135,13 +135,14 @@ def validate_lookup_rows(
         if per_row_hook is not None:
             per_row_hook(row, schema_cls)
         # Backfill the outer ``params_schema_version`` from the validated blob's
-        # ``schema_version`` when the row omits it, for EVERY Lookup -- not just
-        # the DataJoint column default. So a row inserted with an explicit inner
-        # ``schema_version`` (e.g. an older one) but no outer column lands tagged
-        # with the blob's version, never a default that silently disagrees. An
-        # EXPLICIT outer value is left untouched so the drift check below still
+        # ``schema_version`` when the row leaves it at the sentinel -- the key is
+        # absent, OR the DataJoint column default 0 ("unspecified"; no real schema
+        # is version 0) -- for EVERY Lookup. So a row inserted with an explicit
+        # inner ``schema_version`` but no meaningful outer value lands tagged with
+        # the blob's version, never a sentinel that silently disagrees. An EXPLICIT
+        # NON-ZERO outer value is left untouched so the drift check below still
         # trips on a real outer/inner mismatch.
-        if "params_schema_version" not in row:
+        if row.get("params_schema_version", 0) == 0:
             row["params_schema_version"] = int(row["params"]["schema_version"])
         _assert_schema_version_matches(row, schema_cls, table_name=table_name)
         validated.append(row)
