@@ -1090,17 +1090,27 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 sorting = full_sorting.select_units(plan["matchable_unit_ids"])
                 session_dir = Path(tmp_root) / f"member_{plan['member_index']}"
                 # The bundle window / subsample / seed come from the named,
-                # identity-bearing MatcherParameters params blob -- NOT the
+                # identity-bearing MatcherParameters params blob -- NOT silent
                 # extract function defaults -- so the settings that produced each
-                # bundle are pinned to matcher_params_name and recorded.
+                # bundle are pinned to matcher_params_name and recorded. The
+                # UnitMatch schema always carries these keys; only pass those a
+                # given matcher's schema defines (a custom backend may omit them,
+                # falling back to extract_unitmatch_bundle's own defaults).
+                bundle_kwargs = {
+                    key: params[key]
+                    for key in (
+                        "ms_before",
+                        "ms_after",
+                        "max_spikes_per_unit",
+                        "seed",
+                    )
+                    if key in params
+                }
                 extract_unitmatch_bundle(
                     session_dir,
                     recording,
                     sorting,
-                    ms_before=params["ms_before"],
-                    ms_after=params["ms_after"],
-                    max_spikes_per_unit=params["max_spikes_per_unit"],
-                    seed=params["seed"],
+                    **bundle_kwargs,
                     job_kwargs=resolved_job_kwargs,
                 )
                 session_inputs.append(
