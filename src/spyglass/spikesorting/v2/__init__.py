@@ -60,5 +60,43 @@ def initialize_v2_defaults() -> None:
     AutoCurationRules.insert_default()
     MatcherParameters.insert_default()
 
+    # ``insert_default`` skips existing-PK rows, so a stored same-name default
+    # whose content has diverged from the shipped content (e.g. a row seeded at
+    # an old schema version, or a hand-edited blob) is NOT reseeded and goes
+    # unnoticed. Audit for that here and WARN (non-strict) -- an admin can run
+    # ``verify_v2_default_catalog(strict=True)`` to fail hard.
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        verify_v2_default_catalog,
+    )
+    from spyglass.utils import logger
 
-__all__ = ["initialize_v2_defaults", "CurationLabel"]
+    stale = verify_v2_default_catalog(strict=False)
+    if stale:
+        logger.warning(
+            "initialize_v2_defaults: %d stored default row(s) diverge from the "
+            "shipped content and were NOT reseeded (insert_default skips "
+            "existing keys): %s. Drop the stale row(s) and re-run, or call "
+            "verify_v2_default_catalog(strict=True) to inspect.",
+            len(stale),
+            stale,
+        )
+
+
+__all__ = [
+    "initialize_v2_defaults",
+    "verify_v2_default_catalog",
+    "CurationLabel",
+]
+
+
+def __getattr__(name):
+    # Lazily re-export ``verify_v2_default_catalog`` from the reporting module so
+    # ``from spyglass.spikesorting.v2 import verify_v2_default_catalog`` works
+    # without importing the DataJoint reporting layer at package import.
+    if name == "verify_v2_default_catalog":
+        from spyglass.spikesorting.v2._pipeline_reporting import (
+            verify_v2_default_catalog,
+        )
+
+        return verify_v2_default_catalog
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

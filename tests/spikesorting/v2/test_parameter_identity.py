@@ -646,3 +646,65 @@ def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
                 "job_kwargs": shipped["job_kwargs"],
             }
         )
+
+
+# ---- generalized outer params_schema_version backfill -----------------------
+
+_VALIDATED_LOOKUP_SCHEMAS = [
+    ("preprocessing", "PreprocessingParamsSchema"),
+    ("artifact_detection", "ArtifactDetectionParamsSchema"),
+    ("motion_correction", "MotionCorrectionParamsSchema"),
+    ("analyzer_waveform", "AnalyzerWaveformParamsSchema"),
+    ("matcher", "UnitMatchParamsSchema"),
+    ("sorter", "GenericSorterParamsSchema"),
+]
+
+
+@pytest.mark.parametrize("module_name, schema_name", _VALIDATED_LOOKUP_SCHEMAS)
+def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
+    """``validate_lookup_rows`` backfills the outer ``params_schema_version``
+    from the validated blob for EVERY Lookup that routes through it (Preprocessing
+    / Artifact / Sorter / Waveform / Motion / Matcher), not just the DataJoint
+    column default. A row that omits the column and carries an explicit inner
+    ``schema_version`` lands tagged with the blob's version, never a default that
+    silently disagrees. Fails before the change: the shared validator did not
+    backfill, so the omitted column stayed absent from the returned row.
+    """
+    import importlib
+
+    from spyglass.spikesorting.v2._lookup_validation import validate_lookup_rows
+
+    schema = getattr(
+        importlib.import_module(
+            f"spyglass.spikesorting.v2._params.{module_name}"
+        ),
+        schema_name,
+    )
+    sentinel = 9  # != any column default, so the backfilled value is observable
+    row = {"params": {"schema_version": sentinel}}
+    validated = validate_lookup_rows(
+        [row],
+        ["name", "params", "params_schema_version", "job_kwargs"],
+        schema_for=lambda _row: schema,
+        table_name="BackfillProbe",
+    )
+    assert validated[0]["params_schema_version"] == sentinel
+
+
+def test_outer_version_drift_still_trips_after_backfill():
+    """The backfill fills only an ABSENT column; an EXPLICIT outer
+    ``params_schema_version`` that disagrees with the blob still raises -- the
+    drift check is not papered over."""
+    from spyglass.spikesorting.v2._lookup_validation import validate_lookup_rows
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+
+    row = {"params": {"schema_version": 3}, "params_schema_version": 2}
+    with pytest.raises(ValueError, match="does not match"):
+        validate_lookup_rows(
+            [row],
+            ["name", "params", "params_schema_version", "job_kwargs"],
+            schema_for=lambda _row: PreprocessingParamsSchema,
+            table_name="BackfillProbe",
+        )

@@ -317,10 +317,10 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             reject_reserved_execution_keys(
                 row.get("job_kwargs"), context="SorterParameters job_kwargs"
             )
-            if int(row.get("params_schema_version", 0)) == 0:
-                row["params_schema_version"] = _params_schema_version(
-                    row["params"]
-                )
+            # ``params_schema_version`` is backfilled from the validated blob by
+            # ``validate_lookup_rows`` (the shared path, for every Lookup), so it
+            # is NOT re-done here. The execution-params version below is
+            # SorterParameters-specific and stays in this hook.
             # Validate + backfill the execution backend provenance. A row that
             # omits ``execution_params`` defaults to local execution; the outer
             # ``execution_params_schema_version`` is backfilled from the

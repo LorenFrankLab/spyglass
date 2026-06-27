@@ -445,6 +445,321 @@ def describe_parameter_rows() -> "pd.DataFrame":
     ).reset_index(drop=True)
 
 
+def _content_equal(left, right) -> bool:
+    """Float-tolerant deep equality for fetched-vs-shipped default content.
+
+    Deliberately NOT ``_metric_curation._values_match`` despite the near-identical
+    shape: this audit compares a SHIPPED Python value against a DB-FETCHED value,
+    where a ``bool`` column comes back as ``int`` (DataJoint stores bool as
+    tinyint), so ``False`` shipped must equal ``0`` stored -- the ``left == right``
+    bool branch here conflates them on purpose. ``_values_match`` does the
+    opposite (strict ``type(a) is type(b)``) because its own callers compare two
+    in-memory blobs where a bool-vs-int distinction is real. Float columns are
+    single precision, so floats compare with a tolerance and dicts/lists recurse;
+    both sides are pre-normalized via ``_jsonable_blob``.
+    """
+    import math
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return math.isclose(
+            float(left), float(right), rel_tol=1e-6, abs_tol=1e-9
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _content_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        return len(left) == len(right) and all(
+            _content_equal(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def _canonical_quality_metric_rows(table) -> list[dict]:
+    """Shipped ``QualityMetricParameters`` defaults in their STORED shape.
+
+    ``_default_rows`` is the raw insert INPUT -- it omits the columns the
+    validated insert fills (``template_metric_columns``, ``params_schema_version``,
+    ``job_kwargs``). Mirror ``QualityMetricParameters.insert``'s row-building so
+    every stored column joins the drift comparison, not just the raw inputs.
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        QUALITY_METRIC_SCHEMA_VERSION,
+        QualityMetricParamsSchema,
+    )
+    from spyglass.spikesorting.v2.utils import _validate_params
+
+    rows = []
+    for row in table._default_rows():
+        payload = {
+            "schema_version": row.get(
+                "params_schema_version", QUALITY_METRIC_SCHEMA_VERSION
+            ),
+            "metric_names": row["metric_names"],
+            "metric_kwargs": row.get("metric_kwargs", {}),
+            "skip_pc_metrics": row.get("skip_pc_metrics", True),
+        }
+        if "template_metric_columns" in row:
+            payload["template_metric_columns"] = row["template_metric_columns"]
+        clean = _validate_params(QualityMetricParamsSchema, payload)
+        rows.append(
+            {
+                "metric_params_name": row["metric_params_name"],
+                "metric_names": clean["metric_names"],
+                "metric_kwargs": clean["metric_kwargs"],
+                "template_metric_columns": clean["template_metric_columns"],
+                "skip_pc_metrics": clean["skip_pc_metrics"],
+                "params_schema_version": clean["schema_version"],
+                "job_kwargs": row.get("job_kwargs"),
+            }
+        )
+    return rows
+
+
+def _canonical_autocuration_master_rows(table) -> list[dict]:
+    """Shipped ``AutoCurationRules`` MASTER defaults in their STORED shape.
+
+    ``_default_payloads`` masters omit the validated-fill columns
+    (``auto_merge_kwargs``, ``params_schema_version``, ``job_kwargs``). Mirror
+    ``AutoCurationRules.insert_rules``'s master-building so a drift in those
+    defaulted master columns is compared too (the ``Rule`` parts are compared
+    separately in ``verify_v2_default_catalog``).
+    """
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        AUTO_CURATION_RULES_SCHEMA_VERSION,
+        AutoCurationRulesSchema,
+    )
+    from spyglass.spikesorting.v2.utils import _validate_params
+
+    rows = []
+    for master, rule_rows in table._default_payloads():
+        payload = {
+            "schema_version": master.get(
+                "params_schema_version", AUTO_CURATION_RULES_SCHEMA_VERSION
+            ),
+            "auto_merge_preset": master["auto_merge_preset"],
+            "auto_merge_kwargs": master.get("auto_merge_kwargs", {}),
+            "rules": rule_rows,
+        }
+        clean = _validate_params(AutoCurationRulesSchema, payload)
+        rows.append(
+            {
+                "auto_curation_rules_name": master["auto_curation_rules_name"],
+                "auto_merge_preset": clean["auto_merge_preset"],
+                "auto_merge_kwargs": clean["auto_merge_kwargs"],
+                "params_schema_version": clean["schema_version"],
+                "job_kwargs": master.get("job_kwargs"),
+            }
+        )
+    return rows
+
+
+def _shipped_default_rows(table) -> list[dict]:
+    """Shipped default rows for a Lookup in their STORED (canonical) shape.
+
+    ``_DEFAULT_CONTENTS`` positional tuples are zipped to the table heading (and
+    are already canonical). The dynamic-default tables expose raw insert INPUT
+    (``_default_rows`` / ``_default_payloads``), so their canonical stored rows
+    are rebuilt via the table's own validation so EVERY stored column -- not just
+    the raw inputs -- joins the drift comparison. Returns ``[]`` when a table
+    exposes no static default source.
+    """
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    contents = getattr(table, "_DEFAULT_CONTENTS", None)
+    if contents:
+        names = list(table().heading.names)
+        return [dict(zip(names, _jsonable_blob(list(row)))) for row in contents]
+    if table.__name__ == "QualityMetricParameters":
+        return _canonical_quality_metric_rows(table)
+    if table.__name__ == "AutoCurationRules":
+        return _canonical_autocuration_master_rows(table)
+    rows_fn = getattr(table, "_default_rows", None)
+    if callable(rows_fn):
+        return [dict(row) for row in rows_fn()]
+    payloads_fn = getattr(table, "_default_payloads", None)
+    if callable(payloads_fn):
+        # Master scalars only; the ``Rule`` parts are compared separately in
+        # ``verify_v2_default_catalog`` (a drifted rule threshold would otherwise
+        # be invisible).
+        return [dict(master) for master, _parts in payloads_fn()]
+    return []
+
+
+def _v2_default_catalog_tables():
+    """The default-bearing v2 parameter Lookups + their name attribute.
+
+    Every table ``initialize_v2_defaults`` seeds, paired with its params-name
+    column. Imported lazily so the package stays import-light.
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    return [
+        (PreprocessingParameters, "preprocessing_params_name"),
+        (ArtifactDetectionParameters, "artifact_detection_params_name"),
+        (SorterParameters, "sorter_params_name"),
+        (AnalyzerWaveformParameters, "waveform_params_name"),
+        (MotionCorrectionParameters, "motion_correction_params_name"),
+        (QualityMetricParameters, "metric_params_name"),
+        (AutoCurationRules, "auto_curation_rules_name"),
+        (MatcherParameters, "matcher_params_name"),
+    ]
+
+
+def _diverged_autocuration_rules(table) -> list[dict]:
+    """Stale ``AutoCurationRules.Rule`` part rows vs the shipped rule sets.
+
+    The master scalar compare misses a drifted rule (threshold / operator / label
+    / shape column), so compare the shipped ``_default_payloads`` rule rows to the
+    stored ``Rule`` rows per name: a different rule count, a missing
+    ``rule_index``, or a diverged rule field is a stale default.
+    """
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    stale: list[dict] = []
+    for master, shipped_rules in table._default_payloads():
+        name = master["auto_curation_rules_name"]
+        restriction = {"auto_curation_rules_name": name}
+        if not (table & restriction):
+            continue  # not seeded
+        stored_by_index = {
+            int(rule["rule_index"]): rule
+            for rule in (table.Rule & restriction).fetch(as_dict=True)
+        }
+        if len(stored_by_index) != len(shipped_rules):
+            stale.append(
+                {
+                    "table": "AutoCurationRules.Rule",
+                    "name": name,
+                    "fields": ["rule_count"],
+                }
+            )
+            continue
+        for shipped_rule in shipped_rules:
+            index = int(shipped_rule["rule_index"])
+            stored_rule = stored_by_index.get(index)
+            if stored_rule is None:
+                stale.append(
+                    {
+                        "table": "AutoCurationRules.Rule",
+                        "name": name,
+                        "fields": [f"rule_index_{index}_missing"],
+                    }
+                )
+                continue
+            diverged = [
+                field
+                for field, value in shipped_rule.items()
+                if field not in ("auto_curation_rules_name", "rule_index")
+                and field in stored_rule
+                and not _content_equal(
+                    _jsonable_blob(value), _jsonable_blob(stored_rule[field])
+                )
+            ]
+            if diverged:
+                stale.append(
+                    {
+                        "table": "AutoCurationRules.Rule",
+                        "name": f"{name}[{index}]",
+                        "fields": sorted(diverged),
+                    }
+                )
+    return stale
+
+
+def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
+    """Flag stored same-name default rows whose content diverged from shipped.
+
+    ``initialize_v2_defaults`` re-runs each ``insert_default()`` idempotently and
+    NEVER compares a stored same-name row's content to the shipped content
+    (``reject_duplicate_parameter_content`` skips existing-PK rows). So a stored
+    shipped-default row whose content has since diverged from the shipped content
+    -- e.g. a hand-edited stored blob or a row seeded under an older default --
+    silently keeps its stale content. This audit compares, for each shipped
+    default present in the DB, the stored content to the shipped content (per PK,
+    so the per-sorter ``SorterParameters`` keys correctly) and returns the
+    divergences. For ``QualityMetricParameters`` the canonical
+    ``template_metric_columns`` default is included, and for ``AutoCurationRules``
+    the ``Rule`` part rows are compared too, so a drifted rule threshold or
+    waveform-shape column is not invisible.
+
+    Parameters
+    ----------
+    strict : bool, optional
+        Raise ``DuplicateParameterContentError`` listing the stale defaults
+        instead of returning them. Default ``False`` (return the list).
+
+    Returns
+    -------
+    list[dict]
+        One entry per stale default: ``{"table", "name", "fields"}`` where
+        ``fields`` are the diverged content columns. Empty when the catalog is
+        clean.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.utils import _jsonable_blob
+
+    stale: list[dict] = []
+    for table, name_attr in _v2_default_catalog_tables():
+        pk_fields = list(table.primary_key)
+        stored_by_pk = {
+            tuple(row[field] for field in pk_fields): row
+            for row in table.fetch(as_dict=True)
+        }
+        for shipped in _shipped_default_rows(table):
+            try:
+                pk = tuple(shipped[field] for field in pk_fields)
+            except KeyError:
+                continue  # shipped row missing a PK field -> not comparable
+            stored = stored_by_pk.get(pk)
+            if stored is None:
+                continue  # not seeded (e.g. sorter not installed); skip
+            diverged = [
+                field
+                for field, shipped_value in shipped.items()
+                if field not in pk_fields
+                and field in stored
+                and not _content_equal(
+                    _jsonable_blob(shipped_value),
+                    _jsonable_blob(stored[field]),
+                )
+            ]
+            if diverged:
+                stale.append(
+                    {
+                        "table": table.__name__,
+                        "name": shipped[name_attr],
+                        "fields": sorted(diverged),
+                    }
+                )
+        if table.__name__ == "AutoCurationRules":
+            stale.extend(_diverged_autocuration_rules(table))
+    if strict and stale:
+        raise DuplicateParameterContentError(
+            "verify_v2_default_catalog: stored default row(s) diverge from the "
+            f"shipped content: {stale}. Drop the stale row(s) and re-seed via "
+            "insert_default(), or reconcile the divergence deliberately."
+        )
+    return stale
+
+
 _UNIT_COLUMNS = [
     "sorting_id",
     "unit_id",

@@ -745,3 +745,193 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         assert sel["sorter_params_name"] == "franklab_30khz_ms4_2026_06"
     finally:
         _clean_session_v2(polymer_smoke_session)
+
+
+@pytest.mark.slow
+def test_verify_v2_default_catalog_flags_stale(dj_conn):
+    """``verify_v2_default_catalog`` flags a stored shipped-default row whose
+    content diverged from the shipped content; a freshly-seeded catalog returns
+    ``[]``. ``strict=True`` raises instead of returning."""
+    from spyglass.spikesorting.v2 import (
+        initialize_v2_defaults,
+        verify_v2_default_catalog,
+    )
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        _shipped_default_rows,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    initialize_v2_defaults()
+    assert verify_v2_default_catalog() == [], "fresh catalog should be clean"
+
+    # Pick a shipped preprocessing default that is actually seeded.
+    name = next(
+        row["preprocessing_params_name"]
+        for row in _shipped_default_rows(PreprocessingParameters)
+        if PreprocessingParameters
+        & {"preprocessing_params_name": row["preprocessing_params_name"]}
+    )
+    key = {"preprocessing_params_name": name}
+    original = (PreprocessingParameters & key).fetch1("params")
+    mutated = dict(original)
+    mutated["min_segment_length"] = (
+        float(original.get("min_segment_length", 1.0)) + 5.0
+    )
+    try:
+        # Maintenance escape hatch: mutate the stored blob in place.
+        PreprocessingParameters().update1(
+            {**key, "params": mutated}, allow_param_mutation=True
+        )
+        stale = verify_v2_default_catalog()
+        assert any(
+            entry["table"] == "PreprocessingParameters"
+            and entry["name"] == name
+            for entry in stale
+        ), f"stale default {name!r} not flagged: {stale}"
+        with pytest.raises(DuplicateParameterContentError, match="diverge"):
+            verify_v2_default_catalog(strict=True)
+    finally:
+        PreprocessingParameters().update1(
+            {**key, "params": original}, allow_param_mutation=True
+        )
+    assert verify_v2_default_catalog() == [], "restored catalog should be clean"
+
+
+@pytest.mark.slow
+def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
+    """``initialize_v2_defaults`` invokes ``verify_v2_default_catalog`` (non-strict)
+    and logs a WARNING when a stored default diverged -- the wiring, not just the
+    helper."""
+    import logging
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        _shipped_default_rows,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    initialize_v2_defaults()
+    name = next(
+        row["preprocessing_params_name"]
+        for row in _shipped_default_rows(PreprocessingParameters)
+        if PreprocessingParameters
+        & {"preprocessing_params_name": row["preprocessing_params_name"]}
+    )
+    key = {"preprocessing_params_name": name}
+    original = (PreprocessingParameters & key).fetch1("params")
+    mutated = dict(original)
+    mutated["min_segment_length"] = (
+        float(original.get("min_segment_length", 1.0)) + 5.0
+    )
+    try:
+        PreprocessingParameters().update1(
+            {**key, "params": mutated}, allow_param_mutation=True
+        )
+        with caplog.at_level(logging.WARNING):
+            initialize_v2_defaults()  # the non-strict audit must warn
+        assert any(
+            "diverge" in record.getMessage() for record in caplog.records
+        ), "initialize_v2_defaults did not warn on a stale stored default"
+    finally:
+        PreprocessingParameters().update1(
+            {**key, "params": original}, allow_param_mutation=True
+        )
+
+
+@pytest.mark.slow
+def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
+    """The audit also catches drift in a field filled by validation
+    (``QualityMetricParameters.template_metric_columns``) and in a part row
+    (``AutoCurationRules.Rule``), not just the raw master scalars."""
+    from spyglass.spikesorting.v2 import (
+        initialize_v2_defaults,
+        verify_v2_default_catalog,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+
+    initialize_v2_defaults()
+    assert verify_v2_default_catalog() == [], "fresh catalog should be clean"
+
+    # QualityMetricParameters.template_metric_columns is filled by validation, so
+    # _default_rows omits it -- the audit must still catch a stored drift.
+    qm_name = str(QualityMetricParameters.fetch("metric_params_name")[0])
+    qm_key = {"metric_params_name": qm_name}
+    qm_original = (QualityMetricParameters & qm_key).fetch1(
+        "template_metric_columns"
+    )
+    try:
+        QualityMetricParameters().update1(
+            {**qm_key, "template_metric_columns": ["drifted_shape_column"]},
+            allow_param_mutation=True,
+        )
+        stale = verify_v2_default_catalog()
+        assert any(
+            entry["table"] == "QualityMetricParameters"
+            and entry["name"] == qm_name
+            and "template_metric_columns" in entry["fields"]
+            for entry in stale
+        ), f"template_metric_columns drift not flagged: {stale}"
+    finally:
+        QualityMetricParameters().update1(
+            {**qm_key, "template_metric_columns": qm_original},
+            allow_param_mutation=True,
+        )
+    assert verify_v2_default_catalog() == []
+
+    # AutoCurationRules.Rule parts are dropped by _default_payloads' master --
+    # a drifted rule threshold must still be flagged.
+    ac_name = next(
+        master["auto_curation_rules_name"]
+        for master, rules in AutoCurationRules._default_payloads()
+        if rules
+        and (AutoCurationRules & master)
+    )
+    rule_key = {"auto_curation_rules_name": ac_name, "rule_index": 0}
+    rule_original = float((AutoCurationRules.Rule & rule_key).fetch1("threshold"))
+    try:
+        AutoCurationRules.Rule().update1(
+            {**rule_key, "threshold": rule_original + 99.0},
+            allow_param_mutation=True,
+        )
+        stale = verify_v2_default_catalog()
+        assert any(
+            entry["table"] == "AutoCurationRules.Rule"
+            and ac_name in entry["name"]
+            for entry in stale
+        ), f"Rule threshold drift not flagged: {stale}"
+    finally:
+        AutoCurationRules.Rule().update1(
+            {**rule_key, "threshold": rule_original},
+            allow_param_mutation=True,
+        )
+    assert verify_v2_default_catalog() == []
+
+    # AutoCurationRules MASTER defaulted columns (auto_merge_kwargs etc.) are
+    # filled by validation, not present in _default_payloads' master -- a drift
+    # there must still be flagged.
+    master_key = {"auto_curation_rules_name": ac_name}
+    kwargs_original = (AutoCurationRules & master_key).fetch1("auto_merge_kwargs")
+    try:
+        AutoCurationRules().update1(
+            {**master_key, "auto_merge_kwargs": {"drifted_master_field": True}},
+            allow_param_mutation=True,
+        )
+        stale = verify_v2_default_catalog()
+        assert any(
+            entry["table"] == "AutoCurationRules"
+            and entry["name"] == ac_name
+            and "auto_merge_kwargs" in entry["fields"]
+            for entry in stale
+        ), f"master auto_merge_kwargs drift not flagged: {stale}"
+    finally:
+        AutoCurationRules().update1(
+            {**master_key, "auto_merge_kwargs": kwargs_original},
+            allow_param_mutation=True,
+        )
+    assert verify_v2_default_catalog() == []
