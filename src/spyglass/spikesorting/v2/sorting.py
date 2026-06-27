@@ -143,6 +143,13 @@ class SortingFetched(NamedTuple):
     display_waveform_params_name: str
     display_waveform_params: dict
     execution_params: dict
+    # Per-unit Electrode FK resolution, threaded so make_compute builds the
+    # Sorting.Unit rows DB-free (anchored to the recording / first concat
+    # member). ``region_by_electrode`` maps electrode_id -> brain region for the
+    # NWB ``brain_region`` column.
+    sort_group_id: int
+    electrode_by_id: dict
+    region_by_electrode: dict
 
 
 class SortingComputed(NamedTuple):
@@ -194,6 +201,10 @@ class SortingComputed(NamedTuple):
     sorter_version : str or None
         Installed distribution version of the sorter package, or ``None`` for
         in-process / SI-internal sorters (secondary provenance).
+    unit_rows : list of dict
+        The ``Sorting.Unit`` rows built ONCE in ``make_compute`` (peak channel /
+        amplitude / spike count), reused by ``make_insert`` for the part insert
+        so the DB and the NWB cannot drift. Empty for a zero-unit sort.
     """
 
     sorting_obj: "si.BaseSorting"
@@ -206,6 +217,7 @@ class SortingComputed(NamedTuple):
     effective_random_seed: int
     spikeinterface_version: str
     sorter_version: str | None
+    unit_rows: list[dict]
 
 
 _assert_v2_db_safe()
@@ -1324,6 +1336,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorter_row.get("execution_params")
         )
 
+        sort_group_id, electrode_by_id, region_by_electrode = (
+            self._fetch_unit_electrode_metadata(recording_id, nwb_file_name)
+        )
+
         return SortingFetched(
             source=source,
             recording_id=recording_id,
@@ -1334,7 +1350,53 @@ class Sorting(SpyglassMixin, dj.Computed):
             display_waveform_params_name=display_waveform_params_name,
             display_waveform_params=display_waveform_params,
             execution_params=execution_params,
+            sort_group_id=sort_group_id,
+            electrode_by_id=electrode_by_id,
+            region_by_electrode=region_by_electrode,
         )
+
+    @staticmethod
+    def _fetch_unit_electrode_metadata(recording_id, nwb_file_name):
+        """DB reads for the per-unit Electrode FK + brain region (fetch stage).
+
+        Resolved once here so ``make_compute`` builds the ``Sorting.Unit`` rows
+        (and the matching NWB unit columns) with no DB I/O. ``electrode_by_id``
+        comes from the unjoined ``SortGroupElectrode`` so it stays complete (the
+        row-construction key set is unchanged); ``region_by_electrode`` is a
+        best-effort ``electrode_id -> brain region`` map (an electrode without a
+        region simply has no entry). Anchored to ``recording_id`` /
+        ``nwb_file_name`` (the sort's own recording, or the first concat member).
+        """
+        from spyglass.common.common_region import BrainRegion
+        from spyglass.spikesorting.v2.recording import (
+            RecordingSelection,
+            SortGroupV2,
+        )
+
+        sort_group_id = int(
+            (RecordingSelection & {"recording_id": recording_id}).fetch1(
+                "sort_group_id"
+            )
+        )
+        restriction = {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+        }
+        electrode_by_id = {
+            int(row["electrode_id"]): row
+            for row in (
+                SortGroupV2.SortGroupElectrode & restriction
+            ).fetch(as_dict=True)
+        }
+        region_by_electrode = {
+            int(row["electrode_id"]): str(row["region_name"])
+            for row in (
+                (SortGroupV2.SortGroupElectrode & restriction)
+                * Electrode
+                * BrainRegion
+            ).fetch("electrode_id", "region_name", as_dict=True)
+        }
+        return sort_group_id, electrode_by_id, region_by_electrode
 
     @staticmethod
     def _first_concat_member(source_key):
@@ -1456,6 +1518,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         display_waveform_params_name,
         display_waveform_params,
         execution_params,
+        sort_group_id,
+        electrode_by_id,
+        region_by_electrode,
     ):
         """Sort, build analyzer, stage Units NWB outside any DB transaction.
 
@@ -1599,12 +1664,54 @@ class Sorting(SpyglassMixin, dj.Computed):
             analyzer_folder=analyzer_folder,
             waveform_params=display_waveform_params,
         )
+        # Compute the per-unit rows ONCE here (from the analyzer just built) and
+        # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
+        # make_insert -- so the file and the DB cannot drift, and the peak
+        # channel/amplitude are not computed twice.
+        unit_rows = self._build_unit_rows_from_analyzer(
+            sorting=sorting_obj,
+            analyzer_folder=analyzer_folder,
+            sorter_row=sorter_row,
+            electrode_by_id=electrode_by_id,
+            sort_group_id=sort_group_id,
+            nwb_file_name=nwb_file_name,
+            key=key,
+        )
+        unit_metadata = {
+            int(row["unit_id"]): {
+                "peak_amplitude_uv": row["peak_amplitude_uv"],
+                "peak_electrode_id": int(row["electrode_id"]),
+                "n_spikes": int(row["n_spikes"]),
+                "brain_region": region_by_electrode.get(
+                    int(row["electrode_id"])
+                ),
+            }
+            for row in unit_rows
+        }
+        concat_recording_id = (
+            source.key["concat_recording_id"]
+            if source.kind == "concatenated_recording"
+            else None
+        )
+        source_provenance = {
+            "recording_id": recording_id,
+            "concat_recording_id": concat_recording_id,
+            "sorter": sorter_row["sorter"],
+            "sorter_params": sorter_row["params"],
+            "artifact_detection_id": sel_row.get("artifact_detection_id"),
+            "display_waveform_params_name": display_waveform_params_name,
+            "effective_random_seed": effective_random_seed,
+            "spikeinterface_version": spikeinterface_version,
+            "sorter_version": sorter_version,
+        }
         analysis_file_name, units_object_id = self._stage_sorting_artifact(
             sorting=sorting_obj,
             recording=recording,
             nwb_file_name=nwb_file_name,
             obs_intervals=obs_intervals,
             analyzer_folder=analyzer_folder,
+            unit_metadata=unit_metadata,
+            source_provenance=source_provenance,
         )
 
         return SortingComputed(
@@ -1618,6 +1725,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             effective_random_seed=effective_random_seed,
             spikeinterface_version=spikeinterface_version,
             sorter_version=sorter_version,
+            unit_rows=unit_rows,
         )
 
     def make_insert(
@@ -1633,6 +1741,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         effective_random_seed,
         spikeinterface_version,
         sorter_version,
+        unit_rows,
     ):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
@@ -1691,6 +1800,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 effective_random_seed=effective_random_seed,
                 spikeinterface_version=spikeinterface_version,
                 sorter_version=sorter_version,
+                unit_rows=unit_rows,
             )
         except Exception:
             # Failure-mode B: registration failed after a successful
@@ -1710,6 +1820,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         nwb_file_name,
         obs_intervals,
         analyzer_folder,
+        unit_metadata=None,
+        source_provenance=None,
     ):
         """Stage the units NWB; clean the built analyzer if staging fails.
 
@@ -1717,7 +1829,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         so a failure in the units-NWB write must remove it (failure-mode A)
         before propagating -- DataJoint does not call ``make_insert`` once
         ``make_compute`` raises. Returns ``(analysis_file_name,
-        units_object_id)``.
+        units_object_id)``. ``unit_metadata`` / ``source_provenance`` are the
+        compute-once per-unit columns + source header embedded in the NWB.
         """
         try:
             return self._write_units_nwb(
@@ -1725,6 +1838,8 @@ class Sorting(SpyglassMixin, dj.Computed):
                 recording=recording,
                 nwb_file_name=nwb_file_name,
                 obs_intervals=obs_intervals,
+                unit_metadata=unit_metadata,
+                source_provenance=source_provenance,
             )
         except Exception:
             # Mode A cleanup: the analyzer folder exists but the units NWB
@@ -1748,6 +1863,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         effective_random_seed,
         spikeinterface_version,
         sorter_version,
+        unit_rows,
     ):
         """Register the AnalysisNwbfile + master + Unit rows atomically.
 
@@ -1782,13 +1898,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "sorter_version": sorter_version,
                 }
             )
-            self._populate_unit_part(
-                sorting=sorting_obj,
-                recording_id=recording_id,
-                nwb_file_name=nwb_file_name,
-                key=key,
-                analyzer_folder=analyzer_folder,
-            )
+            self._populate_unit_part(unit_rows)
 
     @staticmethod
     def _cleanup_staged_sorting_artifacts(
@@ -2595,7 +2705,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _write_units_nwb(sorting, recording, nwb_file_name, obs_intervals=None):
+    def _write_units_nwb(
+        sorting,
+        recording,
+        nwb_file_name,
+        obs_intervals=None,
+        *,
+        unit_metadata=None,
+        source_provenance=None,
+    ):
         """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
         Thin delegator to :func:`._units_nwb.write_sorting_units_nwb`;
@@ -2604,67 +2722,58 @@ class Sorting(SpyglassMixin, dj.Computed):
         ``Sorting._write_units_nwb`` (the Mode-A analyzer-cleanup audit)
         and call it directly (the zero-unit guard test). The NWB staging
         IO -- absolute-timeline spike times, the ``obs_intervals`` +
-        ``curation_label`` columns, and the zero-unit empty-Units guard --
-        lives in the service module.
+        ``curation_label`` columns, the per-unit metadata + source-provenance
+        scratch, and the zero-unit empty-Units guard -- lives in the service
+        module.
         """
         return write_sorting_units_nwb(
             sorting=sorting,
             recording=recording,
             nwb_file_name=nwb_file_name,
             obs_intervals=obs_intervals,
+            unit_metadata=unit_metadata,
+            source_provenance=source_provenance,
         )
 
     @staticmethod
-    def _populate_unit_part(
+    def _build_unit_rows_from_analyzer(
+        *,
         sorting,
-        recording_id,
+        analyzer_folder,
+        sorter_row,
+        electrode_by_id,
+        sort_group_id,
         nwb_file_name,
         key,
-        analyzer_folder,
     ):
-        """Insert one ``Sorting.Unit`` row per sorted unit.
+        """Build the ``Sorting.Unit`` rows from the freshly built analyzer.
 
-        Each row carries the full ``Electrode`` FK for the peak-amplitude
-        channel (resolved through the sort group's
-        ``SortGroupV2.SortGroupElectrode``) plus the peak template
-        amplitude in microvolts and the spike count.
+        Run ONCE in ``make_compute`` (DB-free): the analyzer folder
+        ``_build_analyzer`` just wrote is loaded here, each unit's peak channel
+        + amplitude is resolved under the sorter's configured detection polarity
+        (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not SI's
+        ``"neg"`` default, so a positive-going detection attributes each unit to
+        its true peak channel), and the rows are assembled by
+        ``build_sorting_unit_rows`` (which raises on a sort-group/recording
+        channel-id mismatch). The resulting rows are reused for BOTH the NWB
+        unit columns and the ``Sorting.Unit`` insert, so the file and the DB
+        cannot drift.
 
-        ``analyzer_folder`` is the transient folder ``_build_analyzer``
-        wrote (threaded from make_compute), NOT a stored column -- so the
-        EXACT folder built is loaded here, not a recomputed path.
-
-        Zero-unit early-return: ``_build_analyzer`` skips the
-        ``create_sorting_analyzer`` call when ``sorting.get_num_units
-        () == 0`` (SI's ``estimate_sparsity`` crashes on empty
-        sortings), so the analyzer folder does not exist. There are
-        no units to insert in that case; return early so
-        ``si.load_sorting_analyzer`` is not called against a
-        non-existent folder.
+        Empty for a zero-unit sort: ``_build_analyzer`` skips the
+        ``create_sorting_analyzer`` call when ``sorting.get_num_units() == 0``
+        (SI's ``estimate_sparsity`` crashes on empty sortings), so the analyzer
+        folder does not exist; there is nothing to load or insert.
         """
         if sorting.get_num_units() == 0:
-            return
+            return []
 
-        import numpy as np
         import spikeinterface as si
         from spikeinterface.core import template_tools
 
-        from spyglass.spikesorting.v2.recording import (
-            RecordingSelection,
-            SortGroupV2,
-        )
         from spyglass.spikesorting.v2.utils import resolve_peak_sign
 
         analyzer = si.load_sorting_analyzer(analyzer_folder)
-        # Honor the sorter's configured detection polarity (clusterless
-        # ``peak_sign`` / MountainSort ``detect_sign``) rather than
-        # SpikeInterface's ``"neg"`` default, so a positive-going detection
-        # attributes each unit to its true peak channel instead of the
-        # most-negative one. The polarity is threaded here at sort time.
-        sorter_params = (
-            SortingSelection * SorterParameters
-            & {"sorting_id": key["sorting_id"]}
-        ).fetch1("params")
-        peak_sign = resolve_peak_sign(sorter_params)
+        peak_sign = resolve_peak_sign(sorter_row["params"])
         peak_channels = template_tools.get_template_extremum_channel(
             analyzer, peak_sign=peak_sign, outputs="id"
         )
@@ -2677,32 +2786,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         peak_amplitudes = template_tools.get_template_extremum_amplitude(
             analyzer, peak_sign=peak_sign, mode="extremum"
         )
-
-        sort_group_id = int(
-            (RecordingSelection & {"recording_id": recording_id}).fetch1(
-                "sort_group_id"
-            )
-        )
-        sg_electrodes = (
-            SortGroupV2.SortGroupElectrode
-            & {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": sort_group_id,
-            }
-        ).fetch(as_dict=True)
-        electrode_by_id = {
-            int(row["electrode_id"]): row for row in sg_electrodes
-        }
-
-        # Spike counts come from the in-memory sorting; the remaining row
-        # construction (Electrode FK resolution, peak-amplitude/n_spikes
-        # assembly, channel-mismatch guard) is pure and lives in
-        # ``build_sorting_unit_rows``.
         n_spikes_by_unit = {
             unit_id: int(len(sorting.get_unit_spike_train(unit_id=unit_id)))
             for unit_id in sorting.unit_ids
         }
-        rows = build_sorting_unit_rows(
+        return build_sorting_unit_rows(
             unit_ids=sorting.unit_ids,
             peak_channels=peak_channels,
             peak_amplitudes=peak_amplitudes,
@@ -2712,4 +2800,14 @@ class Sorting(SpyglassMixin, dj.Computed):
             sort_group_id=sort_group_id,
             nwb_file_name=nwb_file_name,
         )
-        Sorting.Unit.insert(rows)
+
+    @staticmethod
+    def _populate_unit_part(unit_rows):
+        """Insert the pre-built ``Sorting.Unit`` rows.
+
+        The rows are built ONCE in ``make_compute``
+        (:meth:`_build_unit_rows_from_analyzer`) and threaded through, so this
+        is a pure insert with no analyzer load or DB read. An empty list (a
+        zero-unit sort) is a no-op.
+        """
+        Sorting.Unit.insert(unit_rows)

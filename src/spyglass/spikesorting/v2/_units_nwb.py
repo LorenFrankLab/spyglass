@@ -533,7 +533,13 @@ def recording_timestamps(recording_row):
 
 
 def write_sorting_units_nwb(
-    sorting, recording, nwb_file_name, obs_intervals=None
+    sorting,
+    recording,
+    nwb_file_name,
+    obs_intervals=None,
+    *,
+    unit_metadata=None,
+    source_provenance=None,
 ):
     """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
@@ -567,6 +573,8 @@ def write_sorting_units_nwb(
             sorting=sorting,
             recording=recording,
             obs_intervals=obs_intervals,
+            unit_metadata=unit_metadata,
+            source_provenance=source_provenance,
         )
     except Exception:
         from spyglass.spikesorting.v2.recording import (
@@ -580,13 +588,25 @@ def write_sorting_units_nwb(
 
 
 def _write_sorting_units_nwb_body(
-    *, analysis_file_name, sorting, recording, obs_intervals
+    *,
+    analysis_file_name,
+    sorting,
+    recording,
+    obs_intervals,
+    unit_metadata=None,
+    source_provenance=None,
 ):
     """Fill the staged sort-units ``AnalysisNwbfile`` (no cleanup on failure).
 
     Split out of :func:`write_sorting_units_nwb` so the staged-file cleanup-on-
     error wrapper there stays a thin try/except. Returns
     ``(analysis_file_name, units_object_id)``.
+
+    ``unit_metadata`` (``{unit_id: {peak_amplitude_uv, peak_electrode_id,
+    n_spikes, brain_region}}``) adds the matching per-unit columns -- the SAME
+    values used for ``Sorting.Unit`` (computed once). ``source_provenance``
+    (from :mod:`._nwb_provenance`) is embedded as a scratch header so the file
+    is interpretable without the DB.
     """
     import numpy as np
     import pynwb
@@ -658,17 +678,37 @@ def _write_sorting_units_nwb_body(
                 ),
                 index=True,
             )
+            if unit_metadata is not None:
+                # Per-unit metadata mirroring Sorting.Unit (computed once),
+                # so an NWB-only reader has peak channel / amplitude / count /
+                # region without the DB.
+                for name, desc in (
+                    ("peak_amplitude_uv", "Peak template amplitude (uV)."),
+                    ("peak_electrode_id", "Peak channel spyglass electrode id."),
+                    ("n_spikes", "Number of spikes in the unit."),
+                    ("brain_region", "Brain region of the peak electrode."),
+                ):
+                    nwbf.add_unit_column(name=name, description=desc)
         for unit_id in sorting.unit_ids:
             unit_id = int(unit_id)
             spike_indices = sample_indices_by_unit[unit_id]
             spike_times = spike_times_by_unit[unit_id]
-            nwbf.add_unit(
+            unit_kwargs = dict(
                 spike_times=spike_times,
                 id=unit_id,
                 obs_intervals=obs_intervals_arr,
                 curation_label="uncurated",
                 spike_sample_index=spike_indices,
             )
+            if unit_metadata is not None:
+                meta = unit_metadata[unit_id]
+                unit_kwargs.update(
+                    peak_amplitude_uv=float(meta["peak_amplitude_uv"]),
+                    peak_electrode_id=int(meta["peak_electrode_id"]),
+                    n_spikes=int(meta["n_spikes"]),
+                    brain_region=str(meta["brain_region"] or ""),
+                )
+            nwbf.add_unit(**unit_kwargs)
         # pynwb leaves ``nwbf.units = None`` if no add_unit() was
         # called, so a zero-unit sort would crash on .object_id.
         # Initialize an empty Units table explicitly.
@@ -678,6 +718,13 @@ def _write_sorting_units_nwb_body(
                 description="Empty units table (sorter found zero units).",
             )
         units_object_id = nwbf.units.object_id
+        if source_provenance is not None:
+            from spyglass.spikesorting.v2._nwb_provenance import (
+                SORTING_PROVENANCE,
+                add_provenance_table,
+            )
+
+            add_provenance_table(nwbf, SORTING_PROVENANCE, source_provenance)
         io.write(nwbf)
 
     # The AnalysisNwbfile DB-row registration (.add) is deliberately

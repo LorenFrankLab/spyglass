@@ -510,3 +510,73 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
     assert not Path(
         AnalysisNwbfile.get_abs_path(staged["name"])
     ).exists()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
+    """The sort-time Units NWB carries per-unit metadata matching Sorting.Unit
+    plus a source-provenance scratch, so the file is interpretable standalone.
+
+    Per-unit columns (peak_amplitude_uv / peak_electrode_id / n_spikes /
+    brain_region) come from the SAME rows used for Sorting.Unit.insert (computed
+    once), and a header records the sort source / sorter / params / recipe /
+    versions / seed.
+    """
+    import pynwb
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        SORTING_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.recording import Electrode
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort = planted_two_unit_sort
+    row = (Sorting & sort).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+
+    expected = {
+        int(r["unit_id"]): r
+        for r in ((Sorting.Unit & sort) * Electrode * BrainRegion).fetch(
+            "unit_id",
+            "peak_amplitude_uv",
+            "n_spikes",
+            "electrode_id",
+            "region_name",
+            as_dict=True,
+        )
+    }
+    assert expected, "planted sort must have units to compare"
+
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        units = io.read().units.to_dataframe()
+
+    for unit_id, exp in expected.items():
+        got = units.loc[unit_id]
+        # Sorting.Unit.peak_amplitude_uv is a single-precision DataJoint float;
+        # compare with tolerance, not equality.
+        assert float(got["peak_amplitude_uv"]) == pytest.approx(
+            float(exp["peak_amplitude_uv"]), rel=1e-4
+        )
+        assert int(got["peak_electrode_id"]) == int(exp["electrode_id"])
+        assert int(got["n_spikes"]) == int(exp["n_spikes"])
+        assert got["brain_region"] == exp["region_name"]
+
+    prov = read_provenance_values(abs_path, SORTING_PROVENANCE)
+    recording_id = SortingSelection.resolve_source(sort).key["recording_id"]
+    artifact_detection_id = SortingSelection.resolve_artifact_detection(sort)
+    assert prov["recording_id"] == str(recording_id)
+    assert prov["concat_recording_id"] is None
+    assert prov["sorter"] == "mountainsort5"
+    assert isinstance(prov["sorter_params"], dict)
+    assert prov["artifact_detection_id"] == str(artifact_detection_id)
+    assert (
+        prov["display_waveform_params_name"]
+        == row["display_waveform_params_name"]
+    )
+    assert prov["effective_random_seed"] == int(row["effective_random_seed"])
+    assert prov["spikeinterface_version"] == row["spikeinterface_version"]
+    assert prov["sorter_version"] == row["sorter_version"]

@@ -435,7 +435,11 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     from spikeinterface.core import template_tools
 
     from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
@@ -467,11 +471,22 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         template_tools, "get_template_extremum_channel", _bad_peak_channels
     )
 
+    # The per-unit row construction (peak attribution + channel-mismatch guard)
+    # now lives in ``_build_unit_rows_from_analyzer`` (run once in
+    # make_compute); the Electrode FK / sort group are resolved at fetch time.
+    sort_group_id, electrode_by_id, _region = (
+        Sorting._fetch_unit_electrode_metadata(recording_id, nwb_file_name)
+    )
+    sorter_row = (
+        SortingSelection * SorterParameters & populated_sorting
+    ).fetch1()
     with pytest.raises(RuntimeError, match=str(bad_channel)):
-        Sorting._populate_unit_part(
-            sorting,
-            recording_id,
-            nwb_file_name,
-            dict(populated_sorting),
-            analyzer_folder,
+        Sorting._build_unit_rows_from_analyzer(
+            sorting=sorting,
+            analyzer_folder=analyzer_folder,
+            sorter_row=sorter_row,
+            electrode_by_id=electrode_by_id,
+            sort_group_id=sort_group_id,
+            nwb_file_name=nwb_file_name,
+            key=dict(populated_sorting),
         )
