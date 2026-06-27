@@ -84,16 +84,20 @@ def test_resolve_effective_seed_matches_resolved_job_kwargs(
 
 
 def test_resolve_effective_seed_rejects_non_integer(restore_custom_config):
-    """A non-integer random_seed is rejected BEFORE compute, so the stored seed
-    can never diverge from the raw value the seed sites consume (which would
-    happen if it were silently int()-coerced)."""
+    """A non-integer OR negative random_seed is rejected BEFORE compute, so the
+    stored seed can never diverge from the raw value the seed sites consume
+    (silent int()-coercion) nor defer to a later SI/NumPy RNG failure. Negative
+    mirrors the UnitMatch bundle-seed schema's seed >= 0."""
     import numpy as np
 
     dj.config["custom"].pop("spikesorting_v2_job_kwargs", None)
-    for bad in ("7", 7.9, 7.0, True):
-        with pytest.raises(ValueError, match="random_seed must be an integer"):
+    for bad in ("7", 7.9, 7.0, True, -1, -5):
+        with pytest.raises(
+            ValueError, match="random_seed must be a non-negative integer"
+        ):
             resolve_effective_seed({"random_seed": bad})
-    # Clean Python and numpy integers are accepted (seed-equivalent).
+    # Clean non-negative Python and numpy integers are accepted (seed-equivalent).
+    assert resolve_effective_seed({"random_seed": 0}) == 0
     assert resolve_effective_seed({"random_seed": 7}) == 7
     assert resolve_effective_seed({"random_seed": np.int64(5)}) == 5
 

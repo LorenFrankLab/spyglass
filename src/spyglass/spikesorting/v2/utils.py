@@ -895,21 +895,26 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
     Raises
     ------
     ValueError
-        If the resolved ``random_seed`` is not an integer (e.g. ``"7"`` or
-        ``7.9``). The seed sites consume this resolved value directly, so a
-        non-integer is rejected here -- BEFORE compute -- rather than silently
-        ``int()``-coerced (which would store ``7`` while the sorter saw the
-        original object). This is the call that runs first in ``make_compute``,
-        so a bad seed aborts the populate before any row is written.
+        If the resolved ``random_seed`` is not a non-negative integer (e.g.
+        ``"7"``, ``7.9``, or ``-1``). The seed sites consume this resolved value
+        directly, so a bad seed is rejected here -- BEFORE compute -- rather than
+        silently ``int()``-coerced (which would store ``7`` while the sorter saw
+        the original object) or deferred to a later SI/NumPy RNG failure. This is
+        the call that runs first in ``make_compute``, so a bad seed aborts the
+        populate before any row is written. Mirrors the ``seed >= 0`` constraint
+        on the UnitMatch bundle-seed schema.
     """
     resolved = _resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0)
     # ``bool`` is an ``int`` subclass but never a valid seed; ``numbers.Integral``
     # accepts Python and numpy integers (which are seed-equivalent to ``int``).
-    if isinstance(resolved, bool) or not isinstance(
-        resolved, numbers.Integral
+    # SI/NumPy RNG seeds must be non-negative, so reject ``< 0`` here too.
+    if (
+        isinstance(resolved, bool)
+        or not isinstance(resolved, numbers.Integral)
+        or resolved < 0
     ):
         raise ValueError(
-            "spikesorting v2 random_seed must be an integer, got "
+            "spikesorting v2 random_seed must be a non-negative integer, got "
             f"{resolved!r} ({type(resolved).__name__}). Set an int random_seed "
             "in the per-row job_kwargs blob (or "
             "dj.config['custom']['spikesorting_v2_job_kwargs'])."
