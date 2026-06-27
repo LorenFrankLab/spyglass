@@ -179,10 +179,9 @@ def compose_curation_labels(
             f"'replace'; got {label_policy!r}."
         )
     if label_policy == "replace":
-        result = {int(k): list(v) for k, v in supplied_labels.items()}
-        return {k: v for k, v in result.items() if v}
+        return {int(k): list(v) for k, v in supplied_labels.items() if v}
 
-    inherited: dict[int, list[str]] = {}
+    composed: dict[int, list[str]] = {}
     for kept_uid, contributors in kept_unit_to_contributors.items():
         kept_uid = int(kept_uid)
         if apply_merge:
@@ -190,18 +189,17 @@ def compose_curation_labels(
             for contributor in contributors:
                 union.update(parent_labels.get(int(contributor), []))
             if union:
-                inherited[kept_uid] = sorted(union)
+                composed[kept_uid] = sorted(union)
         else:
             own = parent_labels.get(kept_uid, [])
             if own:
-                inherited[kept_uid] = list(own)
+                composed[kept_uid] = list(own)
 
-    result = dict(inherited)
     for unit_id, labels in supplied_labels.items():
         # An explicit supplied entry overrides the inherited value for that
         # unit (an empty list clears it; the trailing filter drops it).
-        result[int(unit_id)] = list(labels)
-    return {k: v for k, v in result.items() if v}
+        composed[int(unit_id)] = list(labels)
+    return {k: v for k, v in composed.items() if v}
 
 
 def build_curated_unit_rows(

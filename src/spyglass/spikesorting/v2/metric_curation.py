@@ -198,17 +198,9 @@ def _assert_curation_in_raw_namespace(
     accessors (which carry the curation's own unit namespace) or at plotting the
     raw sort directly.
     """
-    curation_units = {
-        int(u)
-        for u in (
-            CurationV2.Unit
-            & {"sorting_id": sorting_id, "curation_id": curation_id}
-        ).fetch("unit_id")
-    }
-    raw_units = {
-        int(u) for u in (Sorting.Unit & {"sorting_id": sorting_id}).fetch("unit_id")
-    }
-    if curation_units != raw_units:
+    if not CurationV2.matches_raw_namespace(
+        {"sorting_id": sorting_id, "curation_id": curation_id}
+    ):
         raise ValueError(
             f"{context}: curation (sorting_id={sorting_id}, "
             f"curation_id={curation_id}) has a unit namespace that differs from "
@@ -1064,9 +1056,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         expected_unit_ids = sorted(
             int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")
         )
-        raw_unit_ids = sorted(
-            int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
-        )
 
         # Routing: the cached raw-sort analyzer fast path is valid ONLY when the
         # curation's unit set IS the raw sort's unit set (a root, or a label-only
@@ -1076,7 +1065,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         # merges_applied=False but its namespace includes merged parent ids
         # absent from the raw sort, so it must build a curation-scoped temp
         # analyzer over the curated sorting (same as an applied-merge row).
-        use_fast_path = set(expected_unit_ids) == set(raw_unit_ids)
+        use_fast_path = CurationV2.matches_raw_namespace(curation_key)
 
         display_waveform_params_name = resolve_display_waveform_params_name(
             Sorting(), sorting_id

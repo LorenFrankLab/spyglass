@@ -1771,6 +1771,41 @@ class CurationV2(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def matches_raw_namespace(cls, key) -> bool:
+        """Return whether a curation's unit set IS the raw sort's unit set.
+
+        ``True`` for a root, or a label-only child of a non-merged ancestor:
+        the curation carries exactly the raw ``Sorting.Unit`` ids, so the cached
+        raw-sort display analyzer already holds its namespace. ``False`` for a
+        merged curation -- or a label-only child of a merged parent -- whose unit
+        set includes merged ids absent from the raw sort. The single owner of
+        this predicate: ``CurationEvaluation.make_fetch`` routes its analyzer
+        fast path on it and ``_assert_curation_in_raw_namespace`` guards the
+        raw-analyzer plot helpers with it, so the two cannot drift. Distinct
+        from :meth:`is_committed_curation`: a committed label-only child of a
+        merged parent is committed yet does NOT match the raw namespace.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``CurationV2`` row; must include
+            ``sorting_id`` (used to read the raw ``Sorting.Unit`` set).
+
+        Returns
+        -------
+        bool
+            ``True`` iff the curation unit set equals the raw sort's unit set.
+        """
+        curation_units = {int(u) for u in (cls.Unit & key).fetch("unit_id")}
+        raw_units = {
+            int(u)
+            for u in (
+                Sorting.Unit & {"sorting_id": key["sorting_id"]}
+            ).fetch("unit_id")
+        }
+        return curation_units == raw_units
+
+    @classmethod
     def assert_committed_curation(
         cls, key, *, context: str = "", merges_applied=None
     ) -> None:
