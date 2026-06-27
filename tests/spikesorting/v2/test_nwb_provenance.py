@@ -68,13 +68,16 @@ def test_scalar_provenance_round_trips_mixed_types(tmp_path):
     assert read["provenance_schema_version"] == PROVENANCE_SCHEMA_VERSION
 
 
-def test_scalar_provenance_coerces_numpy_values(tmp_path):
-    """Numpy scalars/arrays (DataJoint blob-fetch artifacts) serialize + read back.
+def test_scalar_provenance_coerces_datajoint_types(tmp_path):
+    """Numpy + UUID (DataJoint-deserialized types) serialize + read back.
 
     Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
-    rule thresholds, hash manifests), which deserialize as numpy scalars/arrays;
-    plain ``json.dumps`` cannot encode those, so the helper coerces them.
+    rule thresholds, hash manifests, row ids), which deserialize as numpy
+    scalars/arrays and ``uuid.UUID``; plain ``json.dumps`` cannot encode those,
+    so the helper coerces them (UUIDs to their canonical string form).
     """
+    import uuid
+
     import numpy as np
 
     from spyglass.spikesorting.v2._nwb_provenance import (
@@ -82,22 +85,25 @@ def test_scalar_provenance_coerces_numpy_values(tmp_path):
         read_provenance_values,
     )
 
+    rec_id = uuid.uuid4()
     values = {
         "threshold": np.float64(1.5),
         "count": np.int64(7),
         "flags": np.array([1, 2, 3]),
         "ok": np.bool_(True),
+        "recording_id": rec_id,
     }
 
     nwbfile = _new_nwbfile()
-    add_provenance_table(nwbfile, "spyglass_v2_test_numpy", values)
+    add_provenance_table(nwbfile, "spyglass_v2_test_dj_types", values)
     path = _write(nwbfile, tmp_path)
 
-    read = read_provenance_values(path, "spyglass_v2_test_numpy")
+    read = read_provenance_values(path, "spyglass_v2_test_dj_types")
     assert read["threshold"] == 1.5
     assert read["count"] == 7
     assert read["flags"] == [1, 2, 3]
     assert read["ok"] is True
+    assert read["recording_id"] == str(rec_id)
 
 
 def test_long_provenance_table_round_trips_typed_rows(tmp_path):

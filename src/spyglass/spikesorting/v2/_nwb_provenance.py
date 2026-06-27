@@ -25,6 +25,7 @@ functions take an absolute file path the ``@schema`` table layer resolves.
 from __future__ import annotations
 
 import json
+import uuid
 
 import numpy as np
 import pynwb
@@ -58,11 +59,12 @@ _NUMPY_FOR_PYTYPE = {
 
 
 def _json_default(value):
-    """JSON encoder fallback for numpy scalars / arrays.
+    """JSON encoder fallback for DataJoint-deserialized value types.
 
     Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
-    rule thresholds, hash manifests), which deserialize as numpy scalars /
-    arrays; ``json.dumps`` cannot encode those natively.
+    rule thresholds, hash manifests, row ids), which deserialize as numpy
+    scalars / arrays and ``uuid.UUID``; ``json.dumps`` cannot encode those
+    natively. UUIDs are stored in their canonical string form.
     """
     if isinstance(value, np.integer):
         return int(value)
@@ -72,6 +74,8 @@ def _json_default(value):
         return bool(value)
     if isinstance(value, np.ndarray):
         return value.tolist()
+    if isinstance(value, uuid.UUID):
+        return str(value)
     raise TypeError(
         f"Object of type {type(value).__name__} is not JSON serializable"
     )
