@@ -248,14 +248,14 @@ class SelectionMasterInsertGuard:
             directing the caller to ``insert_selection`` instead.
         """
         if not allow_direct_insert:
-            raise dj.errors.DataJointError(
-                f"Direct insert into {self.__class__.__name__} is not "
-                "supported: the primary key is derived from the selection's "
-                "full logical identity (and, for the part-bearing masters, "
-                "the source-part rows are inserted atomically with it). Use "
-                f"{self.__class__.__name__}.insert_selection(). Pass "
-                "allow_direct_insert=True only for a deliberate maintenance "
-                "or test bypass."
+            _reject_master_insert(
+                self,
+                reason=(
+                    "the primary key is derived from the selection's full "
+                    "logical identity (and, for the part-bearing masters, the "
+                    "source-part rows are inserted atomically with it). Use "
+                    f"{type(self).__name__}.insert_selection()."
+                ),
             )
         super().insert(
             rows,
@@ -264,6 +264,144 @@ class SelectionMasterInsertGuard:
             ignore_extra_fields=ignore_extra_fields,
             **kwargs,
         )
+
+    def update1(self, row, *, allow_master_mutation=False):
+        """Reject an in-place row mutation unless ``allow_master_mutation``.
+
+        A selection master's secondary columns ARE its logical identity (the
+        deterministic PK is content-addressed from them), so editing them in
+        place retargets the id under every live dependent -- the symmetric
+        hazard to a direct insert. ``update1`` is the only standard in-place
+        mutation path, so guard it the same way
+        :class:`ImmutableParamsLookup` guards the param Lookups: insert a NEW
+        selection via ``insert_selection`` instead of editing an existing one.
+
+        Parameters
+        ----------
+        row : dict
+            The row to update, forwarded to ``dj.Table.update1``.
+        allow_master_mutation : bool, optional
+            Escape hatch for a deliberate maintenance or test mutation of a
+            row known to have no live downstream references. Default ``False``.
+
+        Raises
+        ------
+        datajoint.errors.DataJointError
+            If ``allow_master_mutation`` is ``False`` (the default).
+        """
+        if not allow_master_mutation:
+            _reject_master_update1(
+                self,
+                create_hint=(
+                    f"Insert a new selection via {self.__class__.__name__}."
+                    "insert_selection() instead."
+                ),
+            )
+        super().update1(row)
+
+
+def _reject_master_update1(table, *, create_hint: str) -> None:
+    """Raise the shared "master identity is immutable" ``update1`` rejection.
+
+    Used by both :class:`SelectionMasterInsertGuard` and
+    :class:`FactoryOnlyMaster` so the two in-place-mutation guards share one
+    message; ``create_hint`` names the create path to use instead.
+    """
+    raise dj.errors.DataJointError(
+        f"In-place update1 of {type(table).__name__} is not supported: its "
+        "identity-bearing columns feed the deterministic ids (or are the "
+        "provenance roots) that live dependents reference, so editing them in "
+        f"place silently retargets those references. {create_hint} Pass "
+        "allow_master_mutation=True only for a deliberate maintenance edit of "
+        "a row with no live references."
+    )
+
+
+def _reject_master_insert(table, *, reason: str) -> None:
+    """Raise the shared "direct insert blocked" rejection for an identity master.
+
+    Used by both :class:`SelectionMasterInsertGuard` and
+    :class:`FactoryOnlyMaster` so the lead-in and the ``allow_direct_insert``
+    escape-hatch note live once; ``reason`` is the per-guard rationale plus the
+    create-path sentence.
+    """
+    raise dj.errors.DataJointError(
+        f"Direct insert into {type(table).__name__} is not supported: {reason} "
+        "Pass allow_direct_insert=True only for a deliberate maintenance or "
+        "test bypass."
+    )
+
+
+class FactoryOnlyMaster:
+    """Reject direct ``insert`` / ``update1`` of a factory-constructed master.
+
+    ``CurationV2`` (`curation.py`) and ``SessionGroup`` (`session_group.py`)
+    are not selection masters, but they are identity / provenance roots that
+    downstream rows reference. A direct ``insert`` skips the atomic master +
+    part construction the factory classmethod performs (the analysis-file row
+    and ``Unit`` / ``UnitLabel`` parts for ``CurationV2``; the ``Member`` rows
+    for ``SessionGroup``), and an in-place ``update1`` retargets what existing
+    dependents point at. Both are blocked unless an explicit bypass keyword is
+    passed; the factory classmethods (``CurationV2.insert_curation`` /
+    ``SessionGroup.create_group``) pass ``allow_direct_insert=True`` for their
+    already-validated master insert.
+
+    Mirrors :class:`SelectionMasterInsertGuard` (``allow_direct_insert``) and
+    :class:`ImmutableParamsLookup` (``update1``): the mixin must precede
+    ``SpyglassMixin`` / ``dj.Manual`` in the MRO so its overrides take
+    precedence. Subclasses set :attr:`_factory_create_call` to the factory the
+    error message points to.
+    """
+
+    #: The factory call named in the rejection messages (e.g.
+    #: ``"CurationV2.insert_curation()"``). Subclasses override.
+    _factory_create_call: str = "its factory classmethod"
+
+    def insert(
+        self,
+        rows,
+        replace=False,
+        skip_duplicates=False,
+        ignore_extra_fields=False,
+        *,
+        allow_direct_insert=False,
+        **kwargs,
+    ):
+        """Reject a direct insert unless ``allow_direct_insert`` is set.
+
+        Signature mirrors ``dj.Table.insert`` so positional ``replace`` /
+        ``skip_duplicates`` keep working; ``allow_direct_insert`` is
+        keyword-only. DataJoint forwards ``insert1``'s ``**kwargs`` to
+        ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches
+        this override too.
+        """
+        if not allow_direct_insert:
+            _reject_master_insert(
+                self,
+                reason=(
+                    "it is an identity / provenance root that downstream rows "
+                    f"reference. Write it through {self._factory_create_call}, "
+                    "which constructs the master and its parts atomically."
+                ),
+            )
+        super().insert(
+            rows,
+            replace=replace,
+            skip_duplicates=skip_duplicates,
+            ignore_extra_fields=ignore_extra_fields,
+            **kwargs,
+        )
+
+    def update1(self, row, *, allow_master_mutation=False):
+        """Reject an in-place row mutation unless ``allow_master_mutation``."""
+        if not allow_master_mutation:
+            _reject_master_update1(
+                self,
+                create_hint=(
+                    f"Insert a new row via {self._factory_create_call} instead."
+                ),
+            )
+        super().update1(row)
 
 
 class ImmutableParamsLookup:
@@ -361,6 +499,50 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
         if sum(len(part & master) for part in part_tables) == 0:
             orphans.append(master)
     return orphans
+
+
+def audit_source_part_integrity(
+    master_table, part_tables: list
+) -> list[dict]:
+    """Return masters whose source-part row count is not exactly one.
+
+    Complements :func:`find_orphaned_masters`, which flags only the
+    zero-source case. A master with TWO source-part rows is an
+    AMBIGUOUS-source bug -- ``resolve_source`` would raise lazily, only when
+    something happens to read it -- so flag both ``0`` (orphan) and ``>1``
+    (ambiguous) here for a maintenance script to review.
+
+    ``part_tables`` must be the recording-source parts ONLY -- the
+    exactly-one-of XOR set. For ``SortingSelection`` that is
+    ``[RecordingSource, ConcatenatedRecordingSource]``; ``ArtifactDetectionSource``
+    is deliberately EXCLUDED because it is an independent zero-or-one part (a
+    valid artifact-backed sorting carries one, so including it would falsely
+    flag every artifact-bearing sorting as ``count == 2``). For
+    ``ArtifactDetectionSelection`` the XOR set is
+    ``[RecordingSource, SharedGroupSource]``. These are the same part lists
+    ``find_orphaned_masters`` / ``prune_orphaned_selections`` already pass.
+
+    Parameters
+    ----------
+    master_table : datajoint.Table
+        The selection master table to scan.
+    part_tables : list
+        The recording-source part tables (the exactly-one-of XOR set) to count
+        against each master row.
+
+    Returns
+    -------
+    list[dict]
+        One entry per offending master: its primary-key fields plus
+        ``"source_part_count"`` (``0`` = orphan, ``>= 2`` = ambiguous). Masters
+        with exactly one source part are omitted.
+    """
+    flagged: list[dict] = []
+    for master in master_table.fetch("KEY", as_dict=True):
+        count = sum(len(part & master) for part in part_tables)
+        if count != 1:
+            flagged.append({**master, "source_part_count": count})
+    return flagged
 
 
 def resolve_peak_sign(params) -> str:

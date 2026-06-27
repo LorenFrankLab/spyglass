@@ -263,6 +263,113 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
         )
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_audit_source_part_integrity(populated_sorting):
+    """``audit_source_part_integrity`` flags masters whose recording-source
+    part count is not exactly one (0 = orphan, >=2 = ambiguous), counting ONLY
+    the XOR recording-source pair so a valid artifact-bearing sorting is not
+    falsely flagged.
+
+    Four scenarios:
+    * the real populated sorting (``RecordingSource`` + ``ArtifactDetectionSource``)
+      -> NOT flagged (the artifact part is excluded from the count);
+    * a clean single-recording-source master -> NOT flagged;
+    * an orphan master (no source part) -> flagged with count 0;
+    * an ambiguous master (``RecordingSource`` + ``ConcatenatedRecordingSource``)
+      -> flagged with count 2.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import audit_source_part_integrity
+
+    recording_parts = [
+        SortingSelection.RecordingSource,
+        SortingSelection.ConcatenatedRecordingSource,
+    ]
+
+    sid_real = populated_sorting["sorting_id"]
+    base = (SortingSelection & populated_sorting).fetch1()
+    # The real sorting carries an artifact pass: RecordingSource(1) +
+    # ArtifactDetectionSource(1). The audit must NOT flag it -- the artifact part
+    # is excluded, leaving the recording-source count at 1.
+    assert (
+        len(SortingSelection.ArtifactDetectionSource & {"sorting_id": sid_real})
+        == 1
+    ), "fixture sorting expected to carry an artifact-detection pass"
+    rec_id = (
+        SortingSelection.RecordingSource & {"sorting_id": sid_real}
+    ).fetch1("recording_id")
+    sorter, spn = base["sorter"], base["sorter_params_name"]
+
+    orphan, single, ambiguous = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    conn = SortingSelection.connection
+    try:
+        # Orphan: master with no source part.
+        SortingSelection().insert1(
+            {"sorting_id": orphan, "sorter": sorter, "sorter_params_name": spn},
+            allow_direct_insert=True,
+        )
+        # Clean single recording source.
+        SortingSelection().insert1(
+            {"sorting_id": single, "sorter": sorter, "sorter_params_name": spn},
+            allow_direct_insert=True,
+        )
+        SortingSelection.RecordingSource.insert1(
+            {"sorting_id": single, "recording_id": rec_id}
+        )
+        # Ambiguous: BOTH a recording source AND a concat source. The concat FK
+        # target need not exist for the count to be ambiguous, so inject the
+        # second source under FOREIGN_KEY_CHECKS=0 to avoid building a real concat.
+        SortingSelection().insert1(
+            {
+                "sorting_id": ambiguous,
+                "sorter": sorter,
+                "sorter_params_name": spn,
+            },
+            allow_direct_insert=True,
+        )
+        SortingSelection.RecordingSource.insert1(
+            {"sorting_id": ambiguous, "recording_id": rec_id}
+        )
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            SortingSelection.ConcatenatedRecordingSource.insert1(
+                {"sorting_id": ambiguous, "concat_recording_id": uuid.uuid4()}
+            )
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+        flagged = audit_source_part_integrity(SortingSelection, recording_parts)
+        counts = {row["sorting_id"]: row["source_part_count"] for row in flagged}
+
+        assert counts.get(orphan) == 0, "zero-source master not flagged"
+        assert counts.get(ambiguous) == 2, "dual-recording-source master not flagged"
+        assert single not in counts, "clean single-source master wrongly flagged"
+        assert sid_real not in counts, (
+            "valid Recording+Artifact sorting wrongly flagged -- the artifact "
+            "part must be excluded from the recording-source count"
+        )
+
+        # The artifact-selection side uses the [RecordingSource, SharedGroupSource]
+        # XOR pair; the real artifact selection has exactly one and is not flagged.
+        from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
+
+        art_id = SortingSelection.resolve_artifact_detection(populated_sorting)
+        art_flagged = audit_source_part_integrity(
+            ArtifactDetectionSelection,
+            [
+                ArtifactDetectionSelection.RecordingSource,
+                ArtifactDetectionSelection.SharedGroupSource,
+            ],
+        )
+        assert art_id not in {row["artifact_detection_id"] for row in art_flagged}
+    finally:
+        for sid in (orphan, single, ambiguous):
+            (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
 def test_v2_lookup_tables_validate_via_pydantic():
     """``PreprocessingParameters`` / ``ArtifactDetectionParameters``
     / ``SorterParameters`` all validate ``params`` through Pydantic

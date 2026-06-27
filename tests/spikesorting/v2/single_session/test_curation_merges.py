@@ -1304,7 +1304,9 @@ def test_get_merged_sorting_returns_base_when_merges_applied(
     from spyglass.spikesorting.v2.curation import CurationV2
 
     key = populated_sorting_with_curation
-    CurationV2.update1({**key, "merges_applied": 1})
+    # Deliberate maintenance edit of a root curation's flag with no live
+    # dependents -> the explicit escape hatch past the FactoryOnlyMaster guard.
+    CurationV2.update1({**key, "merges_applied": 1}, allow_master_mutation=True)
 
     base = CurationV2().get_sorting(key)
     merged = CurationV2().get_merged_sorting(key)

@@ -890,3 +890,112 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
         ).delete(safemode=False)
+
+
+# --------------------------------------------------------------------------
+# Master-row identity immutability: in-place ``update1`` is rejected on every
+# selection master AND on the ``CurationV2`` / ``SessionGroup`` factory masters
+# (their columns are identity / provenance roots that dependents reference).
+# Mirrors ``test_direct_master_insert_rejected_all_masters`` (the insert side)
+# and ``test_sorter_parameters_update1_rejected_in_place`` (the param-Lookup
+# side). The guard raises BEFORE any DB write, so a synthetic PK row never
+# reaches MySQL -- no fixture rows needed for the reject path.
+# --------------------------------------------------------------------------
+
+_MASTER_UPDATE1_CASES = [
+    ("spyglass.spikesorting.v2.recording", "RecordingSelection"),
+    ("spyglass.spikesorting.v2.artifact", "ArtifactDetectionSelection"),
+    ("spyglass.spikesorting.v2.sorting", "SortingSelection"),
+    ("spyglass.spikesorting.v2.unit_matching", "UnitMatchSelection"),
+    ("spyglass.spikesorting.v2.session_group", "ConcatenatedRecordingSelection"),
+    ("spyglass.spikesorting.v2.metric_curation", "CurationEvaluationSelection"),
+    ("spyglass.spikesorting.v2.curation", "CurationV2"),
+    ("spyglass.spikesorting.v2.session_group", "SessionGroup"),
+]
+
+
+def _synthetic_master_pk(cls):
+    """Build a syntactically valid PK dict for a master (no DB row needed).
+
+    UUID-keyed selection masters get a random ``uuid4`` PK; the composite-key
+    factory masters (``CurationV2`` / ``SessionGroup``) get plausible literals.
+    The guard rejects before any PK lookup, so the values need only fill the
+    primary-key columns.
+    """
+    pk = {}
+    for field in cls.primary_key:
+        attr = cls.heading.attributes[field]
+        if attr.type == "uuid":
+            pk[field] = uuid.uuid4()
+        elif attr.numeric:
+            pk[field] = 0
+        else:
+            pk[field] = "synthetic_audit_probe"
+    return pk
+
+
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize("module, cls_name", _MASTER_UPDATE1_CASES)
+def test_update1_rejected_all_masters(module, cls_name):
+    """In-place ``update1`` is rejected on every selection master and on the
+    ``CurationV2`` / ``SessionGroup`` factory masters; the ``allow_master_mutation``
+    escape hatch forwards to the real ``update1``."""
+    import importlib
+
+    import datajoint as dj
+
+    cls = getattr(importlib.import_module(module), cls_name)
+    row = _synthetic_master_pk(cls)
+    with pytest.raises(dj.errors.DataJointError, match="is not supported"):
+        cls().update1(row)
+
+
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize(
+    "module, cls_name",
+    [
+        ("spyglass.spikesorting.v2.curation", "CurationV2"),
+        ("spyglass.spikesorting.v2.session_group", "SessionGroup"),
+    ],
+)
+def test_factory_master_direct_insert_rejected(module, cls_name):
+    """``CurationV2`` and ``SessionGroup`` are identity/provenance roots, not
+    selection masters, but a direct ``insert1`` is blocked just the same (write
+    them through ``insert_curation`` / ``create_group``). The guard fires before
+    the FK checks, so a synthetic row never reaches MySQL. The factory paths
+    themselves are covered by the ``single_session/test_curation_*`` and
+    ``test_session_group_concat`` regression suites (which would break if the
+    bypass were mis-wired)."""
+    import importlib
+
+    import datajoint as dj
+
+    cls = getattr(importlib.import_module(module), cls_name)
+    row = _synthetic_master_pk(cls)
+    with pytest.raises(dj.errors.DataJointError, match="is not supported"):
+        cls().insert1(row)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_master_update1_bypass_allows_mutation(fresh_recording_identity):
+    """``allow_master_mutation=True`` forwards to the real ``update1`` so a
+    deliberate maintenance edit of a row with no live references goes through --
+    proving the escape hatch is wired, not just the reject path. Uses
+    ``RecordingSelection`` (cheapest real-FK master)."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    pk = RecordingSelection.insert_selection(fresh_recording_identity)
+    # Without the flag: rejected, row unchanged.
+    with pytest.raises(dj.errors.DataJointError, match="is not supported"):
+        RecordingSelection().update1({**pk, "team_name": "other_team"})
+    # With the flag the guard forwards to super().update1; the team_name is a
+    # real FK, so use a value that exists (the row's own team) to prove the
+    # call reaches DataJoint rather than raising at the guard.
+    current_team = (RecordingSelection & pk).fetch1("team_name")
+    RecordingSelection().update1(
+        {**pk, "team_name": current_team}, allow_master_mutation=True
+    )
+    assert (RecordingSelection & pk).fetch1("team_name") == current_team

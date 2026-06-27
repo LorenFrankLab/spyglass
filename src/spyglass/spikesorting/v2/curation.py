@@ -46,6 +46,7 @@ from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     CurationSource,
+    FactoryOnlyMaster,
     _assert_v2_db_safe,
     transaction_or_noop,
     unit_brain_region_df,
@@ -66,7 +67,7 @@ schema = dj.schema("spikesorting_v2_curation")
 
 
 @schema
-class CurationV2(SpyglassMixin, dj.Manual):
+class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     """Manual curation labels + merge groups for a sorted Sorting.
 
     Multiple curations per sort are allowed via ``curation_id``; each
@@ -77,7 +78,16 @@ class CurationV2(SpyglassMixin, dj.Manual):
     ``object_id`` (NOT ``units_object_id``) is the column name the
     ``SpikeSortingOutput`` merge-table router expects when dispatching
     ``get_spike_times()``; using the wrong name would break that routing.
+
+    A direct ``insert`` / ``insert1`` and an in-place ``update1`` are blocked
+    (``FactoryOnlyMaster``): a curation is an identity/provenance root that
+    ``SpikeSortingOutput`` and child curations reference, so it must be written
+    through :meth:`insert_curation` (which builds the master, the analysis-file
+    row, and the ``Unit`` / ``UnitLabel`` / ``MergeGroup`` parts atomically).
     """
+
+    #: Named in ``FactoryOnlyMaster``'s reject messages.
+    _factory_create_call = "CurationV2.insert_curation()"
 
     definition = """
     -> Sorting
@@ -1166,7 +1176,10 @@ class CurationV2(SpyglassMixin, dj.Manual):
             # transaction so it rolls back atomically with the
             # CurationV2 rows on any later failure.
             AnalysisNwbfile().add(staged_parent_nwb, analysis_file_name)
-            cls.insert1(master_row)
+            # insert_curation IS the validation boundary (it staged the NWB,
+            # validated labels/merges, and shaped every part row), so it bypasses
+            # the FactoryOnlyMaster insert guard for its already-validated master.
+            cls.insert1(master_row, allow_direct_insert=True)
             cls.Unit.insert(unit_rows)
             if unit_label_rows:
                 # Labels were already validated above via

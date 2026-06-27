@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2.recording import (
     SortGroupV2,  # noqa: F401
 )
 from spyglass.spikesorting.v2.utils import (
+    FactoryOnlyMaster,
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _assert_v2_db_safe,
@@ -48,7 +49,7 @@ schema = dj.schema("spikesorting_v2_session_group")
 
 
 @schema
-class SessionGroup(SpyglassMixin, dj.Manual):
+class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     """A named bundle of sorting members to analyze together.
 
     A member is a ``(nwb_file_name, sort_group_id, interval_list_name,
@@ -60,7 +61,16 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     Same-day groups are the default; multi-day requires
     ``allow_multi_day=True`` AND forces an explicit
     ``MotionCorrectionParameters`` row (see ``create_group``).
+
+    A direct ``insert`` / ``insert1`` and an in-place ``update1`` are blocked
+    (``FactoryOnlyMaster``): a group is a provenance root that
+    ``ConcatenatedRecordingSelection`` / ``UnitMatchSelection`` reference, so it
+    must be written through :meth:`create_group` (which inserts the master + its
+    ``Member`` rows atomically after validating member dates).
     """
+
+    #: Named in ``FactoryOnlyMaster``'s reject messages.
+    _factory_create_call = "SessionGroup.create_group()"
 
     definition = """
     -> LabTeam.proj(session_group_owner='team_name')
@@ -205,12 +215,16 @@ class SessionGroup(SpyglassMixin, dj.Manual):
             )
 
         with cls.connection.transaction:
+            # create_group IS the validation boundary (it derived + checked the
+            # member dates and shaped every Member row), so it bypasses the
+            # FactoryOnlyMaster insert guard for its already-validated master.
             cls.insert1(
                 {
                     "session_group_owner": session_group_owner,
                     "session_group_name": session_group_name,
                     "description": description,
-                }
+                },
+                allow_direct_insert=True,
             )
             cls.Member.insert(rows)
 
