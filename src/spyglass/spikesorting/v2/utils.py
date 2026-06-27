@@ -800,6 +800,22 @@ def _assert_noise_levels_length(
         )
 
 
+def _ambient_job_kwargs() -> dict:
+    """Return the ambient job-kwargs layer: SI globals then dj.config custom.
+
+    The process-global precedence stack beneath any per-row blob -- the
+    SpikeInterface global defaults overlaid with
+    ``dj.config['custom']['spikesorting_v2_job_kwargs']``. Single source of this
+    merge so :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`
+    (which needs the ambient layer in isolation to attribute a seed) cannot
+    drift.
+    """
+    merged = dict(si.get_global_job_kwargs())
+    custom = dj.config.get("custom", {}) or {}
+    merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
+    return merged
+
+
 def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     """Merge SpikeInterface-global, DataJoint-config, and per-row job kwargs.
 
@@ -819,9 +835,7 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
     dict
         The merged kwargs, ready to splat into a compute call.
     """
-    merged = dict(si.get_global_job_kwargs())
-    custom = dj.config.get("custom", {}) or {}
-    merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
+    merged = _ambient_job_kwargs()
     for override in row_job_kwargs:
         if override:
             merged.update(override)
@@ -906,9 +920,7 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
         for blob in row_job_kwargs
     )
     if not per_row_has_seed:
-        custom = dj.config.get("custom", {}) or {}
-        ambient = dict(si.get_global_job_kwargs())
-        ambient.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
+        ambient = _ambient_job_kwargs()
         if "random_seed" in ambient:
             _warn_ambient_seed_once(int(ambient["random_seed"]))
     return effective
