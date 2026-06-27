@@ -76,7 +76,8 @@ nullable fields; typed long tables for relational data; every container carries
 - **Curated units** (`spyglass_v2_curation_provenance` +
   `spyglass_v2_curation_merge_lineage`): a curation header (sorting/curation id,
   parent, source, `merges_applied`, description) and the kept->contributor merge
-  lineage (flagged applied or proposed).
+  lineage mirroring `CurationV2.MergeGroup` (raw contributors; the
+  proposed-vs-applied state is the header's `merges_applied`).
 - **UnitMatch** (`spyglass_v2_unitmatch_provenance` /
   `spyglass_v2_unitmatch_members`): the run/group/matcher header (re-emitting the
   row's `matcher_backend` / `matcher_backend_version` / `spikeinterface_version`)

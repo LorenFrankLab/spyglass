@@ -744,6 +744,7 @@ def write_curated_units_nwb(
     *,
     source_units_abs_path: str | None = None,
     curation_header: dict | None = None,
+    merge_group_rows: list[dict] | None = None,
 ) -> tuple[str, str, str, dict]:
     """Write the curated-units NWB.
 
@@ -828,6 +829,7 @@ def write_curated_units_nwb(
             sample_indices_by_uid=sample_indices_by_uid,
             obs_intervals_by_uid=obs_intervals_by_uid,
             curation_header=curation_header,
+            merge_group_rows=merge_group_rows,
         )
     except Exception:
         from spyglass.spikesorting.v2.recording import (
@@ -872,6 +874,7 @@ def _write_curated_units_nwb_body(
     sample_indices_by_uid,
     obs_intervals_by_uid,
     curation_header=None,
+    merge_group_rows=None,
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
 
@@ -1054,10 +1057,14 @@ def _write_curated_units_nwb_body(
                 description=("Empty units table (curation kept zero units)."),
             )
         units_object_id = nwbf.units.object_id
-        # Self-describing provenance: the curation header (identity/source) and
-        # the kept->contributor merge lineage (matching CurationV2.MergeGroup),
-        # flagged applied (apply_merge=True) or proposed (apply_merge=False), so
-        # the merge structure travels in the file, not only in the DB.
+        # Self-describing provenance: the curation header (identity/source,
+        # incl. merges_applied) and the kept->contributor merge lineage. The
+        # lineage mirrors CurationV2.MergeGroup -- the RAW contributors, so a
+        # child of a merged parent expands correctly rather than vanishing into
+        # inherited singletons -- restricted to actual merges (a kept unit with
+        # >1 contributor); singleton self-entries are identity, not lineage.
+        from collections import defaultdict
+
         from spyglass.spikesorting.v2._nwb_provenance import (
             CURATION_MERGE_LINEAGE,
             CURATION_PROVENANCE,
@@ -1069,25 +1076,22 @@ def _write_curated_units_nwb_body(
             nwbf.add_scratch(
                 build_provenance_table(CURATION_PROVENANCE, curation_header)
             )
+        contributors_by_kept: dict[int, list[int]] = defaultdict(list)
+        for row in merge_group_rows or ():
+            contributors_by_kept[int(row["unit_id"])].append(
+                int(row["contributor_unit_id"])
+            )
         merge_lineage_rows = [
-            {
-                "kept_unit_id": int(kept_uid),
-                "contributor_unit_id": int(contributor),
-                "applied": bool(apply_merge),
-            }
-            for kept_uid, contribs in kept_unit_to_contributors.items()
-            if len(contribs) > 1
-            for contributor in contribs
+            {"kept_unit_id": kept, "contributor_unit_id": contributor}
+            for kept, contributors in contributors_by_kept.items()
+            if len(contributors) > 1
+            for contributor in contributors
         ]
         nwbf.add_scratch(
             build_long_provenance_table(
                 CURATION_MERGE_LINEAGE,
                 merge_lineage_rows,
-                [
-                    ("kept_unit_id", int),
-                    ("contributor_unit_id", int),
-                    ("applied", bool),
-                ],
+                [("kept_unit_id", int), ("contributor_unit_id", int)],
             )
         )
         io.write(nwbf)

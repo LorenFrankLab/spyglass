@@ -159,11 +159,18 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
         header = read_provenance_values(abs_path, CURATION_PROVENANCE)
         return rows, header, abs_path
 
+    def _lineage_set(curation_key):
+        rows, header, _ = _lineage_pairs(curation_key)
+        return {
+            (r["kept_unit_id"], r["contributor_unit_id"]) for r in rows
+        }, header
+
     clear_curations_for(sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sort)
 
-        # Applied merge -> kept->contributor map matching MergeGroup, applied.
+        # Applied merge: the lineage matches the RAW MergeGroup; the header
+        # flags the merge as applied for this curation.
         merged = CurationV2.insert_curation(
             sorting_key=sort,
             parent_curation_id=root["curation_id"],
@@ -171,20 +178,19 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
             apply_merge=True,
             description="merged pair",
         )
-        rows, header, _ = _lineage_pairs(merged)
-        assert {(r["kept_unit_id"], r["contributor_unit_id"]) for r in rows} == (
-            _merge_group_pairs(merged)
-        )
-        assert all(r["applied"] is True for r in rows)
+        lineage, header = _lineage_set(merged)
+        assert lineage == _merge_group_pairs(merged)
         assert header["sorting_id"] == str(sort["sorting_id"])
         assert header["curation_id"] == int(merged["curation_id"])
         assert header["parent_curation_id"] == int(root["curation_id"])
         assert header["merges_applied"] is True
         assert header["description"] == "merged pair"
-        merged_row = (CurationV2 & merged).fetch1()
-        assert header["curation_source"] == merged_row["curation_source"]
+        assert header["curation_source"] == (
+            CurationV2 & merged
+        ).fetch1("curation_source")
 
-        # Preview (proposed, not applied).
+        # Preview (proposed, not applied): lineage still matches MergeGroup;
+        # the header carries the proposed-vs-applied flag.
         preview = CurationV2.insert_curation(
             sorting_key=sort,
             parent_curation_id=root["curation_id"],
@@ -192,12 +198,21 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
             apply_merge=False,
             description="proposed pair",
         )
-        rows_p, header_p, _ = _lineage_pairs(preview)
-        assert {
-            (r["kept_unit_id"], r["contributor_unit_id"]) for r in rows_p
-        } == _merge_group_pairs(preview)
-        assert all(r["applied"] is False for r in rows_p)
+        lineage_p, header_p = _lineage_set(preview)
+        assert lineage_p == _merge_group_pairs(preview)
         assert header_p["merges_applied"] is False
+
+        # A label-only child of a MERGED parent inherits the merged unit; its
+        # lineage must expand to the raw contributors (matching the child's
+        # MergeGroup), not vanish because the source-namespace map carries only
+        # singletons for an inherited merge.
+        child = CurationV2.insert_curation(
+            sorting_key=sort, parent_curation_id=merged["curation_id"]
+        )
+        child_expected = _merge_group_pairs(child)
+        assert child_expected, "a child of a merged parent has merge lineage"
+        lineage_c, _ = _lineage_set(child)
+        assert lineage_c == child_expected
     finally:
         clear_curations_for(sort)
 

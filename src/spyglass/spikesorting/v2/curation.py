@@ -527,6 +527,21 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 )
                 return existing_child
 
+        # Build the raw MergeGroup + parent-operation rows ONCE (pure, no DB
+        # I/O) and reuse them for BOTH the NWB merge-lineage scratch and the
+        # CurationV2.MergeGroup insert, so the file's lineage matches the DB
+        # exactly -- including for a child of a merged parent, whose raw
+        # contributors are expanded here (the source-namespace
+        # ``kept_unit_to_contributors`` would carry only inherited singletons).
+        merge_group_rows, parent_merge_group_rows = (
+            cls._build_merge_provenance_rows(
+                sorting_id=sorting_id,
+                curation_id=curation_id,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                parent_raw_contributors=parent_raw_contributors,
+            )
+        )
+
         # Stage the curated-units NWB (filesystem side-effect; the DB
         # row registration happens inside the transaction below so it
         # rolls back atomically). Staging MUST run OUTSIDE the
@@ -540,6 +555,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 labels=labels,
                 unit_rows=unit_rows,
                 source_units_abs_path=source_units_abs_path,
+                merge_group_rows=merge_group_rows,
                 curation_header={
                     "sorting_id": str(sorting_id),
                     "curation_id": int(curation_id),
@@ -567,8 +583,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 description=description,
                 unit_rows=unit_rows,
                 labels=labels,
-                kept_unit_to_contributors=kept_unit_to_contributors,
-                parent_raw_contributors=parent_raw_contributors,
+                merge_group_rows=merge_group_rows,
+                parent_merge_group_rows=parent_merge_group_rows,
                 allow_custom_labels=allow_custom_labels,
             )
         except Exception:
@@ -937,6 +953,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         unit_rows: list[dict],
         source_units_abs_path: str | None = None,
         curation_header: dict | None = None,
+        merge_group_rows: list[dict] | None = None,
     ) -> tuple[str, str, str]:
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
 
@@ -968,6 +985,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             labels=labels,
             source_units_abs_path=source_units_abs_path,
             curation_header=curation_header,
+            merge_group_rows=merge_group_rows,
         )
         # ``n_spikes`` must equal the length of the STORED (post-dedup)
         # train. ``build_curated_unit_rows`` estimated it from the raw
@@ -1086,8 +1104,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         description: str,
         unit_rows: list[dict],
         labels: dict,
-        kept_unit_to_contributors: dict,
-        parent_raw_contributors: dict | None,
+        merge_group_rows: list[dict],
+        parent_merge_group_rows: list[dict],
         allow_custom_labels: bool,
     ) -> None:
         """Insert the master/Unit/UnitLabel/MergeGroup rows atomically.
@@ -1101,12 +1119,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         so the transaction stays short; on failure the caller removes the
         staged file (the DB rows roll back here).
 
-        ``parent_raw_contributors`` (``{parent_unit_id: [raw ids]}``, ``None``
-        for a root) lets a child's parent-namespace ``kept_unit_to_contributors``
-        be expanded back to raw ``Sorting.Unit`` ids for ``MergeGroup`` (which
-        stays raw + FK'd), while the immediate parent operation is recorded
-        verbatim in ``ParentMergeGroup`` (parent namespace, validated, not
-        FK'd).
+        ``merge_group_rows`` (raw ``MergeGroup`` rows) and
+        ``parent_merge_group_rows`` (the immediate parent operation in the
+        parent namespace) are prebuilt by the caller and inserted verbatim --
+        the same rows the curated-units NWB embeds as merge lineage, so the file
+        and the DB agree.
         """
         master_row = {
             "sorting_id": sorting_id,
@@ -1163,27 +1180,13 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             SpikeSortingOutput,
         )
 
-        # Persist per-unit merge provenance for queryable bulk-audit.
-        # ``kept_unit_to_contributors`` carries 1-element self-entries for every
-        # ``CurationV2.Unit`` row that is not itself a merge target (unmerged
-        # units always, and -- for apply_merge=False preview -- the absorbed
-        # contributors that remain in Unit), so every Unit row has at least one
-        # MergeGroup row keyed by its own ``unit_id``. Joining
-        # ``Unit * MergeGroup`` on unit_id therefore preserves every unit.
-        #
-        # For a root the contributors ARE raw ``Sorting.Unit`` ids. For a child
-        # they are PARENT ``CurationV2.Unit`` ids, so ``MergeGroup`` (raw + FK'd)
-        # expands them through the parent's raw provenance, and the immediate
-        # parent operation is recorded verbatim in ``ParentMergeGroup``.
-        merge_group_rows, parent_merge_group_rows = (
-            cls._build_merge_provenance_rows(
-                sorting_id=sorting_id,
-                curation_id=curation_id,
-                kept_unit_to_contributors=kept_unit_to_contributors,
-                parent_raw_contributors=parent_raw_contributors,
-            )
-        )
-
+        # ``merge_group_rows`` / ``parent_merge_group_rows`` are built once by
+        # the caller (before staging) and reused here, so the NWB merge lineage
+        # and the DB ``MergeGroup`` rows are the same data. ``merge_group_rows``
+        # carries a 1-element self-entry for every ``CurationV2.Unit`` that is
+        # not a merge target, so ``Unit * MergeGroup`` on unit_id preserves every
+        # unit; a child's rows are raw-expanded and the immediate parent
+        # operation is in ``parent_merge_group_rows``.
         with transaction_or_noop(cls.connection):
             # Register the analysis file row FIRST inside the
             # transaction so it rolls back atomically with the
