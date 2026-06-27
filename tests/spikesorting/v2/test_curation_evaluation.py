@@ -1036,6 +1036,22 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         assert CurationEvaluation.get_metrics(sel).empty
         assert CurationEvaluation.get_labels(sel) == {}
         assert CurationEvaluation.get_merge_groups(sel) == []
+        # The zero-unit artifact is still self-describing: the provenance header
+        # is written even though there are no metrics (no analyzer is built, so
+        # the source-analyzer manifest is None).
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            CURATION_EVALUATION_PROVENANCE,
+            read_provenance_values,
+        )
+
+        abs_path = AnalysisNwbfile.get_abs_path(
+            (CurationEvaluation & sel).fetch1("analysis_file_name")
+        )
+        prov = read_provenance_values(abs_path, CURATION_EVALUATION_PROVENANCE)
+        assert prov["sorting_id"] == str(sorting_key["sorting_id"])
+        assert prov["metric_params_name"] == "minimal"
+        assert prov["source_analyzer_hashes"] is None
     finally:
         clear_curations_for(planted_zero_unit_sort)
 

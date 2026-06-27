@@ -1223,6 +1223,39 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             _requested_pc_metrics(metric_names)
         )
 
+        # Provenance header shared by the populated and zero-unit paths so every
+        # CurationEvaluation artifact is self-describing; source_analyzer_hashes
+        # is added per-path (a manifest on the fast path, None for a zero-unit
+        # or merged-temp-analyzer evaluation).
+        base_provenance = {
+            "sorting_id": str(sorting_id),
+            "curation_id": int(curation_id),
+            "metric_params_name": metric_params_name,
+            "auto_curation_rules_name": auto_curation_rules_name,
+            "display_waveform_params_name": display_waveform_params_name,
+            "metric_waveform_params_name": metric_waveform_params_name,
+            "metric_names": list(metric_names),
+            "metric_kwargs": metric_kwargs,
+            "auto_merge_preset": auto_merge_preset,
+            "auto_merge_kwargs": auto_merge_kwargs,
+            "auto_curation_rules": rule_rows,
+            "source_kind": source_kind,
+            "recording_id": recording_id,
+            "recording_content_hash": recording_row["content_hash"],
+            "spikeinterface_version": spikeinterface_version,
+        }
+
+        def _provenance_tables(source_analyzer_hashes):
+            return [
+                build_provenance_table(
+                    CURATION_EVALUATION_PROVENANCE,
+                    {
+                        **base_provenance,
+                        "source_analyzer_hashes": source_analyzer_hashes,
+                    },
+                )
+            ]
+
         try:
             # Zero-unit committed curation: nothing to analyze; write empty
             # metric/merge/label tables (SI cannot build an analyzer over zero
@@ -1233,7 +1266,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     f"(sorting_id={sorting_id}, curation_id={curation_id}) has "
                     "zero units; writing empty metric/merge/label tables."
                 )
-                object_ids = self._write_empty(abs_path)
+                object_ids = self._write_empty(
+                    abs_path, provenance_tables=_provenance_tables(None)
+                )
                 return CurationEvaluationComputed(
                     analysis_file_name,
                     *object_ids,
@@ -1370,45 +1405,16 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 if use_fast_path
                 else None
             )
-            # Self-describing provenance: the evaluation inputs (recipe names,
-            # metric set, auto-merge preset/rules), the evaluated curation, and
-            # the source provenance the row stores (analyzer-hash
-            # manifest, SI version) plus the upstream recording content hash --
-            # so the result tables are interpretable without the DB.
-            provenance_tables = [
-                build_provenance_table(
-                    CURATION_EVALUATION_PROVENANCE,
-                    {
-                        "sorting_id": str(sorting_id),
-                        "curation_id": int(curation_id),
-                        "metric_params_name": metric_params_name,
-                        "auto_curation_rules_name": auto_curation_rules_name,
-                        "display_waveform_params_name": (
-                            display_waveform_params_name
-                        ),
-                        "metric_waveform_params_name": (
-                            metric_waveform_params_name
-                        ),
-                        "metric_names": list(metric_names),
-                        "metric_kwargs": metric_kwargs,
-                        "auto_merge_preset": auto_merge_preset,
-                        "auto_merge_kwargs": auto_merge_kwargs,
-                        "auto_curation_rules": rule_rows,
-                        "source_kind": source_kind,
-                        "recording_id": recording_id,
-                        "recording_content_hash": recording_row["content_hash"],
-                        "spikeinterface_version": spikeinterface_version,
-                        "source_analyzer_hashes": source_analyzer_hashes,
-                    },
-                )
-            ]
+            # Self-describing provenance: the evaluation inputs + the source
+            # provenance the row stores (analyzer-hash manifest, SI version) plus
+            # the upstream recording content hash (see ``base_provenance``).
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,
                 merge_groups=merge_groups,
                 labels_by_unit=labels_by_unit,
                 unit_ids=[int(u) for u in metrics_df.index],
-                provenance_tables=provenance_tables,
+                provenance_tables=_provenance_tables(source_analyzer_hashes),
             )
             return CurationEvaluationComputed(
                 analysis_file_name,
@@ -2359,7 +2365,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         return [[int(u) for u in group] for group in groups]
 
     @staticmethod
-    def _write_empty(abs_path):
+    def _write_empty(abs_path, *, provenance_tables=None):
         import pandas as pd
 
         return write_analyzer_curation_tables(
@@ -2368,6 +2374,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             merge_groups=[],
             labels_by_unit={},
             unit_ids=[],
+            provenance_tables=provenance_tables,
         )
 
     @staticmethod
