@@ -558,7 +558,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
     n_pairs: int
     matcher_runtime_s: float
     spikeinterface_version: varchar(32)     # spikeinterface.__version__ at match time
-    matcher_backend: varchar(64)            # resolved backend module path
+    matcher_backend: varchar(255)           # resolved backend module path (plugin paths can be long)
     matcher_backend_version=null: varchar(64)  # backend package version, NULL if absent
     """
 
