@@ -1270,6 +1270,14 @@ class Recording(SpyglassMixin, dj.Computed):
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
             bad_channel_ids=bad_channel_ids,
+            provenance_tables=self._recording_provenance_table(
+                recording_id=sel["recording_id"],
+                raw_object_id=raw_object_id,
+                preprocessing_params_name=sel["preprocessing_params_name"],
+                sort_group_id=sel["sort_group_id"],
+                reference_mode=reference_mode,
+                bad_channel_handling=preprocessing_params.bad_channel_handling,
+            ),
         )
 
         # The duration we INTENDED to save: the sort interval intersected
@@ -1642,6 +1650,18 @@ class Recording(SpyglassMixin, dj.Computed):
                 electrode_group_names=fetched.electrode_group_names,
                 bad_channel_ids=fetched.bad_channel_ids,
                 existing_analysis_file_name=None,  # fresh temp, not the slot
+                provenance_tables=self._recording_provenance_table(
+                    recording_id=fetched.sel["recording_id"],
+                    raw_object_id=fetched.raw_object_id,
+                    preprocessing_params_name=fetched.sel[
+                        "preprocessing_params_name"
+                    ],
+                    sort_group_id=fetched.sel["sort_group_id"],
+                    reference_mode=fetched.reference_mode,
+                    bad_channel_handling=(
+                        fetched.preprocessing_params.bad_channel_handling
+                    ),
+                ),
             )
             temp_abs = AnalysisNwbfile.get_abs_path(rebuilt.analysis_file_name)
 
@@ -1750,6 +1770,7 @@ class Recording(SpyglassMixin, dj.Computed):
         electrode_group_names: tuple,
         bad_channel_ids: tuple = (),
         existing_analysis_file_name: str | None = None,
+        provenance_tables=None,
     ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
@@ -1897,6 +1918,7 @@ class Recording(SpyglassMixin, dj.Computed):
                 existing_analysis_file_name=existing_analysis_file_name,
                 timestamps_override=timestamps_override,
                 filtering_description=filtering_description,
+                provenance_tables=provenance_tables,
             )
             # For a single contiguous interval, derive saved
             # start/end/duration from the persisted override
@@ -2022,6 +2044,47 @@ class Recording(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
+    def _recording_provenance_table(
+        *,
+        recording_id,
+        raw_object_id,
+        preprocessing_params_name,
+        sort_group_id,
+        reference_mode,
+        bad_channel_handling,
+    ):
+        """Build the recording source-provenance scratch table.
+
+        Re-emits, into the artifact NWB, the source lineage ``make_fetch``
+        resolved from the DB so the file is interpretable without the database:
+        the raw source object id, the recording id, the preprocessing recipe,
+        the sort group, the resolved reference mode, the bad-channel handling,
+        and the producing SpikeInterface version. Returns a one-element list
+        (``write_nwb_artifact``'s ``provenance_tables`` contract).
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            RECORDING_PROVENANCE,
+            build_provenance_table,
+        )
+
+        return [
+            build_provenance_table(
+                RECORDING_PROVENANCE,
+                {
+                    "recording_id": str(recording_id),
+                    "raw_object_id": str(raw_object_id),
+                    "preprocessing_params_name": str(preprocessing_params_name),
+                    "sort_group_id": int(sort_group_id),
+                    "reference_mode": str(reference_mode),
+                    "bad_channel_handling": str(bad_channel_handling),
+                    "spikeinterface_version": si.__version__,
+                },
+            )
+        ]
+
+    @staticmethod
     def _write_nwb_artifact(
         recording,
         nwb_file_name: str,
@@ -2029,6 +2092,7 @@ class Recording(SpyglassMixin, dj.Computed):
         timestamps_override=None,
         *,
         filtering_description: str,
+        provenance_tables=None,
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
@@ -2050,6 +2114,7 @@ class Recording(SpyglassMixin, dj.Computed):
             existing_analysis_file_name,
             timestamps_override,
             filtering_description=filtering_description,
+            provenance_tables=provenance_tables,
         )
 
 

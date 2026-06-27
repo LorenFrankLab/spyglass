@@ -96,6 +96,7 @@ def write_nwb_artifact(
     timestamps_override=None,
     *,
     filtering_description: str,
+    provenance_tables=None,
 ) -> tuple[str, str, str]:
     """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
@@ -136,6 +137,12 @@ def write_nwb_artifact(
         Keyword-only. Provenance string written to
         ``ElectricalSeries.filtering`` describing the preprocessing
         steps that actually ran (from :func:`filtering_description`).
+    provenance_tables : list of hdmf.common.DynamicTable, optional
+        Keyword-only. Pre-built provenance tables (from
+        :mod:`._nwb_provenance`) embedded as NWB scratch alongside the
+        ElectricalSeries so the artifact is self-describing. ``None``
+        (default) writes no provenance and leaves the data path unchanged.
+        Scratch does not enter the ``content_hash`` fingerprint.
     """
     import numpy as np
     import pynwb
@@ -241,6 +248,8 @@ def write_nwb_artifact(
                 offset=es_offset,
             )
             nwbfile.add_acquisition(series)
+            for table in provenance_tables or ():
+                nwbfile.add_scratch(table)
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
 

@@ -92,6 +92,81 @@ def test_filtering_description_reflects_actual_steps():
 
 @pytest.mark.slow
 @pytest.mark.usefixtures("dj_conn")
+def test_recording_nwb_carries_source_provenance(populated_sorting):
+    """The Recording artifact NWB embeds the full source-provenance set.
+
+    A shared NWB must be interpretable without the DataJoint DB: the artifact
+    carries the raw source object id, the recording id, the preprocessing
+    recipe name, the sort group, the resolved reference mode, the bad-channel
+    handling, and the producing SpikeInterface version. Each is asserted
+    against the same DB source ``make_fetch`` resolves it from -- not a subset.
+    """
+    import spikeinterface as si
+
+    from spyglass.common import Raw
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        RECORDING_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    sel = (RecordingSelection & {"recording_id": recording_id}).fetch1()
+    nwb_file_name = sel["nwb_file_name"]
+    sort_group_id = int(sel["sort_group_id"])
+
+    reference_mode = str(
+        (
+            SortGroupV2
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        ).fetch1("reference_mode")
+    )
+    raw_object_id = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+        "raw_object_id"
+    )
+    pp_row = (
+        PreprocessingParameters
+        & {"preprocessing_params_name": sel["preprocessing_params_name"]}
+    ).fetch1()
+    bad_channel_handling = PreprocessingParamsSchema.model_validate(
+        pp_row["params"]
+    ).bad_channel_handling
+
+    analysis_file_name = (
+        Recording & {"recording_id": recording_id}
+    ).fetch1("analysis_file_name")
+    abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+
+    prov = read_provenance_values(abs_path, RECORDING_PROVENANCE)
+
+    # recording_id is a UUID in the DB; the artifact stores its canonical
+    # string form (JSON has no UUID type).
+    assert prov["recording_id"] == str(recording_id)
+    assert prov["raw_object_id"] == raw_object_id
+    assert prov["preprocessing_params_name"] == sel["preprocessing_params_name"]
+    assert prov["sort_group_id"] == sort_group_id
+    assert prov["reference_mode"] == reference_mode
+    assert prov["bad_channel_handling"] == str(bad_channel_handling)
+    assert prov["spikeinterface_version"] == si.__version__
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
 def test_obs_intervals_recorded_windows_fallback(populated_sorting):
     """``obs_intervals=None`` (no artifact pass) writes the recorded
     window(s); an artifact-backed sort writes the artifact IntervalList's
