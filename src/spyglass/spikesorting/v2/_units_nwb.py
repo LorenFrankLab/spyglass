@@ -721,10 +721,12 @@ def _write_sorting_units_nwb_body(
         if source_provenance is not None:
             from spyglass.spikesorting.v2._nwb_provenance import (
                 SORTING_PROVENANCE,
-                add_provenance_table,
+                build_provenance_table,
             )
 
-            add_provenance_table(nwbf, SORTING_PROVENANCE, source_provenance)
+            nwbf.add_scratch(
+                build_provenance_table(SORTING_PROVENANCE, source_provenance)
+            )
         io.write(nwbf)
 
     # The AnalysisNwbfile DB-row registration (.add) is deliberately

@@ -42,7 +42,7 @@ def test_scalar_provenance_round_trips_mixed_types(tmp_path):
     """A scalar bundle (str/int/float/bool/None/dict/list) survives HDF5."""
     from spyglass.spikesorting.v2._nwb_provenance import (
         PROVENANCE_SCHEMA_VERSION,
-        add_provenance_table,
+        build_provenance_table,
         read_provenance_values,
     )
 
@@ -57,7 +57,9 @@ def test_scalar_provenance_round_trips_mixed_types(tmp_path):
     }
 
     nwbfile = _new_nwbfile()
-    add_provenance_table(nwbfile, "spyglass_v2_test_provenance", values)
+    nwbfile.add_scratch(
+        build_provenance_table("spyglass_v2_test_provenance", values)
+    )
     path = _write(nwbfile, tmp_path)
 
     read = read_provenance_values(path, "spyglass_v2_test_provenance")
@@ -81,7 +83,7 @@ def test_scalar_provenance_coerces_datajoint_types(tmp_path):
     import numpy as np
 
     from spyglass.spikesorting.v2._nwb_provenance import (
-        add_provenance_table,
+        build_provenance_table,
         read_provenance_values,
     )
 
@@ -95,7 +97,9 @@ def test_scalar_provenance_coerces_datajoint_types(tmp_path):
     }
 
     nwbfile = _new_nwbfile()
-    add_provenance_table(nwbfile, "spyglass_v2_test_dj_types", values)
+    nwbfile.add_scratch(
+        build_provenance_table("spyglass_v2_test_dj_types", values)
+    )
     path = _write(nwbfile, tmp_path)
 
     read = read_provenance_values(path, "spyglass_v2_test_dj_types")
@@ -110,7 +114,7 @@ def test_long_provenance_table_round_trips_typed_rows(tmp_path):
     """A typed long table (one row per member) survives HDF5 with native types."""
     from spyglass.spikesorting.v2._nwb_provenance import (
         PROVENANCE_SCHEMA_VERSION,
-        add_long_provenance_table,
+        build_long_provenance_table,
         read_long_provenance,
     )
 
@@ -125,8 +129,8 @@ def test_long_provenance_table_round_trips_typed_rows(tmp_path):
     ]
 
     nwbfile = _new_nwbfile()
-    add_long_provenance_table(
-        nwbfile, "spyglass_v2_test_members", rows, columns
+    nwbfile.add_scratch(
+        build_long_provenance_table("spyglass_v2_test_members", rows, columns)
     )
     path = _write(nwbfile, tmp_path)
 
@@ -144,15 +148,15 @@ def test_long_provenance_table_round_trips_typed_rows(tmp_path):
 def test_long_provenance_table_handles_empty_rows(tmp_path):
     """A zero-row long table still writes and reads back as an empty list."""
     from spyglass.spikesorting.v2._nwb_provenance import (
-        add_long_provenance_table,
+        build_long_provenance_table,
         read_long_provenance,
     )
 
     columns = [("member_index", int), ("recording_id", str)]
 
     nwbfile = _new_nwbfile()
-    add_long_provenance_table(
-        nwbfile, "spyglass_v2_test_empty", [], columns
+    nwbfile.add_scratch(
+        build_long_provenance_table("spyglass_v2_test_empty", [], columns)
     )
     path = _write(nwbfile, tmp_path)
 

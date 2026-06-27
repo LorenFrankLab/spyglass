@@ -5,15 +5,17 @@ helper writes the *provenance* that makes each artifact self-describing into
 NWB scratch space, under stable container names retrieved BY NAME (never by
 object id, so no new DataJoint columns are needed to find them). Two shapes:
 
-- a scalar bundle (``build_provenance_table`` / ``add_provenance_table``):
-  a two-column ``key`` / ``value_json`` ``DynamicTable``, one row per field,
-  every value JSON-encoded. JSON sidesteps HDF5's inability to store a dict /
-  list / ``None`` in a typed cell, so nested params and nullable fields
-  round-trip uniformly.
-- a typed long table (``build_long_provenance_table`` /
-  ``add_long_provenance_table``): one row per member / pair / boundary with
-  concrete string / int / float / bool columns (concrete dtypes so even a
-  zero-row table writes).
+- a scalar bundle (``build_provenance_table``): a two-column ``key`` /
+  ``value_json`` ``DynamicTable``, one row per field, every value JSON-encoded.
+  JSON sidesteps HDF5's inability to store a dict / list / ``None`` in a typed
+  cell, so nested params and nullable fields round-trip uniformly.
+- a typed long table (``build_long_provenance_table``): one row per member /
+  pair / boundary with concrete string / int / float / bool columns (concrete
+  dtypes so even a zero-row table writes).
+
+Builders return a ``DynamicTable``; the caller embeds it with
+``nwbfile.add_scratch(...)`` (directly, or via a writer's ``provenance_tables``
+loop).
 
 Every container carries ``provenance_schema_version`` so a future reader can
 tell which provenance layout produced the file.
@@ -167,35 +169,6 @@ def build_long_provenance_table(
         description=description or f"{name} (provenance)",
         columns=vector_columns,
     )
-
-
-def add_provenance_table(
-    nwbfile, name: str, values: dict, *, description: str = ""
-) -> str:
-    """Add a scalar-provenance table to an OPEN ``NWBFile``; return its object id.
-
-    Operates on an already-open ``nwbfile`` so a writer adds provenance inside
-    its existing ``NWBHDF5IO(mode="a")`` block rather than re-opening the file.
-    """
-    table = build_provenance_table(name, values, description=description)
-    nwbfile.add_scratch(table)
-    return table.object_id
-
-
-def add_long_provenance_table(
-    nwbfile,
-    name: str,
-    rows: list[dict],
-    columns: list[tuple[str, type]],
-    *,
-    description: str = "",
-) -> str:
-    """Add a typed long provenance table to an OPEN ``NWBFile``; return object id."""
-    table = build_long_provenance_table(
-        name, rows, columns, description=description
-    )
-    nwbfile.add_scratch(table)
-    return table.object_id
 
 
 def read_provenance_values(abs_path: str, name: str) -> dict:

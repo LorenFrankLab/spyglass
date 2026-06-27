@@ -186,8 +186,6 @@ class SortingComputed(NamedTuple):
         Exact on-disk analyzer folder ``_build_analyzer`` wrote; threaded so
         ``make_insert`` loads/cleans that folder rather than recomputing a
         path.
-    recording_id : str
-        Recording id the sort was run against.
     nwb_file_name : str
         Source NWB file backing the recording selection.
     display_waveform_params_name : str
@@ -211,7 +209,6 @@ class SortingComputed(NamedTuple):
     analysis_file_name: str
     units_object_id: str
     analyzer_folder: Path
-    recording_id: str
     nwb_file_name: str
     display_waveform_params_name: str
     effective_random_seed: int
@@ -1719,7 +1716,6 @@ class Sorting(SpyglassMixin, dj.Computed):
             analysis_file_name=analysis_file_name,
             units_object_id=units_object_id,
             analyzer_folder=analyzer_folder,
-            recording_id=recording_id,
             nwb_file_name=nwb_file_name,
             display_waveform_params_name=display_waveform_params_name,
             effective_random_seed=effective_random_seed,
@@ -1735,7 +1731,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         analysis_file_name,
         units_object_id,
         analyzer_folder,
-        recording_id,
         nwb_file_name,
         display_waveform_params_name,
         effective_random_seed,
@@ -1769,8 +1764,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         analyzer_folder : pathlib.Path
             On-disk analyzer folder used to load peak channels and for
             Mode-B rollback cleanup.
-        recording_id : str
-            Recording id the sort was run against.
         nwb_file_name : str
             Source NWB file backing the recording selection.
         display_waveform_params_name : str
@@ -1793,8 +1786,6 @@ class Sorting(SpyglassMixin, dj.Computed):
                 sorting_obj=sorting_obj,
                 analysis_file_name=analysis_file_name,
                 units_object_id=units_object_id,
-                analyzer_folder=analyzer_folder,
-                recording_id=recording_id,
                 nwb_file_name=nwb_file_name,
                 display_waveform_params_name=display_waveform_params_name,
                 effective_random_seed=effective_random_seed,
@@ -1856,8 +1847,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorting_obj,
         analysis_file_name,
         units_object_id,
-        analyzer_folder,
-        recording_id,
         nwb_file_name,
         display_waveform_params_name,
         effective_random_seed,
@@ -1869,15 +1858,11 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Runs the ``transaction_or_noop`` block: registers the staged
         AnalysisNwbfile, inserts the Sorting master, and populates the Unit
-        part rows INSIDE the transaction so they commit atomically with the
-        master (splitting them across stages is forbidden).
-        ``transaction_or_noop`` is a no-op when the framework transaction is
-        already active (the tri-part dispatch path); it is kept so an
-        out-of-populate caller still gets atomic registration.
-        ``analyzer_folder`` is the transient folder ``_build_analyzer``
-        wrote (threaded from make_compute) to load each unit's peak channel;
-        it is NOT a stored column -- the canonical path is resolved from
-        sorting_id everywhere outside this single populate() invocation.
+        part rows (built once in ``make_compute``) INSIDE the transaction so
+        they commit atomically with the master (splitting them across stages is
+        forbidden). ``transaction_or_noop`` is a no-op when the framework
+        transaction is already active (the tri-part dispatch path); it is kept
+        so an out-of-populate caller still gets atomic registration.
         """
         import datetime as dt
 
