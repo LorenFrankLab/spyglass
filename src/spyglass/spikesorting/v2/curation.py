@@ -540,6 +540,17 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 labels=labels,
                 unit_rows=unit_rows,
                 source_units_abs_path=source_units_abs_path,
+                curation_header={
+                    "sorting_id": str(sorting_id),
+                    "curation_id": int(curation_id),
+                    "parent_curation_id": int(parent_curation_id),
+                    # Canonical string for the enum option stored on the row.
+                    "curation_source": getattr(
+                        curation_source, "value", curation_source
+                    ),
+                    "merges_applied": bool(apply_merge),
+                    "description": description,
+                },
             )
         )
 
@@ -925,6 +936,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         labels: dict,
         unit_rows: list[dict],
         source_units_abs_path: str | None = None,
+        curation_header: dict | None = None,
     ) -> tuple[str, str, str]:
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
 
@@ -955,6 +967,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             apply_merge=apply_merge,
             labels=labels,
             source_units_abs_path=source_units_abs_path,
+            curation_header=curation_header,
         )
         # ``n_spikes`` must equal the length of the STORED (post-dedup)
         # train. ``build_curated_unit_rows`` estimated it from the raw

@@ -112,6 +112,98 @@ def test_reader_returns_obs_intervals(tmp_path):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
+    """The curated NWB embeds the kept->contributor merge lineage + a header.
+
+    An applied merge writes the kept-unit->contributors map (matching
+    ``CurationV2.MergeGroup``) flagged applied; a preview curation writes the
+    proposed groups flagged not-applied. A small header records the curation
+    identity/source so the file is interpretable without the DB.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CURATION_MERGE_LINEAGE,
+        CURATION_PROVENANCE,
+        read_long_provenance,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sort = planted_two_unit_sort
+    unit_ids = sorted(int(u) for u in (Sorting.Unit & sort).fetch("unit_id"))
+
+    def _merge_group_pairs(curation_key):
+        # The lineage table records actual MERGES -- kept units with >1
+        # contributor. MergeGroup also stores singleton self-rows
+        # (unit -> itself) for unmerged units, which are identity, not lineage;
+        # exclude them to compare against the merge structure.
+        from collections import Counter
+
+        units, contribs = (CurationV2.MergeGroup & curation_key).fetch(
+            "unit_id", "contributor_unit_id"
+        )
+        counts = Counter(int(u) for u in units)
+        return {
+            (int(u), int(c))
+            for u, c in zip(units, contribs)
+            if counts[int(u)] > 1
+        }
+
+    def _lineage_pairs(curation_key):
+        abs_path = AnalysisNwbfile.get_abs_path(
+            (CurationV2 & curation_key).fetch1("analysis_file_name")
+        )
+        rows = read_long_provenance(abs_path, CURATION_MERGE_LINEAGE)
+        header = read_provenance_values(abs_path, CURATION_PROVENANCE)
+        return rows, header, abs_path
+
+    clear_curations_for(sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sort)
+
+        # Applied merge -> kept->contributor map matching MergeGroup, applied.
+        merged = CurationV2.insert_curation(
+            sorting_key=sort,
+            parent_curation_id=root["curation_id"],
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=True,
+            description="merged pair",
+        )
+        rows, header, _ = _lineage_pairs(merged)
+        assert {(r["kept_unit_id"], r["contributor_unit_id"]) for r in rows} == (
+            _merge_group_pairs(merged)
+        )
+        assert all(r["applied"] is True for r in rows)
+        assert header["sorting_id"] == str(sort["sorting_id"])
+        assert header["curation_id"] == int(merged["curation_id"])
+        assert header["parent_curation_id"] == int(root["curation_id"])
+        assert header["merges_applied"] is True
+        assert header["description"] == "merged pair"
+        merged_row = (CurationV2 & merged).fetch1()
+        assert header["curation_source"] == merged_row["curation_source"]
+
+        # Preview (proposed, not applied).
+        preview = CurationV2.insert_curation(
+            sorting_key=sort,
+            parent_curation_id=root["curation_id"],
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            apply_merge=False,
+            description="proposed pair",
+        )
+        rows_p, header_p, _ = _lineage_pairs(preview)
+        assert {
+            (r["kept_unit_id"], r["contributor_unit_id"]) for r in rows_p
+        } == _merge_group_pairs(preview)
+        assert all(r["applied"] is False for r in rows_p)
+        assert header_p["merges_applied"] is False
+    finally:
+        clear_curations_for(sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
     """A curated export's per-unit obs_intervals match the source sort, and a
     merged unit gets the intersection of its contributors' windows."""

@@ -694,6 +694,7 @@ def write_curated_units_nwb(
     labels: dict,
     *,
     source_units_abs_path: str | None = None,
+    curation_header: dict | None = None,
 ) -> tuple[str, str, str, dict]:
     """Write the curated-units NWB.
 
@@ -777,6 +778,7 @@ def write_curated_units_nwb(
             abs_times_by_uid=abs_times_by_uid,
             sample_indices_by_uid=sample_indices_by_uid,
             obs_intervals_by_uid=obs_intervals_by_uid,
+            curation_header=curation_header,
         )
     except Exception:
         from spyglass.spikesorting.v2.recording import (
@@ -820,6 +822,7 @@ def _write_curated_units_nwb_body(
     abs_times_by_uid,
     sample_indices_by_uid,
     obs_intervals_by_uid,
+    curation_header=None,
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
 
@@ -1002,6 +1005,42 @@ def _write_curated_units_nwb_body(
                 description=("Empty units table (curation kept zero units)."),
             )
         units_object_id = nwbf.units.object_id
+        # Self-describing provenance: the curation header (identity/source) and
+        # the kept->contributor merge lineage (matching CurationV2.MergeGroup),
+        # flagged applied (apply_merge=True) or proposed (apply_merge=False), so
+        # the merge structure travels in the file, not only in the DB.
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            CURATION_MERGE_LINEAGE,
+            CURATION_PROVENANCE,
+            build_long_provenance_table,
+            build_provenance_table,
+        )
+
+        if curation_header is not None:
+            nwbf.add_scratch(
+                build_provenance_table(CURATION_PROVENANCE, curation_header)
+            )
+        merge_lineage_rows = [
+            {
+                "kept_unit_id": int(kept_uid),
+                "contributor_unit_id": int(contributor),
+                "applied": bool(apply_merge),
+            }
+            for kept_uid, contribs in kept_unit_to_contributors.items()
+            if len(contribs) > 1
+            for contributor in contribs
+        ]
+        nwbf.add_scratch(
+            build_long_provenance_table(
+                CURATION_MERGE_LINEAGE,
+                merge_lineage_rows,
+                [
+                    ("kept_unit_id", int),
+                    ("contributor_unit_id", int),
+                    ("applied", bool),
+                ],
+            )
+        )
         io.write(nwbf)
 
     # The AnalysisNwbfile DB-row registration (.add) is deliberately
