@@ -17,6 +17,7 @@ import spikeinterface.full as si
 from spyglass.spikesorting.v2._analyzer_cache import (
     analyzer_cache_root,
     analyzer_path,
+    publish_analyzer_atomically,
     remove_analyzer_cache,
 )
 from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
@@ -292,6 +293,165 @@ class TestAnalyzerCacheLock:
         assert analyzer_curation_lock is analyzer_cache_lock
         # The alias resolves to the same memoized instance.
         assert analyzer_curation_lock("sid-A") is analyzer_cache_lock("sid-A")
+
+
+class TestPublishAnalyzerAtomically:
+    """``publish_analyzer_atomically`` builds into a private temp folder, then
+    moves it into the canonical slot -- never writing the build straight into
+    the canonical path.
+
+    A directory rename is not a clean atomic swap (POSIX ``rename(2)`` needs an
+    empty destination), so a rebuild over an existing ``.zarr`` is published by
+    moving the existing folder aside, moving the temp in, and removing the
+    aside copy; a failed swap restores the original. Callers hold the per-sort
+    lock, so the brief move-aside window is reader-safe. These DB-free tests
+    drive the publisher with a trivial ``build_into`` that writes a marker file.
+    """
+
+    @staticmethod
+    def _configure_root(tmp_path):
+        import datajoint as dj
+
+        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+
+    @staticmethod
+    def _writer(content):
+        def build_into(folder):
+            folder.mkdir(parents=True)
+            (folder / "data.bin").write_text(content)
+
+        return build_into
+
+    def _staging_is_empty(self, canonical):
+        staging = canonical.parent / ".publish"
+        return not staging.exists() or not any(staging.iterdir())
+
+    def test_absent_canonical_publishes_into_slot(
+        self, tmp_path, restore_custom_config
+    ):
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        result = publish_analyzer_atomically(canonical, self._writer("v1"))
+        assert result == canonical
+        assert (canonical / "data.bin").read_text() == "v1"
+        # No leftover temp under the hidden staging area after success.
+        assert self._staging_is_empty(canonical)
+
+    def test_existing_canonical_is_replaced(
+        self, tmp_path, restore_custom_config
+    ):
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        publish_analyzer_atomically(canonical, self._writer("v1"))
+        publish_analyzer_atomically(canonical, self._writer("v2"))
+        assert (canonical / "data.bin").read_text() == "v2"
+        assert self._staging_is_empty(canonical)
+
+    def test_publish_uses_os_replace_and_clears_temp(
+        self, tmp_path, monkeypatch, restore_custom_config
+    ):
+        """The publish moves via ``os.replace`` and leaves no temp behind."""
+        import os as os_mod
+
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        calls = []
+        real_replace = os_mod.replace
+
+        def _spy(src, dst, *a, **k):
+            calls.append((str(src), str(dst)))
+            return real_replace(src, dst, *a, **k)
+
+        monkeypatch.setattr(os_mod, "replace", _spy)
+        publish_analyzer_atomically(canonical, self._writer("v1"))
+        # The temp -> canonical move went through os.replace into the slot.
+        assert any(dst == str(canonical) for _, dst in calls)
+        assert self._staging_is_empty(canonical)
+
+    def test_build_failure_leaves_existing_canonical_untouched(
+        self, tmp_path, restore_custom_config
+    ):
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        publish_analyzer_atomically(canonical, self._writer("v1"))
+
+        def _boom(folder):
+            folder.mkdir(parents=True)
+            (folder / "partial.bin").write_text("partial")
+            raise RuntimeError("build boom")
+
+        with pytest.raises(RuntimeError, match="build boom"):
+            publish_analyzer_atomically(canonical, _boom)
+        # The canonical slot still holds v1; the partial temp is cleaned up.
+        assert (canonical / "data.bin").read_text() == "v1"
+        assert self._staging_is_empty(canonical)
+
+    def test_zero_unit_build_leaves_slot_absent(
+        self, tmp_path, restore_custom_config
+    ):
+        """When ``build_into`` creates no folder (zero-unit sort), the canonical
+        slot stays absent and no error is raised."""
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+
+        def _build_nothing(folder):
+            return  # zero-unit short-circuit: no folder written
+
+        result = publish_analyzer_atomically(canonical, _build_nothing)
+        assert result == canonical
+        assert not canonical.exists()
+        assert self._staging_is_empty(canonical)
+
+    def test_failed_swap_rolls_back_canonical(
+        self, tmp_path, monkeypatch, restore_custom_config
+    ):
+        """If the temp -> canonical move fails mid-publish over an existing
+        folder, the original is restored (the slot is never left empty)."""
+        import os as os_mod
+
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        publish_analyzer_atomically(canonical, self._writer("v1"))
+
+        real_replace = os_mod.replace
+
+        def _fail_temp_into_slot(src, dst, *a, **k):
+            # The publish does: replace(canonical -> trash); replace(temp ->
+            # canonical). Fail only the temp -> slot move (src is a "build-"
+            # staging dir), NOT the trash -> slot rollback ("trash-"), so the
+            # rollback can actually restore the original.
+            if str(dst) == str(canonical) and "build-" in str(src):
+                raise OSError("swap boom")
+            return real_replace(src, dst, *a, **k)
+
+        monkeypatch.setattr(os_mod, "replace", _fail_temp_into_slot)
+        with pytest.raises(OSError, match="swap boom"):
+            publish_analyzer_atomically(canonical, self._writer("v2"))
+        # Rolled back: the original v1 is restored, not left missing.
+        assert canonical.exists()
+        assert (canonical / "data.bin").read_text() == "v1"
+        assert self._staging_is_empty(canonical)
+
+    def test_staging_lives_in_hidden_subdir(
+        self, tmp_path, restore_custom_config
+    ):
+        """The temp build folder lives under a hidden ``.publish`` subdir of the
+        analyzer root (never a ``{sid}__*.zarr`` sibling), so the orphan scan
+        cannot mistake an in-flight build for a stray analyzer."""
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        seen = {}
+
+        def _capture(folder):
+            seen["temp"] = folder
+            folder.mkdir(parents=True)
+            (folder / "data.bin").write_text("v1")
+
+        publish_analyzer_atomically(canonical, _capture)
+        temp = seen["temp"]
+        assert ".publish" in temp.parts
+        # temp is root/.publish/build-XXXX/<canonical name>.
+        assert temp.parent.parent == canonical.parent / ".publish"
 
 
 # --------------------------------------------------------------------------- #

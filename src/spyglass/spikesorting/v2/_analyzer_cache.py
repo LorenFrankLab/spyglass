@@ -171,6 +171,89 @@ def analyzer_cache_lock(sorting_id, *, timeout: float = -1):
 analyzer_curation_lock = analyzer_cache_lock
 
 
+# Hidden staging area (under the analyzer root) where the atomic publisher
+# builds and moves-aside. It is a single dotted directory so the orphan scan
+# (which lists ``{sid}__*.zarr`` folders directly under the root) skips it, and
+# the build/trash folders it holds never collide with a canonical analyzer name.
+_PUBLISH_STAGING_DIRNAME = ".publish"
+
+
+def publish_analyzer_atomically(canonical_folder, build_into):
+    """Build an analyzer into a private temp folder, then move it into the slot.
+
+    The low-level build (``build_into``) writes into a FRESH private folder
+    under the hidden staging area on the SAME filesystem as ``canonical_folder``
+    (so the move is a rename, not a copy); only on success is that temp moved
+    into the canonical slot. This is the canonical-cache safety layer that keeps
+    a build from writing straight into (and corrupting) the live folder a reader
+    might be loading -- distinct from ``build_into`` itself, which simply builds
+    wherever it is told (recompute / merged-curation temp analyzers reuse the
+    low-level build directly, never this publisher).
+
+    A directory rename is NOT a clean atomic swap: POSIX ``rename(2)`` requires
+    the destination to be empty (else ``ENOTEMPTY``), so a rebuild over an
+    existing ``.zarr`` cannot ``os.replace`` straight onto it. The publish
+    sequence is therefore:
+
+    - canonical **absent**  -> ``os.replace(temp, canonical)``;
+    - canonical **present** -> ``os.replace(canonical, trash)``,
+      ``os.replace(temp, canonical)``, ``rmtree(trash)`` -- and if the second
+      move fails, the original is moved back so the slot is never left empty.
+
+    The brief window where the canonical slot is moved aside is reader-safe
+    **only because callers hold** ``analyzer_cache_lock(sorting_id)`` (the read
+    path takes the same lock); the directory replace is not itself atomic.
+    ``build_into`` that writes no folder (a zero-unit sort short-circuits before
+    building) leaves the slot untouched. The temp (and any trash) is removed on
+    success and on failure.
+
+    Parameters
+    ----------
+    canonical_folder : pathlib.Path
+        The cache slot to publish into (``analyzer_path(sorting_id, recipe)``).
+    build_into : callable
+        ``build_into(temp_folder: pathlib.Path) -> None`` builds the analyzer
+        into the given private temp folder (it may legitimately write nothing
+        for a zero-unit sort).
+
+    Returns
+    -------
+    pathlib.Path
+        ``canonical_folder``.
+    """
+    import os
+    import tempfile
+
+    staging = canonical_folder.parent / _PUBLISH_STAGING_DIRNAME
+    staging.mkdir(parents=True, exist_ok=True)
+    temp_parent = Path(tempfile.mkdtemp(prefix="build-", dir=staging))
+    temp_folder = temp_parent / canonical_folder.name
+    try:
+        build_into(temp_folder)
+        if not temp_folder.exists():
+            # Nothing built (zero-unit short-circuit): leave the slot as-is.
+            return canonical_folder
+        if not canonical_folder.exists():
+            os.replace(temp_folder, canonical_folder)
+            return canonical_folder
+        # Rebuild over an existing folder: move it aside, install the temp, then
+        # drop the aside copy. Restore it if the install fails so the slot is
+        # never left empty.
+        trash_parent = Path(tempfile.mkdtemp(prefix="trash-", dir=staging))
+        trash_folder = trash_parent / canonical_folder.name
+        os.replace(canonical_folder, trash_folder)
+        try:
+            os.replace(temp_folder, canonical_folder)
+        except Exception:
+            os.replace(trash_folder, canonical_folder)
+            raise
+        finally:
+            shutil.rmtree(trash_parent, ignore_errors=True)
+        return canonical_folder
+    finally:
+        shutil.rmtree(temp_parent, ignore_errors=True)
+
+
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
