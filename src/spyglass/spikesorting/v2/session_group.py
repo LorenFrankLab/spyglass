@@ -682,6 +682,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 {
                     "member_index": int(member["member_index"]),
                     "nwb_file_name": member["nwb_file_name"],
+                    "interval_list_name": member["interval_list_name"],
                     "recording_pk": {
                         "recording_id": str(rec_pk["recording_id"])
                     },
@@ -893,6 +894,62 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # parent, resolved in make_fetch); full multi-session provenance stays
         # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
         preset_label = motion_preset or "none"
+        # Self-describing provenance: a header (the resolved motion preset +
+        # KWARGS -- the producing params, NOT the displacement field, which stays
+        # derivable) and the ordered member map with per-member frame boundaries,
+        # so split_sorting_by_session is reconstructable from the file alone.
+        from spyglass.spikesorting.v2._nwb_provenance import (
+            CONCAT_MEMBERS,
+            CONCAT_PROVENANCE,
+            build_long_provenance_table,
+            build_provenance_table,
+        )
+
+        member_rows = []
+        concat_start = 0
+        for plan, n_samples, cum_end in zip(
+            member_plan, member_sample_counts, boundaries
+        ):
+            member_rows.append(
+                {
+                    "member_index": int(plan["member_index"]),
+                    "recording_id": str(plan["recording_pk"]["recording_id"]),
+                    "nwb_file_name": plan["nwb_file_name"],
+                    "interval_list_name": plan["interval_list_name"],
+                    "start_sample": 0,
+                    "end_sample": int(n_samples),
+                    "concat_start_sample": int(concat_start),
+                    "concat_end_sample": int(cum_end),
+                }
+            )
+            concat_start = int(cum_end)
+        provenance_tables = [
+            build_provenance_table(
+                CONCAT_PROVENANCE,
+                {
+                    "concat_recording_id": str(key["concat_recording_id"]),
+                    "preprocessing_params_name": preprocessing_params_name,
+                    "motion_preset": preset_label,
+                    "motion_kwargs": preset_kwargs,
+                    "anchor_nwb_file_name": anchor_nwb_file_name,
+                    "n_members": len(member_plan),
+                },
+            ),
+            build_long_provenance_table(
+                CONCAT_MEMBERS,
+                member_rows,
+                [
+                    ("member_index", int),
+                    ("recording_id", str),
+                    ("nwb_file_name", str),
+                    ("interval_list_name", str),
+                    ("start_sample", int),
+                    ("end_sample", int),
+                    ("concat_start_sample", int),
+                    ("concat_end_sample", int),
+                ],
+            ),
+        ]
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             corrected,
             anchor_nwb_file_name,
@@ -901,6 +958,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 f"(preprocessing_params={preprocessing_params_name!r}); "
                 f"motion correction preset={preset_label!r}; unwhitened"
             ),
+            provenance_tables=provenance_tables,
         )
         member_boundaries = [
             {"member_index": member_index, "end_sample": int(end_sample)}

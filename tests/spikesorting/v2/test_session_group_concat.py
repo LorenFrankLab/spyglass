@@ -528,6 +528,86 @@ def test_concatenated_recording_make_shape(same_day_group):
 
 
 @pytest.mark.slow
+def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
+    """The concat NWB self-describes the split.
+
+    It embeds the ordered member provenance + frame boundaries that reproduce
+    ``split_sorting_by_session``'s mapping without reading live
+    ``SessionGroup.Member``, plus the RESOLVED motion preset + kwargs (the
+    producing params, not the displacement field).
+    """
+    import pynwb
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CONCAT_MEMBERS,
+        CONCAT_PROVENANCE,
+        read_long_provenance,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"],
+        grp["preprocessing_params_name"],
+        motion="auto_default",
+    )
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+
+    header = read_provenance_values(abs_path, CONCAT_PROVENANCE)
+    assert header["concat_recording_id"] == str(
+        concat_pk["concat_recording_id"]
+    )
+    # The RESOLVED preset (e.g. rigid_fast for auto same-day), and the producing
+    # kwargs -- not the displacement field.
+    assert header["motion_preset"] == row["motion_preset"]
+    assert isinstance(header["motion_kwargs"], dict)
+
+    members = sorted(
+        read_long_provenance(abs_path, CONCAT_MEMBERS),
+        key=lambda r: r["member_index"],
+    )
+
+    # Frame boundaries reproduce MemberBoundary (split_sorting_by_session's
+    # arithmetic basis), contiguously partitioning the concat timeline.
+    idxs, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
+        "member_index", "end_sample", order_by="member_index"
+    )
+    boundary_by_index = {int(i): int(e) for i, e in zip(idxs, ends)}
+    prev = 0
+    for m in members:
+        assert m["concat_start_sample"] == prev
+        assert m["concat_end_sample"] == boundary_by_index[m["member_index"]]
+        assert (m["end_sample"] - m["start_sample"]) == (
+            m["concat_end_sample"] - m["concat_start_sample"]
+        )
+        assert m["recording_id"]
+        prev = m["concat_end_sample"]
+
+    # Member identity travels in the file (compared to, not sourced from, the DB).
+    expected = {
+        int(r["member_index"]): r
+        for r in (SessionGroup.Member & grp["group_key"]).fetch(
+            as_dict=True, order_by="member_index"
+        )
+    }
+    for m in members:
+        exp = expected[m["member_index"]]
+        assert m["nwb_file_name"] == exp["nwb_file_name"]
+        assert m["interval_list_name"] == exp["interval_list_name"]
+
+    # The motion displacement field is NOT written (params only).
+    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
+        scratch_names = set(io.read().scratch.keys())
+    assert not any("displacement" in name for name in scratch_names)
+
+
+@pytest.mark.slow
 def test_resolved_motion_preset_persisted(same_day_group):
     """A same-day concat built with ``preset='auto'`` stores the RESOLVED preset
     string (``'rigid_fast'``) on the row, not the unresolved ``'auto'`` alias --
