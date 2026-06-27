@@ -817,6 +817,9 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 "base_extension_seed_modes": analyzer_seed_modes(analyzer),
             }
         except ZeroUnitAnalyzerError:
+            # No extensions to hash -> empty manifest + content hashes; the
+            # return below folds an empty content-hash map to _ZERO_HASH.
+            content_hashes = {}
             manifest = {}
         except AnalyzerFolderInvalidError as exc:
             logger.warning(
