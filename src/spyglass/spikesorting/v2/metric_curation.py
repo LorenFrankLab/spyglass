@@ -1645,7 +1645,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         *,
         action_name: str,
     ) -> list[list[int]]:
-        """Resolve merge groups for an action method and require a real merge."""
+        """Resolve merge groups for an action method and require a real merge.
+
+        Enforces the populated-evaluation contract BEFORE resolving suggestions:
+        the ``use_all_suggested_merges`` path reads the evaluation NWB via
+        ``get_merge_groups``, which on an unpopulated selection would fail with
+        an opaque fetch error instead of the friendly "populate first" message.
+        """
+        self._evaluated_curation_key(key)  # populated-evaluation guard
         accepted = self._resolve_accepted_merges(
             key, merge_groups, use_all_suggested_merges
         )

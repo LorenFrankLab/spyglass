@@ -1615,6 +1615,10 @@ def test_accept_merge_actions_require_a_real_merge(
                 "auto_curation_rules_name": "none",
             }
         )
+        # Populated so the actions reach the "needs a real merge" guard rather
+        # than the populated-evaluation guard (get_merge_groups is monkeypatched
+        # empty above to drive the no-merge path).
+        CurationEvaluation.populate(sel, reserve_jobs=False)
 
         with pytest.raises(ValueError, match="accept_merges"):
             CurationEvaluation().accept_merges(sel, merge_groups=[])
@@ -1672,5 +1676,61 @@ def test_label_action_names_replace_and_overlay(
             for r in (CurationV2.UnitLabel & overlay).fetch(as_dict=True)
         }
         assert overlay_label_rows == {(unit_ids[0], "reject")}
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_acceptance_requires_populated_evaluation(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """Every acceptance entry point rejects a SELECTED-but-not-populated
+    evaluation: minting a ``curation_source='curation_evaluation'`` child from a
+    bare selection (no computed proposals) would be a provenance lie. The
+    ``use_all_suggested_merges`` path raises the SAME friendly error, not an
+    opaque NWB fetch -- it is guarded before resolving persisted suggestions.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        sel = CurationEvaluationSelection.insert_selection(
+            {
+                **root,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        assert not (CurationEvaluation & sel)  # selected, NOT populated
+        ev = CurationEvaluation()
+        merge = [[unit_ids[0], unit_ids[1]]]
+        # Every public acceptance entry point -- including the all-suggested
+        # path that reads the evaluation NWB -- raises the friendly guard.
+        for call in (
+            lambda: ev.create_curation(sel, labels={}),
+            lambda: ev.use_evaluation_labels(sel, labels={}),
+            lambda: ev.overlay_evaluation_labels(sel, labels={}),
+            lambda: ev.create_preview_curation(
+                sel, merge_groups=merge, labels={}
+            ),
+            lambda: ev.accept_merges(sel, merge_groups=merge),
+            lambda: ev.accept_all_suggested_merges(sel),
+            lambda: ev.preview_merges(sel, merge_groups=merge),
+        ):
+            with pytest.raises(ValueError, match="POPULATED evaluation"):
+                call()
     finally:
         clear_curations_for(planted_two_unit_sort)

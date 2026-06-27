@@ -167,14 +167,25 @@ the interim `AnalyzerCuration` table is removed.
 - **Label inheritance.** `insert_curation` gains `label_policy`
   (`"inherit"` default / `"replace"`): a child inherits its parent's labels by
   default, and a committed merge inherits the union of its contributors' labels.
-- **Acceptance helpers.** `CurationEvaluation.create_curation` (merges +
-  labels), `use_evaluation_labels` (use the evaluation's label verdict -- clears
-  stale labels, the default final-metrics path) and `overlay_evaluation_labels` (keep the
-  curation's current labels and add the proposed ones) commit an evaluation's
-  outputs into a committed child carrying
-  `curation_source='curation_evaluation'`; merges are never applied implicitly
-  (pass `merge_groups` or `use_all_suggested_merges=True`), and
-  `create_preview_curation` is the explicit draft opt-in.
+- **Acceptance — intent-first action methods.** The normal workflow uses verb
+  methods on `CurationEvaluation` mapped to UI intent: `accept_merges` /
+  `accept_all_suggested_merges` (commit chosen / all suggested merges, inheriting
+  existing labels -- they do NOT apply the pre-merge evaluation labels),
+  `preview_merges` (draft an unapplied merge for review), and
+  `use_evaluation_labels` / `overlay_evaluation_labels` (write the evaluation's
+  label verdict -- clearing stale labels -- vs. keep current labels and add the
+  proposed ones). The lower-level `create_curation` (merges + labels combined)
+  and `create_preview_curation` (explicit draft) remain the expert API. All
+  acceptance writes a committed/preview child carrying
+  `curation_source='curation_evaluation'`, requires a POPULATED evaluation, and
+  never applies merges implicitly (every merge action needs a real >=2-member
+  group).
+- **Manual / FigURL payload API.** `CurationV2.save_manual_curation` ingests a
+  v1/FigURL payload (`labelsByUnit` / `mergeGroups`), a v2 payload, or unpacked
+  `labels=` / `merge_groups=` into the next curation, with an explicit
+  `merge_action` (`"preview"` / `"commit"`). v1 association maps are unioned
+  transitively. This is the payload-save bridge the (still pending) FigPack web
+  UI would post to.
 - **`AnalyzerCuration` / `AnalyzerCurationSelection` removed.** v2 is
   pre-production with no back-compat requirement, so the interim raw-sort
   auto-curation tables are deleted outright in favor of `CurationEvaluation` and
