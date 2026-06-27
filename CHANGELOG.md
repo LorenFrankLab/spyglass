@@ -51,6 +51,45 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: self-describing NWB artifacts
+
+Embeds provenance into every v2 analysis NWB so a shared file is interpretable
+without the DataJoint database. The provenance is written to NWB **scratch**
+under stable, name-addressed containers (retrieved with `get_scratch(name)`);
+no new DataJoint columns and no identity change. The large-array items store the
+producing **params**, not the array (the displacement field / templates stay
+DB-derivable). A shared `_nwb_provenance` helper owns the serialization
+(`key`/`value_json` scalar headers that survive HDF5 for nested params and
+nullable fields; typed long tables for relational data; every container carries
+`provenance_schema_version`).
+
+- **Recording** (`spyglass_v2_recording_provenance`): raw source `object_id`,
+  `recording_id`, preprocessing recipe, sort group, resolved reference mode,
+  bad-channel handling, SpikeInterface version. Written on both the fresh-write
+  and rebuild paths; scratch does not enter the `content_hash` fingerprint.
+- **Sorting** (`spyglass_v2_sorting_provenance` + per-unit columns): the
+  Units table gains `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` /
+  `brain_region` columns (the SAME rows used for `Sorting.Unit`, computed once
+  in `make_compute` and reused -- so the file and the DB cannot drift), plus a
+  source header (recording/concat id, sorter + params, `artifact_detection_id`,
+  display recipe, effective seed, SI + sorter versions).
+- **Curated units** (`spyglass_v2_curation_provenance` +
+  `spyglass_v2_curation_merge_lineage`): a curation header (sorting/curation id,
+  parent, source, `merges_applied`, description) and the kept->contributor merge
+  lineage (flagged applied or proposed).
+- **UnitMatch** (`spyglass_v2_unitmatch_provenance` /
+  `spyglass_v2_unitmatch_members`): the run/group/matcher header (re-emitting the
+  row's `matcher_backend` / `matcher_backend_version` / `spikeinterface_version`)
+  plus the per-member `(sorting_id, curation_id, session_start_time)` map.
+- **CurationEvaluation** (`spyglass_v2_curation_evaluation_provenance`): the
+  evaluation inputs (metric set + recipe names, auto-merge preset/rules, evaluated
+  curation) and the re-emitted source provenance (the `source_analyzer_hashes`
+  manifest, SI version, upstream recording/concat `content_hash`).
+- **ConcatenatedRecording** (`spyglass_v2_concat_provenance` +
+  `spyglass_v2_concat_members`): the resolved motion preset **+ kwargs** (not the
+  displacement field) and the ordered member map with per-member frame
+  boundaries, so `split_sorting_by_session` is reconstructable from the file.
+
 #### Spike Sorting v2: reproducibility provenance in computed rows
 
 Bakes the producer provenance into computed v2 rows while pre-production: the

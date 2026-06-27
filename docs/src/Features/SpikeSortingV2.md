@@ -1151,6 +1151,41 @@ files directly and do not themselves log export events, matching v1's
 `CurationV1` accessors.) A zero-unit curation (the `require_units=False`
 path) exports the same way; its empty-but-real units NWB is captured.
 
+### Provenance in each v2 NWB
+
+Every v2 analysis NWB is **self-describing**: it embeds the lineage needed to
+interpret it without the DataJoint database, so a shared / DANDI'd file stands
+on its own. The provenance lives in NWB **scratch** under stable, name-addressed
+containers — read them with `nwbfile.get_scratch(name)`, which returns a
+DataFrame (a scalar header is a two-column `key` / `value_json` table whose
+values are JSON-encoded; a relational table has one row per member / unit / pair).
+The large
+arrays are **not** duplicated: the recording's content fingerprint, the motion
+displacement field, and waveform templates stay DB-derivable; only the producing
+params are written.
+
+| Artifact | Container(s) | Carries |
+| --- | --- | --- |
+| Recording | `spyglass_v2_recording_provenance` | raw source `object_id`, `recording_id`, preprocessing recipe, sort group, resolved reference mode, bad-channel handling, SpikeInterface version |
+| Sorting | `spyglass_v2_sorting_provenance` + per-unit Units columns | `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` / `brain_region` columns (matching `Sorting.Unit`), and a header with the recording/concat id, sorter + params, `artifact_detection_id`, display recipe, effective seed, SI + sorter versions |
+| Curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | curation header (sorting/curation id, parent, source, `merges_applied`, description) and the kept→contributor merge lineage (flagged applied or proposed) |
+| UnitMatch | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members` | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map |
+| CurationEvaluation | `spyglass_v2_curation_evaluation_provenance` | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash` |
+| ConcatenatedRecording | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members` | resolved motion preset **+ kwargs** (not the displacement field) and the ordered member map with per-member frame boundaries (`split_sorting_by_session` is reconstructable from these) |
+
+```python
+import pynwb
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v2.sorting import Sorting
+
+abs_path = AnalysisNwbfile.get_abs_path(
+    (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
+)
+with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
+    prov = io.read().get_scratch("spyglass_v2_sorting_provenance")
+    # prov is a DataFrame of (key, value_json); values are JSON-encoded.
+```
+
 ### Environment
 
 The v2 pipeline requires SpikeInterface 0.104+ and (for MountainSort) the
