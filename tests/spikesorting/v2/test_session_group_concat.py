@@ -528,6 +528,25 @@ def test_concatenated_recording_make_shape(same_day_group):
 
 
 @pytest.mark.slow
+def test_resolved_motion_preset_persisted(same_day_group):
+    """A same-day concat built with ``preset='auto'`` stores the RESOLVED preset
+    string (``'rigid_fast'``) on the row, not the unresolved ``'auto'`` alias --
+    so the row records what motion correction actually ran.
+    """
+    from spyglass.spikesorting.v2._concat_recording import AUTO_SAME_DAY_PRESET
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"],
+        grp["preprocessing_params_name"],
+        motion="auto_default",
+    )
+    stored = (ConcatenatedRecording & concat_pk).fetch1("motion_preset")
+    assert stored == AUTO_SAME_DAY_PRESET == "rigid_fast"
+
+
+@pytest.mark.slow
 def test_concatenated_recording_make_never_calls_recording_populate(
     same_day_group, monkeypatch
 ):

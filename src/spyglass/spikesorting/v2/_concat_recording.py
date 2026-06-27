@@ -18,7 +18,9 @@ from __future__ import annotations
 
 #: The Spyglass ``"auto"`` motion-correction alias resolves to this
 #: SpikeInterface preset for same-day groups. It is NOT passed through to
-#: ``correct_motion`` (SI has no ``"auto"`` preset).
+#: ``correct_motion`` (SI has no ``"auto"`` preset). The RESOLVED preset (this
+#: value, not the ``"auto"`` alias) is what ``ConcatenatedRecording`` persists in
+#: its ``motion_preset`` column, so each row records what actually ran.
 AUTO_SAME_DAY_PRESET = "rigid_fast"
 
 

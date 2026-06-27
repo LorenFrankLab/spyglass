@@ -577,6 +577,11 @@ class ConcatRecordingComputed(NamedTuple):
     content_hash: str
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
+    # The RESOLVED motion-correction preset string ("rigid_fast" for an "auto"
+    # same-day request, the explicit preset otherwise, "none" when skipped) --
+    # resolved in make_compute and persisted so the row records what actually
+    # ran, not the unresolved alias.
+    motion_preset: str
 
 
 @schema
@@ -601,6 +606,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     sampling_frequency: float
     total_duration_s: float
     content_hash: char(64)
+    motion_preset: varchar(64)   # RESOLVED motion preset ('rigid_fast' for 'auto' same-day, the explicit preset, or 'none')
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -909,6 +915,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
+            # Persist the RESOLVED preset ("rigid_fast" for "auto" same-day),
+            # not the alias; ``preset_label`` already maps a None (skip) to "none".
+            motion_preset=preset_label,
         )
 
     def make_insert(
@@ -922,6 +931,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         content_hash,
         anchor_nwb_file_name,
         member_boundaries,
+        motion_preset,
     ):
         """Atomically register the staged concat artifact + boundary rows.
 
@@ -960,6 +970,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "sampling_frequency": sampling_frequency,
                         "total_duration_s": total_duration_s,
                         "content_hash": content_hash,
+                        "motion_preset": motion_preset,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)

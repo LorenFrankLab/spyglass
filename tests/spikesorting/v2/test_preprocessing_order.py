@@ -49,6 +49,13 @@ class _FakeRecording:
     def get_property(self, key):
         return self._properties.get(key)
 
+    def set_channel_offsets(self, offsets):
+        # SI 0.104.3 mutates IN PLACE and returns None; the offset-zeroing step
+        # (``apply_pre_motion_preprocessing`` after referencing on every branch)
+        # calls this as a bare statement. Record nothing -- the order-signature
+        # tests assert the SI preprocessing-call sequence, not channel offsets.
+        self._offsets = offsets
+
     def remove_channels(self, ids):
         drop = {int(i) for i in ids}
         self._calls.append(("remove_channels", tuple(sorted(drop))))
