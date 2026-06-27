@@ -83,6 +83,36 @@ def test_register_matcher_duplicate_name_raises_unless_replace(clean_registry):
     assert mp.get_matcher("collide") is second
 
 
+def test_registry_no_silent_reroute(clean_registry):
+    """The built-in 'unitmatch' name cannot be silently re-pointed at different
+    code: a different backend under that name raises without the explicit
+    maintenance flag, and the resolved backend stays the built-in one."""
+    mp = clean_registry
+    mp.register_default_matchers()  # ensure the built-in is present
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+
+    impostor = _dummy_matcher(mp, name="unitmatch")  # different class
+    with pytest.raises(ValueError, match="already registered"):
+        mp.register_matcher(impostor, DummySchema)
+    # The name still resolves to the built-in backend, not the impostor.
+    resolved = mp.get_matcher("unitmatch")
+    assert type(resolved) is builtin_cls
+    assert resolved is not impostor
+
+
+def test_same_backend_reregisters_idempotently(clean_registry):
+    """Re-registering the SAME backend class is idempotent (no maintenance flag)
+    -- this is how register_default_matchers self-heals, so the built-in path no
+    longer relies on a blunt replace=True that would also mask a real collision."""
+    mp = clean_registry
+    mp.register_default_matchers()
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+    schema = mp._get_matcher_schema("unitmatch")
+    # A fresh instance of the same class registers without raising or a flag.
+    mp.register_matcher(builtin_cls(), schema)
+    assert type(mp.get_matcher("unitmatch")) is builtin_cls
+
+
 def test_get_matcher_unknown_raises_with_guidance(clean_registry):
     mp = clean_registry
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError

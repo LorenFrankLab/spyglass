@@ -434,14 +434,13 @@ def register() -> None:
 
     Called at import for the usual side-effect path, and re-callable by
     ``matcher_protocol.register_default_matchers`` so the registry self-heals
-    even if it was cleared (e.g. by a test fixture). ``replace=True`` because
-    this is the built-in's own backend re-registering itself idempotently (it
-    must not trip the name-collision guard that protects against third-party
-    overwrites).
+    even if it was cleared (e.g. by a test fixture). No ``replace`` flag: this
+    re-registers the SAME ``UnitMatchBackend`` class, which ``register_matcher``
+    treats as idempotent. ``replace`` is reserved for a deliberate maintenance
+    swap to genuinely different code, so the built-in path never masks a real
+    name collision.
     """
-    register_matcher(
-        UnitMatchBackend(), UnitMatchParamsSchema, replace=True
-    )
+    register_matcher(UnitMatchBackend(), UnitMatchParamsSchema)
 
 
 register()

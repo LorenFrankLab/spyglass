@@ -116,18 +116,22 @@ def register_matcher(
         The Pydantic model validating that matcher's ``MatcherParameters``
         ``params`` blob.
     replace : bool, optional
-        If ``False`` (the default), registering a name that is already taken
-        raises ``ValueError`` -- ``MatcherParameters`` stores only the matcher
-        name, so silently overwriting a registered backend would make existing
-        rows dispatch to different code. The built-in self-healing registration
-        passes ``replace=True`` to re-register its own backend idempotently.
+        Explicit maintenance override. Registering a name already held by a
+        DIFFERENT backend class raises ``ValueError`` unless ``replace=True`` --
+        ``MatcherParameters`` stores only the matcher name, so silently pointing
+        a name at different code would make existing rows dispatch elsewhere.
+        Re-registering the SAME backend class is always idempotent and needs no
+        flag (this is how :func:`register_default_matchers` self-heals), so the
+        built-in registration does NOT use ``replace`` -- it is reserved for a
+        deliberate swap to genuinely different code.
 
     Raises
     ------
     TypeError
         If ``matcher`` does not satisfy :class:`MatcherProtocol`.
     ValueError
-        If ``matcher.name`` is already registered and ``replace`` is ``False``.
+        If ``matcher.name`` is already registered to a different backend class
+        and ``replace`` is ``False``.
     """
     if not isinstance(matcher, MatcherProtocol) or not callable(
         getattr(matcher, "match", None)
@@ -136,12 +140,17 @@ def register_matcher(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
             "attribute and a callable `match(session_inputs, params)` method)."
         )
-    if not replace and matcher.name in _MATCHER_REGISTRY:
+    existing = _MATCHER_REGISTRY.get(matcher.name)
+    if existing is not None and type(existing) is not type(matcher) and (
+        not replace
+    ):
         raise ValueError(
-            f"A matcher named {matcher.name!r} is already registered. "
-            "MatcherParameters rows store only the matcher name, so replacing a "
-            "backend would silently re-route existing rows to different code. "
-            "Pick a distinct name, or pass replace=True to override deliberately."
+            f"A matcher named {matcher.name!r} is already registered to a "
+            f"different backend ({type(existing).__module__}."
+            f"{type(existing).__qualname__}). MatcherParameters rows store only "
+            "the matcher name, so re-pointing a name at different code would "
+            "silently re-route existing rows. Pick a distinct name, or pass "
+            "replace=True to override deliberately."
         )
     _MATCHER_REGISTRY[matcher.name] = matcher
     _SCHEMA_REGISTRY[matcher.name] = schema
