@@ -116,6 +116,22 @@ notebook. For the pipeline overview, see
 - **Analyzer-folder disk-leak audit.**
   `Sorting.find_orphaned_analyzer_folders(dry_run=True)` surfaces 5–50 GB
   on-disk leaks from delete-override bypass.
+- **Immutable identity-bearing masters.** A deterministic-id selection master,
+  `CurationV2`, and `SessionGroup` reject an in-place `update1` (and `CurationV2`
+  / `SessionGroup` reject a direct `insert`): their columns feed the
+  content-addressed id downstream rows reference, so a change ships under a NEW
+  selection / curation / group rather than silently retargeting an existing id.
+  The escape hatches, for a deliberate maintenance edit of a row with no live
+  references, are `update1(..., allow_master_mutation=True)` and (for a direct
+  insert) `insert(..., allow_direct_insert=True)`. A `UnitMatch` run also freezes
+  its matchable-unit universe (`UnitMatch.MatchableUnit`) and a
+  `SharedArtifactGroup`-backed artifact selection freezes its member set, so a
+  later relabel / membership edit cannot change a populated result under a fixed
+  id (a drifted artifact group is recovered by deleting + re-creating that
+  selection, or restoring the group's members).
+- **Stale-default audit.** `verify_v2_default_catalog()` flags a stored
+  shipped-default parameter row whose content has diverged from the shipped
+  content (e.g. a hand-edited blob); `initialize_v2_defaults` runs it and warns.
 - **Tracked, region-specific analyzer waveform window — expect a
   `peak_amplitude_uv` / template-metric shift.** The analyzer window and
   subsample are no longer hardcoded: they come from a named, DB-tracked

@@ -51,6 +51,47 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: identity & relational integrity hardening
+
+Closes a set of cheap-while-pre-production identity / schema gaps so a master
+row's content, a selection's matchable universe, and a shared group's membership
+cannot silently change under a fixed deterministic id.
+
+- **Master-row immutability.** Every deterministic-id selection master
+  (`RecordingSelection` / `ArtifactDetectionSelection` / `SortingSelection` /
+  `UnitMatchSelection` / `ConcatenatedRecordingSelection` /
+  `CurationEvaluationSelection`) now rejects an in-place `update1` (its columns
+  feed its id); `CurationV2` and `SessionGroup` reject BOTH a direct
+  `insert`/`insert1` and an `update1` (they are identity/provenance roots written
+  only through `insert_curation` / `create_group`). Pass `allow_master_mutation=True`
+  / `allow_direct_insert=True` for a deliberate maintenance edit of a row with no
+  live references. A new `audit_source_part_integrity` helper flags masters whose
+  recording-source-part count is not exactly one (0 = orphan, >1 = ambiguous).
+- **`UnitMatch.Pair` is constrained to the pinned curation universe.** A raw
+  `Pair.insert` now rejects an endpoint outside the selection's `MemberCuration`,
+  a same-member edge, a reversed/duplicate edge, or an out-of-range
+  `match_probability` (the canonical `make_insert` path is unaffected).
+- **Frozen matchable universe.** `UnitMatch` gains a `MatchableUnit` part that
+  snapshots the exact matchable `(sorting_id, curation_id, unit_id)` set the
+  matcher saw; `TrackedUnit.make` reads it instead of re-deriving from CURRENT
+  labels, so a relabel between `UnitMatch` and `TrackedUnit` populate cannot drop
+  a singleton. A geometry preflight in `UnitMatchSelection.insert_selection`
+  rejects a cross-probe channel-geometry mismatch before dense bundle extraction.
+- **Shared-artifact-group membership is frozen.**
+  `ArtifactDetectionSelection.SharedGroupSource` now stores a `member_set_hash`
+  snapshot of the group's ordered member `recording_id` set;
+  `ArtifactDetection.make_fetch` re-derives it from the live
+  `SharedArtifactGroup.Member` set and raises if it drifted.
+- **Resolved motion preset persisted.** `ConcatenatedRecording` stores the
+  RESOLVED motion preset (`"rigid_fast"` for an `"auto"` same-day request) in a
+  new `motion_preset` column, so each row records what motion correction ran.
+- **Schema-init upgrade safety.** The outer `params_schema_version` backfill from
+  the validated blob is generalized to every parameter Lookup that routes through
+  `validate_lookup_rows` (not just `SorterParameters`). A new
+  `verify_v2_default_catalog()` flags stored shipped-default rows whose content
+  diverged from the shipped content; `initialize_v2_defaults` runs it non-strict
+  and logs a warning (run `verify_v2_default_catalog(strict=True)` to fail hard).
+
 #### Spike Sorting v2 corrects raw-source selection and channel-name mapping
 
 Two correctness fixes to how `Recording` builds the preprocessed recording, so
