@@ -949,7 +949,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             for unit_id in plan["matchable_unit_ids"]
         ]
         # Self-describing provenance: the run/group/matcher header (re-emitting
-        # the producer provenance phase-3a stores on the row) and the per-member
+        # the producer provenance the row stores) and the per-member
         # map, so the pairs table -- side ids only -- is interpretable without
         # the DB.
         provenance_tables = [

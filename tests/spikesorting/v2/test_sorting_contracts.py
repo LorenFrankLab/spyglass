@@ -52,7 +52,7 @@ def test_sorting_computed_matches_make_insert_signature():
     ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
     contract. Pin that it matches ``make_insert``'s parameter order -- a
     reorder would silently mis-bind the several str-adjacent slots
-    (analysis_file_name / units_object_id / recording_id / nwb_file_name)
+    (analysis_file_name / units_object_id / nwb_file_name)
     without a TypeError.
     """
     import inspect

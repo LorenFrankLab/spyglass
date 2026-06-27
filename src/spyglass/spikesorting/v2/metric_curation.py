@@ -1372,7 +1372,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             )
             # Self-describing provenance: the evaluation inputs (recipe names,
             # metric set, auto-merge preset/rules), the evaluated curation, and
-            # the source provenance phase-3a stores on the row (analyzer-hash
+            # the source provenance the row stores (analyzer-hash
             # manifest, SI version) plus the upstream recording content hash --
             # so the result tables are interpretable without the DB.
             provenance_tables = [

@@ -442,7 +442,7 @@ def test_curation_evaluation_nwb_carries_inputs(
 
     Alongside the metric/merge/label result tables, the artifact carries the
     metric param set + names, the display/metric recipe names, the auto-merge
-    preset, the evaluated sorting/curation, and re-emits the phase-3a source
+    preset, the evaluated sorting/curation, and re-emits the source
     provenance the row stores (analyzer-hash manifest, SI version) plus the
     upstream recording content hash -- so the file is interpretable without the
     DB.
@@ -499,7 +499,7 @@ def test_curation_evaluation_nwb_carries_inputs(
     )
     assert prov["metric_names"] == expected_metric_names
     assert isinstance(prov["auto_merge_preset"], str)
-    # phase-3a source provenance, re-emitted from the row.
+    # Source provenance, re-emitted from the row.
     assert (
         prov["spikeinterface_version"]
         == row["spikeinterface_version"]

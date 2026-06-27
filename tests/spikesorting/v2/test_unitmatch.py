@@ -1493,6 +1493,25 @@ def test_unitmatch_computed_matches_make_insert_signature():
     assert tuple(params[2:]) == UnitMatchComputed._fields
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_unitmatch_fetched_matches_make_compute_signature():
+    """The tri-part dispatch splats ``UnitMatchFetched`` POSITIONALLY into
+    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
+    contract. The selection-identity fields were appended to both -- a
+    misalignment would silently mis-bind the str-adjacent slots without a
+    TypeError."""
+    import inspect
+
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchFetched,
+    )
+
+    params = list(inspect.signature(UnitMatch.make_compute).parameters)
+    assert params[:2] == ["self", "key"]
+    assert tuple(params[2:]) == UnitMatchFetched._fields
+
+
 @pytest.mark.slow
 def test_unitmatch_records_backend_version(two_session_curated_group):
     """A populated UnitMatch row records the producer provenance: the SI version,
@@ -2622,7 +2641,7 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
     The pairs table carries only side ids; without the DB a reader cannot tell
     which match run, session group, or matcher produced it. Assert the artifact
     embeds the run/group/matcher header -- re-emitting the same producer
-    provenance phase-3a stored on the ``UnitMatch`` row (matcher backend, backend
+    provenance stored on the ``UnitMatch`` row (matcher backend, backend
     version, SpikeInterface version) -- plus the per-member map.
 
     Uses the single-member (solo) path so the provenance write is exercised
@@ -2658,7 +2677,7 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
     assert header["session_group_owner"] == grp["owner"]
     assert header["session_group_name"] == grp["solo_name"]
     assert header["matcher_params_name"] == "unitmatch_default"
-    # Re-emits the EXACT producer provenance phase-3a stored on the row.
+    # Re-emits the EXACT producer provenance stored on the row.
     assert header["matcher_backend"] == row["matcher_backend"]
     assert header["matcher_backend_version"] == row["matcher_backend_version"]
     assert header["spikeinterface_version"] == row["spikeinterface_version"]
