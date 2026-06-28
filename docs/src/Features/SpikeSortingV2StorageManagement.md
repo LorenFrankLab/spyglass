@@ -98,6 +98,48 @@ deletion are serialized per recording (`recording_artifact_lock`) and publish
 atomically, so a reclamation can never race a rebuild. There is no hash-mutating
 `repair()`.
 
+## Concatenated recordings
+
+The cross-session `ConcatenatedRecording` cache (a motion-corrected, unwhitened
+`ElectricalSeries` stitched from the ordered member recordings) is a third
+regeneratable family, with the same fail-closed lifecycle as the single-session
+recording — plus a frozen member set tied into its identity.
+
+- **Identity = the ordered member set.** `concat_recording_id` is content-
+  addressed from the group + parameter names **and** a SHA-256 of the ordered
+  *logical* member set (`member_set_hash`). When you create the selection,
+  `ConcatenatedRecordingSelection.insert_selection` freezes each member's logical
+  identity and its resolved `Recording` (`recording_id` + `content_hash`) into the
+  `ConcatenatedRecordingSelection.MemberSnapshot` part. A different ordered member
+  set is therefore a *different* concat; editing `SessionGroup.Member` afterward
+  does not change or invalidate an existing concat — it just mints a new id on the
+  next `insert_selection`.
+- **Reads use the frozen snapshot.** Materialization and split read the frozen
+  `MemberSnapshot`, never the live group, so a later group edit cannot silently
+  re-point an existing concat. If a frozen member's underlying `Recording` is gone
+  or its `content_hash` has drifted from the snapshot, materialization/rebuild
+  raises `MissingRecordingForConcatError` / `ConcatMemberDriftError` rather than
+  building from changed inputs.
+- **Verify-on-read + rebuild-on-missing.** `ConcatenatedRecording.get_recording()`
+  mirrors `Recording.get_recording()`: a missing cache file is rebuilt through a
+  locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
+  content-`hash`-verified path, raising `RecordingContentDriftError` on a
+  fingerprint mismatch instead of serving drifted bytes (the canonical slot is
+  left untouched). A motion-corrected concat is only byte-reproducible insofar as
+  `correct_motion` is deterministic; an irreproducible rebuild fails loudly here
+  rather than silently.
+- **Split-back conserves spikes.** `split_sorting_by_session()` back-maps a
+  concat-frame sorting into per-member local frames; it asserts one strictly-
+  increasing boundary per frozen member and that every input spike lands in
+  exactly one member, raising `ConcatSplitError` rather than dropping spikes that
+  fall outside a member's range.
+- **Recompute/reclamation: deferred.** There is no `ConcatenatedRecordingArtifact*`
+  recompute trio yet — a concat cache that is deleted out of band is rebuilt and
+  verified on demand by `get_recording()`, which covers correctness. A dedicated
+  audit + `delete_files` reclamation surface (the analogue of the recording trio
+  above) is deferred until concat outputs are first retained at scale, and should
+  reuse the shared recompute helpers rather than a bespoke table family.
+
 ## Admin surface
 
 `attempt_all`, `remove_matched` (on the `*RecomputeSelection` tables) and

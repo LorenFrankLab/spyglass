@@ -51,6 +51,53 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: concat member-set identity, verify-on-read, and split conservation
+
+Brings the cross-session `ConcatenatedRecording` cache to parity with the
+single-session `Recording` lifecycle, and ties its identity to its actual
+ordered member set. Additive schema (a part table + one secondary column) and a
+changed `concat_recording_id` payload; pre-production, no migration.
+
+- **The ordered member set is frozen into concat identity.** `concat_recording_id`
+  was content-addressed from the group + parameter *names* only, while the
+  materialization read the **live** `SessionGroup.Member` set — so editing a
+  group's members under a fixed name silently reused a stale concat over a
+  different member set. `ConcatenatedRecordingSelection.insert_selection` now
+  freezes each member's ordered logical identity and resolved `Recording`
+  (`recording_id` + `content_hash`) into a new
+  `ConcatenatedRecordingSelection.MemberSnapshot` part, stores a SHA-256 of the
+  ordered **logical** set (`member_set_hash`) on the master, and folds that hash
+  into `concat_recording_id`. A different ordered member set is now a different
+  concat; `_find_existing_pk` keys on `member_set_hash` so the same group name
+  over a different frozen set is a distinct selection, not a collision.
+- **Concat reads/materialization use the frozen snapshot, not the live group.**
+  `make_fetch`, `split_sorting_by_session`, and the `Sorting` concat anchor
+  helpers read `MemberSnapshot`, so a later `SessionGroup.Member` edit cannot
+  re-point or misalign an existing concat (the edit mints a new id on
+  re-selection). `make_fetch` re-checks each frozen member's `Recording` still
+  exists and its `content_hash` still matches, raising `ConcatMemberDriftError`
+  (or `MissingRecordingForConcatError`) rather than materializing from drifted
+  inputs.
+- **`ConcatenatedRecording.get_recording` verifies on read and rebuilds on
+  missing.** It now mirrors `Recording.get_recording`: a missing cache file is
+  rebuilt through a locked (`concat_recording_artifact_lock`), atomic
+  (`os.replace`), content-`hash`-verified path, raising
+  `RecordingContentDriftError` on a fingerprint mismatch instead of serving
+  garbage or erroring on the stale checksum.
+- **Split-back conserves every spike.** `split_unit_spike_trains` silently
+  dropped any concat-frame spike outside a member's `[start, end)` — including
+  frames below 0 or at/after the final boundary. It now enforces strictly-
+  increasing boundaries and per-spike conservation, and
+  `split_sorting_by_session` asserts exactly one boundary per frozen member,
+  raising `ConcatSplitError` rather than truncating the split.
+- **Deferred:** dedicated concat recompute/reclamation tables
+  (`ConcatenatedRecordingArtifact*`, the analogues of the recording recompute
+  trio) are **not** added in this change. Rebuild-on-missing + content
+  verification cover correctness; the audit/`delete_files` reclamation surface is
+  deferred until the first retention of concat outputs (e.g. when Phase 5 begins
+  retaining concat data), at which point it should reuse the shared recompute
+  helpers rather than a bespoke table family.
+
 #### Spike Sorting v2: execution dispatch, dependency pins, and security hardening
 
 A batch of localized operational, dependency, and security fixes. No schema,
