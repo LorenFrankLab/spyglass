@@ -285,14 +285,13 @@ def load_or_rebuild_analyzer(
     # (``../bad``, ``bad/name``) must be rejected up front, and resolving the
     # params row here fails fast on an unknown recipe rather than mid-rebuild
     # after a folder delete. Both checks run for ``rebuild=True`` and ``False``.
-    from spyglass.spikesorting.v2.sorting import (
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_path,
         assert_path_safe_waveform_params_name,
     )
 
     assert_path_safe_waveform_params_name(waveform_params_name)
     fetch_waveform_params(waveform_params_name)
-
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     folder = analyzer_path(sorting_id, waveform_params_name)
     return _load_analyzer_folder_or_rebuild(

@@ -19,7 +19,6 @@ and the analysis-NWB parent to the first ``SessionGroup.Member``.
 
 from __future__ import annotations
 
-import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -580,34 +579,17 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         cls.insert(rows, skip_duplicates=True)
 
 
-_WAVEFORM_PARAMS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
-
-
-def assert_path_safe_waveform_params_name(name) -> None:
-    """Reject a ``waveform_params_name`` that is not path-safe.
-
-    The name is embedded in the analyzer cache folder
-    ``{sorting_id}__{waveform_params_name}.zarr`` (see ``analyzer_path``), so it
-    must match ``^[A-Za-z0-9_]+$`` -- no path separators, dots, or traversal.
-    Enforced both at insert (via :func:`_reject_unsafe_waveform_params_name`)
-    and at load time (``get_analyzer`` accepts an un-FK'd free-string recipe
-    name), so a path-like name can never reach the filesystem load/delete path.
-    """
-    if not _WAVEFORM_PARAMS_NAME_RE.match(str(name)):
-        raise ValueError(
-            "AnalyzerWaveformParameters: waveform_params_name "
-            f"{name!r} is not path-safe; it is embedded in the analyzer "
-            "cache folder name, so it must match ^[A-Za-z0-9_]+$ (letters, "
-            "digits, underscore)."
-        )
-
-
 def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
     """Reject a non-path-safe ``waveform_params_name`` at insert.
 
-    A ``per_row_hook`` for ``validate_lookup_rows``; delegates to
-    :func:`assert_path_safe_waveform_params_name`.
+    A ``per_row_hook`` for ``validate_lookup_rows``; delegates to the DB-free
+    :func:`._analyzer_cache.assert_path_safe_waveform_params_name` (the owner of
+    the analyzer-path policy), which the load path reuses.
     """
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        assert_path_safe_waveform_params_name,
+    )
+
     assert_path_safe_waveform_params_name(row["waveform_params_name"])
 
 

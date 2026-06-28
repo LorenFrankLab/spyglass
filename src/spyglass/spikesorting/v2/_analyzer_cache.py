@@ -28,9 +28,34 @@ side-effect free.
 
 from __future__ import annotations
 
+import re
 import shutil
 import threading
 from pathlib import Path
+
+# The recipe name is embedded in the analyzer cache folder
+# ``{sorting_id}__{waveform_params_name}.zarr`` (see ``analyzer_path``), so it
+# must be path-safe -- no separators, dots, or traversal. Validated both at
+# insert (``AnalyzerWaveformParameters``) and at load (``get_analyzer`` accepts
+# an un-FK'd free-string recipe name). Lives here -- the DB-free owner of the
+# analyzer-path policy -- so the load path can validate without importing the
+# ``sorting`` schema module.
+_WAVEFORM_PARAMS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def assert_path_safe_waveform_params_name(name) -> None:
+    """Reject a ``waveform_params_name`` that is not path-safe.
+
+    It must match ``^[A-Za-z0-9_]+$`` (letters, digits, underscore) because it
+    is embedded in the analyzer cache folder name.
+    """
+    if not _WAVEFORM_PARAMS_NAME_RE.match(str(name)):
+        raise ValueError(
+            "AnalyzerWaveformParameters: waveform_params_name "
+            f"{name!r} is not path-safe; it is embedded in the analyzer "
+            "cache folder name, so it must match ^[A-Za-z0-9_]+$ (letters, "
+            "digits, underscore)."
+        )
 
 # Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
 # acquisition (the read path taking the lock while the compute path already

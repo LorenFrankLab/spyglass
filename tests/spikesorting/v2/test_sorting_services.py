@@ -205,7 +205,7 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
     import sys
     import types
 
-    from spyglass.spikesorting.v2 import _analyzer_cache
+    from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
     from spyglass.spikesorting.v2._sorting_analyzer import (
         load_or_rebuild_analyzer,
     )
@@ -228,6 +228,12 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
 
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
+    )
+    # The recipe-row validation queries AnalyzerWaveformParameters; this unit
+    # test mocks the rest of the load path, so stub it (the "display" name is a
+    # placeholder, not a real shipped recipe row).
+    monkeypatch.setattr(
+        _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
     monkeypatch.setitem(
         sys.modules,
@@ -283,6 +289,12 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(
         _sorting_analyzer, "rebuild_analyzer_folder", _rebuild
+    )
+    # The recipe-row validation queries AnalyzerWaveformParameters; this unit
+    # test mocks the rest of the load path, so stub it ("display" is a
+    # placeholder, not a real shipped recipe row).
+    monkeypatch.setattr(
+        _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
     monkeypatch.setitem(
         sys.modules,
