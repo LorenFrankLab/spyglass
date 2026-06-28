@@ -483,9 +483,9 @@ def run_si_sorter(
     Scratch is anchored under ``spyglass.settings.temp_dir`` via
     ``tempfile.TemporaryDirectory`` so the dir is cleaned on
     successful exit AND on raise (fixes the tempdir leak).
-    ``os.chmod 0o777`` makes it world-writable so SI sorter
-    subprocesses with a different uid (rootless container, slurm
-    scenarios) can write into it.
+    For a CONTAINER backend the scratch is ``os.chmod 0o777`` so an SI
+    sorter subprocess with a different uid (rootless container, slurm
+    scenarios) can write into it; a local run keeps the 0o700 default.
 
     External float64 whitening: if the sorter asks for whitening,
     run it externally at float64 and turn the sorter's internal

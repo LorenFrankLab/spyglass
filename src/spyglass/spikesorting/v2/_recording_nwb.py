@@ -196,8 +196,6 @@ def write_nwb_artifact(
         write_buffer_gb,
     )
 
-    import pathlib
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._recompute import combined_hash
     from spyglass.spikesorting.v2._recording_fingerprint import (

@@ -2698,7 +2698,7 @@ def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
     disambiguators resolved at this point -- ``unitmatch_id`` /
     ``tracked_unit_id`` / ``member_index`` / ``nwb_file_name`` /
     ``recording_date`` / ``curation_id`` -- not just ``sorting_id`` /
-    ``unit_id`` / ``region_name`` (UCI-6)."""
+    ``unit_id`` / ``region_name``."""
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
