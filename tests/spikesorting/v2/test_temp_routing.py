@@ -20,6 +20,17 @@ class _StopAfterTempDir(Exception):
     dir is created, so the expensive post-temp work never runs."""
 
 
+def _capture_dir_then_stop(capture: dict):
+    """Return a ``tempfile`` stand-in that records the ``dir=`` kwarg into
+    ``capture`` and raises ``_StopAfterTempDir`` to abort before the build."""
+
+    def _recorder(*args, **kwargs):
+        capture["dir"] = kwargs.get("dir")
+        raise _StopAfterTempDir
+
+    return _recorder
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     configured = str(tmp_path / "configured_scratch")
@@ -31,13 +42,8 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "temp_dir", configured)
 
     captured_um = {}
-
-    def _record_temporary_directory(*args, **kwargs):
-        captured_um["dir"] = kwargs.get("dir")
-        raise _StopAfterTempDir
-
     monkeypatch.setattr(
-        tempfile, "TemporaryDirectory", _record_temporary_directory
+        tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured_um)
     )
     # Reach the temp site after the cheap pure preamble: an empty member plan
     # is enough (the loop body never runs -- the recorder aborts first).
@@ -62,12 +68,9 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     captured_rc = {}
-
-    def _record_mkdtemp(*args, **kwargs):
-        captured_rc["dir"] = kwargs.get("dir")
-        raise _StopAfterTempDir
-
-    monkeypatch.setattr(tempfile, "mkdtemp", _record_mkdtemp)
+    monkeypatch.setattr(
+        tempfile, "mkdtemp", _capture_dir_then_stop(captured_rc)
+    )
     # Mock the pre-temp work (stored-analyzer load, hash, recipe + source
     # reconstruction) so the function reaches the mkdtemp site cheaply.
     monkeypatch.setattr(
@@ -117,13 +120,8 @@ def test_clusterless_waveform_features_use_configured_temp(
     )
 
     captured = {}
-
-    def _record_temporary_directory(*args, **kwargs):
-        captured["dir"] = kwargs.get("dir")
-        raise _StopAfterTempDir
-
     monkeypatch.setattr(
-        tempfile, "TemporaryDirectory", _record_temporary_directory
+        tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured)
     )
     with pytest.raises(_StopAfterTempDir):
         UnitWaveformFeatures._fetch_waveform_v2({"merge_id": "x"}, {})

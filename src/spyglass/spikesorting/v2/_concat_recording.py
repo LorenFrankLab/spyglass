@@ -274,22 +274,23 @@ def assert_concat_compatible(recordings: list) -> None:
             return None
         return None if values is None else np.asarray(values)
 
-    def _assert_scaling_matches(reference_values, values, index, kind):
-        if (reference_values is None) != (values is None):
+    def _assert_array_matches(reference, value, index, *, noun, share_clause):
+        # Shared presence-XOR + shape/allclose check for the optional per-channel
+        # arrays (geometry, gains, offsets): a member that HAS the array while
+        # another does not, or whose values differ, is surfaced.
+        if (reference is None) != (value is None):
             raise ValueError(
-                f"build_concatenated_recording: member {index} channel {kind} "
-                "presence differs from member 0 (one has per-channel "
-                f"{kind}s, the other does not); concatenated members must "
-                "share scaling metadata."
+                f"build_concatenated_recording: member {index} {noun} presence "
+                "differs from member 0 (one has it, the other does not); "
+                f"{share_clause}"
             )
-        if reference_values is not None and (
-            values.shape != reference_values.shape
-            or not np.allclose(values, reference_values)
+        if reference is not None and (
+            value.shape != reference.shape
+            or not np.allclose(value, reference)
         ):
             raise ValueError(
-                f"build_concatenated_recording: member {index} channel {kind}s "
-                f"differ from member 0; concatenated members must share "
-                f"per-channel {kind}s so traces are combined on one scale."
+                f"build_concatenated_recording: member {index} {noun} differs "
+                f"from member 0; {share_clause}"
             )
 
     reference = recordings[0]
@@ -322,29 +323,36 @@ def assert_concat_compatible(recordings: list) -> None:
                 f"{recording.get_dtype()} differs from member 0's "
                 f"{reference_dtype}; concatenated members must share a dtype."
             )
-        _assert_scaling_matches(
-            reference_gains, _scaling(recording, "gain"), index, "gain"
+        _assert_array_matches(
+            reference_gains,
+            _scaling(recording, "gain"),
+            index,
+            noun="channel gains",
+            share_clause=(
+                "concatenated members must share per-channel gains so traces "
+                "are combined on one scale."
+            ),
         )
-        _assert_scaling_matches(
-            reference_offsets, _scaling(recording, "offset"), index, "offset"
+        _assert_array_matches(
+            reference_offsets,
+            _scaling(recording, "offset"),
+            index,
+            noun="channel offsets",
+            share_clause=(
+                "concatenated members must share per-channel offsets so traces "
+                "are combined on one scale."
+            ),
         )
-        locations = _locations(recording)
-        if (reference_locations is None) != (locations is None):
-            raise ValueError(
-                f"build_concatenated_recording: member {index} channel geometry "
-                "presence differs from member 0 (one has probe locations, the "
-                "other does not); concatenated members must share probe "
-                "geometry."
-            )
-        if reference_locations is not None and (
-            locations.shape != reference_locations.shape
-            or not np.allclose(locations, reference_locations)
-        ):
-            raise ValueError(
-                f"build_concatenated_recording: member {index} channel geometry "
-                "differs from member 0; concatenated members must share probe "
-                "geometry so cross-session waveforms align channel-for-channel."
-            )
+        _assert_array_matches(
+            reference_locations,
+            _locations(recording),
+            index,
+            noun="channel geometry",
+            share_clause=(
+                "concatenated members must share probe geometry so "
+                "cross-session waveforms align channel-for-channel."
+            ),
+        )
 
 
 def build_concatenated_recording(
