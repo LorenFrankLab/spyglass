@@ -2184,8 +2184,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``UnitWaveformFeatures`` -- don't re-implement v2's join topology.
         ``key`` must carry ``sorting_id`` (sorter and nwb_file_name are fixed
         per sort, independent of ``curation_id``). For a concat-backed sort the
-        ``nwb_file_name`` is the FIRST ``SessionGroup.Member``'s session (the
-        same deterministic parent anchor the sort's analysis NWB uses), so
+        ``nwb_file_name`` is the FIRST frozen ``MemberSnapshot`` member's session
+        (the same deterministic parent anchor the sort's analysis NWB uses), so
         downstream provenance resolves to the anchor member rather than raising.
 
         Parameters
@@ -2497,8 +2497,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         probe surfaces every represented region. Callers can chain
         restrictions / fetches on the returned relation.
 
-        For a concat-backed sort the electrodes come from the FIRST
-        ``SessionGroup.Member``'s sort group (the same deterministic parent
+        For a concat-backed sort the electrodes come from the FIRST frozen
+        ``MemberSnapshot`` member's sort group (the same deterministic parent
         anchor the per-unit Electrode FK uses), so the merge dispatcher and
         downstream sort-group queries resolve rather than raising. As with the
         concat brain-region anchor, the anchor member's regions may differ from

@@ -361,16 +361,19 @@ class ConcatMemberDriftError(RuntimeError):
     ``concat_recording_id`` (so a different member set is a different concat).
     ``ConcatenatedRecording.make_fetch`` (materialize / rebuild) reads the frozen
     snapshot -- never the live ``SessionGroup.Member`` set -- and re-checks each
-    member's current ``Recording`` against it. This is raised when a member's
-    recording is GONE, or its current ``content_hash`` diverges from the frozen
-    one: the concatenation would be built from different underlying data than the
-    ``concat_recording_id`` was minted for. Editing ``SessionGroup.Member`` does
-    NOT raise this (old concat rows read their frozen snapshot); only the
-    underlying member recording content changing does. Message names the
-    ``member_index`` / ``recording_id`` and the stored-vs-current ``content_hash``,
-    and points the caller at re-running ``insert_selection`` (which re-snapshots
-    and mints a new ``concat_recording_id`` for the changed inputs) or restoring
-    the member recording.
+    member's current ``Recording`` against it. This is raised specifically when a
+    frozen member's ``Recording`` still exists but its current ``content_hash``
+    DIVERGES from the frozen one: the concatenation would be built from different
+    underlying data than the ``concat_recording_id`` was minted for. (A frozen
+    member whose ``Recording`` row is GONE raises
+    ``MissingRecordingForConcatError`` instead -- absence vs. divergence are
+    distinct.) Editing ``SessionGroup.Member`` does NOT raise this (old concat
+    rows read their frozen snapshot); only the underlying member recording
+    content changing does. Message names the ``member_index`` / ``recording_id``
+    and the stored-vs-current ``content_hash``, and points the caller at
+    re-running ``insert_selection`` (which re-snapshots and mints a new
+    ``concat_recording_id`` for the changed inputs) or restoring the member
+    recording.
     """
 
 

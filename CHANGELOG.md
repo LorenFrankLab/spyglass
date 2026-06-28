@@ -55,7 +55,8 @@ DLCProject().alter()
 
 Brings the cross-session `ConcatenatedRecording` cache to parity with the
 single-session `Recording` lifecycle, and ties its identity to its actual
-ordered member set. Additive schema (a part table + one secondary column) and a
+ordered member set. Additive schema (a `MemberSnapshot` part table + two
+secondary columns, `member_set_hash` and `n_samples`) and a
 changed `concat_recording_id` payload; pre-production, no migration.
 
 - **The ordered member set is frozen into concat identity.** `concat_recording_id`

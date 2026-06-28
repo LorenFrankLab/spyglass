@@ -14,7 +14,8 @@ sorter and writes the units NWB + analyzer, and the accessor methods
 (``get_sorting``, ``get_analyzer``) read those back. Both source kinds
 populate: a recording source loads ``Recording``, a concatenated-recording
 source loads ``ConcatenatedRecording`` and anchors the per-unit Electrode FK
-and the analysis-NWB parent to the first ``SessionGroup.Member``.
+and the analysis-NWB parent to the first frozen
+``ConcatenatedRecordingSelection.MemberSnapshot`` member.
 """
 
 from __future__ import annotations
@@ -104,9 +105,9 @@ class SortingFetched(NamedTuple):
         ``"concatenated_recording"``).
     recording_id : str
         The anchor ``recording_id``: the sort's own recording for a
-        single-recording source, or the FIRST ``SessionGroup.Member``'s
-        recording for a concat source (the deterministic parent anchor for the
-        per-unit ``Electrode`` FK and the analysis-NWB parent).
+        single-recording source, or the FIRST frozen ``MemberSnapshot``
+        member's recording for a concat source (the deterministic parent anchor
+        for the per-unit ``Electrode`` FK and the analysis-NWB parent).
     sel_row : dict
         The ``SortingSelection`` row, with ``artifact_detection_id`` resolved
         and stashed on it for downstream readers.
@@ -1226,9 +1227,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         Layer-2 source re-check fires here (``resolve_source`` asserts exactly
         one input source). Dispatches on the source: a single-recording source
         anchors to its own ``RecordingSelection``; a concat source anchors
-        deterministically to the FIRST ``SessionGroup.Member`` (so the per-unit
-        ``Electrode`` FK and the analysis-NWB parent both resolve to the anchor
-        member) and observes no artifact pass. All returned values are
+        deterministically to the FIRST frozen ``MemberSnapshot`` member (so the
+        per-unit ``Electrode`` FK and the analysis-NWB parent both resolve to the
+        anchor member) and observes no artifact pass. All returned values are
         deterministic bytes (DataJoint fetches inline dicts) so DataJoint's
         tri-part DeepHash integrity check across the two fetches stays stable.
 
@@ -1511,8 +1512,8 @@ class Sorting(SpyglassMixin, dj.Computed):
         """Return the analysis-NWB parent ``nwb_file_name`` for a sort.
 
         Source-agnostic: a single-recording sort anchors to its own
-        ``RecordingSelection``; a concat sort anchors to the FIRST
-        ``SessionGroup.Member`` (the deterministic parent the per-unit Electrode
+        ``RecordingSelection``; a concat sort anchors to the FIRST frozen
+        ``MemberSnapshot`` member (the deterministic parent the per-unit Electrode
         FK and the curated/analyzer NWBs all use). Centralizes the
         unwrap-to-nwb dispatch that several reporting / curation accessors need,
         so the "which member is the anchor" decision lives in exactly one place.

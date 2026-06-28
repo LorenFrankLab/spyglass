@@ -784,7 +784,8 @@ def write_curated_units_nwb(
     from spyglass.spikesorting.v2.sorting import Sorting
 
     # Anchor the curated-units NWB to the same parent as the Sorting (the sort's
-    # own session, or the first SessionGroup.Member for a concat source). The
+    # own session, or the first frozen MemberSnapshot member for a concat
+    # source). The
     # curated absolute spike times are read from the Sorting units NWB below
     # (source-agnostic), so only the parent-file anchor differs by source kind.
     nwb_file_name = Sorting.resolve_anchor_nwb_file_name(
