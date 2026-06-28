@@ -236,6 +236,75 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
         backend.UnitMatchBackend().match(inputs, {})
 
 
+def test_bundle_geometry_is_2d(tmp_path, monkeypatch):
+    """A 3D-probe recording yields a saved ``(n_channels, 2)``
+    ``channel_positions.npy``.
+
+    Spyglass stores 3D electrode geometry (z typically 0), but the UnitMatch
+    matcher contract requires 2D channel positions; the bundle projects the
+    probe to 2D (mirroring the analyzer path) and guards the saved shape so a 3D
+    probe never reaches the matcher silently. UnitMatch is faked so the test
+    does not require the optional UnitMatchPy extra.
+    """
+    import types
+
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    fake_um = types.SimpleNamespace(
+        extract_raw_data=types.SimpleNamespace(
+            save_avg_waveforms=lambda *a, **k: None
+        )
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[2.0], num_channels=8, num_units=3, seed=0
+    )
+    recording_3d = recording.set_probe(
+        recording.get_probe().to_3d(axes="xy")
+    )
+    assert recording_3d.get_probe().ndim == 3
+
+    backend.extract_unitmatch_bundle(
+        tmp_path / "sess", recording_3d, sorting, seed=0
+    )
+    positions = np.load(tmp_path / "sess" / "channel_positions.npy")
+    assert positions.shape == (8, 2), positions.shape
+
+
+def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
+    """The bundle guards the 2D contract: a non-``(n, 2)`` channel-positions
+    array is rejected up front (before the expensive split-half build) rather
+    than handed to the matcher."""
+    import types
+
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend as backend
+
+    fake_um = types.SimpleNamespace(
+        extract_raw_data=types.SimpleNamespace(
+            save_avg_waveforms=lambda *a, **k: None
+        )
+    )
+    monkeypatch.setattr(backend, "_require_unitmatch", lambda: fake_um)
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[2.0], num_channels=8, num_units=3, seed=0
+    )
+    # Force a 3D positions array past the probe (the planar probe needs no
+    # projection, so this exercises the shape guard directly).
+    monkeypatch.setattr(
+        recording, "get_channel_locations", lambda *a, **k: np.zeros((8, 3))
+    )
+    with pytest.raises(ValueError, match=r"2D"):
+        backend.extract_unitmatch_bundle(
+            tmp_path / "sess", recording, sorting, seed=0
+        )
+
+
 def test_get_matcher_bootstraps_default_after_clear():
     """get_matcher re-registers the built-in backend even if the registry was cleared."""
     from spyglass.spikesorting.v2 import matcher_protocol as mp

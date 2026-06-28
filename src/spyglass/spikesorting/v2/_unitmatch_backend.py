@@ -169,6 +169,27 @@ def extract_unitmatch_bundle(
     session_dir.mkdir(parents=True, exist_ok=True)
     random_seed, compute_job_kwargs = _bundle_compute_kwargs(seed, job_kwargs)
 
+    # The UnitMatch matcher contract requires 2D channel positions. Spyglass
+    # stores 3D electrode geometry (z typically 0); project the probe to 2D --
+    # the same projection the analyzer build uses -- so the recording handed to
+    # the per-half analyzers and the saved ``channel_positions.npy`` are
+    # consistently 2D. (SI's ``get_channel_locations`` defaults to ``axes="xy"``
+    # and so already drops z, but project + guard explicitly so the 2D contract
+    # does not silently depend on that default.) Validate up front so a bad
+    # geometry fails before the expensive split-half analyzer build.
+    probe = recording.get_probe()
+    if probe.ndim == 3:
+        recording = recording.set_probe(probe.to_2d())
+    channel_positions = recording.get_channel_locations()
+    n_channels = recording.get_num_channels()
+    if channel_positions.shape != (n_channels, 2):
+        raise ValueError(
+            "extract_unitmatch_bundle: channel_positions have shape "
+            f"{channel_positions.shape}, expected (n_channels, 2) = "
+            f"({n_channels}, 2). The UnitMatch matcher requires 2D channel "
+            "geometry; a non-2D probe cannot be fed to the matcher."
+        )
+
     half = recording.get_num_samples() // 2
     t_halves = []
     for a0, a1 in [(0, half), (half, recording.get_num_samples())]:
@@ -194,7 +215,7 @@ def extract_unitmatch_bundle(
 
     avg_waves = np.stack(t_halves, axis=-1)  # (n_units, spike_width, n_chan, 2)
     unit_ids = np.asarray(sorting.get_unit_ids(), dtype=int)
-    np.save(session_dir / "channel_positions.npy", recording.get_channel_locations())
+    np.save(session_dir / "channel_positions.npy", channel_positions)
     um.extract_raw_data.save_avg_waveforms(
         avg_waves, str(session_dir), unit_ids, unit_ids, extract_good_units_only=False
     )
