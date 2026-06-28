@@ -170,6 +170,9 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
                 "display_waveform_params_name": _DISPLAY,
+                # Synthetic provenance for this bypassed row; the column is
+                # NOT NULL (set from si.__version__ on a real sort).
+                "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
         )
@@ -376,6 +379,9 @@ def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1),
                 "display_waveform_params_name": _DISPLAY,
+                # Synthetic provenance for this bypassed row; the column is
+                # NOT NULL (set from si.__version__ on a real sort).
+                "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
         )

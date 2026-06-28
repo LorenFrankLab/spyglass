@@ -1071,6 +1071,9 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
                 "display_waveform_params_name": (
                     "franklab_cortex_actual_waveforms"
                 ),
+                # Synthetic provenance for this bypassed row; the column is
+                # NOT NULL (set from si.__version__ on a real sort).
+                "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
         )

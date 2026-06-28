@@ -337,6 +337,9 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
                 "n_units": 0,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
                 "display_waveform_params_name": _DISPLAY,
+                # Synthetic provenance for this bypassed row; the column is
+                # NOT NULL (set from si.__version__ on a real sort).
+                "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
         )
@@ -690,6 +693,9 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
                 "n_units": n_units,
                 "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
                 "display_waveform_params_name": _DISPLAY,
+                # Synthetic provenance for this bypassed row; the column is
+                # NOT NULL (set from si.__version__ on a real sort).
+                "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
         )
