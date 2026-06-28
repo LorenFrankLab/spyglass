@@ -354,6 +354,41 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
         clean_session_groups_for_owner(owner)
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_concat_rejects_mismatched_electrode_space(monkeypatch):
+    """A SessionGroup whose members map to different physical electrode spaces
+    (different electrode ids or brain regions) is rejected.
+
+    The concat result is read in the ANCHOR member's electrode frame, so two
+    members with the same local channel layout but different underlying
+    electrodes/regions would be silently mis-attributed. The per-member
+    electrode/region signature query is exercised end to end by the chronic
+    concat path; here the signature source is stubbed so the comparison logic
+    (raise on mismatch, accept on match) is checked directly.
+    """
+    from spyglass.spikesorting.v2 import session_group as sg
+
+    members = [
+        {"member_index": 0, "sort_group_id": 0, "nwb_file_name": "a.nwb"},
+        {"member_index": 1, "sort_group_id": 0, "nwb_file_name": "b.nwb"},
+    ]
+    signatures = {
+        0: ((0, "hpc"), (1, "hpc")),
+        1: ((0, "cortex"), (1, "cortex")),  # different brain region
+    }
+    monkeypatch.setattr(
+        sg,
+        "_member_electrode_signature",
+        lambda member: signatures[member["member_index"]],
+    )
+    with pytest.raises(ValueError, match="electrode"):
+        sg.assert_members_share_electrode_space(members)
+
+    # Matching signatures across members pass.
+    signatures[1] = signatures[0]
+    sg.assert_members_share_electrode_space(members)
+
+
 @pytest.mark.slow
 def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
     """Changing only the motion-correction recipe yields a distinct

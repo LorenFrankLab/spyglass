@@ -289,3 +289,63 @@ def test_assert_concat_compatible_rejects_geometry_mismatch():
     b = _rec_with_locations(50, [1, 2], [[0.0, 0.0], [0.0, 40.0]])
     with pytest.raises(ValueError, match="geometry"):
         assert_concat_compatible([a, b])
+
+
+def test_assert_concat_compatible_rejects_mismatched_fs():
+    """Members with the same channel ids/geometry but different sampling
+    frequencies cannot be stitched into one continuous timeline."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    locs = [[0.0, 0.0], [0.0, 20.0]]
+    a = _rec_with_locations(100, [1, 2], locs, fs=30_000.0)
+    b = _rec_with_locations(50, [1, 2], locs, fs=20_000.0)
+    with pytest.raises(ValueError, match="sampling frequency"):
+        assert_concat_compatible([a, b])
+
+
+def _rec_with_dtype(n_samples, channel_ids, locations, dtype):
+    """A synthetic NumpyRecording with an explicit sample dtype."""
+    import spikeinterface as si
+
+    rec = si.NumpyRecording(
+        [np.zeros((n_samples, len(channel_ids)), dtype=dtype)],
+        sampling_frequency=30_000.0,
+        channel_ids=channel_ids,
+    )
+    rec.set_dummy_probe_from_locations(np.asarray(locations, dtype=float))
+    return rec
+
+
+def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
+    """Members with mismatched sample dtype, channel gains, or channel offsets
+    are rejected -- concatenation would silently combine differently-scaled
+    traces into one recording."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        assert_concat_compatible,
+    )
+
+    locs = [[0.0, 0.0], [0.0, 20.0]]
+
+    # dtype mismatch.
+    a = _rec_with_dtype(100, [1, 2], locs, np.float32)
+    b_int = _rec_with_dtype(50, [1, 2], locs, np.int16)
+    with pytest.raises(ValueError, match="dtype"):
+        assert_concat_compatible([a, b_int])
+
+    # gain mismatch.
+    a_gain = _rec_with_locations(100, [1, 2], locs)
+    a_gain.set_channel_gains([1.0, 1.0])
+    b_gain = _rec_with_locations(50, [1, 2], locs)
+    b_gain.set_channel_gains([2.0, 2.0])
+    with pytest.raises(ValueError, match="gain"):
+        assert_concat_compatible([a_gain, b_gain])
+
+    # offset mismatch.
+    a_off = _rec_with_locations(100, [1, 2], locs)
+    a_off.set_channel_offsets([0.0, 0.0])
+    b_off = _rec_with_locations(50, [1, 2], locs)
+    b_off.set_channel_offsets([5.0, 5.0])
+    with pytest.raises(ValueError, match="offset"):
+        assert_concat_compatible([a_off, b_off])

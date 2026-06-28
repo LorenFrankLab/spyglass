@@ -48,6 +48,86 @@ _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_session_group")
 
 
+def _member_electrode_signature(member: dict) -> tuple:
+    """Return a member sort group's ordered ``(electrode_id, region)`` signature.
+
+    The signature identifies the physical electrode space a member contributes:
+    its sort group's electrode ids (in id order) paired with each electrode's
+    brain region. ``electrode_id`` is per-NWB but stable across an animal's
+    sessions, and the region pins the physical target -- so two members of the
+    same implant share a signature while members from different sort groups,
+    probes, or regions diverge. An electrode without a region maps to ``None``.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.common.common_region import BrainRegion
+
+    restriction = {
+        "nwb_file_name": member["nwb_file_name"],
+        "sort_group_id": member["sort_group_id"],
+    }
+    electrode_ids = sorted(
+        int(eid)
+        for eid in (
+            SortGroupV2.SortGroupElectrode & restriction
+        ).fetch("electrode_id")
+    )
+    region_by_electrode = {
+        int(row["electrode_id"]): str(row["region_name"])
+        for row in (
+            (SortGroupV2.SortGroupElectrode & restriction)
+            * Electrode
+            * BrainRegion
+        ).fetch("electrode_id", "region_name", as_dict=True)
+    }
+    return tuple(
+        (eid, region_by_electrode.get(eid)) for eid in electrode_ids
+    )
+
+
+def assert_members_share_electrode_space(members: list[dict]) -> None:
+    """Reject a SessionGroup whose members map to different electrode spaces.
+
+    SI's channel-id check (and the geometry/scaling checks in
+    ``assert_concat_compatible``) compare the per-member SI recordings, but two
+    members can share a local channel layout while their sort groups reference
+    DIFFERENT physical electrodes or brain regions. The concatenated recording
+    is read in the ANCHOR member's electrode frame, so a divergent member would
+    be silently mis-attributed. Compare each member's electrode/region signature
+    against the anchor (lowest ``member_index``) and raise on a mismatch.
+
+    Parameters
+    ----------
+    members : list of dict
+        ``SessionGroup.Member`` rows (each carrying ``nwb_file_name``,
+        ``sort_group_id``, ``member_index``).
+
+    Raises
+    ------
+    ValueError
+        If any member's electrode/region signature differs from the anchor's.
+    """
+    if len(members) < 2:
+        return
+    ordered = sorted(members, key=lambda m: m["member_index"])
+    anchor = ordered[0]
+    anchor_signature = _member_electrode_signature(anchor)
+    for member in ordered[1:]:
+        signature = _member_electrode_signature(member)
+        if signature != anchor_signature:
+            raise ValueError(
+                "ConcatenatedRecordingSelection.insert_selection: member "
+                f"(index {member['member_index']}, "
+                f"sort_group_id={member['sort_group_id']}, "
+                f"nwb_file_name={member['nwb_file_name']!r}) maps to a "
+                "different electrode space than the anchor member (index "
+                f"{anchor['member_index']}): its sort group's electrode "
+                "ids/brain regions differ. Concatenated members must share the "
+                "same physical electrodes so the result reads correctly in the "
+                "anchor frame -- check that every member uses the same sort "
+                "group / probe layout."
+            )
+
+
 @schema
 class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     """A named bundle of sorting members to analyze together.
@@ -454,6 +534,11 @@ class ConcatenatedRecordingSelection(
                 f"{group_key} has no members. Create it via "
                 "SessionGroup.create_group() with at least one member first."
             )
+        # Reject members in different physical electrode spaces (different sort
+        # group electrodes / brain regions). The concat result is read in the
+        # anchor member's electrode frame, so this must hold regardless of
+        # whether the per-member Recording caches are populated yet.
+        assert_members_share_electrode_space(members)
         missing: list[dict] = []
         for member in members:
             rec_sel_key = member_recording_selection_key(

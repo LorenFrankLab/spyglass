@@ -236,8 +236,9 @@ def assert_concat_compatible(recordings: list) -> None:
     Raises
     ------
     ValueError
-        If the list is empty, or any member's channel ids (or count) or channel
-        geometry differs from the first member's.
+        If the list is empty, or any member's channel ids (or count), sampling
+        frequency, sample dtype, channel gains/offsets, or channel geometry
+        differs from the first member's.
     """
     import numpy as np
 
@@ -258,9 +259,46 @@ def assert_concat_compatible(recordings: list) -> None:
         except Exception:
             return None
 
+    def _scaling(recording, kind):
+        # ``gain_to_uV`` / ``offset_to_uV`` are optional; a recording without
+        # them returns None. Mirror the geometry presence handling so a member
+        # that HAS scaling while another does not is surfaced.
+        getter = (
+            recording.get_channel_gains
+            if kind == "gain"
+            else recording.get_channel_offsets
+        )
+        try:
+            values = getter()
+        except Exception:
+            return None
+        return None if values is None else np.asarray(values)
+
+    def _assert_scaling_matches(reference_values, values, index, kind):
+        if (reference_values is None) != (values is None):
+            raise ValueError(
+                f"build_concatenated_recording: member {index} channel {kind} "
+                "presence differs from member 0 (one has per-channel "
+                f"{kind}s, the other does not); concatenated members must "
+                "share scaling metadata."
+            )
+        if reference_values is not None and (
+            values.shape != reference_values.shape
+            or not np.allclose(values, reference_values)
+        ):
+            raise ValueError(
+                f"build_concatenated_recording: member {index} channel {kind}s "
+                f"differ from member 0; concatenated members must share "
+                f"per-channel {kind}s so traces are combined on one scale."
+            )
+
     reference = recordings[0]
     reference_ids = list(reference.get_channel_ids())
     reference_locations = _locations(reference)
+    reference_fs = float(reference.get_sampling_frequency())
+    reference_dtype = reference.get_dtype()
+    reference_gains = _scaling(reference, "gain")
+    reference_offsets = _scaling(reference, "offset")
     for index, recording in enumerate(recordings[1:], start=1):
         channel_ids = list(recording.get_channel_ids())
         if channel_ids != reference_ids:
@@ -270,6 +308,26 @@ def assert_concat_compatible(recordings: list) -> None:
                 "members must share channel ids (the same sort group / probe "
                 "layout across sessions)."
             )
+        fs = float(recording.get_sampling_frequency())
+        if not np.isclose(fs, reference_fs):
+            raise ValueError(
+                f"build_concatenated_recording: member {index} sampling "
+                f"frequency {fs} differs from member 0's {reference_fs}; "
+                "concatenated members must share a sampling frequency so the "
+                "stitched timeline is uniform."
+            )
+        if recording.get_dtype() != reference_dtype:
+            raise ValueError(
+                f"build_concatenated_recording: member {index} sample dtype "
+                f"{recording.get_dtype()} differs from member 0's "
+                f"{reference_dtype}; concatenated members must share a dtype."
+            )
+        _assert_scaling_matches(
+            reference_gains, _scaling(recording, "gain"), index, "gain"
+        )
+        _assert_scaling_matches(
+            reference_offsets, _scaling(recording, "offset"), index, "offset"
+        )
         locations = _locations(recording)
         if (reference_locations is None) != (locations is None):
             raise ValueError(
