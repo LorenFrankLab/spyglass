@@ -1359,30 +1359,82 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         Returns
         -------
         pandas.DataFrame
-            Columns ``sorting_id``, ``unit_id``, ``region_name`` -- one row per
-            (member unit, electrode/region).
+            One row per (member unit, electrode/region), carrying the full
+            chronic-identity disambiguators resolved at this point:
+            ``unitmatch_id``, ``tracked_unit_id``, ``member_index``,
+            ``nwb_file_name``, ``recording_date``, ``sorting_id``,
+            ``curation_id``, ``unit_id``, ``region_name``. (Returning only
+            ``sorting_id``/``unit_id``/``region_name`` dropped the very
+            identifiers a cross-session caller needs to attribute each row.)
         """
         import pandas as pd
 
+        from spyglass.common.common_session import Session
         from spyglass.spikesorting.v2.utils import unit_brain_region_df
 
+        columns = [
+            "unitmatch_id",
+            "tracked_unit_id",
+            "member_index",
+            "nwb_file_name",
+            "recording_date",
+            "sorting_id",
+            "curation_id",
+            "unit_id",
+            "region_name",
+        ]
+
         members = (self.Member & tracked_unit_key).fetch(
-            "sorting_id", "curation_id", "unit_id", as_dict=True
+            "unitmatch_id",
+            "tracked_unit_id",
+            "sorting_id",
+            "curation_id",
+            "unit_id",
+            as_dict=True,
         )
         frames = []
         for member in members:
+            sorting_id = member["sorting_id"]
+            curation_id = int(member["curation_id"])
+            unit_id = int(member["unit_id"])
             unit_rel = CurationV2.Unit & {
-                "sorting_id": member["sorting_id"],
-                "curation_id": int(member["curation_id"]),
-                "unit_id": int(member["unit_id"]),
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+                "unit_id": unit_id,
             }
             region_df = unit_brain_region_df(unit_rel, "single_session")
-            region_df.insert(0, "sorting_id", str(member["sorting_id"]))
-            frames.append(region_df[["sorting_id", "unit_id", "region_name"]])
-        if not frames:
-            return pd.DataFrame(
-                columns=["sorting_id", "unit_id", "region_name"]
+
+            # member_index from the frozen matchable universe this match ran
+            # over (the canonical per-member ordering).
+            member_index = int(
+                (
+                    UnitMatch.MatchableUnit
+                    & {
+                        "unitmatch_id": member["unitmatch_id"],
+                        "sorting_id": sorting_id,
+                        "curation_id": curation_id,
+                        "unit_id": unit_id,
+                    }
+                ).fetch1("member_index")
             )
+            # Session identity (single-session members only).
+            nwb_file_name = _curation_member_identity(sorting_id)[0]
+            recording_date = (
+                Session & {"nwb_file_name": nwb_file_name}
+            ).fetch1("session_start_time")
+
+            region_df = region_df.assign(
+                unitmatch_id=str(member["unitmatch_id"]),
+                tracked_unit_id=int(member["tracked_unit_id"]),
+                member_index=member_index,
+                nwb_file_name=nwb_file_name,
+                recording_date=recording_date,
+                sorting_id=str(sorting_id),
+                curation_id=curation_id,
+            )
+            frames.append(region_df[columns])
+        if not frames:
+            return pd.DataFrame(columns=columns)
         return pd.concat(frames, ignore_index=True)
 
 

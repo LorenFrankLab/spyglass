@@ -2690,3 +2690,58 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
     assert got["curation_id"] == int(choice["curation_id"])
     # A real session start time (ISO 8601), not a placeholder.
     assert "T" in got["session_start_time"]
+
+
+@pytest.mark.slow
+def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
+    """``TrackedUnit.get_unit_brain_regions`` returns the chronic-identity
+    disambiguators resolved at this point -- ``unitmatch_id`` /
+    ``tracked_unit_id`` / ``member_index`` / ``nwb_file_name`` /
+    ``recording_date`` / ``curation_id`` -- not just ``sorting_id`` /
+    ``unit_id`` / ``region_name`` (UCI-6)."""
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    pk = UnitMatchSelection.insert_selection(
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
+    )
+    UnitMatch.populate(pk, reserve_jobs=False)
+    TrackedUnit.populate(pk, reserve_jobs=False)
+
+    tracked_keys = (TrackedUnit & pk).fetch("KEY")
+    assert tracked_keys, "no tracked units were populated"
+
+    df = TrackedUnit().get_unit_brain_regions(tracked_keys[0])
+
+    expected = {
+        "unitmatch_id",
+        "tracked_unit_id",
+        "member_index",
+        "nwb_file_name",
+        "recording_date",
+        "sorting_id",
+        "curation_id",
+        "unit_id",
+        "region_name",
+    }
+    assert expected <= set(df.columns), (
+        "get_unit_brain_regions dropped chronic-identity disambiguators; "
+        f"columns={list(df.columns)}"
+    )
+    if len(df):
+        for col in (
+            "unitmatch_id",
+            "tracked_unit_id",
+            "member_index",
+            "nwb_file_name",
+            "recording_date",
+            "curation_id",
+        ):
+            assert df[col].notna().all(), f"{col} must be populated, not null"
