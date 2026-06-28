@@ -732,27 +732,30 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
 
 
-def test_find_orphaned_analyzer_folders_disk_side(dj_conn, tmp_path):
-    """A stray on-disk analyzer folder referenced by no Sorting row is
-    reported as a disk-side orphan."""
+def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
+    """A canonical ``{sorting_id}__{recipe}.zarr`` folder referenced by no
+    Sorting row is reported as a disk-side orphan.
+
+    The sweep only considers canonical analyzer-cache folders (it refuses to
+    flag arbitrary directories under a possibly-misconfigured cache root), so
+    the stray is created with the canonical name for a sorting_id that has no
+    Sorting row -- not an arbitrary directory.
+    """
+    import shutil
     import uuid
 
-    from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
 
-    analyzer_root = analyzer_path("x", _DISPLAY).parent
-    analyzer_root.mkdir(parents=True, exist_ok=True)
-    stray = analyzer_root / f"a22_disk_orphan_{uuid.uuid4()}.analyzer"
-    stray.mkdir()
+    stray = analyzer_path(uuid.uuid4(), _DISPLAY)
+    stray.mkdir(parents=True, exist_ok=True)
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         assert str(stray) in report["disk_side"], (
-            "an on-disk analyzer folder with no referencing Sorting row must "
+            "a canonical analyzer folder with no referencing Sorting row must "
             "be reported as a disk-side orphan"
         )
     finally:
-        import shutil
-
         shutil.rmtree(stray, ignore_errors=True)
 
 
