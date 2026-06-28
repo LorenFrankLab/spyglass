@@ -428,6 +428,52 @@ def test_concat_id_changes_with_member_set(same_day_group):
 
 
 @pytest.mark.slow
+def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
+    same_day_group,
+):
+    """The exact R39 bug: editing the LIVE SessionGroup.Member set under a fixed
+    group name+params re-mints a different concat_recording_id on re-selection,
+    and the original concat's frozen MemberSnapshot is unchanged by the edit (old
+    concat rows stay valid; the change is not silently absorbed)."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    request = {
+        **grp["group_key"],
+        "preprocessing_params_name": grp["preprocessing_params_name"],
+        "motion_correction_params_name": "none",
+    }
+    original = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    original_snapshot = (
+        ConcatenatedRecordingSelection.MemberSnapshot & original
+    ).fetch(as_dict=True, order_by="member_index")
+    assert [r["member_index"] for r in original_snapshot] == [0, 1]
+
+    # Edit the LIVE member set under the SAME group_key: drop the second member.
+    (
+        SessionGroup.Member
+        & {**grp["group_key"], "member_index": 1}
+    ).delete_quick()
+
+    # Re-selection over the now-different live member set mints a DIFFERENT id.
+    edited = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    assert edited["concat_recording_id"] != original["concat_recording_id"]
+
+    # The original concat's frozen snapshot is untouched by the live edit -- the
+    # old concat row stays valid (reads its own frozen members), not invalidated.
+    still_frozen = (
+        ConcatenatedRecordingSelection.MemberSnapshot & original
+    ).fetch(as_dict=True, order_by="member_index")
+    assert [r["member_index"] for r in still_frozen] == [0, 1]
+    assert {str(r["recording_id"]) for r in still_frozen} == {
+        str(r["recording_id"]) for r in original_snapshot
+    }
+
+
+@pytest.mark.slow
 def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
     """A member with no populated Recording for the requested preprocessing
     recipe raises ``MissingRecordingForConcatError`` naming the missing member."""
@@ -773,6 +819,9 @@ def test_concatenated_recording_make_shape(same_day_group):
     n0, n1 = _member_sample_counts(grp)
     fs = float(row["sampling_frequency"])
     assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
+    # n_samples is the EXACT integer concat sample count (the split-back guard's
+    # authoritative basis), not a float duration round-trip.
+    assert int(row["n_samples"]) == n0 + n1
 
     idxs, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
         "member_index", "end_sample", order_by="member_index"

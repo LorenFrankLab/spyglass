@@ -78,12 +78,13 @@ changed `concat_recording_id` payload; pre-production, no migration.
   exists and its `content_hash` still matches, raising `ConcatMemberDriftError`
   (or `MissingRecordingForConcatError`) rather than materializing from drifted
   inputs.
-- **`ConcatenatedRecording.get_recording` verifies on read and rebuilds on
-  missing.** It now mirrors `Recording.get_recording`: a missing cache file is
-  rebuilt through a locked (`concat_recording_artifact_lock`), atomic
-  (`os.replace`), content-`hash`-verified path, raising
-  `RecordingContentDriftError` on a fingerprint mismatch instead of serving
-  garbage or erroring on the stale checksum.
+- **`ConcatenatedRecording.get_recording` checksum-validates reads and
+  content-verifies rebuilds.** It now mirrors `Recording.get_recording`: a
+  present cache file is read through `AnalysisNwbfile`'s `~external` byte-checksum
+  validation, and a missing cache file is rebuilt through a locked
+  (`concat_recording_artifact_lock`), atomic (`os.replace`),
+  content-`hash`-verified path, raising `RecordingContentDriftError` on a
+  fingerprint mismatch instead of installing drifted bytes.
 - **Split-back conserves every spike.** `split_unit_spike_trains` silently
   dropped any concat-frame spike outside a member's `[start, end)` — including
   frames below 0 or at/after the final boundary. It now enforces strictly-

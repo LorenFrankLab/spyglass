@@ -120,11 +120,13 @@ recording — plus a frozen member set tied into its identity.
   or its `content_hash` has drifted from the snapshot, materialization/rebuild
   raises `MissingRecordingForConcatError` / `ConcatMemberDriftError` rather than
   building from changed inputs.
-- **Verify-on-read + rebuild-on-missing.** `ConcatenatedRecording.get_recording()`
-  mirrors `Recording.get_recording()`: a missing cache file is rebuilt through a
-  locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
+- **Checksum-validated reads + content-verified rebuild-on-missing.**
+  `ConcatenatedRecording.get_recording()` mirrors `Recording.get_recording()`: a
+  present cache file is read through `AnalysisNwbfile`'s `~external` byte-checksum
+  validation, and a missing cache file is rebuilt through a locked
+  (`concat_recording_artifact_lock`), atomic (`os.replace`),
   content-`hash`-verified path, raising `RecordingContentDriftError` on a
-  fingerprint mismatch instead of serving drifted bytes (the canonical slot is
+  fingerprint mismatch instead of installing drifted bytes (the canonical slot is
   left untouched). A motion-corrected concat is only byte-reproducible insofar as
   `correct_motion` is deterministic; an irreproducible rebuild fails loudly here
   rather than silently.
