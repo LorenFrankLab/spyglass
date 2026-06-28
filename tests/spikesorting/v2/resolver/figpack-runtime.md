@@ -79,6 +79,21 @@ widget): `correlograms`, `spike_amplitudes`, `unit_locations`,
 `random_spikes`, and `quality_metrics`/`template_metrics` for the displayed unit
 columns.
 
+**v2 analyzer source.** `Sorting().get_analyzer(key)`
+([sorting.py](../../../../src/spyglass/spikesorting/v2/sorting.py)) returns a
+SortingAnalyzer whose **base** extension set is only
+`random_spikes`/`noise_levels`/`templates`/`waveforms`
+([_sorting_analyzer.py](../../../../src/spyglass/spikesorting/v2/_sorting_analyzer.py)).
+The four curation-view extras above (`spike_amplitudes`, `correlograms`,
+`unit_locations`, `template_similarity`) are **not** in that base set, so the
+curation-view builder must compute them on top — which is exactly what the
+standalone spike below does. v2 already has the machinery for this:
+`Sorting.add_extensions` / `ensure_extensions` and `_visualization`'s
+`DISPLAY_WIDGET_EXTENSIONS` (used by the existing v2 viz path,
+[visualization.py](../../../../src/spyglass/spikesorting/v2/visualization.py)).
+So a real v2 analyzer differs from the standalone one only in provenance, not in
+the inputs the figpack views consume.
+
 ```python
 def _subview(plot_fn, analyzer, **kw):
     return plot_fn(analyzer, backend="figpack",
@@ -151,6 +166,18 @@ view.save(output_path, *, title, description="", script="")            # folder 
   (`figpack/core/config.py`). The annotations contract below is identical for a
   hosted figure; only the write path is authenticated.
 
+> **Durability caveat (affects the persisted table's default).** A
+> `FigPackCuration` Computed row stores a `figpack_uri`. For that URI to be both
+> **durable** and **editable** (round-trippable), it must be the hosted/cloud
+> path (or a self-hosted figpack figure service): the offline local-server URL is
+> process-ephemeral, and `view.save()` produces a durable but **read-only** bundle
+> (no annotation server, so no edit round trip). 5a verified only the offline
+> mechanism. Therefore 5b must verify the cloud round trip (`FIGPACK_API_KEY` +
+> a cloud smoke that PUT/GETs `annotations.json` on a hosted figure) before
+> relying on `upload=True` as the table's path. Do not assume the cloud annotation
+> write path works just because the offline one does — only the read (GET) path is
+> proven identical.
+
 ## Curation-state round trip (the gating deliverable — verified offline)
 
 Edited curation is **not** written back to the zarr `curation` dataset. It is
@@ -207,24 +234,45 @@ key (same shape as above) rather than relying on the `curation=` kwarg.
 ## Helper shapes the DataJoint tables will wrap
 
 - `build_curation_view(curation_key, label_options=None, metrics=None,
-  upload=True, ephemeral=False) -> str`: load the curation's `SortingAnalyzer`,
-  ensure the required extensions, build the units table + sub-views +
+  upload=..., ephemeral=False) -> str`: load the curation's `SortingAnalyzer`
+  via `Sorting().get_analyzer(...)`, **ensure the curation-view extensions**
+  (`spike_amplitudes`/`correlograms`/`unit_locations`/`template_similarity`) on
+  top of the base set via `Sorting.add_extensions`/`ensure_extensions`, build the
+  units table + sub-views +
   `ssv.SortingCuration(default_label_options=label_options or <CurationLabel
   order>)`, compose with figpack layout, then `view.show(upload=..., ephemeral=...,
   wait_for_input=False, open_in_browser=False)` (or `view.save(...)` for a local
   artifact) and return the figure URL. Default `label_options` should be the v2
   `CurationLabel` order `["accept", "mua", "noise"]`, not FigURL-era `"good"`.
+  The `upload` default is intentionally left open here: only the offline path is
+  verified, and a persisted+editable `figpack_uri` needs the cloud/hosted path
+  (see the durability caveat above), so 5b must gate `upload=True` on
+  `FIGPACK_API_KEY` + a cloud smoke before adopting it as the table default.
 - `fetch_curation_from_uri(uri) -> tuple[dict, list]`:
   `GET <uri>/annotations.json`, parse `["annotations"]["/"]["sorting_curation"]`,
   and return `({int(unit_id): labels}, [list(group) for group in mergeGroups])` —
   ready for `CurationV2.insert_curation(labels=..., merge_groups=...)`. Empty /
   missing annotations → `({}, [])`.
 
-## Reproduction
+## Reproduction and the analyzer-fixture decision
 
 Standalone, no DataJoint: a deterministic SortingAnalyzer is built with
 `spikeinterface.generate_ground_truth_recording(seed=0)` +
 `create_sorting_analyzer` + the extensions above; the view is built, saved, served
 locally, and the annotations round trip is exercised over the real local-server
-HTTP PUT/GET. A real DataJoint-produced v2 analyzer carries the same extensions,
-so the contract transfers unchanged.
+HTTP PUT/GET.
+
+**Fixture decision (accepted).** This feasibility check used a *standalone*
+SpikeInterface analyzer rather than a populated v2 DataJoint analyzer — an
+explicit owner decision, made because the isolated curation environment has no
+DataJoint/MySQL stack and the figpack views consume a `SortingAnalyzer` + the
+extensions above regardless of how the analyzer was produced. The standalone
+analyzer is representative: it carries v2's base extensions plus the same
+curation-view extras computed on top (see "v2 analyzer source" above).
+
+**Residual risk for 5b (must smoke).** 5b binds to the concrete v2 surface —
+`Sorting().get_analyzer(key)` and v2's `add_extensions`/`ensure_extensions` — which
+this offline check did not exercise. The first 5b step should run one documented
+smoke of `build_curation_view` against a **real populated v2 analyzer** (needs the
+Docker/MySQL v2 environment) to confirm `get_analyzer()` returns a usable analyzer
+and the curation-view extensions ensure cleanly end to end.

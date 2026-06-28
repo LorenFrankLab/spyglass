@@ -124,7 +124,8 @@ below still holds); the remediation plan owns all schema changes.
   - `FigPackCurationSelection` Manual + `FigPackCuration` Computed.
   - `FigPackCurationSelection.insert_selection(curation_key, label_options=None, metrics=None, upload=True, ephemeral=False)` mirrors v1's explicit curation-UI identity instead of storing only `-> CurationV2`. The selection row stores `figpack_config_hash` plus label options, requested metrics, and upload mode so repeated calls are idempotent and multiple UI configurations for the same curation are representable without querying blob equality.
   - Default `label_options` must use the v2 enum labels in `CurationLabel` order (`["accept", "mua", "noise"]` — see `_enums.py` `CurationLabel` / `CurationV2.label_options()`), not FigURL-era `"good"`, unless Phase 5 explicitly adds a validated alias.
-  - `make()` uses the verified FigPack API. Publishes/uploads the view, stores returned URI.
+  - `make()` uses the verified FigPack API. Publishes/uploads the view, stores returned URI. Load the analyzer via `Sorting().get_analyzer(...)` and **ensure the curation-view extensions** (`spike_amplitudes`/`correlograms`/`unit_locations`/`template_similarity`) on top of v2's base set (`random_spikes`/`noise_levels`/`templates`/`waveforms`) via the existing `Sorting.add_extensions`/`ensure_extensions` surface; build the `SortingCuration` control directly with `default_label_options=` (do **NOT** call `plot_sorting_summary(curation=True)` — released SI passes `label_choices=` while `figpack-spike-sorting==0.1.14` expects `default_label_options=`, raising `TypeError`). **First 5b step:** smoke `build_curation_view` against one real populated v2 analyzer (Docker/MySQL v2 env) — 5a verified the contract on a standalone SpikeInterface analyzer per owner decision, not against `get_analyzer()`.
+  - **Cloud-upload gate (cloud round trip is NOT yet verified).** 5a verified only the offline round trip. A persisted+editable `figpack_uri` needs the cloud/hosted path (the offline local-server URL is process-ephemeral; `view.save()` is durable but read-only). So `make()` must gate `upload=True` on `FIGPACK_API_KEY` (clear error if missing), and 5b must add a cloud smoke (PUT/GET `annotations.json` on a hosted figure) before trusting `upload=True` as the stored-URI path. See [figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md).
   - `build_curation_view(curation_key, label_options=None, metrics=None, upload=True, ephemeral=False) -> str` or an equivalently named helper is the v2 analog of `FigURLCurationSelection.generate_curation_uri`: it creates/inserts the `FigPackCurationSelection` row, populates `FigPackCuration`, and returns the URI. The exact helper internals wrap the verified FigPack API from the feasibility check.
   - `FigPackCuration.fetch_curation_from_uri(uri) -> tuple[dict, list]` — round-trip labels + merge_groups from FigPack back into v2, but only after the feasibility check proves that edited state is persisted and retrievable.
   - Gate `figpack` and `figpack_spike_sorting` imports inside the module with a clear install message if absent (helps users who haven't installed the `spikesorting-v2-curation` extra).
@@ -132,11 +133,11 @@ below still holds); the remediation plan owns all schema changes.
 - **Add FigPack packages to `pyproject.toml`** as optional dependencies:
   ```toml
   optional-dependencies.spikesorting-v2-curation = [
-      "figpack>=X.Y",
-      "figpack-spike-sorting>=A.B",
+      "figpack==0.3.20",                # exact pin: figpack-spike-sorting is
+      "figpack-spike-sorting==0.1.14",  # pre-1.0 and the SI<->ext API has drifted
   ]
   ```
-  Pin minimum versions once verified at implementation time. Do not add these to core Spyglass dependencies.
+  Use **exact** pins (verified combo: `figpack==0.3.20`, `figpack-spike-sorting==0.1.14`, with `spikeinterface==0.104.7`). `figpack-spike-sorting` is `0.1.x` beta and its `SortingCuration` kwargs already drifted from SpikeInterface's figpack backend, so do not ship a `>=` range; loosen only after re-verifying the API and round trip on a newer release. Do not add these to core Spyglass dependencies.
 
 - **Extend the canonical v2 notebook**: update
   `notebooks/10_Spike_SortingV2.ipynb`. Do **not** create another competing

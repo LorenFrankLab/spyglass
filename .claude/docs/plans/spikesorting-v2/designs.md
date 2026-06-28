@@ -1625,6 +1625,8 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 - `FigPackCurationSelection` identity includes `figpack_config_hash` over label options, requested metrics, upload mode, and ephemeral mode, not only `CurationV2`.
 - `FigPackCuration.make()` may only call the FigPack API verified in Phase 5; if edited curation state cannot be fetched, Phase 5 stops instead of shipping a degraded UI.
+- **Analyzer extensions.** `make()`/`build_curation_view()` load the analyzer via `Sorting().get_analyzer(...)`, whose base set is only `random_spikes`/`noise_levels`/`templates`/`waveforms`. The curation view additionally needs `spike_amplitudes`/`correlograms`/`unit_locations`/`template_similarity`, so the builder must ensure them on top via the existing `Sorting.add_extensions`/`ensure_extensions` surface (not assume they are present). Build the `SortingCuration` control directly (`default_label_options=`); do **not** call `plot_sorting_summary(curation=True)` (released-version kwarg drift, see [figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md)).
+- **Cloud upload is NOT yet verified — durability gate.** Phase 5a verified only the offline round trip. A persisted `figpack_uri` that is both durable and editable requires the hosted/cloud path (the offline local-server URL is process-ephemeral; `view.save()` is durable but read-only with no annotation server). So `make()` must gate `upload=True` on `FIGPACK_API_KEY` and raise a clear error if absent, and Phase 5b must add a cloud smoke (PUT/GET `annotations.json` on a hosted figure) before trusting `upload=True` as the stored-URI path. The `upload=True` default in `insert_selection` carries this unverified-cloud caveat until that smoke lands.
 
 ---
 
