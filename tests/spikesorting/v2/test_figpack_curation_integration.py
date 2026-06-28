@@ -196,3 +196,70 @@ def test_upload_of_labeled_curation_rejected(planted_two_unit_sort):
     with pytest.raises(FigPackUploadError):
         FigPackCuration.build_curation_view(labeled, upload=True)
     clear_curations_for(planted_two_unit_sort)
+
+
+def test_fetch_from_nonexistent_local_path_fails_closed():
+    """A missing/typoed local figure path raises, not look like 'no edits'."""
+    from spyglass.spikesorting.v2.exceptions import FigPackRetrievalError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    with pytest.raises(FigPackRetrievalError):
+        FigPackCuration.fetch_curation_from_uri(
+            "/tmp/figpack_does_not_exist_xyz/figure"
+        )
+
+
+def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
+    """A selection bypassing insert_selection is re-validated at populate time."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2._figpack_curation import (
+        default_label_options,
+        figpack_config_hash,
+    )
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        FigPackCurationNamespaceError,
+    )
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    clear_curations_for(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    merged = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort,
+        merge_groups=[unit_ids[:2]],
+        apply_merge=True,
+    )
+    label_options = default_label_options()
+    config_hash = figpack_config_hash(
+        sorting_id=merged["sorting_id"],
+        curation_id=merged["curation_id"],
+        label_options=label_options,
+        metrics=[],
+        upload=False,
+        ephemeral=False,
+    )
+    identity = {**merged, "figpack_config_hash": config_hash}
+    figpack_id = deterministic_id("figpack_curation", identity)
+    # Bypass insert_selection's guard via the documented escape hatch.
+    FigPackCurationSelection.insert1(
+        {
+            **identity,
+            "figpack_curation_id": figpack_id,
+            "label_options": label_options,
+            "metrics": [],
+            "upload": False,
+            "ephemeral": False,
+        },
+        allow_direct_insert=True,
+    )
+    with pytest.raises(FigPackCurationNamespaceError):
+        FigPackCuration.populate({"figpack_curation_id": figpack_id})
+    clear_curations_for(planted_two_unit_sort)

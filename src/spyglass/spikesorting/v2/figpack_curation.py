@@ -161,9 +161,15 @@ def _load_annotations_json(uri: str) -> dict:
                 f"Malformed annotations at {annotations_url}: {exc}."
             ) from exc
 
-    path = Path(base) / "annotations.json"
+    figure_dir = Path(base)
+    if not figure_dir.exists():
+        raise FigPackRetrievalError(
+            f"FigPack figure path does not exist: {figure_dir}. Refusing to "
+            "treat a missing/typoed figure as having no edits."
+        )
+    path = figure_dir / "annotations.json"
     if not path.exists():
-        return {}
+        return {}  # existing figure dir, never edited == pristine
     try:
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
@@ -273,6 +279,28 @@ def _curation_matches_raw_namespace(curation_key: dict) -> bool:
         for unit_id in (CurationV2.Unit & curation_key).fetch("unit_id")
     }
     return curated == raw
+
+
+def _assert_figpack_curatable(curation_key: dict) -> None:
+    """Assert a curation is committed and in the raw-sort unit namespace.
+
+    Enforced at BOTH ``insert_selection`` (early, friendly) and ``make`` (the
+    integrity boundary): ``SelectionMasterInsertGuard`` has an
+    ``allow_direct_insert`` escape hatch, so a row bypassing ``insert_selection``
+    must still be re-validated before the view is built -- otherwise a preview or
+    merged-namespace curation could render the raw-sort namespace. Mirrors
+    ``CurationEvaluation.make_fetch`` re-asserting its preview guard.
+    """
+    CurationV2.assert_committed_curation(
+        curation_key, context="FigPackCuration"
+    )
+    if not _curation_matches_raw_namespace(curation_key):
+        raise FigPackCurationNamespaceError(
+            "FigPack curation of a merged curation (or a label-only child of a "
+            "merged curation) is not yet supported: the view renders the raw "
+            "sort's unit namespace, not this curation's units. "
+            f"curation_key={curation_key}. Curate the root curation instead."
+        )
 
 
 def _existing_curation_state(curation_key: dict) -> tuple[dict, list]:
@@ -423,16 +451,7 @@ class FigPackCurationSelection(
             "sorting_id": curation_key["sorting_id"],
             "curation_id": curation_key["curation_id"],
         }
-        CurationV2.assert_committed_curation(
-            parent_key, context="FigPackCuration"
-        )
-        if not _curation_matches_raw_namespace(parent_key):
-            raise FigPackCurationNamespaceError(
-                "FigPack curation of a merged curation (or a label-only child of "
-                "a merged curation) is not yet supported: the view renders the "
-                "raw sort's unit namespace, not this curation's units. "
-                f"curation_key={parent_key}. Curate the root curation instead."
-            )
+        _assert_figpack_curatable(parent_key)
         # ``ephemeral`` only affects a hosted upload; offline it is inert, so
         # normalize it to False so it cannot fork the content-addressed identity.
         if not upload:
@@ -537,6 +556,11 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         }
         label_options = list(selection["label_options"])
         upload = bool(selection["upload"])
+
+        # Re-validate at the integrity boundary: insert_selection's guard is
+        # bypassable (allow_direct_insert), so a row over a preview / merged-
+        # namespace curation must be rejected here before any view is built.
+        _assert_figpack_curatable(curation_key)
 
         seed_labels, seed_merges = _existing_curation_state(curation_key)
         if upload and (seed_labels or seed_merges):
