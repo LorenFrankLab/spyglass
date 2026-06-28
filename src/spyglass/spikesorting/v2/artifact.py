@@ -1006,12 +1006,21 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             Recording().get_recording({"recording_id": rid})
             for rid in member_recording_ids
         ]
-        # ``aggregate_channels`` column-stacks along the channel
-        # axis (column = channel). All members must share the same
-        # n_samples + fs + dtype, which the same-session check at
-        # ``insert_group`` guarantees -- members live in one
-        # ``nwb_file_name`` so their time axes match by
-        # construction.
+        # ``aggregate_channels`` column-stacks along the channel axis (column =
+        # channel). All members must share session + n_samples + fs + dtype +
+        # timestamps, which ``insert_group`` enforces -- but a direct insert of
+        # a SharedGroupSource part can bypass that, so re-assert the invariants
+        # over the loaded recordings here and raise ``SchemaBypassError`` rather
+        # than letting ``aggregate_channels`` build a silently-wrong union.
+        from spyglass.spikesorting.v2._shared_artifact_group import (
+            assert_shared_group_recordings_aggregatable,
+        )
+
+        assert_shared_group_recordings_aggregatable(
+            per_member_recordings,
+            member_recording_ids,
+            member_nwb_file_names,
+        )
         unioned = si.aggregate_channels(per_member_recordings)
         valid_times = self._detect_artifacts(
             unioned,

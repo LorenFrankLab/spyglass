@@ -72,3 +72,65 @@ def test_validate_shared_group_members_rejects_differing_sampling_frequency():
                 {"nwb_file_name": "s.nwb", "sampling_frequency": 20000.0},
             ]
         )
+
+
+# --------------------------------------------------------------------------- #
+# Compute-boundary re-assertion of the channel-aggregation invariants.
+#
+# ``ArtifactDetection.make_compute`` aggregates the shared-group members with
+# ``si.aggregate_channels``; a direct insert of a SharedGroupSource part can
+# bypass ``insert_group``'s check, so the same invariants (one session, fs,
+# n_samples, dtype, timestamp vector) are re-asserted over the loaded
+# recordings and raise ``SchemaBypassError`` on a corrupted member set.
+# --------------------------------------------------------------------------- #
+
+
+def _np_recording(n_samples, fs, dtype="float32", channel_ids=(1, 2)):
+    import numpy as np
+    import spikeinterface as si
+
+    return si.NumpyRecording(
+        [np.zeros((n_samples, len(channel_ids)), dtype=dtype)],
+        sampling_frequency=fs,
+        channel_ids=list(channel_ids),
+    )
+
+
+def test_assert_shared_group_aggregatable_accepts_matching_members():
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        assert_shared_group_recordings_aggregatable,
+    )
+
+    a = _np_recording(100, 30000.0)
+    b = _np_recording(100, 30000.0)
+    assert_shared_group_recordings_aggregatable(
+        [a, b], ["r1", "r2"], ["s.nwb", "s.nwb"]
+    )  # no raise
+
+
+@pytest.mark.parametrize(
+    "make_second,nwb_names,match",
+    [
+        (lambda: _np_recording(100, 20000.0), ["s.nwb", "s.nwb"], "sampling"),
+        (lambda: _np_recording(50, 30000.0), ["s.nwb", "s.nwb"], "sample"),
+        (
+            lambda: _np_recording(100, 30000.0, dtype="int16"),
+            ["s.nwb", "s.nwb"],
+            "dtype",
+        ),
+        (lambda: _np_recording(100, 30000.0), ["s.nwb", "b.nwb"], "session"),
+    ],
+)
+def test_assert_shared_group_aggregatable_rejects_bypass(
+    make_second, nwb_names, match
+):
+    from spyglass.spikesorting.v2._shared_artifact_group import (
+        assert_shared_group_recordings_aggregatable,
+    )
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    a = _np_recording(100, 30000.0)
+    with pytest.raises(SchemaBypassError, match=match):
+        assert_shared_group_recordings_aggregatable(
+            [a, make_second()], ["r1", "r2"], nwb_names
+        )
