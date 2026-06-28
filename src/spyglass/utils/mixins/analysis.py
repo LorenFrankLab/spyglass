@@ -308,14 +308,27 @@ class AnalysisMixin(BaseMixin):
         with h5py.File(nwb_file_path, "a") as f:
             f["/general/source_script"][()] = self._logged_env_info()
 
+    _ENV_CAPTURE_UNAVAILABLE = "environment capture unavailable (conda absent)"
+
     def _logged_env_info(self) -> str:
         """Get the environment information for logging."""
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        python_env = subprocess.check_output(
-            ["conda", "env", "export"], text=True
-        )
+        try:
+            python_env = subprocess.check_output(
+                ["conda", "env", "export"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as err:
+            # conda-less / uv-only environments cannot export a conda env;
+            # record a marker rather than aborting the NWB write.
+            self._logger.warning(
+                f"Could not capture conda environment ({err}); recording an "
+                "'environment capture unavailable' marker instead."
+            )
+            python_env = self._ENV_CAPTURE_UNAVAILABLE
         env_info += python_env
         return env_info
 
