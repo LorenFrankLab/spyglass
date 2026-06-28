@@ -977,8 +977,12 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     # Secondary provenance, never identity.
 
     # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
-    # DB transaction. make_compute does NO DB I/O: every DB input is resolved in
-    # make_fetch and threaded through the carrier.
+    # DB transaction. make_compute resolves no DB INPUTS: every upstream input
+    # is read in make_fetch and threaded through the carrier (no get_sorting /
+    # get_analyzer in compute). It does still stage its OUTPUT through
+    # AnalysisNwbfile().create()/get_abs_path() -- the same off-transaction
+    # write every v2 make_compute uses (Recording / Sorting /
+    # ConcatenatedRecording) -- keeping the heavy NWB write off the commit txn.
     _parallel_make = True
 
     def make_fetch(self, key) -> CurationEvaluationFetched:
@@ -1203,9 +1207,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     ) -> CurationEvaluationComputed:
         """Compute metrics / merges / labels over the committed curation.
 
-        NO DB I/O (tri-part contract): the recording + raw / curated sortings
-        are reconstructed from the threaded inputs, never via
+        No DB INPUT resolution (tri-part contract): the recording + raw /
+        curated sortings are reconstructed from the threaded inputs, never via
         ``CurationV2.get_sorting`` / ``Sorting.get_analyzer`` (both DB-backed).
+        The only DB touch is staging the OUTPUT artifact via
+        ``AnalysisNwbfile().create()`` / ``get_abs_path()`` -- the standard v2
+        off-transaction write (identical to ``Recording`` / ``Sorting`` /
+        ``ConcatenatedRecording`` ``make_compute``) that keeps the heavy NWB
+        write outside the commit transaction.
         """
         import tempfile
         from pathlib import Path
