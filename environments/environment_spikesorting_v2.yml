@@ -12,10 +12,10 @@
 #    (run from the repo root; the env file installs the package editable
 #    from the repo root via the `../` path in the pip section).
 # 2. Activate: `conda activate spyglass_spikesorting_v2`
-# 3. SpikeInterface is pinned to 0.104 by the pip section below. If you
+# 3. SpikeInterface is pinned to 0.104.3 by the pip section below. If you
 #    need to (re)install the package + extras by hand:
 #       pip install -e ".[test,spikesorting-v2,spikesorting-v2-validation]"
-#       pip install "spikeinterface>=0.104,<0.105"
+#       pip install "spikeinterface==0.104.3"
 #    (The CI `pytest-v2` job creates this same env from this file, so it
 #    also installs `spikesorting-v2-validation` -- MEArec + neuroconv are
 #    needed for `_read_ground_truth`, `test_mearec_fixture_gain_required`,

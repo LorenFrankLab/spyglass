@@ -985,7 +985,10 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             ),
         ]
 
-        analysis_file_name = AnalysisNwbfile().create(anchor_nwb_file_name)
+        analysis_file_name = AnalysisNwbfile().create(
+            anchor_nwb_file_name,
+            restrict_permission=True,  # 0o644, not world-writable 0o666
+        )
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         try:
             if len(member_plan) < 2:

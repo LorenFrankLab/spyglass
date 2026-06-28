@@ -106,6 +106,59 @@ def test_local_sorter_scratch_not_world_writable(monkeypatch):
 # --------------------------------------------------------------------------
 
 
+def test_all_v2_writers_restrict_permission():
+    """Every ``AnalysisNwbfile().create(...)`` in the v2 package passes
+    ``restrict_permission=True``.
+
+    ``AnalysisNwbfile.create`` defaults to world-writable ``0o666``; a v2 writer
+    that forgets the flag silently ships a world-writable artifact. This static
+    guard covers all writers (Recording / Sorting units / CurationEvaluation /
+    UnitMatch) -- present and future -- without populating each artifact type.
+    """
+    import ast
+    from pathlib import Path
+
+    v2_dir = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "spyglass"
+        / "spikesorting"
+        / "v2"
+    )
+    offenders = []
+    for py in sorted(v2_dir.rglob("*.py")):
+        for node in ast.walk(ast.parse(py.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            obj = getattr(func, "value", None)
+            is_create = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "create"
+                and isinstance(obj, ast.Call)
+                and isinstance(obj.func, ast.Name)
+                and obj.func.id == "AnalysisNwbfile"
+            )
+            if not is_create:
+                continue
+            rp = next(
+                (kw for kw in node.keywords if kw.arg == "restrict_permission"),
+                None,
+            )
+            if not (
+                rp is not None
+                and isinstance(rp.value, ast.Constant)
+                and rp.value.value is True
+            ):
+                offenders.append(f"{py.name}:{node.lineno}")
+
+    assert not offenders, (
+        "v2 AnalysisNwbfile().create() call(s) missing "
+        f"restrict_permission=True (artifacts would be world-writable): "
+        f"{offenders}"
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.usefixtures("dj_conn")
 def test_v2_artifacts_not_world_writable(populated_sorting):

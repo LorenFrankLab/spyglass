@@ -1221,7 +1221,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         )
 
         spikeinterface_version = si.__version__
-        analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
+        analysis_file_name = AnalysisNwbfile().create(
+            nwb_file_name,
+            restrict_permission=True,  # 0o644, not world-writable 0o666
+        )
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         wants_pc = (not skip_pc_metrics) and bool(
             _requested_pc_metrics(metric_names)
