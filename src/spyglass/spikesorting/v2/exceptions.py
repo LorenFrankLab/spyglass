@@ -225,6 +225,17 @@ class ZeroUnitAnalyzerError(RuntimeError):
     """
 
 
+class FigPackUploadError(RuntimeError):
+    """Raise when a FigPack hosted upload is requested without credentials.
+
+    ``FigPackCuration`` was asked to publish a hosted figpack.org figure
+    (``upload=True``) but ``FIGPACK_API_KEY`` is unset and the figure is not
+    ``ephemeral``. Message points the caller at setting the API key, using
+    ``ephemeral=True`` for a temporary figure, or ``upload=False`` to save a
+    local bundle instead.
+    """
+
+
 class AnalyzerFolderMissingError(RuntimeError):
     """Raise when a no-rebuild analyzer load finds the folder absent.
 

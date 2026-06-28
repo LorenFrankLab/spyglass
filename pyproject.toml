@@ -149,6 +149,18 @@ optional-dependencies.spikesorting-v2-matching = [
   "UnitMatchPy>=3.2.6,<3.2.8",
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports
 ]
+optional-dependencies.spikesorting-v2-curation = [
+  # FigPack web-based curation UI for v2 sorts. EXACT pins: figpack-spike-sorting
+  # is pre-1.0 (0.1.x) and its ``SortingCuration`` kwargs already drifted from
+  # SpikeInterface's figpack backend (SI passes ``label_choices=``, the extension
+  # expects ``default_label_options=``; figpack_curation builds the curation
+  # control directly to work around it). Verified combo: figpack 0.3.20 +
+  # figpack-spike-sorting 0.1.14 + spikeinterface 0.104.x (see
+  # tests/spikesorting/v2/resolver/figpack-runtime.md). Loosen only after
+  # re-verifying the API and curation round trip on a newer release.
+  "figpack==0.3.20",
+  "figpack-spike-sorting==0.1.14",
+]
 optional-dependencies.spikesorting-v2-validation = [
   "MEArec>=1.9",       # ground-truth simulated recordings
   "neuroconv[mearec]", # MEArec -> NWB conversion
