@@ -332,6 +332,15 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
     both from the row and raise ``SchemaBypassError`` on mismatch, mirroring the
     consume-time hash recheck the other v2 content-addressed selections do.
     """
+    # insert_selection normalizes ephemeral to False when offline, so an
+    # offline + ephemeral row can only come from a raw-insert bypass.
+    if not bool(selection["upload"]) and bool(selection["ephemeral"]):
+        raise SchemaBypassError(
+            f"FigPackCurationSelection {key['figpack_curation_id']} has "
+            "upload=False with ephemeral=True (inert offline; insert_selection "
+            "normalizes it away). This is a raw-insert bypass -- drop the row "
+            "and re-insert via insert_selection()."
+        )
     expected_hash = figpack_config_hash(
         sorting_id=selection["sorting_id"],
         curation_id=selection["curation_id"],

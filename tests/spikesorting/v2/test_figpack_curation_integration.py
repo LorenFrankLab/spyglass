@@ -258,6 +258,50 @@ def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
         FigPackCuration.populate({"figpack_curation_id": figpack_id})
 
 
+def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
+    """A bypassed upload=False + ephemeral=True row is refused (inert flag)."""
+    from spyglass.spikesorting.v2._figpack_curation import (
+        default_label_options,
+        figpack_config_hash,
+    )
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+
+    label_options = default_label_options()
+    # Hash/id computed FOR the offline+ephemeral combo, so the hash/id rechecks
+    # pass and the offline-ephemeral invariant is what fires.
+    config_hash = figpack_config_hash(
+        sorting_id=populated_sorting_with_curation["sorting_id"],
+        curation_id=populated_sorting_with_curation["curation_id"],
+        label_options=label_options,
+        metrics=[],
+        upload=False,
+        ephemeral=True,
+    )
+    identity = {
+        **populated_sorting_with_curation,
+        "figpack_config_hash": config_hash,
+    }
+    figpack_id = deterministic_id("figpack_curation", identity)
+    FigPackCurationSelection.insert1(
+        {
+            **identity,
+            "figpack_curation_id": figpack_id,
+            "label_options": label_options,
+            "metrics": [],
+            "upload": False,
+            "ephemeral": True,
+        },
+        allow_direct_insert=True,
+    )
+    with pytest.raises(SchemaBypassError):
+        FigPackCuration.populate({"figpack_curation_id": figpack_id})
+
+
 def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
     """A selection bypassing insert_selection is re-validated at populate time."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
