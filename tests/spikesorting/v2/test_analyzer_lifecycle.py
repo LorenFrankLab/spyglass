@@ -404,10 +404,13 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 def test_rebuild_publishes_into_temp_not_canonical(
     populated_sorting, monkeypatch
 ):
-    """A rebuild builds into a private ``.publish`` temp folder and publishes
-    it into the slot -- it NEVER writes the build straight into the canonical
-    path (no ``overwrite=True`` into the live folder a reader might load)."""
+    """A rebuild builds into a private HIDDEN SIBLING ``.zarr`` of the canonical
+    slot and publishes it into the slot -- it NEVER writes the build straight
+    into the canonical path (no ``overwrite=True`` into the live folder a reader
+    might load), and the sibling location keeps the analyzer's recording path
+    valid through the move."""
     import shutil
+    from pathlib import Path
 
     import spikeinterface as si
 
@@ -432,8 +435,13 @@ def test_rebuild_publishes_into_temp_not_canonical(
         Sorting().get_analyzer(populated_sorting)  # rebuild via the publisher
         assert folder.exists(), "rebuild must publish the canonical folder"
         assert built_folders, "rebuild must build an analyzer"
-        assert all(".publish" in f for f in built_folders), built_folders
-        assert all(str(folder) != f for f in built_folders), built_folders
+        # Each build targets a hidden ``.zarr`` sibling of the canonical slot,
+        # never the canonical path itself.
+        for built in built_folders:
+            built_path = Path(built)
+            assert built_path.name.startswith("."), built
+            assert built_path.parent == folder.parent, built
+            assert built != str(folder), built
     finally:
         if not folder.exists():
             try:
@@ -442,24 +450,24 @@ def test_rebuild_publishes_into_temp_not_canonical(
                 pass
 
 
-def test_find_orphaned_skips_publish_staging(dj_conn):
-    """The hidden ``.publish`` staging dir (where the atomic publisher builds
-    and moves-aside) is skipped by the orphan scan -- an in-flight build must
-    not be reported as a stray analyzer folder."""
+def test_find_orphaned_skips_hidden_staging(dj_conn):
+    """A hidden ``.zarr`` staging sibling (where the atomic publisher builds /
+    moves-aside) is skipped by the orphan scan -- an in-flight build must not be
+    reported as a stray analyzer folder."""
     import shutil
 
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
     analyzer_root = analyzer_path("x", _DISPLAY).parent
-    staging = analyzer_root / ".publish"
-    (staging / "build-staging-probe").mkdir(parents=True, exist_ok=True)
+    analyzer_root.mkdir(parents=True, exist_ok=True)
+    staging = analyzer_root / f".staging_probe__{_DISPLAY}.build-1.zarr"
+    staging.mkdir(parents=True, exist_ok=True)
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
-        assert not any(".publish" in p for p in report["disk_side"]), (
-            "the hidden .publish staging dir must be skipped by the orphan "
-            "scan, not flagged as a disk-side orphan"
-        )
+        assert not any(
+            str(staging) == p or staging.name in p for p in report["disk_side"]
+        ), "a hidden staging sibling must be skipped by the orphan scan"
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

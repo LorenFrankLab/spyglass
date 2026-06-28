@@ -323,8 +323,9 @@ class TestPublishAnalyzerAtomically:
         return build_into
 
     def _staging_is_empty(self, canonical):
-        staging = canonical.parent / ".publish"
-        return not staging.exists() or not any(staging.iterdir())
+        # The build/trash siblings are hidden ``.{stem}.build|trash-*.zarr``
+        # folders next to the canonical slot; none should survive a publish.
+        return not any(canonical.parent.glob(f".{canonical.stem}.*"))
 
     def test_absent_canonical_publishes_into_slot(
         self, tmp_path, restore_custom_config
@@ -432,12 +433,14 @@ class TestPublishAnalyzerAtomically:
         assert (canonical / "data.bin").read_text() == "v1"
         assert self._staging_is_empty(canonical)
 
-    def test_staging_lives_in_hidden_subdir(
+    def test_temp_build_is_a_hidden_sibling_of_canonical(
         self, tmp_path, restore_custom_config
     ):
-        """The temp build folder lives under a hidden ``.publish`` subdir of the
-        analyzer root (never a ``{sid}__*.zarr`` sibling), so the orphan scan
-        cannot mistake an in-flight build for a stray analyzer."""
+        """The temp build folder is a HIDDEN ``.zarr`` SIBLING of the canonical
+        slot (same parent directory), so (a) the move preserves the analyzer's
+        recording path, relative to the analyzer folder, and (b) the leading
+        ``.`` keeps the orphan scan from mistaking an in-flight build for a
+        stray ``{sid}__*.zarr`` analyzer."""
         self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         seen = {}
@@ -449,9 +452,48 @@ class TestPublishAnalyzerAtomically:
 
         publish_analyzer_atomically(canonical, _capture)
         temp = seen["temp"]
-        assert ".publish" in temp.parts
-        # temp is root/.publish/build-XXXX/<canonical name>.
-        assert temp.parent.parent == canonical.parent / ".publish"
+        assert temp.parent == canonical.parent, "temp must be a sibling"
+        assert temp.name.startswith("."), "temp must be hidden"
+        assert temp.suffix == ".zarr"
+        assert temp.name != canonical.name
+
+    def test_published_real_analyzer_keeps_its_recording(
+        self, tmp_path, restore_custom_config
+    ):
+        """A real SI zarr analyzer published via the move keeps its recording.
+
+        SI stores the recording reference as a path RELATIVE to the analyzer
+        folder, so the temp build folder MUST be a sibling of the canonical slot
+        -- otherwise the move silently detaches the recording and a later
+        recording-dependent extension (``spike_amplitudes``) cannot compute.
+        This is the regression guard for that detachment (a marker-file
+        ``build_into`` cannot catch it).
+        """
+        self._configure_root(tmp_path)
+        recording, sorting = si.generate_ground_truth_recording(
+            durations=[2.0], num_channels=8, num_units=3, seed=0
+        )
+        # A path-backed recording (like the production NWB-backed one): its
+        # provenance is a path stored relative to the analyzer folder.
+        recording = recording.save(
+            folder=tmp_path / "rec_on_disk", overwrite=True
+        )
+        canonical = analyzer_path("sidR", "rec")
+
+        def build_into(folder):
+            analyzer = si.create_sorting_analyzer(
+                sorting, recording, sparse=True, format="zarr", folder=folder
+            )
+            analyzer.compute(["random_spikes", "templates", "waveforms"])
+
+        publish_analyzer_atomically(canonical, build_into)
+        reloaded = si.load_sorting_analyzer(canonical)
+        assert reloaded.has_recording(), (
+            "the published analyzer lost its recording after the move"
+        )
+        # The recording-dependent extension the detachment bug broke.
+        reloaded.compute(["noise_levels", "spike_amplitudes"])
+        assert self._staging_is_empty(canonical)
 
 
 # --------------------------------------------------------------------------- #
