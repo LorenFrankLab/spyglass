@@ -33,6 +33,7 @@ import re
 import shutil
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 
 # The recipe name is embedded in the analyzer cache folder
@@ -58,6 +59,25 @@ def assert_path_safe_waveform_params_name(name) -> None:
             "cache folder name, so it must match ^[A-Za-z0-9_]+$ (letters, "
             "digits, underscore)."
         )
+
+
+def is_canonical_analyzer_folder_name(name: str) -> bool:
+    """Whether ``name`` is a canonical analyzer-cache folder name.
+
+    Canonical analyzer folders are ``{sorting_id}__{waveform_params_name}.zarr``
+    (see :func:`analyzer_path`): a UUID sorting id, a ``__`` separator, a
+    path-safe recipe name, and the ``.zarr`` suffix. The disk-side orphan sweep
+    uses this to refuse deleting any directory under a (possibly misconfigured)
+    analyzer root that is not a canonical analyzer cache.
+    """
+    if not name.endswith(".zarr") or "__" not in name:
+        return False
+    sorting_id, _, recipe = name[: -len(".zarr")].partition("__")
+    try:
+        uuid.UUID(sorting_id)
+    except ValueError:
+        return False
+    return bool(_WAVEFORM_PARAMS_NAME_RE.match(recipe))
 
 # Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
 # acquisition (the read path taking the lock while the compute path already

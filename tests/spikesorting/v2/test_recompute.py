@@ -1325,3 +1325,19 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
     assert (
         RecordingArtifactRecomputeSelection & {**ver_key, "env_id": env_id}
     ).fetch1("xfail_reason") == "missing_probe_info"
+
+
+def test_negative_days_rejected(dj_conn):
+    """``delete_files`` rejects a negative ``days_since_creation``.
+
+    A negative value moves the age floor into the future, so every artifact --
+    including ones created seconds ago -- would read as old enough to delete.
+    The guard runs at the public entry point, before any DB/filesystem work.
+    """
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    for tbl in (rc.RecordingArtifactRecompute, rc.SortingAnalyzerRecompute):
+        with pytest.raises(
+            ValueError, match="days_since_creation must be >= 0"
+        ):
+            tbl().delete_files(dry_run=True, days_since_creation=-1)

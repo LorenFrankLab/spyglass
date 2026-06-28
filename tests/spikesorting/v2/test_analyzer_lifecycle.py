@@ -1007,3 +1007,52 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
         )
     finally:
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
+def test_is_canonical_analyzer_folder_name():
+    """Only ``{sorting_id}__{recipe}.zarr`` (UUID id + path-safe recipe) names
+    are canonical analyzer-cache folders."""
+    import uuid as uuidlib
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        is_canonical_analyzer_folder_name as canon,
+    )
+
+    sid = str(uuidlib.uuid4())
+    assert canon(f"{sid}__default.zarr")
+    assert canon(f"{sid}__metric_whitened.zarr")  # recipe may contain "_"
+    # Not canonical: missing suffix, missing separator, non-UUID id, bad recipe.
+    assert not canon(f"{sid}__default")
+    assert not canon(f"{sid}.zarr")
+    assert not canon("not_a_uuid__default.zarr")
+    assert not canon("important_user_data")
+    assert not canon(f"{sid}__bad-recipe.zarr")  # '-' not path-safe
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
+    """The disk-side orphan sweep only treats canonical analyzer folders as
+    deletion candidates, so a misconfigured (e.g. shared, non-dedicated)
+    analyzer root cannot lead it to delete unrelated subdirectories."""
+    import uuid as uuidlib
+
+    from spyglass.spikesorting.v2 import _analyzer_cache as ac
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    monkeypatch.setattr(ac, "analyzer_cache_root", lambda: tmp_path)
+
+    # A canonical-named folder with no DB row -> a real disk-side orphan.
+    sid = str(uuidlib.uuid4())
+    canonical = tmp_path / f"{sid}__default.zarr"
+    canonical.mkdir()
+    # A non-analyzer directory that must NEVER be a deletion candidate.
+    unrelated = tmp_path / "important_user_data"
+    unrelated.mkdir()
+
+    result = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+    disk_side = set(result["disk_side"])
+
+    assert str(canonical) in disk_side, "canonical orphan folder must be listed"
+    assert str(unrelated) not in disk_side, (
+        "a non-canonical directory must never be an orphan-deletion candidate"
+    )

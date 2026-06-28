@@ -1977,3 +1977,42 @@ def test_raw_source_series_pinned_to_raw_object_id(
         f"('acquisition/{second_name}'), not the first acquisition series; got "
         f"{captured['electrical_series_path']!r}"
     )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_inplace_writer_does_not_unlink_canonical_on_failure(
+    monkeypatch, tmp_path
+):
+    """A failed in-place rebuild does NOT unlink the canonical artifact.
+
+    The cleanup-on-failure helper must refuse to delete a canonical artifact
+    (``existing_analysis_file_name`` set); only a temp-staged partial
+    (``existing_analysis_file_name is None``) is removed.
+    """
+    import pathlib
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _recording_nwb as rn
+
+    monkeypatch.setattr(
+        AnalysisNwbfile,
+        "get_abs_path",
+        staticmethod(lambda name, from_schema=False: str(tmp_path / name)),
+    )
+
+    canonical = tmp_path / "canonical.nwb"
+    canonical.write_text("canonical artifact")
+    temp = tmp_path / "temp.nwb"
+    temp.write_text("temp partial artifact")
+
+    # In-place rebuild (existing set): canonical must survive.
+    rn._remove_partial_artifact(
+        "canonical.nwb", existing_analysis_file_name="canonical.nwb"
+    )
+    assert (
+        canonical.exists()
+    ), "in-place rebuild must NOT unlink the canonical artifact on failure"
+
+    # Temp-staged rebuild (existing None): the partial temp file is removed.
+    rn._remove_partial_artifact("temp.nwb", existing_analysis_file_name=None)
+    assert not temp.exists(), "temp-staged partial must be cleaned up"

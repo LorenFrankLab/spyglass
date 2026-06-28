@@ -2436,6 +2436,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             analyzer_cache_root,
             analyzer_path,
             classify_orphaned_analyzer_folders,
+            is_canonical_analyzer_folder_name,
         )
 
         # Gather the DB / filesystem facts, then classify (the orphan set logic
@@ -2498,15 +2499,19 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         }
         analyzer_root = analyzer_cache_root()
-        # Skip hidden directories: the atomic publisher's ``.publish`` staging
-        # area (transient build / move-aside folders) lives directly under the
-        # root but is internal scratch, never an analyzer cache, so it must not
-        # be reported as a disk-side orphan.
+        # Only canonical ``{sorting_id}__{recipe}.zarr`` directories are deletion
+        # candidates. Skipping hidden directories excludes the atomic publisher's
+        # ``.publish`` staging scratch; the canonical-name filter additionally
+        # refuses to treat any unrelated subdirectory as an orphan, so a
+        # misconfigured (e.g. shared, non-dedicated) analyzer root cannot lead
+        # the sweep to delete non-analyzer folders.
         disk_dir_paths = (
             [
                 str(c)
                 for c in sorted(analyzer_root.iterdir())
-                if c.is_dir() and not c.name.startswith(".")
+                if c.is_dir()
+                and not c.name.startswith(".")
+                and is_canonical_analyzer_folder_name(c.name)
             ]
             if analyzer_root.exists()
             else []

@@ -89,6 +89,41 @@ def raw_eseries_path_and_timestamp_mode(
     )
 
 
+def _remove_partial_artifact(
+    analysis_file_name: str, existing_analysis_file_name: str | None
+) -> None:
+    """Best-effort cleanup of a partial artifact after a failed write.
+
+    NEVER unlink a canonical artifact. An in-place rebuild
+    (``existing_analysis_file_name`` set) writes to the *canonical* slot, so
+    deleting it on failure would destroy the very artifact being rebuilt; it is
+    left in place. The production rebuild temp-stages
+    (``existing_analysis_file_name is None``), so only that freshly created temp
+    file is removed. The unlink is best-effort -- a cleanup failure is logged,
+    not raised, so it cannot mask the original error.
+    """
+    import pathlib
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.utils import logger
+
+    if existing_analysis_file_name:
+        logger.error(
+            "Recording._write_nwb_artifact: in-place rebuild of canonical "
+            f"artifact {analysis_file_name!r} failed; leaving it in place "
+            "(refusing to unlink a canonical artifact on failure)."
+        )
+        return
+    try:
+        _abs = AnalysisNwbfile.get_abs_path(analysis_file_name, from_schema=False)
+        pathlib.Path(_abs).unlink(missing_ok=True)
+    except Exception as cleanup_exc:  # pragma: no cover -- defensive
+        logger.error(
+            "Recording._write_nwb_artifact: failed to clean up partial "
+            f"analysis file {analysis_file_name!r}: {cleanup_exc!r}"
+        )
+
+
 def write_nwb_artifact(
     recording,
     nwb_file_name: str,
@@ -266,21 +301,9 @@ def write_nwb_artifact(
         )
     except Exception:
         # Any write/hash failure: remove the partial analysis file before
-        # re-raising so a half-written artifact never lingers. The unlink is
-        # best-effort -- a cleanup failure is logged, not raised, so it cannot
-        # mask the original error.
-        try:
-            _abs = AnalysisNwbfile.get_abs_path(
-                analysis_file_name,
-                from_schema=bool(existing_analysis_file_name),
-            )
-            pathlib.Path(_abs).unlink(missing_ok=True)
-        except Exception as cleanup_exc:  # pragma: no cover -- defensive
-            logger.error(
-                "Recording._write_nwb_artifact: failed to clean up "
-                f"partial analysis file {analysis_file_name!r}: "
-                f"{cleanup_exc!r}"
-            )
+        # re-raising so a half-written artifact never lingers -- but NEVER a
+        # canonical artifact (see ``_remove_partial_artifact``).
+        _remove_partial_artifact(analysis_file_name, existing_analysis_file_name)
         raise
 
     return analysis_file_name, object_id, content_hash

@@ -635,6 +635,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         regeneratable artifact (the preprocessed ``AnalysisNwbfile``) is removed
         and ``deleted`` set; ``Recording.get_recording`` rebuilds it on demand.
         """
+        _assert_nonnegative_age(days_since_creation)
         return _delete_files(
             self,
             Recording,
@@ -1063,6 +1064,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         Same current-environment gate as the recording recompute. The deleted
         analyzer folder is regeneratable via ``Sorting.get_analyzer``.
         """
+        _assert_nonnegative_age(days_since_creation)
         return _delete_analyzer_folders(
             self,
             restriction,
@@ -1235,6 +1237,19 @@ def _authorize_artifacts_for_deletion(
                 "(audit-logged)."
             )
     return authorized, matched
+
+
+def _assert_nonnegative_age(days_since_creation: int) -> None:
+    """Reject a negative ``days_since_creation`` at the deletion entry points.
+
+    A negative value moves the age floor into the *future*, so every artifact
+    -- including ones created seconds ago -- would read as old enough to delete.
+    """
+    if days_since_creation < 0:
+        raise ValueError(
+            "days_since_creation must be >= 0; a negative value moves the age "
+            f"floor into the future (got {days_since_creation})."
+        )
 
 
 def _recent_cutoff(days_since_creation: int):
