@@ -1752,6 +1752,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             "sorter_version": sorter_version,
         }
         analysis_file_name, units_object_id = self._stage_sorting_artifact(
+            key=key,
             sorting=sorting_obj,
             recording=recording,
             nwb_file_name=nwb_file_name,
@@ -1848,6 +1849,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             # make_compute -- roll back BOTH on-disk side effects (the staged
             # units NWB and the analyzer folder) before propagating.
             self._cleanup_staged_sorting_artifacts(
+                key=key,
                 analyzer_folder=analyzer_folder,
                 analysis_file_name=analysis_file_name,
             )
@@ -1856,6 +1858,7 @@ class Sorting(SpyglassMixin, dj.Computed):
     def _stage_sorting_artifact(
         self,
         *,
+        key,
         sorting,
         recording,
         nwb_file_name,
@@ -1884,9 +1887,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         except Exception:
             # Mode A cleanup: the analyzer folder exists but the units NWB
-            # write failed; remove it so a half-built scratch dir doesn't leak.
+            # write failed; remove it (if no committed row owns it) so a
+            # half-built scratch dir doesn't leak.
             self._cleanup_staged_sorting_artifacts(
-                analyzer_folder=analyzer_folder
+                key=key, analyzer_folder=analyzer_folder
             )
             raise
 
@@ -1935,22 +1939,33 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
             self._populate_unit_part(unit_rows)
 
-    @staticmethod
+    @classmethod
     def _cleanup_staged_sorting_artifacts(
-        *, analyzer_folder, analysis_file_name=None
+        cls, *, key, analyzer_folder, analysis_file_name=None
     ):
         """Best-effort removal of a sort's on-disk side effects after failure.
 
         Removes the staged units NWB (when ``analysis_file_name`` is given --
-        failure-mode B, registration failed after staging) and the analyzer
-        folder (failure-mode A, the units-NWB write failed after the analyzer
-        was built; or B). Each unlink/rmtree is best-effort: a cleanup failure
-        is logged, never raised, so it cannot mask the original error.
-        DataJoint cannot roll back these filesystem side effects, so the
-        caller invokes this in its ``except`` before re-raising.
+        failure-mode B, registration failed after staging; it is per-attempt and
+        content-addressed, owned by this attempt). The analyzer folder is shared
+        by ``sorting_id`` and is regeneratable, so it is removed ONLY when no
+        committed ``Sorting`` row owns the ``sorting_id`` (a true orphan), under
+        the per-sort ``analyzer_cache_lock``: a concurrent worker that
+        republished the same ``sorting_id`` (``reserve_jobs=False``) must not
+        lose its freshly published analyzer to this failed attempt's cleanup. A
+        folder a committed row owns is left for ``find_orphaned_analyzer_folders``
+        / normal reuse + ``get_analyzer`` self-heal, never deleted here. Each
+        step is best-effort: a cleanup failure is logged, never raised, so it
+        cannot mask the original error. DataJoint cannot roll back these
+        filesystem side effects, so the caller invokes this in its ``except``
+        before re-raising.
         """
         import pathlib
         import shutil
+
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
 
         if analysis_file_name is not None:
             try:
@@ -1962,9 +1977,15 @@ class Sorting(SpyglassMixin, dj.Computed):
                     f"clean up staged units NWB {analysis_file_name!r}: "
                     f"{cleanup_exc!r}"
                 )
+        sorting_id = key["sorting_id"]
         try:
-            if analyzer_folder.exists():
-                shutil.rmtree(analyzer_folder, ignore_errors=False)
+            with analyzer_cache_lock(sorting_id):
+                # A committed row owns the analyzer (this attempt's retry or a
+                # concurrent worker's republish) -> do not delete it.
+                if cls & {"sorting_id": sorting_id}:
+                    return
+                if analyzer_folder.exists():
+                    shutil.rmtree(analyzer_folder, ignore_errors=False)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
                 "Sorting._cleanup_staged_sorting_artifacts: failed to remove "

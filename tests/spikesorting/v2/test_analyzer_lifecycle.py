@@ -597,6 +597,43 @@ def test_make_compute_mode_a_cleanup_on_write_failure(
 
 
 @pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_cleanup_keeps_analyzer_owned_by_committed_sort(populated_sorting):
+    """Failure cleanup must NOT rmtree the canonical analyzer while a committed
+    Sorting row owns it.
+
+    Under concurrent same-``sorting_id`` populate (``reserve_jobs=False``) a
+    stale worker A that published then failed must not delete the analyzer worker
+    B just republished for the now-committed row. The analyzer is shared by
+    ``sorting_id`` and regeneratable, so failure cleanup deletes it only when no
+    Sorting row owns it (a true orphan); otherwise it defers to orphan-sweep.
+    """
+    import shutil
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort_pk = populated_sorting  # a committed Sorting row owns this sorting_id
+    # A placeholder canonical folder at a distinct recipe, so the test never
+    # touches the shared fixture's real (display-recipe) analyzer.
+    folder = analyzer_path(
+        sort_pk["sorting_id"], "placeholder_recipe_for_cleanup_test"
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        Sorting._cleanup_staged_sorting_artifacts(
+            key={"sorting_id": sort_pk["sorting_id"]},
+            analyzer_folder=folder,
+        )
+        assert folder.exists(), (
+            "failure cleanup deleted the canonical analyzer folder while a "
+            "committed Sorting row still owned the sorting_id"
+        )
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+@pytest.mark.slow
 @pytest.mark.integration
 def test_changed_analyzer_root_causes_miss_and_rebuild(
     populated_sorting, restore_custom_config, tmp_path
