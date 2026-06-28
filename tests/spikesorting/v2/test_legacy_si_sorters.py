@@ -111,8 +111,7 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
     monkeypatch.setattr(sis, "get_default_sorter_params", lambda _sorter: {})
     request.addfinalizer(
         lambda: (
-            SorterParameters
-            & {"sorter": fake, "sorter_params_name": "default"}
+            SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
         ).delete(safemode=False)
     )
 

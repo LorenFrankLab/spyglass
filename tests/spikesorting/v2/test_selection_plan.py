@@ -68,9 +68,7 @@ def test_recording_plan_rejects_unknown_field():
     """An extra (joined/fetched) field is rejected, not silently hashed into
     a different recording_id."""
     with pytest.raises(ValueError, match="unknown field"):
-        build_recording_selection_plan(
-            {**_FULL_REC, "analysis_file_name": "x"}
-        )
+        build_recording_selection_plan({**_FULL_REC, "analysis_file_name": "x"})
 
 
 def test_recording_plan_requires_all_identity_fields():
@@ -129,9 +127,7 @@ def test_sorting_plan_with_artifact_normalizes_str_to_uuid():
     the artifact source row; the artifact-backed id differs from the
     artifact-free id for the same (recording, sorter)."""
     base = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}
-    plan = build_sorting_selection_plan(
-        {**base, "artifact_detection_id": _ART}
-    )
+    plan = build_sorting_selection_plan({**base, "artifact_detection_id": _ART})
     assert plan.artifact_detection_id == uuid.UUID(_ART)
     assert plan.artifact_source_row == {
         "sorting_id": plan.sorting_id,
@@ -290,9 +286,7 @@ def test_sorting_plan_supplied_id_mismatch_raises_but_match_ok():
     key = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}
     derived = build_sorting_selection_plan(key).sorting_id
     # The correct id is accepted (no raise) and round-trips.
-    again = build_sorting_selection_plan(
-        {**key, "sorting_id": str(derived)}
-    )
+    again = build_sorting_selection_plan({**key, "sorting_id": str(derived)})
     assert again.sorting_id == derived
     # A wrong id is rejected.
     with pytest.raises(ValueError, match="sorting_id"):
@@ -345,7 +339,10 @@ def test_artifact_plan_recording_and_shared_group_dont_alias():
         {"recording_id": "x", "artifact_detection_params_name": "p"}
     )
     grp = build_artifact_detection_selection_plan(
-        {"shared_artifact_group_name": "x", "artifact_detection_params_name": "p"}
+        {
+            "shared_artifact_group_name": "x",
+            "artifact_detection_params_name": "p",
+        }
     )
     assert rec.artifact_detection_id != grp.artifact_detection_id
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any, Literal, TypeAlias, TypedDict
 from uuid import UUID
 
-
 StageStatus: TypeAlias = Literal["computed", "reused"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
 

@@ -202,9 +202,7 @@ def _plan_sort_groups_by_shank(
                 )
                 # omit_ref_electrode_group: skip the electrode group that
                 # CONTAINS this group's resolved specific reference.
-                if omit_ref_electrode_group and str(ref_group) == str(
-                    e_group
-                ):
+                if omit_ref_electrode_group and str(ref_group) == str(e_group):
                     logger.warning(
                         f"set_group_by_shank: skipping "
                         f"{nwb_file_name!r} electrode group "

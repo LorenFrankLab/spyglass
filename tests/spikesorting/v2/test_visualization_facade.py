@@ -78,9 +78,9 @@ def test_visualization_facade_exports_expected_helpers():
     }
     # Every plotting/export helper is catalogued with a non-empty description.
     catalogued = set(table["name"])
-    assert {n for n in _FACADE_FUNCTIONS if n != "available_visualizations"} <= (
-        catalogued
-    )
+    assert {
+        n for n in _FACADE_FUNCTIONS if n != "available_visualizations"
+    } <= (catalogued)
     assert all(d for d in table["description"])
 
 
@@ -117,9 +117,9 @@ def test_table_delegates_call_facade_if_present(dj_conn):
             f"{method.__qualname__} must delegate to "
             f"visualization.{facade_name}"
         )
-        assert "import spikeinterface" not in source, (
-            f"{method.__qualname__} must not import spikeinterface"
-        )
+        assert (
+            "import spikeinterface" not in source
+        ), f"{method.__qualname__} must not import spikeinterface"
         # No second routing implementation: delegates resolve nothing themselves.
         assert "get_analyzer" not in source
         assert "get_recording" not in source
@@ -139,18 +139,14 @@ def test_recording_plot_traces_calls_si_widget(dj_conn, monkeypatch):
 
     sentinel = object()
     captured = {}
-    monkeypatch.setattr(
-        Recording, "get_recording", lambda self, key: sentinel
-    )
+    monkeypatch.setattr(Recording, "get_recording", lambda self, key: sentinel)
 
     def _fake(*, recording, backend, **kwargs):
         captured.update(recording=recording, backend=backend, kwargs=kwargs)
         return "TRACES"
 
     monkeypatch.setattr(sw, "plot_traces", _fake)
-    out = ssviz.plot_recording_traces(
-        {"recording_id": "r"}, time_range=[0, 1]
-    )
+    out = ssviz.plot_recording_traces({"recording_id": "r"}, time_range=[0, 1])
     assert out == "TRACES"
     assert captured["recording"] is sentinel
     assert captured["backend"] == "matplotlib"
@@ -174,9 +170,7 @@ def test_recording_plot_probe_map_calls_si_widget(dj_conn, monkeypatch):
 
     sentinel = object()
     captured = {}
-    monkeypatch.setattr(
-        Recording, "get_recording", lambda self, key: sentinel
-    )
+    monkeypatch.setattr(Recording, "get_recording", lambda self, key: sentinel)
 
     def _no_analyzer(self, key, waveform_params_name=None):
         raise AssertionError("probe map must not load an analyzer")
@@ -275,8 +269,12 @@ def test_sorting_plot_summary_uses_display_analyzer(dj_conn, monkeypatch):
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer(
-        ["correlograms", "spike_amplitudes", "unit_locations",
-         "template_similarity"]
+        [
+            "correlograms",
+            "spike_amplitudes",
+            "unit_locations",
+            "template_similarity",
+        ]
     )
     wpn = []
     _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
@@ -323,7 +321,9 @@ def test_sorting_plot_summary_missing_extensions_read_only_by_default(
         raise AssertionError("SI widget must not be called on the error path")
 
     monkeypatch.setattr(sw, "plot_sorting_summary", _must_not_call)
-    with pytest.raises(MissingDisplayExtensionError, match="unit_locations") as exc:
+    with pytest.raises(
+        MissingDisplayExtensionError, match="unit_locations"
+    ) as exc:
         ssviz.plot_sorting_summary(
             {"sorting_id": "s"}, backend="spikeinterface_gui"
         )
@@ -423,9 +423,7 @@ def test_sorting_plot_unit_locations_requires_extension_or_opt_in(
 
     fake = _FakeAnalyzer([])
     _patch_display_analyzer(monkeypatch, fake)
-    monkeypatch.setattr(
-        sw, "plot_unit_locations", lambda analyzer, **k: "LOC"
-    )
+    monkeypatch.setattr(sw, "plot_unit_locations", lambda analyzer, **k: "LOC")
 
     # Default: raises naming the missing extension; no compute.
     _forbid_add_extensions(monkeypatch)
@@ -471,7 +469,9 @@ def test_curation_evaluation_plot_metrics_uses_spyglass_metrics_by_default(
     )
 
     def _must_not_call(*a, **k):
-        raise AssertionError("plot_metrics must not call SI plot_quality_metrics")
+        raise AssertionError(
+            "plot_metrics must not call SI plot_quality_metrics"
+        )
 
     monkeypatch.setattr(sw, "plot_quality_metrics", _must_not_call)
     fig = ssviz.plot_metrics({"sorting_id": "s", "curation_id": 0})
@@ -582,9 +582,7 @@ def test_plot_potential_merges_uses_persisted_merge_groups(
     def _must_not_recompute(*a, **k):
         raise AssertionError("plot path must not recompute merge candidates")
 
-    monkeypatch.setattr(
-        sic, "compute_merge_unit_groups", _must_not_recompute
-    )
+    monkeypatch.setattr(sic, "compute_merge_unit_groups", _must_not_recompute)
     fake = _FakeAnalyzer(["spike_amplitudes", "correlograms"])
     _patch_display_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
@@ -594,9 +592,7 @@ def test_plot_potential_merges_uses_persisted_merge_groups(
     captured = {}
 
     def _fake(analyzer, *, potential_merges, backend, **kwargs):
-        captured.update(
-            analyzer=analyzer, potential_merges=potential_merges
-        )
+        captured.update(analyzer=analyzer, potential_merges=potential_merges)
         return "MERGES"
 
     monkeypatch.setattr(sw, "plot_potential_merges", _fake)
@@ -694,7 +690,9 @@ def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
     _forbid_add_extensions(monkeypatch)
 
     def _must_not_export(*a, **k):
-        raise AssertionError("export_report must not run on the read-only error")
+        raise AssertionError(
+            "export_report must not run on the read-only error"
+        )
 
     monkeypatch.setattr(sie, "export_report", _must_not_export)
     with pytest.raises(MissingDisplayExtensionError, match="unit_locations"):
@@ -832,7 +830,9 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
     # The two widgets SI offers no matplotlib backend for default honestly:
     # sorting summary requires an explicit backend, potential-merges is ipywidgets.
     assert (
-        inspect.signature(ssviz.plot_sorting_summary).parameters["backend"].default
+        inspect.signature(ssviz.plot_sorting_summary)
+        .parameters["backend"]
+        .default
         is None
     )
     assert (
@@ -843,9 +843,7 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
     )
 
     # An explicit backend reaches SI unchanged (opt-in only).
-    monkeypatch.setattr(
-        Recording, "get_recording", lambda self, key: object()
-    )
+    monkeypatch.setattr(Recording, "get_recording", lambda self, key: object())
     captured = {}
     monkeypatch.setattr(
         sw,
@@ -869,6 +867,6 @@ def test_schema_modules_do_not_import_visualization_eagerly(dj_conn):
     import spyglass.spikesorting.v2.sorting as srt
 
     for module in (rec, srt, mc):
-        assert not hasattr(module, "visualization"), (
-            f"{module.__name__} imports visualization at module level"
-        )
+        assert not hasattr(
+            module, "visualization"
+        ), f"{module.__name__} imports visualization at module level"

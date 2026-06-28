@@ -235,9 +235,7 @@ def read_merge_suggestions(abs_path: str, object_id: str) -> list[list[int]]:
     return [groups[index] for index in sorted(groups)]
 
 
-def read_proposed_labels(
-    abs_path: str, object_id: str
-) -> dict[int, list[str]]:
+def read_proposed_labels(abs_path: str, object_id: str) -> dict[int, list[str]]:
     """Read proposed labels back to ``{unit_id: [label, ...]}`` (labeled only)."""
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()

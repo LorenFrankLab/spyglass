@@ -441,7 +441,9 @@ def plot_potential_merges(
 
     groups = [
         group
-        for group in CurationEvaluation.get_merge_groups(curation_evaluation_key)
+        for group in CurationEvaluation.get_merge_groups(
+            curation_evaluation_key
+        )
         if len(group) >= 2
     ]
     if not groups:

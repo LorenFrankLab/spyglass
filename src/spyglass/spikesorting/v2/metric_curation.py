@@ -128,6 +128,7 @@ def _pca_params_match(existing: dict) -> bool:
             return False
     return True
 
+
 _AUTO_MERGE_EXTRA_EXTENSIONS = {
     # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
     # required extensions are templates, spike_locations, and spike_amplitudes.
@@ -593,7 +594,13 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     @classmethod
     def _default_payloads(cls) -> list[tuple[dict, list[dict]]]:
         return [
-            ({"auto_curation_rules_name": "none", "auto_merge_preset": "none"}, []),
+            (
+                {
+                    "auto_curation_rules_name": "none",
+                    "auto_merge_preset": "none",
+                },
+                [],
+            ),
             (
                 {
                     "auto_curation_rules_name": "v1_default_nn_noise",
@@ -702,7 +709,10 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             for rule in rules:
                 try:
                     AutoCurationRuleSchema.model_validate(
-                        {k: rule[k] for k in AutoCurationRuleSchema.model_fields}
+                        {
+                            k: rule[k]
+                            for k in AutoCurationRuleSchema.model_fields
+                        }
                     )
                 except Exception as err:  # noqa: BLE001 - report, don't raise
                     offenders.append(
@@ -797,10 +807,8 @@ class CurationEvaluationSelection(
             # source-aware from the source preprocessing recipe (recording or
             # concat). ``[1]`` is the metric element of the (display, metric)
             # pair.
-            preproc = (
-                SortingSelection.resolve_source_preprocessing_params_name(
-                    {"sorting_id": key["sorting_id"]}
-                )
+            preproc = SortingSelection.resolve_source_preprocessing_params_name(
+                {"sorting_id": key["sorting_id"]}
             )
             metric_waveform_params_name = waveform_params_for_preprocessing(
                 preproc
@@ -1141,9 +1149,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             ),
             metric_names=metric_names,
             metric_kwargs=metric_kwargs,
-            template_metric_columns=list(
-                qm["template_metric_columns"] or []
-            ),
+            template_metric_columns=list(qm["template_metric_columns"] or []),
             skip_pc_metrics=bool(qm["skip_pc_metrics"]),
             auto_merge_preset=acr["auto_merge_preset"],
             auto_merge_kwargs=dict(acr["auto_merge_kwargs"] or {}),
@@ -1352,9 +1358,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 compute_key = {"sorting_id": sorting_id}
                 from spyglass.settings import temp_dir as spyglass_temp_dir
 
-                with tempfile.TemporaryDirectory(
-                    dir=spyglass_temp_dir
-                ) as tmp:
+                with tempfile.TemporaryDirectory(dir=spyglass_temp_dir) as tmp:
                     # ``.zarr`` suffix matches the SI zarr store create_sorting_
                     # analyzer writes (SI forces it) so load_sorting_analyzer
                     # resolves the same folder -- same convention as
@@ -2204,9 +2208,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             # params): drop a mismatched extension so it recomputes pinned.
             if metric_analyzer.has_extension("principal_components"):
                 existing_pca = dict(
-                    metric_analyzer.get_extension(
-                        "principal_components"
-                    ).params
+                    metric_analyzer.get_extension("principal_components").params
                 )
                 if not _pca_params_match(existing_pca):
                     logger.warning(

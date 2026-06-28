@@ -243,7 +243,9 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     def _must_not_run(**kwargs):
-        raise AssertionError("run_sorter must not be reached for a local MATLAB row")
+        raise AssertionError(
+            "run_sorter must not be reached for a local MATLAB row"
+        )
 
     monkeypatch.setattr(sis, "run_sorter", _must_not_run)
     rec = si.generate_recording(

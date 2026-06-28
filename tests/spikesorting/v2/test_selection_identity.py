@@ -907,7 +907,10 @@ _MASTER_UPDATE1_CASES = [
     ("spyglass.spikesorting.v2.artifact", "ArtifactDetectionSelection"),
     ("spyglass.spikesorting.v2.sorting", "SortingSelection"),
     ("spyglass.spikesorting.v2.unit_matching", "UnitMatchSelection"),
-    ("spyglass.spikesorting.v2.session_group", "ConcatenatedRecordingSelection"),
+    (
+        "spyglass.spikesorting.v2.session_group",
+        "ConcatenatedRecordingSelection",
+    ),
     ("spyglass.spikesorting.v2.metric_curation", "CurationEvaluationSelection"),
     ("spyglass.spikesorting.v2.curation", "CurationV2"),
     ("spyglass.spikesorting.v2.session_group", "SessionGroup"),

@@ -150,7 +150,9 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
         for mod in backend_modules:
             try:
                 importlib.import_module(mod)
-            except Exception as exc:  # noqa: BLE001 - any import failure disqualifies
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - any import failure disqualifies
                 broken_backends.append(f"{mod} ({type(exc).__name__}: {exc})")
         check(
             "sorter_runtime_available",

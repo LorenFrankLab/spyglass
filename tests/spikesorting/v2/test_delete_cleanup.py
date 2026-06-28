@@ -96,7 +96,13 @@ def planted_sort(dj_conn):
     (Sorting & sort_pk).super_delete(warn=False)
 
     def _plant(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         samples = np.array([500, 1500, 2500, 3500, 4500], dtype=np.int64)
         labels = np.zeros(samples.size, dtype=np.int32)

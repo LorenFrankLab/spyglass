@@ -270,9 +270,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 parents_by_curation[
                     (row["sorting_id"], int(row["curation_id"]))
                 ].add(int(row["parent_unit_id"]))
-            for (sorting_id, curation_id), parent_uids in (
-                parents_by_curation.items()
-            ):
+            for (
+                sorting_id,
+                curation_id,
+            ), parent_uids in parents_by_curation.items():
                 curation_key = {
                     "sorting_id": sorting_id,
                     "curation_id": curation_id,
@@ -887,9 +888,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         for row in (cls.MergeGroup & parent_key).fetch(
             "unit_id", "contributor_unit_id", as_dict=True
         ):
-            parent_raw_contributors.setdefault(
-                int(row["unit_id"]), []
-            ).append(int(row["contributor_unit_id"]))
+            parent_raw_contributors.setdefault(int(row["unit_id"]), []).append(
+                int(row["contributor_unit_id"])
+            )
         parent_labels = cls._labels_by_unit(parent_key)
         return (
             source_units,
@@ -1037,9 +1038,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         merge_group_rows = []
         parent_merge_group_rows = []
-        for kept_uid, parent_contributors in (
-            kept_unit_to_contributors.items()
-        ):
+        for kept_uid, parent_contributors in kept_unit_to_contributors.items():
             kept_uid = int(kept_uid)
             # Raw provenance: union the parent contributors' raw contributors
             # (deduped + sorted) so a unit physically derived from raw N
@@ -1941,7 +1940,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         curation_units = {int(u) for u in (cls.Unit & key).fetch("unit_id")}
         raw_units = {
             int(u)
-            for u in (Sorting.Unit & {"sorting_id": sorting_id}).fetch("unit_id")
+            for u in (Sorting.Unit & {"sorting_id": sorting_id}).fetch(
+                "unit_id"
+            )
         }
         return curation_units == raw_units
 
@@ -2131,12 +2132,16 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # sorts whose RecordingSource recipe matches OR whose
             # ConcatenatedRecordingSource recipe matches. Routing through one
             # family only would silently drop the other.
-            rec_match = SortingSelection.RecordingSource * (
-                RecordingSelection & plan.shared_restriction
-            ).proj()
-            concat_match = SortingSelection.ConcatenatedRecordingSource * (
-                ConcatenatedRecordingSelection & plan.shared_restriction
-            ).proj()
+            rec_match = (
+                SortingSelection.RecordingSource
+                * (RecordingSelection & plan.shared_restriction).proj()
+            )
+            concat_match = (
+                SortingSelection.ConcatenatedRecordingSource
+                * (
+                    ConcatenatedRecordingSelection & plan.shared_restriction
+                ).proj()
+            )
             sort_master = SortingSelection & [
                 rec_match.proj(),
                 concat_match.proj(),

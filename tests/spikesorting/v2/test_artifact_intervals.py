@@ -568,9 +568,9 @@ def test_chunked_artifact_matches_in_memory_reference(
         "Chunked artifact runs diverge from the in-memory reference; the "
         "ChunkRecordingExecutor port changed which frames are flagged."
     )
-    assert np.array_equal(_expand_runs(single), reference), (
-        "Single-chunk pass should reproduce the in-memory reference exactly."
-    )
+    assert np.array_equal(
+        _expand_runs(single), reference
+    ), "Single-chunk pass should reproduce the in-memory reference exactly."
 
 
 def _expand_runs(runs):
@@ -1103,15 +1103,19 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
     fs = 30000.0
     n = 4_000_000  # 32 MB float64 timestamp vector -- clear materialize signal
     path = tmp_path / "lazy_rec.nwb"
-    nwbf = pynwb.NWBFile(
-        "d", "id", datetime(2020, 1, 1, tzinfo=timezone.utc)
-    )
+    nwbf = pynwb.NWBFile("d", "id", datetime(2020, 1, 1, tzinfo=timezone.utc))
     dev = nwbf.create_device("probe")
     grp = nwbf.create_electrode_group("g", "d", "loc", dev)
     for _ in range(2):
         nwbf.add_electrode(
-            x=0.0, y=0.0, z=0.0, imp=0.0, location="loc",
-            filtering="f", group=grp, group_name="g",
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            imp=0.0,
+            location="loc",
+            filtering="f",
+            group=grp,
+            group_name="g",
         )
     region = nwbf.create_electrode_table_region([0, 1], "all")
     ts = np.arange(n, dtype=np.float64) / fs
@@ -1129,7 +1133,8 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
         # recording built OUTSIDE the window (production: get_recording builds
         # it once), re-read per op so get_times()'s caching cannot pollute.
         rec = se.read_nwb_recording(
-            str(path), electrical_series_path="acquisition/es",
+            str(path),
+            electrical_series_path="acquisition/es",
             load_time_vector=True,
         )
         gc.collect()

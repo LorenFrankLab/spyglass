@@ -569,7 +569,9 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_downstream_consumer_reads_applied_merge_unit_set(planted_two_unit_sort):
+def test_downstream_consumer_reads_applied_merge_unit_set(
+    planted_two_unit_sort,
+):
     """An APPLIED-MERGE committed child reaches the decoding consumer surfaces
     with its MERGED unit set (not the pre-merge ids), via SpikeSortingOutput.
 
@@ -596,7 +598,9 @@ def test_downstream_consumer_reads_applied_merge_unit_set(planted_two_unit_sort)
         keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
         if keys:
             for mid in (SpikeSortingOutput.CurationV2 & keys).fetch("merge_id"):
-                (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
         clear_curations_for(planted_two_unit_sort)
 
     _drop_output_and_curations()
@@ -618,7 +622,9 @@ def test_downstream_consumer_reads_applied_merge_unit_set(planted_two_unit_sort)
 
         # get_spike_times: one per-unit array; its length is the merged unit's
         # stored n_spikes (the authoritative post-merge, post-dedup count).
-        spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+        spike_times = SpikeSortingOutput().get_spike_times(
+            {"merge_id": merge_id}
+        )
         assert len(spike_times) == 1
         n_spikes = int(
             (CurationV2.Unit & merged & {"unit_id": merged_uid}).fetch1(

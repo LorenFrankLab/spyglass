@@ -83,9 +83,7 @@ def test_bundle_compute_kwargs_seed_is_authoritative():
         _bundle_compute_kwargs,
     )
 
-    seed, kwargs = _bundle_compute_kwargs(
-        5, {"random_seed": 9, "n_jobs": 2}
-    )
+    seed, kwargs = _bundle_compute_kwargs(5, {"random_seed": 9, "n_jobs": 2})
     assert seed == 5
     assert "random_seed" not in kwargs
     assert kwargs == {"n_jobs": 2}

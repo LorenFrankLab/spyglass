@@ -149,9 +149,7 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
     # as a loud check that masking more than the bound is a misconfiguration --
     # it fails at detection time rather than letting the mask stage expand the
     # complement of a near-empty valid_times per-frame for SI.
-    total_flagged = (
-        int(np.sum(runs[:, 1] - runs[:, 0] + 1)) if runs.size else 0
-    )
+    total_flagged = int(np.sum(runs[:, 1] - runs[:, 0] + 1)) if runs.size else 0
     assert_artifact_frame_fraction(
         total_flagged,
         recording.get_num_samples(segment_index=0),
@@ -312,9 +310,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # small group a sub-1.0 proportion can silently require ALL channels (e.g.
     # 0.7 on a stereotrode -> ceil(1.4)=2 of 2 = 100%). Warn so the realized
     # requirement is visible; the detection math itself is unchanged.
-    n_required = int(
-        np.ceil(validated.proportion_above_threshold * n_channels)
-    )
+    n_required = int(np.ceil(validated.proportion_above_threshold * n_channels))
     if validated.proportion_above_threshold < 1.0 and n_required >= n_channels:
         logger.warning(
             "ArtifactDetection: proportion_above_threshold="
@@ -651,9 +647,9 @@ def read_artifact_removed_intervals(key, as_dict=False):
             "must include 'artifact_detection_id'."
         )
     source = ArtifactDetectionSelection.resolve_source(key)
-    part_rows = (
-        ArtifactDetection.ArtifactRemovedInterval & key
-    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    part_rows = (ArtifactDetection.ArtifactRemovedInterval & key).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    )
     if not part_rows:
         raise ValueError(
             "ArtifactDetection.get_artifact_removed_intervals: "
@@ -745,9 +741,9 @@ def collect_artifact_interval_rows_to_remove(rows):
 
     interval_rows_to_remove = []
     for row in rows:
-        part_rows = (
-            ArtifactDetection.ArtifactRemovedInterval & row
-        ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+        part_rows = (ArtifactDetection.ArtifactRemovedInterval & row).fetch(
+            "nwb_file_name", "interval_list_name", as_dict=True
+        )
         if not part_rows:
             raise ValueError(
                 "ArtifactDetection.delete: "

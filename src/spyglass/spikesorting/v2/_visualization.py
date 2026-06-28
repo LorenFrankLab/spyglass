@@ -250,9 +250,7 @@ def missing_extensions(analyzer, required_extensions) -> list[str]:
     order so the error message and any subsequent compute list are stable.
     """
     return [
-        name
-        for name in required_extensions
-        if not analyzer.has_extension(name)
+        name for name in required_extensions if not analyzer.has_extension(name)
     ]
 
 

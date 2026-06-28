@@ -126,9 +126,7 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
 
     # The two presets differ ONLY by the phase-shift step.
     assert {k: v for k, v in np_params.items() if k != "phase_shift"} == {
-        k: v
-        for k, v in contents["default"].items()
-        if k != "phase_shift"
+        k: v for k, v in contents["default"].items() if k != "phase_shift"
     }
 
 
@@ -825,9 +823,7 @@ def test_curation_v2_nwb_write_outside_transaction():
         return None
 
     # --- The transaction lives in _insert_curation_rows_transaction. ---
-    txn_src = inspect.getsource(
-        CurationV2._insert_curation_rows_transaction
-    )
+    txn_src = inspect.getsource(CurationV2._insert_curation_rows_transaction)
     txn_tree = ast.parse(inspect.cleandoc(txn_src))
     # Find every ``with`` block whose context manager is a
     # ``transaction_or_noop(...)`` call (or attribute thereof).

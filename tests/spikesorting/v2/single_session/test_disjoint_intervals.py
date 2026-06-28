@@ -7,7 +7,6 @@ import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 
-
 # ---------- Boundary-spike round-trip (clip decision gate) -----------------
 
 
@@ -108,7 +107,13 @@ def test_boundary_spike_round_trip_does_not_raise(
     # the artifact-masked recording. ``_run_sorter`` is a
     # ``@staticmethod`` so we patch the class attribute directly.
     def _boundary_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         import spikeinterface as si
 
@@ -274,7 +279,13 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     planted: dict = {}
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         import spikeinterface as si
 
@@ -423,7 +434,13 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
     (Sorting & sort_pk).super_delete(warn=False)
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         import spikeinterface as si
 
@@ -541,15 +558,19 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
     planted = {}
 
     def _two_unit_gap_boundary_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         import spikeinterface as si
 
         ts = np.asarray(recording.get_times())
         fs_local = recording.get_sampling_frequency()
-        k = int(
-            np.flatnonzero(np.diff(ts) > 1.5 / fs_local)[0]
-        )  # chunk1 last
+        k = int(np.flatnonzero(np.diff(ts) > 1.5 / fs_local)[0])  # chunk1 last
         # unit 0: a chunk-1 spike + chunk-1's LAST frame; unit 1: chunk-2's
         # FIRST frame + a later chunk-2 spike. Frames k and k+1 are adjacent
         # but separated by the wall-clock gap.
@@ -954,14 +975,18 @@ def test_disjoint_multi_gap_readback_and_artifact(
     gaps = np.flatnonzero(np.diff(times) > 1.5 / fs)
     assert len(gaps) == 2, f"expected two gaps, found {len(gaps)}"
     k1, k2 = int(gaps[0]), int(gaps[1])  # last frame of chunks 1, 2
-    planted_frames = np.sort(
-        np.array([50, k1 + 10, k2 + 10], dtype=np.int64)
-    )
+    planted_frames = np.sort(np.array([50, k1 + 10, k2 + 10], dtype=np.int64))
     # Sanity: one frame in each chunk.
     assert 50 < k1 and k1 + 10 < k2 and k2 + 10 < times.size
 
     def _planted_run_sorter(
-        sorter, sorter_params, recording, sorting_id, *, job_kwargs=None, execution_params=None
+        sorter,
+        sorter_params,
+        recording,
+        sorting_id,
+        *,
+        job_kwargs=None,
+        execution_params=None,
     ):
         import spikeinterface as si
 

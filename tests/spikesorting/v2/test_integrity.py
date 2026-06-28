@@ -342,11 +342,17 @@ def test_audit_source_part_integrity(populated_sorting):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
         flagged = audit_source_part_integrity(SortingSelection, recording_parts)
-        counts = {row["sorting_id"]: row["source_part_count"] for row in flagged}
+        counts = {
+            row["sorting_id"]: row["source_part_count"] for row in flagged
+        }
 
         assert counts.get(orphan) == 0, "zero-source master not flagged"
-        assert counts.get(ambiguous) == 2, "dual-recording-source master not flagged"
-        assert single not in counts, "clean single-source master wrongly flagged"
+        assert (
+            counts.get(ambiguous) == 2
+        ), "dual-recording-source master not flagged"
+        assert (
+            single not in counts
+        ), "clean single-source master wrongly flagged"
         assert sid_real not in counts, (
             "valid Recording+Artifact sorting wrongly flagged -- the artifact "
             "part must be excluded from the recording-source count"
@@ -364,7 +370,9 @@ def test_audit_source_part_integrity(populated_sorting):
                 ArtifactDetectionSelection.SharedGroupSource,
             ],
         )
-        assert art_id not in {row["artifact_detection_id"] for row in art_flagged}
+        assert art_id not in {
+            row["artifact_detection_id"] for row in art_flagged
+        }
     finally:
         for sid in (orphan, single, ambiguous):
             (SortingSelection & {"sorting_id": sid}).delete(safemode=False)

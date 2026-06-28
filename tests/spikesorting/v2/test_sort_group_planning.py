@@ -179,9 +179,7 @@ def test_plan_by_shank_references_missing_key_raises():
 def test_plan_by_shank_override_pair_forces_mode():
     """`override_pair` forces the mode regardless of configured reference."""
     # Configured ref is -2 (global_median); override forces 'none'.
-    electrodes = _electrodes(
-        [_shank("0", 0, eid, ref=-2) for eid in (1, 2)]
-    )
+    electrodes = _electrodes([_shank("0", 0, eid, ref=-2) for eid in (1, 2)])
     proposed, skipped = _plan_sort_groups_by_shank(
         electrodes,
         electrodes,

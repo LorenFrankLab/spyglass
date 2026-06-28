@@ -543,15 +543,22 @@ def planted_three_unit_sort(dj_conn):
     ):
         samples = np.array(
             [
-                500, 1500, 2500, 3500,  # unit 0
-                700, 1700, 2700, 3700,  # unit 1
-                900, 1900, 2900, 3900,  # unit 2
+                500,
+                1500,
+                2500,
+                3500,  # unit 0
+                700,
+                1700,
+                2700,
+                3700,  # unit 1
+                900,
+                1900,
+                2900,
+                3900,  # unit 2
             ],
             dtype=np.int64,
         )
-        labels = np.array(
-            [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2], dtype=np.int32
-        )
+        labels = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2], dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[labels],

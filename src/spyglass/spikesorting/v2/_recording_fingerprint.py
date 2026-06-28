@@ -81,7 +81,9 @@ def geometry_component_hash(coords) -> str:
 
     import numpy as np
 
-    arr = np.ascontiguousarray(np.asarray(coords, dtype=np.float64).astype("<f8"))
+    arr = np.ascontiguousarray(
+        np.asarray(coords, dtype=np.float64).astype("<f8")
+    )
     if arr.ndim != 2 or arr.shape[1] == 0:
         raise ValueError(
             "geometry_component_hash: expected a (n_channels, n_coords>=1) "

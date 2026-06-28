@@ -74,7 +74,9 @@ KS4_NEUROPIXELS = "franklab_neuropixels_default"
 # Do not conflate them -- tagging the image with the SI release (e.g. 0.104.3)
 # references a non-existent tag and the pull fails.
 MS4_CONTAINER_IMAGE_TAG = "1.0.5"
-MS4_CONTAINER_IMAGE = f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
+MS4_CONTAINER_IMAGE = (
+    f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
+)
 MS4_CONTAINER_SI_VERSION = "0.104.3"
 MS4_SINGULARITY_30KHZ = (
     "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
@@ -312,6 +314,7 @@ _MS4_RATE_PARAMS: dict[int, dict] = {
     30000: {"adjacency_radius": 100.0},
     20000: {"adjacency_radius": 100.0, "clip_size": 27, "detect_interval": 7},
 }
+
 
 def _ms4_singularity_execution_params() -> dict:
     """Validated Singularity execution provenance for the containerized MS4 row.

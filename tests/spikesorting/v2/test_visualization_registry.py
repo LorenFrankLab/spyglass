@@ -152,7 +152,9 @@ def test_missing_extensions_returns_absent_in_order():
 def test_missing_extensions_empty_when_all_present():
     """A fully provisioned analyzer reports nothing missing."""
     analyzer = _FakeAnalyzer(["unit_locations", "correlograms"])
-    assert missing_extensions(analyzer, ("unit_locations", "correlograms")) == []
+    assert (
+        missing_extensions(analyzer, ("unit_locations", "correlograms")) == []
+    )
 
 
 @pytest.mark.unit
@@ -269,8 +271,6 @@ def test_notebook_uses_visualization_facade():
         if cell.get("cell_type") == "code"
     ]
     code = "\n".join(sources)
-    assert (
-        "from spyglass.spikesorting.v2 import visualization as ssviz" in code
-    )
+    assert "from spyglass.spikesorting.v2 import visualization as ssviz" in code
     assert "ssviz.available_visualizations()" in code
     assert "ssviz.plot_" in code

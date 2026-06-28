@@ -72,11 +72,7 @@ _SORT_KEYS = (
 )
 _CURATION_KEYS = ("curation_id",)
 _ALLOWED_KEYS = frozenset(
-    _REC_KEYS
-    + _CONCAT_KEYS
-    + _SHARED_SOURCE_KEYS
-    + _SORT_KEYS
-    + _CURATION_KEYS
+    _REC_KEYS + _CONCAT_KEYS + _SHARED_SOURCE_KEYS + _SORT_KEYS + _CURATION_KEYS
 )
 
 # Sentinel distinguishing "the restriction names no artifact_detection_id"

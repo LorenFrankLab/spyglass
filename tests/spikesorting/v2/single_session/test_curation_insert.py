@@ -433,9 +433,7 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     ):
         return [], {}
 
-    monkeypatch.setattr(
-        _curation_plan, "build_curated_unit_rows", _empty_rows
-    )
+    monkeypatch.setattr(_curation_plan, "build_curated_unit_rows", _empty_rows)
 
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting,

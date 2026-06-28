@@ -85,7 +85,8 @@ def test_concatenated_recording_has_total_duration_s_column():
 @pytest.mark.usefixtures("dj_conn")
 def test_concat_selection_stores_member_set_hash():
     """``ConcatenatedRecordingSelection`` records the folded member-set hash as a
-    secondary attribute (the hash is also folded into ``concat_recording_id``)."""
+    secondary attribute (the hash is also folded into ``concat_recording_id``).
+    """
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
     )
@@ -121,4 +122,6 @@ def test_concat_selection_member_snapshot_part_shape():
         assert column in attrs, column
     assert "member_index" in snapshot.primary_key
     # Frozen snapshot: the only foreign-key parent is its own master.
-    assert snapshot.parents() == [ConcatenatedRecordingSelection.full_table_name]
+    assert snapshot.parents() == [
+        ConcatenatedRecordingSelection.full_table_name
+    ]

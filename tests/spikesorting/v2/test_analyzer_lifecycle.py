@@ -91,9 +91,7 @@ def _record_lock_acquisitions(monkeypatch):
         acquired.append(str(sorting_id))
         return real_lock(sorting_id, **kwargs)
 
-    monkeypatch.setattr(
-        _analyzer_cache, "analyzer_cache_lock", _recording_lock
-    )
+    monkeypatch.setattr(_analyzer_cache, "analyzer_cache_lock", _recording_lock)
     return acquired
 
 
@@ -238,9 +236,9 @@ def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
 
         acquired.clear()
         (Sorting & sort_pk).delete(safemode=False)
-        assert sid in acquired, (
-            "Sorting.delete must acquire the lock around analyzer-cache removal"
-        )
+        assert (
+            sid in acquired
+        ), "Sorting.delete must acquire the lock around analyzer-cache removal"
     finally:
         (SortingSelection & sort_pk).delete(safemode=False)
         if folder.exists():
@@ -286,9 +284,9 @@ def test_get_analyzer_validates_recipe_before_filesystem(
             waveform_params_name=bad_name,
             rebuild=rebuild,
         )
-    assert not reached_filesystem, (
-        "recipe validation must fire before the load/delete path"
-    )
+    assert (
+        not reached_filesystem
+    ), "recipe validation must fire before the load/delete path"
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -784,16 +782,16 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         disk = set(report["disk_side"])
-        assert str(stale_folder) in disk, (
-            "a {sid}__other_recipe.zarr folder must be a disk-side orphan"
-        )
-        assert str(display_folder) not in disk, (
-            "the sort's stored display-recipe folder is referenced, not orphan"
-        )
+        assert (
+            str(stale_folder) in disk
+        ), "a {sid}__other_recipe.zarr folder must be a disk-side orphan"
+        assert (
+            str(display_folder) not in disk
+        ), "the sort's stored display-recipe folder is referenced, not orphan"
         db_ids = {str(r["sorting_id"]) for r in report["db_side"]}
-        assert str(sid) not in db_ids, (
-            "the display folder exists, so the row is not a DB-side orphan"
-        )
+        assert (
+            str(sid) not in db_ids
+        ), "the display folder exists, so the row is not a DB-side orphan"
     finally:
         shutil.rmtree(display_folder, ignore_errors=True)
         shutil.rmtree(stale_folder, ignore_errors=True)
@@ -864,9 +862,9 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
             "a metric folder referenced by CurationEvaluationSelection must be "
             "retained, not swept as a disk-side orphan"
         )
-        assert str(unreferenced) in disk, (
-            "an unreferenced metric folder is a disk-side orphan"
-        )
+        assert (
+            str(unreferenced) in disk
+        ), "an unreferenced metric folder is a disk-side orphan"
         assert str(display_folder) not in disk
     finally:
         for folder in (display_folder, referenced, unreferenced):
@@ -874,8 +872,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                CurationEvaluationSelection
-                & {"curation_evaluation_id": ceid}
+                CurationEvaluationSelection & {"curation_evaluation_id": ceid}
             ).delete_quick()
             (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
         finally:
@@ -1062,6 +1059,6 @@ def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
     disk_side = set(result["disk_side"])
 
     assert str(canonical) in disk_side, "canonical orphan folder must be listed"
-    assert str(unrelated) not in disk_side, (
-        "a non-canonical directory must never be an orphan-deletion candidate"
-    )
+    assert (
+        str(unrelated) not in disk_side
+    ), "a non-canonical directory must never be an orphan-deletion candidate"

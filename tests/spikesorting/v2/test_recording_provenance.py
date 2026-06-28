@@ -147,9 +147,9 @@ def test_recording_nwb_carries_source_provenance(populated_sorting):
         pp_row["params"]
     ).bad_channel_handling
 
-    analysis_file_name = (
-        Recording & {"recording_id": recording_id}
-    ).fetch1("analysis_file_name")
+    analysis_file_name = (Recording & {"recording_id": recording_id}).fetch1(
+        "analysis_file_name"
+    )
     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     prov = read_provenance_values(abs_path, RECORDING_PROVENANCE)
@@ -365,7 +365,9 @@ def _write_electrode_table_nwb(path, electrode_ids, *, channel_names=None):
         name="0", description="test group", location="hpc", device=device
     )
     for eid in electrode_ids:
-        nwbfile.add_electrode(id=int(eid), location="hpc", group=electrode_group)
+        nwbfile.add_electrode(
+            id=int(eid), location="hpc", group=electrode_group
+        )
     if channel_names is not None:
         nwbfile.add_electrode_column(
             name="channel_name",

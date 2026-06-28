@@ -503,9 +503,7 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     return orphans
 
 
-def audit_source_part_integrity(
-    master_table, part_tables: list
-) -> list[dict]:
+def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
     """Return masters whose source-part row count is not exactly one.
 
     Complements :func:`find_orphaned_masters`, which flags only the

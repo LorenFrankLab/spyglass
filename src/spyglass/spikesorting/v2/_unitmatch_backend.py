@@ -40,7 +40,7 @@ from spyglass.spikesorting.v2.matcher_protocol import (
 )
 
 _INSTALL_HINT = (
-    'UnitMatchPy is required for cross-session matching. Install it with '
+    "UnitMatchPy is required for cross-session matching. Install it with "
     '`pip install -e ".[spikesorting-v2-matching]"` (UnitMatchPy>=3.2.6,<3.2.8 '
     "+ mat73). If the import fails on `_tkinter`, the top-level "
     "`import UnitMatchPy` is loading its Tk GUI; run in a Tk-enabled "
@@ -217,7 +217,11 @@ def extract_unitmatch_bundle(
     unit_ids = np.asarray(sorting.get_unit_ids(), dtype=int)
     np.save(session_dir / "channel_positions.npy", channel_positions)
     um.extract_raw_data.save_avg_waveforms(
-        avg_waves, str(session_dir), unit_ids, unit_ids, extract_good_units_only=False
+        avg_waves,
+        str(session_dir),
+        unit_ids,
+        unit_ids,
+        extract_good_units_only=False,
     )
     rows = [np.array(("cluster_id", "group"))] + [
         np.array((str(i), "good")) for i in unit_ids
@@ -345,15 +349,22 @@ class UnitMatchBackend:
 
         session_dirs = [str(s.waveform_dir) for s in session_inputs]
         param["KS_dirs"] = session_dirs
-        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(session_dirs)
+        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
+            session_dirs
+        )
         # get_probe_geometry needs the raw 2-D positions (paths_from_KS prepends
         # a ones column that would collapse the shanks to one).
         param = um.utils.get_probe_geometry(raw_positions, param)
 
-        waveform, session_id, session_switch, within_session, good_units, param = (
-            um.utils.load_good_waveforms(
-                wave_paths, label_paths, param, good_units_only=True
-            )
+        (
+            waveform,
+            session_id,
+            session_switch,
+            within_session,
+            good_units,
+            param,
+        ) = um.utils.load_good_waveforms(
+            wave_paths, label_paths, param, good_units_only=True
         )
         # load_good_waveforms silently DROPS a session whose bundle fails to
         # load (it does not raise). If that happened, the compact session

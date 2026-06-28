@@ -6,7 +6,6 @@ import pytest
 
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
 
-
 # ---------- Tri-part dispatch active smoke gate ---------------------------
 
 

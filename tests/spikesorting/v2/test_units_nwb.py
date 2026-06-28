@@ -303,7 +303,9 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
         str(p_legacy)
     )
     assert samp_l is None
-    assert np.array_equal(abs_l[0], read_units_abs_spike_times(str(p_legacy))[0])
+    assert np.array_equal(
+        abs_l[0], read_units_abs_spike_times(str(p_legacy))[0]
+    )
 
     # (c) empty Units table -> ({}, {}, {})
     p_empty = tmp_path / "empty.nwb"
@@ -507,9 +509,7 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
 
     # The staged orphan was unlinked by the writer's except block.
     assert "name" in staged
-    assert not Path(
-        AnalysisNwbfile.get_abs_path(staged["name"])
-    ).exists()
+    assert not Path(AnalysisNwbfile.get_abs_path(staged["name"])).exists()
 
 
 @pytest.mark.slow

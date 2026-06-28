@@ -153,26 +153,26 @@ def test_get_spike_times_warns_on_preview_merge(
     )
     try:
         SpikeSortingOutput().get_spike_times({"merge_id": preview_id})
-        assert any("apply_merge=False" in s for s in seen), (
-            f"expected a preview-merge warning; got {seen}"
-        )
+        assert any(
+            "apply_merge=False" in s for s in seen
+        ), f"expected a preview-merge warning; got {seen}"
         seen.clear()
         SpikeSortingOutput().get_spike_times({"merge_id": applied_id})
-        assert not any("apply_merge=False" in s for s in seen), (
-            f"applied-merge curation must not warn; got {seen}"
-        )
+        assert not any(
+            "apply_merge=False" in s for s in seen
+        ), f"applied-merge curation must not warn; got {seen}"
         # The warning must follow the merges fetch_nwb actually consumes,
         # including a restriction stored on ``self`` with an empty key (the
         # form the classmethod-on-key warning ignored).
         seen.clear()
         (SpikeSortingOutput & {"merge_id": preview_id}).get_spike_times({})
-        assert any("apply_merge=False" in s for s in seen), (
-            f"self-restricted preview merge must warn; got {seen}"
-        )
+        assert any(
+            "apply_merge=False" in s for s in seen
+        ), f"self-restricted preview merge must warn; got {seen}"
         seen.clear()
         (SpikeSortingOutput & {"merge_id": applied_id}).get_spike_times({})
-        assert not any("apply_merge=False" in s for s in seen), (
-            f"self-restricted applied merge must not warn; got {seen}"
-        )
+        assert not any(
+            "apply_merge=False" in s for s in seen
+        ), f"self-restricted applied merge must not warn; got {seen}"
     finally:
         clear_curations_for(planted_two_unit_sort)

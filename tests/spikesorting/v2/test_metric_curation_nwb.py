@@ -79,7 +79,11 @@ def test_no_labels_omits_column_and_reads_empty(empty_nwb_path):
         {"snr": [5.0, 6.0]}, index=pd.Index([1, 2], name="unit_id")
     )
     qm_oid, ms_oid, pl_oid = _write(
-        empty_nwb_path, metrics, merge_groups=[], labels_by_unit={}, unit_ids=[1, 2]
+        empty_nwb_path,
+        metrics,
+        merge_groups=[],
+        labels_by_unit={},
+        unit_ids=[1, 2],
     )
     assert read_proposed_labels(empty_nwb_path, pl_oid) == {}
     assert read_merge_suggestions(empty_nwb_path, ms_oid) == []
@@ -117,7 +121,11 @@ def test_round_trip_preserves_template_columns(empty_nwb_path):
         index=pd.Index([1, 2], name="unit_id"),
     )
     qm_oid, _, _ = _write(
-        empty_nwb_path, metrics, merge_groups=[], labels_by_unit={}, unit_ids=[1, 2]
+        empty_nwb_path,
+        metrics,
+        merge_groups=[],
+        labels_by_unit={},
+        unit_ids=[1, 2],
     )
     qm = read_quality_metrics(empty_nwb_path, qm_oid)
     assert {

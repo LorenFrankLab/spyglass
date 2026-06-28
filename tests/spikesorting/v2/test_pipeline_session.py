@@ -449,9 +449,7 @@ def test_session_runner_propagates_preflight_warnings(monkeypatch):
 
     def fake_run(*, sort_group_id, **kw):
         if sort_group_id == 2:  # passes preflight, fails mid-run
-            raise PipelineStageError(
-                "sorting", {"recording_id": "r2"}, "boom"
-            )
+            raise PipelineStageError("sorting", {"recording_id": "r2"}, "boom")
         return {"merge_id": f"m{sort_group_id}", "n_units": 1, "warnings": []}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)

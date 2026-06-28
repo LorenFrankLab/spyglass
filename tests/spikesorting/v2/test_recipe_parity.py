@@ -237,9 +237,7 @@ def test_neuropixels_ks4_preset_wiring(dj_conn):
     """The experimental NP preset bundles the AIND-matched KS4 row + no-CAR-conflict notes."""
     from spyglass.spikesorting.v2 import pipeline as pipeline_mod
 
-    preset = pipeline_mod._PIPELINE_PRESETS[
-        "franklab_neuropixels_ks4_2026_06"
-    ]
+    preset = pipeline_mod._PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
     assert preset.sorter == "kilosort4"
     assert preset.sorter_params_name == "franklab_neuropixels_default"
     assert preset.preprocessing_params_name == "default_neuropixels"

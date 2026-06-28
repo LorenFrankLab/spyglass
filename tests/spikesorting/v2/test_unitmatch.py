@@ -170,9 +170,9 @@ def test_derive_tracked_units_partition_no_unit_in_two_groups():
         [a1, a2, b1, b2], edges, threshold=0.5, max_strict_nodes=100
     )
     all_members = [node for tu in tracked for node in tu["members"]]
-    assert len(all_members) == len(set(all_members)), (
-        "a curated unit was assigned to more than one tracked unit"
-    )
+    assert len(all_members) == len(
+        set(all_members)
+    ), "a curated unit was assigned to more than one tracked unit"
     # Every node is covered exactly once (a true partition of the universe).
     assert set(all_members) == {a1, a2, b1, b2}
     # The strongest edge's clique survives whole.
@@ -233,9 +233,7 @@ def test_derive_tracked_units_under_cap_succeeds_strict():
     from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
 
     nodes = [("S", 0, u) for u in range(5)]
-    tracked = derive_tracked_units(
-        nodes, [], threshold=0.5, max_strict_nodes=5
-    )
+    tracked = derive_tracked_units(nodes, [], threshold=0.5, max_strict_nodes=5)
     assert len(tracked) == 5
     assert all(tu["policy_used"] == "strict" for tu in tracked)
 
@@ -426,7 +424,9 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
     # Empty table writes and reads back empty (concrete dtypes, no inference).
     empty_oid = write_pairs_table(_fresh_nwb("empty.nwb"), [])
     assert read_pairs(str(tmp_path / "empty.nwb"), empty_oid) == []
-    assert len(build_pairs_table([]).columns) > 0  # columns exist even when empty
+    assert (
+        len(build_pairs_table([]).columns) > 0
+    )  # columns exist even when empty
 
 
 # --------------------------------------------------------------------------- #
@@ -451,11 +451,19 @@ class _DummyMatcher:
             for right in session_inputs[i + 1 :]:
                 pairs.append(
                     MatchPair(
-                        session_a_sorting_id=str(left.session_key["sorting_id"]),
-                        session_a_curation_id=int(left.session_key["curation_id"]),
+                        session_a_sorting_id=str(
+                            left.session_key["sorting_id"]
+                        ),
+                        session_a_curation_id=int(
+                            left.session_key["curation_id"]
+                        ),
                         unit_a_id=0,
-                        session_b_sorting_id=str(right.session_key["sorting_id"]),
-                        session_b_curation_id=int(right.session_key["curation_id"]),
+                        session_b_sorting_id=str(
+                            right.session_key["sorting_id"]
+                        ),
+                        session_b_curation_id=int(
+                            right.session_key["curation_id"]
+                        ),
                         unit_b_id=0,
                         match_probability=float(params.get("prob", 0.99)),
                     )
@@ -758,8 +766,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
             )
     finally:
         (
-            MatcherParameters
-            & {"matcher_params_name": "other_same_params"}
+            MatcherParameters & {"matcher_params_name": "other_same_params"}
         ).super_delete(warn=False)
         mp._MATCHER_REGISTRY.clear()
         mp._MATCHER_REGISTRY.update(saved_m)
@@ -892,9 +899,9 @@ def _plant_two_unit_sort_on_first_member(grp):
         SortingSelection,
     )
 
-    rec_id = (
-        SortingSelection.RecordingSource & grp["sort_pks"][0]
-    ).fetch1("recording_id")
+    rec_id = (SortingSelection.RecordingSource & grp["sort_pks"][0]).fetch1(
+        "recording_id"
+    )
     two_unit_params = "minirec_ms5_two_unit"
     default_ms5 = (
         SorterParameters
@@ -1040,7 +1047,9 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
         for part in parts:
             if int(part["member_index"]) == 0:
                 part["curation_id"] = preview0["curation_id"]
-        UnitMatchSelection.MemberCuration.insert(parts, allow_direct_insert=True)
+        UnitMatchSelection.MemberCuration.insert(
+            parts, allow_direct_insert=True
+        )
         try:
             with pytest.raises(
                 UnitMatchSelectionIntegrityError, match="apply_merge=False"
@@ -1186,7 +1195,9 @@ def test_insert_selection_rejects_foreign_group_parts_with_matching_hash(
         for m in (SessionGroup.Member & solo_key).fetch(as_dict=True)
     }
     if 0 not in solo_member_indexes:
-        pytest.skip("solo group has no member_index 0 to borrow for the forgery")
+        pytest.skip(
+            "solo group has no member_index 0 to borrow for the forgery"
+        )
 
     pk = UnitMatchSelection.insert_selection(
         grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
@@ -1316,7 +1327,9 @@ def test_make_rechecks_member_provenance(two_session_curated_group):
     )
     try:
         with pytest.raises(UnitMatchSelectionIntegrityError):
-            UnitMatch.populate({"unitmatch_id": unitmatch_id}, reserve_jobs=False)
+            UnitMatch.populate(
+                {"unitmatch_id": unitmatch_id}, reserve_jobs=False
+            )
         assert len(UnitMatch & {"unitmatch_id": unitmatch_id}) == 0
         assert len(UnitMatch.Pair & {"unitmatch_id": unitmatch_id}) == 0
     finally:
@@ -1465,7 +1478,10 @@ def test_degenerate_single_session_zero_pairs(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: grp["choices"][0]}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     row = (UnitMatch & pk).fetch1()
@@ -1598,9 +1614,7 @@ def test_clusterless_unit_semantics_derived_and_warned(
             SessionGroup.create_group(owner, group_name, [member])
 
         assert (
-            CurationV2.get_unit_semantics(
-                {"sorting_id": sort_pk["sorting_id"]}
-            )
+            CurationV2.get_unit_semantics({"sorting_id": sort_pk["sorting_id"]})
             == "clusterless_threshold_crossings"
         )
 
@@ -1647,7 +1661,10 @@ def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: grp["choices"][0]}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     side_a, side_b = grp["choices"][0], grp["choices"][1]
@@ -1657,7 +1674,9 @@ def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
         "session_a_sorting_id": side_a["sorting_id"],
         "session_a_curation_id": side_a["curation_id"],
         "unit_a_id": 10**9,  # no such curated unit
-        "session_b_sorting_id": side_b["sorting_id"],  # member 1: not pinned here
+        "session_b_sorting_id": side_b[
+            "sorting_id"
+        ],  # member 1: not pinned here
         "session_b_curation_id": side_b["curation_id"],
         "unit_b_id": 10**9,
         "match_probability": 0.9,
@@ -1680,14 +1699,15 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: grp["choices"][0]}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: grp["choices"][0]},
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     TrackedUnit.populate(pk, reserve_jobs=False)
 
-    n_matchable = len(
-        CurationV2().get_matchable_unit_ids(grp["choices"][0])
-    )
+    n_matchable = len(CurationV2().get_matchable_unit_ids(grp["choices"][0]))
     tracked = (TrackedUnit & pk).fetch(as_dict=True)
     assert len(tracked) == n_matchable
     for row in tracked:
@@ -1898,7 +1918,10 @@ def test_make_runs_full_matcher_table_path(
         assert (
             len(
                 TrackedUnit.Member
-                & {**selection_pk, "tracked_unit_id": matched[0]["tracked_unit_id"]}
+                & {
+                    **selection_pk,
+                    "tracked_unit_id": matched[0]["tracked_unit_id"],
+                }
             )
             == 2
         )
@@ -1943,8 +1966,7 @@ def test_make_runs_full_matcher_table_path(
             (UnitMatch & selection_pk).super_delete(warn=False)
             (UnitMatchSelection & selection_pk).super_delete(warn=False)
         (
-            MatcherParameters
-            & {"matcher_params_name": "fixture_pairer_params"}
+            MatcherParameters & {"matcher_params_name": "fixture_pairer_params"}
         ).super_delete(warn=False)
         mp._MATCHER_REGISTRY.clear()
         mp._MATCHER_REGISTRY.update(saved_matchers)
@@ -2038,7 +2060,9 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
                 int(row["curation_id"]),
                 int(row["unit_id"]),
             )
-            for row in (UnitMatch.MatchableUnit & selection_pk).fetch(as_dict=True)
+            for row in (UnitMatch.MatchableUnit & selection_pk).fetch(
+                as_dict=True
+            )
         }
         for member_index, choice in accepted_choices.items():
             for unit_id in matchable[member_index]:
@@ -2155,7 +2179,9 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         assert [merged_uid] in seen_unit_ids
         assert (UnitMatch & selection_pk).fetch1("n_pairs") == 1
         pair = (UnitMatch.Pair & selection_pk).fetch1()
-        assert str(pair["session_a_sorting_id"]) == str(merged_choice["sorting_id"])
+        assert str(pair["session_a_sorting_id"]) == str(
+            merged_choice["sorting_id"]
+        )
         assert int(pair["session_a_curation_id"]) == int(
             merged_choice["curation_id"]
         )
@@ -2209,14 +2235,11 @@ def _ground_truth_sorting(nwb_path, sampling_frequency):
             for i, unit in enumerate(gt.id[:])
         }
     times = np.concatenate([trains[u] for u in trains])
-    labels = np.concatenate(
-        [np.full(len(trains[u]), u) for u in trains]
-    )
+    labels = np.concatenate([np.full(len(trains[u]), u) for u in trains])
     order = np.argsort(times)
     return NumpySorting.from_times_and_labels(
         times[order], labels[order], sampling_frequency=sampling_frequency
     )
-
 
 
 def _auc(scores, labels):

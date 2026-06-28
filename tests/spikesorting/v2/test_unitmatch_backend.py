@@ -211,7 +211,9 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     cp_a = tmp_path / "cp_a.npy"
     cp_b = tmp_path / "cp_b.npy"
     np.save(cp_a, np.zeros((4, 2)))
-    np.save(cp_b, np.zeros((8, 2)))  # different channel count -> different probe
+    np.save(
+        cp_b, np.zeros((8, 2))
+    )  # different channel count -> different probe
     inputs = [
         SessionMatcherInput(
             session_key={"sorting_id": "A", "curation_id": 0},
@@ -262,9 +264,7 @@ def test_bundle_geometry_is_2d(tmp_path, monkeypatch):
     recording, sorting = si.generate_ground_truth_recording(
         durations=[2.0], num_channels=8, num_units=3, seed=0
     )
-    recording_3d = recording.set_probe(
-        recording.get_probe().to_3d(axes="xy")
-    )
+    recording_3d = recording.set_probe(recording.get_probe().to_3d(axes="xy"))
     assert recording_3d.get_probe().ndim == 3
 
     backend.extract_unitmatch_bundle(
@@ -412,11 +412,9 @@ def test_match_recovers_planted_correspondences(two_session_inputs):
     # shared GT units keep the same unit_id in both sessions, so a planted
     # correspondence surfaces as the (u, u) pair.
     found = {
-        (p.unit_a_id, p.unit_b_id)
-        for p in pairs
-        if p.match_probability > 0.5
+        (p.unit_a_id, p.unit_b_id) for p in pairs if p.match_probability > 0.5
     }
     recovered = sum(1 for u in shared if (u, u) in found)
-    assert recovered >= len(shared) - 1, (
-        f"recovered only {recovered}/{len(shared)} planted correspondences"
-    )
+    assert (
+        recovered >= len(shared) - 1
+    ), f"recovered only {recovered}/{len(shared)} planted correspondences"

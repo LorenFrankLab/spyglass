@@ -72,6 +72,7 @@ def curation_set_hash(member_choices) -> str:
         json.dumps(ordered, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
+
 #: The only tracked-unit policy shipped today (greedy maximal-clique cover).
 #: Future policies are pure inserts into ``TrackedUnit.policy_used`` -- no
 #: schema migration.
@@ -139,8 +140,14 @@ def canonicalize_match_pairs(
     """
     oriented: dict[tuple, dict] = {}
     for pair in pairs:
-        side_a = (str(pair.session_a_sorting_id), int(pair.session_a_curation_id))
-        side_b = (str(pair.session_b_sorting_id), int(pair.session_b_curation_id))
+        side_a = (
+            str(pair.session_a_sorting_id),
+            int(pair.session_a_curation_id),
+        )
+        side_b = (
+            str(pair.session_b_sorting_id),
+            int(pair.session_b_curation_id),
+        )
         for side in (side_a, side_b):
             if side not in member_index_by_curation:
                 raise ValueError(
@@ -314,7 +321,11 @@ def derive_tracked_units(
 
     cliques = sorted(
         (sorted(clique) for clique in nx.find_cliques(graph)),
-        key=lambda members: (-len(members), -_clique_strength(members), members),
+        key=lambda members: (
+            -len(members),
+            -_clique_strength(members),
+            members,
+        ),
     )
     claimed: set = set()
     tracked: list[dict] = []

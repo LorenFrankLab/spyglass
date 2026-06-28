@@ -40,7 +40,9 @@ def _force_v2_curation_error(monkeypatch, exc):
     ],
     ids=["import_error", "db_safety_runtime_error"],
 )
-def test_unexpected_v2_import_error_is_logged(dj_conn, monkeypatch, caplog, exc):
+def test_unexpected_v2_import_error_is_logged(
+    dj_conn, monkeypatch, caplog, exc
+):
     # Import the probe (declaring spikesorting_merge's schema against the live
     # ``dj_conn`` DB) BEFORE patching, so the patch affects only our direct
     # ``_probe_v2_curation()`` call rather than the module's own load-time one.

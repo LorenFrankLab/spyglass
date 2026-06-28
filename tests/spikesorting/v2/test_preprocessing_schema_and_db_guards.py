@@ -156,9 +156,7 @@ def test_metric_curation_and_recompute_call_db_guard(
 
     from spyglass.spikesorting.v2.utils import _OVERRIDE_ENV
 
-    module = importlib.import_module(
-        f"spyglass.spikesorting.v2.{module_name}"
-    )
+    module = importlib.import_module(f"spyglass.spikesorting.v2.{module_name}")
 
     monkeypatch.delenv(_OVERRIDE_ENV, raising=False)
     monkeypatch.setitem(dj.config, "database.host", "prod.example.org")

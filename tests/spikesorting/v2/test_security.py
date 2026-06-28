@@ -12,7 +12,6 @@ import uuid
 
 import pytest
 
-
 # --------------------------------------------------------------------------
 # Caller-supplied NWB file-name path confinement (DB-free).
 # --------------------------------------------------------------------------
@@ -173,9 +172,9 @@ def test_v2_artifacts_not_world_writable(populated_sorting):
     recording_id = (
         SortingSelection.RecordingSource & populated_sorting
     ).fetch1("recording_id")
-    analysis_file_name = (
-        Recording & {"recording_id": recording_id}
-    ).fetch1("analysis_file_name")
+    analysis_file_name = (Recording & {"recording_id": recording_id}).fetch1(
+        "analysis_file_name"
+    )
     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     mode = stat.S_IMODE(os.stat(abs_path).st_mode)
 

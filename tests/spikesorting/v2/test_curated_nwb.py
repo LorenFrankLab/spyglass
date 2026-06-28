@@ -22,9 +22,7 @@ def _write_units_nwb(path, specs, *, with_obs=True):
     ``with_obs=False`` omits the obs_intervals column (legacy file)."""
     from pynwb import NWBFile, NWBHDF5IO
 
-    nwbf = NWBFile(
-        "s", "i", datetime.datetime.now(datetime.timezone.utc)
-    )
+    nwbf = NWBFile("s", "i", datetime.datetime.now(datetime.timezone.utc))
     for uid, st, obs in specs:
         kwargs = {"spike_times": st, "id": uid}
         if with_obs:
@@ -92,9 +90,7 @@ def test_reader_returns_obs_intervals(tmp_path):
     )
 
     p = tmp_path / "obs.nwb"
-    _write_units_nwb(
-        p, [(0, [0.1], [[0.0, 1.0]]), (1, [0.2], [[0.0, 0.5]])]
-    )
+    _write_units_nwb(p, [(0, [0.1], [[0.0, 1.0]]), (1, [0.2], [[0.0, 0.5]])])
     _abs, _samp, obs = read_units_abs_times_and_sample_indices(str(p))
     assert obs is not None
     np.testing.assert_array_equal(obs[0], [[0.0, 1.0]])
@@ -185,9 +181,9 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
         assert header["parent_curation_id"] == int(root["curation_id"])
         assert header["merges_applied"] is True
         assert header["description"] == "merged pair"
-        assert header["curation_source"] == (
-            CurationV2 & merged
-        ).fetch1("curation_source")
+        assert header["curation_source"] == (CurationV2 & merged).fetch1(
+            "curation_source"
+        )
 
         # Preview (proposed, not applied): lineage still matches MergeGroup;
         # the header carries the proposed-vs-applied flag.

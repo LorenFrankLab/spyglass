@@ -215,9 +215,7 @@ def test_preflight_gates_analyzer_waveform_params_row(
     """
     report = preflight_v2_pipeline(**preflight_inputs)
     (check,) = [
-        c
-        for c in report.checks
-        if c.name == "analyzer_waveform_params_exist"
+        c for c in report.checks if c.name == "analyzer_waveform_params_exist"
     ]
     assert check.ok is True
 
@@ -234,9 +232,7 @@ def test_preflight_gates_analyzer_waveform_params_row(
     missing = preflight_v2_pipeline(**preflight_inputs)
     assert missing.ok is False
     (missing_check,) = [
-        c
-        for c in missing.checks
-        if c.name == "analyzer_waveform_params_exist"
+        c for c in missing.checks if c.name == "analyzer_waveform_params_exist"
     ]
     assert missing_check.ok is False
     assert "missing_waveform_preflight" in missing_check.fix
@@ -358,9 +354,7 @@ def test_preflight_missing_params_row_points_to_initialize_defaults(
     import spyglass.spikesorting.v2._pipeline_preflight as preflight_mod
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
 
-    base = _PIPELINE_PRESETS[
-        "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
-    ]
+    base = _PIPELINE_PRESETS["franklab_tetrode_hippocampus_30khz_ms5_2026_06"]
     bogus = base.model_copy(
         update={"preprocessing_params_name": "missing_preproc_preflight"}
     )
@@ -481,7 +475,9 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
 
 
 @pytest.mark.database
-def test_preflight_sorter_runtime_backend_missing(preflight_inputs, monkeypatch):
+def test_preflight_sorter_runtime_backend_missing(
+    preflight_inputs, monkeypatch
+):
     """A sorter whose runtime backend can't import fails sorter_runtime_available.
 
     installed_sorters() only checks the thin SI wrapper; some sorters call a
@@ -639,7 +635,9 @@ def test_preflight_speed(preflight_inputs):
         start = time.perf_counter()
         preflight_v2_pipeline(**preflight_inputs)
         best = min(best, time.perf_counter() - start)
-    assert best < 1.5, f"preflight best-of-5 took {best:.2f}s (expected < 1.5 s)"
+    assert (
+        best < 1.5
+    ), f"preflight best-of-5 took {best:.2f}s (expected < 1.5 s)"
 
 
 @pytest.mark.database
@@ -727,9 +725,7 @@ def test_run_pipeline_preflight_bypass(preflight_inputs):
 
 # The one shipped container preset (Singularity, 30 kHz). The execution backend
 # lives on its referenced SorterParameters row, not the preset.
-_SINGULARITY_PRESET = (
-    "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
-)
+_SINGULARITY_PRESET = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
 
 
 @pytest.mark.database
@@ -787,9 +783,7 @@ def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
     # No silent fallback to local execution: the local sorter-install checks do
     # not run for a container backend.
     assert not any(c.name == "sorter_installed" for c in report.checks)
-    assert not any(
-        c.name == "sorter_runtime_available" for c in report.checks
-    )
+    assert not any(c.name == "sorter_runtime_available" for c in report.checks)
 
 
 @pytest.mark.database
@@ -867,9 +861,7 @@ def test_preflight_matlab_local_backend_errors(
     report = preflight_v2_pipeline(
         **{**preflight_inputs, "pipeline_preset": "_preflight_matlab_local"}
     )
-    (chk,) = [
-        c for c in report.checks if c.name == "sorter_execution_backend"
-    ]
+    (chk,) = [c for c in report.checks if c.name == "sorter_execution_backend"]
     assert chk.ok is False
     assert "container" in chk.fix
     # The local-install checks do not run for a MATLAB local row.

@@ -295,18 +295,16 @@ def test_sorter_parameters_update1_rejected_in_place(request):
                 "params": {"detect_threshold": 50.0, "threshold_unit": "uv"},
             }
         )
-    assert (
-        (SorterParameters & key).fetch1("params")["detect_threshold"] == 100.0
-    )
+    assert (SorterParameters & key).fetch1("params")[
+        "detect_threshold"
+    ] == 100.0
 
     # Explicit escape hatch: the deliberate mutation goes through.
     SorterParameters().update1(
         {**key, "params": {"detect_threshold": 50.0, "threshold_unit": "uv"}},
         allow_param_mutation=True,
     )
-    assert (
-        (SorterParameters & key).fetch1("params")["detect_threshold"] == 50.0
-    )
+    assert (SorterParameters & key).fetch1("params")["detect_threshold"] == 50.0
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -546,7 +544,9 @@ def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
 
     real_installed = set(sis.installed_sorters())
     monkeypatch.setattr(
-        sis, "installed_sorters", lambda: sorted(real_installed - {"mountainsort4"})
+        sis,
+        "installed_sorters",
+        lambda: sorted(real_installed - {"mountainsort4"}),
     )
 
     insertable, skipped = SorterParameters._gated_default_rows()
@@ -620,9 +620,9 @@ def test_legacy_seeder_skips_matlab(monkeypatch, request):
     # Clean slate so a reappearing row unambiguously means the skip regressed.
     (SorterParameters & {"sorter": matlab_sorter}).delete(safemode=False)
     request.addfinalizer(
-        lambda: (
-            SorterParameters & {"sorter": matlab_sorter}
-        ).delete(safemode=False)
+        lambda: (SorterParameters & {"sorter": matlab_sorter}).delete(
+            safemode=False
+        )
     )
 
     SorterParameters.insert_default_legacy_si_sorters()

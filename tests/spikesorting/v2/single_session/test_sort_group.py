@@ -10,7 +10,6 @@ from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
 )
 
-
 # ---------- SortGroupV2 by shank -------------------------------------------
 
 

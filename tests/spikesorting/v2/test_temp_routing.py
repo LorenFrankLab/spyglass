@@ -58,9 +58,9 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
             params={},
             job_kwargs=None,
         )
-    assert captured_um["dir"] == configured, (
-        "UnitMatch bundle scratch must be created under the configured temp_dir"
-    )
+    assert (
+        captured_um["dir"] == configured
+    ), "UnitMatch bundle scratch must be created under the configured temp_dir"
 
     # --- analyzer-recompute scratch (tempfile.mkdtemp) --------------------- #
     from spyglass.spikesorting.v2 import _sorting_analyzer as sa
@@ -73,9 +73,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     )
     # Mock the pre-temp work (stored-analyzer load, hash, recipe + source
     # reconstruction) so the function reaches the mkdtemp site cheaply.
-    monkeypatch.setattr(
-        Sorting, "get_analyzer", lambda self, *a, **k: object()
-    )
+    monkeypatch.setattr(Sorting, "get_analyzer", lambda self, *a, **k: object())
     monkeypatch.setattr(rc, "hash_extension_data", lambda *a, **k: {})
     monkeypatch.setattr(sa, "fetch_waveform_params", lambda name: {})
     monkeypatch.setattr(

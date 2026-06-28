@@ -82,9 +82,10 @@ def test_numpy_pinned_and_si_contracts_agree():
         "resolver float across the numpy 1/2 boundary."
     )
     numpy_specs = {(s.operator, s.version) for s in reqs["numpy"].specifier}
-    assert numpy_specs == {(">=", "2"), ("<", "3")}, (
-        f"numpy must be pinned >=2,<3; found {str(reqs['numpy'].specifier)!r}"
-    )
+    assert numpy_specs == {
+        (">=", "2"),
+        ("<", "3"),
+    }, f"numpy must be pinned >=2,<3; found {str(reqs['numpy'].specifier)!r}"
 
     # SpikeInterface is hard-pinned in pyproject, and the v2 env must agree.
     assert "spikeinterface" in reqs, "spikeinterface missing from base deps"

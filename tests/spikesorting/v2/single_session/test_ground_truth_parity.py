@@ -6,7 +6,6 @@ import pytest
 
 from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
-
 # ---------- 60s MEArec ground-truth correctness gate ----------------------
 
 
@@ -90,9 +89,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
             {
                 "recording_id": rec_pk["recording_id"],
                 "sorter": "mountainsort5",
-                "sorter_params_name": (
-                    "franklab_30khz_ms5_2026_06"
-                ),
+                "sorter_params_name": ("franklab_30khz_ms5_2026_06"),
                 "artifact_detection_id": art_pk["artifact_detection_id"],
             }
         )
@@ -363,9 +360,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
             {
                 "recording_id": rec_pk["recording_id"],
                 "sorter": "mountainsort5",
-                "sorter_params_name": (
-                    "franklab_30khz_ms5_2026_06"
-                ),
+                "sorter_params_name": ("franklab_30khz_ms5_2026_06"),
                 "artifact_detection_id": art_pk["artifact_detection_id"],
             }
         )

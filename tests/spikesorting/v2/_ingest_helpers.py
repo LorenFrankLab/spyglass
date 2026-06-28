@@ -410,9 +410,7 @@ def synthesize_minirec_nwb(
     nwbfile = _build_nwbfile(
         fixture_name=fixture_name, session_start=session_start
     )
-    _add_probe_and_electrodes(
-        nwbfile, layout=layout, targeted_location="CA1"
-    )
+    _add_probe_and_electrodes(nwbfile, layout=layout, targeted_location="CA1")
     _add_raw_ephys(
         nwbfile, traces=traces, sampling_frequency=float(sampling_frequency)
     )
@@ -488,9 +486,9 @@ def write_two_eseries_nwb(
     )
     second = pynwb.ecephys.ElectricalSeries(
         name="second_series",
-        data=(
-            rng.normal(size=(n_samples, n_channels)) + 1_000.0
-        ).astype("float32"),
+        data=(rng.normal(size=(n_samples, n_channels)) + 1_000.0).astype(
+            "float32"
+        ),
         electrodes=nwbfile.create_electrode_table_region(
             region=list(range(n_channels)), description="second"
         ),

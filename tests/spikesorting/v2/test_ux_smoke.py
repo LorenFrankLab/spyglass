@@ -205,7 +205,9 @@ def test_ux_smoke_first_hour(first_hour):
     for key in (*_STABLE_KEYS, *_STATUS_KEYS, "stage_seconds", "warnings"):
         assert key in run_summary, f"missing run_summary key {key!r}"
     assert set(run_summary["stage_seconds"]) == set(_STAGES)
-    assert all(isinstance(v, float) for v in run_summary["stage_seconds"].values())
+    assert all(
+        isinstance(v, float) for v in run_summary["stage_seconds"].values()
+    )
     assert isinstance(run_summary["warnings"], list)
     for key in _STATUS_KEYS:
         assert run_summary[key] in _STAGE_STATUSES

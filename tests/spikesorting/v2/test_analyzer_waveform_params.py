@@ -84,6 +84,7 @@ def _planted_source_sort(selection_table, id_attr, source_part, preproc_name):
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
+
 # --------------------------------------------------------------------------- #
 # Pydantic schema (DB-free)
 # --------------------------------------------------------------------------- #
@@ -135,7 +136,9 @@ def test_waveform_params_for_preprocessing_literal_region_names():
     built from) so the test pins the actual region behavior rather than being a
     tautology against the same constants.
     """
-    assert waveform_params_for_preprocessing("franklab_hippocampus_2026_06") == (
+    assert waveform_params_for_preprocessing(
+        "franklab_hippocampus_2026_06"
+    ) == (
         "franklab_hippocampus_actual_waveforms",
         "franklab_hippocampus_metric_waveforms",
     )
@@ -246,10 +249,9 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
             {"waveform_params_name": "cortex_clone", "params": cortex_blob},
             allow_duplicate_params=True,
         )
-        assert (
-            AnalyzerWaveformParameters
-            & {"waveform_params_name": "cortex_clone"}
-        )
+        assert AnalyzerWaveformParameters & {
+            "waveform_params_name": "cortex_clone"
+        }
     finally:
         (
             AnalyzerWaveformParameters
@@ -267,12 +269,9 @@ def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     assert "display_waveform_params_name" in Sorting().heading.names
+    assert "display_waveform_params_name" not in Sorting().primary_key
     assert (
-        "display_waveform_params_name" not in Sorting().primary_key
-    )
-    assert (
-        "display_waveform_params_name"
-        not in SortingSelection().heading.names
+        "display_waveform_params_name" not in SortingSelection().heading.names
     )
 
 
@@ -319,7 +318,10 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
 @pytest.mark.parametrize(
     ("preproc_name", "expected_display"),
     [
-        ("franklab_hippocampus_2026_06", "franklab_hippocampus_actual_waveforms"),
+        (
+            "franklab_hippocampus_2026_06",
+            "franklab_hippocampus_actual_waveforms",
+        ),
         ("franklab_cortex_2026_06", "franklab_cortex_actual_waveforms"),
         # custom / unknown recipe -> wide cortex fallback
         ("default", "franklab_cortex_actual_waveforms"),

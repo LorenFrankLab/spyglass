@@ -279,9 +279,7 @@ def _consolidate_intervals(intervals, timestamps):
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[np.argsort(intervals[:, 0])]
 
-    assert_monotonic_timestamps(
-        timestamps, context="_consolidate_intervals: "
-    )
+    assert_monotonic_timestamps(timestamps, context="_consolidate_intervals: ")
     start_indices = np.searchsorted(timestamps, intervals[:, 0], side="left")
     # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
     # which is exactly the half-open end ``frame_slice`` expects.
@@ -524,9 +522,7 @@ def _base_intervals_from_timestamps(timestamps, fs):
     ts = np.asarray(timestamps, dtype=float)
     if ts.size == 0:
         return []
-    assert_monotonic_timestamps(
-        ts, context="_base_intervals_from_timestamps: "
-    )
+    assert_monotonic_timestamps(ts, context="_base_intervals_from_timestamps: ")
     fs = assert_positive_sampling_frequency(
         fs, context="_base_intervals_from_timestamps: "
     )
@@ -793,9 +789,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
         )
         if times.size == 0:
             continue
-        assert_monotonic_timestamps(
-            times, context="base_intervals_and_gaps: "
-        )
+        assert_monotonic_timestamps(times, context="base_intervals_and_gaps: ")
         if current_start is None:
             current_start = float(times[0])
         else:

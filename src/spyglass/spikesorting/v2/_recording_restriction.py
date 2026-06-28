@@ -206,7 +206,8 @@ class _LazyConcatenatedTimestamps(_LazyTimestamps):
                 if overlap_start < overlap_stop:
                     chunks.append(
                         part[
-                            overlap_start - int(part_start) : overlap_stop
+                            overlap_start
+                            - int(part_start) : overlap_stop
                             - int(part_start)
                         ]
                     )

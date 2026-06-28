@@ -19,7 +19,6 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-
 # ---------- committed-curation predicate ------------------------------------
 
 
@@ -110,9 +109,9 @@ def _resolved_recording_inputs(sorting_key):
         recording_id = None
     valid_times = None
     if source.kind == "recording" and artifact_detection_id is not None:
-        nwb = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
+        nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+            "nwb_file_name"
+        )
         valid_times = read_artifact_removed_intervals(
             {"artifact_detection_id": artifact_detection_id}, as_dict=True
         )[nwb]
@@ -189,7 +188,9 @@ def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
     ref = Sorting().get_analyzer(sorting_key)
     ref_unit_ids = sorted(int(u) for u in ref.unit_ids)
 
-    sorting_id, n_units = (Sorting & sorting_key).fetch1("sorting_id", "n_units")
+    sorting_id, n_units = (Sorting & sorting_key).fetch1(
+        "sorting_id", "n_units"
+    )
     display_name = resolve_display_waveform_params_name(Sorting(), sorting_id)
     display_params = fetch_waveform_params(display_name)
     recording, raw_sorting = reconstruct_recording_and_sorting(
@@ -341,7 +342,9 @@ def test_final_metrics_recomputed_for_merged_unit(
         merged_units = (CurationV2.Unit & merged).fetch(
             "unit_id", "n_spikes", as_dict=True
         )
-        assert len(merged_units) == 1, "apply_merge should yield one merged unit"
+        assert (
+            len(merged_units) == 1
+        ), "apply_merge should yield one merged unit"
         merged_uid = int(merged_units[0]["unit_id"])
         merged_n = int(merged_units[0]["n_spikes"])
 
@@ -357,9 +360,9 @@ def test_final_metrics_recomputed_for_merged_unit(
 
         assert merged_uid in metrics.index
         for contributor in unit_ids:
-            assert contributor not in metrics.index, (
-                "absorbed contributor must not appear in merged metrics"
-            )
+            assert (
+                contributor not in metrics.index
+            ), "absorbed contributor must not appear in merged metrics"
         assert int(metrics.loc[merged_uid, "num_spikes"]) == merged_n
     finally:
         clear_curations_for(planted_two_unit_sort)
@@ -493,9 +496,9 @@ def test_curation_evaluation_nwb_carries_inputs(
     assert prov["display_waveform_params_name"]
     # Metric param set + auto-merge preset.
     expected_metric_names = list(
-        (
-            QualityMetricParameters & {"metric_params_name": "minimal"}
-        ).fetch1("metric_names")
+        (QualityMetricParameters & {"metric_params_name": "minimal"}).fetch1(
+            "metric_names"
+        )
     )
     assert prov["metric_names"] == expected_metric_names
     assert isinstance(prov["auto_merge_preset"], str)
@@ -922,7 +925,9 @@ def planted_zero_unit_sort(dj_conn):
     )
 
     fixture = (
-        Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "mearec_polymer_smoke.nwb"
     )
     if not fixture.exists():
         pytest.skip(f"Fixture {fixture.name} not found.")

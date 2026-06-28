@@ -164,11 +164,7 @@ def apply_artifact_mask(
     # rules out) is no longer detected here, unlike the pre-refactor whole-
     # vector scan; the chunked ``detect_artifacts`` path still validates
     # monotonicity per chunk.
-    if not (
-        np.isfinite(t_first)
-        and np.isfinite(t_last)
-        and t_last >= t_first
-    ):
+    if not (np.isfinite(t_first) and np.isfinite(t_last) and t_last >= t_first):
         raise ValueError(
             "apply_artifact_mask: recording endpoints are non-finite or step "
             f"backward (t_first={t_first}, t_last={t_last}); the persisted "

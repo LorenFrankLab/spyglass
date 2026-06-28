@@ -174,9 +174,7 @@ def sanitize_for_json(df: pd.DataFrame) -> pd.DataFrame:
     return sanitized
 
 
-def isi_violation_fraction(
-    isi_violations_count, num_spikes
-) -> np.ndarray:
+def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     """Reproduce Spyglass's bounded ISI-violation fraction.
 
     Spyglass defines ``isi_violation`` as ``count / (n_spikes - 1)`` -- the
@@ -209,7 +207,11 @@ def isi_violation_fraction(
 
 
 def rules_payloads_match(
-    expected: dict, stored: dict, *, rel_tol: float = 1e-6, abs_tol: float = 1e-12
+    expected: dict,
+    stored: dict,
+    *,
+    rel_tol: float = 1e-6,
+    abs_tol: float = 1e-12,
 ) -> bool:
     """Return whether two normalized ``AutoCurationRules`` payloads are equal.
 

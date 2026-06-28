@@ -79,6 +79,7 @@ def is_canonical_analyzer_folder_name(name: str) -> bool:
         return False
     return bool(_WAVEFORM_PARAMS_NAME_RE.match(recipe))
 
+
 # Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
 # acquisition (the read path taking the lock while the compute path already
 # holds it) is reentrant rather than a self-deadlock -- see
@@ -141,9 +142,7 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     pathlib.Path
         The analyzer-cache folder path for this ``(sorting_id, recipe)`` pair.
     """
-    return (
-        analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"
-    )
+    return analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"
 
 
 def analyzer_cache_lock(sorting_id):
@@ -418,7 +417,10 @@ def classify_orphaned_analyzer_folders(
     for sorting_id, computed_path, exists in units_bearing:
         if exists:
             continue
-        row = {"sorting_id": sorting_id, "computed_analyzer_path": computed_path}
+        row = {
+            "sorting_id": sorting_id,
+            "computed_analyzer_path": computed_path,
+        }
         if computed_path in reclaimed_set:
             reclaimed.append(row)
         else:

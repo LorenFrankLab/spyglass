@@ -67,9 +67,9 @@ def _member_electrode_signature(member: dict) -> tuple:
     }
     electrode_ids = sorted(
         int(eid)
-        for eid in (
-            SortGroupV2.SortGroupElectrode & restriction
-        ).fetch("electrode_id")
+        for eid in (SortGroupV2.SortGroupElectrode & restriction).fetch(
+            "electrode_id"
+        )
     )
     region_by_electrode = {
         int(row["electrode_id"]): str(row["region_name"])
@@ -79,9 +79,7 @@ def _member_electrode_signature(member: dict) -> tuple:
             * BrainRegion
         ).fetch("electrode_id", "region_name", as_dict=True)
     }
-    return tuple(
-        (eid, region_by_electrode.get(eid)) for eid in electrode_ids
-    )
+    return tuple((eid, region_by_electrode.get(eid)) for eid in electrode_ids)
 
 
 def assert_members_share_electrode_space(members: list[dict]) -> None:
@@ -845,9 +843,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         drifted: list[dict] = []
         for row in snapshot_rows:
             recording_id = row["recording_id"]
-            content_hashes = (
-                Recording & {"recording_id": recording_id}
-            ).fetch("content_hash")
+            content_hashes = (Recording & {"recording_id": recording_id}).fetch(
+                "content_hash"
+            )
             if len(content_hashes) == 0:
                 missing.append({"recording_id": str(recording_id)})
                 continue
@@ -994,9 +992,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # The frozen snapshot -- not the live SessionGroup.Member set -- is the
         # authority: a later member edit mints a NEW concat id on re-selection
         # and never silently changes what THIS concat materializes.
-        snapshot = (
-            ConcatenatedRecordingSelection.MemberSnapshot & key
-        ).fetch(as_dict=True, order_by="member_index")
+        snapshot = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
+            as_dict=True, order_by="member_index"
+        )
         if not snapshot:
             raise SchemaBypassError(
                 "ConcatenatedRecording.make_fetch: selection "
@@ -1252,9 +1250,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         ]
         try:
             with transaction_or_noop(self.connection):
-                AnalysisNwbfile().add(
-                    anchor_nwb_file_name, analysis_file_name
-                )
+                AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
                 self.insert1(
                     {
                         **key,
@@ -1468,9 +1464,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # materialize), so a later SessionGroup.Member edit cannot misalign the
         # back-mapping; the per-member end boundaries are the frozen
         # MemberBoundary rows.
-        members = (
-            ConcatenatedRecordingSelection.MemberSnapshot & key
-        ).fetch(as_dict=True, order_by="member_index")
+        members = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
+            as_dict=True, order_by="member_index"
+        )
         # MemberBoundary is keyed by member_index; align to the member order and
         # require exactly one boundary per frozen member (no missing/extra).
         indices, ends = (self.MemberBoundary & key).fetch(

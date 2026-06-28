@@ -34,7 +34,9 @@ def merged_parent(planted_three_unit_sort):
     sort_pk = planted_three_unit_sort
     clear_curations_for(sort_pk)
 
-    raw_units = sorted(int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id"))
+    raw_units = sorted(
+        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
+    )
     assert raw_units == [0, 1, 2], raw_units
     merged_id = max(raw_units) + 1  # 3
 
@@ -78,7 +80,9 @@ def test_child_curation_composes_from_merged_parent(merged_parent):
         description="label edit on merged parent",
     )
 
-    child_units = set(int(u) for u in (CurationV2.Unit & child).fetch("unit_id"))
+    child_units = set(
+        int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
+    )
     # Parent namespace {2, 3}, NOT the raw {0, 1, 2}: the absorbed raw
     # contributors 0 and 1 are not resurrected as separate child units.
     assert child_units == {2, merged_id}, child_units
@@ -123,7 +127,9 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
         description="child merge in parent namespace",
     )
 
-    child_units = set(int(u) for u in (CurationV2.Unit & child).fetch("unit_id"))
+    child_units = set(
+        int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
+    )
     assert child_units == {child_merged_id}, child_units
 
     # Raw-contributor provenance: child unit 4 expands through the parent's
@@ -151,9 +157,9 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
     assert len(merged_train) == expected_n, (len(merged_train), expected_n)
 
     # n_spikes invariant survives the parent-composition write.
-    n_spikes = (
-        CurationV2.Unit & child & {"unit_id": child_merged_id}
-    ).fetch1("n_spikes")
+    n_spikes = (CurationV2.Unit & child & {"unit_id": child_merged_id}).fetch1(
+        "n_spikes"
+    )
     assert n_spikes == expected_n
 
 
@@ -315,7 +321,9 @@ def test_grandchild_composition_chains_raw_and_parent_provenance(
         root = CurationV2.insert_curation(sorting_key=sort_pk)
         # Child A merges raw [0,1] -> 3; units {2, 3}.
         child_a = CurationV2.create_merged_curation(
-            sort_pk, merge_groups=[[0, 1]], parent_curation_id=root["curation_id"]
+            sort_pk,
+            merge_groups=[[0, 1]],
+            parent_curation_id=root["curation_id"],
         )
         # Grandchild B merges A's units [2, 3] -> 4; units {4}. Unit 3 is a
         # fresh A-namespace id absent from Sorting.Unit.
@@ -373,7 +381,9 @@ def test_child_labels_inherit_and_merge(planted_three_unit_sort):
         def labels_of(key):
             out: dict[int, set] = {}
             for r in (CurationV2.UnitLabel & key).fetch(as_dict=True):
-                out.setdefault(int(r["unit_id"]), set()).add(r["curation_label"])
+                out.setdefault(int(r["unit_id"]), set()).add(
+                    r["curation_label"]
+                )
             return out
 
         assert labels_of(labeled_parent) == {2: {"mua"}, 3: {"noise"}}

@@ -51,7 +51,9 @@ def test_save_expectation_drops_sub_min_segment_slivers():
 
     # The intersect already dropped the 0.05 s sliver from the intended set.
     intended = np.array([[0.0, 1.0]])
-    sort = np.array([[0.0, 1.0], [2.0, 2.05]])  # second epoch is a 0.05 s sliver
+    sort = np.array(
+        [[0.0, 1.0], [2.0, 2.05]]
+    )  # second epoch is a 0.05 s sliver
     exp = compute_recording_save_expectation(intended, sort, 0.1)
 
     assert exp.n_intended_intervals == 1
@@ -158,7 +160,8 @@ def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
 
 def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
     """Lazy timestamp overrides intentionally support only the current streaming
-    consumers' int/slice indexing; unsupported indexing should fail explicitly."""
+    consumers' int/slice indexing; unsupported indexing should fail explicitly.
+    """
     from spyglass.spikesorting.v2._recording_restriction import (
         _lazy_timestamp_override,
     )

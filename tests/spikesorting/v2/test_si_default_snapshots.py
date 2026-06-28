@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # KS4's install-independent SI-wrapper defaults (Kilosort4Sorter
 # ._si_default_params). The kilosort-ALGORITHM defaults (Th_universal,
 # batch_size, nearest_chans, ...) live in kilosort.parameters.DEFAULT_SETTINGS

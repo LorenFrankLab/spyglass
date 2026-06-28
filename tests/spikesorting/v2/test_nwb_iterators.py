@@ -77,8 +77,8 @@ def test_timestamps_segment_length_one_chunk_returns_1d():
         dtype=np.float64,
     )
     tail = seg.get_traces(start_frame=4, end_frame=5)  # length-1 final chunk
-    assert (
-        tail.ndim == 1 and tail.shape == (1,)
+    assert tail.ndim == 1 and tail.shape == (
+        1,
     ), f"length-1 chunk must stay 1-D (1,); got shape {tail.shape}"
     multi = seg.get_traces(start_frame=0, end_frame=3)
     assert multi.shape == (3,)

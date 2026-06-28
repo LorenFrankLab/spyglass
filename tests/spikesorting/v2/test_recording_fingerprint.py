@@ -118,14 +118,14 @@ def test_recording_content_fingerprint_discriminates(tmp_path):
     clean = rng.integers(-100, 100, size=(50, 4)).astype("float32")
     noise = 2.0 * 10.0 ** (-(TRACE_ROUNDING + 1))  # 2e-5 µV, < 5e-5 boundary
     noisy = (clean.astype("float64") + noise).astype("float32")
-    assert not np.array_equal(noisy, clean), (
-        "precondition: the noise must perturb the stored float32 bytes"
-    )
+    assert not np.array_equal(
+        noisy, clean
+    ), "precondition: the noise must perturb the stored float32 bytes"
     p_clean, e_clean = _baseline(tmp_path / "clean.nwb", traces=clean)
     p_noisy, e_noisy = _baseline(tmp_path / "noisy.nwb", traces=noisy)
-    assert _aggregate(p_noisy, e_noisy) == _aggregate(p_clean, e_clean), (
-        "sub-TRACE_ROUNDING noise must be absorbed (same hash)"
-    )
+    assert _aggregate(p_noisy, e_noisy) == _aggregate(
+        p_clean, e_clean
+    ), "sub-TRACE_ROUNDING noise must be absorbed (same hash)"
 
 
 def test_fingerprint_geometry_parity(tmp_path):
@@ -199,12 +199,12 @@ def test_geometry_component_hash_distinguishes_rel_z():
     xyz = np.column_stack([xy, np.zeros(4)])
     xyz_deep = np.column_stack([xy, np.full(4, 5.0)])
 
-    assert geometry_component_hash(xy) != geometry_component_hash(xyz), (
-        "2-D and 3-D geometry of the same in-plane coords must not collide"
-    )
-    assert geometry_component_hash(xyz) != geometry_component_hash(xyz_deep), (
-        "a rel_z (depth) change must change the geometry hash"
-    )
+    assert geometry_component_hash(xy) != geometry_component_hash(
+        xyz
+    ), "2-D and 3-D geometry of the same in-plane coords must not collide"
+    assert geometry_component_hash(xyz) != geometry_component_hash(
+        xyz_deep
+    ), "a rel_z (depth) change must change the geometry hash"
 
 
 def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):

@@ -93,8 +93,10 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
 
     def _date(member):
         return (
-            Session & {"nwb_file_name": member["nwb_file_name"]}
-        ).fetch1("session_start_time").date()
+            (Session & {"nwb_file_name": member["nwb_file_name"]})
+            .fetch1("session_start_time")
+            .date()
+        )
 
     d0, d1 = _date(same_day[0]), _date(same_day[1])
     assert d0 == d1, "the two same-day members must share a date"
@@ -103,9 +105,7 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
     rec0 = Recording().get_recording(recording_pks[0])
     rec1 = Recording().get_recording(recording_pks[1])
     assert list(rec0.get_channel_ids()) == list(rec1.get_channel_ids())
-    assert (
-        rec0.get_channel_locations() == rec1.get_channel_locations()
-    ).all()
+    assert (rec0.get_channel_locations() == rec1.get_channel_locations()).all()
 
 
 # ---------- SessionGroup.create_group / is_multi_day ----------------------
@@ -239,7 +239,10 @@ def test_create_group_rejects_caller_supplied_recording_date(
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     sub = chronic_2_session_minirec
-    member = {**sub["same_day_members"][0], "recording_date": dt.date(2023, 6, 22)}
+    member = {
+        **sub["same_day_members"][0],
+        "recording_date": dt.date(2023, 6, 22),
+    }
     with pytest.raises(SessionGroupDateError, match="derived"):
         SessionGroup.create_group(sub["owner"], "sg_reject_date", [member])
 
@@ -383,9 +386,9 @@ def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
     assert [r["member_index"] for r in snap] == [0, 1]
     for row, rec_pk in zip(snap, grp["recording_pks"]):
         assert str(row["recording_id"]) == str(rec_pk["recording_id"])
-        assert row["recording_content_hash"] == (
-            Recording & rec_pk
-        ).fetch1("content_hash")
+        assert row["recording_content_hash"] == (Recording & rec_pk).fetch1(
+            "content_hash"
+        )
         assert row["team_name"] == grp["owner"]
 
 
@@ -454,8 +457,7 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
 
     # Edit the LIVE member set under the SAME group_key: drop the second member.
     (
-        SessionGroup.Member
-        & {**grp["group_key"], "member_index": 1}
+        SessionGroup.Member & {**grp["group_key"], "member_index": 1}
     ).delete_quick()
 
     # Re-selection over the now-different live member set mints a DIFFERENT id.
@@ -476,7 +478,8 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
 @pytest.mark.slow
 def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
     """A member with no populated Recording for the requested preprocessing
-    recipe raises ``MissingRecordingForConcatError`` naming the missing member."""
+    recipe raises ``MissingRecordingForConcatError`` naming the missing member.
+    """
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
     )
@@ -869,7 +872,8 @@ def test_concat_get_recording_rebuilds_on_missing(same_day_group):
 def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
     """A concat rebuild whose fingerprint diverges from the stored
     ``content_hash`` raises ``RecordingContentDriftError``; the canonical slot is
-    NOT written (drifted bytes are never served) -- mirrors the recording side."""
+    NOT written (drifted bytes are never served) -- mirrors the recording side.
+    """
     import shutil
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -897,9 +901,7 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
         components["traces"] = "drifted-" + components["traces"]
         return components
 
-    monkeypatch.setattr(
-        fp_mod, "recording_content_fingerprint", _drifted_fp
-    )
+    monkeypatch.setattr(fp_mod, "recording_content_fingerprint", _drifted_fp)
     try:
         Path(abs_path).unlink()
         with pytest.raises(RecordingContentDriftError, match="content_hash"):
@@ -953,15 +955,14 @@ def test_concat_split_conserves_all_spikes(same_day_group):
     snapshot = (
         ConcatenatedRecordingSelection.MemberSnapshot & concat_pk
     ).fetch(as_dict=True, order_by="member_index")
-    indices, ends = (
-        ConcatenatedRecording.MemberBoundary & concat_pk
-    ).fetch("member_index", "end_sample")
+    indices, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
+        "member_index", "end_sample"
+    )
     end_by_index = {int(i): int(e) for i, e in zip(indices, ends)}
     ordered_ends = [end_by_index[int(r["member_index"])] for r in snapshot]
     starts = [0, *ordered_ends[:-1]]
     start_by_key = {
-        member_split_key(row): start
-        for row, start in zip(snapshot, starts)
+        member_split_key(row): start for row, start in zip(snapshot, starts)
     }
     for unit_id, original in trains.items():
         reconstructed = np.sort(
@@ -977,11 +978,11 @@ def test_concat_split_conserves_all_spikes(same_day_group):
     # A MemberBoundary set short of the frozen member set is rejected, not
     # silently truncated.
     (
-        ConcatenatedRecording.MemberBoundary
-        & concat_pk
-        & {"member_index": 1}
+        ConcatenatedRecording.MemberBoundary & concat_pk & {"member_index": 1}
     ).delete_quick()
-    with pytest.raises(ConcatSplitError, match="one boundary per frozen member"):
+    with pytest.raises(
+        ConcatSplitError, match="one boundary per frozen member"
+    ):
         ConcatenatedRecording().split_sorting_by_session(sorting, concat_pk)
 
 
@@ -1122,9 +1123,7 @@ def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
     SessionGroup.create_group(
         owner, "sg_concat_b", [grp["same_day_members"][0]]
     )
-    a_pk = _populate_concat(
-        grp["group_key"], grp["preprocessing_params_name"]
-    )
+    a_pk = _populate_concat(grp["group_key"], grp["preprocessing_params_name"])
     b_pk = _populate_concat(
         {"session_group_owner": owner, "session_group_name": "sg_concat_b"},
         grp["preprocessing_params_name"],
@@ -1185,7 +1184,9 @@ def test_concat_make_raises_on_motion_sample_count_drift(
         ConcatenatedRecordingSelection,
     )
 
-    def _drifted(recordings, *, motion_preset, preset_kwargs=None, job_kwargs=None):
+    def _drifted(
+        recordings, *, motion_preset, preset_kwargs=None, job_kwargs=None
+    ):
         # Simulate a motion step that changed the sample count.
         total = sum(int(r.get_num_samples()) for r in recordings)
         return si.NumpyRecording(
@@ -1314,7 +1315,9 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     # Concat brain regions: ambiguous by default, anchor-member with opt-in.
     with pytest.raises(ConcatBrainRegionAmbiguousError):
         Sorting().get_unit_brain_regions(sort_pk)
-    regions = Sorting().get_unit_brain_regions(sort_pk, allow_anchor_member=True)
+    regions = Sorting().get_unit_brain_regions(
+        sort_pk, allow_anchor_member=True
+    )
     assert (regions["region_resolution"] == "anchor_member").all()
 
     # split_sorting_by_session: one entry per member, local frames, unit ids
@@ -1395,13 +1398,10 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     # timeline the curated spike times live in) -- not a per-member Recording.
     curated_sorting = CurationV2.get_sorting(curation_key)
     assert set(curated_sorting.unit_ids) == all_unit_ids
-    merge_recording = SpikeSortingOutput().get_recording(
-        {"merge_id": merge_id}
-    )
+    merge_recording = SpikeSortingOutput().get_recording({"merge_id": merge_id})
     concat_recording = ConcatenatedRecording().get_recording(concat_pk)
     assert (
-        merge_recording.get_num_samples()
-        == concat_recording.get_num_samples()
+        merge_recording.get_num_samples() == concat_recording.get_num_samples()
     )
     assert list(merge_recording.get_channel_ids()) == list(
         concat_recording.get_channel_ids()
@@ -1435,9 +1435,9 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     # (concat sorts have no artifact pass), not a per-member recording: assert
     # the exact denominator, not merely > 0, so a regression to any positive
     # duration would fail.
-    concat_total_duration_s = (
-        ConcatenatedRecording & concat_pk
-    ).fetch1("total_duration_s")
+    concat_total_duration_s = (ConcatenatedRecording & concat_pk).fetch1(
+        "total_duration_s"
+    )
     assert (units_df["firing_rate_hz"] > 0).all()
     assert units_df["firing_rate_hz"].to_numpy() == pytest.approx(
         units_df["n_spikes"].to_numpy() / concat_total_duration_s
@@ -1493,9 +1493,7 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     CurationEvaluation.populate(sel, reserve_jobs=False)
 
     metrics = CurationEvaluation.get_metrics(sel)
-    expected = {
-        int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")
-    }
+    expected = {int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")}
     assert set(metrics.index) == expected
 
     child = CurationEvaluation().use_evaluation_labels(sel)
@@ -1503,9 +1501,10 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     assert (CurationV2 & child).fetch1("curation_source") == (
         "curation_evaluation"
     )
-    assert set(
-        int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
-    ) == expected
+    assert (
+        set(int(u) for u in (CurationV2.Unit & child).fetch("unit_id"))
+        == expected
+    )
 
     child_sel = CurationEvaluationSelection.insert_selection(
         {
@@ -1601,9 +1600,9 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
     )
     Sorting.populate(concat_sort, reserve_jobs=False)
     concat_curation = CurationV2.insert_curation(sorting_key=concat_sort)
-    concat_merge_id = (
-        SpikeSortingOutput.CurationV2 & concat_curation
-    ).fetch1("merge_id")
+    concat_merge_id = (SpikeSortingOutput.CurationV2 & concat_curation).fetch1(
+        "merge_id"
+    )
 
     # A single-recording sort + curation on a member, SAME preproc recipe.
     rec_sort = SortingSelection.insert_selection(
@@ -1651,14 +1650,12 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
         )
         assert concat_merge_id in by_concat_and_preproc
         assert rec_merge_id not in by_concat_and_preproc
-        by_concat_wrong_preproc = (
-            SpikeSortingOutput().get_restricted_merge_ids(
-                {
-                    "concat_recording_id": concat_pk["concat_recording_id"],
-                    "preprocessing_params_name": "no_such_preproc_recipe",
-                },
-                sources=["v2"],
-            )
+        by_concat_wrong_preproc = SpikeSortingOutput().get_restricted_merge_ids(
+            {
+                "concat_recording_id": concat_pk["concat_recording_id"],
+                "preprocessing_params_name": "no_such_preproc_recipe",
+            },
+            sources=["v2"],
         )
         assert concat_merge_id not in by_concat_wrong_preproc
 
@@ -1676,14 +1673,12 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
         )
         assert concat_merge_id not in by_preproc_unknown_artifact
         assert rec_merge_id not in by_preproc_unknown_artifact
-        by_preproc_no_artifact = (
-            SpikeSortingOutput().get_restricted_merge_ids(
-                {
-                    "preprocessing_params_name": preproc,
-                    "artifact_detection_id": None,
-                },
-                sources=["v2"],
-            )
+        by_preproc_no_artifact = SpikeSortingOutput().get_restricted_merge_ids(
+            {
+                "preprocessing_params_name": preproc,
+                "artifact_detection_id": None,
+            },
+            sources=["v2"],
         )
         assert concat_merge_id in by_preproc_no_artifact
         assert rec_merge_id in by_preproc_no_artifact
@@ -1890,7 +1885,9 @@ def test_concat_applied_merge_through_downstream_and_evaluation(
         keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
         if keys:
             for mid in (SpikeSortingOutput.CurationV2 & keys).fetch("merge_id"):
-                (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
         (CurationV2 & sorting_key).super_delete(warn=False)
 
     mp = pytest.MonkeyPatch()
@@ -1900,9 +1897,7 @@ def test_concat_applied_merge_through_downstream_and_evaluation(
             Sorting.populate(sort_pk, reserve_jobs=False)
     finally:
         mp.undo()
-    unit_ids = sorted(
-        int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id")
-    )
+    unit_ids = sorted(int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id"))
     assert len(unit_ids) >= 2, "planted concat sort must yield >=2 units"
 
     _drop_output_and_curations()

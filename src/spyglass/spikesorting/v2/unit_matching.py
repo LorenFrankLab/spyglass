@@ -350,9 +350,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # sessions is biologically degenerate.
         for member_sorting_id, _curation_id in choices_by_member.values():
             if (
-                CurationV2.get_unit_semantics(
-                    {"sorting_id": member_sorting_id}
-                )
+                CurationV2.get_unit_semantics({"sorting_id": member_sorting_id})
                 == "clusterless_threshold_crossings"
             ):
                 _warn_clusterless_match_once(str(member_sorting_id))
@@ -796,7 +794,10 @@ class UnitMatch(SpyglassMixin, dj.Computed):
             seen_member_indexes.add(member_index)
 
         choices_by_member = {
-            int(row["member_index"]): (row["sorting_id"], int(row["curation_id"]))
+            int(row["member_index"]): (
+                row["sorting_id"],
+                int(row["curation_id"]),
+            )
             for row in member_curations
         }
         _validate_member_curations(
@@ -846,7 +847,10 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         for member in members:
             member_index = int(member["member_index"])
             sorting_id, curation_id = choices_by_member[member_index]
-            curation_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+            curation_key = {
+                "sorting_id": sorting_id,
+                "curation_id": curation_id,
+            }
             matchable = [
                 int(u)
                 for u in CurationV2().get_matchable_unit_ids(curation_key)
@@ -1441,7 +1445,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         return pd.concat(frames, ignore_index=True)
 
 
-def _normalize_member_identity(nwb_file_name, sort_group_id, interval_list_name, team_name):
+def _normalize_member_identity(
+    nwb_file_name, sort_group_id, interval_list_name, team_name
+):
     """Comparable ``(nwb, sort_group, interval, team)`` member identity tuple."""
     return (
         str(nwb_file_name),
@@ -1507,8 +1513,7 @@ def _validate_member_curations(members, choices_by_member, exc_class):
         member_index = int(member["member_index"])
         sorting_id, curation_id = choices_by_member[member_index]
         if not (
-            CurationV2
-            & {"sorting_id": sorting_id, "curation_id": curation_id}
+            CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
         ):
             raise exc_class(
                 f"UnitMatchSelection: member_index {member_index} pins curation "

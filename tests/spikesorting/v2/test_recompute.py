@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ---------- DB-free comparison logic ----------------------------------------
 
 
@@ -164,7 +163,11 @@ def test_env_matches_compatible_on_shared_namespaces():
     """A file is compatible when every namespace shared with the env agrees."""
     from spyglass.spikesorting.v2._recompute import env_matches
 
-    env = {"core": "2.9.0", "hdmf-common": "1.8.0", "hdmf-experimental": "0.5.0"}
+    env = {
+        "core": "2.9.0",
+        "hdmf-common": "1.8.0",
+        "hdmf-experimental": "0.5.0",
+    }
     file_deps = {"core": "2.9.0", "hdmf-common": "1.8.0"}
     assert env_matches(file_deps, env)
 
@@ -286,9 +289,9 @@ def clean_recompute(populated_sorting):
     def _clear():
         (rc.RecordingArtifactVersions & rec_key).delete(safemode=False)
         (rc.SortingAnalyzerVersions & sort_key).delete(safemode=False)
-        (
-            UserEnvironment & {"env_id": "planted_stale_env_00"}
-        ).delete(safemode=False)
+        (UserEnvironment & {"env_id": "planted_stale_env_00"}).delete(
+            safemode=False
+        )
 
     _clear()
     yield
@@ -297,7 +300,9 @@ def clean_recompute(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_recording_recompute_matches_and_delete_gate(populated_sorting, clean_recompute):
+def test_recording_recompute_matches_and_delete_gate(
+    populated_sorting, clean_recompute
+):
     """Versions inventory + recompute matched=1 in the current env; the delete
     gate lists the artifact, refuses a stale-env match, and force overrides."""
     _assert_temp_base_dir()
@@ -356,7 +361,9 @@ def test_recording_recompute_matches_and_delete_gate(populated_sorting, clean_re
         allow_direct_insert=True,
     )
     # Remove the current-env match so only the stale-env match remains.
-    (RecordingArtifactRecompute & {**sel_key, "env_id": env_id}).delete(safemode=False)
+    (RecordingArtifactRecompute & {**sel_key, "env_id": env_id}).delete(
+        safemode=False
+    )
 
     from spyglass.spikesorting.v2.exceptions import StaleEnvMatchedError
 
@@ -373,7 +380,9 @@ def test_recording_recompute_matches_and_delete_gate(populated_sorting, clean_re
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_recording_recompute_refuses_unmatched(populated_sorting, clean_recompute):
+def test_recording_recompute_refuses_unmatched(
+    populated_sorting, clean_recompute
+):
     """delete_files never selects a matched=0 artifact."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -417,9 +426,7 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     )
 
     SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
-    assert (SortingAnalyzerVersions & populated_sorting).fetch1(
-        "analyzer_hash"
-    )
+    assert (SortingAnalyzerVersions & populated_sorting).fetch1("analyzer_hash")
     SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
     SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
@@ -591,7 +598,9 @@ def test_recompute_metric_verify_independent_of_display_cache(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_file_tracking_excludes_v2_deleted_files(populated_sorting, clean_recompute):
+def test_file_tracking_excludes_v2_deleted_files(
+    populated_sorting, clean_recompute
+):
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 
     The file-tracking ``deleted`` set (used to skip intentionally-removed
@@ -840,9 +849,9 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute):
     removed = RecordingArtifactRecompute().delete_files(
         rec_key, dry_run=False, days_since_creation=0
     )
-    assert removed and not Path(abs_path).exists(), (
-        "delete_files must reclaim the matched artifact"
-    )
+    assert (
+        removed and not Path(abs_path).exists()
+    ), "delete_files must reclaim the matched artifact"
     assert RecordingArtifactRecompute & rec_key & "deleted=1"
 
     # get_recording rebuilds + reconciles the checksum; traces are identical.
@@ -889,9 +898,9 @@ def test_recompute_authority_anchors_on_content_hash(
     try:
         RecordingArtifactRecomputeSelection.attempt_all(rec_key)
         RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-        assert RecordingArtifactRecompute & rec_key & "matched=0", (
-            "fresh rebuild != drifted row content_hash must NOT match"
-        )
+        assert (
+            RecordingArtifactRecompute & rec_key & "matched=0"
+        ), "fresh rebuild != drifted row content_hash must NOT match"
         assert (
             RecordingArtifactRecompute().delete_files(
                 rec_key, dry_run=True, days_since_creation=0
@@ -904,9 +913,9 @@ def test_recompute_authority_anchors_on_content_hash(
 
     # With the true hash restored, a fresh recompute matches.
     RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    assert RecordingArtifactRecompute & rec_key & "matched=1", (
-        "fresh rebuild == restored content_hash must match"
-    )
+    assert (
+        RecordingArtifactRecompute & rec_key & "matched=1"
+    ), "fresh rebuild == restored content_hash must match"
 
 
 @pytest.mark.slow
@@ -925,9 +934,9 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 
     rc.SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
     rc.SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
-    sel_key = (
-        rc.SortingAnalyzerRecomputeSelection & populated_sorting
-    ).fetch1("KEY")
+    sel_key = (rc.SortingAnalyzerRecomputeSelection & populated_sorting).fetch1(
+        "KEY"
+    )
     (rc.SortingAnalyzerRecompute & sel_key).delete(safemode=False)
 
     # Force stored != recomputed extension hashes so make() records matched=0
@@ -980,9 +989,9 @@ def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
     rc.SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
     rc.SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
     rc.SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
-    assert rc.SortingAnalyzerRecompute & populated_sorting & "matched=1", (
-        "a fresh analyzer rebuild must reproduce the hashes -> matched=1"
-    )
+    assert (
+        rc.SortingAnalyzerRecompute & populated_sorting & "matched=1"
+    ), "a fresh analyzer rebuild must reproduce the hashes -> matched=1"
 
     # The analyzer ``created_at`` is populate time, so the age gate (correctly)
     # protects a freshly built folder; a real reclamation runs days later.
@@ -1055,8 +1064,12 @@ def test_recording_recompute_mixed_env_deletes(
     # blocked the artifact; it must not, because the current-env row authorizes.
     stale_env = "planted_stale_env_00"
     UserEnvironment().insert1(
-        {"env_id": stale_env, "env_hash": "0" * 32, "env": {"x": 1},
-         "has_editable": 0},
+        {
+            "env_id": stale_env,
+            "env_hash": "0" * 32,
+            "env": {"x": 1},
+            "has_editable": 0,
+        },
         skip_duplicates=True,
     )
     sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")

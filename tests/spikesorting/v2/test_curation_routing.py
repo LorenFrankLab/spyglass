@@ -74,9 +74,7 @@ def test_classify_splits_recording_concat_sort_curation_keys():
 
 def test_classify_routes_concat_only_keys():
     """Concat-source keys route into ``concat_restriction`` with empty rec."""
-    plan = _classify(
-        {"session_group_name": "g", "session_group_owner": "o"}
-    )
+    plan = _classify({"session_group_name": "g", "session_group_owner": "o"})
     assert plan.concat_restriction == {
         "session_group_name": "g",
         "session_group_owner": "o",

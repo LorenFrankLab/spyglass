@@ -1168,9 +1168,9 @@ class Recording(SpyglassMixin, dj.Computed):
         # compute step resolves the raw ElectricalSeries by this id (not by
         # scanning acquisition) so a multi-ElectricalSeries / repacked NWB
         # cannot silently feed a different source than the selection lineage.
-        raw_object_id = (
-            Raw & {"nwb_file_name": nwb_file_name}
-        ).fetch1("raw_object_id")
+        raw_object_id = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+            "raw_object_id"
+        )
         # Pre-fetch + validate the preprocessing params here so the
         # compute stage does not need to re-read them. The validated
         # model is DeepHash-stable across the two ``make_fetch``

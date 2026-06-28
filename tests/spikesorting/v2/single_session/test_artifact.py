@@ -9,7 +9,6 @@ from tests.spikesorting.v2.single_session._helpers import (
     _build_synthetic_rec,
 )
 
-
 # ---------- ArtifactDetectionSelection source-part pattern -------------------------
 
 
@@ -993,9 +992,9 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         "z-score-only region (frames 3000-3099) is still valid -- the "
         "z-score branch did not contribute, or the combine became AND"
     )
-    assert _covered(timestamps[500]), (
-        "a quiet background frame was flagged; detection is over-triggering"
-    )
+    assert _covered(
+        timestamps[500]
+    ), "a quiet background frame was flagged; detection is over-triggering"
     assert valid_times.shape == (3, 2), (
         "expected 3 valid intervals around the two single-detector regions, "
         f"got shape {valid_times.shape}"
@@ -1191,9 +1190,9 @@ def test_artifact_detection_delete_uses_interval_ownership_part_rows(
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    part_rows = (
-        ArtifactDetection.ArtifactRemovedInterval & art_pk
-    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    part_rows = (ArtifactDetection.ArtifactRemovedInterval & art_pk).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    )
     assert part_rows, "ArtifactDetection.populate must insert ownership rows"
 
     def _unexpected_resolve(cls, key):
@@ -1235,9 +1234,9 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
         }
     )
     ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    part_rows = (
-        ArtifactDetection.ArtifactRemovedInterval & art_pk
-    ).fetch("nwb_file_name", "interval_list_name", as_dict=True)
+    part_rows = (ArtifactDetection.ArtifactRemovedInterval & art_pk).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    )
     assert part_rows, "ArtifactDetection.populate must insert ownership rows"
 
     (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
@@ -1374,14 +1373,11 @@ def test_shared_artifact_group_populate_end_to_end(
     ).fetch(as_dict=True)
     assert len(rows) == 1
     assert rows[0]["pipeline"] == "spikesorting_artifact_detection_v2"
-    assert (
-        ArtifactDetection.ArtifactRemovedInterval
-        & {
-            "artifact_detection_id": art_pk["artifact_detection_id"],
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_name,
-        }
-    ), "ArtifactDetection.populate did not insert the IntervalList ownership part row"
+    assert ArtifactDetection.ArtifactRemovedInterval & {
+        "artifact_detection_id": art_pk["artifact_detection_id"],
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_name,
+    }, "ArtifactDetection.populate did not insert the IntervalList ownership part row"
 
     # ``get_artifact_removed_intervals`` returns a dict keyed by
     # member nwb_file_name for shared-group sources. Today single

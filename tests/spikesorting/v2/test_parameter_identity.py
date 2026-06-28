@@ -365,17 +365,14 @@ def test_duplicate_parameter_content_escape_hatch(dj_conn):
             },
             allow_duplicate_params=True,
         )
-        assert PreprocessingParameters & {
-            "preprocessing_params_name": dup_name
-        }
+        assert PreprocessingParameters & {"preprocessing_params_name": dup_name}
         df = describe_parameter_rows()
         dup = df.loc[df["parameter_name"] == dup_name].iloc[0]
         assert dup["duplicate_of"] == "default"
         assert "duplicate content" in dup["name_warnings"]
     finally:
         (
-            PreprocessingParameters
-            & {"preprocessing_params_name": dup_name}
+            PreprocessingParameters & {"preprocessing_params_name": dup_name}
         ).delete(safemode=False)
 
 
@@ -431,9 +428,7 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
     assert list(df.columns) == _PARAMETER_ROW_COLUMNS
 
     def _cell(table, name, col):
-        sub = df[
-            (df["table"] == table) & (df["parameter_name"] == name)
-        ]
+        sub = df[(df["table"] == table) & (df["parameter_name"] == name)]
         assert len(sub) == 1, f"{table}/{name}: expected one row"
         return sub.iloc[0][col]
 

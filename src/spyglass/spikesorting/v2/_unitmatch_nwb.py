@@ -54,7 +54,9 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
     hdmf.common.DynamicTable
         Concrete-dtype columns so even an empty (zero-pair) table writes.
     """
-    columns = {name: [] for name in _STR_COLUMNS + _INT_COLUMNS + _FLOAT_COLUMNS}
+    columns = {
+        name: [] for name in _STR_COLUMNS + _INT_COLUMNS + _FLOAT_COLUMNS
+    }
     for index, pair in enumerate(pairs):
         columns["pair_index"].append(index)
         for name in _STR_COLUMNS:

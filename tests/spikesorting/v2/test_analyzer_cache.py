@@ -520,9 +520,9 @@ class TestPublishAnalyzerAtomically:
 
         publish_analyzer_atomically(canonical, build_into)
         reloaded = si.load_sorting_analyzer(canonical)
-        assert reloaded.has_recording(), (
-            "the published analyzer lost its recording after the move"
-        )
+        assert (
+            reloaded.has_recording()
+        ), "the published analyzer lost its recording after the move"
         # The recording-dependent extension the detachment bug broke.
         reloaded.compute(["noise_levels", "spike_amplitudes"])
         assert self._staging_is_empty(canonical)

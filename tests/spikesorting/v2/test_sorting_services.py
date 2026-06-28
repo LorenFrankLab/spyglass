@@ -251,7 +251,9 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
     assert folder.exists(), "no-rebuild audit path must not mutate the folder"
 
 
-def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(monkeypatch, tmp_path):
+def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
+    monkeypatch, tmp_path
+):
     """Default analyzer access removes an invalid cache folder and rebuilds it."""
     import sys
     import types
@@ -280,16 +282,16 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(monkeypatch, tmp_path)
     def _rebuild(_sorting_table, key, waveform_params_name=None):
         assert key == {"sorting_id": "s1"}
         assert waveform_params_name == "display"
-        assert not folder.exists(), "invalid folder must be removed before rebuild"
+        assert (
+            not folder.exists()
+        ), "invalid folder must be removed before rebuild"
         folder.mkdir()
         rebuilt_marker.write_text("ok")
 
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
     )
-    monkeypatch.setattr(
-        _sorting_analyzer, "rebuild_analyzer_folder", _rebuild
-    )
+    monkeypatch.setattr(_sorting_analyzer, "rebuild_analyzer_folder", _rebuild)
     # The recipe-row validation queries AnalyzerWaveformParameters; this unit
     # test mocks the rest of the load path, so stub it ("display" is a
     # placeholder, not a real shipped recipe row).

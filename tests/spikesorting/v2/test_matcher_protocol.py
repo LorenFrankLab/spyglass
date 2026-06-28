@@ -103,7 +103,8 @@ def test_registry_no_silent_reroute(clean_registry):
 def test_same_backend_reregisters_idempotently(clean_registry):
     """Re-registering the SAME backend class is idempotent (no maintenance flag)
     -- this is how register_default_matchers self-heals, so the built-in path no
-    longer relies on a blunt replace=True that would also mask a real collision."""
+    longer relies on a blunt replace=True that would also mask a real collision.
+    """
     mp = clean_registry
     mp.register_default_matchers()
     builtin_cls = type(mp.get_matcher("unitmatch"))

@@ -206,7 +206,9 @@ def _insert_recompute_outcome(
 
     with transaction_or_noop(table.connection):
         if outcome == "compare":
-            _insert_comparison(table, key, stored_hashes, new_hashes, created_at)
+            _insert_comparison(
+                table, key, stored_hashes, new_hashes, created_at
+            )
         else:  # 'xfail' / 'error': a single matched=0 row, no diff parts
             table.insert1(
                 {
@@ -525,9 +527,9 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         shared ``RecomputeFetched.rounding`` field carries ``TRACE_ROUNDING`` for
         carrier shape only; the recording compute path ignores it.
         """
-        xfail_reason = (
-            RecordingArtifactRecomputeSelection & key
-        ).fetch1("xfail_reason")
+        xfail_reason = (RecordingArtifactRecomputeSelection & key).fetch1(
+            "xfail_reason"
+        )
         parent = self.get_parent_key(key)
         return RecomputeFetched(
             # str the recording_id UUID for a DeepHash-stable carrier.
@@ -617,7 +619,12 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
         """Backfill ``created_at`` from the artifact file mtime."""
         for key in (self & restriction).fetch("KEY", as_dict=True):
             self.update1(
-                {**key, "created_at": _artifact_created_at(self.get_parent_key(key))}
+                {
+                    **key,
+                    "created_at": _artifact_created_at(
+                        self.get_parent_key(key)
+                    ),
+                }
             )
 
     def delete_files(
@@ -854,9 +861,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             si_deps=si_deps,
             analyzer_manifest=manifest,
             analyzer_hash=(
-                combined_hash(content_hashes)
-                if content_hashes
-                else _ZERO_HASH
+                combined_hash(content_hashes) if content_hashes else _ZERO_HASH
             ),
         )
 
@@ -901,9 +906,9 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
             return
         rows = [
             {**version_key, "env_id": env_id, "rounding": rounding}
-            for version_key in (
-                SortingAnalyzerVersions & restriction
-            ).fetch("KEY", as_dict=True)
+            for version_key in (SortingAnalyzerVersions & restriction).fetch(
+                "KEY", as_dict=True
+            )
         ]
         cls.insert(rows, skip_duplicates=True)
 
@@ -1180,9 +1185,7 @@ def _insert_comparison(table, key, stored_hashes, new_hashes, created_at):
     matched, missing_old, missing_new, differing = compare_hash_dicts(
         stored_hashes, new_hashes
     )
-    table.insert1(
-        {**key, "matched": matched, "created_at": created_at}
-    )
+    table.insert1({**key, "matched": matched, "created_at": created_at})
     name_rows = [
         {**key, "name": n, "missing_from": "old"} for n in missing_old
     ] + [{**key, "name": n, "missing_from": "new"} for n in missing_new]

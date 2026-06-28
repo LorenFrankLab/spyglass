@@ -62,7 +62,8 @@ def polymer_60s_sort(dj_conn):
         nwb_file_name, _TEAM, team_description="curation wrapper tests"
     )
     run_summary = run_v2_pipeline(
-        **inputs, pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+        **inputs,
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
     return {"sorting_id": run_summary["sorting_id"]}
 

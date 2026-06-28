@@ -67,6 +67,8 @@ def _should_external_whiten(sorter: str, sorter_params: dict) -> bool:
     return sorter.lower() in _EXTERNAL_WHITEN_SORTERS and bool(
         sorter_params.get("whiten", False)
     )
+
+
 # Sorter kwargs that do not survive containerization of the MATLAB sorters
 # (they reference host paths / host process settings). Stripped only when one of
 # the MATLAB sorters runs on a container backend.

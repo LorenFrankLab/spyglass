@@ -181,7 +181,9 @@ def _explicit_recording(times, fs=FS):
         traces_list=[np.zeros((times.size, 1), dtype="float32")],
         sampling_frequency=fs,
     )
-    with warnings.catch_warnings():  # set_times warns "not recommended"; fine here
+    with (
+        warnings.catch_warnings()
+    ):  # set_times warns "not recommended"; fine here
         warnings.simplefilter("ignore")
         rec.set_times(times, segment_index=0)
     return rec
@@ -202,8 +204,8 @@ def _recording_for_kind(kind, n, fs=FS):
         return _rate_based_recording(n, fs)
     ts = np.arange(n, dtype=np.float64) / fs
     if kind == "disjoint":  # two wall-clock gaps from disjoint sort intervals
-        ts[n // 3:] += 5.0
-        ts[2 * n // 3:] += 11.0
+        ts[n // 3 :] += 5.0
+        ts[2 * n // 3 :] += 11.0
     return _explicit_recording(ts, fs)
 
 
@@ -219,25 +221,25 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
     n = 200_000
     rec = _recording_for_kind(kind, n)
     full = rec.get_times()
-    queries = np.concatenate([
-        full[[0, 1, n // 3, n // 2, n - 2, n - 1]],
-        full[[0, n // 2, n - 1]] + 1e-9,
-        full[[0, n // 2, n - 1]] - 1e-9,
-        # midway between the last pre-gap and first post-gap sample: for the
-        # disjoint recording this lands INSIDE the dead wall-clock gap (the
-        # most disjoint-specific binary-search query); harmless for the others.
-        [(full[n // 3 - 1] + full[n // 3]) / 2.0],
-        [full[0] - 1.0, full[-1] + 1.0],
-    ])
+    queries = np.concatenate(
+        [
+            full[[0, 1, n // 3, n // 2, n - 2, n - 1]],
+            full[[0, n // 2, n - 1]] + 1e-9,
+            full[[0, n // 2, n - 1]] - 1e-9,
+            # midway between the last pre-gap and first post-gap sample: for the
+            # disjoint recording this lands INSIDE the dead wall-clock gap (the
+            # most disjoint-specific binary-search query); harmless for the others.
+            [(full[n // 3 - 1] + full[n // 3]) / 2.0],
+            [full[0] - 1.0, full[-1] + 1.0],
+        ]
+    )
     np.testing.assert_array_equal(
         frames_for_times(rec, queries),
         np.searchsorted(full, queries, side="left"),
     )
 
 
-@pytest.mark.parametrize(
-    "bad", [float("nan"), float("inf"), float("-inf")]
-)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_frames_for_times_rejects_non_finite(bad):
     """AVTM-3: a NaN/Inf query time raises (searchsorted would map NaN to +inf
     and silently mis-map). Out-of-range FINITE times still clamp -- that
@@ -312,7 +314,8 @@ def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
 def test_timestamp_fingerprint_matches_array_equal_semantics():
     """Equal timestamps -> equal digest; any byte difference (a tiny shift OR a
     different length) -> different digest -- the bounded-memory replacement for
-    ``np.array_equal`` over two full vectors in the shared-artifact-group check."""
+    ``np.array_equal`` over two full vectors in the shared-artifact-group check.
+    """
     import numpy as np
 
     from spyglass.spikesorting.v2._signal_math import timestamp_fingerprint

@@ -265,7 +265,9 @@ def resolve_motion_correction(
     return preset, preset_kwargs
 
 
-def cumulative_member_boundaries(num_samples_per_member: list[int]) -> list[int]:
+def cumulative_member_boundaries(
+    num_samples_per_member: list[int],
+) -> list[int]:
     """Return the cumulative end-sample boundary for each member.
 
     The boundary for member ``i`` is the number of samples in the
@@ -473,8 +475,7 @@ def assert_concat_compatible(recordings: list) -> None:
                 f"{share_clause}"
             )
         if reference is not None and (
-            value.shape != reference.shape
-            or not np.allclose(value, reference)
+            value.shape != reference.shape or not np.allclose(value, reference)
         ):
             raise ValueError(
                 f"build_concatenated_recording: member {index} {noun} differs "

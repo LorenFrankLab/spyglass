@@ -30,7 +30,6 @@ from spyglass.spikesorting.v2._pipeline_types import (
     StageStatus,
 )
 
-
 # Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
 # ``"computed"`` when its row did not exist before this call and populate /
 # insert_curation created it this call; ``"reused"`` when the row already
@@ -690,9 +689,7 @@ def run_v2_pipeline_session(
             failed_details.append(
                 f"sort_group_id={entry['sort_group_id']}: {error_type}"
             )
-    failed_suffix = (
-        f" ({', '.join(failed_details)})" if failed_details else ""
-    )
+    failed_suffix = f" ({', '.join(failed_details)})" if failed_details else ""
     logger.info(
         f"run_v2_pipeline_session: {len(results)} group(s): {n_ok} ok, "
         f"{n_failed} failed{failed_suffix}, {n_zero} zero-unit, "

@@ -88,9 +88,9 @@ def describe_parameter_rows() -> "pd.DataFrame":
     artifact_use: dict[str, list[str]] = {}
     sorter_use: dict[tuple[str, str], list[str]] = {}
     for preset_name, preset in _PIPELINE_PRESETS.items():
-        preproc_use.setdefault(
-            preset.preprocessing_params_name, []
-        ).append(preset_name)
+        preproc_use.setdefault(preset.preprocessing_params_name, []).append(
+            preset_name
+        )
         artifact_use.setdefault(
             preset.artifact_detection_params_name, []
         ).append(preset_name)
@@ -102,9 +102,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
     shipped_artifact = {
         r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS
     }
-    shipped_sorter = {
-        (r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS
-    }
+    shipped_sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
 
     def _str_axis(used_by: list[str], attr: str) -> str:
         """Distinct non-blank preset values for ``attr``, comma-joined."""
@@ -372,6 +370,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
         "metric_params_name",
         lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
     )
+
     def _autocuration_rule_content(rules_row):
         # The Rule part rows define the named ruleset's content, so fold them
         # (ordered by rule_index) into the fingerprint -- two rulesets with the
@@ -418,9 +417,7 @@ def describe_parameter_rows() -> "pd.DataFrame":
         ).append(rec["parameter_name"])
 
     for rec in records:
-        group = sorted(
-            names_by_fp[(rec["table"], rec["sorter"], rec["_fp"])]
-        )
+        group = sorted(names_by_fp[(rec["table"], rec["sorter"], rec["_fp"])])
         others = [n for n in group if n != rec["parameter_name"]]
         rec["duplicate_of"] = others[0] if others else None
         rec["fingerprint"] = short_fingerprint(rec["_fp"])
@@ -440,9 +437,9 @@ def describe_parameter_rows() -> "pd.DataFrame":
         [{c: rec.get(c) for c in _PARAMETER_ROW_COLUMNS} for rec in records],
         columns=_PARAMETER_ROW_COLUMNS,
     )
-    return frame.sort_values(
-        ["table", "sorter", "parameter_name"]
-    ).reset_index(drop=True)
+    return frame.sort_values(["table", "sorter", "parameter_name"]).reset_index(
+        drop=True
+    )
 
 
 def _content_equal(left, right) -> bool:

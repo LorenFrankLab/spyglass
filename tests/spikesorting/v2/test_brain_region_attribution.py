@@ -253,9 +253,9 @@ def test_get_unit_brain_regions_empty_include_labels_returns_all(
 
     all_units = CurationV2().get_unit_brain_regions(pk)
     empty_filter = CurationV2().get_unit_brain_regions(pk, include_labels=[])
-    assert {int(u) for u in empty_filter["unit_id"]} == set(unit_ids), (
-        "include_labels=[] must return all units (no filter), not zero"
-    )
+    assert {int(u) for u in empty_filter["unit_id"]} == set(
+        unit_ids
+    ), "include_labels=[] must return all units (no filter), not zero"
     assert len(empty_filter) == len(all_units)
 
 

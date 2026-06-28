@@ -68,7 +68,8 @@ def test_classify_orphans_keeps_referenced_folders_and_present_rows():
 
 def test_classify_orphans_separates_intentionally_reclaimed_paths():
     """A missing row-side folder with deleted=1 provenance is reclaimed, not a
-    DB-side orphan. Missing paths without that provenance keep the old behavior."""
+    DB-side orphan. Missing paths without that provenance keep the old behavior.
+    """
     from spyglass.spikesorting.v2._analyzer_cache import (
         classify_orphaned_analyzer_folders,
     )

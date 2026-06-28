@@ -154,11 +154,9 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     # one past the inclusive run end. This keeps the worker's return O(n_runs)
     # rather than O(n_flagged) for the whole chunk.
     flagged = channel_hit.sum(axis=1) >= n_required
-    edges = np.diff(
-        np.concatenate(([False], flagged, [False])).astype(np.int8)
-    )
+    edges = np.diff(np.concatenate(([False], flagged, [False])).astype(np.int8))
     starts = np.flatnonzero(edges == 1)
     ends = np.flatnonzero(edges == -1) - 1
-    return np.stack(
-        [starts + start_frame, ends + start_frame], axis=1
-    ).astype(np.int64)
+    return np.stack([starts + start_frame, ends + start_frame], axis=1).astype(
+        np.int64
+    )

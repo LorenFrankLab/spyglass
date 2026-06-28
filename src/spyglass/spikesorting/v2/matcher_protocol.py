@@ -141,8 +141,10 @@ def register_matcher(
             "attribute and a callable `match(session_inputs, params)` method)."
         )
     existing = _MATCHER_REGISTRY.get(matcher.name)
-    if existing is not None and type(existing) is not type(matcher) and (
-        not replace
+    if (
+        existing is not None
+        and type(existing) is not type(matcher)
+        and (not replace)
     ):
         raise ValueError(
             f"A matcher named {matcher.name!r} is already registered to a "

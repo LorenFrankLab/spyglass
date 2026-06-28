@@ -157,7 +157,9 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
     assert units_nwb != recording_nwb, "units and recording must be distinct"
 
     try:
-        selection, final = _export_and_populate(run_summary["merge_id"], paper_id)
+        selection, final = _export_and_populate(
+            run_summary["merge_id"], paper_id
+        )
 
         # The supported path captures BOTH analysis files in the final export.
         assert units_nwb in final, (

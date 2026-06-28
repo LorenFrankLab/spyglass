@@ -31,9 +31,7 @@ pytestmark = pytest.mark.unit
 # tests/spikesorting/v2/ -> repo root is parents[3].
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FEATURE_DOC = _REPO_ROOT / "docs" / "src" / "Features" / "SpikeSortingV2.md"
-_NOTEBOOK_PY = (
-    _REPO_ROOT / "notebooks" / "py_scripts" / "10_Spike_SortingV2.py"
-)
+_NOTEBOOK_PY = _REPO_ROOT / "notebooks" / "py_scripts" / "10_Spike_SortingV2.py"
 # The dated, content-fingerprinted Neuropixels/Kilosort4 preset actually in the
 # catalog. Docs/notebooks discover it via describe_pipeline_presets(); this is
 # the name they may reference, never an undated placeholder.
@@ -55,6 +53,7 @@ def _nullable_num_match(df_value, preset_value) -> bool:
             isinstance(df_value, float) and math.isnan(df_value)
         )
     return df_value == preset_value
+
 
 _COLUMNS = [
     "pipeline_preset",
@@ -92,9 +91,9 @@ def test_describe_pipeline_presets_columns():
 def test_describe_pipeline_presets_threshold_units_clusterless():
     """The clusterless row's threshold units are µV, never the MAD ``σ``."""
     df = describe_pipeline_presets()
-    row = df.loc[
-        df["pipeline_preset"] == "franklab_clusterless_2026_06"
-    ].iloc[0]
+    row = df.loc[df["pipeline_preset"] == "franklab_clusterless_2026_06"].iloc[
+        0
+    ]
     units = row["threshold_units"]
     assert "µV" in units
     assert "σ" not in units

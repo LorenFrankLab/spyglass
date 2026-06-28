@@ -80,9 +80,7 @@ def test_sorter_execution_params_schema_container():
         with pytest.raises(ValidationError, match="non-empty container_image"):
             SorterExecutionParamsSchema(backend=backend)
         with pytest.raises(ValidationError, match="non-empty container_image"):
-            SorterExecutionParamsSchema(
-                backend=backend, container_image="   "
-            )
+            SorterExecutionParamsSchema(backend=backend, container_image="   ")
         # SI accepts docker_image=True; v2 rejects True as untracked provenance.
         with pytest.raises(ValidationError):
             SorterExecutionParamsSchema(backend=backend, container_image=True)
@@ -132,7 +130,9 @@ def test_reject_reserved_execution_keys():
 def test_build_run_sorter_container_kwargs():
     """The builder maps a validated execution row to SI run_sorter kwargs."""
     # Local -> no container kwargs at all.
-    assert build_run_sorter_container_kwargs(validate_execution_params(None)) == {}
+    assert (
+        build_run_sorter_container_kwargs(validate_execution_params(None)) == {}
+    )
 
     docker = SorterExecutionParamsSchema(
         backend="docker",
@@ -189,9 +189,7 @@ def test_recommended_container_rows_pin_si_runtime():
     from spyglass.spikesorting.v2._recipe_catalog import sorter_default_contents
 
     container_rows = [
-        row
-        for row in sorter_default_contents()
-        if is_container_backend(row[5])
+        row for row in sorter_default_contents() if is_container_backend(row[5])
     ]
     assert container_rows, "no shipped container sorter rows found"
     for row in container_rows:
@@ -203,7 +201,10 @@ def test_recommended_container_rows_pin_si_runtime():
         mode = execution["installation_mode"]
         if mode == "no-install":
             continue  # baked image carries the SI runtime
-        assert mode in ("pypi", "github"), f"{name} uses non-pinned mode {mode!r}"
+        assert mode in (
+            "pypi",
+            "github",
+        ), f"{name} uses non-pinned mode {mode!r}"
         assert execution["spikeinterface_version"], (
             f"{name} uses installation_mode={mode!r} without an explicit "
             "spikeinterface_version -- not reproducible by row content"
@@ -290,8 +291,8 @@ def test_reserved_keys_cover_schema_install_controls():
     routing = {"schema_version", "backend", "container_image"}
     install_controls = schema_fields - routing
     missing = install_controls - EXECUTION_RESERVED_KEYS
-    assert not missing, (
-        f"schema install controls not in EXECUTION_RESERVED_KEYS: {missing}"
-    )
+    assert (
+        not missing
+    ), f"schema install controls not in EXECUTION_RESERVED_KEYS: {missing}"
     # The image maps to both run_sorter image kwargs, which are reserved.
     assert {"docker_image", "singularity_image"} <= EXECUTION_RESERVED_KEYS

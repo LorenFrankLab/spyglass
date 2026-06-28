@@ -34,9 +34,7 @@ def test_recording_trace_and_probe_map_render(populated_sorting):
 
     recording_key = _recording_key(populated_sorting)
 
-    traces = ssviz.plot_recording_traces(
-        recording_key, time_range=[0.0, 0.1]
-    )
+    traces = ssviz.plot_recording_traces(recording_key, time_range=[0.0, 0.1])
     assert traces is not None
     plt.close("all")
 

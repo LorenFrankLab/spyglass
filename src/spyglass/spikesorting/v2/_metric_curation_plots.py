@@ -303,9 +303,7 @@ def plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=None):
     """Render an autocorrelogram (ACG) grid, one panel per unit."""
     show = list(unit_ids) if unit_ids is not None else list(ids)
     index_of = {unit_id: i for i, unit_id in enumerate(ids)}
-    panels = [
-        (index_of[u], index_of[u], f"unit {u} ACG") for u in show
-    ]
+    panels = [(index_of[u], index_of[u], f"unit {u} ACG") for u in show]
     return _plot_correlogram_grid(
         ccgs, bins, panels, n_cols=4, panel_size=(3, 2)
     )
@@ -319,9 +317,7 @@ def plot_pair_correlograms_figure(ccgs, bins, ids, pairs):
     pair is mapped through the analyzer's unit-id order.
     """
     index_of = {unit_id: i for i, unit_id in enumerate(ids)}
-    panels = [
-        (index_of[a], index_of[b], f"{a} x {b}") for a, b in pairs
-    ]
+    panels = [(index_of[a], index_of[b], f"{a} x {b}") for a, b in pairs]
     return _plot_correlogram_grid(
         ccgs, bins, panels, n_cols=3, panel_size=(4, 3)
     )
@@ -424,9 +420,7 @@ def burst_pair_metrics_from_analyzer(
     similarity = np.asarray(
         analyzer.get_extension("template_similarity").get_data()
     )
-    locations = np.asarray(
-        analyzer.get_extension("unit_locations").get_data()
-    )
+    locations = np.asarray(analyzer.get_extension("unit_locations").get_data())
     ccgs, bins, _ = correlograms_from_analyzer(
         analyzer, window_ms=window_ms, bin_ms=bin_ms
     )

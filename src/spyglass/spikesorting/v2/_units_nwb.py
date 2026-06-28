@@ -687,7 +687,10 @@ def _write_sorting_units_nwb_body(
                 # region without the DB.
                 for name, desc in (
                     ("peak_amplitude_uv", "Peak template amplitude (uV)."),
-                    ("peak_electrode_id", "Peak channel spyglass electrode id."),
+                    (
+                        "peak_electrode_id",
+                        "Peak channel spyglass electrode id.",
+                    ),
                     ("n_spikes", "Number of spikes in the unit."),
                     ("brain_region", "Brain region of the peak electrode."),
                 ):
@@ -849,7 +852,9 @@ def write_curated_units_nwb(
         raise
 
 
-def _curated_obs_intervals(kept_uid, contribs, apply_merge, obs_intervals_by_uid):
+def _curated_obs_intervals(
+    kept_uid, contribs, apply_merge, obs_intervals_by_uid
+):
     """Per-unit ``obs_intervals`` for one curated/kept unit, or ``None``.
 
     ``None`` when the source NWB carried no ``obs_intervals`` column (legacy).

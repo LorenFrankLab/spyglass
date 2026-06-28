@@ -8,7 +8,6 @@ from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
 )
 
-
 # ===========================================================================
 # pipeline.py untested branches.
 #
@@ -107,7 +106,10 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "n_units",
     }
     assert stable_keys <= set(run_summary.keys())
-    assert run_summary["pipeline_preset"] == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    assert (
+        run_summary["pipeline_preset"]
+        == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+    )
     assert run_summary["curation_id"] == 0  # root curation
     assert run_summary["n_units"] >= 1
     # The smoke fixture's clusterless 100 uV default IS exercised in
@@ -126,7 +128,8 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     )
     assert run_summary2["recording_id"] == run_summary["recording_id"]
     assert (
-        run_summary2["artifact_detection_id"] == run_summary["artifact_detection_id"]
+        run_summary2["artifact_detection_id"]
+        == run_summary["artifact_detection_id"]
     )
     assert run_summary2["sorting_id"] == run_summary["sorting_id"]
     assert run_summary2["curation_id"] == run_summary["curation_id"]
@@ -405,10 +408,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             team_name="v2_test_team",
             pipeline_preset="franklab_clusterless_2026_06",
         )
-        assert (
-            run_summary["pipeline_preset"]
-            == "franklab_clusterless_2026_06"
-        )
+        assert run_summary["pipeline_preset"] == "franklab_clusterless_2026_06"
         for key in (
             "recording_id",
             "artifact_detection_id",
@@ -429,9 +429,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         # update1 modifies the secondary attributes in place.
         # allow_param_mutation=True: the deliberate-restore escape hatch on the
         # ImmutableParamsLookup guard (see the forward edit above).
-        SorterParameters.update1(
-            original_default, allow_param_mutation=True
-        )
+        SorterParameters.update1(original_default, allow_param_mutation=True)
 
 
 @pytest.mark.slow
@@ -889,11 +887,12 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
     ac_name = next(
         master["auto_curation_rules_name"]
         for master, rules in AutoCurationRules._default_payloads()
-        if rules
-        and (AutoCurationRules & master)
+        if rules and (AutoCurationRules & master)
     )
     rule_key = {"auto_curation_rules_name": ac_name, "rule_index": 0}
-    rule_original = float((AutoCurationRules.Rule & rule_key).fetch1("threshold"))
+    rule_original = float(
+        (AutoCurationRules.Rule & rule_key).fetch1("threshold")
+    )
     try:
         AutoCurationRules.Rule().update1(
             {**rule_key, "threshold": rule_original + 99.0},
@@ -916,7 +915,9 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
     # filled by validation, not present in _default_payloads' master -- a drift
     # there must still be flagged.
     master_key = {"auto_curation_rules_name": ac_name}
-    kwargs_original = (AutoCurationRules & master_key).fetch1("auto_merge_kwargs")
+    kwargs_original = (AutoCurationRules & master_key).fetch1(
+        "auto_merge_kwargs"
+    )
     try:
         AutoCurationRules().update1(
             {**master_key, "auto_merge_kwargs": {"drifted_master_field": True}},

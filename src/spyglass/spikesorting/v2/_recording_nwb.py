@@ -115,7 +115,9 @@ def _remove_partial_artifact(
         )
         return
     try:
-        _abs = AnalysisNwbfile.get_abs_path(analysis_file_name, from_schema=False)
+        _abs = AnalysisNwbfile.get_abs_path(
+            analysis_file_name, from_schema=False
+        )
         pathlib.Path(_abs).unlink(missing_ok=True)
     except Exception as cleanup_exc:  # pragma: no cover -- defensive
         logger.error(
@@ -302,7 +304,9 @@ def write_nwb_artifact(
         # Any write/hash failure: remove the partial analysis file before
         # re-raising so a half-written artifact never lingers -- but NEVER a
         # canonical artifact (see ``_remove_partial_artifact``).
-        _remove_partial_artifact(analysis_file_name, existing_analysis_file_name)
+        _remove_partial_artifact(
+            analysis_file_name, existing_analysis_file_name
+        )
         raise
 
     return analysis_file_name, object_id, content_hash

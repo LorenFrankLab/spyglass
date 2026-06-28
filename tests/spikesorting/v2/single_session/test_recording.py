@@ -8,7 +8,6 @@ import pytest
 
 from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 
-
 # ---------- RecordingSelection.insert_selection ---------------------------
 
 
@@ -345,9 +344,7 @@ def test_rebuild_refuses_on_content_drift(populated_recording, monkeypatch):
         components["traces"] = "drifted-" + components["traces"]
         return components
 
-    monkeypatch.setattr(
-        fp_mod, "recording_content_fingerprint", _drifted_fp
-    )
+    monkeypatch.setattr(fp_mod, "recording_content_fingerprint", _drifted_fp)
     try:
         Path(abs_path).unlink()
         with pytest.raises(RecordingContentDriftError, match="content_hash"):
@@ -388,9 +385,9 @@ def test_rebuild_cleanup_on_refresh_failure(populated_recording, monkeypatch):
             Recording()._rebuild_nwb_artifact(populated_recording)
         # os.replace ran but the refresh failed -> the slot is returned to
         # MISSING (not left under a stale checksum).
-        assert not Path(abs_path).exists(), (
-            "a failed checksum refresh must unlink the canonical slot"
-        )
+        assert not Path(
+            abs_path
+        ).exists(), "a failed checksum refresh must unlink the canonical slot"
     finally:
         shutil.move(backup, abs_path)
         # The restored file's checksum is the ORIGINAL (refresh never ran), so
@@ -413,21 +410,17 @@ def test_rebuild_double_check_skips_when_present(
         calls["n"] += 1
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(
-        Recording, "_compute_recording_artifact", _counting
-    )
+    monkeypatch.setattr(Recording, "_compute_recording_artifact", _counting)
     # File is present (populated), so the under-lock existence re-check short-
     # circuits before any rebuild.
     Recording()._rebuild_nwb_artifact(populated_recording)
-    assert calls["n"] == 0, (
-        "the double-check must skip the rebuild when the file is present"
-    )
+    assert (
+        calls["n"] == 0
+    ), "the double-check must skip the rebuild when the file is present"
 
 
 @pytest.mark.slow
-def test_rebuild_installs_via_atomic_replace(
-    populated_recording, monkeypatch
-):
+def test_rebuild_installs_via_atomic_replace(populated_recording, monkeypatch):
     """The rebuild installs via an atomic ``os.replace`` from a DISTINCT temp
     file into the canonical slot -- so a reader never observes a partially
     written canonical file."""
@@ -452,9 +445,9 @@ def test_rebuild_installs_via_atomic_replace(
     Path(canonical_abs).unlink()
     Recording()._rebuild_nwb_artifact(populated_recording)
 
-    assert captured.get("dst") == str(canonical_abs), (
-        "the install must os.replace INTO the canonical slot"
-    )
+    assert captured.get("dst") == str(
+        canonical_abs
+    ), "the install must os.replace INTO the canonical slot"
     assert captured.get("src") and captured["src"] != str(canonical_abs), (
         "the install must rename a DISTINCT temp file (atomic publish), not "
         "write the canonical slot in place"
@@ -1949,7 +1942,9 @@ def test_raw_source_series_pinned_to_raw_object_id(
         pass
 
     def _capture_read(nwb_file_abs_path, **kwargs):
-        captured["electrical_series_path"] = kwargs.get("electrical_series_path")
+        captured["electrical_series_path"] = kwargs.get(
+            "electrical_series_path"
+        )
         raise _StopAfterRead
 
     monkeypatch.setattr(ss_utils, "read_raw_nwb_recording", _capture_read)

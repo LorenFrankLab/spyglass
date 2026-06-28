@@ -70,9 +70,7 @@ def ensure_extensions(
     to_add = [name for name in names if not analyzer.has_extension(name)]
     if to_add:
         params = {
-            k: v
-            for k, v in (extension_params or {}).items()
-            if k in to_add
+            k: v for k, v in (extension_params or {}).items() if k in to_add
         }
         analyzer.compute(
             to_add, extension_params=params or None, **compute_kwargs
@@ -191,8 +189,7 @@ def _load_analyzer_folder_or_rebuild(
                     shutil.rmtree(folder, ignore_errors=False)
                 except Exception as cleanup_exc:
                     raise AnalyzerFolderInvalidError(
-                        message
-                        + " Failed to remove the invalid folder before "
+                        message + " Failed to remove the invalid folder before "
                         "rebuilding; manual cleanup is required."
                     ) from cleanup_exc
 
@@ -262,9 +259,7 @@ def load_or_rebuild_analyzer(
     # restriction (e.g. {"object_id": ...} or any single-row selector)
     # must work too. ``fetch1`` enforces that the restriction selects
     # exactly one Sorting row, so the resolved id is unambiguous.
-    sorting_id, n_units = (sorting_table & key).fetch1(
-        "sorting_id", "n_units"
-    )
+    sorting_id, n_units = (sorting_table & key).fetch1("sorting_id", "n_units")
     if int(n_units) == 0:
         raise ZeroUnitAnalyzerError(
             "Sorting.get_analyzer: sorting_id="
@@ -512,8 +507,7 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         recording = ConcatenatedRecording().get_recording(source.key)
     if source.kind == "recording" and artifact_detection_id is not None:
         nwb_file_name = (
-            RecordingSelection
-            & {"recording_id": source.key["recording_id"]}
+            RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
         valid_times = (
             IntervalList

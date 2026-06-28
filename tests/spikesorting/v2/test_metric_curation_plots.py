@@ -212,9 +212,7 @@ def capped_analyzer():
     rec, gt = si.generate_ground_truth_recording(
         durations=[30.0], num_units=2, seed=0, sampling_frequency=30000.0
     )
-    analyzer = si.create_sorting_analyzer(
-        gt, rec, sparse=True, format="memory"
-    )
+    analyzer = si.create_sorting_analyzer(gt, rec, sparse=True, format="memory")
     analyzer.compute(
         ["random_spikes", "noise_levels", "templates", "waveforms"],
         extension_params={
@@ -287,9 +285,7 @@ def sparse_multichannel_analyzer():
         seed=0,
         sampling_frequency=30000.0,
     )
-    analyzer = si.create_sorting_analyzer(
-        gt, rec, sparse=True, format="memory"
-    )
+    analyzer = si.create_sorting_analyzer(gt, rec, sparse=True, format="memory")
     analyzer.compute(
         ["random_spikes", "noise_levels", "templates", "waveforms"],
         extension_params={"random_spikes": {"seed": 0}},
@@ -319,7 +315,9 @@ def test_peak_amplitudes_dense_for_cross_unit_alignment(
 
     peak_amps, _ = peak_amplitudes_from_analyzer(analyzer)
     for unit_id in analyzer.unit_ids:
-        assert peak_amps[unit_id].shape[1] == n_total  # dense, cross-unit aligned
+        assert (
+            peak_amps[unit_id].shape[1] == n_total
+        )  # dense, cross-unit aligned
 
 
 def test_correlograms_from_analyzer_honors_window_bin(synthetic_analyzer):

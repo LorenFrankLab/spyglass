@@ -391,9 +391,7 @@ def _capture_metric_curation(curation_pk: dict):
             "metric_curation_param_name": "none",
         }
     )
-    sel_key = {
-        k: selection[k] for k in MetricCurationSelection.primary_key
-    }
+    sel_key = {k: selection[k] for k in MetricCurationSelection.primary_key}
     MetricCuration.populate(sel_key, reserve_jobs=False)
     metrics = MetricCuration.get_metrics(sel_key)  # {name: {unit_id: value}}
     frame = pd.DataFrame(

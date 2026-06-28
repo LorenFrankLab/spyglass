@@ -1423,9 +1423,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         }
         electrode_by_id = {
             int(row["electrode_id"]): row
-            for row in (
-                SortGroupV2.SortGroupElectrode & restriction
-            ).fetch(as_dict=True)
+            for row in (SortGroupV2.SortGroupElectrode & restriction).fetch(
+                as_dict=True
+            )
         }
         region_by_electrode = {
             int(row["electrode_id"]): str(row["region_name"])
@@ -2193,9 +2193,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # nested ``get_analyzer`` load does not self-deadlock.
         with analyzer_cache_lock(sorting_id):
             analyzer = self.get_analyzer(key)
-            return ensure_extensions(
-                analyzer, extensions, job_kwargs=resolved
-            )
+            return ensure_extensions(analyzer, extensions, job_kwargs=resolved)
 
     # ---- visualization / export delegates (see v2.visualization facade) ---
 

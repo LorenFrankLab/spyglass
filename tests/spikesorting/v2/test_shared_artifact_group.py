@@ -678,13 +678,22 @@ def test_shared_group_member_set_frozen():
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
         SharedArtifactGroup.insert1(
-            {"shared_artifact_group_name": group_name, "nwb_file_name": session},
+            {
+                "shared_artifact_group_name": group_name,
+                "nwb_file_name": session,
+            },
             allow_direct_insert=True,
         )
         SharedArtifactGroup.Member.insert(
             [
-                {"shared_artifact_group_name": group_name, "recording_id": rid_a},
-                {"shared_artifact_group_name": group_name, "recording_id": rid_b},
+                {
+                    "shared_artifact_group_name": group_name,
+                    "recording_id": rid_a,
+                },
+                {
+                    "shared_artifact_group_name": group_name,
+                    "recording_id": rid_b,
+                },
             ],
             allow_direct_insert=True,
         )

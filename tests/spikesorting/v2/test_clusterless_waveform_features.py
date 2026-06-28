@@ -665,12 +665,13 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
         loc_row = loc_df.loc[0]
         loc = np.asarray(loc_row["spike_location"])
         n_spikes = np.asarray(loc_row["spike_times"]).shape[0]
-        assert loc.ndim == 2 and loc.shape[0] == n_spikes, (
-            f"spike_location {loc.shape} must align 1:1 with {n_spikes} spikes"
-        )
-        assert loc.shape[1] in (2, 3), (
-            f"spike_location must be 2D or 3D coordinates; got {loc.shape}"
-        )
+        assert (
+            loc.ndim == 2 and loc.shape[0] == n_spikes
+        ), f"spike_location {loc.shape} must align 1:1 with {n_spikes} spikes"
+        assert loc.shape[1] in (
+            2,
+            3,
+        ), f"spike_location must be 2D or 3D coordinates; got {loc.shape}"
     finally:
         for p in (fw_param, loc_param):
             (UnitWaveformFeatures & {"features_param_name": p}).delete_quick()

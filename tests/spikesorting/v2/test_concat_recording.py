@@ -225,7 +225,10 @@ def _snap(member_index, recording_id, content_hash="c" * 64, **over):
 def test_member_set_hash_is_a_stable_sha256_hex():
     """The folded member-set hash is a deterministic 64-char hex digest, stable
     across calls and insertion order (canonicalized by member_index)."""
-    rows = [_snap(0, "11111111-1111-1111-1111-111111111111"), _snap(1, "22222222-2222-2222-2222-222222222222")]
+    rows = [
+        _snap(0, "11111111-1111-1111-1111-111111111111"),
+        _snap(1, "22222222-2222-2222-2222-222222222222"),
+    ]
     h1 = member_set_hash(rows)
     h2 = member_set_hash(list(reversed(rows)))  # input order must not matter
     assert h1 == h2
@@ -236,8 +239,14 @@ def test_member_set_hash_is_a_stable_sha256_hex():
 def test_member_set_hash_changes_with_member_identity():
     """A different member (different recording_id) yields a different hash --
     this is what makes a different member SET a different concat id."""
-    base = [_snap(0, "11111111-1111-1111-1111-111111111111"), _snap(1, "22222222-2222-2222-2222-222222222222")]
-    swapped = [_snap(0, "11111111-1111-1111-1111-111111111111"), _snap(1, "33333333-3333-3333-3333-333333333333")]
+    base = [
+        _snap(0, "11111111-1111-1111-1111-111111111111"),
+        _snap(1, "22222222-2222-2222-2222-222222222222"),
+    ]
+    swapped = [
+        _snap(0, "11111111-1111-1111-1111-111111111111"),
+        _snap(1, "33333333-3333-3333-3333-333333333333"),
+    ]
     assert member_set_hash(base) != member_set_hash(swapped)
 
 
@@ -256,8 +265,14 @@ def test_member_set_hash_ignores_content_hash():
     must NOT change the folded set hash (content drift is caught separately)."""
     rid_a = "11111111-1111-1111-1111-111111111111"
     rid_b = "22222222-2222-2222-2222-222222222222"
-    rows = [_snap(0, rid_a, content_hash="a" * 64), _snap(1, rid_b, content_hash="b" * 64)]
-    drifted = [_snap(0, rid_a, content_hash="f" * 64), _snap(1, rid_b, content_hash="e" * 64)]
+    rows = [
+        _snap(0, rid_a, content_hash="a" * 64),
+        _snap(1, rid_b, content_hash="b" * 64),
+    ]
+    drifted = [
+        _snap(0, rid_a, content_hash="f" * 64),
+        _snap(1, rid_b, content_hash="e" * 64),
+    ]
     assert member_set_hash(rows) == member_set_hash(drifted)
 
 
@@ -290,9 +305,7 @@ def test_build_concatenated_recording_no_motion_sums_samples():
         [rng.normal(0, 1, size=(200, 4)).astype(np.float32)],
         sampling_frequency=fs,
     )
-    concat = build_concatenated_recording(
-        [rec_a, rec_b], motion_preset=None
-    )
+    concat = build_concatenated_recording([rec_a, rec_b], motion_preset=None)
     assert concat.get_num_segments() == 1
     assert concat.get_num_samples() == 500
     assert list(concat.get_channel_ids()) == list(rec_a.get_channel_ids())
