@@ -112,6 +112,9 @@ def test_assert_shared_group_aggregatable_accepts_matching_members():
     "make_second,nwb_names,match",
     [
         (lambda: _np_recording(100, 20000.0), ["s.nwb", "s.nwb"], "sampling"),
+        # The regression case: a sub-Hz drift NumPy's default np.isclose would
+        # accept must still be rejected (it misaligns the aggregated time axis).
+        (lambda: _np_recording(100, 30000.3), ["s.nwb", "s.nwb"], "sampling"),
         (lambda: _np_recording(50, 30000.0), ["s.nwb", "s.nwb"], "sample"),
         (
             lambda: _np_recording(100, 30000.0, dtype="int16"),

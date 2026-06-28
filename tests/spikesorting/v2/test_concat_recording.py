@@ -304,6 +304,12 @@ def test_assert_concat_compatible_rejects_mismatched_fs():
     with pytest.raises(ValueError, match="sampling frequency"):
         assert_concat_compatible([a, b])
 
+    # The regression case: a sub-Hz drift NumPy's default np.isclose (rtol=1e-5)
+    # would silently accept must still be rejected (it mis-times every spike).
+    near = _rec_with_locations(50, [1, 2], locs, fs=30_000.3)
+    with pytest.raises(ValueError, match="sampling frequency"):
+        assert_concat_compatible([a, near])
+
 
 def _rec_with_dtype(n_samples, channel_ids, locations, dtype):
     """A synthetic NumpyRecording with an explicit sample dtype."""

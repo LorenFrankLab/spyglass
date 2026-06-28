@@ -237,15 +237,19 @@ def publish_analyzer_atomically(canonical_folder, build_into):
 
     - canonical **absent**  -> ``os.replace(temp, canonical)``;
     - canonical **present** -> ``os.replace(canonical, trash)``,
-      ``os.replace(temp, canonical)``, ``rmtree(trash)`` -- and if the second
-      move fails, the original is moved back so the slot is never left empty.
+      ``os.replace(temp, canonical)``, ``rmtree(trash)``. If the install move
+      fails, the original is moved back from trash so the slot is restored; if
+      THAT restore also fails (a rare double failure), the trash is LEFT on disk
+      (the only surviving copy) for manual recovery -- the slot may be absent
+      but is recoverable.
 
     The brief window where the canonical slot is moved aside is reader-safe
     **only because callers hold** ``analyzer_cache_lock(sorting_id)`` (the read
     path takes the same lock); the directory replace is not itself atomic.
     ``build_into`` that writes no folder (a zero-unit sort short-circuits before
-    building) leaves the slot untouched. The temp (and any trash) is removed on
-    success and on failure.
+    building) leaves the slot untouched. The temp is always removed; the trash
+    is removed only after a successful install (never on the failed-rollback
+    path, where it is the surviving copy).
 
     Parameters
     ----------
