@@ -2126,18 +2126,30 @@ class Sorting(SpyglassMixin, dj.Computed):
             The extensions actually computed (already-present ones are
             skipped); empty when every requested extension already exists.
         """
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
         from spyglass.spikesorting.v2._sorting_analyzer import (
             ensure_extensions,
         )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        analyzer = self.get_analyzer(key)
+        sorting_id = (self & key).fetch1("sorting_id")
         sorter_job_kwargs = (
             SorterParameters & (SortingSelection & key)
         ).fetch1("job_kwargs")
         resolved = _resolved_job_kwargs(sorter_job_kwargs)
         resolved.update(kwargs)
-        return ensure_extensions(analyzer, extensions, job_kwargs=resolved)
+        # Hold the per-sort lock across BOTH the load and the in-place extension
+        # compute: ``ensure_extensions`` persists into the canonical analyzer
+        # folder, so loading under the lock and releasing it before the compute
+        # would leave the mutation unguarded. The lock is reentrant, so the
+        # nested ``get_analyzer`` load does not self-deadlock.
+        with analyzer_cache_lock(sorting_id):
+            analyzer = self.get_analyzer(key)
+            return ensure_extensions(
+                analyzer, extensions, job_kwargs=resolved
+            )
 
     # ---- visualization / export delegates (see v2.visualization facade) ---
 
@@ -2286,6 +2298,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             return target.delete(*args, safemode=safemode, **kwargs)
 
         from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
             remove_analyzer_cache,
         )
 
@@ -2307,7 +2320,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         # propagates a real removal error (``ignore_errors=False``).
         for row in rows:
             if not (Sorting & row):
-                remove_analyzer_cache(row["sorting_id"], missing_ok=True)
+                # Remove the regeneratable cache UNDER the per-sort lock so a
+                # concurrent reader / rebuild never races the rmtree.
+                with analyzer_cache_lock(row["sorting_id"]):
+                    remove_analyzer_cache(row["sorting_id"], missing_ok=True)
 
     @classmethod
     def find_orphaned_analyzer_folders(cls, *, dry_run: bool = True) -> dict:

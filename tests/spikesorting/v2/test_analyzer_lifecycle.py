@@ -74,6 +74,135 @@ def _fresh_unit_producing_selection(populated_sorting):
     )
 
 
+def _record_lock_acquisitions(monkeypatch):
+    """Patch ``analyzer_cache_lock`` to record the sorting_ids it is called for.
+
+    Returns the list of recorded ids. The wrapper delegates to the real
+    (memoized, reentrant) lock so the guarded operation still runs; every
+    canonical analyzer-cache reader/writer/deleter resolves the lock lazily, so
+    patching the source attribute is picked up by each call.
+    """
+    from spyglass.spikesorting.v2 import _analyzer_cache
+
+    acquired: list[str] = []
+    real_lock = _analyzer_cache.analyzer_cache_lock
+
+    def _recording_lock(sorting_id, **kwargs):
+        acquired.append(str(sorting_id))
+        return real_lock(sorting_id, **kwargs)
+
+    monkeypatch.setattr(
+        _analyzer_cache, "analyzer_cache_lock", _recording_lock
+    )
+    return acquired
+
+
+def test_load_path_acquires_lock(monkeypatch, tmp_path):
+    """The analyzer read/rebuild core acquires the per-sort lock around a load,
+    so the atomic-publish move-aside window is never observed by a reader."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        _load_analyzer_folder_or_rebuild,
+    )
+
+    acquired = _record_lock_acquisitions(monkeypatch)
+    folder = tmp_path / "sidX__rec.zarr"
+    folder.mkdir()
+    sentinel = object()
+    monkeypatch.setattr(si, "load_sorting_analyzer", lambda f: sentinel)
+
+    result = _load_analyzer_folder_or_rebuild(
+        folder,
+        rebuild=True,
+        rebuild_fn=lambda: None,
+        recipe_label="rec",
+        sorting_id="sidX",
+    )
+    assert result is sentinel
+    assert "sidX" in acquired, "the load path must acquire the analyzer lock"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
+    """``recompute._delete_analyzer_folders`` removes a folder UNDER the lock,
+    so a reclamation never races a concurrent reader/rebuild of the same sort.
+
+    The authorize/age helpers are patched so the body is logically DB-free, but
+    importing ``recompute`` activates the common schema, so a live connection
+    (``dj_conn``) is required.
+    """
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    acquired = _record_lock_acquisitions(monkeypatch)
+    folder = tmp_path / "sidY__rec.zarr"
+    folder.mkdir()
+
+    artifact = {"sorting_id": "sidY", "waveform_params_name": "rec"}
+    monkeypatch.setattr(
+        rc,
+        "_authorize_artifacts_for_deletion",
+        lambda *a, **k: ([(artifact, [{"env": "x"}])], None),
+    )
+    monkeypatch.setattr(rc, "_too_recent_or_unknown", lambda *a, **k: False)
+    # No-op rmtree that leaves the folder in place, so the post-delete DB
+    # update path (which needs the real recompute table) is skipped -- this
+    # test isolates the lock acquisition, not the bookkeeping.
+    rmtree_calls = []
+    monkeypatch.setattr(
+        rc.shutil,
+        "rmtree",
+        lambda f, **k: rmtree_calls.append(str(f)),
+    )
+
+    rc._delete_analyzer_folders(
+        recompute_table=None,
+        restriction=None,
+        dry_run=False,
+        force_stale_env=False,
+        days_since_creation=0,
+        folder_fn=lambda sid, recipe: folder,
+        artifact_pk="sorting_id",
+    )
+    assert rmtree_calls == [str(folder)]
+    assert "sidY" in acquired, "the recompute delete must acquire the lock"
+
+
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
+    """``Sorting.add_extensions`` (load + in-place extension compute) and
+    ``Sorting.delete`` (analyzer-cache removal) both run under the per-sort lock.
+
+    One fresh MS5 sort is populated so its destructive delete leaves the shared
+    fixture untouched; the lock recorder is installed AFTER populate so it
+    observes only the two guarded operations.
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort_pk = _fresh_unit_producing_selection(populated_sorting)
+    Sorting.populate(sort_pk, reserve_jobs=False)
+    sid = str(sort_pk["sorting_id"])
+    folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
+    try:
+        acquired = _record_lock_acquisitions(monkeypatch)
+        Sorting().add_extensions(sort_pk, ["unit_locations"])
+        assert sid in acquired, "add_extensions must acquire the analyzer lock"
+
+        acquired.clear()
+        (Sorting & sort_pk).delete(safemode=False)
+        assert sid in acquired, (
+            "Sorting.delete must acquire the lock around analyzer-cache removal"
+        )
+    finally:
+        (SortingSelection & sort_pk).delete(safemode=False)
+        if folder.exists():
+            import shutil
+
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_get_analyzer_zero_unit_raises_before_path_lookup():
     """A zero-unit sort raises before any analyzer-folder lookup.

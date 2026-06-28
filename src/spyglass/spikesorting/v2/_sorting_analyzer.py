@@ -151,54 +151,64 @@ def _load_analyzer_folder_or_rebuild(
 
     import spikeinterface as si
 
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
     from spyglass.spikesorting.v2.exceptions import (
         AnalyzerFolderInvalidError,
         AnalyzerFolderMissingError,
     )
 
-    if folder.exists():
-        try:
-            return si.load_sorting_analyzer(folder)
-        except Exception as exc:
-            message = (
-                "Sorting.get_analyzer: analyzer folder for "
-                f"sorting_id={sorting_id!r}, recipe={recipe_label!r} "
-                f"exists but could not be loaded ({folder}). The regeneratable "
-                "analyzer cache is invalid, likely from a killed build, partial "
-                "cleanup, or out-of-band corruption."
-            )
-            if not rebuild:
-                raise AnalyzerFolderInvalidError(
-                    message
-                    + " The no-rebuild loader surfaces this state for the "
-                    "recompute audit instead of rebuilding."
-                ) from exc
-            from spyglass.utils import logger
-
-            logger.warning(
-                f"{message} Removing it and rebuilding. Original error: {exc!r}"
-            )
+    # Hold the per-sort lock around the whole load / invalid-cleanup / rebuild
+    # region: a reader must not observe the brief move-aside window of a
+    # concurrent atomic publish, and an invalid-folder rmtree + rebuild must not
+    # race another job. The lock is reentrant, so a caller that already holds it
+    # (the CurationEvaluation fast path loads inside its own lock) does not
+    # self-deadlock.
+    with analyzer_cache_lock(sorting_id):
+        if folder.exists():
             try:
-                shutil.rmtree(folder, ignore_errors=False)
-            except Exception as cleanup_exc:
-                raise AnalyzerFolderInvalidError(
-                    message
-                    + " Failed to remove the invalid folder before rebuilding; "
-                    "manual cleanup is required."
-                ) from cleanup_exc
+                return si.load_sorting_analyzer(folder)
+            except Exception as exc:
+                message = (
+                    "Sorting.get_analyzer: analyzer folder for "
+                    f"sorting_id={sorting_id!r}, recipe={recipe_label!r} "
+                    f"exists but could not be loaded ({folder}). The "
+                    "regeneratable analyzer cache is invalid, likely from a "
+                    "killed build, partial cleanup, or out-of-band corruption."
+                )
+                if not rebuild:
+                    raise AnalyzerFolderInvalidError(
+                        message
+                        + " The no-rebuild loader surfaces this state for the "
+                        "recompute audit instead of rebuilding."
+                    ) from exc
+                from spyglass.utils import logger
 
-    if not folder.exists():
-        if not rebuild:
-            raise AnalyzerFolderMissingError(
-                "Sorting.get_analyzer(rebuild=False): analyzer folder for "
-                f"sorting_id={sorting_id!r}, recipe={recipe_label!r} is "
-                f"absent ({folder}). The regeneratable analyzer cache was removed "
-                "out of band; the no-rebuild loader surfaces the missing state "
-                "for the recompute audit instead of rebuilding. Use the default "
-                "rebuild=True path to reconstruct it."
-            )
-        rebuild_fn()
-    return si.load_sorting_analyzer(folder)
+                logger.warning(
+                    f"{message} Removing it and rebuilding. Original error: "
+                    f"{exc!r}"
+                )
+                try:
+                    shutil.rmtree(folder, ignore_errors=False)
+                except Exception as cleanup_exc:
+                    raise AnalyzerFolderInvalidError(
+                        message
+                        + " Failed to remove the invalid folder before "
+                        "rebuilding; manual cleanup is required."
+                    ) from cleanup_exc
+
+        if not folder.exists():
+            if not rebuild:
+                raise AnalyzerFolderMissingError(
+                    "Sorting.get_analyzer(rebuild=False): analyzer folder for "
+                    f"sorting_id={sorting_id!r}, recipe={recipe_label!r} is "
+                    f"absent ({folder}). The regeneratable analyzer cache was "
+                    "removed out of band; the no-rebuild loader surfaces the "
+                    "missing state for the recompute audit instead of "
+                    "rebuilding. Use the default rebuild=True path to "
+                    "reconstruct it."
+                )
+            rebuild_fn()
+        return si.load_sorting_analyzer(folder)
 
 
 def load_or_rebuild_analyzer(
@@ -532,7 +542,10 @@ def rebuild_analyzer_folder(
     """
     import shutil
 
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_cache_lock,
+        analyzer_path,
+    )
     from spyglass.utils import logger
 
     # The canonical (artifact-masked) recording + sorting -- the exact pair the
@@ -551,31 +564,36 @@ def rebuild_analyzer_folder(
     # keeps the rebuild path's invariant ("analyzer folder reflects the
     # canonical sort") true under failure.
     folder = analyzer_path(key["sorting_id"], waveform_params_name)
-    try:
-        # Pass the already-resolved folder so the build target equals the path
-        # this method cleans up on failure (one resolution), and the resolved
-        # params dict so the rebuild uses the SAME recipe the cache stored.
-        sorting_table._build_analyzer(
-            sorting=sorting_obj,
-            recording=recording,
-            key=key,
-            analyzer_folder=folder,
-            waveform_params=waveform_params,
-        )
-    except Exception:
-        # Any build failure: remove the partial analyzer folder before
-        # re-raising so a half-built folder is never mistaken for a valid cache.
-        # The rmtree is best-effort -- a cleanup failure is logged, not raised,
-        # so it cannot mask the original error.
+    # Serialize the canonical-folder mutation against concurrent readers /
+    # rebuilds. Reentrant, so a rebuild invoked from the (already-locked) load
+    # path does not self-deadlock.
+    with analyzer_cache_lock(key["sorting_id"]):
         try:
-            if folder.exists():
-                shutil.rmtree(folder, ignore_errors=False)
-        except Exception as cleanup_exc:  # pragma: no cover -- defensive
-            logger.error(
-                "Sorting._rebuild_analyzer_folder: failed to remove "
-                f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
+            # Pass the already-resolved folder so the build target equals the
+            # path this method cleans up on failure (one resolution), and the
+            # resolved params dict so the rebuild uses the SAME recipe the cache
+            # stored.
+            sorting_table._build_analyzer(
+                sorting=sorting_obj,
+                recording=recording,
+                key=key,
+                analyzer_folder=folder,
+                waveform_params=waveform_params,
             )
-        raise
+        except Exception:
+            # Any build failure: remove the partial analyzer folder before
+            # re-raising so a half-built folder is never mistaken for a valid
+            # cache. The rmtree is best-effort -- a cleanup failure is logged,
+            # not raised, so it cannot mask the original error.
+            try:
+                if folder.exists():
+                    shutil.rmtree(folder, ignore_errors=False)
+            except Exception as cleanup_exc:  # pragma: no cover -- defensive
+                logger.error(
+                    "Sorting._rebuild_analyzer_folder: failed to remove "
+                    f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
+                )
+            raise
 
 
 def build_analyzer(

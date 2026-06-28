@@ -1313,6 +1313,8 @@ def _delete_analyzer_folders(
     artifact_pk,
 ):
     """Artifact-level analyzer delete gate: current-env match + age, rmtree once."""
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+
     cutoff = _recent_cutoff(days_since_creation)
     authorized, matched = _authorize_artifacts_for_deletion(
         recompute_table,
@@ -1330,19 +1332,22 @@ def _delete_analyzer_folders(
         if dry_run:
             deleted.append(str(folder))
             continue
-        shutil.rmtree(folder, ignore_errors=True)
-        if folder.exists():
-            # Do NOT mark deleted -- the folder is still on disk; leaving
-            # deleted=0 lets a later cleanup retry rather than silently
-            # suppressing it.
-            logger.warning(
-                f"delete_files: analyzer folder not removed: {folder}; "
-                "leaving deleted=0 so a later cleanup retries."
-            )
-            continue
-        for key in (matched & artifact).fetch("KEY", as_dict=True):
-            recompute_table.update1({**key, "deleted": 1})
-        deleted.append(str(folder))
+        # Reclaim the folder UNDER the per-sort lock so a concurrent reader /
+        # rebuild of the same sort never races the rmtree.
+        with analyzer_cache_lock(artifact["sorting_id"]):
+            shutil.rmtree(folder, ignore_errors=True)
+            if folder.exists():
+                # Do NOT mark deleted -- the folder is still on disk; leaving
+                # deleted=0 lets a later cleanup retry rather than silently
+                # suppressing it.
+                logger.warning(
+                    f"delete_files: analyzer folder not removed: {folder}; "
+                    "leaving deleted=0 so a later cleanup retries."
+                )
+                continue
+            for key in (matched & artifact).fetch("KEY", as_dict=True):
+                recompute_table.update1({**key, "deleted": 1})
+            deleted.append(str(folder))
     return deleted
 
 
