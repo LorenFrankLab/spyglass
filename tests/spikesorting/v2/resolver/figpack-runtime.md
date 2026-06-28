@@ -71,13 +71,17 @@ The released `figpack_spike_sorting==0.1.14` `SortingCuration` signature is:
 ssv.SortingCuration(*, default_label_options=["mua", "good", "noise"], curation={})
 ```
 
-Build the curation view by composing SpikeInterface figpack sub-views (each
-widget returns a figpack view via `.view`) with a `SortingCuration` control and
-figpack layout views. Required analyzer extensions (checked by SI's summary
-widget): `correlograms`, `spike_amplitudes`, `unit_locations`,
-`template_similarity` — plus `templates`/`waveforms`/`noise_levels`/
-`random_spikes`, and `quality_metrics`/`template_metrics` for the displayed unit
-columns.
+Build the curation view with the **minimal-attach** approach: let SpikeInterface
+build the whole summary view via `plot_sorting_summary(curation=False)` and attach
+**only** the `SortingCuration` control as a sibling. This keeps SpikeInterface the
+owner of the layout/sub-view composition (we do not reimplement it) and isolates
+our hand-written surface to a single widget plus a one-line wrapper — important
+because of the upstream kwarg mismatch documented below.
+
+Required analyzer extensions (checked by SI's summary widget): `correlograms`,
+`spike_amplitudes`, `unit_locations`, `template_similarity` — plus
+`templates`/`waveforms`/`noise_levels`/`random_spikes`, and
+`quality_metrics`/`template_metrics` for the displayed unit columns.
 
 **v2 analyzer source.** `Sorting().get_analyzer(key)`
 ([sorting.py](../../../../src/spyglass/spikesorting/v2/sorting.py)) returns a
@@ -86,8 +90,8 @@ SortingAnalyzer whose **base** extension set is only
 ([_sorting_analyzer.py](../../../../src/spyglass/spikesorting/v2/_sorting_analyzer.py)).
 The four curation-view extras above (`spike_amplitudes`, `correlograms`,
 `unit_locations`, `template_similarity`) are **not** in that base set, so the
-curation-view builder must compute them on top — which is exactly what the
-standalone spike below does. v2 already has the machinery for this:
+curation-view builder must compute them on top before calling
+`plot_sorting_summary`. v2 already has the machinery for this:
 `Sorting.add_extensions` / `ensure_extensions` and `_visualization`'s
 `DISPLAY_WIDGET_EXTENSIONS` (used by the existing v2 viz path,
 [visualization.py](../../../../src/spyglass/spikesorting/v2/visualization.py)).
@@ -95,35 +99,30 @@ So a real v2 analyzer differs from the standalone one only in provenance, not in
 the inputs the figpack views consume.
 
 ```python
-def _subview(plot_fn, analyzer, **kw):
-    return plot_fn(analyzer, backend="figpack",
-                   generate_url=False, display=False, **kw).view
-
-units    = generate_unit_table_view(analyzer, ["firing_rate", "snr"])
-templates = _subview(sw.plot_unit_templates, analyzer, hide_unit_selector=True)
-amps      = _subview(sw.plot_amplitudes,     analyzer, hide_unit_selector=True)
-corr      = _subview(sw.plot_crosscorrelograms, analyzer, hide_unit_selector=True)
-curation  = ssv.SortingCuration(default_label_options=["accept", "mua", "noise"])
-
-view = vv.Splitter(
-    direction="horizontal",
-    item1=vv.LayoutItem(view=vv.Box(direction="vertical", items=[
-        vv.LayoutItem(view=units, title="Units"),
-        vv.LayoutItem(view=curation, title="Curation"),
-    ])),
-    item2=vv.LayoutItem(view=vv.Splitter(
-        direction="vertical",
-        item1=vv.LayoutItem(view=templates, title="Templates"),
-        item2=vv.LayoutItem(view=vv.Splitter(
-            direction="vertical",
-            item1=vv.LayoutItem(view=amps, title="Amplitudes"),
-            item2=vv.LayoutItem(view=corr, title="Cross-correlograms"),
-        )),
-    )),
+# Ensure the curation-view extensions on top of v2's base analyzer set (in v2 this
+# is Sorting.add_extensions / ensure_extensions), then let SpikeInterface build the
+# entire summary view and attach ONLY the curation control as a sibling.
+analyzer.compute(
+    ["spike_amplitudes", "correlograms", "unit_locations", "template_similarity"]
+)
+summary = sw.plot_sorting_summary(
+    analyzer, curation=False, backend="figpack",
+    generate_url=False, display=False,
+).view                                       # SI owns this composition
+control = ssv.SortingCuration(default_label_options=["accept", "mua", "noise"])
+view = vv.Box(
+    direction="vertical",
+    items=[
+        vv.LayoutItem(view=summary, title="Sorting summary", stretch=1),
+        vv.LayoutItem(view=control, title="Curation", max_size=260),
+    ],
 )
 ```
 
-### Released-version drift (must work around in the table)
+Verified: this composed view saves, serves, and round-trips edited curation
+(`labelsByUnit` / `mergeGroups`) identically to a fully hand-built layout.
+
+### Released-version drift — why we attach instead of one-call `curation=True`
 
 `sw.plot_sorting_summary(analyzer, curation=True, label_choices=[...],
 backend="figpack")` **raises** with this released combo:
@@ -132,14 +131,21 @@ backend="figpack")` **raises** with this released combo:
 TypeError: SortingCuration.__init__() got an unexpected keyword argument 'label_choices'
 ```
 
-SpikeInterface 0.104.7's figpack backend calls
-`SortingCuration(label_choices=...)`, but `figpack_spike_sorting==0.1.14` expects
-`default_label_options=...`. So the curation-table builder must construct the
-`SortingCuration` control itself (as above), **not** rely on SI's
-`plot_sorting_summary(curation=True)`. `plot_sorting_summary(curation=False)`
-works and returns a `figpack.views.Splitter` (usable for the read-only sub-views).
-`figpack_spike_sorting` is **0.1.14, beta** — pin exact versions and re-check this
-on any bump.
+SpikeInterface 0.104.7's figpack backend calls `SortingCuration(label_choices=...)`,
+but `figpack_spike_sorting==0.1.14` (the latest on PyPI; upstream `main` is the
+same) expects `default_label_options=...`. The mismatch is unresolved upstream on
+both released and `main`, and it breaks **only** the curation-control
+instantiation. Hence the minimal-attach path above:
+
+- Use `plot_sorting_summary(curation=False)` (works) for the whole summary view and
+  attach `ssv.SortingCuration(default_label_options=...)` ourselves — we do NOT
+  reimplement SI's layout, and we do NOT depend on SI's `curation=True` path.
+- Add a small **compatibility probe** in the table module that detects when the
+  one-call `curation=True` path becomes usable on a future release, so the attach
+  shim can be dropped and SI can own the curation control too. Worth filing the
+  SI↔extension kwarg mismatch upstream.
+- `figpack_spike_sorting` is **0.1.14, beta** — pin exact versions and re-check on
+  any bump.
 
 ## Display / publish / save (verified)
 
@@ -238,9 +244,11 @@ key (same shape as above) rather than relying on the `curation=` kwarg.
   via `Sorting().get_analyzer(...)`, **ensure the curation-view extensions**
   (`spike_amplitudes`/`correlograms`/`unit_locations`/`template_similarity`) on
   top of the base set via `Sorting.add_extensions`/`ensure_extensions`, build the
-  units table + sub-views +
+  summary with `sw.plot_sorting_summary(analyzer, curation=False, backend="figpack",
+  generate_url=False, display=False).view` and **attach** only
   `ssv.SortingCuration(default_label_options=label_options or <CurationLabel
-  order>)`, compose with figpack layout, then `view.show(upload=..., ephemeral=...,
+  order>)` as a sibling layout item (minimal-attach; do not reimplement SI's
+  layout), then `view.show(upload=..., ephemeral=...,
   wait_for_input=False, open_in_browser=False)` (or `view.save(...)` for a local
   artifact) and return the figure URL. Default `label_options` should be the v2
   `CurationLabel` order `["accept", "mua", "noise"]`, not FigURL-era `"good"`.
