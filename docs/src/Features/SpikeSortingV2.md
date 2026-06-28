@@ -132,6 +132,35 @@ The orchestrator is idempotent: re-running with the same inputs returns the
 same run summary (same `merge_id`, same intermediate PKs) without duplicating
 rows.
 
+## Security & trust model
+
+Spike Sorting v2 assumes a **trusted compute-operator** deployment, the same
+model as the rest of Spyglass:
+
+- **Whoever can write `SorterParameters` (or ingest sessions) is a trusted
+  operator.** A `SorterParameters` row's `execution_params` can, by design,
+  pull and run a container image (Docker / Singularity) to execute a sorter.
+  That is a deliberate capability for reproducible containerized sorting, not a
+  vulnerability — but it means inserting parameter rows is equivalent to running
+  code on the compute host. Restrict write access accordingly.
+- **The database is not internet-facing.** v2 hard-refuses to register or write
+  its schemas against a non-localhost database host (the import-time
+  `_assert_v2_db_safe` guard) while the pipeline is pre-production; deployment
+  is on a lab-internal DB reachable only by trusted operators.
+- **`team_name` is a provenance tag, not access enforcement.** It records which
+  team owns a selection; it does not gate reads or writes. Because sort groups
+  in one session can belong to different teams, overwriting a session's sort
+  groups can cascade-delete another team's downstream rows — the overwrite
+  preview (`SortGroupV2.preview_existing_entries`) enumerates that cross-team
+  blast radius so the operator can review it before confirming, but it does not
+  block.
+
+Within that model, v2 still defaults to least surprise: materialized analysis
+artifacts are written owner-writable (`0o644`), the sorter scratch is only made
+world-writable for a container backend (the container-UID case), and
+caller-supplied NWB file names are confined to a bare basename before any
+directory join.
+
 ## How
 
 ### Run your first single-session sort

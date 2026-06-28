@@ -66,6 +66,42 @@ identity, or `content_hash` change.
   *Migration:* re-resolve environments after pulling; the numpy-2 baseline is
   unchanged in practice (the v2 env already resolved numpy 2), only the
   declaration is now explicit.
+- **Sorter execution-dispatch mismatches fixed.** A clusterless (in-process)
+  `SorterParameters` row can no longer claim a container backend (rejected at
+  insert); the legacy SI seeder skips MATLAB sorters (a local `default` row for
+  them is rejected by the dispatcher); and the external-whitening interception
+  is allowlisted to MountainSort 4/5 so a generic sorter's `whiten` passes
+  through unchanged instead of being silently rewritten.
+- **Trusted-deployment security hardening.** Materialized analysis artifacts are
+  written `0o644` (not world-writable `0o666`); the sorter scratch is
+  `chmod 0o777` only for a container backend; caller-supplied NWB file names are
+  confined to a bare basename (separator / `..` / absolute rejected) before any
+  directory join. A new "Security & trust model" section documents the
+  trusted-operator assumptions (`execution_params` can run container images by
+  design; the DB is not internet-facing; `team_name` is a provenance tag).
+- **`metric_curation` and `recompute` declare their own DB-safety guard** (call
+  `_assert_v2_db_safe` before `dj.schema(...)`) instead of relying on transitive
+  coverage.
+- **The eager v2 merge-table probe surfaces failures.** `spikesorting_merge`
+  logs the captured cause (`logger.warning`) while keeping the broad
+  `except Exception` load-bearing — a non-localhost `RuntimeError` is tolerated
+  so v0/v1 environments on a production DB still load the merge table.
+- **Destructive footguns closed.** recompute `delete_files` rejects a negative
+  `days_since_creation`; the disk-side analyzer orphan sweep only considers
+  canonical `{sorting_id}__{recipe}.zarr` folders (a misconfigured root can't
+  delete unrelated directories); a failed in-place artifact rebuild refuses to
+  unlink the canonical artifact.
+- **conda-less environments can write analysis NWB.** `_logged_env_info` records
+  an "environment capture unavailable" marker instead of aborting when
+  `conda env export` is unavailable.
+- **`Export` overwrite removes superseded `Export.File` rows** (a duplicated
+  `Table` delete had leaked them), and the superseded-id set-precedence is
+  corrected.
+- **Cross-team overwrite visibility.** `SortGroupV2.preview_existing_entries`
+  enumerates, per team, the downstream rows an overwrite would cascade-delete.
+- **`TrackedUnit.get_unit_brain_regions` keeps chronic-identity disambiguators**
+  (`unitmatch_id` / `tracked_unit_id` / `member_index` / `nwb_file_name` /
+  `recording_date` / `curation_id`) instead of dropping them.
 
 #### Spike Sorting v2: analyzer-cache concurrency and concat hardening
 
