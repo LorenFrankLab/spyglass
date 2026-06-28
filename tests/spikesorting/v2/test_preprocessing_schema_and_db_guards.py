@@ -139,6 +139,34 @@ def test_assert_v2_db_safe_override_permits_nonlocal(monkeypatch):
     assert _assert_v2_db_safe() is None
 
 
+@pytest.mark.parametrize("module_name", ["metric_curation", "recompute"])
+def test_metric_curation_and_recompute_call_db_guard(
+    dj_conn, monkeypatch, module_name
+):
+    """``metric_curation`` and ``recompute`` gate their own schema
+    declaration on ``_assert_v2_db_safe`` rather than relying on transitive
+    coverage from an imported module.
+
+    Reloading the module with a non-local host re-runs the module-level guard
+    (which precedes ``dj.schema(...)``), so it raises before any schema work.
+    ``dj_conn`` ensures the initial import (schema declaration) has a live DB;
+    the reload then raises on the patched host before touching the DB.
+    """
+    import importlib
+
+    from spyglass.spikesorting.v2.utils import _OVERRIDE_ENV
+
+    module = importlib.import_module(
+        f"spyglass.spikesorting.v2.{module_name}"
+    )
+
+    monkeypatch.delenv(_OVERRIDE_ENV, raising=False)
+    monkeypatch.setitem(dj.config, "database.host", "prod.example.org")
+
+    with pytest.raises(RuntimeError, match="refuses to register schemas"):
+        importlib.reload(module)
+
+
 # ---------------------------------------------------------------------------
 # The two critical recording-timestamp branches (utils.py). Hermetic -- they
 # touch only in-memory SI objects and monkeypatched config, so they live here
