@@ -469,3 +469,30 @@ def test_run_si_sorter_output_survives_tempdir_cleanup():
     assert unit_ids, "MS5 should detect the planted units"
     for uid in unit_ids:
         assert result.get_unit_spike_train(uid) is not None
+
+
+def test_whiten_interception_allowlisted():
+    """The external-whitening interception fires only for the curated
+    external-whitening sorters (MountainSort 4/5).
+
+    Those sorters deliberately carry ``whiten=True`` and the dispatcher routes
+    them through the runtime's external float64 whitening. A generic /
+    uncurated sorter's ``whiten`` must be passed through to the sorter
+    unchanged, not silently rewritten.
+    """
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        _should_external_whiten,
+    )
+
+    # Curated external-whitening sorters with a truthy whiten ARE intercepted.
+    assert _should_external_whiten("mountainsort4", {"whiten": True})
+    assert _should_external_whiten("mountainsort5", {"whiten": True})
+    assert _should_external_whiten("MountainSort5", {"whiten": True})  # case
+
+    # A generic / uncurated sorter's whiten is passed through unchanged.
+    assert not _should_external_whiten("kilosort4", {"whiten": True})
+    assert not _should_external_whiten("spykingcircus2", {"whiten": True})
+
+    # MS without a truthy whiten is not intercepted.
+    assert not _should_external_whiten("mountainsort5", {"whiten": False})
+    assert not _should_external_whiten("mountainsort5", {})

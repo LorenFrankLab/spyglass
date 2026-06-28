@@ -558,3 +558,79 @@ def test_container_ms4_default_row_inserts_without_local_ms4(monkeypatch):
     # The container MS4 row still ships -- gated by preflight at run time, not
     # here (its runtime lives in the image).
     assert ("mountainsort4", MS4_SINGULARITY_30KHZ) in insertable_names
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_clusterless_rejects_container_backend():
+    """A clusterless (in-process) ``SorterParameters`` row cannot claim a
+    container execution backend.
+
+    Clusterless thresholding runs in the host process, so the runtime ignores
+    any container backend; a row that claims one would make preflight falsely
+    require a container image. The insert validation rejects it.
+    """
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    row = {
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "clusterless_container_reject",
+        "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+        "job_kwargs": None,
+        "execution_params": {
+            "backend": "docker",
+            "container_image": "spikeinterface/test:latest",
+        },
+    }
+    with pytest.raises(ValueError, match="runs in-process"):
+        SorterParameters().insert1(
+            row, skip_duplicates=True, allow_duplicate_params=True
+        )
+    assert not (
+        SorterParameters
+        & {
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "clusterless_container_reject",
+        }
+    ), "a rejected clusterless container row must not be inserted"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_legacy_seeder_skips_matlab(monkeypatch, request):
+    """``insert_default_legacy_si_sorters`` does not create a local ``default``
+    row for a MATLAB sorter.
+
+    MATLAB sorters require a container backend; a local ``default`` row is
+    rejected by the dispatcher at populate time, so the seeder must skip them
+    (the lab inserts those rows explicitly with a container ``execution_params``).
+    The MATLAB sorter is forced available + installed with valid default params
+    so that WITHOUT the skip the seeder would insert an unrunnable local row.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._sorting_dispatch import MATLAB_SORTERS
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    matlab_sorter = MATLAB_SORTERS[0]  # e.g. "kilosort2_5"
+    monkeypatch.setattr(sis, "available_sorters", lambda: [matlab_sorter])
+    monkeypatch.setattr(sis, "installed_sorters", lambda: [matlab_sorter])
+    monkeypatch.setattr(
+        sis, "get_default_sorter_params", lambda s: {"detect_threshold": 6.0}
+    )
+
+    # Clean slate so a reappearing row unambiguously means the skip regressed.
+    (SorterParameters & {"sorter": matlab_sorter}).delete(safemode=False)
+    request.addfinalizer(
+        lambda: (
+            SorterParameters & {"sorter": matlab_sorter}
+        ).delete(safemode=False)
+    )
+
+    SorterParameters.insert_default_legacy_si_sorters()
+
+    assert not (
+        SorterParameters
+        & {"sorter": matlab_sorter, "sorter_params_name": "default"}
+    ), (
+        f"legacy seeder must skip MATLAB sorter {matlab_sorter!r} -- a local "
+        "default row is rejected by the dispatcher at populate time"
+    )

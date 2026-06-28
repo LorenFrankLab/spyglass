@@ -43,6 +43,30 @@ from __future__ import annotations
 # concept (container-execution policy, not internal whitening); they are kept
 # separate on purpose -- see the note there.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
+# Sorters that whiten via the v2 runtime's external float64 whitening by design:
+# they deliberately carry ``whiten=True`` and the dispatcher routes that to
+# ``pinned_whiten`` (whitening the signal exactly once). The interception is
+# allowlisted to exactly these so an *uncurated/generic* sorter's truthy
+# ``whiten`` is passed through to the sorter unchanged rather than silently
+# rewritten. NOT keyed on ``_INTERNAL_WHITEN_NO_KWARG_SORTERS``
+# (kilosort2_5/3/ironclust): those reject a truthy ``whiten`` at insert
+# (``reject_internal_whiten``) and so can never reach the dispatcher with
+# ``whiten=True`` -- allowlisting them would disable interception for the wrong
+# set.
+_EXTERNAL_WHITEN_SORTERS = frozenset({"mountainsort4", "mountainsort5"})
+
+
+def _should_external_whiten(sorter: str, sorter_params: dict) -> bool:
+    """Whether the dispatcher should route this sort through the runtime's
+    external float64 whitening.
+
+    True only for an external-whitening sorter (MountainSort 4/5) carrying a
+    truthy ``whiten``. For any other sorter the ``whiten`` value is left in
+    ``sorter_params`` and passed through to the sorter unchanged.
+    """
+    return sorter.lower() in _EXTERNAL_WHITEN_SORTERS and bool(
+        sorter_params.get("whiten", False)
+    )
 # Sorter kwargs that do not survive containerization of the MATLAB sorters
 # (they reference host paths / host process settings). Stripped only when one of
 # the MATLAB sorters runs on a container backend.
@@ -550,7 +574,7 @@ def run_si_sorter(
             np.Inf = np.inf
             patched_numpy_inf = True
 
-        if sorter_params.get("whiten", False):
+        if _should_external_whiten(sorter, sorter_params):
             # Pin SI's random-chunk-based covariance estimate inside
             # ``sip.whiten`` to a deterministic seed (see ``pinned_whiten``).
             # Empirically verified: 3 v2 MS4 runs with seed=0 produce identical
@@ -558,7 +582,8 @@ def run_si_sorter(
             # states. User override: set ``random_seed`` in the per-row
             # ``SorterParameters.job_kwargs`` blob (for robustness studies);
             # Spyglass's default 0 makes re-runs of a parameter row reproducible
-            # by default.
+            # by default. Only the external-whitening sorters are intercepted;
+            # a generic sorter's ``whiten`` is passed through unchanged below.
             _random_seed = (job_kwargs or {}).get("random_seed", 0)
             recording = pinned_whiten(recording, random_seed=_random_seed)
             sorter_params = {**sorter_params, "whiten": False}

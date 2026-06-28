@@ -350,6 +350,21 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 row.get("execution_params")
             )
             row["execution_params"] = validated_execution
+            # In-process sorters (clusterless) run in the host process; the
+            # runtime ignores any container backend, so a row that claims one
+            # would make preflight falsely require a container image. Reject it
+            # at insert -- these must run with backend='local' (or omit it).
+            if (
+                sorter in self._NON_SI_SORTERS
+                and validated_execution["backend"] != "local"
+            ):
+                raise ValueError(
+                    f"SorterParameters.insert: sorter {sorter!r} runs "
+                    "in-process (clusterless) and is executed locally; it "
+                    "cannot use execution backend "
+                    f"{validated_execution['backend']!r}. Set backend='local' "
+                    "or omit execution_params."
+                )
             inner_execution_version = int(validated_execution["schema_version"])
             if "execution_params_schema_version" not in row:
                 row["execution_params_schema_version"] = inner_execution_version
@@ -521,14 +536,23 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             GenericSorterParamsSchema,
             _SORTER_SCHEMAS,
         )
+        from spyglass.spikesorting.v2._sorting_dispatch import MATLAB_SORTERS
 
         curated = set(_SORTER_SCHEMAS)  # sorters with their own schemas
         installed = set(sis.installed_sorters())
         rows = []
         skipped_not_installed = []
+        skipped_matlab = []
         for sorter in sis.available_sorters():
             if sorter in curated:
                 continue  # see docstring: would fail or drop keys
+            if sorter.lower() in MATLAB_SORTERS:
+                # MATLAB sorters require a container backend; a local 'default'
+                # row is rejected by the dispatcher at populate time. The lab
+                # inserts MATLAB rows explicitly with a container
+                # execution_params, so do not seed an unrunnable local default.
+                skipped_matlab.append(sorter)
+                continue
             if sorter not in installed:
                 # Gate on installed_sorters() to match insert_default's installed-sorters
                 # gate -- get_default_sorter_params succeeds for
