@@ -209,6 +209,55 @@ def test_fetch_from_nonexistent_local_path_fails_closed():
         )
 
 
+def test_metrics_not_yet_supported(populated_sorting_with_curation):
+    """A non-empty metrics request is refused (would be silently dropped)."""
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCurationSelection,
+    )
+
+    with pytest.raises(ValueError, match="metric-column selection"):
+        FigPackCurationSelection.insert_selection(
+            populated_sorting_with_curation, metrics=["snr"]
+        )
+
+
+def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
+    """A bypassed selection whose config hash != its fields is refused."""
+    from spyglass.spikesorting.v2._figpack_curation import (
+        default_label_options,
+    )
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+
+    label_options = default_label_options()
+    # A config hash that does NOT match the row's own fields; pair it with the
+    # id derived from that same wrong hash so the hash recheck (not the id
+    # recheck) is what fires.
+    wrong_hash = "0" * 64
+    identity = {
+        **populated_sorting_with_curation,
+        "figpack_config_hash": wrong_hash,
+    }
+    figpack_id = deterministic_id("figpack_curation", identity)
+    FigPackCurationSelection.insert1(
+        {
+            **identity,
+            "figpack_curation_id": figpack_id,
+            "label_options": label_options,
+            "metrics": [],
+            "upload": False,
+            "ephemeral": False,
+        },
+        allow_direct_insert=True,
+    )
+    with pytest.raises(SchemaBypassError):
+        FigPackCuration.populate({"figpack_curation_id": figpack_id})
+
+
 def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
     """A selection bypassing insert_selection is re-validated at populate time."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for

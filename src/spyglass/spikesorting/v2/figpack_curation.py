@@ -52,6 +52,7 @@ from spyglass.spikesorting.v2.exceptions import (
     FigPackCurationNamespaceError,
     FigPackRetrievalError,
     FigPackUploadError,
+    SchemaBypassError,
 )
 from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.spikesorting.v2.utils import (
@@ -303,6 +304,65 @@ def _assert_figpack_curatable(curation_key: dict) -> None:
         )
 
 
+def _reject_unsupported_metrics(metrics) -> None:
+    """Reject a non-empty metric-column request (not yet supported).
+
+    The builder ensures only the four summary extensions, not
+    ``quality_metrics`` / ``template_metrics``, so a requested metric absent from
+    the display analyzer would be silently warned-and-dropped by SpikeInterface
+    -- producing a populated row whose unit table does not show it. Refuse rather
+    than mislead until metric columns are wired to computed metrics.
+    """
+    if metrics:
+        raise ValueError(
+            "FigPackCuration metric-column selection is not yet supported: a "
+            f"requested metric in {list(metrics)} absent from the display "
+            "analyzer would be silently dropped. Omit `metrics` for now; metric "
+            "columns will be wired to computed CurationEvaluation metrics in a "
+            "follow-up."
+        )
+
+
+def _assert_selection_identity(selection: dict, key: dict) -> None:
+    """Recheck the content-addressed identity at consume time (bypass guard).
+
+    ``figpack_config_hash`` and ``figpack_curation_id`` are derived from the
+    selection's own fields, but ``allow_direct_insert`` can store a row whose PK
+    / hash disagree with its label options, metrics, and upload mode. Recompute
+    both from the row and raise ``SchemaBypassError`` on mismatch, mirroring the
+    consume-time hash recheck the other v2 content-addressed selections do.
+    """
+    expected_hash = figpack_config_hash(
+        sorting_id=selection["sorting_id"],
+        curation_id=selection["curation_id"],
+        label_options=list(selection["label_options"]),
+        metrics=list(selection["metrics"]),
+        upload=bool(selection["upload"]),
+        ephemeral=bool(selection["ephemeral"]),
+    )
+    if selection["figpack_config_hash"] != expected_hash:
+        raise SchemaBypassError(
+            f"FigPackCurationSelection {key['figpack_curation_id']} has a "
+            "figpack_config_hash that does not match its own label_options / "
+            "metrics / upload / ephemeral (a raw-insert bypass). Drop the row "
+            "and re-insert via insert_selection()."
+        )
+    expected_id = deterministic_id(
+        "figpack_curation",
+        {
+            "sorting_id": selection["sorting_id"],
+            "curation_id": selection["curation_id"],
+            "figpack_config_hash": expected_hash,
+        },
+    )
+    if uuid.UUID(str(key["figpack_curation_id"])) != expected_id:
+        raise SchemaBypassError(
+            f"FigPackCurationSelection id {key['figpack_curation_id']} is not "
+            f"the content-addressed id {expected_id} for its fields (a raw-"
+            "insert bypass). Drop the row and re-insert via insert_selection()."
+        )
+
+
 def _existing_curation_state(curation_key: dict) -> tuple[dict, list]:
     """Return ``(labels, merge_groups)`` a curation already carries.
 
@@ -414,8 +474,9 @@ class FigPackCurationSelection(
             Curation label palette, in display order. Defaults to
             ``["accept", "mua", "noise"]``.
         metrics : list of str, optional
-            Metric column names to display. Defaults to ``[]`` (SI's default
-            unit-table columns).
+            Metric columns to display. NOT yet supported -- a non-empty value
+            raises ``ValueError`` (a requested metric absent from the display
+            analyzer would be silently dropped). Defaults to ``[]``.
         upload : bool, optional
             Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
             unless ``ephemeral``). Default ``False`` (save a local bundle).
@@ -461,6 +522,7 @@ class FigPackCurationSelection(
             list(label_options) if label_options else default_label_options()
         )
         metrics = list(metrics) if metrics else []
+        _reject_unsupported_metrics(metrics)
         config_hash = figpack_config_hash(
             sorting_id=parent_key["sorting_id"],
             curation_id=parent_key["curation_id"],
@@ -558,9 +620,12 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         upload = bool(selection["upload"])
 
         # Re-validate at the integrity boundary: insert_selection's guard is
-        # bypassable (allow_direct_insert), so a row over a preview / merged-
-        # namespace curation must be rejected here before any view is built.
+        # bypassable (allow_direct_insert), so re-check everything it enforced
+        # before any view is built -- the curation namespace, the content-
+        # addressed identity, and the unsupported metric-column request.
         _assert_figpack_curatable(curation_key)
+        _assert_selection_identity(selection, key)
+        _reject_unsupported_metrics(list(selection["metrics"]))
 
         seed_labels, seed_merges = _existing_curation_state(curation_key)
         if upload and (seed_labels or seed_merges):
