@@ -51,6 +51,43 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: analyzer-cache concurrency and concat hardening
+
+Operational hardening of the v2 SortingAnalyzer cache, concatenation
+compatibility, and compute-time integrity. No schema, identity, or
+`content_hash` change.
+
+- **Analyzer cache is lock-guarded + (dir-)atomic-published**, mirroring the
+  recording artifact. The per-sort `analyzer_cache_lock` (renamed from
+  `analyzer_curation_lock`, alias kept) now wraps every canonical-folder
+  read/rebuild/delete/extension-compute path and is process-reentrant
+  (memoized `FileLock`) so the read path can nest inside the
+  `CurationEvaluation` compute lock without self-deadlock. Builds publish via a
+  private `.publish` temp folder moved into the slot (move-aside + rollback for
+  a rebuild over an existing `.zarr`) instead of `create_sorting_analyzer(...,
+  overwrite=True)` into the live folder; a directory replace is not atomic, so
+  the brief move-aside window is reader-safe only because readers hold the same
+  lock.
+- **Concat compatibility checks what it claims.** `assert_concat_compatible`
+  now rejects members differing in sampling frequency, sample dtype, or
+  per-channel gains/offsets (in addition to channel ids + probe geometry), and
+  `ConcatenatedRecordingSelection.insert_selection` rejects members whose sort
+  groups map to a different electrode space (electrode-id/brain-region
+  signature) so a concat read in the anchor frame can't be silently
+  mis-attributed.
+- **Bypass-inserted rows are re-validated at compute.** A concat-source sort
+  carrying an `artifact_detection_id`, and a shared artifact group whose member
+  recordings disagree on session/fs/n_samples/dtype/timestamps, now raise
+  `SchemaBypassError` at compute instead of sorting unmasked / aggregating a
+  wrong union.
+- **UnitMatch bundle geometry is 2D-guarded** (probe projected to 2D, saved
+  `channel_positions.npy` asserted `(n_channels, 2)`); **scratch honors the
+  configured `temp_dir`** at the UnitMatch / analyzer-recompute /
+  clusterless-waveform-feature / merged-curation-temp sites; the analyzer
+  recipe name/row is validated before any filesystem load/delete; and the
+  full-folder analyzer-cache deletion policy (regeneratable scratch, all
+  extensions) is documented and logged.
+
 #### Spike Sorting v2: self-describing NWB artifacts
 
 Embeds provenance into every v2 analysis NWB so a shared file is interpretable
