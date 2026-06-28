@@ -141,35 +141,26 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     """
     import hashlib
     import json
-    import uuid
 
-    def _canonical(value):
-        # Match _selection_identity normalization so a UUID object and its str
-        # form -- and a numpy vs plain int sort_group_id -- collapse to one hash.
-        if isinstance(value, uuid.UUID):
-            return str(value)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int):
-            return int(value)
-        if isinstance(value, str):
-            try:
-                return str(uuid.UUID(value))
-            except (ValueError, AttributeError, TypeError):
-                return value
-        if hasattr(value, "__index__"):
-            return int(value)
-        raise TypeError(
-            "member_set_hash: member identity values must be UUID, str, int, "
-            f"or bool; got {type(value).__name__!r} ({value!r})"
-        )
+    from spyglass.spikesorting.v2._selection_identity import (
+        canonical_identity,
+    )
 
+    # Reuse the single v2 identity canonicalization (UUID<->str, numpy<->int
+    # collapse) so the folded member-set hash can never drift from the rest of
+    # the deterministic-id system. ``canonical_identity`` sorts keys, so each
+    # member's logical fields canonicalize order-independently; we order the
+    # MEMBERS by member_index so the concatenation order is part of the hash.
     ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
-    canonical = [
-        {field: _canonical(row[field]) for field in MEMBER_SNAPSHOT_LOGICAL_FIELDS}
-        for row in ordered
-    ]
-    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    payload = json.dumps(
+        [
+            canonical_identity(
+                {field: row[field] for field in MEMBER_SNAPSHOT_LOGICAL_FIELDS}
+            )
+            for row in ordered
+        ],
+        separators=(",", ":"),
+    )
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

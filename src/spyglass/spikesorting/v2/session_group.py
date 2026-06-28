@@ -915,7 +915,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
 
         The compute-side half: given the fetch-resolved ``member_plan`` (see
-        :meth:`_resolve_member_recording_keys`), load each cached ``Recording``
+        :meth:`_resolve_snapshot_recordings`), load each cached ``Recording``
         and collect the pre-motion sample count (the basis for the
         ``MemberBoundary`` back-mapping). Aligned element-wise in
         ``member_index`` order. No DB resolution happens here -- the PKs were
@@ -925,7 +925,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         ----------
         member_plan : list[dict]
             Resolved per-member plan dicts from
-            :meth:`_resolve_member_recording_keys`.
+            :meth:`_resolve_snapshot_recordings`.
 
         Returns
         -------
