@@ -203,6 +203,48 @@ def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
             shutil.rmtree(folder, ignore_errors=True)
 
 
+@pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize("rebuild", [True, False])
+@pytest.mark.parametrize(
+    "bad_name,match",
+    [
+        ("../bad", "path-safe"),
+        ("bad/name", "path-safe"),
+        ("unknown_recipe_xyz", "no row named"),
+    ],
+)
+def test_get_analyzer_validates_recipe_before_filesystem(
+    populated_sorting, monkeypatch, rebuild, bad_name, match
+):
+    """``get_analyzer`` validates the recipe NAME (path-safety) and ROW before
+    any filesystem load/delete.
+
+    ``waveform_params_name`` is embedded in the cache folder path and reaches
+    ``get_analyzer`` as an un-FK'd free string, so a path-like name (``../bad``,
+    ``bad/name``) -- or a path-safe-but-unknown recipe -- must be rejected
+    BEFORE ``_load_analyzer_folder_or_rebuild`` can rmtree or rebuild a folder.
+    """
+    from spyglass.spikesorting.v2 import _sorting_analyzer as sa
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    reached_filesystem = []
+    monkeypatch.setattr(
+        sa,
+        "_load_analyzer_folder_or_rebuild",
+        lambda *a, **k: reached_filesystem.append(1),
+    )
+    with pytest.raises(ValueError, match=match):
+        Sorting().get_analyzer(
+            populated_sorting,
+            waveform_params_name=bad_name,
+            rebuild=rebuild,
+        )
+    assert not reached_filesystem, (
+        "recipe validation must fire before the load/delete path"
+    )
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_get_analyzer_zero_unit_raises_before_path_lookup():
     """A zero-unit sort raises before any analyzer-folder lookup.
