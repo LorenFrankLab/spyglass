@@ -238,8 +238,13 @@ class AnalysisMixin(BaseMixin):
         # Confine the caller-supplied source name to a bare basename at this
         # acceptance boundary (it is used to locate the file to copy and as the
         # base of the generated analysis name); a separator / ``..`` / absolute
-        # path must not slip through.
+        # path must not slip through. ``recompute_file_name`` is confined the
+        # same way -- it is threaded straight into ``analysis_file_name`` and the
+        # path builder below, so an unsafe value would escape the managed
+        # analysis directory just as ``nwb_file_name`` would.
         assert_safe_nwb_file_name(nwb_file_name)
+        if recompute_file_name is not None:
+            assert_safe_nwb_file_name(recompute_file_name)
         nwb_file_abspath = self._nwb_table.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(

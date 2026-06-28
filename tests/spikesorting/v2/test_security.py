@@ -47,6 +47,28 @@ def test_nwb_filename_basename_accepted():
         assert_safe_nwb_file_name(good)  # does not raise
 
 
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize(
+    "bad_recompute_name",
+    ["../escape.nwb", "sub/dir.nwb", "/absolute/path.nwb", "a/../b.nwb"],
+)
+def test_create_rejects_unsafe_recompute_file_name(bad_recompute_name):
+    """``AnalysisNwbfile().create(recompute_file_name=...)`` confines the
+    recompute target to a bare basename too -- not just ``nwb_file_name``.
+
+    The recompute/rebuild path threads a caller- or row-supplied name straight
+    into the analysis path builder; without the same guard a separator / ``..``
+    / absolute path would escape the managed analysis directory. Must raise at
+    the acceptance boundary, before any path resolution.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    with pytest.raises(ValueError, match="bare file name"):
+        AnalysisNwbfile().create(
+            "valid_parent_.nwb", recompute_file_name=bad_recompute_name
+        )
+
+
 # --------------------------------------------------------------------------
 # Sorter scratch permissions: container-only world-writable.
 # --------------------------------------------------------------------------
