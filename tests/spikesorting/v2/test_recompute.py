@@ -956,6 +956,73 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
+    """The full analyzer reclamation round-trip -- the ``dry_run=False`` analog
+    of ``test_delete_files_round_trip`` (recording).
+
+    populate -> recompute matched -> ``delete_files`` removes the ``.zarr``
+    folder + sets ``deleted=1`` -> ``get_analyzer`` rebuilds it from the
+    canonical sort.
+    """
+    _assert_temp_base_dir()
+    from spyglass.spikesorting.v2 import recompute as rc
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        CORTEX_DISPLAY_WAVEFORMS,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    folder = analyzer_path(
+        populated_sorting["sorting_id"], CORTEX_DISPLAY_WAVEFORMS
+    )
+    assert folder.exists(), "populated sort should have an analyzer folder"
+
+    rc.SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
+    rc.SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
+    rc.SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
+    assert rc.SortingAnalyzerRecompute & populated_sorting & "matched=1", (
+        "a fresh analyzer rebuild must reproduce the hashes -> matched=1"
+    )
+
+    # The analyzer ``created_at`` is populate time, so the age gate (correctly)
+    # protects a freshly built folder; a real reclamation runs days later.
+    # Backfill ``created_at`` to the past so the round-trip exercises the
+    # ``dry_run=False`` reclamation without waiting.
+    import datetime as dt
+
+    old = dt.datetime(2000, 1, 1)
+    for matched_key in (
+        rc.SortingAnalyzerRecompute & populated_sorting & "matched=1"
+    ).fetch("KEY", as_dict=True):
+        rc.SortingAnalyzerRecompute().update1(
+            {**matched_key, "created_at": old}
+        )
+
+    try:
+        removed = rc.SortingAnalyzerRecompute().delete_files(
+            populated_sorting, dry_run=False, days_since_creation=0
+        )
+        assert removed and not folder.exists(), (
+            "delete_files(dry_run=False) must reclaim the matched analyzer "
+            "folder"
+        )
+        assert rc.SortingAnalyzerRecompute & populated_sorting & "deleted=1"
+
+        rebuilt = Sorting().get_analyzer(populated_sorting)
+        assert folder.exists(), "get_analyzer must rebuild the reclaimed folder"
+        assert list(rebuilt.unit_ids), "rebuilt analyzer carries the units"
+    finally:
+        # The folder belongs to the shared package fixture; restore it if the
+        # body failed after the reclaim, so siblings do not cascade-fail.
+        if not folder.exists():
+            try:
+                Sorting().get_analyzer(populated_sorting)
+            except Exception:
+                pass
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_recording_recompute_mixed_env_deletes(
     populated_sorting, clean_recompute
 ):
