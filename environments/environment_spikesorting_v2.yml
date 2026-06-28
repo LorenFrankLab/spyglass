@@ -19,8 +19,9 @@
 #    (The CI `pytest-v2` job creates this same env from this file, so it
 #    also installs `spikesorting-v2-validation` -- MEArec + neuroconv are
 #    needed for `_read_ground_truth`, `test_mearec_fixture_gain_required`,
-#    and generating the MEArec smoke fixture. Note MEArec / elephant cap
-#    numpy < 2.)
+#    and generating the MEArec smoke fixture. MEArec (>=1.9) is uncapped on
+#    numpy and elephant (>=1.2) requires numpy>=2, so the validation extra
+#    resolves cleanly on the v2 numpy>=2 baseline.)
 #
 # torch is a direct `spikesorting-v2` dependency (drift/motion QC: the
 # DriftEstimate table's dredge preset needs it). A modern standalone
@@ -53,4 +54,6 @@ dependencies:
       # validation deps; the explicit SpikeInterface pin overrides the
       # base dependency to the 0.104 line the v2 pipeline targets.
       - --editable "..[test,spikesorting-v2,spikesorting-v2-validation]"
-      - "spikeinterface>=0.104,<0.105"
+      # Match the pyproject hard pin exactly (==0.104.3) so the env and the
+      # package contract cannot drift; test_dependency_contract guards this.
+      - "spikeinterface==0.104.3"

@@ -416,7 +416,7 @@ jobs:
         sed -i \
           -e 's/"spikeinterface==0.104.3"/"spikeinterface>=0.99.1,<0.100"/' \
           -e 's/"probeinterface>=0.3.2"/"probeinterface>=0.2.19,<0.3"/' \
-          -e 's/^  "numpy",/  "numpy>=1.23,<2",/' \
+          -e 's/^  "numpy>=2,<3",/  "numpy>=1.23,<2",/' \
           pyproject.toml
         grep -nE '"(spikeinterface|probeinterface|numpy)' pyproject.toml
     - name: Set up conda (legacy SpikeInterface 0.99 environment)

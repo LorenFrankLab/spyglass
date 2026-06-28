@@ -51,6 +51,22 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: execution dispatch, dependency pins, and security hardening
+
+A batch of localized operational, dependency, and security fixes. No schema,
+identity, or `content_hash` change.
+
+- **Dependency contracts pinned and reconciled.** `numpy` is now pinned
+  `>=2,<3` in `pyproject.toml` (was bare), and the v2 conda env's SpikeInterface
+  spec matches the `pyproject` hard pin (`==0.104.3`) instead of a looser range.
+  No new runtime dependencies. The legacy (v0/v1, SpikeInterface 0.99) suite
+  downgrades to `numpy<2` by sed-rewriting the committed `numpy` line; that sed
+  (in the `pytest-legacy` CI job and the legacy env doc) was updated to match
+  the new pin, and `test_dependency_contract` now guards the two against drift.
+  *Migration:* re-resolve environments after pulling; the numpy-2 baseline is
+  unchanged in practice (the v2 env already resolved numpy 2), only the
+  declaration is now explicit.
+
 #### Spike Sorting v2: analyzer-cache concurrency and concat hardening
 
 Operational hardening of the v2 SortingAnalyzer cache, concatenation
