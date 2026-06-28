@@ -557,20 +557,25 @@ def test_sorting_delete_removes_analyzer_folder(
 
 @pytest.mark.slow
 @pytest.mark.usefixtures("dj_conn")
-def test_make_compute_mode_a_cleanup_on_write_failure(
+def test_make_compute_failure_leaves_analyzer_for_orphan_sweep(
     populated_sorting, monkeypatch
 ):
-    """A ``_write_units_nwb`` failure after ``_build_analyzer`` removes
-    the analyzer folder and inserts no row (make_compute Mode-A cleanup).
+    """A units-NWB write failure after ``_build_analyzer`` leaves the published
+    canonical analyzer on disk (for orphan-sweep) and inserts no Sorting row --
+    failure cleanup must NOT eagerly rmtree the analyzer.
 
-    Once ``_build_analyzer`` has written the folder, any later failure in
-    ``make_compute`` must rmtree it (DataJoint never calls ``make_insert``
-    after the raise). We build a fresh unit-producing (MS5) selection with
-    ``_write_units_nwb`` patched to raise, then assert the folder is gone and
-    no Sorting row landed.
+    At the point of failure NO Sorting row exists yet -- exactly the state a
+    concurrent in-flight worker that published but has not committed would be in.
+    The analyzer is shared by ``sorting_id`` and regeneratable, so eagerly
+    deleting it here could destroy that peer's analyzer; cleanup leaves it, and
+    an analyzer with no committed row is a disk-side orphan reclaimed by
+    ``find_orphaned_analyzer_folders`` (``get_analyzer`` self-heals a missing
+    one). Build a fresh unit-producing (MS5) selection with ``_write_units_nwb``
+    patched to raise after the analyzer is published, then assert the folder
+    remains and no row landed.
     """
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sort_pk = _fresh_unit_producing_selection(populated_sorting)
     folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
@@ -583,54 +588,18 @@ def test_make_compute_mode_a_cleanup_on_write_failure(
     try:
         with pytest.raises(Exception, match="units NWB write blew up"):
             Sorting.populate(sort_pk, reserve_jobs=False)
-        assert not folder.exists(), (
-            "Mode-A cleanup did not remove the analyzer folder after the "
-            "units-NWB write failed"
-        )
         assert len(Sorting & sort_pk) == 0, "no row should be inserted"
+        assert folder.exists(), (
+            "failure cleanup eagerly deleted the canonical analyzer -- it must "
+            "be left for orphan-sweep (a concurrent in-flight worker with no "
+            "committed row yet could own the same sorting_id's analyzer)"
+        )
     finally:
         (SortingSelection & sort_pk).delete(safemode=False)
         if folder.exists():
             import shutil
 
             shutil.rmtree(folder, ignore_errors=True)
-
-
-@pytest.mark.slow
-@pytest.mark.usefixtures("dj_conn")
-def test_cleanup_keeps_analyzer_owned_by_committed_sort(populated_sorting):
-    """Failure cleanup must NOT rmtree the canonical analyzer while a committed
-    Sorting row owns it.
-
-    Under concurrent same-``sorting_id`` populate (``reserve_jobs=False``) a
-    stale worker A that published then failed must not delete the analyzer worker
-    B just republished for the now-committed row. The analyzer is shared by
-    ``sorting_id`` and regeneratable, so failure cleanup deletes it only when no
-    Sorting row owns it (a true orphan); otherwise it defers to orphan-sweep.
-    """
-    import shutil
-
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    sort_pk = populated_sorting  # a committed Sorting row owns this sorting_id
-    # A placeholder canonical folder at a distinct recipe, so the test never
-    # touches the shared fixture's real (display-recipe) analyzer.
-    folder = analyzer_path(
-        sort_pk["sorting_id"], "placeholder_recipe_for_cleanup_test"
-    )
-    folder.mkdir(parents=True, exist_ok=True)
-    try:
-        Sorting._cleanup_staged_sorting_artifacts(
-            key={"sorting_id": sort_pk["sorting_id"]},
-            analyzer_folder=folder,
-        )
-        assert folder.exists(), (
-            "failure cleanup deleted the canonical analyzer folder while a "
-            "committed Sorting row still owned the sorting_id"
-        )
-    finally:
-        shutil.rmtree(folder, ignore_errors=True)
 
 
 @pytest.mark.slow

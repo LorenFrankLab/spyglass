@@ -219,11 +219,12 @@ def _assert_curation_in_raw_namespace(
 
 
 class CurationEvaluationFetched(NamedTuple):
-    """DB inputs for ``CurationEvaluation.make_compute`` (no DB I/O in compute).
+    """DB inputs for ``CurationEvaluation.make_compute`` (no DB INPUT resolution
+    in compute; it still stages its OUTPUT via ``AnalysisNwbfile``).
 
     Everything ``make_compute`` needs to reconstruct the recording + curated /
     raw sorting and load-or-build the analyzers is resolved here (the only stage
-    allowed DB access). ``use_fast_path`` records the committed-state routing
+    allowed to resolve DB inputs). ``use_fast_path`` records the committed-state routing
     decision (root/label-only -> cached raw-sort analyzer; merged -> temp
     curation analyzer) so the worker does not re-query the curation.
     """

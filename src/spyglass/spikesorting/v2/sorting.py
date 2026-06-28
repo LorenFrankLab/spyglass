@@ -1752,12 +1752,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             "sorter_version": sorter_version,
         }
         analysis_file_name, units_object_id = self._stage_sorting_artifact(
-            key=key,
             sorting=sorting_obj,
             recording=recording,
             nwb_file_name=nwb_file_name,
             obs_intervals=obs_intervals,
-            analyzer_folder=analyzer_folder,
             unit_metadata=unit_metadata,
             source_provenance=source_provenance,
         )
@@ -1846,53 +1844,46 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         except Exception:
             # Failure-mode B: registration failed after a successful
-            # make_compute -- roll back BOTH on-disk side effects (the staged
-            # units NWB and the analyzer folder) before propagating.
-            self._cleanup_staged_sorting_artifacts(
-                key=key,
-                analyzer_folder=analyzer_folder,
-                analysis_file_name=analysis_file_name,
+            # make_compute -- remove the attempt-owned, unregistered units NWB
+            # before propagating. The analyzer folder is shared by sorting_id and
+            # regeneratable, and a concurrent worker may have just published it
+            # for the same sorting_id (without yet committing its row), so it is
+            # NEVER deleted here -- an analyzer with no committed row is a
+            # disk-side orphan reclaimed by find_orphaned_analyzer_folders, and
+            # get_analyzer self-heals a missing one.
+            self._cleanup_staged_units_nwb(
+                analysis_file_name=analysis_file_name
             )
             raise
 
     def _stage_sorting_artifact(
         self,
         *,
-        key,
         sorting,
         recording,
         nwb_file_name,
         obs_intervals,
-        analyzer_folder,
         unit_metadata=None,
         source_provenance=None,
     ):
-        """Stage the units NWB; clean the built analyzer if staging fails.
+        """Stage the units NWB; return ``(analysis_file_name, units_object_id)``.
 
-        ``_build_analyzer`` has already written ``analyzer_folder`` on disk,
-        so a failure in the units-NWB write must remove it (failure-mode A)
-        before propagating -- DataJoint does not call ``make_insert`` once
-        ``make_compute`` raises. Returns ``(analysis_file_name,
-        units_object_id)``. ``unit_metadata`` / ``source_provenance`` are the
-        compute-once per-unit columns + source header embedded in the NWB.
+        ``_write_units_nwb`` self-cleans its own staged file on a write failure
+        (mode A) before propagating, and the analyzer folder is deliberately left
+        for orphan-sweep / ``get_analyzer`` self-heal rather than eagerly deleted
+        (it is shared by ``sorting_id`` and may belong to a concurrent worker),
+        so no extra failure cleanup is needed here. ``unit_metadata`` /
+        ``source_provenance`` are the compute-once per-unit columns + source
+        header embedded in the NWB.
         """
-        try:
-            return self._write_units_nwb(
-                sorting=sorting,
-                recording=recording,
-                nwb_file_name=nwb_file_name,
-                obs_intervals=obs_intervals,
-                unit_metadata=unit_metadata,
-                source_provenance=source_provenance,
-            )
-        except Exception:
-            # Mode A cleanup: the analyzer folder exists but the units NWB
-            # write failed; remove it (if no committed row owns it) so a
-            # half-built scratch dir doesn't leak.
-            self._cleanup_staged_sorting_artifacts(
-                key=key, analyzer_folder=analyzer_folder
-            )
-            raise
+        return self._write_units_nwb(
+            sorting=sorting,
+            recording=recording,
+            nwb_file_name=nwb_file_name,
+            obs_intervals=obs_intervals,
+            unit_metadata=unit_metadata,
+            source_provenance=source_provenance,
+        )
 
     def _insert_sorting_rows_transaction(
         self,
@@ -1939,57 +1930,32 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
             self._populate_unit_part(unit_rows)
 
-    @classmethod
-    def _cleanup_staged_sorting_artifacts(
-        cls, *, key, analyzer_folder, analysis_file_name=None
-    ):
-        """Best-effort removal of a sort's on-disk side effects after failure.
+    @staticmethod
+    def _cleanup_staged_units_nwb(*, analysis_file_name):
+        """Best-effort removal of the attempt-owned units NWB after failure.
 
-        Removes the staged units NWB (when ``analysis_file_name`` is given --
-        failure-mode B, registration failed after staging; it is per-attempt and
-        content-addressed, owned by this attempt). The analyzer folder is shared
-        by ``sorting_id`` and is regeneratable, so it is removed ONLY when no
-        committed ``Sorting`` row owns the ``sorting_id`` (a true orphan), under
-        the per-sort ``analyzer_cache_lock``: a concurrent worker that
-        republished the same ``sorting_id`` (``reserve_jobs=False``) must not
-        lose its freshly published analyzer to this failed attempt's cleanup. A
-        folder a committed row owns is left for ``find_orphaned_analyzer_folders``
-        / normal reuse + ``get_analyzer`` self-heal, never deleted here. Each
-        step is best-effort: a cleanup failure is logged, never raised, so it
-        cannot mask the original error. DataJoint cannot roll back these
-        filesystem side effects, so the caller invokes this in its ``except``
-        before re-raising.
+        Removes ONLY the staged units NWB (failure-mode B: registration failed
+        after ``make_compute`` staged the file) -- it is per-attempt and
+        content-addressed, owned by this populate attempt. The analyzer folder is
+        deliberately NOT touched: it is shared by ``sorting_id`` and
+        regeneratable, and a concurrent worker may have just published it for the
+        same ``sorting_id`` (without yet committing its row), so eagerly deleting
+        it could destroy a peer's analyzer. An analyzer with no committed
+        ``Sorting`` row is a disk-side orphan reclaimed by
+        ``find_orphaned_analyzer_folders``; ``get_analyzer`` self-heals a missing
+        one. Best-effort: a cleanup failure is logged, never raised, so it cannot
+        mask the original error. DataJoint cannot roll back this filesystem side
+        effect, so the caller invokes this in its ``except`` before re-raising.
         """
         import pathlib
-        import shutil
 
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_lock,
-        )
-
-        if analysis_file_name is not None:
-            try:
-                abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-                pathlib.Path(abs_path).unlink(missing_ok=True)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Sorting._cleanup_staged_sorting_artifacts: failed to "
-                    f"clean up staged units NWB {analysis_file_name!r}: "
-                    f"{cleanup_exc!r}"
-                )
-        sorting_id = key["sorting_id"]
         try:
-            with analyzer_cache_lock(sorting_id):
-                # A committed row owns the analyzer (this attempt's retry or a
-                # concurrent worker's republish) -> do not delete it.
-                if cls & {"sorting_id": sorting_id}:
-                    return
-                if analyzer_folder.exists():
-                    shutil.rmtree(analyzer_folder, ignore_errors=False)
+            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            pathlib.Path(abs_path).unlink(missing_ok=True)
         except Exception as cleanup_exc:  # pragma: no cover -- defensive
             logger.error(
-                "Sorting._cleanup_staged_sorting_artifacts: failed to remove "
-                f"analyzer folder {analyzer_folder!r}: {cleanup_exc!r}"
+                "Sorting._cleanup_staged_units_nwb: failed to clean up staged "
+                f"units NWB {analysis_file_name!r}: {cleanup_exc!r}"
             )
 
     # ---- Accessors -------------------------------------------------------
