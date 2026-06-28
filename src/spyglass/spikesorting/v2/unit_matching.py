@@ -1113,6 +1113,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         import tempfile
         from pathlib import Path
 
+        from spyglass.settings import temp_dir as spyglass_temp_dir
         from spyglass.spikesorting.v2._matcher_graph import (
             canonicalize_match_pairs,
             chronological_member_order,
@@ -1136,7 +1137,9 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         # would mis-align drift. Pair orientation is independent of feed order --
         # canonicalize_match_pairs re-orients by member_index below.
         ordered_plan = chronological_member_order(member_plan)
-        with tempfile.TemporaryDirectory(prefix="unitmatch_") as tmp_root:
+        with tempfile.TemporaryDirectory(
+            prefix="unitmatch_", dir=spyglass_temp_dir
+        ) as tmp_root:
             session_inputs = []
             for plan in ordered_plan:
                 curation_key = {

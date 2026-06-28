@@ -1128,7 +1128,11 @@ def _recompute_analyzer_hashes(
     # RECORDING cache -- a separate, known self-heal, out of scope here.)
     recording, sorting = reconstruct_recording_and_sorting(Sorting(), sort_key)
 
-    tmp = tempfile.mkdtemp(prefix="v2_analyzer_recompute_")
+    from spyglass.settings import temp_dir as spyglass_temp_dir
+
+    tmp = tempfile.mkdtemp(
+        prefix="v2_analyzer_recompute_", dir=spyglass_temp_dir
+    )
     try:
         # Rebuild from the SAME sorting + recording with build_analyzer's exact
         # seed/param logic, to a temp folder, so the comparison is a genuine

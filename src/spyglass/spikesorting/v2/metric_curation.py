@@ -1343,7 +1343,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                     curated_units_abs_path, recording_row, fs
                 )
                 compute_key = {"sorting_id": sorting_id}
-                with tempfile.TemporaryDirectory() as tmp:
+                from spyglass.settings import temp_dir as spyglass_temp_dir
+
+                with tempfile.TemporaryDirectory(
+                    dir=spyglass_temp_dir
+                ) as tmp:
                     # ``.zarr`` suffix matches the SI zarr store create_sorting_
                     # analyzer writes (SI forces it) so load_sorting_analyzer
                     # resolves the same folder -- same convention as

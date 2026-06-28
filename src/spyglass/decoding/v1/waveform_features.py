@@ -385,7 +385,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         import tempfile
         from pathlib import Path as _Path
 
-        tmpdir = tempfile.TemporaryDirectory(prefix="v2_clusterless_wf_")
+        tmpdir = tempfile.TemporaryDirectory(
+            prefix="v2_clusterless_wf_", dir=temp_dir
+        )
         # Until the accessor takes ownership (below), an exception during
         # build/compute would leave the on-disk scratch folder orphaned until
         # GC; clean it up deterministically and re-raise.
