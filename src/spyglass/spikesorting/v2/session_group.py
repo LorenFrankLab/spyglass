@@ -745,6 +745,7 @@ class ConcatRecordingComputed(NamedTuple):
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
+    n_samples: int
     content_hash: str
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
@@ -776,6 +777,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
+    n_samples: bigint            # concat sample count; exact integer basis for the MemberBoundary back-mapping
     content_hash: char(64)
     motion_preset: varchar(64)   # RESOLVED motion preset ('rigid_fast' for 'auto' same-day, the explicit preset, or 'none')
     """
@@ -1199,6 +1201,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             n_channels=n_channels,
             sampling_frequency=sampling_frequency,
             total_duration_s=total_duration_s,
+            # Exact integer concat sample count (== boundaries[-1], asserted
+            # above) -- the authoritative basis split-back checks the cumulative
+            # MemberBoundary set against, avoiding a float total_duration_s*fs
+            # round-trip.
+            n_samples=corrected_n_samples,
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
@@ -1215,6 +1222,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         n_channels,
         sampling_frequency,
         total_duration_s,
+        n_samples,
         content_hash,
         anchor_nwb_file_name,
         member_boundaries,
@@ -1256,6 +1264,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "n_channels": n_channels,
                         "sampling_frequency": sampling_frequency,
                         "total_duration_s": total_duration_s,
+                        "n_samples": n_samples,
                         "content_hash": content_hash,
                         "motion_preset": motion_preset,
                     }
@@ -1488,10 +1497,16 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         }
         # split_unit_spike_trains enforces strictly-increasing boundaries and
         # per-spike conservation (every concat-frame spike lands in exactly one
-        # member). The final boundary equals the concat sample count by the
-        # make_compute write-time invariant (corrected_n_samples == boundaries[-1]),
-        # so it is not re-derived from a heavy recording load here.
-        per_member = split_unit_spike_trains(unit_trains, boundaries)
+        # member). Pass the stored exact concat sample count so the final
+        # boundary is verified to cover the whole recording -- catching a
+        # truncated or over-long MemberBoundary set that the per-spike range
+        # check alone could miss (a too-long final boundary is never exceeded by
+        # an in-range spike). ``n_samples`` is the exact integer written by
+        # make_insert, not a float total_duration_s * fs round-trip.
+        n_samples = int((self & key).fetch1("n_samples"))
+        per_member = split_unit_spike_trains(
+            unit_trains, boundaries, total_n_samples=n_samples
+        )
         fs = float(sorting.get_sampling_frequency())
         return {
             member_split_key(member): si.NumpySorting.from_unit_dict(
