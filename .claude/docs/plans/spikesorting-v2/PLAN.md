@@ -108,7 +108,7 @@ All implementation artifacts also use the [Code Artifact Naming](shared-contract
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
   - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate.
-  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` sorting API, `run_v2_unit_match()` helper, FigPack curation, canonical notebook extension, v1/v2 path-selection docs. Split into Phase 5a (FigPack feasibility spike — verifies the FigPack spike-sorting API and edited-curation round trip, replaces the `PHASE5A_CONTRACT_STUB` markers) and Phase 5b (orchestrator extension, FigPack tables, notebooks, docs). Phase 5b is gated on Phase 5a, mirroring the Phase 4a/4b split.
+  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v2_pipeline()` sorting API, `run_v2_unit_match()` helper, FigPack curation, canonical notebook extension, v1/v2 path-selection docs. Split into Phase 5a (FigPack feasibility spike — verifies the FigPack spike-sorting API and edited-curation round trip, records the verified contract in `figpack-runtime.md`) and Phase 5b (orchestrator extension, FigPack tables, notebooks, docs). Phase 5b is gated on Phase 5a, mirroring the Phase 4a/4b split.
 - [appendix.md](appendix.md) — SpikeInterface 0.99→0.104 migration cheat sheet, UnitMatchPy integration notes, MountainSort 5 install + sorter param table.
 
 ## Dependency DAG
@@ -132,7 +132,7 @@ Phase 3 SessionGroup + ConcatenatedRecording
           -> Re-run code_graph on the revised draft schema
               -> Phase 4b UnitMatch cross-session tracking implementation
                   -> Phase 5a FigPack feasibility spike
-                      -> Replace PHASE5A_CONTRACT_STUB markers from 5a findings
+                      -> Record verified FigPack contract from 5a findings
                           -> Phase 5b UX/FigPack tables/notebooks/docs
 ```
 

@@ -1546,15 +1546,37 @@ Future policy values are pure inserts into the `policy_used: varchar(32)` column
 
 Phase 5. FigPack is FigURL's successor UI path. The v2 table mirrors the important v1 FigURL lesson: the selection row must include the UI configuration, not only the curation FK, so repeated calls are idempotent and multiple display configurations for the same curation are possible.
 
-**PHASE5A_CONTRACT_STUB — finalized in Phase 5a.** If this marker is still
-present, the FigPack spike-sorting API and edited-curation round trip have not
-been verified. The table shapes below are the intended schema direction, but
-Phase 5b must not implement `figpack_curation.py` until Phase 5a replaces this
-marker in `designs.md`, `appendix.md`, and `phase-5-ux-overhaul.md` with the
-observed package names, import paths, view-construction call, upload/publish
-call, and curation-state retrieval path.
+**FigPack contract — verified.** The FigPack spike-sorting API, view
+construction, offline/cloud display, and edited-curation round trip are verified
+against `figpack==0.3.20` + `figpack-spike-sorting==0.1.14` +
+`spikeinterface==0.104.7`; full evidence and a minimal snippet are in
+[figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md).
+The table shapes below rely on this summary:
 
-Implementation precondition: Phase 5 must first verify the current FigPack spike-sorting extension API. Current upstream packaging is core `figpack` plus `figpack-spike-sorting` (imported as `figpack_spike_sorting`); do not assume `figpack.spike_sorting.build_curation_view()` or `view.publish()` exists. The private helper names below are Spyglass-owned adapter functions that wrap the verified upstream API after the feasibility spike.
+- **Packages / imports:** core `figpack` plus the spike-sorting extension
+  `figpack-spike-sorting` (PyPI), imported as `figpack_spike_sorting`.
+  SpikeInterface 0.104 provides a `backend="figpack"` widgets path. There is no
+  `figpack.spike_sorting.build_curation_view()` / `view.publish()`; the
+  `build_curation_view` / `fetch_curation_from_uri` helper names below are
+  Spyglass-owned adapters over the verified upstream API.
+- **View construction:** compose SpikeInterface figpack sub-views
+  (`sw.plot_*(analyzer, backend="figpack", generate_url=False, display=False).view`
+  and `generate_unit_table_view(analyzer, [props])`) with
+  `ssv.SortingCuration(default_label_options=[...])` and `figpack.views` layout.
+  Do **not** use `sw.plot_sorting_summary(curation=True)` — with the released
+  versions it calls `SortingCuration(label_choices=...)` while the extension
+  expects `default_label_options=...` and raises `TypeError`; build the
+  `SortingCuration` control directly.
+- **Display / publish:** `view.show(*, title, upload=False|True, ephemeral=...,
+  open_in_browser=False, wait_for_input=False) -> figure_url` (offline local
+  server, or figpack.org upload needing `FIGPACK_API_KEY` unless
+  `ephemeral=True`); `view.save(path, *, title)` for a static bundle.
+- **Curation round trip:** edited labels/merges persist as figure annotations at
+  `<figure_url>/annotations.json` →
+  `{"annotations": {"/": {"sorting_curation": "<json>"}}}`, the json being
+  `{labelsByUnit, mergeGroups, labelChoices, isClosed}` — the same shape as v1
+  FigURL's kachery JSON. Retrieve with an HTTP GET on that file and map directly
+  onto `CurationV2.insert_curation(labels=, merge_groups=)`.
 
 ```python
 @schema

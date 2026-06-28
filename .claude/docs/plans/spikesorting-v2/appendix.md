@@ -598,12 +598,31 @@ Sources:
 
 **FigPack** is the intended FigURL successor UI path. Repo: https://github.com/flatironinstitute/figpack. Current packaging during plan review is a core `figpack` package plus a spike-sorting extension package named `figpack-spike-sorting` on PyPI and imported as `figpack_spike_sorting`.
 
-**PHASE5A_CONTRACT_STUB — finalized in Phase 5a.** If this marker is still
-present, the exact view-construction API, upload/show method, and
-edited-curation state round trip have not been verified. Phase 5b must not
-implement the DataJoint FigPack tables until this section records the observed
-package versions, import paths, minimal working code snippet, publish/upload
-behavior, and curation-state retrieval path.
+**FigPack contract — verified.** The package set, import paths, view-construction
+API, display/publish methods, and edited-curation round trip are verified against
+`figpack==0.3.20` + `figpack-spike-sorting==0.1.14` + `spikeinterface==0.104.7`
+(Python 3.11). Full evidence, minimal snippet, and the exact helper shapes are in
+[figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md);
+the schema-level summary is in [designs.md § FigPackCuration](designs.md#figpackcuration).
+Key observed facts:
+
+- Curation UI is two packages: core `figpack` plus `figpack-spike-sorting`
+  (imported as `figpack_spike_sorting`). SpikeInterface 0.104 ships a
+  `backend="figpack"` widgets path that builds sub-views from a `SortingAnalyzer`.
+- Display: `view.show(upload=False)` runs a local **offline** server (file-upload
+  enabled) and returns a `http://localhost:<port>/figure_<id>` URL;
+  `view.show(upload=True)` uploads to figpack.org (needs `FIGPACK_API_KEY` unless
+  `ephemeral=True`); `view.save(path)` writes a static bundle. There is no
+  `view.publish()`.
+- Edited curation state round-trips as `<figure_url>/annotations.json` →
+  `{"annotations": {"/": {"sorting_curation": "<json>"}}}` with json
+  `{labelsByUnit, mergeGroups, labelChoices, isClosed}` (same shape as v1 FigURL's
+  kachery JSON), retrievable by an HTTP GET. Verified offline end to end (labels +
+  merge groups), so no FigURL fallback is needed for v2.
+- Caveat: `figpack-spike-sorting` is `0.1.14` (beta); SI's
+  `plot_sorting_summary(curation=True)` is incompatible with it (kwarg drift), so
+  the FigPack table builds the `SortingCuration` control directly. Pin exact
+  versions.
 
 **Migration policy** (per resolved decision #2 in `overview.md`):
 - Phase 1 ships v2 with NO curation UI table — users curate by editing `CurationV2` rows directly in Python.

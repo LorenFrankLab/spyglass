@@ -15,7 +15,7 @@ unless Phase 0c explicitly ports a narrow shim.
 
 ## Executor Checklist
 
-- Complete Phase 5a first: verify the current FigPack spike-sorting API and edited-curation state round trip, replace all `PHASE5A_CONTRACT_STUB` markers, and stop/escalate if the round trip cannot be made to work.
+- Phase 5a is complete: the FigPack spike-sorting API, display/publish, and edited-curation round trip are verified (offline) and recorded in [figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md); the FigPack contract stubs in this file, `designs.md`, and `appendix.md` are replaced with the observed contract. Phase 5b implements against that verified contract.
 - Extend the current single-session `pipeline.py` runner with full presets,
   auto-curation, concat routing, FigPack routing, and separate
   `run_v2_unit_match()`. Preserve the already-shipped `require_units=False`
@@ -84,7 +84,7 @@ below still holds); the remediation plan owns all schema changes.
 
 ### Phase 5a — FigPack feasibility spike
 
-- **PHASE5A_CONTRACT_STUB — no FigPack DataJoint implementation while this marker remains.** Phase 5a must replace this marker in `phase-5-ux-overhaul.md`, `designs.md`, and `appendix.md` with observed API details before Phase 5b starts. Reviewers should use `rg "PHASE5A_CONTRACT_STUB" .claude/docs/plans/spikesorting-v2` as the stop/go check.
+- **FigPack contract — verified (feasibility spike complete).** The FigPack spike-sorting API, view construction, display/publish, and edited-curation round trip are verified and recorded in [figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md); the contract stubs in this file, `designs.md`, and `appendix.md` are replaced with the observed contract. Phase 5b may implement the FigPack DataJoint tables against that contract.
 
 - **Verify FigPack outside DataJoint first.** Use the isolated v2 curation environment and one existing v2 `SortingAnalyzer` fixture. Deliverables:
   1. Confirm the actual installable package set. Current upstream uses the core `figpack` package plus a spike-sorting extension package (`figpack-spike-sorting` on PyPI, imported as `figpack_spike_sorting` in the upstream repository); do not assume `figpack` alone provides spike-sorting views.
@@ -92,13 +92,13 @@ below still holds); the remediation plan owns all schema changes.
   3. Test on a single example: build a curation view from a v2 SortingAnalyzer end-to-end and publish/upload or save it through the verified API.
   4. Round-trip a known labels dict and merge-groups representation back through the verified API or documented state file. If FigPack can display a curation view but cannot persist edited curation state in a retrievable form, stop and escalate before schema finalization.
   5. Record the verified FigPack and `figpack-spike-sorting` versions, exact import statements, minimal working code snippet, upload/publish behavior, and curation-state retrieval path in `tests/spikesorting/v2/resolver/figpack-runtime.md`.
-  6. Replace the `PHASE5A_CONTRACT_STUB` markers in this file, `designs.md`, and `appendix.md` with the observed contract. Include the exact helper shape that `FigPackCuration.make()` and `FigPackCuration.fetch_curation_from_uri()` will wrap.
+  6. The FigPack contract stubs in this file, `designs.md`, and `appendix.md` are replaced with the observed contract, including the exact helper shapes that `FigPackCuration.make()` / `build_curation_view()` and `FigPackCuration.fetch_curation_from_uri()` wrap (recorded in [figpack-runtime.md](../../../../tests/spikesorting/v2/resolver/figpack-runtime.md)).
 
   **If FigPack is not usable at implementation time**: STOP Phase 5 and escalate to the project owner. The plan does not silently fall back to FigURL. Possible resolutions (decided by project owner, not the implementer): wait for FigPack release; pin to a specific FigPack commit; add a contribution to upstream FigPack; or remove FigPack from this release scope.
 
 ### Phase 5b — implementation and docs
 
-- **Do not start Phase 5b while `PHASE5A_CONTRACT_STUB` remains anywhere under `.claude/docs/plans/spikesorting-v2/`.**
+- **Phase 5a is complete — no FigPack contract stubs remain under `.claude/docs/plans/spikesorting-v2/`; Phase 5b may proceed.**
 
 - **EXTEND `pipeline.py`** (Phase 1 shipped a minimal version with 3 presets covering recording → artifact → sorting → initial curation). Phase 5 adds the missing stages and broadens the preset set per [designs.md § `run_v2_pipeline()` Orchestrator](designs.md#run_v2_pipeline-orchestrator):
   - **Add `auto_curate=False` parameter** — wires up Phase 2's `AnalyzerCuration` stage and materialization only when the caller opts in. The default remains initial-curation-only so a convenience call does not silently commit suggested labels/merges into a new `CurationV2`. If `auto_curate=True`, the returned manifest must include both the `AnalyzerCuration` suggestion row and the materialized child `CurationV2` row.
@@ -225,7 +225,7 @@ Behaviors the Phase 5 validation goals must cover. Implementer chooses test name
 4. **Single-session vs concat input mode**: mixing single-session inputs with concat session-group inputs raises before any insert; supplying only one of `concat_session_group_owner` / `concat_session_group_name` raises before any insert; concat happy path returns a manifest with `concat_recording` and no `artifact_detection` (the concat `SortingSelection` simply has no `ArtifactDetectionSource` row).
 4b. **Zero-unit manifest (review-fix C5)**: default `require_units=False` writes an empty-but-real curation + merge row and returns a full manifest (real `curation_id` / `merge_id`, `n_units=0`) with a warning and does not raise; `require_units=True` raises `ZeroUnitSortError`.
 5. **`run_v2_unit_match`**: requires explicit `curation_choices` (raises if missing — never auto-picks "latest"); two calls with identical args return the same `unitmatch_id`.
-6. **FigPack feasibility-gated** (slow, integration, optional): Phase 5a has replaced all `PHASE5A_CONTRACT_STUB` markers and recorded `figpack-runtime.md`; with the `spikesorting-v2-curation` extra installed, `FigPackCuration.populate(key)` returns a non-empty URI or verified local artifact reference; zero-unit curation publishes an empty view or raises a clear zero-unit error (`ZeroUnitAnalyzerError` / `ZeroUnitSortError`, or a new FigPack-specific exception — there is no `EmptySortingError` in `exceptions.py`), never a missing-column `KeyError`; published labels round-trip via `fetch_curation_from_uri`.
+6. **FigPack feasibility-gated** (slow, integration, optional): the FigPack feasibility spike is complete and recorded in `figpack-runtime.md` (verified contract, no stubs remaining); with the `spikesorting-v2-curation` extra installed, `FigPackCuration.populate(key)` returns a non-empty URI or verified local artifact reference; zero-unit curation publishes an empty view or raises a clear zero-unit error (`ZeroUnitAnalyzerError` / `ZeroUnitSortError`, or a new FigPack-specific exception — there is no `EmptySortingError` in `exceptions.py`), never a missing-column `KeyError`; published labels round-trip via `fetch_curation_from_uri`.
 7. **Notebook smoke** (slow, integration): `jupytext` executes `notebooks/10_Spike_SortingV2.ipynb` against `minirec` or the smoke fixture with no errors; programmatic check confirms code-cell count ≤10. Cross-session notebook executes when a multi-session fixture is available (optional).
 8. **Source documentation-density pass (readability)**: the density-pass diff touches only comment/docstring lines (no logic change — verify the diff carries no executable-line edits); the v2 documentation ratio is re-measured and before/after recorded in the PR; the DOCSTRING-AUDIT.md Medium Patterns 1–5 are closed by promoting prose into rendered NumPy `Parameters`/`Returns`/`Raises` sections rather than by deletion; v1-divergence rationale is condensed/relocated (not deleted), since v0/v1 stay in-tree. No `definition`-string column comments are edited.
 
@@ -241,7 +241,7 @@ import importlib.util
 assert importlib.util.find_spec("figpack") is not None
 assert importlib.util.find_spec("figpack_spike_sorting") is not None
 PY
-test -z "$(rg 'PHASE5A_CONTRACT_STUB' .claude/docs/plans/spikesorting-v2 || true)"
+test -f tests/spikesorting/v2/resolver/figpack-runtime.md  # FigPack contract verified
 
 pytest tests/spikesorting/v2/test_run_pipeline.py -q
 pytest tests/spikesorting/v2/test_notebooks.py -q
@@ -271,7 +271,7 @@ Before opening or reviewing the implementation PR that contains this checkpoint,
 - `notebooks/10_Spike_SortingV2.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/10_Spike_SortingV2.ipynb`).
 - `run_v2_pipeline()` is idempotent (the manifest comparison test passes).
 - `run_v2_unit_match()` is idempotent by `(session_group_owner, session_group_name, matcher_params_name, curation_set_hash)` and does not conflate UnitMatch with concatenated sorting.
-- FigPack feasibility was verified in Phase 5a before implementation began, `tests/spikesorting/v2/resolver/figpack-runtime.md` records the working API and round trip, and no `PHASE5A_CONTRACT_STUB` markers remain. If FigPack proved unusable, the project owner was escalated and no degraded fallback shipped.
+- FigPack feasibility was verified before implementation began, `tests/spikesorting/v2/resolver/figpack-runtime.md` records the working API and round trip, and the FigPack contract stubs are resolved (verified contract recorded). If FigPack had proved unusable, the project owner would have been escalated and no degraded fallback shipped.
 - All docs tasks landed: `docs/src/Features/SpikeSortingV2.md` banner, README snippet, and an updated `docs/src/Features/SpikeSortingV2_Migration.md` with the v1/v2 decision guidance.
 - Source documentation-density pass landed: the density-pass diff is comment/docstring-only (no logic change); the v2 documentation ratio is re-measured with before/after in the PR; v1-divergence rationale was condensed/relocated (not deleted) given v0/v1 stay in-tree; DOCSTRING-AUDIT.md Medium Patterns were closed by promoting prose into rendered NumPy sections; no `definition`-string column comments were touched.
 - CHANGELOG.md mentions the delivered user-facing capabilities (orchestrator, FigPack, canonical notebook extension), the opt-in `auto_curate=True` path, v0/v1 source/query coexistence, and the legacy-environment boundary for active v0/v1 runtime workflows without referencing plan phases.
