@@ -176,7 +176,10 @@ def cumulative_member_boundaries(num_samples_per_member: list[int]) -> list[int]
 
 
 def split_unit_spike_trains(
-    unit_spike_trains: dict, boundaries: list[int]
+    unit_spike_trains: dict,
+    boundaries: list[int],
+    *,
+    total_n_samples: int | None = None,
 ) -> list[dict]:
     """Slice concat-frame spike trains into per-member local frames.
 
@@ -186,6 +189,15 @@ def split_unit_spike_trains(
     member's own recording from sample 0. Unit ids are preserved across every
     member (a unit absent from a member's span gets an empty array).
 
+    Spike conservation is enforced, not assumed. The members partition
+    ``[0, boundaries[-1])`` into disjoint, contiguous half-open intervals, so
+    every concat-frame spike must land in exactly one member. This raises
+    ``ConcatSplitError`` rather than silently dropping a spike when the
+    boundaries are not strictly increasing (overlapping / empty intervals), when
+    ``total_n_samples`` is given and the final boundary does not equal it (a
+    boundary set that does not cover the whole recording), or when any input
+    frame falls outside ``[0, boundaries[-1])``.
+
     Parameters
     ----------
     unit_spike_trains : dict[int, numpy.ndarray]
@@ -193,19 +205,78 @@ def split_unit_spike_trains(
     boundaries : list[int]
         Cumulative end-sample boundaries from
         :func:`cumulative_member_boundaries` (one per member, ordered by
-        ``member_index``).
+        ``member_index``). Must be non-empty and strictly increasing.
+    total_n_samples : int, optional
+        The concatenated recording's sample count. When supplied, the final
+        boundary must equal it (the boundary set covers the full recording).
 
     Returns
     -------
     list[dict[int, numpy.ndarray]]
         One ``{unit_id: local-frame spike indices}`` dict per member, in
         ``member_index`` order.
+
+    Raises
+    ------
+    ConcatSplitError
+        If the boundaries are empty / not strictly increasing, do not cover
+        ``total_n_samples``, or any input spike frame falls outside
+        ``[0, boundaries[-1])``.
     """
     import numpy as np
+
+    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+
+    if not boundaries:
+        raise ConcatSplitError(
+            "split_unit_spike_trains: no member boundaries; a concatenated "
+            "recording must have at least one member boundary to split back."
+        )
+    # Strictly increasing from the implicit start 0 -> disjoint, non-empty,
+    # contiguous member intervals covering [0, boundaries[-1]).
+    previous = 0
+    for index, end in enumerate(boundaries):
+        end = int(end)
+        if end <= previous:
+            raise ConcatSplitError(
+                "split_unit_spike_trains: member boundaries must be strictly "
+                f"increasing, but boundary {index} ({end}) is not greater than "
+                f"the previous boundary ({previous}). Overlapping or empty "
+                "member intervals would assign a spike to two members or none."
+            )
+        previous = end
+    total = int(boundaries[-1])
+    if total_n_samples is not None and total != int(total_n_samples):
+        raise ConcatSplitError(
+            "split_unit_spike_trains: the final member boundary "
+            f"({total}) does not equal the concatenated recording's sample "
+            f"count ({int(total_n_samples)}); the boundary set does not cover "
+            "the whole recording, so trailing spikes would be dropped."
+        )
+
+    # Per-spike conservation: reject (rather than silently drop) any frame
+    # outside the covered range [0, total). Within range, the strictly-
+    # increasing boundaries guarantee each frame maps to exactly one member.
+    dropped = {}
+    for unit_id, frames in unit_spike_trains.items():
+        frames = np.asarray(frames)
+        out_of_range = int(np.count_nonzero((frames < 0) | (frames >= total)))
+        if out_of_range:
+            dropped[int(unit_id)] = out_of_range
+    if dropped:
+        n_dropped = sum(dropped.values())
+        raise ConcatSplitError(
+            f"split_unit_spike_trains: {n_dropped} spike(s) fall outside the "
+            f"concatenated frame range [0, {total}) and would be dropped "
+            f"(per-unit out-of-range counts: {dropped}). Every concat-frame "
+            "spike must map to exactly one member; check the sorting frame "
+            "alignment and the MemberBoundary set."
+        )
 
     per_member: list[dict] = []
     start = 0
     for end in boundaries:
+        end = int(end)
         member_units: dict = {}
         for unit_id, frames in unit_spike_trains.items():
             frames = np.asarray(frames)

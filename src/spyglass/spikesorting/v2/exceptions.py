@@ -352,6 +352,44 @@ class TrackedUnitBudgetExceededError(RuntimeError):
     """
 
 
+class ConcatMemberDriftError(RuntimeError):
+    """Raise when a frozen concat member's recording content no longer matches.
+
+    ``ConcatenatedRecordingSelection.insert_selection`` freezes each member's
+    ordered logical identity AND its ``Recording.content_hash`` into a
+    ``MemberSnapshot`` part, and folds the ordered LOGICAL member set into
+    ``concat_recording_id`` (so a different member set is a different concat).
+    ``ConcatenatedRecording.make_fetch`` (materialize / rebuild) reads the frozen
+    snapshot -- never the live ``SessionGroup.Member`` set -- and re-checks each
+    member's current ``Recording`` against it. This is raised when a member's
+    recording is GONE, or its current ``content_hash`` diverges from the frozen
+    one: the concatenation would be built from different underlying data than the
+    ``concat_recording_id`` was minted for. Editing ``SessionGroup.Member`` does
+    NOT raise this (old concat rows read their frozen snapshot); only the
+    underlying member recording content changing does. Message names the
+    ``member_index`` / ``recording_id`` and the stored-vs-current ``content_hash``,
+    and points the caller at re-running ``insert_selection`` (which re-snapshots
+    and mints a new ``concat_recording_id`` for the changed inputs) or restoring
+    the member recording.
+    """
+
+
+class ConcatSplitError(RuntimeError):
+    """Raise when splitting a concat sorting back to members would drop spikes.
+
+    ``ConcatenatedRecording.split_sorting_by_session`` (and the pure
+    ``split_unit_spike_trains``) back-map a concat-frame sorting into each
+    member's local sample frame using the per-member boundaries. The boundaries
+    must be one strictly-increasing value per member partitioning ``[0, total)``,
+    and every input spike frame must land in exactly one member. This is raised
+    when the boundaries are not strictly increasing, do not cover the recording
+    (a final boundary short of the concat sample count), or when an input spike
+    frame falls outside ``[0, final_boundary)`` -- which the previous silent slice
+    dropped. Message names the offending boundary / spike count so the caller can
+    see the conservation violation rather than getting a silently truncated split.
+    """
+
+
 class RecordingContentDriftError(RuntimeError):
     """Raise when a recording rebuild diverges from its stored ``content_hash``.
 

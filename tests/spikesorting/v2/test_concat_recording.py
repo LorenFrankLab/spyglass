@@ -18,6 +18,7 @@ from spyglass.spikesorting.v2._concat_recording import (
     resolve_motion_correction,
     split_unit_spike_trains,
 )
+from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
 pytestmark = pytest.mark.unit
 
@@ -143,6 +144,63 @@ def test_split_preserves_unit_ids_with_empty_arrays():
     assert set(per_member[1]) == {3, 4}
     assert per_member[0][4].size == 0
     assert per_member[1][3].size == 0
+
+
+def test_split_conserves_every_spike_per_unit():
+    """Per-spike conservation: every input (unit, frame) lands in exactly one
+    member and back-maps to its original frame -- not just matching summed counts
+    (which a simultaneous drop + duplicate could satisfy)."""
+    boundaries = [100, 250, 400]
+    trains = {
+        7: np.array([0, 99, 100, 249, 250, 399]),
+        9: np.array([5, 150, 399]),
+        11: np.array([], dtype=np.int64),
+    }
+    per_member = split_unit_spike_trains(trains, boundaries)
+
+    starts = [0, 100, 250]
+    for unit_id, original in trains.items():
+        # Reconstruct the global frames from each member's local frames.
+        reconstructed = np.sort(
+            np.concatenate(
+                [
+                    per_member[m][unit_id] + starts[m]
+                    for m in range(len(boundaries))
+                ]
+            )
+        ).astype(np.int64)
+        np.testing.assert_array_equal(reconstructed, np.sort(original))
+
+
+def test_split_raises_when_a_spike_is_past_the_final_boundary():
+    """A frame at/after the final boundary would be silently dropped by the old
+    slice; conservation now raises ``ConcatSplitError``."""
+    trains = {7: np.array([0, 50, 200])}  # 200 == final boundary, out of range
+    with pytest.raises(ConcatSplitError, match="outside"):
+        split_unit_spike_trains(trains, [100, 200])
+
+
+def test_split_raises_on_negative_spike_frame():
+    """A negative frame is assigned to no member; conservation raises."""
+    trains = {7: np.array([-1, 10, 150])}
+    with pytest.raises(ConcatSplitError, match="outside"):
+        split_unit_spike_trains(trains, [100, 200])
+
+
+def test_split_raises_on_non_strictly_increasing_boundaries():
+    """Equal/decreasing boundaries make the member intervals overlap or empty,
+    so a spike could land in two members (or none); reject them."""
+    trains = {7: np.array([10, 120])}
+    with pytest.raises(ConcatSplitError, match="strictly increasing"):
+        split_unit_spike_trains(trains, [100, 100, 200])
+
+
+def test_split_raises_when_final_boundary_below_total_sample_count():
+    """When the caller passes the concat sample count, a boundary set that does
+    not cover the full recording is rejected before any spike is dropped."""
+    trains = {7: np.array([10, 150])}
+    with pytest.raises(ConcatSplitError, match="sample count"):
+        split_unit_spike_trains(trains, [100, 200], total_n_samples=300)
 
 
 # ---------- build_concatenated_recording -----------------------------------
