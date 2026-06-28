@@ -126,8 +126,14 @@ def assert_shared_group_recordings_aggregatable(
         )
 
     for recording, rid in zip(recordings[1:], recording_ids[1:]):
+        # Effectively exact: aggregate_channels stacks by frame index, so even
+        # a sub-Hz fs drift misaligns the time axis (np.isclose's default
+        # rtol=1e-5 would accept 30000.0 vs 30000.3).
         if not np.isclose(
-            float(recording.get_sampling_frequency()), reference_fs
+            float(recording.get_sampling_frequency()),
+            reference_fs,
+            rtol=0,
+            atol=1e-9,
         ):
             _bypass(rid, "sampling frequency")
         if int(recording.get_num_samples()) != reference_n_samples:

@@ -310,7 +310,11 @@ def assert_concat_compatible(recordings: list) -> None:
                 "layout across sessions)."
             )
         fs = float(recording.get_sampling_frequency())
-        if not np.isclose(fs, reference_fs):
+        # Effectively exact (within float epsilon): a stitched timeline maps
+        # sample frames to spike times, so even a sub-Hz fs drift (e.g. 30000.0
+        # vs 30000.3) silently mis-times every spike. ``np.isclose``'s default
+        # rtol=1e-5 would accept that, so pin rtol=0 with a tiny atol.
+        if not np.isclose(fs, reference_fs, rtol=0, atol=1e-9):
             raise ValueError(
                 f"build_concatenated_recording: member {index} sampling "
                 f"frequency {fs} differs from member 0's {reference_fs}; "
