@@ -39,7 +39,7 @@ from spyglass.spikesorting.v2.utils import (
     reject_duplicate_parameter_content,
     validate_lookup_rows,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -1275,11 +1275,14 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def get_recording(self, key) -> "si.BaseRecording":  # noqa: F821
         """Return the cached concatenated SpikeInterface recording.
 
-        Reads the persisted motion-corrected, unwhitened ``ElectricalSeries``
-        through the stored ``electrical_series_path`` (authoritative, not an
-        auto-detect hint) and annotates ``is_filtered=True`` so a downstream
-        sorter does not re-filter the already-filtered cache -- the same
-        contract as ``Recording.get_recording``.
+        Rebuilds the concat NWB artifact on demand if the file is missing
+        (mirroring ``Recording.get_recording``); the DataJoint row is never
+        deleted by this path -- the stored ``content_hash`` is the source of
+        truth for re-verification. Reads the persisted motion-corrected,
+        unwhitened ``ElectricalSeries`` through the stored
+        ``electrical_series_path`` (authoritative, not an auto-detect hint) and
+        annotates ``is_filtered=True`` so a downstream sorter does not re-filter
+        the already-filtered cache.
 
         Parameters
         ----------
@@ -1291,10 +1294,15 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         si.BaseRecording
             The concatenated, motion-corrected, unwhitened recording.
         """
+        from pathlib import Path
+
         import spikeinterface.extractors as se
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        if not Path(abs_path).exists():
+            self._rebuild_nwb_artifact(key)
+            abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         rec = se.read_nwb_recording(
             abs_path,
             electrical_series_path=row["electrical_series_path"],
@@ -1302,6 +1310,113 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         )
         rec.annotate(is_filtered=True)
         return rec
+
+    def _rebuild_nwb_artifact(self, key) -> None:
+        """Rebuild a missing concat artifact -- locked, atomic, content-verified.
+
+        The concat analog of ``Recording._rebuild_nwb_artifact``. Acquire
+        ``concat_recording_artifact_lock(concat_recording_id)``, double-check the
+        file is still missing under the lock (a peer may have rebuilt while we
+        waited), then re-run the materialization (``make_fetch`` -> ``make_compute``
+        -- which also re-verifies the frozen member set against the live
+        recordings) to a FRESH temp analysis file, fingerprint it, and only on a
+        ``content_hash`` match ``os.replace`` it into the canonical slot and
+        refresh the DataJoint ``~external`` byte checksum. A rebuild whose
+        fingerprint diverges from the stored ``content_hash`` raises
+        ``RecordingContentDriftError`` and never touches the canonical slot --
+        drifted bytes are never served.
+
+        Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
+        if ``os.replace`` ran but the checksum refresh then failed, the canonical
+        is unlinked to return the slot to the missing state for the next (locked)
+        ``get_recording``. Ordering is load-bearing -- the atomic ``os.replace``
+        precedes ``_resolve_external``.
+
+        Note: a motion-corrected concat is only byte-reproducible insofar as
+        ``correct_motion`` is deterministic; an irreproducible rebuild surfaces
+        loudly as ``RecordingContentDriftError`` rather than silently serving
+        different bytes (the fingerprint's trace rounding absorbs sub-µV noise).
+        Safe to call directly (it takes the lock itself) and from
+        ``get_recording`` (which does not hold the lock).
+        """
+        import os
+        from pathlib import Path
+
+        from spyglass.spikesorting.v2._concat_recording import (
+            concat_recording_artifact_lock,
+        )
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingContentDriftError,
+        )
+        from spyglass.spikesorting.v2.recording import (
+            _unlink_staged_analysis_file,
+        )
+
+        row = (self & key).fetch1()
+        concat_recording_id = row["concat_recording_id"]
+        analysis_file_name = row["analysis_file_name"]
+        canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
+
+        with concat_recording_artifact_lock(concat_recording_id):
+            # Double-checked: a peer rebuilt (or the file was never gone) while
+            # we waited for the lock -- nothing to do.
+            if Path(canonical_abs).exists():
+                return
+
+            logger.info(
+                "ConcatenatedRecording.get_recording: cache miss for "
+                f"{analysis_file_name!r} (reason=missing cache); rebuilding "
+                "the concatenated artifact..."
+            )
+            fetched = self.make_fetch(key)
+            # make_compute writes a FRESH (unregistered) temp analysis file and
+            # returns its readback content fingerprint as ``content_hash``.
+            computed = self.make_compute(key, *fetched)
+            temp_abs = AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
+
+            if computed.content_hash != row["content_hash"]:
+                _unlink_staged_analysis_file(
+                    computed.analysis_file_name,
+                    context="ConcatenatedRecording._rebuild_nwb_artifact",
+                )
+                raise RecordingContentDriftError(
+                    "ConcatenatedRecording._rebuild_nwb_artifact: rebuilt "
+                    f"content_hash {computed.content_hash} does not match the "
+                    f"stored content_hash {row['content_hash']} for "
+                    f"{analysis_file_name!r}. The current environment no longer "
+                    "reproduces this concatenated recording (e.g. a "
+                    "SpikeInterface/BLAS upgrade, a changed member recording, or "
+                    "non-deterministic motion correction). The canonical artifact "
+                    "was NOT modified. Recover by restoring a backup, rerunning "
+                    "under the original environment, or deleting and repopulating "
+                    "the ConcatenatedRecording row (and its downstream)."
+                )
+
+            # Verified content match: atomically install the temp into the
+            # canonical slot, then reconcile the byte checksum so the next
+            # checksum-validated get_abs_path read succeeds.
+            try:
+                os.replace(temp_abs, canonical_abs)
+            except Exception:
+                Path(temp_abs).unlink(missing_ok=True)
+                raise
+            try:
+                AnalysisNwbfile()._resolve_external(analysis_file_name)
+            except Exception:
+                # os.replace already ran; return the slot to MISSING so the next
+                # (locked) get_recording retries cleanly rather than leaving
+                # byte-different content under a stale checksum.
+                Path(canonical_abs).unlink(missing_ok=True)
+                raise
+            # Confirm the reconciled slot resolves through the checksum-
+            # validating path. get_recording re-reads after this, but a DIRECT
+            # caller has no follow-on read, so a botched reconcile would
+            # otherwise stay silent until the next reader. Unlink + raise if so.
+            try:
+                AnalysisNwbfile.get_abs_path(analysis_file_name)
+            except Exception:
+                Path(canonical_abs).unlink(missing_ok=True)
+                raise
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.

@@ -173,6 +173,51 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
+    """Return a cross-process lock serializing one concat artifact's slot.
+
+    The concat analog of :func:`._recording_fingerprint.recording_artifact_lock`:
+    a per-``concat_recording_id`` ``filelock.FileLock`` so a rebuild
+    (``ConcatenatedRecording.get_recording`` read-repair /
+    ``_rebuild_nwb_artifact``) of the *same* concat can never interleave with
+    another -- no unlink racing a write, no reader seeing a half-written HDF5.
+    Different concats stay free to run in parallel. A distinct filename prefix
+    (``concat_recording_*``) keeps it from colliding with the single-session
+    recording lock even if a ``recording_id`` and a ``concat_recording_id`` ever
+    shared a UUID.
+
+    The lock file lives under the shared analyzer/lock root
+    (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path, so
+    all workers on a machine contend on the same file. As with the recording
+    lock this serializes processes on ONE machine; it does not coordinate across
+    hosts sharing an NFS mount.
+
+    Parameters
+    ----------
+    concat_recording_id
+        The concat whose canonical artifact the caller will mutate.
+    timeout : float, optional
+        Seconds to wait before raising ``filelock.Timeout``. Default ``-1``
+        blocks indefinitely (serialize-don't-fail); the lock releases when the
+        holding process exits, so a crashed job cannot wedge the next one.
+
+    Returns
+    -------
+    filelock.FileLock
+        An unacquired lock; use it as a context manager or call ``.acquire()``.
+    """
+    from filelock import FileLock
+
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_root
+
+    root = analyzer_cache_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return FileLock(
+        str(root / f"concat_recording_{concat_recording_id}.artifact.lock"),
+        timeout=timeout,
+    )
+
+
 def resolve_motion_correction(
     motion_params: dict, *, is_multi_day: bool
 ) -> tuple[str | None, dict]:

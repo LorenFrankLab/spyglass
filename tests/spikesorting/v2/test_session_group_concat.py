@@ -17,6 +17,7 @@ import datetime as dt
 import logging
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -782,6 +783,84 @@ def test_concatenated_recording_make_shape(same_day_group):
     concat_rec = ConcatenatedRecording().get_recording(concat_pk)
     assert concat_rec.get_num_segments() == 1
     assert concat_rec.get_num_samples() == n0 + n1
+
+
+@pytest.mark.slow
+def test_concat_get_recording_rebuilds_on_missing(same_day_group):
+    """A missing concat cache file is rebuilt on demand: ``get_recording``
+    reconciles the ``~external`` checksum and returns a valid, content-identical
+    recording -- mirroring ``Recording.get_recording``. Uses ``motion='none'`` so
+    the rebuild is bit-deterministic."""
+    import numpy as np
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+    )
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    assert Path(abs_path).exists()
+    before = ConcatenatedRecording().get_recording(concat_pk).get_traces()
+
+    Path(abs_path).unlink()
+    rec = ConcatenatedRecording().get_recording(concat_pk)
+    assert rec.get_num_samples() == sum(_member_sample_counts(grp))
+    assert Path(
+        AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    ).exists(), "the canonical concat file must be back on disk after rebuild"
+    np.testing.assert_array_equal(rec.get_traces(), before)
+
+
+@pytest.mark.slow
+def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
+    """A concat rebuild whose fingerprint diverges from the stored
+    ``content_hash`` raises ``RecordingContentDriftError``; the canonical slot is
+    NOT written (drifted bytes are never served) -- mirrors the recording side."""
+    import shutil
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _recording_fingerprint as fp_mod
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+    )
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    backup = str(abs_path) + ".drift.bak"
+    shutil.copy2(abs_path, backup)
+
+    real_fp = fp_mod.recording_content_fingerprint
+
+    def _drifted_fp(*args, **kwargs):
+        components = dict(real_fp(*args, **kwargs))
+        components["traces"] = "drifted-" + components["traces"]
+        return components
+
+    monkeypatch.setattr(
+        fp_mod, "recording_content_fingerprint", _drifted_fp
+    )
+    try:
+        Path(abs_path).unlink()
+        with pytest.raises(RecordingContentDriftError, match="content_hash"):
+            ConcatenatedRecording()._rebuild_nwb_artifact(concat_pk)
+        assert not Path(abs_path).exists(), (
+            "the canonical concat slot must stay missing on a drift refusal -- "
+            "drifted bytes must never be installed"
+        )
+    finally:
+        shutil.move(backup, abs_path)
 
 
 @pytest.mark.slow
