@@ -1312,6 +1312,31 @@ class Sorting(SpyglassMixin, dj.Computed):
             else:
                 obs_intervals = None
         else:  # concatenated_recording
+            # A concat source has no artifact pass: concat sorts reuse the
+            # per-member Recording artifacts and observe the full recording.
+            # ``insert_selection`` rejects a concat source carrying an
+            # artifact_detection_id, but a direct insert of a
+            # ConcatenatedRecordingSource + ArtifactDetectionSource pair can
+            # bypass that. Re-assert here (the compute boundary) so the sort is
+            # never run UNMASKED while a stray ArtifactDetectionSource row claims
+            # an artifact pass -- raise rather than silently dropping the mask.
+            if sel_row.get("artifact_detection_id") is not None:
+                from spyglass.spikesorting.v2.exceptions import (
+                    SchemaBypassError,
+                )
+
+                raise SchemaBypassError(
+                    "Sorting.make_fetch: concat source for sorting_id="
+                    f"{key.get('sorting_id')!r} carries artifact_detection_id="
+                    f"{sel_row['artifact_detection_id']!r}, but a concat sort "
+                    "has no artifact-detection pass (concat sorts reuse "
+                    "per-member Recording artifacts). The ArtifactDetectionSource "
+                    "part was inserted without SortingSelection.insert_selection "
+                    "(schema bypass); the sort would otherwise run unmasked "
+                    "while claiming artifact metadata. Re-create the selection "
+                    "via insert_selection, or drop the stray "
+                    "ArtifactDetectionSource row."
+                )
             recording_id, nwb_file_name, preprocessing_params_name = (
                 self._resolve_concat_anchor(source.key)
             )

@@ -389,6 +389,61 @@ def test_concat_rejects_mismatched_electrode_space(monkeypatch):
     sg.assert_members_share_electrode_space(members)
 
 
+def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
+    """A bypass-inserted concat sort carrying an ``ArtifactDetectionSource`` row
+    raises ``SchemaBypassError`` at ``make_fetch`` instead of sorting unmasked.
+
+    ``insert_selection`` rejects a concat source combined with an
+    ``artifact_detection_id``, but a direct insert of the part rows bypasses it.
+    A concat sort observes the full recording (``obs_intervals=None``), so a
+    stray artifact id would otherwise be silently ignored while the sort claims
+    artifact metadata -- the compute-boundary re-check catches it.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+    from spyglass.spikesorting.v2.sorting import (
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            },
+            allow_direct_insert=True,
+        )
+        SortingSelection.ConcatenatedRecordingSource.insert1(
+            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()}
+        )
+        # The bypass: a concat source must NOT carry an artifact pass.
+        SortingSelection.ArtifactDetectionSource.insert1(
+            {"sorting_id": sid, "artifact_detection_id": uuid.uuid4()}
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(SchemaBypassError, match="concat source"):
+            Sorting().make_fetch({"sorting_id": sid})
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (SortingSelection & {"sorting_id": sid}).super_delete(warn=False)
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
 @pytest.mark.slow
 def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
     """Changing only the motion-correction recipe yields a distinct
