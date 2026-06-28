@@ -653,7 +653,7 @@ def test_rebuild_reconstruction_validates_artifact_interval_ownership(
     from spyglass.spikesorting.v2 import _artifact_intervals, _sorting_analyzer
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    sort_pk = populated_sorting  # artifact-backed (carries artifact_detection_id)
+    sort_pk = populated_sorting  # artifact-backed sort
     sentinel = "ownership-validated rebuild artifact mask"
 
     def _must_route_here(key, as_dict=False):
