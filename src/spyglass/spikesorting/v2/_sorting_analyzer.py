@@ -540,13 +540,11 @@ def rebuild_analyzer_folder(
     ``waveform_params_name`` is the recipe to rebuild; ``None`` resolves the
     sort's stored display recipe (``Sorting.display_waveform_params_name``).
     """
-    import shutil
-
     from spyglass.spikesorting.v2._analyzer_cache import (
         analyzer_cache_lock,
         analyzer_path,
+        publish_analyzer_atomically,
     )
-    from spyglass.utils import logger
 
     # The canonical (artifact-masked) recording + sorting -- the exact pair the
     # recompute audit reconstructs too (shared resolver), so a rebuilt analyzer
@@ -559,41 +557,24 @@ def rebuild_analyzer_folder(
             sorting_table, key["sorting_id"]
         )
     waveform_params = fetch_waveform_params(waveform_params_name)
-    # ``_build_analyzer`` writes a folder to disk; a mid-rebuild failure would
-    # otherwise leak a partial scratch folder. Removing it before re-raising
-    # keeps the rebuild path's invariant ("analyzer folder reflects the
-    # canonical sort") true under failure.
     folder = analyzer_path(key["sorting_id"], waveform_params_name)
-    # Serialize the canonical-folder mutation against concurrent readers /
-    # rebuilds. Reentrant, so a rebuild invoked from the (already-locked) load
-    # path does not self-deadlock.
+    # Publish atomically under the per-sort lock: build into a private temp
+    # folder, then move it into the canonical slot. A build failure leaves the
+    # existing canonical folder untouched (the publisher cleans only its own
+    # temp), so an interrupted rebuild can never replace a valid cache with a
+    # half-built one. The lock is reentrant, so a rebuild invoked from the
+    # (already-locked) load path does not self-deadlock.
     with analyzer_cache_lock(key["sorting_id"]):
-        try:
-            # Pass the already-resolved folder so the build target equals the
-            # path this method cleans up on failure (one resolution), and the
-            # resolved params dict so the rebuild uses the SAME recipe the cache
-            # stored.
-            sorting_table._build_analyzer(
+        publish_analyzer_atomically(
+            folder,
+            lambda temp_folder: sorting_table._build_analyzer(
                 sorting=sorting_obj,
                 recording=recording,
                 key=key,
-                analyzer_folder=folder,
+                analyzer_folder=temp_folder,
                 waveform_params=waveform_params,
-            )
-        except Exception:
-            # Any build failure: remove the partial analyzer folder before
-            # re-raising so a half-built folder is never mistaken for a valid
-            # cache. The rmtree is best-effort -- a cleanup failure is logged,
-            # not raised, so it cannot mask the original error.
-            try:
-                if folder.exists():
-                    shutil.rmtree(folder, ignore_errors=False)
-            except Exception as cleanup_exc:  # pragma: no cover -- defensive
-                logger.error(
-                    "Sorting._rebuild_analyzer_folder: failed to remove "
-                    f"partial analyzer folder {folder!r}: {cleanup_exc!r}"
-                )
-            raise
+            ),
+        )
 
 
 def build_analyzer(

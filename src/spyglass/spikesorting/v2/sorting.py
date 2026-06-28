@@ -1647,20 +1647,33 @@ class Sorting(SpyglassMixin, dj.Computed):
         # resolved DISPLAY recipe + its cache folder (the folder carries the
         # recipe identity) so the analyzer window / subsample are not
         # hardcoded.
-        from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+            analyzer_path,
+            publish_analyzer_atomically,
+        )
 
         analyzer_folder = analyzer_path(
             key["sorting_id"], display_waveform_params_name
         )
-        self._build_analyzer(
-            sorting=sorting_obj,
-            recording=recording,
-            key=key,
-            sorter_row=sorter_row,
-            job_kwargs=job_kwargs,
-            analyzer_folder=analyzer_folder,
-            waveform_params=display_waveform_params,
-        )
+        # Publish the analyzer atomically: build into a private temp folder,
+        # then move it into the canonical slot under the per-sort lock, rather
+        # than writing ``overwrite=True`` straight into the live folder. The
+        # low-level ``_build_analyzer`` still builds wherever it is told (the
+        # temp here); only the canonical install goes through the publisher.
+        with analyzer_cache_lock(key["sorting_id"]):
+            publish_analyzer_atomically(
+                analyzer_folder,
+                lambda temp_folder: self._build_analyzer(
+                    sorting=sorting_obj,
+                    recording=recording,
+                    key=key,
+                    sorter_row=sorter_row,
+                    job_kwargs=job_kwargs,
+                    analyzer_folder=temp_folder,
+                    waveform_params=display_waveform_params,
+                ),
+            )
         # Compute the per-unit rows ONCE here (from the analyzer just built) and
         # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
         # make_insert -- so the file and the DB cannot drift, and the peak
@@ -2444,8 +2457,16 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         }
         analyzer_root = analyzer_cache_root()
+        # Skip hidden directories: the atomic publisher's ``.publish`` staging
+        # area (transient build / move-aside folders) lives directly under the
+        # root but is internal scratch, never an analyzer cache, so it must not
+        # be reported as a disk-side orphan.
         disk_dir_paths = (
-            [str(c) for c in sorted(analyzer_root.iterdir()) if c.is_dir()]
+            [
+                str(c)
+                for c in sorted(analyzer_root.iterdir())
+                if c.is_dir() and not c.name.startswith(".")
+            ]
             if analyzer_root.exists()
             else []
         )
