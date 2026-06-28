@@ -556,7 +556,13 @@ def run_si_sorter(
     )
     patched_numpy_inf = False
     try:
-        os.chmod(sorter_temp_dir.name, 0o777)
+        # World-writable scratch only for a CONTAINER backend: the sorter's
+        # container process may run as a different uid and must be able to write
+        # into this per-sort scratch. A LOCAL run is same-uid, so the 0o700
+        # default of TemporaryDirectory is sufficient -- a gratuitous 0o777 on a
+        # local run needlessly widens access.
+        if is_container_backend(execution_params):
+            os.chmod(sorter_temp_dir.name, 0o777)
 
         # spikeextractors 0.9.11 (a transitive dep of SI's MS4
         # wrapper at ``spikeinterface/sorters/external/mountainsort4.py``)

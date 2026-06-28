@@ -22,6 +22,36 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
+def assert_safe_nwb_file_name(nwb_file_name: str) -> None:
+    """Reject a caller-supplied NWB file name that is not a bare basename.
+
+    NWB file names are joined onto a base directory by naive string concat in
+    several places, so a name with a path separator, a ``..`` component, or an
+    absolute path could escape the intended directory. This is accident
+    prevention under the trusted-operator model -- it guards the filename
+    *acceptance* boundary, not the internal random-name generator -- so it must
+    not reject a legitimate basename.
+
+    Raises
+    ------
+    ValueError
+        If ``nwb_file_name`` is empty, ``.``/``..``, contains a path separator,
+        or is an absolute path.
+    """
+    name = str(nwb_file_name)
+    if (
+        not name
+        or name in (".", "..")
+        or name != os.path.basename(name)
+        or os.path.isabs(name)
+    ):
+        raise ValueError(
+            f"nwb_file_name {nwb_file_name!r} is not a bare file name; it must "
+            "not contain a path separator, a '..' component, or an absolute "
+            "path (the name is joined onto a managed directory)."
+        )
+
+
 def _open_nwb_file(nwb_file_path, source="local"):
     """Open an NWB file, add to cache, return contents. Does not close file."""
     if source == "local":

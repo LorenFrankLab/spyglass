@@ -25,7 +25,11 @@ from pynwb.core import ScratchData
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
-from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    assert_safe_nwb_file_name,
+    get_electrode_indices,
+    get_nwb_file,
+)
 
 # Only differs from the common AnalysisNwbfile in adding 'Custom' to heading
 ENFORCED_DEFINITION = """
@@ -231,6 +235,11 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
+        # Confine the caller-supplied source name to a bare basename at this
+        # acceptance boundary (it is used to locate the file to copy and as the
+        # base of the generated analysis name); a separator / ``..`` / absolute
+        # path must not slip through.
+        assert_safe_nwb_file_name(nwb_file_name)
         nwb_file_abspath = self._nwb_table.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(

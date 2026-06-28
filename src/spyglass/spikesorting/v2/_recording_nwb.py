@@ -214,6 +214,7 @@ def write_nwb_artifact(
     analysis_file_name = AnalysisNwbfile().create(
         nwb_file_name=nwb_file_name,
         recompute_file_name=existing_analysis_file_name,
+        restrict_permission=True,  # 0o644, not world-writable 0o666
     )
     try:
         analysis_abs_path = AnalysisNwbfile.get_abs_path(

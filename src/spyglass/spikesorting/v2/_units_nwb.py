@@ -562,7 +562,10 @@ def write_sorting_units_nwb(
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
-    analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
+    analysis_file_name = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name,
+        restrict_permission=True,  # 0o644, not world-writable 0o666
+    )
     # ``create`` already wrote a stub file to disk; if any step below raises
     # before the caller registers the AnalysisNwbfile row, unlink that orphan
     # (mirrors the recording writer -- the caller's staging cleanup only knows
@@ -814,7 +817,10 @@ def write_curated_units_nwb(
         )
     )
 
-    analysis_file_name = AnalysisNwbfile().create(nwb_file_name=nwb_file_name)
+    analysis_file_name = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name,
+        restrict_permission=True,  # 0o644, not world-writable 0o666
+    )
     # ``create`` staged a stub file; unlink it if the write below fails before
     # the caller registers the AnalysisNwbfile row (curation stages OUTSIDE its
     # rows-transaction try, so its cleanup does not otherwise cover this file).
