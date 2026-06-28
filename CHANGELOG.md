@@ -1328,14 +1328,14 @@ for label, interval_data in results.groupby("interval_labels"):
     (metrics.spiketrain) — across submodules that the parent `metrics`
     namespace re-exports; SI 0.99's `qualitymetrics` carries both. The
     legacy conda env
-    (`environments/environment_spikesorting_legacy.yml`) now installs in two
-    passes: `mamba env create` brings the `test` extra and its pinned
-    `spikeinterface==0.104.3`, then a separate
-    `pip install --force-reinstall "spikeinterface>=0.99,<0.101"` downgrades
-    SpikeInterface (the two pins cannot co-resolve in conda's single-pass
-    pip section). The `pytest-legacy` CI job runs the downgrade as its own
-    step. The v2 `spikeinterface==0.104.3` pin in `pyproject.toml` is
-    unchanged
+    (`environments/environment_spikesorting_legacy.yml`) builds the SI-0.99
+    stack by relaxing the `pyproject` SpikeInterface / probeinterface / numpy
+    pins FIRST (a `sed` edit of the ephemeral checkout), so `mamba env create`
+    resolves a coherent SI-0.99 stack in a single pass (relaxing first avoids
+    the inconsistent set a 0.104-then-downgrade pass left behind). The
+    `pytest-legacy` CI job runs that `sed` relax as its own step before
+    creating the env. The committed v2 `spikeinterface==0.104.3` pin in
+    `pyproject.toml` is never changed -- the relax is a build-time-only edit
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
 - Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
