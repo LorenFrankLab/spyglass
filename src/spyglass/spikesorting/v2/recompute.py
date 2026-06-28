@@ -1318,7 +1318,7 @@ def _delete_analyzer_folders(
 ):
     """Artifact-level analyzer delete gate: current-env match + age, rmtree once.
 
-    Deletion policy (ALSC-4): the reproducibility audit hashes only the
+    Deletion policy: the reproducibility audit hashes only the
     ``ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes / templates / waveforms),
     but this removes the WHOLE ``.zarr`` folder -- including derived
     curation/visualization extensions it never hashed (amplitudes,
