@@ -511,6 +511,8 @@ def test_curation_evaluation_nwb_carries_inputs(
     assert prov["source_analyzer_hashes"] == row["source_analyzer_hashes"]
     # Upstream recording content hash + source kind.
     assert prov["source_kind"] == "recording"
+    # A single-recording source carries no concat id.
+    assert prov["concat_recording_id"] is None
     recording_id = SortingSelection.resolve_source(
         {"sorting_id": populated_sorting_with_curation["sorting_id"]}
     ).key["recording_id"]

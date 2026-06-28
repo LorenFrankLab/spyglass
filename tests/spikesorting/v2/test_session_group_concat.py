@@ -1492,6 +1492,27 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     )
     CurationEvaluation.populate(sel, reserve_jobs=False)
 
+    # The concat-backed evaluation NWB is self-identifying: it carries the
+    # concat_recording_id (recording_id is None for a concat source) so the file
+    # is interpretable standalone rather than only via the upstream join.
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._nwb_provenance import (
+        CURATION_EVALUATION_PROVENANCE,
+        read_provenance_values,
+    )
+
+    eval_prov = read_provenance_values(
+        AnalysisNwbfile.get_abs_path(
+            (CurationEvaluation & sel).fetch1("analysis_file_name")
+        ),
+        CURATION_EVALUATION_PROVENANCE,
+    )
+    assert eval_prov["source_kind"] == "concatenated_recording"
+    assert eval_prov["recording_id"] is None
+    assert eval_prov["concat_recording_id"] == str(
+        concat_pk["concat_recording_id"]
+    )
+
     metrics = CurationEvaluation.get_metrics(sel)
     expected = {int(u) for u in (CurationV2.Unit & curation).fetch("unit_id")}
     assert set(metrics.index) == expected

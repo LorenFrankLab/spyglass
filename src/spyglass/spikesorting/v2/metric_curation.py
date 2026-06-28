@@ -1245,6 +1245,16 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             _requested_pc_metrics(metric_names)
         )
 
+        # Concat sources carry no single recording_id (recording_id is None);
+        # record the concat_recording_id (from the ConcatenatedRecording row) so
+        # the file identifies its upstream standalone. recording_content_hash is
+        # the source row's content_hash either way (the concat's, for a concat).
+        concat_recording_id = (
+            str(recording_row["concat_recording_id"])
+            if source_kind == "concatenated_recording"
+            else None
+        )
+
         # Provenance header shared by the populated and zero-unit paths so every
         # CurationEvaluation artifact is self-describing; source_analyzer_hashes
         # is added per-path (a manifest on the fast path, None for a zero-unit
@@ -1263,6 +1273,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             "auto_curation_rules": rule_rows,
             "source_kind": source_kind,
             "recording_id": recording_id,
+            "concat_recording_id": concat_recording_id,
             "recording_content_hash": recording_row["content_hash"],
             "spikeinterface_version": spikeinterface_version,
         }
