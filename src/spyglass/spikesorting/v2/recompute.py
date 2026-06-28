@@ -1316,7 +1316,19 @@ def _delete_analyzer_folders(
     folder_fn,
     artifact_pk,
 ):
-    """Artifact-level analyzer delete gate: current-env match + age, rmtree once."""
+    """Artifact-level analyzer delete gate: current-env match + age, rmtree once.
+
+    Deletion policy (ALSC-4): the reproducibility audit hashes only the
+    ``ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes / templates / waveforms),
+    but this removes the WHOLE ``.zarr`` folder -- including derived
+    curation/visualization extensions it never hashed (amplitudes,
+    correlograms, principal_components, quality_metrics). That is intentional:
+    the analyzer folder is regeneratable scratch (a valid ``Sorting`` row keeps
+    its FK-guaranteed upstream recording, so ``get_analyzer`` rebuilds the whole
+    folder on the next read), so reclaiming the full folder -- not just the
+    hashed extensions -- is the correct, simplest behavior. Each full-folder
+    deletion is logged so the over-deletion is explicit, never silent.
+    """
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
 
     cutoff = _recent_cutoff(days_since_creation)
@@ -1339,6 +1351,15 @@ def _delete_analyzer_folders(
         # Reclaim the folder UNDER the per-sort lock so a concurrent reader /
         # rebuild of the same sort never races the rmtree.
         with analyzer_cache_lock(artifact["sorting_id"]):
+            logger.info(
+                "delete_files: removing the FULL analyzer folder "
+                f"{folder} -- this drops ALL extensions, including the derived "
+                "curation/visualization extensions the audit does not hash "
+                "(amplitudes, correlograms, principal_components, "
+                "quality_metrics), not just random_spikes/templates/waveforms. "
+                "The analyzer cache is regeneratable scratch, rebuilt in full "
+                "by the next get_analyzer."
+            )
             shutil.rmtree(folder, ignore_errors=True)
             if folder.exists():
                 # Do NOT mark deleted -- the folder is still on disk; leaving

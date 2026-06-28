@@ -168,6 +168,52 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
     assert "sidY" in acquired, "the recompute delete must acquire the lock"
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_recompute_extension_deletion_policy(monkeypatch, tmp_path):
+    """Deleting an analyzer cache removes the FULL ``.zarr`` -- including the
+    derived curation/visualization extensions the recompute does NOT hash --
+    and logs that policy, so the full-folder regeneratable-scratch decision is
+    explicit rather than a silent over-deletion.
+
+    The authorize/age helpers are patched (logically DB-free), but importing
+    ``recompute`` activates the common schema, so ``dj_conn`` is required.
+    """
+    from spyglass.spikesorting.v2 import recompute as rc
+
+    folder = tmp_path / "sidZ__rec.zarr"
+    folder.mkdir()
+    artifact = {"sorting_id": "sidZ", "waveform_params_name": "rec"}
+    monkeypatch.setattr(
+        rc,
+        "_authorize_artifacts_for_deletion",
+        lambda *a, **k: ([(artifact, [{"env": "x"}])], None),
+    )
+    monkeypatch.setattr(rc, "_too_recent_or_unknown", lambda *a, **k: False)
+    monkeypatch.setattr(rc.shutil, "rmtree", lambda f, **k: None)
+
+    logged: list[str] = []
+    monkeypatch.setattr(
+        rc.logger, "info", lambda msg, *a, **k: logged.append(str(msg))
+    )
+
+    rc._delete_analyzer_folders(
+        recompute_table=None,
+        restriction=None,
+        dry_run=False,
+        force_stale_env=False,
+        days_since_creation=0,
+        folder_fn=lambda sid, recipe: folder,
+        artifact_pk="sorting_id",
+    )
+    joined = " ".join(logged).lower()
+    assert "full" in joined and (
+        "extension" in joined or "regeneratable" in joined
+    ), (
+        "the full-folder analyzer deletion policy (all extensions, "
+        f"regeneratable scratch) must be logged; got: {logged}"
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.usefixtures("dj_conn")
 def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
