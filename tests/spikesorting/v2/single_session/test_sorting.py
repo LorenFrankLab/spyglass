@@ -572,9 +572,9 @@ def test_sorting_make_rollback_cleans_units_nwb(
 
     # Patch the Unit-part populate to raise AFTER the file is
     # written and AnalysisNwbfile.add has run inside the transaction.
-    def _broken_unit_part(
-        self, sorting, recording_id, nwb_file_name, key, analyzer_folder
-    ):
+    # (_populate_unit_part is a staticmethod taking only unit_rows; replacing it
+    # with a plain function binds self on instance access.)
+    def _broken_unit_part(self, unit_rows):
         raise RuntimeError("simulated unit-part failure")
 
     monkeypatch.setattr(Sorting, "_populate_unit_part", _broken_unit_part)
@@ -602,18 +602,30 @@ def test_sorting_make_rollback_cleans_units_nwb(
         "when the transaction rolls back."
     )
 
-    # The analyzer folder created by ``_build_analyzer`` must also
-    # be removed by ``make_insert``'s rollback path. A 5-50 GB
-    # analyzer folder orphan per failed populate is the leak this
-    # guards against.
+    # The analyzer folder published by ``_build_analyzer`` is deliberately LEFT
+    # on disk by the rollback (NOT eagerly removed): it is shared by sorting_id
+    # and regeneratable, and a concurrent in-flight worker (published but not yet
+    # committed) could own it, so failure cleanup never rmtrees it. With no
+    # committed Sorting row it is a disk-side orphan reclaimed by
+    # ``find_orphaned_analyzer_folders`` (``get_analyzer`` self-heals a missing
+    # one). The attempt-owned units NWB IS cleaned (asserted above).
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
-    assert not analyzer_folder.exists(), (
-        f"Sorting.make rollback left analyzer folder {analyzer_folder} "
-        "on disk. The except-block in Sorting.make_insert must "
-        "shutil.rmtree it when the transaction rolls back."
-    )
+    try:
+        assert analyzer_folder.exists(), (
+            f"rollback removed the analyzer folder {analyzer_folder}; the "
+            "shared, regeneratable analyzer must be left for orphan-sweep, not "
+            "eagerly deleted (a concurrent in-flight worker could own it)."
+        )
+    finally:
+        # The orphan is real now; clean it (and the selection) so it does not
+        # litter the analyzer root for later orphan-sweep tests in this session.
+        if analyzer_folder.exists():
+            import shutil
+
+            shutil.rmtree(analyzer_folder, ignore_errors=True)
+        (SortingSelection & sort_pk).super_delete(warn=False)
 
 
 def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
