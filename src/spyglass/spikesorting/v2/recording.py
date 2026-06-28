@@ -114,12 +114,21 @@ class DeletionPreview(NamedTuple):
         externals)`` as returned by ``cautious_delete(dry_run=True)``.
         Use this to spot downstream Recording / Sorting / CurationV2
         rows that would also vanish via cascade.
+    cross_team_downstream
+        Tuple of per-team dicts (``team_name``, ``recording_selection_rows``,
+        ``sorting_rows``, ``curation_rows``) enumerating the downstream rows
+        each team owns that this overwrite would cascade-delete. Sort groups in
+        one session can belong to different teams, so an overwrite can delete
+        *another* team's downstream rows; this surfaces that blast radius. It
+        does not block (per the v2 model ``team_name`` is a provenance tag, not
+        access enforcement) -- the operator reviews it before confirming.
     """
 
     nwb_file_name: str
     sort_group_rows: int
     electrode_rows: int
     cascade_summary: tuple
+    cross_team_downstream: tuple
 
 
 @schema
@@ -203,7 +212,48 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             sort_group_rows=sort_group_count,
             electrode_rows=sort_group_electrode_count,
             cascade_summary=cascade,
+            cross_team_downstream=cls._cross_team_downstream(nwb_file_name),
         )
+
+    @classmethod
+    def _cross_team_downstream(cls, nwb_file_name: str) -> tuple:
+        """Per-team downstream rows an overwrite of this session would delete.
+
+        Deleting a session's ``SortGroupV2`` cascades through
+        ``RecordingSelection`` (which carries the owning ``team_name``) to
+        ``Sorting`` and ``CurationV2``. Because sort groups in one session can
+        belong to different teams, this enumerates the cross-team blast radius
+        so the operator sees whose downstream rows would vanish before
+        confirming. Visibility only -- it never blocks.
+        """
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+
+        rec_sel = RecordingSelection & {"nwb_file_name": nwb_file_name}
+        summary = []
+        for team in sorted(set(rec_sel.fetch("team_name"))):
+            team_recs = rec_sel & {"team_name": team}
+            rec_ids = [str(r) for r in team_recs.fetch("recording_id")]
+            sorting_rows = curation_rows = 0
+            if rec_ids:
+                sortings = SortingSelection.RecordingSource & [
+                    {"recording_id": r} for r in rec_ids
+                ]
+                sort_ids = [str(s) for s in sortings.fetch("sorting_id")]
+                sorting_rows = len(sortings)
+                if sort_ids:
+                    curation_rows = len(
+                        CurationV2 & [{"sorting_id": s} for s in sort_ids]
+                    )
+            summary.append(
+                {
+                    "team_name": team,
+                    "recording_selection_rows": len(team_recs),
+                    "sorting_rows": sorting_rows,
+                    "curation_rows": curation_rows,
+                }
+            )
+        return tuple(summary)
 
     @classmethod
     def _handle_existing(

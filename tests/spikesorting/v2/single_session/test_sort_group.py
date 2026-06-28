@@ -882,3 +882,71 @@ def test_set_group_by_electrode_table_column_empty_match_raises(
             column="electrode_id",
             groups=[[10_000_000]],  # no electrode has this id
         )
+
+
+@pytest.mark.slow
+def test_sortgroup_overwrite_preview_lists_cross_team_downstream(
+    polymer_smoke_session,
+):
+    """The overwrite preview enumerates downstream rows owned by EACH team.
+
+    Sort groups in one session can belong to different teams, so an overwrite
+    can cascade-delete another team's downstream rows. The preview surfaces
+    that cross-team blast radius (visibility only; it does not block).
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_ids = sorted(
+        int(s)
+        for s in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+    )
+    assert len(sort_group_ids) >= 2, "need >=2 sort groups for a two-team test"
+
+    for team in ("team_alpha", "team_beta"):
+        LabTeam.insert1(
+            {"team_name": team, "team_description": "cross-team preview test"},
+            skip_duplicates=True,
+        )
+
+    try:
+        # Two teams own DIFFERENT sort groups of the SAME session.
+        RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_ids[0],
+                "interval_list_name": "raw data valid times",
+                "preprocessing_params_name": "default",
+                "team_name": "team_alpha",
+            }
+        )
+        RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_ids[1],
+                "interval_list_name": "raw data valid times",
+                "preprocessing_params_name": "default",
+                "team_name": "team_beta",
+            }
+        )
+
+        preview = SortGroupV2.preview_existing_entries(nwb_file_name)
+        by_team = {
+            row["team_name"]: row for row in preview.cross_team_downstream
+        }
+        assert {"team_alpha", "team_beta"} <= set(by_team), (
+            "overwrite preview must enumerate both teams' downstream rows; "
+            f"got {preview.cross_team_downstream}"
+        )
+        assert by_team["team_alpha"]["recording_selection_rows"] >= 1
+        assert by_team["team_beta"]["recording_selection_rows"] >= 1
+    finally:
+        _clean_session_v2(polymer_smoke_session)
