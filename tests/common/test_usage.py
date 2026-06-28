@@ -343,6 +343,67 @@ def test_intersect_export_populate(populate_intersect_export, common):
     ), "Intersection failed to censor entries"
 
 
+def test_export_file_rows_removed_on_overwrite(common, teardown):
+    """A superseded export's parts are fully removed -- including its
+    ``Export.File`` rows (the leak was a duplicated ``Table`` delete) -- and
+    only the *processed* lesser ids are considered superseded (the overlap
+    set-precedence is correct)."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    sel, export = ExportSelection(), Export()
+    paper = "export_overwrite_test"
+
+    def _make_selection(analysis_id):
+        sel.insert1(
+            {
+                "paper_id": paper,
+                "analysis_id": analysis_id,
+                "spyglass_version": "test",
+            }
+        )
+        return (
+            sel & {"paper_id": paper, "analysis_id": analysis_id}
+        ).fetch1("export_id")
+
+    e1 = _make_selection("a1")  # superseded (already exported)
+    e2 = _make_selection("a2")  # superseding (max) export
+
+    # Seed the superseded export (e1) with BOTH a Table and a File part.
+    export.insert1(
+        {"export_id": e1, "paper_id": paper}, allow_direct_insert=True
+    )
+    export.Table.insert1(
+        {"export_id": e1, "table_id": 0, "table_name": "x", "restriction": "x"},
+        allow_direct_insert=True,
+    )
+    export.File.insert1(
+        {"export_id": e1, "file_id": 0, "file_path": "/tmp/x.nwb"},
+        allow_direct_insert=True,
+    )
+    assert len(export.Table & {"export_id": e1}) == 1
+    assert len(export.File & {"export_id": e1}) == 1
+
+    try:
+        overlap = export._delete_superseded_exports([e1, e2], max_export_id=e2)
+        # e2 is the max (not processed); only the processed lesser id e1 is
+        # superseded. The buggy `all - ({max} & processed)` precedence would
+        # also include the unprocessed e2 here.
+        assert overlap == {e1}, f"unexpected superseded set {overlap}"
+        # BOTH parts removed -- the File part must not leak.
+        assert len(export.Table & {"export_id": e1}) == 0
+        assert (
+            len(export.File & {"export_id": e1}) == 0
+        ), "stale Export.File row leaked after overwrite"
+    finally:
+        if teardown:
+            (export & {"paper_id": paper}).super_delete(
+                warn=False, safemode=False
+            )
+            (sel & {"paper_id": paper}).super_delete(
+                warn=False, safemode=False
+            )
+
+
 def test_invalid_export_id(export_tbls):
     ExportSelection, _ = export_tbls
     ExportSelection.start_export(paper_id=2, analysis_id=1)
