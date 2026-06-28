@@ -49,8 +49,11 @@ from spyglass.spikesorting.v2._selection_identity import (
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     DuplicateSelectionError,
+    FigPackCurationNamespaceError,
+    FigPackRetrievalError,
     FigPackUploadError,
 )
+from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     _is_duplicate_key_error,
@@ -115,12 +118,15 @@ def figpack_bundle_path(figpack_curation_id) -> Path:
 
 
 def _load_annotations_json(uri: str) -> dict:
-    """Fetch a figure's ``annotations.json`` (HTTP or local path); {} if absent.
+    """Fetch a figure's ``annotations.json`` (HTTP or local path); fail closed.
 
     Mirrors how the FigPack frontend loads annotations: a GET on
     ``<figure>/annotations.json`` for a hosted figure, or a file read for a
-    saved bundle directory. A missing file / 404 yields ``{}`` (a pristine,
-    never-edited figure round-trips to no curation).
+    saved bundle directory. ONLY a genuine 404 / missing local file yields
+    ``{}`` (a pristine, never-edited figure). An unreachable host, refused
+    connection, non-404 HTTP error, or malformed JSON raises
+    ``FigPackRetrievalError`` rather than silently looking like "no edits" --
+    which could otherwise commit an empty child curation over a real one.
     """
     import urllib.error
     import urllib.request
@@ -136,20 +142,34 @@ def _load_annotations_json(uri: str) -> dict:
     if base.startswith(("http://", "https://")):
         try:
             with urllib.request.urlopen(annotations_url) as response:
-                return json.loads(response.read().decode("utf-8"))
+                raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
-                return {}
-            raise
-        except urllib.error.URLError:
-            # Server unreachable (e.g. an expired offline local server) -> no
-            # retrievable edits rather than a hard failure.
-            return {}
+                return {}  # no annotations file yet == pristine figure
+            raise FigPackRetrievalError(
+                f"Failed to fetch {annotations_url}: HTTP {exc.code}."
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise FigPackRetrievalError(
+                f"Could not reach {annotations_url}: {exc.reason}. Refusing to "
+                "treat an unreachable figure as having no edits."
+            ) from exc
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise FigPackRetrievalError(
+                f"Malformed annotations at {annotations_url}: {exc}."
+            ) from exc
 
     path = Path(base) / "annotations.json"
-    if path.exists():
+    if not path.exists():
+        return {}
+    try:
         return json.loads(path.read_text())
-    return {}
+    except json.JSONDecodeError as exc:
+        raise FigPackRetrievalError(
+            f"Malformed annotations at {path}: {exc}."
+        ) from exc
 
 
 def _coerce_units_table_ids(view) -> None:
@@ -233,30 +253,55 @@ def _build_curation_view(curation_key: dict, *, label_options, metrics):
     return view
 
 
-def _seed_offline_annotations(bundle: Path, curation_key: dict, label_options):
-    """Pre-write ``annotations.json`` so a saved bundle opens pre-curated.
+def _curation_matches_raw_namespace(curation_key: dict) -> bool:
+    """Whether a curation's unit set equals the raw sort's unit set.
 
-    Best-effort: seeds the FigPack curation control with the curation's existing
-    labels and merge groups so a reviewer continues from the committed state.
-    A failure here never blocks publishing the view.
+    The FigPack view is built over the raw-sort display analyzer, so it is only
+    correct when the curation lives in the raw ``Sorting.Unit`` namespace. A
+    merged curation (or a label-only child of a merged parent) has a different
+    unit set, so this returns ``False`` and the view is rejected upstream. Label-
+    only curations of a non-merged sort keep the raw unit set, so they pass.
     """
-    try:
-        labels = CurationV2._labels_by_unit(curation_key)
-        merge_groups = [
-            sorted({kept, *contributors})
-            for kept, contributors in CurationV2.get_merge_groups(
-                curation_key
-            ).items()
-            if len({kept, *contributors}) > 1
-        ]
-        payload = labels_and_merges_to_annotations(
-            labels, merge_groups, label_options=label_options
-        )
-        (bundle / "annotations.json").write_text(json.dumps(payload, indent=2))
-    except Exception as exc:  # noqa: BLE001 - seeding is a non-fatal nicety
-        logger.warning(
-            f"FigPack: could not seed initial curation annotations: {exc}"
-        )
+    raw = {
+        int(unit_id)
+        for unit_id in (
+            Sorting.Unit & {"sorting_id": curation_key["sorting_id"]}
+        ).fetch("unit_id")
+    }
+    curated = {
+        int(unit_id)
+        for unit_id in (CurationV2.Unit & curation_key).fetch("unit_id")
+    }
+    return curated == raw
+
+
+def _existing_curation_state(curation_key: dict) -> tuple[dict, list]:
+    """Return ``(labels, merge_groups)`` a curation already carries.
+
+    Used both to seed an offline view and to detect (and refuse) a hosted upload
+    of a curation with pre-existing state before cloud seeding is verified. Reads
+    the curation's own namespace; for the raw-namespace curations FigPack
+    accepts, ``merge_groups`` is empty and only labels can be present.
+    """
+    labels = CurationV2._labels_by_unit(curation_key)
+    merge_groups = [
+        sorted({kept, *contributors})
+        for kept, contributors in CurationV2.get_merge_groups(
+            curation_key
+        ).items()
+        if len({kept, *contributors}) > 1
+    ]
+    return labels, merge_groups
+
+
+def _write_seed_annotations(
+    bundle: Path, labels: dict, merge_groups: list, label_options
+) -> None:
+    """Write ``annotations.json`` so a saved bundle opens pre-curated."""
+    payload = labels_and_merges_to_annotations(
+        labels, merge_groups, label_options=label_options
+    )
+    (bundle / "annotations.json").write_text(json.dumps(payload, indent=2))
 
 
 def _publish_view(
@@ -381,6 +426,17 @@ class FigPackCurationSelection(
         CurationV2.assert_committed_curation(
             parent_key, context="FigPackCuration"
         )
+        if not _curation_matches_raw_namespace(parent_key):
+            raise FigPackCurationNamespaceError(
+                "FigPack curation of a merged curation (or a label-only child of "
+                "a merged curation) is not yet supported: the view renders the "
+                "raw sort's unit namespace, not this curation's units. "
+                f"curation_key={parent_key}. Curate the root curation instead."
+            )
+        # ``ephemeral`` only affects a hosted upload; offline it is inert, so
+        # normalize it to False so it cannot fork the content-addressed identity.
+        if not upload:
+            ephemeral = False
 
         label_options = (
             list(label_options) if label_options else default_label_options()
@@ -480,6 +536,17 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             "curation_id": selection["curation_id"],
         }
         label_options = list(selection["label_options"])
+        upload = bool(selection["upload"])
+
+        seed_labels, seed_merges = _existing_curation_state(curation_key)
+        if upload and (seed_labels or seed_merges):
+            raise FigPackUploadError(
+                "Hosted upload (upload=True) of a curation that already carries "
+                "labels/merges is not yet supported: seeding the initial curation "
+                "state into the hosted figure's annotations.json has not been "
+                "verified. Use upload=False (the seeded local bundle), or open a "
+                "fresh root curation."
+            )
 
         view = _build_curation_view(
             curation_key,
@@ -492,13 +559,15 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         )
         uri = _publish_view(
             view,
-            upload=bool(selection["upload"]),
+            upload=upload,
             ephemeral=bool(selection["ephemeral"]),
             title=title,
             figpack_curation_id=key["figpack_curation_id"],
         )
-        if not bool(selection["upload"]):
-            _seed_offline_annotations(Path(uri), curation_key, label_options)
+        if not upload:
+            _write_seed_annotations(
+                Path(uri), seed_labels, seed_merges, label_options
+            )
 
         self.insert1(
             {

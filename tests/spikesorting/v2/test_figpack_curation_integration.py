@@ -119,3 +119,80 @@ def test_upload_without_api_key_raises(monkeypatch):
             title="x",
             figpack_curation_id="x",
         )
+
+
+def test_fetch_from_unreachable_uri_fails_closed():
+    """An unreachable figure raises, not silently look like 'no edits'."""
+    from spyglass.spikesorting.v2.exceptions import FigPackRetrievalError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    # Port 9 (discard) refuses the connection -> URLError, not a 404.
+    with pytest.raises(FigPackRetrievalError):
+        FigPackCuration.fetch_curation_from_uri("http://127.0.0.1:9/figure")
+
+
+def test_ephemeral_normalized_when_offline(populated_sorting_with_curation):
+    """ephemeral is inert offline -> normalized away (one identity, stored 0)."""
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCurationSelection,
+    )
+
+    with_ephemeral = FigPackCurationSelection.insert_selection(
+        populated_sorting_with_curation, upload=False, ephemeral=True
+    )
+    without_ephemeral = FigPackCurationSelection.insert_selection(
+        populated_sorting_with_curation, upload=False, ephemeral=False
+    )
+    assert with_ephemeral == without_ephemeral
+    assert (
+        int((FigPackCurationSelection & with_ephemeral).fetch1("ephemeral"))
+        == 0
+    )
+
+
+def test_merged_curation_rejected(planted_two_unit_sort):
+    """A merged curation (non-raw namespace) is refused with a typed error."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        FigPackCurationNamespaceError,
+    )
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCurationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    clear_curations_for(planted_two_unit_sort)  # package-scoped sort is shared
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    merged = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort,
+        merge_groups=[unit_ids[:2]],
+        apply_merge=True,
+    )
+    with pytest.raises(FigPackCurationNamespaceError):
+        FigPackCurationSelection.insert_selection(merged)
+    clear_curations_for(planted_two_unit_sort)
+
+
+def test_upload_of_labeled_curation_rejected(planted_two_unit_sort):
+    """Hosted upload of a curation with existing labels raises (no blank view)."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import FigPackUploadError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    clear_curations_for(planted_two_unit_sort)  # package-scoped sort is shared
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    labeled = CurationV2.insert_curation(
+        sorting_key=planted_two_unit_sort, labels={unit_ids[0]: ["noise"]}
+    )
+    with pytest.raises(FigPackUploadError):
+        FigPackCuration.build_curation_view(labeled, upload=True)
+    clear_curations_for(planted_two_unit_sort)

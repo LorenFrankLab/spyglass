@@ -230,9 +230,33 @@ class FigPackUploadError(RuntimeError):
 
     ``FigPackCuration`` was asked to publish a hosted figpack.org figure
     (``upload=True``) but ``FIGPACK_API_KEY`` is unset and the figure is not
-    ``ephemeral``. Message points the caller at setting the API key, using
-    ``ephemeral=True`` for a temporary figure, or ``upload=False`` to save a
-    local bundle instead.
+    ``ephemeral`` -- OR a curation that already carries labels/merges was asked
+    to upload before cloud seeding of the initial curation state is verified.
+    Message points the caller at setting the API key, using ``ephemeral=True``
+    for a temporary figure, or ``upload=False`` to save a seeded local bundle.
+    """
+
+
+class FigPackCurationNamespaceError(RuntimeError):
+    """Raise when a FigPack view is requested for a non-raw-namespace curation.
+
+    The FigPack view is built over the sort's display analyzer (the RAW
+    ``Sorting.Unit`` namespace). A merged curation -- or a label-only child of a
+    merged curation -- lives in a different unit namespace, so rendering the raw
+    analyzer would show the wrong units. Raised by
+    ``FigPackCurationSelection.insert_selection`` until curation-scoped analyzers
+    are supported; curate the root curation instead.
+    """
+
+
+class FigPackRetrievalError(RuntimeError):
+    """Raise when a figure's ``annotations.json`` cannot be retrieved/parsed.
+
+    ``FigPackCuration.fetch_curation_from_uri`` fails CLOSED: only a genuine
+    404 / missing local file means "pristine, no edits" (``({}, [])``). An
+    unreachable host, refused connection, non-404 HTTP error, or malformed JSON
+    raises this instead of silently looking like no edits (which could commit an
+    empty child curation over a real one).
     """
 
 
