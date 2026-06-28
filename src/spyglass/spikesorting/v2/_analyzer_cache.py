@@ -126,7 +126,7 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     )
 
 
-def analyzer_cache_lock(sorting_id, *, timeout: float = -1):
+def analyzer_cache_lock(sorting_id):
     """Return a cross-process lock serializing analyzer-cache access per sort.
 
     Every canonical analyzer-cache folder reader/writer/deleter holds this lock:
@@ -160,18 +160,17 @@ def analyzer_cache_lock(sorting_id, *, timeout: float = -1):
     would still race. A regeneratable cache makes the worst case a rebuild, not
     data loss.
 
+    The lock blocks indefinitely by default (the intended serialize-don't-fail
+    behavior); it releases when the holding process exits, so a crashed job
+    cannot wedge the next one. A per-call timeout is available via
+    ``analyzer_cache_lock(sorting_id).acquire(timeout=...)`` -- the memoized
+    instance has no constructor-level timeout knob because a second caller would
+    silently inherit the first's value.
+
     Parameters
     ----------
     sorting_id
         The sorting whose analyzer-cache folders the job will access.
-    timeout : float, optional
-        Seconds to wait for the lock before raising ``filelock.Timeout``.
-        Default ``-1`` blocks indefinitely (wait your turn), the intended
-        serialize-don't-fail behavior; the lock releases when the holding
-        process exits, so a crashed job cannot wedge the next one. Applied when
-        the per-sort instance is first created; later callers reuse that
-        instance (every internal caller uses the default), and ``.acquire``
-        accepts a per-call ``timeout`` override regardless.
 
     Returns
     -------
@@ -187,7 +186,7 @@ def analyzer_cache_lock(sorting_id, *, timeout: float = -1):
     with _ANALYZER_LOCK_REGISTRY_GUARD:
         lock = _ANALYZER_LOCK_REGISTRY.get(lock_path)
         if lock is None:
-            lock = FileLock(lock_path, timeout=timeout)
+            lock = FileLock(lock_path)
             _ANALYZER_LOCK_REGISTRY[lock_path] = lock
         return lock
 
@@ -283,10 +282,14 @@ def publish_analyzer_atomically(canonical_folder, build_into):
         try:
             os.replace(temp_folder, canonical_folder)
         except Exception:
+            # Install failed: restore the original from trash so the slot is
+            # never left empty. If THIS also fails, leave the trash on disk for
+            # manual recovery -- it is the only surviving copy, so it must not
+            # be deleted (hence the cleanup is NOT in a ``finally``).
             os.replace(trash_folder, canonical_folder)
             raise
-        finally:
-            shutil.rmtree(trash_folder, ignore_errors=True)
+        # Install succeeded: the trash is the now-stale old folder; drop it.
+        shutil.rmtree(trash_folder, ignore_errors=True)
         return canonical_folder
     finally:
         shutil.rmtree(temp_folder, ignore_errors=True)

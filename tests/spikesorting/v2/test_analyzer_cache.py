@@ -433,6 +433,38 @@ class TestPublishAnalyzerAtomically:
         assert (canonical / "data.bin").read_text() == "v1"
         assert self._staging_is_empty(canonical)
 
+    def test_failed_swap_and_failed_rollback_preserve_trash(
+        self, tmp_path, monkeypatch, restore_custom_config
+    ):
+        """If the temp -> canonical install fails AND the trash -> canonical
+        rollback ALSO fails, the moved-aside original must be LEFT on disk for
+        manual recovery -- it is the only surviving copy, so the publisher must
+        not delete it."""
+        import os as os_mod
+
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        publish_analyzer_atomically(canonical, self._writer("v1"))
+
+        real_replace = os_mod.replace
+
+        def _fail_into_slot(src, dst, *a, **k):
+            # Fail BOTH moves whose destination is the canonical slot: the
+            # temp -> canonical install and the trash -> canonical rollback.
+            if str(dst) == str(canonical):
+                raise OSError("swap boom")
+            return real_replace(src, dst, *a, **k)
+
+        monkeypatch.setattr(os_mod, "replace", _fail_into_slot)
+        with pytest.raises(OSError, match="swap boom"):
+            publish_analyzer_atomically(canonical, self._writer("v2"))
+
+        # The original v1 survives in a trash sibling (canonical was moved aside
+        # and could not be restored); it must NOT have been deleted.
+        trash = list(canonical.parent.glob(f".{canonical.stem}.trash-*"))
+        assert trash, "the moved-aside original must be preserved for recovery"
+        assert (trash[0] / "data.bin").read_text() == "v1"
+
     def test_temp_build_is_a_hidden_sibling_of_canonical(
         self, tmp_path, restore_custom_config
     ):
