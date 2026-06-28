@@ -479,15 +479,11 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         ``(recording, sorting)`` -- the artifact-masked SI recording and the
         canonical SI sorting.
     """
-    from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import (
-        artifact_detection_interval_list_name,
-    )
 
     # Resolve the artifact-detection id from the ArtifactDetectionSource part
     # (the master has no artifact_detection_id FK); without it the mask gate
@@ -506,18 +502,31 @@ def reconstruct_recording_and_sorting(sorting_table, key):
 
         recording = ConcatenatedRecording().get_recording(source.key)
     if source.kind == "recording" and artifact_detection_id is not None:
+        # Route the artifact mask through the ownership-validated helper -- the
+        # same one Sorting.make_fetch uses -- NOT a direct IntervalList-by-name
+        # fetch. The direct fetch would accept a partially-deleted artifact (no
+        # ArtifactRemovedInterval part rows owning the IntervalList) or a
+        # hand-inserted same-name IntervalList that populate rejects, so a
+        # rebuilt analyzer would diverge from what Sorting.make wrote.
+        from spyglass.spikesorting.v2._artifact_intervals import (
+            read_artifact_removed_intervals,
+        )
+
         nwb_file_name = (
             RecordingSelection & {"recording_id": source.key["recording_id"]}
         ).fetch1("nwb_file_name")
-        valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": artifact_detection_interval_list_name(
-                    artifact_detection_id
-                ),
-            }
-        ).fetch1("valid_times")
+        intervals_by_nwb = read_artifact_removed_intervals(
+            {"artifact_detection_id": artifact_detection_id}, as_dict=True
+        )
+        if nwb_file_name not in intervals_by_nwb:
+            raise ValueError(
+                "reconstruct_recording_and_sorting: artifact-removed intervals "
+                f"for nwb_file_name={nwb_file_name!r} not found among "
+                f"{sorted(intervals_by_nwb)} for artifact_detection_id="
+                f"{artifact_detection_id!r}; the ArtifactDetection may be "
+                "partially deleted."
+            )
+        valid_times = intervals_by_nwb[nwb_file_name]
         recording = sorting_table._apply_artifact_mask(
             recording=recording,
             valid_times=valid_times,

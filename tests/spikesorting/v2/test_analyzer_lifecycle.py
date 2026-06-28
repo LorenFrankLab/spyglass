@@ -634,6 +634,43 @@ def test_cleanup_keeps_analyzer_owned_by_committed_sort(populated_sorting):
 
 
 @pytest.mark.slow
+@pytest.mark.usefixtures("dj_conn")
+def test_rebuild_reconstruction_validates_artifact_interval_ownership(
+    populated_sorting, monkeypatch
+):
+    """Analyzer-rebuild recording reconstruction routes the artifact mask through
+    the ownership-validated ``read_artifact_removed_intervals`` -- the same
+    helper ``Sorting.make_fetch`` uses -- not a direct IntervalList-by-name
+    fetch.
+
+    The direct fetch would accept a partially-deleted artifact (no
+    ``ArtifactRemovedInterval`` part rows owning the IntervalList) or a
+    hand-inserted same-name IntervalList that the populate path rejects, so a
+    rebuilt analyzer could be masked with a stale/unowned interval. Patch the
+    helper to a sentinel and assert the rebuild path calls it (proving it routes
+    through the validation, not around it).
+    """
+    from spyglass.spikesorting.v2 import _artifact_intervals, _sorting_analyzer
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sort_pk = populated_sorting  # artifact-backed (carries artifact_detection_id)
+    sentinel = "ownership-validated rebuild artifact mask"
+
+    def _must_route_here(key, as_dict=False):
+        raise RuntimeError(sentinel)
+
+    monkeypatch.setattr(
+        _artifact_intervals,
+        "read_artifact_removed_intervals",
+        _must_route_here,
+    )
+    with pytest.raises(RuntimeError, match=sentinel):
+        _sorting_analyzer.reconstruct_recording_and_sorting(
+            Sorting(), {"sorting_id": sort_pk["sorting_id"]}
+        )
+
+
+@pytest.mark.slow
 @pytest.mark.integration
 def test_changed_analyzer_root_causes_miss_and_rebuild(
     populated_sorting, restore_custom_config, tmp_path
