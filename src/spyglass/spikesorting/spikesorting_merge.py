@@ -33,15 +33,32 @@ from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 # moment a v2-requiring helper is called — otherwise users see an
 # opaque "v2 not loaded" message and have to dig for the real cause
 # (non-localhost DB, missing pydantic, SI version skew, etc).
-try:
-    from spyglass.spikesorting.v2.curation import (
-        CurationV2 as CurationV2,
-    )
-except Exception as _v2_import_err:  # pragma: no cover -- v0/v1 envs
-    CurationV2 = None
-    _v2_import_error: Union[Exception, None] = _v2_import_err
-else:
-    _v2_import_error = None
+def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
+    """Import the v2 ``CurationV2`` part-table target for this merge table.
+
+    Returns ``(CurationV2_or_None, import_error_or_None)``.
+
+    The broad ``except Exception`` is load-bearing and must NOT be narrowed to
+    ``ImportError``: ``curation`` calls ``_assert_v2_db_safe()`` at import,
+    which raises ``RuntimeError`` (not ``ImportError``) on a non-localhost DB.
+    That is the expected, tolerated path that lets v0/v1 environments on a
+    production database still load this merge table. The captured error is
+    logged (in addition to being returned) so a genuinely unexpected v2
+    failure is surfaced rather than silently swallowed.
+    """
+    try:
+        from spyglass.spikesorting.v2.curation import CurationV2
+    except Exception as err:  # noqa: BLE001 -- see docstring (RuntimeError path)
+        logger.warning(
+            "spikesorting v2 is unavailable; SpikeSortingOutput will be "
+            "declared without its CurationV2 part in this process. "
+            f"Captured cause: {type(err).__name__}: {err}"
+        )
+        return None, err
+    return CurationV2, None
+
+
+CurationV2, _v2_import_error = _probe_v2_curation()
 
 
 def _raise_v2_unavailable(caller: str) -> None:
