@@ -49,6 +49,7 @@ from spyglass.spikesorting.v2._pipeline_presets import (
     describe_pipeline_presets,
     describe_preset,
     list_pipeline_presets,
+    register_preset,
 )
 from spyglass.spikesorting.v2._pipeline_reporting import (
     describe_parameter_rows,

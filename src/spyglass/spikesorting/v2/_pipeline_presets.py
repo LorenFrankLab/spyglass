@@ -358,3 +358,98 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
 
 # Alias: shorter discovery name for the same helper.
 describe_preset = describe_pipeline_preset
+
+
+def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
+    """Raise ``ValueError`` if any Lookup row the preset references is absent.
+
+    A preset is only usable if every parameter row it names already exists, so
+    ``register_preset`` checks them up front rather than letting the orchestrator
+    fail with an opaque FK error mid-populate. Names the missing row and the
+    table so the fix is obvious.
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    checks = (
+        (
+            PreprocessingParameters,
+            {"preprocessing_params_name": preset.preprocessing_params_name},
+            "PreprocessingParameters",
+            preset.preprocessing_params_name,
+        ),
+        (
+            ArtifactDetectionParameters,
+            {
+                "artifact_detection_params_name": (
+                    preset.artifact_detection_params_name
+                )
+            },
+            "ArtifactDetectionParameters",
+            preset.artifact_detection_params_name,
+        ),
+        (
+            SorterParameters,
+            {
+                "sorter": preset.sorter,
+                "sorter_params_name": preset.sorter_params_name,
+            },
+            "SorterParameters",
+            preset.sorter_params_name,
+        ),
+    )
+    for table, restriction, label, row_name in checks:
+        if not (table & restriction):
+            raise ValueError(
+                f"register_preset({name!r}): row {row_name!r} not found in "
+                f"{label}. Insert it (e.g. via initialize_v2_defaults() or the "
+                "table's insert) before registering the preset."
+            )
+
+
+def register_preset(name: str, preset, *, validate_rows: bool = True) -> str:
+    """Register a custom pipeline preset at runtime; return its name.
+
+    The public, source-free way for a lab to add a preset: external labs use the
+    same dated ``{lab}_..._{date}`` naming as the built-ins. The preset is
+    Pydantic-validated (unknown fields are rejected) and, by default, every
+    parameter row it references is verified to exist so a typo fails here with a
+    clear message rather than mid-populate.
+
+    Parameters
+    ----------
+    name : str
+        Registry name. Must not already exist (refuses to silently overwrite a
+        built-in or a prior registration).
+    preset : dict or _PipelinePreset
+        The preset bundle (a dict is validated into a ``_PipelinePreset``).
+    validate_rows : bool, optional
+        If True (default), verify the referenced Lookup rows exist (requires a
+        database connection). Pass False to register without the DB check.
+
+    Returns
+    -------
+    str
+        The registered ``name``.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` already exists, the preset fails Pydantic validation, or
+        (when ``validate_rows``) a referenced parameter row is missing.
+    """
+    if name in _PIPELINE_PRESETS:
+        raise ValueError(
+            f"pipeline preset {name!r} is already registered. Choose a fresh "
+            f"name; existing presets: {sorted(_PIPELINE_PRESETS)}."
+        )
+    validated = (
+        preset
+        if isinstance(preset, _PipelinePreset)
+        else _PipelinePreset(**preset)
+    )
+    if validate_rows:
+        _assert_preset_rows_exist(name, validated)
+    _PIPELINE_PRESETS[name] = validated
+    return name

@@ -24,6 +24,7 @@ from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
     describe_preset,
     list_pipeline_presets,
+    register_preset,
 )
 
 pytestmark = pytest.mark.unit
@@ -336,3 +337,62 @@ def test_describe_pipeline_preset_missing_row_points_to_initialize_defaults(
     )
     with pytest.raises(ValueError, match="initialize_v2_defaults"):
         describe_pipeline_preset("bogus_missing_row_preset")
+
+
+def _custom_spec() -> dict:
+    """A valid preset bundle copied from a built-in (rows already exist)."""
+    base = _PIPELINE_PRESETS["franklab_tetrode_hippocampus_30khz_ms5_2026_06"]
+    return base.model_dump()
+
+
+def test_register_preset_adds_to_registry(monkeypatch):
+    """A registered preset appears in the catalog (no DB row check)."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    register_preset("lab_custom_2026_06", _custom_spec(), validate_rows=False)
+    assert "lab_custom_2026_06" in list_pipeline_presets()
+
+
+def test_register_preset_rejects_duplicate():
+    """Re-registering an existing name raises rather than overwriting."""
+    existing = next(iter(_PIPELINE_PRESETS))
+    with pytest.raises(ValueError, match="already registered"):
+        register_preset(existing, _custom_spec(), validate_rows=False)
+
+
+def test_register_preset_rejects_unknown_field(monkeypatch):
+    """Pydantic extra=forbid rejects a typo'd preset field."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    spec = {**_custom_spec(), "bogus_field": 1}
+    with pytest.raises(ValueError):
+        register_preset("lab_bad_2026_06", spec, validate_rows=False)
+
+
+def test_register_preset_catches_missing_lookup_row(dj_conn, monkeypatch):
+    """Validating against the DB names the missing row and its table."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    spec = {**_custom_spec(), "preprocessing_params_name": "does_not_exist_xyz"}
+    with pytest.raises(
+        ValueError, match="not found in PreprocessingParameters"
+    ):
+        register_preset("lab_missing_2026_06", spec)
