@@ -1440,13 +1440,13 @@ class Sorting(SpyglassMixin, dj.Computed):
     def _first_concat_member(source_key):
         """Return the concat anchor member row and its preprocessing recipe.
 
-        The anchor is the FIRST ``SessionGroup.Member`` (by ``member_index``):
-        its NWB is the analysis parent and its ``Recording`` (resolved lazily by
-        callers that need it) supplies the per-unit ``Electrode`` FK. The
-        preprocessing recipe is the concat selection's single shared one. This
-        is the cheap half of anchor resolution -- two part-table fetches, no
-        ``RecordingSelection`` join -- so callers that only need the NWB never
-        pay for the ``recording_id`` lookup.
+        The anchor is the FIRST frozen member (by ``member_index``) from the
+        ``ConcatenatedRecordingSelection.MemberSnapshot`` -- never the live
+        ``SessionGroup.Member`` set, so a later group edit cannot re-point an
+        existing concat sort's anchor. The frozen row carries the anchor's
+        ``nwb_file_name`` (the analysis parent) and ``recording_id`` (the
+        per-unit ``Electrode`` FK); the preprocessing recipe is the concat
+        selection's single shared one.
 
         Parameters
         ----------
@@ -1456,33 +1456,35 @@ class Sorting(SpyglassMixin, dj.Computed):
         Returns
         -------
         tuple[dict, str]
-            ``(first_member_row, preprocessing_params_name)``.
+            ``(first_member_snapshot_row, preprocessing_params_name)``.
         """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecordingSelection,
-            SessionGroup,
         )
 
         concat_sel = (ConcatenatedRecordingSelection & source_key).fetch1()
-        group_key = {
-            "session_group_owner": concat_sel["session_group_owner"],
-            "session_group_name": concat_sel["session_group_name"],
-        }
-        first_member = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index", limit=1
-        )[0]
-        return first_member, concat_sel["preprocessing_params_name"]
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot & source_key
+        ).fetch(as_dict=True, order_by="member_index", limit=1)
+        if not snapshot:
+            raise SchemaBypassError(
+                "Sorting._first_concat_member: concat selection "
+                f"{dict(source_key)} has no MemberSnapshot rows; the frozen "
+                "member set is written by insert_selection. Drop the selection "
+                "and re-insert via insert_selection."
+            )
+        return snapshot[0], concat_sel["preprocessing_params_name"]
 
     @staticmethod
     def _resolve_concat_anchor(source_key):
         """Resolve a concat source to its anchor recording / NWB / preprocessing.
 
-        Adds the anchor ``recording_id`` (the per-unit ``Electrode`` FK) to the
-        cheap :meth:`_first_concat_member` resolution. The full multi-session
+        Reads the anchor ``recording_id`` straight from the frozen snapshot (no
+        ``RecordingSelection`` join needed -- the snapshot froze the resolved
+        ``recording_id`` when the concat id was minted). The full multi-session
         provenance stays queryable through
-        ``ConcatenatedRecordingSelection -> SessionGroup.Member``; this resolves
-        the anchor member's own ``RecordingSelection`` by its single-session
-        key, never ``RecordingSelection`` with the concat-only key.
+        ``ConcatenatedRecordingSelection.MemberSnapshot``.
 
         Parameters
         ----------
@@ -1491,26 +1493,15 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        tuple[str, str, str]
+        tuple[uuid.UUID, str, str]
             ``(anchor_recording_id, anchor_nwb_file_name,
             preprocessing_params_name)``.
         """
-        from spyglass.spikesorting.v2._concat_recording import (
-            member_recording_selection_key,
-        )
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-
         first_member, preprocessing_params_name = Sorting._first_concat_member(
             source_key
         )
-        anchor_recording_id = (
-            RecordingSelection
-            & member_recording_selection_key(
-                first_member, preprocessing_params_name
-            )
-        ).fetch1("recording_id")
         return (
-            anchor_recording_id,
+            first_member["recording_id"],
             first_member["nwb_file_name"],
             preprocessing_params_name,
         )

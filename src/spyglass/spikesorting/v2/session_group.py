@@ -791,84 +791,124 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """
 
     @staticmethod
-    def _resolve_member_recording_keys(members, preprocessing_params_name):
-        """Resolve each member's cached ``Recording`` PK in member order (DB only).
+    def _resolve_snapshot_recordings(snapshot_rows):
+        """Verify each FROZEN member's ``Recording`` and build the load plan.
 
-        The fetch-side half of the materialization contract: resolve each
-        member's ``RecordingSelection`` PK ONCE and confirm its ``Recording``
-        row is cached. No SI/NWB I/O -- the heavy load lives in
-        :meth:`_load_member_recordings`, which ``make_compute`` drives off the
-        returned plan. Isolated so the resolve discipline (a single PK fetch per
-        member) is unit-testable without driving a full populate.
+        The fetch-side half of the materialization contract, driven off the
+        frozen ``ConcatenatedRecordingSelection.MemberSnapshot`` (never the live
+        ``SessionGroup.Member`` set). For each member, in ``member_index`` order,
+        confirm its frozen ``recording_id`` still resolves to a populated
+        ``Recording`` AND that the recording's current ``content_hash`` still
+        matches the one frozen at selection. No SI/NWB I/O -- the heavy load
+        lives in :meth:`_load_member_recordings`, which ``make_compute`` drives
+        off the returned plan.
 
         Never calls ``Recording.populate``: the selection-time precondition in
-        ``ConcatenatedRecordingSelection.insert_selection`` guarantees every
-        member is already cached. This defensively re-checks and raises if a row
-        is missing (the selection was inserted by a raw bypass).
+        ``insert_selection`` guarantees every member was cached when the concat
+        id was minted. This re-checks (a row could be deleted later) and, by
+        comparing ``content_hash``, refuses to materialize / rebuild from member
+        data that drifted out from under the frozen id.
 
         Parameters
         ----------
-        members : list[dict]
-            ``SessionGroup.Member`` rows, already ordered by ``member_index``.
-        preprocessing_params_name : str
-            The concat selection's single shared preprocessing recipe.
+        snapshot_rows : list[dict]
+            ``ConcatenatedRecordingSelection.MemberSnapshot`` rows, ordered by
+            ``member_index`` (each carrying ``recording_id`` +
+            ``recording_content_hash`` and the member's logical identity).
 
         Returns
         -------
         list[dict]
             member_index-ordered plan dicts ``{"member_index" (int),
-            "nwb_file_name" (str), "recording_pk" (dict whose ``recording_id``
-            is the str UUID -- DeepHash-stable for the tri-part carrier)}``.
+            "nwb_file_name" (str), "interval_list_name" (str), "recording_pk"
+            (dict whose ``recording_id`` is the str UUID -- DeepHash-stable for
+            the tri-part carrier)}``.
 
         Raises
         ------
         MissingRecordingForConcatError
-            If any member's ``Recording`` row is not populated.
+            If any frozen member's ``Recording`` row is gone.
+        ConcatMemberDriftError
+            If a frozen member's current ``Recording.content_hash`` diverges
+            from the one captured in the snapshot.
         """
-        from spyglass.spikesorting.v2._concat_recording import (
-            member_recording_selection_key,
-        )
         from spyglass.spikesorting.v2.exceptions import (
+            ConcatMemberDriftError,
             MissingRecordingForConcatError,
         )
-        from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
-        )
+        from spyglass.spikesorting.v2.recording import Recording
 
         member_plan = []
         missing: list[dict] = []
-        for member in members:
-            rec_sel_key = member_recording_selection_key(
-                member, preprocessing_params_name
-            )
-            rec_sel = RecordingSelection & rec_sel_key
-            # ``fetch1("KEY")`` resolves the secondary-attribute restriction to
-            # the recording_id UUID -- a real query, so resolve it ONCE.
-            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
-            if rec_pk is None or not (Recording & rec_pk):
-                missing.append(rec_sel_key)
+        drifted: list[dict] = []
+        for row in snapshot_rows:
+            recording_id = row["recording_id"]
+            content_hashes = (
+                Recording & {"recording_id": recording_id}
+            ).fetch("content_hash")
+            if len(content_hashes) == 0:
+                missing.append({"recording_id": str(recording_id)})
+                continue
+            current_hash = str(content_hashes[0])
+            if current_hash != str(row["recording_content_hash"]):
+                drifted.append(
+                    {
+                        "member_index": int(row["member_index"]),
+                        "recording_id": str(recording_id),
+                        "snapshot_content_hash": str(
+                            row["recording_content_hash"]
+                        ),
+                        "current_content_hash": current_hash,
+                    }
+                )
                 continue
             member_plan.append(
                 {
-                    "member_index": int(member["member_index"]),
-                    "nwb_file_name": member["nwb_file_name"],
-                    "interval_list_name": member["interval_list_name"],
-                    "recording_pk": {
-                        "recording_id": str(rec_pk["recording_id"])
-                    },
+                    "member_index": int(row["member_index"]),
+                    "nwb_file_name": row["nwb_file_name"],
+                    "interval_list_name": row["interval_list_name"],
+                    "recording_pk": {"recording_id": str(recording_id)},
                 }
             )
         if missing:
             raise MissingRecordingForConcatError(
                 "ConcatenatedRecording.make: "
-                f"{len(missing)} member Recording row(s) are not populated "
-                f"under preprocessing_params_name={preprocessing_params_name!r}: "
-                f"{missing}. Populate Recording for each member first "
-                "(ConcatenatedRecordingSelection.insert_selection enforces "
-                "this; the selection was likely inserted by a raw bypass)."
+                f"{len(missing)} frozen member Recording row(s) are gone: "
+                f"{missing}. The member set was frozen at insert_selection; "
+                "restore the missing Recording(s), or DELETE this concat and "
+                "re-run ConcatenatedRecordingSelection.insert_selection (which "
+                "re-snapshots and mints a new concat_recording_id). Run "
+                "Recording.populate(...) for each missing key first."
+            )
+        if drifted:
+            raise ConcatMemberDriftError(
+                "ConcatenatedRecording.make: "
+                f"{len(drifted)} frozen member(s) have a Recording whose current "
+                f"content_hash no longer matches the snapshot: {drifted}. The "
+                "concatenation would be built from different underlying data than "
+                "concat_recording_id was minted for. Restore the original member "
+                "recording content, or DELETE this concat and re-run "
+                "insert_selection to mint a new concat for the changed inputs."
             )
         return member_plan
+
+    @staticmethod
+    def _snapshot_is_multi_day(snapshot_rows) -> bool:
+        """Report whether the frozen member set spans two or more dates.
+
+        Derived from the snapshot's distinct ``nwb_file_name``s (the frozen
+        member set), not the live ``SessionGroup.Member`` rows, so a concat's
+        multi-day status is fixed once its id is minted. ``Session`` start times
+        are themselves immutable, so reading them live is safe.
+        """
+        nwb_keys = [
+            {"nwb_file_name": name}
+            for name in {row["nwb_file_name"] for row in snapshot_rows}
+        ]
+        if not nwb_keys:
+            return False
+        start_times = (Session & nwb_keys).fetch("session_start_time")
+        return len({start_time.date() for start_time in start_times}) > 1
 
     @staticmethod
     def _load_member_recordings(member_plan):
@@ -915,11 +955,12 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     def make_fetch(self, key) -> ConcatRecordingFetched:
         """Read every DB input the materialization needs (no SI / NWB I/O).
 
-        Resolves the selection row, the ordered members and their cached
-        ``Recording`` PKs (raising if any is missing), the motion-correction and
-        preprocessing parameter blobs, and the group's multi-day status. Returns
-        a DeepHash-stable carrier so the framework's two-fetch integrity check
-        does not trip.
+        Resolves the selection row, the FROZEN member snapshot (never the live
+        ``SessionGroup.Member`` set) and each member's still-current ``Recording``
+        (raising if any is missing or its content drifted from the snapshot), the
+        motion-correction and preprocessing parameter blobs, and the group's
+        multi-day status. Returns a DeepHash-stable carrier so the framework's
+        two-fetch integrity check does not trip.
 
         Parameters
         ----------
@@ -933,31 +974,41 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
         Raises
         ------
+        SchemaBypassError
+            If the selection has no frozen ``MemberSnapshot`` (a raw insert that
+            bypassed ``insert_selection``).
         MissingRecordingForConcatError
-            If any member's ``Recording`` row is missing (selection bypassed).
+            If any frozen member's ``Recording`` row is gone.
+        ConcatMemberDriftError
+            If a frozen member's recording content drifted from the snapshot.
         """
+        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
         # The populate key carries only concat_recording_id; every member and
         # parameter query restricts with the fetched selection row, not the
         # UUID-only key, so independent concat selections never cross-restrict.
         sel = (ConcatenatedRecordingSelection & key).fetch1()
-        group_key = {
-            "session_group_owner": sel["session_group_owner"],
-            "session_group_name": sel["session_group_name"],
-        }
         preprocessing_params_name = sel["preprocessing_params_name"]
-        members = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index"
-        )
-        # Re-assert electrode-space compatibility at the compute boundary, not
-        # just at insert_selection: a raw ``allow_direct_insert`` selection or a
-        # member edit after selection could otherwise reach compute with members
-        # in different physical electrode spaces (same SI channel ids/geometry,
-        # different DB electrodes/regions) and be silently read in the anchor
-        # frame.
-        assert_members_share_electrode_space(members)
-        member_plan = self._resolve_member_recording_keys(
-            members, preprocessing_params_name
-        )
+        # The frozen snapshot -- not the live SessionGroup.Member set -- is the
+        # authority: a later member edit mints a NEW concat id on re-selection
+        # and never silently changes what THIS concat materializes.
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot & key
+        ).fetch(as_dict=True, order_by="member_index")
+        if not snapshot:
+            raise SchemaBypassError(
+                "ConcatenatedRecording.make_fetch: selection "
+                f"{dict(key)} has no MemberSnapshot rows. The frozen member set "
+                "is written by ConcatenatedRecordingSelection.insert_selection; "
+                "this selection was inserted by a raw bypass. Drop it and "
+                "re-insert via insert_selection."
+            )
+        # Re-assert electrode-space compatibility at the compute boundary against
+        # the frozen snapshot, defending a raw ``allow_direct_insert`` selection
+        # whose members span different physical electrode spaces (same SI channel
+        # ids/geometry, different DB electrodes/regions).
+        assert_members_share_electrode_space(snapshot)
+        member_plan = self._resolve_snapshot_recordings(snapshot)
         motion_row = (
             MotionCorrectionParameters
             & {
@@ -976,10 +1027,10 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             motion_params=motion_row["params"],
             motion_job_kwargs=motion_row["job_kwargs"],
             preprocessing_job_kwargs=preprocessing_job_kwargs,
-            # Resolve multi-day status at fetch time (DB-derived); the 'auto'
+            # Multi-day status of the FROZEN member set (DB-derived); the 'auto'
             # motion alias is resolved against it in compute.
-            is_multi_day=bool(SessionGroup.is_multi_day(group_key)),
-            anchor_nwb_file_name=members[0]["nwb_file_name"],
+            is_multi_day=self._snapshot_is_multi_day(snapshot),
+            anchor_nwb_file_name=snapshot[0]["nwb_file_name"],
         )
 
     def make_compute(
@@ -1287,20 +1338,31 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             member_split_key,
             split_unit_spike_trains,
         )
+        from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
-        sel = (ConcatenatedRecordingSelection & key).fetch1()
-        group_key = {
-            "session_group_owner": sel["session_group_owner"],
-            "session_group_name": sel["session_group_name"],
-        }
-        members = (SessionGroup.Member & group_key).fetch(
-            as_dict=True, order_by="member_index"
-        )
-        # MemberBoundary is keyed by member_index; align to the member order.
+        # Split over the FROZEN member set (the same authority make_fetch used to
+        # materialize), so a later SessionGroup.Member edit cannot misalign the
+        # back-mapping; the per-member end boundaries are the frozen
+        # MemberBoundary rows.
+        members = (
+            ConcatenatedRecordingSelection.MemberSnapshot & key
+        ).fetch(as_dict=True, order_by="member_index")
+        # MemberBoundary is keyed by member_index; align to the member order and
+        # require exactly one boundary per frozen member (no missing/extra).
         indices, ends = (self.MemberBoundary & key).fetch(
             "member_index", "end_sample"
         )
         end_by_index = {int(i): int(e) for i, e in zip(indices, ends)}
+        member_indices = {int(member["member_index"]) for member in members}
+        if set(end_by_index) != member_indices:
+            raise ConcatSplitError(
+                "ConcatenatedRecording.split_sorting_by_session: the "
+                "MemberBoundary set "
+                f"{sorted(end_by_index)} does not match exactly one boundary "
+                f"per frozen member {sorted(member_indices)}. The boundaries "
+                "and the frozen member snapshot are inconsistent; the concat "
+                "cache may be partially written -- repopulate it."
+            )
         boundaries = [
             end_by_index[int(member["member_index"])] for member in members
         ]
@@ -1309,6 +1371,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
             for unit_id in sorting.unit_ids
         }
+        # split_unit_spike_trains enforces strictly-increasing boundaries and
+        # per-spike conservation (every concat-frame spike lands in exactly one
+        # member). The final boundary equals the concat sample count by the
+        # make_compute write-time invariant (corrected_n_samples == boundaries[-1]),
+        # so it is not re-derived from a heavy recording load here.
         per_member = split_unit_spike_trains(unit_trains, boundaries)
         fs = float(sorting.get_sampling_frequency())
         return {

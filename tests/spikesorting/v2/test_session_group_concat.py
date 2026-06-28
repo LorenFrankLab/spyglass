@@ -670,25 +670,37 @@ def _ensure_clusterless_sorter_params():
     )
 
 
+def _member_snapshot(grp):
+    """insert_selection over a group + return its frozen MemberSnapshot rows."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    sel = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    return (ConcatenatedRecordingSelection.MemberSnapshot & sel).fetch(
+        as_dict=True, order_by="member_index"
+    )
+
+
 @pytest.mark.slow
 def test_load_member_recordings_returns_aligned_counts_and_indices(
     same_day_group,
 ):
     """``_load_member_recordings`` loads each member's cached Recording from the
-    fetch-resolved plan in member_index order and returns sample counts / indices
-    aligned element-wise with the loaded recordings -- the core per-member
+    snapshot-resolved plan in member_index order and returns sample counts /
+    indices aligned element-wise with the loaded recordings -- the core per-member
     materialization contract, exercised without driving a full populate."""
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-        SessionGroup,
-    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     grp = same_day_group
-    members = (SessionGroup.Member & grp["group_key"]).fetch(
-        as_dict=True, order_by="member_index"
-    )
-    member_plan = ConcatenatedRecording._resolve_member_recording_keys(
-        members, grp["preprocessing_params_name"]
+    member_plan = ConcatenatedRecording._resolve_snapshot_recordings(
+        _member_snapshot(grp)
     )
     recordings, sample_counts, member_indices = (
         ConcatenatedRecording._load_member_recordings(member_plan)
@@ -701,30 +713,42 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
 
 
 @pytest.mark.slow
-def test_resolve_member_recording_keys_raises_on_missing_recording(
+def test_resolve_snapshot_recordings_raises_on_missing_recording(
     same_day_group,
 ):
-    """A member whose Recording cache is absent raises
-    ``MissingRecordingForConcatError`` at fetch-time key resolution rather than
-    silently dropping it (which would shift every later member's boundary)."""
+    """A frozen member whose ``Recording`` is gone raises
+    ``MissingRecordingForConcatError`` rather than silently dropping it (which
+    would shift every later member's boundary)."""
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
     )
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-        SessionGroup,
-    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
-    grp = same_day_group
-    members = (SessionGroup.Member & grp["group_key"]).fetch(
-        as_dict=True, order_by="member_index"
-    )
-    # No RecordingSelection exists under a bogus preprocessing recipe, so every
-    # member is "missing" -- the defensive precondition fires.
-    with pytest.raises(MissingRecordingForConcatError, match="not populated"):
-        ConcatenatedRecording._resolve_member_recording_keys(
-            members, "no_such_preprocessing_recipe"
-        )
+    snapshot = _member_snapshot(same_day_group)
+    # Point the first frozen member at a recording_id with no Recording row.
+    snapshot[0] = {
+        **snapshot[0],
+        "recording_id": "00000000-0000-0000-0000-000000000000",
+    }
+    with pytest.raises(MissingRecordingForConcatError, match="populate"):
+        ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
+
+
+@pytest.mark.slow
+def test_resolve_snapshot_recordings_raises_on_member_content_drift(
+    same_day_group,
+):
+    """A frozen member whose live ``Recording.content_hash`` no longer matches the
+    snapshot raises ``ConcatMemberDriftError`` -- the concat would be built from
+    different underlying data than its id was minted for."""
+    from spyglass.spikesorting.v2.exceptions import ConcatMemberDriftError
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    snapshot = _member_snapshot(same_day_group)
+    # Freeze a content hash that diverges from the live Recording's.
+    snapshot[0] = {**snapshot[0], "recording_content_hash": "f" * 64}
+    with pytest.raises(ConcatMemberDriftError, match="content"):
+        ConcatenatedRecording._resolve_snapshot_recordings(snapshot)
 
 
 @pytest.mark.slow
