@@ -864,6 +864,79 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
 
 
 @pytest.mark.slow
+def test_concat_split_conserves_all_spikes(same_day_group):
+    """``split_sorting_by_session`` back-maps a concat-frame sorting so every input
+    (unit, frame) lands in exactly one member and reconstructs to its original
+    frame -- per-spike membership, not just summed counts. A MemberBoundary set
+    that no longer covers the frozen member set raises ``ConcatSplitError``."""
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._concat_recording import member_split_key
+    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"], motion="none"
+    )
+    n0, n1 = _member_sample_counts(grp)
+    total = n0 + n1
+    # Synthetic concat-frame sorting: spikes spanning member 0, the boundary
+    # frame (n0 -> first frame of member 1), and the last valid frame.
+    trains = {
+        7: np.array([0, n0 - 1, n0, total - 1]),
+        9: np.array([5, n0 + 3]),
+    }
+    sorting = si.NumpySorting.from_unit_dict(
+        [trains], sampling_frequency=30_000.0
+    )
+    per_member = ConcatenatedRecording().split_sorting_by_session(
+        sorting, concat_pk
+    )
+    assert len(per_member) == 2
+
+    # Independently re-derive each member's start offset from the frozen
+    # snapshot + boundaries to reconstruct the global frames per unit.
+    snapshot = (
+        ConcatenatedRecordingSelection.MemberSnapshot & concat_pk
+    ).fetch(as_dict=True, order_by="member_index")
+    indices, ends = (
+        ConcatenatedRecording.MemberBoundary & concat_pk
+    ).fetch("member_index", "end_sample")
+    end_by_index = {int(i): int(e) for i, e in zip(indices, ends)}
+    ordered_ends = [end_by_index[int(r["member_index"])] for r in snapshot]
+    starts = [0, *ordered_ends[:-1]]
+    start_by_key = {
+        member_split_key(row): start
+        for row, start in zip(snapshot, starts)
+    }
+    for unit_id, original in trains.items():
+        reconstructed = np.sort(
+            np.concatenate(
+                [
+                    per_member[key].get_unit_spike_train(unit_id) + start
+                    for key, start in start_by_key.items()
+                ]
+            )
+        )
+        np.testing.assert_array_equal(reconstructed, np.sort(original))
+
+    # A MemberBoundary set short of the frozen member set is rejected, not
+    # silently truncated.
+    (
+        ConcatenatedRecording.MemberBoundary
+        & concat_pk
+        & {"member_index": 1}
+    ).delete_quick()
+    with pytest.raises(ConcatSplitError, match="one boundary per frozen member"):
+        ConcatenatedRecording().split_sorting_by_session(sorting, concat_pk)
+
+
+@pytest.mark.slow
 def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
     """The concat NWB self-describes the split.
 
