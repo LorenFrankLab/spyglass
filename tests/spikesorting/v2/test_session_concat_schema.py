@@ -80,3 +80,45 @@ def test_concatenated_recording_has_total_duration_s_column():
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     assert "total_duration_s" in ConcatenatedRecording.heading.attributes
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_concat_selection_stores_member_set_hash():
+    """``ConcatenatedRecordingSelection`` records the folded member-set hash as a
+    secondary attribute (the hash is also folded into ``concat_recording_id``)."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    attrs = ConcatenatedRecordingSelection.heading.attributes
+    assert "member_set_hash" in attrs
+    assert "member_set_hash" not in ConcatenatedRecordingSelection.primary_key
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_concat_selection_member_snapshot_part_shape():
+    """The frozen ``MemberSnapshot`` part captures each member's logical identity
+    plus its ``Recording`` content hash, keyed by ``member_index``.
+
+    Stored as plain columns (not FKs) so the snapshot is frozen -- a later edit
+    to ``SessionGroup.Member`` / ``RecordingSelection`` cannot cascade into it.
+    """
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    snapshot = ConcatenatedRecordingSelection.MemberSnapshot
+    attrs = snapshot.heading.attributes
+    for column in (
+        "member_index",
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+        "recording_id",
+        "recording_content_hash",
+    ):
+        assert column in attrs, column
+    assert "member_index" in snapshot.primary_key
+    # Frozen snapshot: the only foreign-key parent is its own master.
+    assert snapshot.parents() == [ConcatenatedRecordingSelection.full_table_name]

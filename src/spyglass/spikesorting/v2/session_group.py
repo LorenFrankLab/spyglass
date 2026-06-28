@@ -439,11 +439,43 @@ class ConcatenatedRecordingSelection(
     -> SessionGroup
     -> PreprocessingParameters
     -> MotionCorrectionParameters
+    member_set_hash: char(64)   # sha256 of the ordered frozen member set; also folded into concat_recording_id
     """
+
+    class MemberSnapshot(SpyglassMixinPart):
+        """Frozen per-member identity captured when the concat id was minted.
+
+        ``insert_selection`` freezes each ``SessionGroup.Member``'s ordered
+        logical identity AND its resolved ``Recording`` (``recording_id`` +
+        ``recording_content_hash``) here, and folds the ordered LOGICAL set into
+        ``concat_recording_id`` via :func:`._concat_recording.member_set_hash`.
+        Stored as PLAIN columns (no foreign keys) so the snapshot is genuinely
+        frozen: a later edit to ``SessionGroup.Member`` or the member's
+        ``RecordingSelection`` cannot cascade into it. Concat read /
+        materialization paths read THIS, never the live ``SessionGroup.Member``
+        set, so an old concat row stays valid after a group edit (the edit mints
+        a new ``concat_recording_id`` on re-selection); ``recording_content_hash``
+        lets materialize / rebuild detect that a frozen member's underlying
+        recording content drifted (``ConcatMemberDriftError``).
+        """
+
+        definition = """
+        -> master
+        member_index: int
+        ---
+        nwb_file_name: varchar(64)
+        sort_group_id: int
+        interval_list_name: varchar(170)
+        team_name: varchar(80)
+        recording_id: uuid
+        recording_content_hash: char(64)
+        """
 
     #: The logical-identity fields (everything but the minted PK). A concat
     #: selection is one (SessionGroup, PreprocessingParameters,
-    #: MotionCorrectionParameters) tuple; find-existing keys on all four.
+    #: MotionCorrectionParameters) tuple; find-existing keys on all four plus the
+    #: derived ``member_set_hash`` (so the same group name over a different frozen
+    #: member set is a distinct selection, not a collision).
     _IDENTITY_FIELDS = (
         "session_group_owner",
         "session_group_name",
@@ -495,6 +527,7 @@ class ConcatenatedRecordingSelection(
         """
         from spyglass.spikesorting.v2._concat_recording import (
             member_recording_selection_key,
+            member_set_hash,
         )
         from spyglass.spikesorting.v2._selection_identity import (
             deterministic_id,
@@ -527,7 +560,11 @@ class ConcatenatedRecordingSelection(
         # exists iff its RecordingSelection row exists AND the Computed Recording
         # populated. The empty-group check is explicit: without it the loop
         # passes vacuously and make_fetch later fails indexing members[0].
-        members = (SessionGroup.Member & group_key).fetch(as_dict=True)
+        # Members are read in member_index order so the frozen snapshot (and its
+        # folded hash) records the concatenation order.
+        members = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
         if not members:
             raise ValueError(
                 "ConcatenatedRecordingSelection.insert_selection: SessionGroup "
@@ -539,14 +576,38 @@ class ConcatenatedRecordingSelection(
         # anchor member's electrode frame, so this must hold regardless of
         # whether the per-member Recording caches are populated yet.
         assert_members_share_electrode_space(members)
+        # Freeze each member's logical identity + its resolved Recording
+        # (recording_id + content_hash) into an ordered snapshot. The snapshot is
+        # the authority every downstream concat path reads (never the live
+        # SessionGroup.Member set), and its LOGICAL set hash is folded into the
+        # concat id so a different ordered member set is a different concat.
+        snapshot_rows: list[dict] = []
         missing: list[dict] = []
         for member in members:
             rec_sel_key = member_recording_selection_key(
                 member, preprocessing_params_name
             )
             rec_sel = RecordingSelection & rec_sel_key
-            if not rec_sel or not (Recording & rec_sel.fetch1("KEY")):
+            rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
+            content_hashes = (
+                (Recording & rec_pk).fetch("content_hash")
+                if rec_pk is not None
+                else []
+            )
+            if rec_pk is None or len(content_hashes) == 0:
                 missing.append(rec_sel_key)
+                continue
+            snapshot_rows.append(
+                {
+                    "member_index": int(member["member_index"]),
+                    "nwb_file_name": member["nwb_file_name"],
+                    "sort_group_id": int(member["sort_group_id"]),
+                    "interval_list_name": member["interval_list_name"],
+                    "team_name": member["team_name"],
+                    "recording_id": str(rec_pk["recording_id"]),
+                    "recording_content_hash": str(content_hashes[0]),
+                }
+            )
         if missing:
             raise MissingRecordingForConcatError(
                 "ConcatenatedRecordingSelection.insert_selection requires "
@@ -556,29 +617,49 @@ class ConcatenatedRecordingSelection(
                 "Recording.populate(...) for each missing key, then retry."
             )
 
-        # Content-address the concat_recording_id from the logical identity
-        # (mirrors RecordingSelection / SortingSelection): two callers that
-        # request the same (group, preprocessing, motion) compute the same id,
-        # so the PK-uniqueness constraint -- not a check-then-insert dedup race
-        # -- is the concurrency guard. The loser of a duplicate-PK race refetches
-        # the winner's row.
-        concat_recording_id = deterministic_id("concat_recording", identity)
+        # Content-address the concat_recording_id from the logical identity AND
+        # the ordered member-set hash (mirrors RecordingSelection /
+        # SortingSelection): two callers that request the same (group,
+        # preprocessing, motion) over the same ordered member set compute the
+        # same id, so the PK-uniqueness constraint -- not a check-then-insert
+        # dedup race -- is the concurrency guard. A different member set folds to
+        # a different id rather than silently reusing this concat.
+        set_hash = member_set_hash(snapshot_rows)
+        concat_recording_id = deterministic_id(
+            "concat_recording", {**identity, "member_set_hash": set_hash}
+        )
 
-        existing = cls._find_existing_pk(identity, concat_recording_id)
+        existing = cls._find_existing_pk(
+            identity, set_hash, concat_recording_id
+        )
         if existing is not None:
             return existing
+        snapshot_inserts = [
+            {"concat_recording_id": concat_recording_id, **row}
+            for row in snapshot_rows
+        ]
         try:
             # allow_direct_insert: this helper IS the validation boundary (it
-            # has already checked every member's Recording exists and minted the
-            # deterministic id), so it bypasses the master insert guard.
-            cls.insert1(
-                {**identity, "concat_recording_id": concat_recording_id},
-                allow_direct_insert=True,
-            )
+            # has already checked every member's Recording exists, frozen the
+            # snapshot, and minted the deterministic id), so it bypasses the
+            # master insert guard. Master + snapshot land in one transaction so
+            # a concat id never exists without its frozen member set.
+            with cls.connection.transaction:
+                cls.insert1(
+                    {
+                        **identity,
+                        "member_set_hash": set_hash,
+                        "concat_recording_id": concat_recording_id,
+                    },
+                    allow_direct_insert=True,
+                )
+                cls.MemberSnapshot.insert(snapshot_inserts)
         except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
             if not _is_duplicate_key_error(exc):
                 raise
-            existing = cls._find_existing_pk(identity, concat_recording_id)
+            existing = cls._find_existing_pk(
+                identity, set_hash, concat_recording_id
+            )
             if existing is not None:
                 return existing
             raise
@@ -586,25 +667,29 @@ class ConcatenatedRecordingSelection(
 
     @classmethod
     def _find_existing_pk(
-        cls, identity: dict, deterministic_concat_recording_id
+        cls, identity: dict, member_set_hash, deterministic_concat_recording_id
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        The full logical identity (group + preprocessing + motion params) lives
-        in the master's own columns, so it is checked against the master alone.
-        Any master matching the identity whose ``concat_recording_id`` is NOT
-        the deterministic id is a raw-insert / pre-determinism legacy bypass of
-        the content-addressed invariant, and is rejected rather than silently
-        returned. Used by ``insert_selection`` for both the pre-insert lookup
-        and the post-duplicate-key refetch.
+        The full logical identity (group + preprocessing + motion params) plus
+        the derived ``member_set_hash`` lives in the master's own columns, so it
+        is checked against the master alone. Restricting on ``member_set_hash``
+        too means two selections sharing a group name but over DIFFERENT frozen
+        member sets do not collide -- each resolves to its own deterministic id.
+        Any master matching this (identity, member set) whose
+        ``concat_recording_id`` is NOT the deterministic id is a raw-insert /
+        pre-determinism legacy bypass of the content-addressed invariant, and is
+        rejected rather than silently returned. Used by ``insert_selection`` for
+        both the pre-insert lookup and the post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2.exceptions import (
             DuplicateSelectionError,
         )
 
+        lookup = {**identity, "member_set_hash": member_set_hash}
         master_ids = {
             row["concat_recording_id"]
-            for row in (cls & identity).fetch("KEY", as_dict=True)
+            for row in (cls & lookup).fetch("KEY", as_dict=True)
         }
         bypassed = [
             cid
@@ -614,8 +699,9 @@ class ConcatenatedRecordingSelection(
         if bypassed:
             raise DuplicateSelectionError(
                 f"ConcatenatedRecordingSelection has {len(master_ids)} master "
-                f"row(s) for identity {identity} whose concat_recording_id is "
-                f"not the deterministic id {deterministic_concat_recording_id}: "
+                f"row(s) for identity {identity} (member_set_hash "
+                f"{member_set_hash}) whose concat_recording_id is not the "
+                f"deterministic id {deterministic_concat_recording_id}: "
                 f"{bypassed}. This is a non-deterministic selection row (a raw "
                 "insert or pre-determinism legacy row); drop it and re-insert "
                 "via insert_selection."

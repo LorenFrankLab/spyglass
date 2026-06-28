@@ -92,6 +92,87 @@ def member_split_key(member: dict) -> tuple:
     )
 
 
+#: The per-member logical-identity fields folded into ``concat_recording_id``
+#: via :func:`member_set_hash`. Ordered by ``member_index`` so the concatenation
+#: order is part of identity. ``recording_content_hash`` / sample counts are
+#: deliberately EXCLUDED: member content is verified at materialize/rebuild
+#: against the stored snapshot, not folded into identity (a member rebuild that
+#: reproduces its content must not fork the concat id).
+MEMBER_SNAPSHOT_LOGICAL_FIELDS = (
+    "member_index",
+    "nwb_file_name",
+    "sort_group_id",
+    "interval_list_name",
+    "team_name",
+    "recording_id",
+)
+
+
+def member_set_hash(snapshot_rows: list[dict]) -> str:
+    """Return the content-addressed hash of an ordered concat member set.
+
+    Hashes only the LOGICAL identity of each member
+    (:data:`MEMBER_SNAPSHOT_LOGICAL_FIELDS`), canonicalized and ordered by
+    ``member_index``, into a 64-char SHA-256 hex digest. This is folded into
+    ``concat_recording_id`` so that two ``SessionGroup``\\s identical in name and
+    params but differing in their ordered member set mint DIFFERENT concat ids --
+    and so a later edit to ``SessionGroup.Member`` produces a new id rather than
+    silently reusing an existing concat over a changed member set.
+
+    The per-member ``recording_content_hash`` (and any sample-count field) is
+    excluded: member content is verification, not identity. Content drift is
+    caught at materialize/rebuild by comparing the live ``Recording`` against the
+    stored snapshot (``ConcatMemberDriftError``), the same separation
+    ``Recording`` keeps between its selection-logical ``recording_id`` and its
+    post-write ``content_hash``.
+
+    Parameters
+    ----------
+    snapshot_rows : list of dict
+        Member-snapshot rows, each carrying at least
+        :data:`MEMBER_SNAPSHOT_LOGICAL_FIELDS`. Order is irrelevant (rows are
+        sorted by ``member_index``); extra keys (e.g. ``recording_content_hash``)
+        are ignored.
+
+    Returns
+    -------
+    str
+        A 64-character lowercase hex SHA-256 digest of the ordered member set.
+    """
+    import hashlib
+    import json
+    import uuid
+
+    def _canonical(value):
+        # Match _selection_identity normalization so a UUID object and its str
+        # form -- and a numpy vs plain int sort_group_id -- collapse to one hash.
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return str(uuid.UUID(value))
+            except (ValueError, AttributeError, TypeError):
+                return value
+        if hasattr(value, "__index__"):
+            return int(value)
+        raise TypeError(
+            "member_set_hash: member identity values must be UUID, str, int, "
+            f"or bool; got {type(value).__name__!r} ({value!r})"
+        )
+
+    ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
+    canonical = [
+        {field: _canonical(row[field]) for field in MEMBER_SNAPSHOT_LOGICAL_FIELDS}
+        for row in ordered
+    ]
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def resolve_motion_correction(
     motion_params: dict, *, is_multi_day: bool
 ) -> tuple[str | None, dict]:

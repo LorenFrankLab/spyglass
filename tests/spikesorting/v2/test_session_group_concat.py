@@ -320,6 +320,113 @@ def test_concat_selection_inserts_and_is_idempotent(same_day_group):
 
 
 @pytest.mark.slow
+def test_concat_id_folds_member_set(same_day_group):
+    """``concat_recording_id`` folds the ordered frozen member set: it equals the
+    deterministic id of (identity + member_set_hash) and DIFFERS from the
+    pre-fold formula (identity alone), and the stored hash is the hash of the
+    captured snapshot rows."""
+    from spyglass.spikesorting.v2._concat_recording import member_set_hash
+    from spyglass.spikesorting.v2._selection_identity import deterministic_id
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    grp = same_day_group
+    pk = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    row = (ConcatenatedRecordingSelection & pk).fetch1()
+    identity = {
+        f: row[f] for f in ConcatenatedRecordingSelection._IDENTITY_FIELDS
+    }
+    set_hash = row["member_set_hash"]
+
+    folded = deterministic_id(
+        "concat_recording", {**identity, "member_set_hash": set_hash}
+    )
+    unfolded = deterministic_id("concat_recording", identity)
+    assert pk["concat_recording_id"] == folded
+    assert pk["concat_recording_id"] != unfolded
+
+    snap = (ConcatenatedRecordingSelection.MemberSnapshot & pk).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    assert member_set_hash(snap) == set_hash
+
+
+@pytest.mark.slow
+def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
+    """The frozen ``MemberSnapshot`` captures each member's logical identity, its
+    resolved ``recording_id``, and its ``Recording.content_hash`` -- the values a
+    later materialize / rebuild verifies the live recordings against."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    grp = same_day_group
+    pk = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    snap = (ConcatenatedRecordingSelection.MemberSnapshot & pk).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    assert [r["member_index"] for r in snap] == [0, 1]
+    for row, rec_pk in zip(snap, grp["recording_pks"]):
+        assert str(row["recording_id"]) == str(rec_pk["recording_id"])
+        assert row["recording_content_hash"] == (
+            Recording & rec_pk
+        ).fetch1("content_hash")
+        assert row["team_name"] == grp["owner"]
+
+
+@pytest.mark.slow
+def test_concat_id_changes_with_member_set(same_day_group):
+    """Two selections identical in params but over a DIFFERENT frozen member set
+    mint different ``concat_recording_id``s (and different ``member_set_hash``es)
+    -- a different member set is a different concat, not a silent reuse."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    grp = same_day_group
+    both = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **grp["group_key"],
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    # A second group over only the first member -- same owner + params, a
+    # different ordered member set. (Torn down with the owner by same_day_group.)
+    owner = grp["owner"]
+    SessionGroup.create_group(
+        owner, "sg_concat_subset", [grp["same_day_members"][0]]
+    )
+    subset = ConcatenatedRecordingSelection.insert_selection(
+        {
+            "session_group_owner": owner,
+            "session_group_name": "sg_concat_subset",
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "motion_correction_params_name": "none",
+        }
+    )
+    assert subset["concat_recording_id"] != both["concat_recording_id"]
+    assert (ConcatenatedRecordingSelection & subset).fetch1(
+        "member_set_hash"
+    ) != (ConcatenatedRecordingSelection & both).fetch1("member_set_hash")
+
+
+@pytest.mark.slow
 def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
     """A member with no populated Recording for the requested preprocessing
     recipe raises ``MissingRecordingForConcatError`` naming the missing member."""
