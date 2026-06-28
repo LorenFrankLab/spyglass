@@ -862,6 +862,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         members = (SessionGroup.Member & group_key).fetch(
             as_dict=True, order_by="member_index"
         )
+        # Re-assert electrode-space compatibility at the compute boundary, not
+        # just at insert_selection: a raw ``allow_direct_insert`` selection or a
+        # member edit after selection could otherwise reach compute with members
+        # in different physical electrode spaces (same SI channel ids/geometry,
+        # different DB electrodes/regions) and be silently read in the anchor
+        # frame.
+        assert_members_share_electrode_space(members)
         member_plan = self._resolve_member_recording_keys(
             members, preprocessing_params_name
         )

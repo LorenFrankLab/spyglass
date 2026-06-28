@@ -389,6 +389,42 @@ def test_concat_rejects_mismatched_electrode_space(monkeypatch):
     sg.assert_members_share_electrode_space(members)
 
 
+@pytest.mark.slow
+def test_concat_make_fetch_rejects_mismatched_electrode_space(
+    same_day_group, monkeypatch
+):
+    """``ConcatenatedRecording.make_fetch`` re-asserts electrode-space
+    compatibility at the compute boundary -- so member drift after selection (or
+    a raw ``allow_direct_insert`` selection) that bypassed ``insert_selection``'s
+    check still fails before the concat is read in the anchor member's frame."""
+    from spyglass.spikesorting.v2 import session_group as sg
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    # The members match at selection time (insert_selection's check passes).
+    key = ConcatenatedRecordingSelection.insert_selection(
+        {
+            **same_day_group["group_key"],
+            "preprocessing_params_name": same_day_group[
+                "preprocessing_params_name"
+            ],
+            "motion_correction_params_name": "none",
+        }
+    )
+    # Simulate post-selection drift: the per-member electrode/region signatures
+    # now diverge, so the compute-boundary re-check must reject.
+    signatures = {0: ((0, "hpc"),), 1: ((0, "cortex"),)}
+    monkeypatch.setattr(
+        sg,
+        "_member_electrode_signature",
+        lambda member: signatures[member["member_index"]],
+    )
+    with pytest.raises(ValueError, match="electrode space"):
+        ConcatenatedRecording().make_fetch(key)
+
+
 def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
     """A bypass-inserted concat sort carrying an ``ArtifactDetectionSource`` row
     raises ``SchemaBypassError`` at ``make_fetch`` instead of sorting unmasked.
