@@ -218,33 +218,53 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         Raises
         ------
+        SessionGroupInputError
+            If ``members`` is empty, a member dict is missing a required key
+            (``nwb_file_name`` / ``sort_group_id`` / ``interval_list_name``),
+            references a non-ingested session, duplicates another member, or
+            references a ``SortGroupV2`` / ``IntervalList`` / ``LabTeam`` that
+            does not exist.
         SessionGroupDateError
             If a member dict carries ``recording_date`` (dates are derived),
             or if members span multiple dates without ``allow_multi_day=True``.
         """
-        from spyglass.spikesorting.v2.exceptions import SessionGroupDateError
+        from spyglass.spikesorting.v2.exceptions import (
+            SessionGroupDateError,
+            SessionGroupInputError,
+        )
 
         if not members:
-            raise ValueError(
+            raise SessionGroupInputError(
                 "SessionGroup.create_group: members is empty; a group needs "
                 "at least one sorting member (nwb_file_name, sort_group_id, "
                 "interval_list_name)."
             )
 
+        required_keys = ("nwb_file_name", "sort_group_id", "interval_list_name")
         rows: list[dict] = []
         dates: list = []
         for i, member in enumerate(members):
+            missing = [k for k in required_keys if k not in member]
+            if missing:
+                raise SessionGroupInputError(
+                    f"SessionGroup.create_group: member {i} is missing required "
+                    f"key(s) {missing}; each member needs {list(required_keys)} "
+                    "(plus an optional team_name)."
+                )
             if "recording_date" in member:
                 raise SessionGroupDateError(
                     "SessionGroup.create_group: recording_date is derived "
                     "from Session.session_start_time and must not be supplied "
                     "in member dictionaries; remove it."
                 )
-            derived_date = (
-                (Session & {"nwb_file_name": member["nwb_file_name"]})
-                .fetch1("session_start_time")
-                .date()
-            )
+            session_match = Session & {"nwb_file_name": member["nwb_file_name"]}
+            if not session_match:
+                raise SessionGroupInputError(
+                    f"SessionGroup.create_group: member {i} references "
+                    f"nwb_file_name {member['nwb_file_name']!r}, which is not an "
+                    "ingested Session. Ingest it first (e.g. insert_sessions)."
+                )
+            derived_date = session_match.fetch1("session_start_time").date()
             dates.append(derived_date)
             rows.append(
                 {
@@ -274,7 +294,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             duplicates = sorted(
                 {ident for ident in identities if identities.count(ident) > 1}
             )
-            raise ValueError(
+            raise SessionGroupInputError(
                 "SessionGroup.create_group: duplicate logical member(s) "
                 f"{duplicates} (same nwb_file_name / sort_group_id / "
                 "interval_list_name / team_name). Each member must be distinct; "
@@ -292,19 +312,30 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 "not concatenation."
             )
 
-        with cls.connection.transaction:
-            # create_group IS the validation boundary (it derived + checked the
-            # member dates and shaped every Member row), so it bypasses the
-            # FactoryOnlyMaster insert guard for its already-validated master.
-            cls.insert1(
-                {
-                    "session_group_owner": session_group_owner,
-                    "session_group_name": session_group_name,
-                    "description": description,
-                },
-                allow_direct_insert=True,
-            )
-            cls.Member.insert(rows)
+        try:
+            with cls.connection.transaction:
+                # create_group IS the validation boundary (it derived + checked
+                # the member dates and shaped every Member row), so it bypasses
+                # the FactoryOnlyMaster insert guard for its validated master.
+                cls.insert1(
+                    {
+                        "session_group_owner": session_group_owner,
+                        "session_group_name": session_group_name,
+                        "description": description,
+                    },
+                    allow_direct_insert=True,
+                )
+                cls.Member.insert(rows)
+        except dj.errors.IntegrityError as exc:
+            # A member's SortGroupV2 / IntervalList / LabTeam foreign key does
+            # not exist -- translate the raw integrity error into a typed,
+            # actionable one instead of leaking the DataJoint message.
+            raise SessionGroupInputError(
+                "SessionGroup.create_group: a member references a SortGroupV2, "
+                "IntervalList, or LabTeam row that does not exist. Verify each "
+                "member's sort_group_id / interval_list_name / team_name "
+                f"(create the sort groups / team first). ({exc})"
+            ) from exc
 
     @classmethod
     def is_multi_day(cls, key: dict) -> bool:

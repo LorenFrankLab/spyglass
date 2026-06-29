@@ -197,14 +197,18 @@ class PreflightReport:
     resolved_pipeline_preset
         The pipeline-preset name that was checked.
     expected_ids
-        The selection PKs a subsequent ``run_v2_pipeline`` would produce,
-        each annotated with whether the row already exists, e.g.
-        ``{"recording_id": {"id": UUID(...), "exists": False}, ...}``. IDs
-        are computed DB-free via ``deterministic_id``; ``exists`` is a
-        ``& pk`` restriction. Empty when the preset is unknown (the param
-        names needed to derive the IDs are then unavailable). For an ``ok``
-        report each ``id`` equals the PK ``run_v2_pipeline`` returns.
-        ``curation_id`` is intentionally excluded: it is assigned by
+        The selection PKs a subsequent ``run_v2_pipeline`` would produce, each
+        annotated with whether its SELECTION row and its COMPUTED output row
+        already exist, e.g. ``{"recording_id": {"id": UUID(...),
+        "exists": False, "computed_exists": False}, ...}``. ``exists`` is the
+        selection ``& pk`` restriction (the run would reuse this PK);
+        ``computed_exists`` is the computed-table ``& pk`` restriction (the
+        populate already ran, so that stage would be a near-zero-cost reuse) --
+        distinguishing them shows what work the run would actually do. IDs are
+        computed DB-free via ``deterministic_id``. Empty when the preset is
+        unknown (the param names needed to derive the IDs are then unavailable).
+        For an ``ok`` report each ``id`` equals the PK ``run_v2_pipeline``
+        returns. ``curation_id`` is intentionally excluded: it is assigned by
         ``CurationV2.insert_curation``, not content-addressed.
     checks
         Per-check detail; every check runs (the report is complete, not
@@ -370,11 +374,13 @@ def preflight_v2_pipeline(
         sorting_identity_payload,
     )
     from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
         ArtifactDetectionParameters,
         ArtifactDetectionSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
+        Recording,
         RecordingSelection,
         SortGroupV2,
     )
@@ -384,6 +390,7 @@ def preflight_v2_pipeline(
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
         SorterParameters,
+        Sorting,
         SortingSelection,
     )
 
@@ -708,13 +715,19 @@ def preflight_v2_pipeline(
             artifact_detection_id=artifact_detection_id,
         ),
     )
+    # Per stage, ``exists`` is whether the SELECTION row exists (the run would
+    # reuse this PK) and ``computed_exists`` whether the COMPUTED output row
+    # exists (the populate already ran -- a reused, near-zero-cost stage).
+    # Distinguishing them tells a caller what work the run would actually do: a
+    # selection can exist with its output not yet populated.
     expected_ids = {
         "recording_id": {
             "id": recording_id,
             "exists": bool(RecordingSelection & {"recording_id": recording_id}),
+            "computed_exists": bool(Recording & {"recording_id": recording_id}),
         },
         "artifact_detection_id": (
-            {"id": None, "exists": False}
+            {"id": None, "exists": False, "computed_exists": False}
             if artifact_detection_id is None
             else {
                 "id": artifact_detection_id,
@@ -722,11 +735,16 @@ def preflight_v2_pipeline(
                     ArtifactDetectionSelection
                     & {"artifact_detection_id": artifact_detection_id}
                 ),
+                "computed_exists": bool(
+                    ArtifactDetection
+                    & {"artifact_detection_id": artifact_detection_id}
+                ),
             }
         ),
         "sorting_id": {
             "id": sorting_id,
             "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
+            "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
         },
     }
 

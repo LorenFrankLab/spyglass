@@ -804,7 +804,9 @@ def test_preflight_expected_ids_round_trip(preflight_session):
     pre = preflight_v2_pipeline(**preflight_inputs)
     assert pre.ok is True
     for stage in ("recording_id", "artifact_detection_id", "sorting_id"):
+        # Pre-run: neither the selection nor the computed output exists.
         assert pre.expected_ids[stage]["exists"] is False
+        assert pre.expected_ids[stage]["computed_exists"] is False
 
     run_summary = run_v2_pipeline(**preflight_inputs)
     assert pre.expected_ids["recording_id"]["id"] == run_summary["recording_id"]
@@ -816,7 +818,9 @@ def test_preflight_expected_ids_round_trip(preflight_session):
 
     post = preflight_v2_pipeline(**preflight_inputs)
     for stage in ("recording_id", "artifact_detection_id", "sorting_id"):
+        # Post-run: both the selection and the computed output exist.
         assert post.expected_ids[stage]["exists"] is True
+        assert post.expected_ids[stage]["computed_exists"] is True
 
     _clean_session_v2({"nwb_file_name": preflight_inputs["nwb_file_name"]})
 

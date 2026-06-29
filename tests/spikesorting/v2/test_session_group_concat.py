@@ -176,6 +176,52 @@ def test_create_group_rejects_duplicate_logical_members(
         )
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_create_group_rejects_missing_member_key():
+    """A member dict missing a required key raises a typed error, not KeyError."""
+    from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    with pytest.raises(SessionGroupInputError, match="missing required key"):
+        SessionGroup.create_group(
+            "any_owner", "sg_missing_key", [{"nwb_file_name": "x.nwb"}]
+        )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_create_group_rejects_nonexistent_session():
+    """A member referencing a non-ingested session raises a typed error, not a
+    bare fetch1 failure."""
+    from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    with pytest.raises(SessionGroupInputError, match="not an ingested Session"):
+        SessionGroup.create_group(
+            "any_owner",
+            "sg_no_session",
+            [
+                {
+                    "nwb_file_name": "not_ingested_.nwb",
+                    "sort_group_id": 0,
+                    "interval_list_name": "raw data valid times",
+                }
+            ],
+        )
+
+
+@pytest.mark.slow
+def test_create_group_rejects_missing_foreign_key(chronic_2_session_minirec):
+    """A member with a valid session but a non-existent SortGroupV2 raises a
+    typed error, not a raw DataJoint integrity error."""
+    from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    sub = chronic_2_session_minirec
+    bad_member = {**sub["same_day_members"][0], "sort_group_id": 99999}
+    with pytest.raises(SessionGroupInputError, match="does not exist"):
+        SessionGroup.create_group(sub["owner"], "sg_bad_fk", [bad_member])
+
+
 @pytest.mark.slow
 def test_create_group_same_day_inserts_and_is_not_multi_day(
     chronic_2_session_minirec,

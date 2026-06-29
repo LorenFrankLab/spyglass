@@ -121,6 +121,19 @@ class SessionGroupDateError(ValueError):
     """
 
 
+class SessionGroupInputError(ValueError):
+    """Raise on malformed input to ``SessionGroup.create_group()``.
+
+    Covers a member dict missing a required key (``nwb_file_name`` /
+    ``sort_group_id`` / ``interval_list_name``), a member referencing a session
+    that is not ingested, an empty / duplicate member set, or a member whose
+    ``SortGroupV2`` / ``IntervalList`` / ``LabTeam`` foreign key does not exist
+    -- surfaced as a clear, typed error instead of a bare ``KeyError``,
+    ``fetch1`` failure, or DataJoint integrity error. A ``ValueError`` subclass
+    so existing ``except ValueError`` callers still catch it.
+    """
+
+
 class ConcatBrainRegionAmbiguousError(RuntimeError):
     """Raise on ambiguous brain regions for concat-backed data.
 
