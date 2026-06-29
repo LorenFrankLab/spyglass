@@ -181,6 +181,7 @@ if run_unit_match:
         as_dict=True, order_by="member_index"
     )
 
+    member_summaries = {}
     for member in group_members:
         summary = run_v2_pipeline(
             nwb_file_name=member["nwb_file_name"],
@@ -189,45 +190,35 @@ if run_unit_match:
             team_name=member["team_name"],
             pipeline_preset=single_preset,
         )
+        member_summaries[int(member["member_index"])] = summary
         print(
             f"member {member['member_index']} ({member['nwb_file_name']}): "
             f"sorting_id={summary['sorting_id']} ({summary['n_units']} units)"
         )
 
-# ### B2. List each member's curation choices
+# ### B2. Pin each member's curation
 #
-# `describe_unit_match_choices` walks each member's recordings → sortings →
-# committed curations and lists, per member, every `(sorting_id, curation_id)` you
-# may pin — so you assemble the match input without hand-querying. Pick one entry
-# per member (here the root curation each sort just produced). Choosing the
-# curation explicitly is required by design: an implicit "latest" would make a
-# match silently change when a source session gains a new curation.
+# `describe_unit_match_choices` lists, per member, every committed
+# `(sorting_id, curation_id)` you may pin — useful to see what is available. Here
+# we pin the EXACT sort each member just produced in B1 (from `member_summaries`),
+# rather than guessing an entry from the list: a member may have an older sort of
+# the same session under a different preset, and matching the wrong one would be
+# silent. Pinning the curation explicitly is required by design — an implicit
+# "latest" would make a match change when a source session gains a new curation.
+# To match a labeled/merged curation instead, take its `(sorting_id, curation_id)`
+# from the table below.
 
 if run_unit_match:
-    choices = describe_unit_match_choices(session_group_owner, match_group_name)
-    for member in choices:
-        print(
-            f"member {member['member_index']} ({member['nwb_file_name']}): "
-            f"{len(member['choices'])} curation(s) available"
-        )
+    display(describe_unit_match_choices(session_group_owner, match_group_name))
 
-    # Pin the root curation (parent_curation_id == -1) of each member; swap in a
-    # labeled/merged curation_id to match curated units instead.
-    curation_choices = {}
-    for member in choices:
-        root = next(
-            (c for c in member["choices"] if c["parent_curation_id"] == -1),
-            member["choices"][0] if member["choices"] else None,
-        )
-        if root is None:
-            raise ValueError(
-                f"member {member['member_index']} has no curation to pin; sort "
-                "it first (Part B1)."
-            )
-        curation_choices[member["member_index"]] = {
-            "sorting_id": root["sorting_id"],
-            "curation_id": root["curation_id"],
+    # Pin the root curation of the sort each member just produced above.
+    curation_choices = {
+        member_index: {
+            "sorting_id": summary["sorting_id"],
+            "curation_id": summary["curation_id"],
         }
+        for member_index, summary in member_summaries.items()
+    }
     display(curation_choices)
 
 # ### B3. Match and track

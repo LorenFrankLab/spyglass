@@ -780,10 +780,10 @@ def pipeline_preset_specs() -> dict[str, dict]:
         # ArtifactDetectionSource row) and pins motion correction to the
         # "auto_default" row (preset "auto", which resolves to rigid_fast for a
         # same-day group). Otherwise the same MS5 hippocampus recipe as the
-        # single-session default. NOTE: the concat run path is not wired into
-        # run_v2_pipeline yet (it accepts only single-session inputs and rejects
-        # this motion-pinned preset); this registration makes the recipe
-        # discoverable and clonable until that path lands.
+        # single-session default. Run it via run_v2_pipeline's concat mode
+        # (concat_session_group_owner / concat_session_group_name); a
+        # motion-pinned preset like this one is required there and is rejected
+        # for single-session inputs.
         "franklab_concat_hippocampus_30khz_ms5_2026_06": dict(
             preprocessing_params_name=HIPPOCAMPUS_PREPROC,
             artifact_detection_params_name=None,
@@ -800,12 +800,9 @@ def pipeline_preset_specs() -> dict[str, dict]:
             intended_use=(
                 "Frank-lab same-day chronic hippocampal probes at 30 kHz: "
                 "concatenate a SessionGroup's members into one "
-                "ConcatenatedRecording and sort once (MountainSort5). The "
-                "concatenated run path is NOT wired into run_v2_pipeline yet "
-                "(it takes only single-session inputs and rejects this "
-                "motion-pinned preset); for now this recipe is discoverable and "
-                "clonable, and the members can be sorted individually with a "
-                "single-session preset."
+                "ConcatenatedRecording and sort once (MountainSort5). Run it "
+                "via run_v2_pipeline's concat mode (concat_session_group_owner "
+                "/ concat_session_group_name)."
             ),
             threshold_units="sigma of the whitened signal (~5.5)",
             notes=(

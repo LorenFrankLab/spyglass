@@ -3,10 +3,11 @@
 ``run_v2_pipeline`` chains the recording -> artifact -> sort ->
 curation stages into one call so notebook users can populate an
 end-to-end single-session sort without writing the per-stage
-insert_selection / populate boilerplate. The orchestrator focuses on
-the minimum-viable single-session path; richer surfaces (metrics +
-auto-curation, concat sorts, cross-session matching, UI hooks) come
-in later versions.
+insert_selection / populate boilerplate. The same orchestrator also
+runs metric-driven auto-curation (``auto_curate=True``), same-day
+concatenated sorts (concat mode over a ``SessionGroup``), and a
+publishable browser curation view (``figpack=True``); cross-session
+unit matching is its own helper, ``run_v2_unit_match``.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
 orchestrator looks them up at first call. The shipped presets are the dated
