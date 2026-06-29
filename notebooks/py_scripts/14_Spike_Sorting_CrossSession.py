@@ -99,6 +99,9 @@ match_members = [
 ]
 match_group_name = "day1_to_day2"
 single_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+# The matcher backend + its parameters. The default uses UnitMatchPy; see
+# describe_pipeline_presets()'s sibling MatcherParameters for the shipped rows.
+matcher_params_name = "unitmatch_default"
 
 # The two workflows are independent; enable whichever you need.
 run_concat = True
@@ -238,7 +241,7 @@ if run_unit_match and unitmatch_available:
     match_summary = run_v2_unit_match(
         session_group_owner,
         match_group_name,
-        matcher_params_name="unitmatch_default",
+        matcher_params_name=matcher_params_name,
         curation_choices=curation_choices,
     )
     display(describe_run(match_summary))
