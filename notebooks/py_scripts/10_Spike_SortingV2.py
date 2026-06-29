@@ -221,8 +221,10 @@ run_summary = run_v2_pipeline(
 #
 # `describe_run(run_summary)` renders the run as a receipt: a leading summary row
 # with `n_units` and the `merge_id` **downstream code keys off**, one row per
-# stage (its `*_status` is `"computed"` if the stage ran this call or `"reused"`
-# if its row already existed, with the wall-clock `seconds` spent **this call** —
+# stage (its `*_status` is `"computed"` if the stage ran this call, `"reused"`
+# if its row already existed, or `"skipped"` if the preset has no such stage
+# (e.g. artifact detection for a no-artifact preset), with the wall-clock
+# `seconds` spent **this call** —
 # ≈0 on an idempotent re-run, not cumulative cost), and one row per advisory
 # `warning`. Because warnings are their own rows, a **zero-unit** sort — a
 # legitimate quiet-shank result that still writes an empty-but-real curation +

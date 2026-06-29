@@ -253,7 +253,9 @@ Besides the stable keys (`pipeline_preset` / `recording_id` /
 `n_units`), it carries per-stage observability:
 `recording_status` / `artifact_detection_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
-its row already existed), a `stage_seconds` dict of wall-clock per stage **this
+its row already existed, or `"skipped"` if the preset configured no such stage —
+e.g. `artifact_detection_status` for a no-artifact preset), a `stage_seconds`
+dict of wall-clock per stage **this
 call** (keys `recording` / `artifact_detection` / `sorting` / `curation`; ≈0
 on an idempotent re-run, not cumulative compute), and a `warnings` list (e.g.
 a zero-unit advisory). A failed stage raises `PipelineStageError`, which names

@@ -280,10 +280,13 @@ def preflight_v2_pipeline(
     :class:`PreflightReport` instead of failing minutes into ``populate``
     with an opaque foreign-key or SpikeInterface error.
 
-    Every check is a read-only restriction (``& {...}``) or a pure call;
-    all checks run even after one fails, so the report lists every problem
-    at once. An unknown ``pipeline_preset`` short-circuits before any database
-    access (the later checks need the resolved param names).
+    Every check is a read-only restriction (``& {...}``) or a pure call. Most
+    checks run even after one fails, so the report lists every problem at once.
+    Two cases short-circuit before any database access, because the remaining
+    checks would be meaningless: an unknown ``pipeline_preset`` (the later
+    checks need the resolved param names), and a motion-pinned
+    (concatenated-group) preset, which ``run_v2_pipeline``'s single-session
+    inputs cannot run.
 
     Parameters
     ----------
