@@ -812,8 +812,10 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "to the 'auto_default' row (preset 'auto', which resolves to "
                 "rigid_fast for a same-day group). Otherwise the same MS5 "
                 "hippocampus recipe as the single-session default; MS5 runs "
-                "under the v2 numpy>=2 baseline. Marked experimental until the "
-                "concatenated run path is wired into run_v2_pipeline."
+                "under the v2 numpy>=2 baseline. Run it via run_v2_pipeline's "
+                "concat mode (concat_session_group_owner / "
+                "concat_session_group_name). Marked experimental: validate the "
+                "recipe on your own same-day data before relying on it."
             ),
         ),
     }

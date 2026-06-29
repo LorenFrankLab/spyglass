@@ -823,8 +823,10 @@ def _resolve_session_sort_group_ids(
             "correction (motion_correction_params_name="
             f"{bundle.motion_correction_params_name!r}), so it targets a "
             "concatenated session group, not the single-session inputs the "
-            "session runner drives. Concatenated (same-day) sorting is not wired "
-            "in yet; choose a non-concat preset."
+            "session runner drives. Concatenated (same-day) sorting is not "
+            "available through the session runner; run it directly with "
+            "run_v2_pipeline concat mode (concat_session_group_owner / "
+            "concat_session_group_name), or choose a non-concat preset here."
         )
 
     from spyglass.spikesorting.v2.recording import SortGroupV2
