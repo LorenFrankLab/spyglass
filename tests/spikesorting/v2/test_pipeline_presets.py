@@ -935,6 +935,39 @@ def test_run_v2_pipeline_requires_exactly_one_input_mode():
             run_v2_pipeline(**kwargs)
 
 
+def test_run_v2_pipeline_concat_fields_are_keyword_only():
+    """Concat fields are keyword-only, preserving the old positional order.
+
+    An existing positional call ``run_v2_pipeline(nwb, sort_group_id,
+    interval_list_name, team_name, pipeline_preset)`` must still bind the 5th
+    argument to ``pipeline_preset`` -- not to ``concat_session_group_owner``.
+    The concat fields are therefore keyword-only (after ``*``), and the first
+    five positional-or-keyword parameters keep their original order. DB-free.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    params = inspect.signature(run_v2_pipeline).parameters
+    positional = [
+        name
+        for name, p in params.items()
+        if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ]
+    assert positional[:5] == [
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+        "pipeline_preset",
+    ]
+    for name in (
+        "concat_session_group_owner",
+        "concat_session_group_name",
+    ):
+        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 

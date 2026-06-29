@@ -88,13 +88,14 @@ def run_v2_pipeline(
     sort_group_id: "int | None" = None,
     interval_list_name: "str | None" = None,
     team_name: "str | None" = None,
-    concat_session_group_owner: "str | None" = None,
-    concat_session_group_name: "str | None" = None,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     description: str = "",
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
+    *,
+    concat_session_group_owner: "str | None" = None,
+    concat_session_group_name: "str | None" = None,
 ) -> RunV2PipelineSummary:
     """End-to-end sort in one call: select + populate every stage, then curate.
 
@@ -198,42 +199,61 @@ def run_v2_pipeline(
         ``auto_curate=False``). ``CurationEvaluation`` builds a whitened PCA
         analyzer, so this adds the heaviest populate of the run.
     preflight
-        If True (default), run ``preflight_v2_pipeline`` first as a fast,
-        read-only check that the session / interval / team / sort-group
-        rows, the pipeline preset's parameter rows, and the sorter binary are all
-        present; a failure raises ``PreflightError`` (with the exact fix)
-        before any populate. Pass ``preflight=False`` to skip the check and
-        attempt the run directly (e.g. to see the raw underlying error).
+        If True (default), run a fast, read-only prerequisite check before any
+        populate; a failure raises ``PreflightError`` (with the exact fix). The
+        check is mode-specific:
+
+        - single-session: ``preflight_v2_pipeline`` -- the session / interval /
+          team / sort-group rows, the preset's parameter rows, and the sorter
+          binary.
+        - concat: intentionally minimal -- the ``SessionGroup``, its members,
+          and the preset's motion-correction row exist. It does NOT verify the
+          preset's preprocessing / sorter rows or the sorter binary, so a
+          missing one of those surfaces later as its native error (after the
+          member / concat populate), not as a preflight failure.
+
+        Pass ``preflight=False`` to skip the check and attempt the run directly
+        (e.g. to see the raw underlying error).
 
     Returns
     -------
     RunV2PipelineSummary
-        Run summary with the following stage keys:
+        Run summary. The sort / curation / merge keys are always present; the
+        source-stage keys depend on the input mode.
+
+        Always present:
             ``pipeline_preset``          : the pipeline-preset name
-            ``recording_id``             : RecordingSelection PK
-            ``artifact_detection_id``    : ArtifactDetectionSelection PK, or
-                ``None`` when the preset runs no artifact detection
-                (``artifact_detection_params_name`` is ``None``)
             ``sorting_id``               : SortingSelection PK
             ``curation_id``              : CurationV2 PK
             ``merge_id``                 : SpikeSortingOutput master PK
             ``n_units``                  : unit count (0 on a zero-unit sort)
+        Single-session mode adds:
+            ``recording_id``             : RecordingSelection PK
+            ``artifact_detection_id``    : ArtifactDetectionSelection PK, or
+                ``None`` when the preset runs no artifact detection
+                (``artifact_detection_params_name`` is ``None``)
+        Concat mode adds instead (no artifact stage):
+            ``member_recording_ids``     : the per-member RecordingSelection PKs
+            ``concat_recording_id``      : ConcatenatedRecording PK
         Downstream consumers should key off ``merge_id``. A zero-unit
         sort yields an empty (but real) curation/merge row, not
         ``None``, so the result is always merge-keyable.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
-            ``recording_status`` / ``artifact_detection_status`` /
-            ``sorting_status`` / ``curation_status`` : ``"computed"`` if the stage did work
-                this call, ``"reused"`` if its row already existed and the
-                call no-opped, or ``"skipped"`` if the preset configured no such
-                stage (only ``artifact_detection_status`` for a no-artifact
-                preset) -- see ``_STAGE_STATUSES``.
-            ``stage_seconds``     : dict of monotonic wall-clock seconds
-                spent per stage (keys ``"recording"`` / ``"artifact_detection"``
-                / ``"sorting"`` / ``"curation"``) **this call** -- ≈0 on an
-                idempotent re-run, NOT cumulative compute cost.
+            ``*_status`` (one per source/sort/curation stage above -- e.g.
+                ``recording_status`` / ``artifact_detection_status`` in
+                single-session mode, ``member_recording_status`` /
+                ``concat_recording_status`` in concat mode, plus
+                ``sorting_status`` / ``curation_status``) : ``"computed"`` if the
+                stage did work this call, ``"reused"`` if its row already existed
+                and the call no-opped, or ``"skipped"`` if the preset configured
+                no such stage (only ``artifact_detection_status`` for a
+                no-artifact preset) -- see ``_STAGE_STATUSES``.
+            ``stage_seconds``     : dict of monotonic wall-clock seconds spent
+                per stage **this call** (the same stage names as the ``*_status``
+                keys above) -- ≈0 on an idempotent re-run, NOT cumulative
+                compute cost.
             ``warnings``          : list of human-readable advisories raised
                 during the run (e.g. the zero-unit message); empty when
                 clean.
@@ -499,10 +519,12 @@ def run_v2_pipeline(
         }
         # ConcatenatedRecordingSelection requires every member's Recording to be
         # populated under the preset's preprocessing recipe; build them here so a
-        # single concat call is as self-contained as a single-session run.
-        member_recording_ids = []
-        for member in (SessionGroup.Member & group_key).fetch(as_dict=True):
-            member_recording_key = RecordingSelection.insert_selection(
+        # single concat call is as self-contained as a single-session run. The
+        # member-recording build is its own stage so a member populate failure
+        # surfaces as a PipelineStageError with timing + partial run summary,
+        # the same contract as every other stage.
+        member_recording_keys = [
+            RecordingSelection.insert_selection(
                 {
                     "nwb_file_name": member["nwb_file_name"],
                     "sort_group_id": int(member["sort_group_id"]),
@@ -511,10 +533,27 @@ def run_v2_pipeline(
                     "team_name": member["team_name"],
                 }
             )
-            if not (Recording & member_recording_key):
-                Recording.populate(member_recording_key, reserve_jobs=False)
-            member_recording_ids.append(member_recording_key["recording_id"])
-        run_summary["member_recording_ids"] = member_recording_ids
+            for member in (SessionGroup.Member & group_key).fetch(as_dict=True)
+        ]
+
+        def _populate_member_recordings():
+            for key in member_recording_keys:
+                if not (Recording & key):
+                    Recording.populate(key, reserve_jobs=False)
+
+        (
+            _,
+            run_summary["member_recording_status"],
+            stage_seconds["member_recording"],
+        ) = _run_stage(
+            "member_recording",
+            all(bool(Recording & key) for key in member_recording_keys),
+            _populate_member_recordings,
+            run_summary,
+        )
+        run_summary["member_recording_ids"] = [
+            key["recording_id"] for key in member_recording_keys
+        ]
 
         concat_key = ConcatenatedRecordingSelection.insert_selection(
             {

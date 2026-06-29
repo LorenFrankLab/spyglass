@@ -2035,6 +2035,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert "recording_id" not in summary
         assert "artifact_detection_id" not in summary
         assert "artifact_detection" not in summary["stage_seconds"]
+        # The member-recording build and the concat are each their own stage.
+        assert summary["member_recording_status"] in {"computed", "reused"}
+        assert "member_recording" in summary["stage_seconds"]
         assert "concat_recording" in summary["stage_seconds"]
         # Sorted + curated + registered on the merge table.
         assert summary["n_units"] >= 0

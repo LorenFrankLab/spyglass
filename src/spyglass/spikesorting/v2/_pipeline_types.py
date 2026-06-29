@@ -16,7 +16,11 @@ PipelineOutcome: TypeAlias = Literal["ok", "failed"]
 
 
 class RunV2PipelineRequiredInputs(TypedDict):
-    """Required ``run_v2_pipeline`` keyword arguments."""
+    """Required ``run_v2_pipeline`` keyword arguments for a single-session run.
+
+    A concat run instead supplies ``concat_session_group_owner`` /
+    ``concat_session_group_name`` (see ``RunV2PipelineInputs``).
+    """
 
     nwb_file_name: str
     sort_group_id: int
@@ -24,13 +28,26 @@ class RunV2PipelineRequiredInputs(TypedDict):
     team_name: str
 
 
-class RunV2PipelineInputs(RunV2PipelineRequiredInputs, total=False):
+class RunV2PipelineInputs(TypedDict, total=False):
     """Keyword-argument bundle accepted by ``run_v2_pipeline``.
 
-    Useful for typed ``run_v2_pipeline(**inputs)`` call sites. Optional keys
-    mirror the function defaults.
+    Useful for typed ``run_v2_pipeline(**inputs)`` call sites. Every key is
+    optional because the call accepts exactly one of two input modes, validated
+    at call time:
+
+    - single-session: ``nwb_file_name`` + ``sort_group_id`` +
+      ``interval_list_name`` + ``team_name``
+    - concat: ``concat_session_group_owner`` + ``concat_session_group_name``
+
+    The remaining keys mirror the function defaults.
     """
 
+    nwb_file_name: str
+    sort_group_id: int
+    interval_list_name: str
+    team_name: str
+    concat_session_group_owner: str
+    concat_session_group_name: str
     pipeline_preset: str
     description: str
     require_units: bool
@@ -73,7 +90,8 @@ class PipelineStageSeconds(TypedDict):
     # Single-session source stages.
     recording: NotRequired[float]
     artifact_detection: NotRequired[float]
-    # Concat source stage (concat mode only).
+    # Concat source stages (concat mode only).
+    member_recording: NotRequired[float]
     concat_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
@@ -106,9 +124,10 @@ class RunV2PipelineSummary(TypedDict):
     artifact_detection_id: NotRequired["UUID | None"]
     artifact_detection_status: NotRequired[StageStatus]
     # Concat source keys (concat mode only).
+    member_recording_status: NotRequired[StageStatus]
+    member_recording_ids: NotRequired[list[UUID]]
     concat_recording_id: NotRequired[UUID]
     concat_recording_status: NotRequired[StageStatus]
-    member_recording_ids: NotRequired[list[UUID]]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
     # CurationV2 (its curation_id + merge table id) whose labels are the
