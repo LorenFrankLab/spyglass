@@ -897,6 +897,44 @@ def test_session_runners_reject_motion_pinned_preset_without_db():
             )
 
 
+def test_run_v2_pipeline_requires_exactly_one_input_mode():
+    """run_v2_pipeline rejects missing / partial / mixed input modes DB-free.
+
+    Exactly one COMPLETE mode is required -- all single-session fields, or both
+    concat fields with no single-session field (team_name included). The
+    validation runs before any table import, so it is database-free.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    msg = "exactly one input mode"
+    bad_calls = (
+        {},  # no mode
+        {  # both modes
+            "nwb_file_name": "x.nwb",
+            "sort_group_id": 0,
+            "interval_list_name": "i",
+            "team_name": "t",
+            "concat_session_group_owner": "o",
+            "concat_session_group_name": "g",
+        },
+        {  # partial single-session (missing team_name)
+            "nwb_file_name": "x.nwb",
+            "sort_group_id": 0,
+            "interval_list_name": "i",
+        },
+        {"concat_session_group_owner": "o"},  # partial concat
+        {  # concat + a stray single-session field (team_name invalid in concat)
+            "concat_session_group_owner": "o",
+            "concat_session_group_name": "g",
+            "team_name": "t",
+        },
+    )
+    for kwargs in bad_calls:
+        with pytest.raises(PipelineInputError, match=msg):
+            run_v2_pipeline(**kwargs)
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 

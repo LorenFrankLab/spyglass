@@ -1979,3 +1979,75 @@ def test_concat_applied_merge_through_downstream_and_evaluation(
         (
             SorterParameters & {"sorter_params_name": two_unit_params}
         ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
+    """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
+
+    With a concat preset (motion pinned -> concat-mode, no artifact stage), the
+    orchestrator populates each member's Recording, concatenates them, sorts,
+    and curates -- returning a concat-shaped manifest (concat_recording_id +
+    member_recording_ids, no recording_id / artifact keys) registered on the
+    merge table, and idempotent on rerun.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.pipeline import (
+        register_preset,
+        run_v2_pipeline,
+    )
+    from tests.spikesorting.v2._smoke_constants import (
+        SMOKE_CLUSTERLESS_PARAM_NAME,
+    )
+
+    initialize_v2_defaults()
+    _ensure_clusterless_sorter_params()
+    grp = same_day_group
+    preset_name = "test_concat_clusterless_smoke"
+    # A concat preset (motion set -> concat-mode) using the default preproc +
+    # smoke clusterless sorter the chronic minirec is known to sort. The "none"
+    # motion row is a valid concat motion recipe (no correction).
+    register_preset(
+        preset_name,
+        {
+            "preprocessing_params_name": grp["preprocessing_params_name"],
+            "artifact_detection_params_name": None,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+            "motion_correction_params_name": "none",
+        },
+        validate_rows=False,
+    )
+    try:
+        summary = run_v2_pipeline(
+            concat_session_group_owner=grp["group_key"]["session_group_owner"],
+            concat_session_group_name=grp["group_key"]["session_group_name"],
+            pipeline_preset=preset_name,
+        )
+        # Concat-shaped manifest: concat source keys, no single-session/artifact.
+        assert "concat_recording_id" in summary
+        assert summary["concat_recording_status"] in {"computed", "reused"}
+        assert len(summary["member_recording_ids"]) == 2
+        assert "recording_id" not in summary
+        assert "artifact_detection_id" not in summary
+        assert "artifact_detection" not in summary["stage_seconds"]
+        assert "concat_recording" in summary["stage_seconds"]
+        # Sorted + curated + registered on the merge table.
+        assert summary["n_units"] >= 0
+        assert SpikeSortingOutput.CurationV2 & {"merge_id": summary["merge_id"]}
+
+        # Idempotent: a rerun reuses the concat sort + curation.
+        rerun = run_v2_pipeline(
+            concat_session_group_owner=grp["group_key"]["session_group_owner"],
+            concat_session_group_name=grp["group_key"]["session_group_name"],
+            pipeline_preset=preset_name,
+        )
+        assert rerun["sorting_id"] == summary["sorting_id"]
+        assert rerun["merge_id"] == summary["merge_id"]
+        assert rerun["concat_recording_status"] == "reused"
+    finally:
+        presets_mod._PIPELINE_PRESETS.pop(preset_name, None)

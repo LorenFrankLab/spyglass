@@ -61,34 +61,54 @@ class RunV2PipelineSessionInputs(
 
 
 class PipelineStageSeconds(TypedDict):
-    """Per-stage wall-clock seconds for one ``run_v2_pipeline`` call."""
+    """Per-stage wall-clock seconds for one ``run_v2_pipeline`` call.
 
-    recording: float
-    artifact_detection: float
+    The source-stage keys depend on the input mode: single-session runs carry
+    ``recording`` (+ ``artifact_detection``), concat runs carry
+    ``concat_recording`` instead. ``sorting`` / ``curation`` are always present.
+    """
+
     sorting: float
     curation: float
+    # Single-session source stages.
+    recording: NotRequired[float]
+    artifact_detection: NotRequired[float]
+    # Concat source stage (concat mode only).
+    concat_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
 
 
 class RunV2PipelineSummary(TypedDict):
-    """Return value of ``run_v2_pipeline``."""
+    """Return value of ``run_v2_pipeline``.
+
+    The source keys depend on the input mode. Single-session runs carry
+    ``recording_id`` / ``recording_status`` and ``artifact_detection_id`` /
+    ``artifact_detection_status``; concat runs carry ``concat_recording_id`` /
+    ``concat_recording_status`` and ``member_recording_ids`` instead, and omit
+    the artifact keys (a concat sort has no ArtifactDetectionSource row). The
+    sorting / curation / merge keys are always present.
+    """
 
     pipeline_preset: str
-    recording_id: UUID
-    # None when the preset runs no artifact detection (artifact_detection_status
-    # is then "skipped" and no ArtifactDetectionSource row is created).
-    artifact_detection_id: "UUID | None"
     sorting_id: UUID
     curation_id: int
     merge_id: UUID
     n_units: int
-    recording_status: StageStatus
-    artifact_detection_status: StageStatus
     sorting_status: StageStatus
     curation_status: StageStatus
     stage_seconds: PipelineStageSeconds
     warnings: list[str]
+    # Single-session source keys. ``artifact_detection_id`` is None when the
+    # preset runs no artifact detection (status is then "skipped").
+    recording_id: NotRequired[UUID]
+    recording_status: NotRequired[StageStatus]
+    artifact_detection_id: NotRequired["UUID | None"]
+    artifact_detection_status: NotRequired[StageStatus]
+    # Concat source keys (concat mode only).
+    concat_recording_id: NotRequired[UUID]
+    concat_recording_status: NotRequired[StageStatus]
+    member_recording_ids: NotRequired[list[UUID]]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
     # CurationV2 (its curation_id + merge table id) whose labels are the
