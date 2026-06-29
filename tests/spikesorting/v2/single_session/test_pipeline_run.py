@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
+)
+
+_FIGPACK_MISSING = (
+    importlib.util.find_spec("figpack") is None
+    or importlib.util.find_spec("figpack_spike_sorting") is None
 )
 
 # ===========================================================================
@@ -1134,3 +1141,43 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     rerun = run_v2_pipeline(**common, auto_curate=True)
     assert rerun["auto_curation_id"] == curated["auto_curation_id"]
     assert rerun["auto_curation_status"] == "reused"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _FIGPACK_MISSING, reason="optional FigPack packages not installed"
+)
+def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
+    """``run_v2_pipeline(figpack=True)`` publishes an offline FigPack view.
+
+    A single-session run that finds units additionally builds an offline FigPack
+    manual-curation bundle of the root curation and surfaces its local URI; the
+    figpack stage is observable and reused on an idempotent rerun.
+    """
+    from pathlib import Path
+
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    run_kwargs = dict(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        figpack=True,
+    )
+    summary = run_v2_pipeline(**run_kwargs)
+
+    # A populated view (not the zero-unit skip path).
+    assert summary["n_units"] >= 1
+    assert summary["figpack_status"] in {"computed", "reused"}
+    assert "figpack" in summary["stage_seconds"]
+    figpack_uri = summary["figpack_uri"]
+    assert Path(figpack_uri).exists()  # an offline bundle on disk
+
+    # Idempotent: a rerun reuses the same published view.
+    rerun = run_v2_pipeline(**run_kwargs)
+    assert rerun["figpack_uri"] == figpack_uri
+    assert rerun["figpack_status"] == "reused"

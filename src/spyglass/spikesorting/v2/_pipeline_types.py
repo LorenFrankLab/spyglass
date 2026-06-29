@@ -53,6 +53,8 @@ class RunV2PipelineInputs(TypedDict, total=False):
     require_units: bool
     auto_curate: bool
     preflight: bool
+    figpack: bool
+    figpack_label_options: list[str]
 
 
 class RunV2PipelineSessionRequiredInputs(TypedDict):
@@ -95,6 +97,8 @@ class PipelineStageSeconds(TypedDict):
     concat_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
+    # Present only when ``run_v2_pipeline(figpack=True)``.
+    figpack: NotRequired[float]
 
 
 class RunV2PipelineSummary(TypedDict):
@@ -136,6 +140,12 @@ class RunV2PipelineSummary(TypedDict):
     auto_curation_id: NotRequired[int]
     auto_merge_id: NotRequired[UUID]
     auto_curation_status: NotRequired[StageStatus]
+    # FigPack keys, present only when ``run_v2_pipeline(figpack=True)``: the
+    # published curation-view URI (a local bundle path offline) and its stage
+    # status. ``figpack_uri`` is absent and ``figpack_status`` is ``"skipped"``
+    # when the sort found zero units (no analyzer to summarize).
+    figpack_uri: NotRequired[str]
+    figpack_status: NotRequired[StageStatus]
 
 
 class RunV2PipelineSessionOk(RunV2PipelineSummary):

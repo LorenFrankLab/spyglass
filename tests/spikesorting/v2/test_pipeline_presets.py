@@ -968,6 +968,56 @@ def test_run_v2_pipeline_concat_fields_are_keyword_only():
         assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
 
 
+def test_run_v2_pipeline_figpack_params_are_keyword_only():
+    """figpack / figpack_label_options are keyword-only, like the concat fields.
+
+    New parameters go after ``*`` so they never shift the positional binding of
+    an existing ``run_v2_pipeline(nwb, sort_group_id, interval_list_name,
+    team_name, pipeline_preset)`` call. DB-free.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    params = inspect.signature(run_v2_pipeline).parameters
+    for name in ("figpack", "figpack_label_options"):
+        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["figpack"].default is False
+    assert params["figpack_label_options"].default is None
+
+
+def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
+    """figpack=True without the optional packages fails fast, DB-free.
+
+    The FigPack package availability is checked before any table import, so a
+    missing install raises ``PipelineInputError`` (carrying the install hint)
+    without touching the database -- not an opaque import error surfacing only
+    after a full sort.
+    """
+    import importlib.util
+
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name in ("figpack", "figpack_spike_sorting"):
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(PipelineInputError, match="figpack"):
+        run_v2_pipeline(
+            nwb_file_name="x.nwb",
+            sort_group_id=0,
+            interval_list_name="i",
+            team_name="t",
+            figpack=True,
+        )
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 

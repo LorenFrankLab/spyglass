@@ -96,6 +96,8 @@ def run_v2_pipeline(
     *,
     concat_session_group_owner: "str | None" = None,
     concat_session_group_name: "str | None" = None,
+    figpack: bool = False,
+    figpack_label_options: "list[str] | None" = None,
 ) -> RunV2PipelineSummary:
     """End-to-end sort in one call: select + populate every stage, then curate.
 
@@ -214,6 +216,20 @@ def run_v2_pipeline(
 
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
+    figpack
+        If True, additionally publish an offline FigPack manual-curation view of
+        the run's ROOT curation and add its local bundle URI to the summary
+        (``figpack_uri``) along with a ``figpack`` stage. Default ``False``.
+        Requires the optional FigPack packages (the ``spikesorting-v2-curation``
+        extra); ``figpack=True`` without them fails fast with
+        ``PipelineInputError`` before any populate. A zero-unit sort has no
+        analyzer to summarize, so the view is skipped (``figpack_status`` is
+        ``"skipped"`` and ``figpack_uri`` is absent) rather than failing the run.
+        Hosted upload is not offered here -- the bundle is always local.
+    figpack_label_options
+        Curation label palette (in display order) for the FigPack view; passed
+        through to ``FigPackCurationSelection``. ``None`` (default) uses
+        ``["accept", "mua", "noise"]``. Ignored when ``figpack=False``.
 
     Returns
     -------
@@ -235,6 +251,9 @@ def run_v2_pipeline(
         Concat mode adds instead (no artifact stage):
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
+        ``figpack=True`` adds (unless the sort found zero units):
+            ``figpack_uri``              : the published FigPack curation-view
+                URI (a local bundle path; offline only)
         Downstream consumers should key off ``merge_id``. A zero-unit
         sort yields an empty (but real) curation/merge row, not
         ``None``, so the result is always merge-keyable.
@@ -353,6 +372,25 @@ def run_v2_pipeline(
             "Choose a concat preset (one whose motion_correction_params_name is "
             "set; see describe_pipeline_presets())."
         )
+
+    # Fail fast (still DB-free, before the table imports) if a FigPack view was
+    # requested without the optional packages installed -- otherwise the missing
+    # install would surface only as an opaque import error after a full sort.
+    if figpack:
+        import importlib.util
+
+        from spyglass.spikesorting.v2._figpack_curation import (
+            FIGPACK_INSTALL_HINT,
+        )
+
+        if (
+            importlib.util.find_spec("figpack") is None
+            or importlib.util.find_spec("figpack_spike_sorting") is None
+        ):
+            raise PipelineInputError(
+                "run_v2_pipeline: figpack=True but the FigPack packages are not "
+                f"installed. {FIGPACK_INSTALL_HINT}"
+            )
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -743,6 +781,52 @@ def run_v2_pipeline(
         ]
         run_summary["auto_curation_id"] = child["curation_id"]
         run_summary["auto_merge_id"] = auto_merge_id
+
+    # Optional FigPack manual-curation view: only when the caller opts in.
+    # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes
+    # raw-namespace curations only -- an auto-curated child lives in the
+    # curation_evaluation namespace) and surface its local URI. A zero-unit sort
+    # has no analyzer to summarize, so figpack is skipped with a warning rather
+    # than failing an otherwise-successful empty sort. These keys are added only
+    # when opted in (NotRequired), so a default run's summary is unchanged.
+    if figpack:
+        if n_units == 0:
+            figpack_skip_warning = (
+                "run_v2_pipeline: figpack=True but the sort found zero units "
+                f"(sorting_id={sorting_key['sorting_id']}); skipping the FigPack "
+                "view -- there is no analyzer to summarize."
+            )
+            logger.warning(figpack_skip_warning)
+            warnings_list.append(figpack_skip_warning)
+            run_summary["figpack_status"] = "skipped"
+            stage_seconds["figpack"] = 0.0
+        else:
+            from spyglass.spikesorting.v2.figpack_curation import (
+                FigPackCuration,
+                FigPackCurationSelection,
+            )
+
+            figpack_selection = FigPackCurationSelection.insert_selection(
+                {
+                    "sorting_id": sorting_key["sorting_id"],
+                    "curation_id": curation_key["curation_id"],
+                },
+                label_options=figpack_label_options,
+                upload=False,
+            )
+            (
+                _,
+                run_summary["figpack_status"],
+                stage_seconds["figpack"],
+            ) = _run_stage(
+                "figpack",
+                bool(FigPackCuration & figpack_selection),
+                lambda: FigPackCuration.populate(figpack_selection),
+                run_summary,
+            )
+            run_summary["figpack_uri"] = (
+                FigPackCuration & figpack_selection
+            ).fetch1("figpack_uri")
 
     run_summary["stage_seconds"] = stage_seconds
     return cast(RunV2PipelineSummary, run_summary)

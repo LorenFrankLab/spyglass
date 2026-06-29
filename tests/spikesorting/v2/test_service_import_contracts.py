@@ -117,6 +117,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "require_units",
         "auto_curate",
         "preflight",
+        "figpack",
+        "figpack_label_options",
     }
     # The single-session required quartet is still documented as its own type.
     assert pipeline_types.RunV2PipelineRequiredInputs.__required_keys__ == {
