@@ -1,13 +1,10 @@
 # Convenience functions
 # some DLC-utils copied from datajoint element-interface utils.py
-import grp
 import logging
 import os
-import pwd
 import subprocess
 import sys
 import matplotlib.path
-from collections.abc import Sequence
 from functools import reduce
 from itertools import combinations, groupby
 from operator import itemgetter
@@ -125,47 +122,6 @@ def validate_smooth_params(params):
     )
 
 
-def _set_permissions(directory, mode, username: str, groupname: str = None):
-    """
-    Use to recursively set ownership and permissions for
-    directories/files that result from the DLC pipeline
-
-    Parameters
-    ----------
-    directory : str or PosixPath
-        path to target directory
-    mode : stat read-out
-        list of permissions to set using stat package
-        (e.g. mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
-    username : str
-        username of user to set as owner and apply permissions to
-    groupname : str
-        existing Linux groupname to set as group owner
-        and apply permissions to
-
-    Returns
-    -------
-    None
-    """
-    ActivityLog().deprecate_log(  # pragma: no cover
-        "dlc_utils: _set_permissions"
-    )
-
-    directory = Path(directory)  # pragma: no cover
-    assert directory.exists(), f"Target directory: {directory} does not exist"
-    uid = pwd.getpwnam(username).pw_uid  # pragma: no cover
-    if groupname:  # pragma: no cover
-        gid = grp.getgrnam(groupname).gr_gid
-    else:  # pragma: no cover
-        gid = None
-    for dirpath, _, filenames in os.walk(directory):  # pragma: no cover
-        os.chown(dirpath, uid, gid)
-        os.chmod(dirpath, mode)
-        for filename in filenames:
-            os.chown(os.path.join(dirpath, filename), uid, gid)
-            os.chmod(os.path.join(dirpath, filename), mode)
-
-
 def file_log(logger, console=False):
     """Decorator to add a file handler to a logger.
 
@@ -208,98 +164,6 @@ def file_log(logger, console=False):
         return wrapper
 
     return decorator
-
-
-def get_dlc_root_data_dir():  # pragma: no cover
-    """Returns list of potential root directories for DLC data"""
-    ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
-    if "custom" in dj.config:
-        if "dlc_root_data_dir" in dj.config["custom"]:
-            dlc_root_dirs = dj.config.get("custom", {}).get("dlc_root_data_dir")
-    if not dlc_root_dirs:
-        return [
-            "/nimbus/deeplabcut/projects/",
-            "/nimbus/deeplabcut/output/",
-            "/cumulus/deeplabcut/",
-        ]
-    elif not isinstance(dlc_root_dirs, Sequence):
-        return list(dlc_root_dirs)
-    else:
-        return dlc_root_dirs
-
-
-def get_dlc_processed_data_dir() -> str:  # pragma: no cover
-    """Returns session_dir relative to custom 'dlc_output_dir' root"""
-    ActivityLog().deprecate_log("dlc_utils: get_dlc_processed_data_dir")
-    if "custom" in dj.config:
-        if "dlc_output_dir" in dj.config["custom"]:
-            dlc_output_dir = dj.config.get("custom", {}).get("dlc_output_dir")
-    if dlc_output_dir:
-        return Path(dlc_output_dir)
-    else:
-        return Path("/nimbus/deeplabcut/output/")
-
-
-def find_full_path(root_directories, relative_path):  # pragma: no cover
-    """
-    from Datajoint Elements - unused
-    Given a relative path, search and return the full-path
-     from provided potential root directories (in the given order)
-        :param root_directories: potential root directories
-        :param relative_path: the relative path to find the valid root directory
-        :return: full-path (Path object)
-    """
-    ActivityLog().deprecate_log("dlc_utils: find_full_path")
-    relative_path = _to_Path(relative_path)
-
-    if relative_path.exists():
-        return relative_path
-
-    # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, Path)):
-        root_directories = [_to_Path(root_directories)]
-
-    for root_dir in root_directories:
-        if (_to_Path(root_dir) / relative_path).exists():
-            return _to_Path(root_dir) / relative_path
-
-    raise FileNotFoundError(
-        f"No valid full-path found (from {root_directories})"
-        f" for {relative_path}"
-    )
-
-
-def find_root_directory(root_directories, full_path):  # pragma: no cover
-    """
-    From datajoint elements - unused
-    Given multiple potential root directories and a full-path,
-    search and return one directory that is the parent of the given path
-        :param root_directories: potential root directories
-        :param full_path: the full path to search the root directory
-        :return: root_directory (Path object)
-    """
-    ActivityLog().deprecate_log("dlc_utils: find_full_path")
-    full_path = _to_Path(full_path)
-
-    if not full_path.exists():
-        raise FileNotFoundError(f"{full_path} does not exist!")
-
-    # Turn to list if only a single root directory is provided
-    if isinstance(root_directories, (str, Path)):
-        root_directories = [_to_Path(root_directories)]
-
-    try:
-        return next(
-            _to_Path(root_dir)
-            for root_dir in root_directories
-            if _to_Path(root_dir) in set(full_path.parents)
-        )
-
-    except StopIteration as exc:
-        raise FileNotFoundError(
-            f"No valid root directory found (from {root_directories})"
-            f" for {full_path}"
-        ) from exc
 
 
 def infer_output_dir(key, makedir=True):
