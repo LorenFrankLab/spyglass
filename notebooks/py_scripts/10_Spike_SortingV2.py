@@ -399,11 +399,19 @@ if figpack_summary is not None:
         figpack_summary["figpack_uri"]
     )
     print("from figure — labels:", labels, "| merge groups:", merge_groups)
-    # With real edits, commit them as the next curation:
+    # With real edits, commit them as a CHILD of the root curation (pass the
+    # root's curation_id as the parent — the default parent_curation_id=-1 would
+    # try to re-create the root and raise). `merge_action="commit"` applies the
+    # browser's merges into the child's unit set; use `"preview"` instead to
+    # store them as proposals you review in section 7 first.
     # CurationV2.save_manual_curation(
     #     {"sorting_id": run_summary["sorting_id"]},
+    #     parent_curation_id=run_summary["curation_id"],
     #     labels=labels,
     #     merge_groups=merge_groups,
+    #     merge_action="commit",
+    #     curation_source="figpack",
+    #     description="curated in FigPack",
     # )
 
 # ### 7a. Evaluate the root curation (pass 1)
