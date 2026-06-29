@@ -405,8 +405,8 @@ if figpack_summary is not None:
     # browser's merges into the child's unit set; use `"preview"` instead to
     # store them as proposals you review in section 7 first.
     # CurationV2.save_manual_curation(
-    #     {"sorting_id": run_summary["sorting_id"]},
-    #     parent_curation_id=run_summary["curation_id"],
+    #     {"sorting_id": figpack_summary["sorting_id"]},
+    #     parent_curation_id=figpack_summary["curation_id"],
     #     labels=labels,
     #     merge_groups=merge_groups,
     #     merge_action="commit",
