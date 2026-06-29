@@ -1018,6 +1018,35 @@ def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
         )
 
 
+def test_run_v2_unit_match_signature_defaults():
+    """run_v2_unit_match defaults the matcher to unitmatch_default + no choices.
+
+    ``curation_choices`` defaults to ``None`` so the explicit-choice requirement
+    is enforced at call time (never auto-pick a curation). DB-free.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    params = inspect.signature(run_v2_unit_match).parameters
+    assert params["matcher_params_name"].default == "unitmatch_default"
+    assert params["curation_choices"].default is None
+
+
+def test_run_v2_unit_match_requires_explicit_curation_choices():
+    """run_v2_unit_match rejects a missing curation_choices DB-free.
+
+    An implicit "latest curation" lookup would make the match irreproducible
+    when a source session gains a new curation, so ``curation_choices=None``
+    raises before any table import / DB access.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    with pytest.raises(PipelineInputError, match="curation_choices"):
+        run_v2_unit_match("owner", "group")  # curation_choices defaults to None
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 

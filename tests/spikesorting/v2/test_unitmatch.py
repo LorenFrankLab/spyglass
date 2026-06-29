@@ -2768,3 +2768,149 @@ def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
             "curation_id",
         ):
             assert df[col].notna().all(), f"{col} must be populated, not null"
+
+
+@pytest.mark.slow
+def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
+    """run_v2_unit_match: insert selection -> UnitMatch -> TrackedUnit in one call.
+
+    ``describe_unit_match_choices`` surfaces each member's pinned root curation,
+    and ``run_v2_unit_match`` drives the full cross-session chain to a
+    tracked-unit manifest, idempotent on rerun. Uses a registered lightweight
+    fixture matcher (emitting one pair, bundle extraction stubbed) so the match
+    is deterministic without UnitMatchPy's multi-unit metric path -- the same
+    substrate the table-layer matcher tests use.
+    """
+    from pydantic import BaseModel, ConfigDict, Field
+
+    from spyglass.spikesorting.v2 import _unitmatch_backend
+    from spyglass.spikesorting.v2 import matcher_protocol as mp
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.matcher_protocol import (
+        MatchPair,
+        register_matcher,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        describe_unit_match_choices,
+        run_v2_unit_match,
+    )
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+
+    # Discovery: each member's available curations include the pinned root.
+    described = describe_unit_match_choices(grp["owner"], grp["group_name"])
+    assert [m["member_index"] for m in described] == [0, 1]
+    for index, member in enumerate(described):
+        pinned = grp["choices"][index]
+        assert any(
+            c["sorting_id"] == pinned["sorting_id"]
+            and c["curation_id"] == pinned["curation_id"]
+            for c in member["choices"]
+        )
+
+    matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
+    matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
+    if len(matchable_a) == 0 or len(matchable_b) == 0:
+        pytest.skip("minirec sort produced no matchable units to pair")
+    unit_a, unit_b = int(matchable_a[0]), int(matchable_b[0])
+
+    class _FixtureMatcherParams(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        tracked_unit_threshold: float = 0.5
+        max_strict_nodes: int = 2000
+        probability: float = 0.99
+        pairs: list = Field(default_factory=list)
+        schema_version: int = 1
+
+    class _FixturePairer:
+        name = "fixture_pairer"
+
+        def match(self, session_inputs, params):
+            left = session_inputs[0].session_key
+            right = session_inputs[1].session_key
+            return [
+                MatchPair(
+                    session_a_sorting_id=str(left["sorting_id"]),
+                    session_a_curation_id=int(left["curation_id"]),
+                    unit_a_id=int(pair_a),
+                    session_b_sorting_id=str(right["sorting_id"]),
+                    session_b_curation_id=int(right["curation_id"]),
+                    unit_b_id=int(pair_b),
+                    match_probability=float(params.get("probability", 0.99)),
+                )
+                for pair_a, pair_b in params.get("pairs", [])
+            ]
+
+    def _noop_extract(session_dir, recording, sorting, **kwargs):
+        Path(session_dir).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        _unitmatch_backend, "extract_unitmatch_bundle", _noop_extract
+    )
+
+    saved_matchers = dict(mp._MATCHER_REGISTRY)
+    saved_schemas = dict(mp._SCHEMA_REGISTRY)
+    register_matcher(_FixturePairer(), _FixtureMatcherParams)
+    matcher_name = "fixture_pairer_run_params"
+    selection_pk = None
+    try:
+        MatcherParameters().insert1(
+            {
+                "matcher_params_name": matcher_name,
+                "matcher": "fixture_pairer",
+                "params": {"pairs": [[unit_a, unit_b]], "probability": 0.99},
+            },
+            skip_duplicates=True,
+        )
+
+        # Full chain via the orchestrator.
+        summary = run_v2_unit_match(
+            grp["owner"],
+            grp["group_name"],
+            matcher_params_name=matcher_name,
+            curation_choices=grp["choices"],
+        )
+        selection_pk = {"unitmatch_id": summary["unitmatch_id"]}
+        assert summary["session_group_name"] == grp["group_name"]
+        assert summary["matcher_params_name"] == matcher_name
+        assert summary["unitmatch_status"] in {"computed", "reused"}
+        assert summary["tracked_unit_status"] in {"computed", "reused"}
+        assert summary["n_pairs"] == 1
+        assert summary["n_tracked_units"] >= 1
+        assert set(summary["stage_seconds"]) == {"unit_match", "tracked_unit"}
+        # The matched pair forms exactly one 2-session tracked unit.
+        matched = [
+            row
+            for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
+            if row["n_sessions_observed"] == 2
+        ]
+        assert len(matched) == 1
+
+        # Idempotent: a rerun reuses both stages.
+        rerun = run_v2_unit_match(
+            grp["owner"],
+            grp["group_name"],
+            matcher_params_name=matcher_name,
+            curation_choices=grp["choices"],
+        )
+        assert rerun["unitmatch_id"] == summary["unitmatch_id"]
+        assert rerun["unitmatch_status"] == "reused"
+        assert rerun["tracked_unit_status"] == "reused"
+        assert rerun["n_pairs"] == 1
+    finally:
+        if selection_pk is not None:
+            (UnitMatch & selection_pk).super_delete(warn=False)
+            (UnitMatchSelection & selection_pk).super_delete(warn=False)
+        (
+            MatcherParameters & {"matcher_params_name": matcher_name}
+        ).super_delete(warn=False)
+        mp._MATCHER_REGISTRY.clear()
+        mp._MATCHER_REGISTRY.update(saved_matchers)
+        mp._SCHEMA_REGISTRY.clear()
+        mp._SCHEMA_REGISTRY.update(saved_schemas)

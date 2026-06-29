@@ -27,7 +27,9 @@ from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
     RunV2PipelineSessionResult,
     RunV2PipelineSummary,
+    RunV2UnitMatchSummary,
     StageStatus,
+    UnitMatchMemberChoices,
 )
 
 # Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
@@ -1110,3 +1112,239 @@ def run_v2_pipeline_session(
         "Call describe_run(results) for the per-group receipt."
     )
     return cast(list[RunV2PipelineSessionResult], results)
+
+
+def run_v2_unit_match(
+    session_group_owner: str,
+    session_group_name: str,
+    matcher_params_name: str = "unitmatch_default",
+    curation_choices: "dict | None" = None,
+) -> RunV2UnitMatchSummary:
+    """Match units across a SessionGroup's members in one call, then track them.
+
+    Chains the cross-session unit-matching stages into one call:
+    ``UnitMatchSelection.insert_selection`` -> ``UnitMatch`` (pairwise matches)
+    -> ``TrackedUnit`` (biological-unit identity across sessions). Idempotent:
+    re-running with the same inputs reuses the existing rows.
+
+    ``curation_choices`` is REQUIRED and explicit -- this helper never auto-picks
+    a "latest" curation, which would make the match irreproducible the moment a
+    source session gains a new curation. Build it from
+    :func:`describe_unit_match_choices`.
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name : str
+        Identify the ``SessionGroup`` whose members are matched.
+    matcher_params_name : str
+        ``MatcherParameters`` row to use. Default ``"unitmatch_default"`` (the
+        ``UnitMatchPy`` backend; ``MatcherParameters.insert_default()`` seeds it).
+        The same row supplies ``TrackedUnit``'s threshold / budget.
+    curation_choices : dict
+        ``{member_index: {"sorting_id": ..., "curation_id": ...}}`` -- exactly
+        one committed curation pinned per member. ``None`` (the default) raises.
+
+    Returns
+    -------
+    RunV2UnitMatchSummary
+        ``session_group_owner`` / ``session_group_name`` / ``matcher_params_name``,
+        the ``unitmatch_id`` selection PK, ``n_pairs`` (pairwise matches) and
+        ``n_tracked_units`` (cross-session biological units), the per-stage
+        ``unitmatch_status`` / ``tracked_unit_status`` (``"computed"`` /
+        ``"reused"``), ``stage_seconds`` (keys ``unit_match`` / ``tracked_unit``),
+        and ``warnings``.
+
+    Raises
+    ------
+    PipelineInputError
+        If ``curation_choices`` is ``None`` or ``matcher_params_name`` is not a
+        known ``MatcherParameters`` row.
+    ValueError
+        From ``insert_selection`` on a missing/extra member choice, a
+        non-existent curation, or a curation that does not belong to its member.
+    PipelineStageError
+        If ``UnitMatch`` / ``TrackedUnit`` populate fails (names the stage,
+        carries the partial summary). A missing optional matcher backend (e.g.
+        ``UnitMatchPy``) surfaces here with the backend's install hint.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    # curation_choices is REQUIRED and explicit: an implicit "latest curation"
+    # lookup would make the match irreproducible the moment a source session
+    # gains a new curation. Validate DB-free, before any table import.
+    if curation_choices is None:
+        raise PipelineInputError(
+            "run_v2_unit_match requires explicit curation_choices "
+            "(member_index -> {'sorting_id': ..., 'curation_id': ...}); it never "
+            "auto-picks a curation. List each member's options with "
+            "describe_unit_match_choices(session_group_owner, "
+            "session_group_name)."
+        )
+
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    if not (MatcherParameters & {"matcher_params_name": matcher_params_name}):
+        raise PipelineInputError(
+            "run_v2_unit_match: unknown matcher_params_name "
+            f"{matcher_params_name!r}. Seed defaults with "
+            "MatcherParameters.insert_default() (ships 'unitmatch_default'), or "
+            "register a custom matcher row first."
+        )
+
+    run_summary: dict[str, Any] = {
+        "session_group_owner": session_group_owner,
+        "session_group_name": session_group_name,
+        "matcher_params_name": matcher_params_name,
+    }
+    stage_seconds: dict[str, float] = {}
+
+    # insert_selection pins one curation per member and validates coverage /
+    # per-member ownership / geometry BEFORE any populate (a wrong-member or
+    # missing choice raises here, not deep in the matcher).
+    selection = UnitMatchSelection.insert_selection(
+        session_group_owner,
+        session_group_name,
+        matcher_params_name,
+        curation_choices,
+    )
+    run_summary["unitmatch_id"] = selection["unitmatch_id"]
+
+    # Pairwise cross-session match.
+    (
+        _,
+        run_summary["unitmatch_status"],
+        stage_seconds["unit_match"],
+    ) = _run_stage(
+        "unit_match",
+        bool(UnitMatch & selection),
+        lambda: UnitMatch.populate(selection, reserve_jobs=False),
+        run_summary,
+    )
+    run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
+
+    # Biological-unit identity across sessions, derived from the pair graph with
+    # the same matcher params. Its own stage so a tracked-unit failure (e.g. the
+    # strict-node budget) is reported distinctly from the match itself.
+    (
+        _,
+        run_summary["tracked_unit_status"],
+        stage_seconds["tracked_unit"],
+    ) = _run_stage(
+        "tracked_unit",
+        bool(TrackedUnit & selection),
+        lambda: TrackedUnit.populate(selection, reserve_jobs=False),
+        run_summary,
+    )
+    run_summary["n_tracked_units"] = len(TrackedUnit & selection)
+
+    run_summary["stage_seconds"] = stage_seconds
+    run_summary["warnings"] = []
+    return cast(RunV2UnitMatchSummary, run_summary)
+
+
+def describe_unit_match_choices(
+    session_group_owner: str,
+    session_group_name: str,
+) -> "list[UnitMatchMemberChoices]":
+    """List, per SessionGroup member, the curations you can pin for matching.
+
+    Read-only discovery helper for assembling :func:`run_v2_unit_match`'s
+    ``curation_choices``. For each member (ordered by ``member_index``) it walks
+    the member's recordings -> sortings -> committed ``CurationV2`` rows and
+    returns every curation you may pin, so you never hand-query the join or rely
+    on an implicit "latest". Pick one entry per member and build
+    ``curation_choices = {member_index: {"sorting_id": ..., "curation_id": ...}}``.
+
+    A member with no sort/curation yet returns an empty ``choices`` list (sort it
+    first). The returned curations are not pre-filtered for match-validity;
+    ``run_v2_unit_match`` / ``UnitMatchSelection.insert_selection`` is the
+    validation boundary (it rejects e.g. a preview curation or a wrong-member
+    pin).
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name : str
+        Identify the ``SessionGroup``.
+
+    Returns
+    -------
+    list of UnitMatchMemberChoices
+        One entry per member (``member_index`` order): the member identity plus
+        a ``choices`` list of ``{sorting_id, curation_id, parent_curation_id,
+        description}`` (``parent_curation_id == -1`` marks a root curation).
+
+    Raises
+    ------
+    PipelineInputError
+        If the ``SessionGroup`` has no members.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    group_key = {
+        "session_group_owner": session_group_owner,
+        "session_group_name": session_group_name,
+    }
+    members = (SessionGroup.Member & group_key).fetch(
+        as_dict=True, order_by="member_index"
+    )
+    if len(members) == 0:
+        raise PipelineInputError(
+            "describe_unit_match_choices: no SessionGroup.Member rows for "
+            f"{group_key}. Create the group first via "
+            "SessionGroup.create_group()."
+        )
+
+    out: list[dict] = []
+    for member in members:
+        member_id = {
+            "nwb_file_name": member["nwb_file_name"],
+            "sort_group_id": int(member["sort_group_id"]),
+            "interval_list_name": member["interval_list_name"],
+            "team_name": member["team_name"],
+        }
+        # Find the member's recordings by session/sort-group/interval only --
+        # team_name is a provenance tag in the v2 model, not an identity
+        # boundary, so a sort run under a different team tag still surfaces here.
+        recording_restriction = {
+            k: member_id[k]
+            for k in ("nwb_file_name", "sort_group_id", "interval_list_name")
+        }
+        recording_ids = list(
+            (RecordingSelection & recording_restriction).fetch("recording_id")
+        )
+        choices: list[dict] = []
+        if recording_ids:
+            sorting_ids = list(
+                (
+                    SortingSelection.RecordingSource
+                    & [{"recording_id": rid} for rid in recording_ids]
+                ).fetch("sorting_id")
+            )
+            if sorting_ids:
+                choices = (
+                    CurationV2 & [{"sorting_id": sid} for sid in sorting_ids]
+                ).fetch(
+                    "sorting_id",
+                    "curation_id",
+                    "parent_curation_id",
+                    "description",
+                    as_dict=True,
+                    order_by="sorting_id, curation_id",
+                )
+        out.append(
+            {
+                "member_index": int(member["member_index"]),
+                **member_id,
+                "choices": choices,
+            }
+        )
+    return cast("list[UnitMatchMemberChoices]", out)

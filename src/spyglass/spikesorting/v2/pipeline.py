@@ -58,8 +58,10 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
     describe_units,
 )
 from spyglass.spikesorting.v2._pipeline_run import (
+    describe_unit_match_choices,
     run_v2_pipeline,
     run_v2_pipeline_session,
+    run_v2_unit_match,
 )
 from spyglass.spikesorting.v2._pipeline_types import (
     PipelineOutcome,
@@ -72,5 +74,8 @@ from spyglass.spikesorting.v2._pipeline_types import (
     RunV2PipelineSessionRequiredInputs,
     RunV2PipelineSessionResult,
     RunV2PipelineSummary,
+    RunV2UnitMatchSummary,
     StageStatus,
+    UnitMatchCurationChoice,
+    UnitMatchMemberChoices,
 )

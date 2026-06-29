@@ -178,6 +178,56 @@ RunV2PipelineSessionResult: TypeAlias = (
 )
 
 
+class UnitMatchCurationChoice(TypedDict):
+    """One pickable curation for a SessionGroup member.
+
+    From ``describe_unit_match_choices``: a committed ``CurationV2`` the user may
+    pin for this member. ``parent_curation_id == -1`` marks a root curation.
+    """
+
+    sorting_id: UUID
+    curation_id: int
+    parent_curation_id: int
+    description: str
+
+
+class UnitMatchMemberChoices(TypedDict):
+    """One SessionGroup member and the curations available to pin for it.
+
+    From ``describe_unit_match_choices``. Assemble ``run_v2_unit_match``'s
+    ``curation_choices`` as ``{member_index: {"sorting_id": ...,
+    "curation_id": ...}}`` by picking one entry from each member's ``choices``.
+    """
+
+    member_index: int
+    nwb_file_name: str
+    sort_group_id: int
+    interval_list_name: str
+    team_name: str
+    choices: list[UnitMatchCurationChoice]
+
+
+class RunV2UnitMatchSummary(TypedDict):
+    """Return value of ``run_v2_unit_match``.
+
+    The cross-session match manifest: the ``UnitMatch`` selection PK plus the
+    pairwise-match and tracked-unit results, with per-stage status / timing.
+    """
+
+    session_group_owner: str
+    session_group_name: str
+    matcher_params_name: str
+    unitmatch_id: UUID
+    unitmatch_status: StageStatus
+    n_pairs: int
+    tracked_unit_status: StageStatus
+    n_tracked_units: int
+    # Per-stage wall-clock seconds (keys ``unit_match`` / ``tracked_unit``) this
+    # call -- ≈0 on an idempotent re-run, NOT cumulative compute cost.
+    stage_seconds: dict[str, float]
+    warnings: list[str]
+
+
 __all__ = [
     "PipelineOutcome",
     "PipelineStageSeconds",
@@ -189,5 +239,8 @@ __all__ = [
     "RunV2PipelineSessionRequiredInputs",
     "RunV2PipelineSessionResult",
     "RunV2PipelineSummary",
+    "RunV2UnitMatchSummary",
     "StageStatus",
+    "UnitMatchCurationChoice",
+    "UnitMatchMemberChoices",
 ]
