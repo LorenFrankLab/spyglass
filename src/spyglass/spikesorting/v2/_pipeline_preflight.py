@@ -328,6 +328,20 @@ def preflight_v2_pipeline(
     _check("pipeline_preset_known", True, "")
     bundle = _PIPELINE_PRESETS[pipeline_preset]
 
+    # A motion-pinned preset targets a concatenated session group (motion
+    # correction runs on the ConcatenatedRecording path, not single-session
+    # Recording), which run_v2_pipeline's single-session inputs cannot drive
+    # yet, so flag it rather than let the preset look runnable here.
+    _check(
+        "single_session_preset",
+        bundle.motion_correction_params_name is None,
+        f"pipeline_preset {pipeline_preset!r} pins motion correction "
+        f"(motion_correction_params_name={bundle.motion_correction_params_name!r}), "
+        "so it targets a concatenated session group; run_v2_pipeline's "
+        "single-session inputs cannot run it yet. Choose a non-concat preset, or "
+        "sort the members individually.",
+    )
+
     import spikeinterface.sorters as sis
 
     from spyglass.common import IntervalList, LabTeam, Raw, Session

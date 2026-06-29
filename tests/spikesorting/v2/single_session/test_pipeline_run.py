@@ -985,3 +985,39 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
         SortingSelection.ArtifactDetectionSource
         & {"sorting_id": run_summary["sorting_id"]}
     )
+
+
+def test_stage_statuses_vocabulary_includes_skipped():
+    """The status vocabulary covers ``"skipped"`` (the no-artifact-stage value).
+
+    ``run_v2_pipeline`` emits ``artifact_detection_status="skipped"`` for a
+    no-artifact preset, so the closed ``_STAGE_STATUSES`` set the observability
+    tests validate against must contain it, alongside the populate states.
+    """
+    from spyglass.spikesorting.v2._pipeline_run import _STAGE_STATUSES
+
+    assert "skipped" in _STAGE_STATUSES
+    assert {"computed", "reused"} <= _STAGE_STATUSES
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_run_v2_pipeline_rejects_motion_pinned_concat_preset():
+    """A motion-pinned (concat) preset is rejected by the single-session call.
+
+    ``run_v2_pipeline`` only accepts single-session inputs, which cannot apply a
+    preset's motion correction (that runs on the ConcatenatedRecording path), so
+    selecting the same-day concat preset must raise rather than silently ignore
+    the motion stage. The guard fires before any populate, so dummy inputs are
+    fine.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    with pytest.raises(PipelineInputError, match="concatenated session group"):
+        run_v2_pipeline(
+            nwb_file_name="nonexistent_concat_guard.nwb",
+            sort_group_id=0,
+            interval_list_name="raw data valid times",
+            team_name="v2_test_team",
+            pipeline_preset="franklab_concat_hippocampus_30khz_ms5_2026_06",
+        )

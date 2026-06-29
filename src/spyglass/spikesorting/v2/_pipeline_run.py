@@ -33,8 +33,12 @@ from spyglass.spikesorting.v2._pipeline_types import (
 # Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
 # ``"computed"`` when its row did not exist before this call and populate /
 # insert_curation created it this call; ``"reused"`` when the row already
-# existed and the call no-opped. Test code asserts each status is a member.
-_STAGE_STATUSES: frozenset[StageStatus] = frozenset({"computed", "reused"})
+# existed and the call no-opped; ``"skipped"`` when the preset configured no
+# such stage (e.g. a no-artifact preset's artifact_detection stage). Test code
+# asserts each status is a member.
+_STAGE_STATUSES: frozenset[StageStatus] = frozenset(
+    {"computed", "reused", "skipped"}
+)
 
 
 def _run_stage(
@@ -260,6 +264,22 @@ def run_v2_pipeline(
             "what each preset does, or list_pipeline_presets() for just the names."
         )
     bundle = _PIPELINE_PRESETS[pipeline_preset]
+
+    # A preset that pins motion correction is intended for a concatenated
+    # session group (motion correction is applied on the ConcatenatedRecording
+    # path, never the single-session Recording path). run_v2_pipeline only
+    # accepts single-session inputs today, so running such a preset here would
+    # silently ignore its motion correction -- reject it rather than mislead.
+    if bundle.motion_correction_params_name is not None:
+        raise PipelineInputError(
+            f"run_v2_pipeline: pipeline_preset {pipeline_preset!r} pins motion "
+            "correction (motion_correction_params_name="
+            f"{bundle.motion_correction_params_name!r}), so it targets a "
+            "concatenated session group, not the single-session inputs "
+            "run_v2_pipeline accepts. Concatenated (same-day) sorting is not "
+            "wired into run_v2_pipeline yet; choose a non-concat preset, or sort "
+            "the members individually with one of the single-session presets."
+        )
 
     # Fail fast: a read-only config check before any insert/populate, so a
     # missing team / interval / sort group / param row / sorter binary
