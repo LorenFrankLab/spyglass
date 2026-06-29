@@ -61,9 +61,9 @@ class PopulateMixin(BaseMixin):
         processes = kwargs.pop("processes", 1)
 
         # Decide if using transaction protection
-        use_transact = kwargs.pop("use_transaction", None) or getattr(
-            self, "_use_transaction", None
-        )
+        use_transact = kwargs.pop("use_transaction", None)
+        if use_transact is None:
+            use_transact = getattr(self, "_use_transaction", None)
         if use_transact is False:
             raise NotImplementedError(
                 "Non-transaction populate no longer supported. Please use "
