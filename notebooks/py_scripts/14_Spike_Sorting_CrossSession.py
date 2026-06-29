@@ -204,9 +204,7 @@ if run_unit_match:
 # match silently change when a source session gains a new curation.
 
 if run_unit_match:
-    choices = describe_unit_match_choices(
-        session_group_owner, match_group_name
-    )
+    choices = describe_unit_match_choices(session_group_owner, match_group_name)
     for member in choices:
         print(
             f"member {member['member_index']} ({member['nwb_file_name']}): "
