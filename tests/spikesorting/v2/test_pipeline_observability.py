@@ -210,6 +210,11 @@ def test_stage_error_carries_partial_run_summary(first_run, monkeypatch):
     )
     assert "sorting_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
+    # The partial summary carries the timing of stages completed before the
+    # failure, not an empty stage_seconds.
+    assert {"recording", "artifact_detection"} <= set(
+        err.partial_run_summary["stage_seconds"]
+    )
 
 
 @pytest.mark.database

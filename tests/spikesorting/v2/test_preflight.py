@@ -196,8 +196,44 @@ def test_preflight_all_pass(preflight_inputs):
     assert bool(report) is True
     assert report.errors == []
     assert all(c.ok for c in report.checks)
+    # The recording build reads the 'raw data valid times' interval; preflight
+    # gates it up front (in addition to the sort interval).
+    assert "raw_valid_times_exists" in {c.name for c in report.checks}
     # The default 'default' artifact params do real detection -> no warning.
     assert report.warnings == []
+
+
+@pytest.mark.database
+def test_preflight_missing_raw_valid_times(preflight_inputs, monkeypatch):
+    """A session missing the 'raw data valid times' interval fails preflight.
+
+    ``Recording.make_fetch`` reads ``'raw data valid times'`` for the raw sample
+    bounds in addition to the sort interval, so a partial ingest that misses it
+    would otherwise crash late on a bare ``fetch1``. Simulate it absent
+    (``IntervalList`` returns empty only for that name) and assert the
+    ``raw_valid_times_exists`` check fails up front.
+    """
+    import spyglass.common as common
+
+    real_interval = common.IntervalList
+
+    class _NoRawValidTimes:
+        def __and__(self, restriction):
+            if (
+                isinstance(restriction, dict)
+                and restriction.get("interval_list_name")
+                == "raw data valid times"
+            ):
+                return []  # simulate the missing raw interval
+            return real_interval & restriction
+
+    monkeypatch.setattr(common, "IntervalList", _NoRawValidTimes())
+
+    report = preflight_v2_pipeline(**preflight_inputs)
+    assert report.ok is False
+    (check,) = [c for c in report.checks if c.name == "raw_valid_times_exists"]
+    assert check.ok is False
+    assert "raw data valid times" in check.fix
 
 
 @pytest.mark.database

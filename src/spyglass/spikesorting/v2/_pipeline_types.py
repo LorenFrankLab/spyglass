@@ -167,6 +167,11 @@ class RunV2PipelineSessionFailed(TypedDict):
     outcome: Literal["failed"]
     error_type: str
     error: str
+    # For a stage failure (PipelineStageError): the failing stage name and the
+    # underlying error type it wrapped (e.g. "IndexError"). Both None for a
+    # preflight / zero-unit failure, which is not a stage failure.
+    stage: str | None
+    original_error_type: str | None
     partial_run_summary: dict[str, Any] | None
     # Preflight advisories for this group are carried even on failure so the
     # batch warning count / describe_run do not under-report failed groups.

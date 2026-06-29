@@ -424,6 +424,23 @@ def preflight_v2_pipeline(
         f"{nwb_file_name!r}. A full-session sort typically uses "
         "'raw data valid times'.",
     )
+    # The recording build reads BOTH the sort interval (above) and the raw
+    # 'raw data valid times' interval -- for the raw sample bounds -- even when
+    # the sort interval differs. A partial ingest can have the sort interval but
+    # miss 'raw data valid times', which would otherwise surface late as a bare
+    # fetch1 error deep in Recording.make_fetch. Check it up front.
+    _check(
+        "raw_valid_times_exists",
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        },
+        f"IntervalList 'raw data valid times' not found for {nwb_file_name!r}; "
+        "the recording build reads it for the raw sample bounds. A partial "
+        "ingest can miss it -- re-run ingestion (populate_all_common / "
+        "insert_sessions).",
+    )
     _check(
         "team_exists",
         LabTeam & {"team_name": team_name},

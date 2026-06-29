@@ -478,6 +478,11 @@ def run_v2_pipeline(
     # aware PipelineStageError carrying the run summary built so far.
     run_summary: dict[str, Any] = {"pipeline_preset": pipeline_preset}
     stage_seconds: dict[str, float] = {}
+    # Point the run summary at the live stage_seconds dict NOW (not only at the
+    # end) so a PipelineStageError's partial run summary -- a shallow copy --
+    # carries the timing of every stage that completed before the failure, not
+    # an empty dict.
+    run_summary["stage_seconds"] = stage_seconds
     warnings_list: list[str] = list(preflight_warnings)
 
     if is_single:
@@ -917,13 +922,16 @@ def run_v2_pipeline_session(
         A successful entry is the single-group run summary (see
         :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
         A failed entry is ``{"sort_group_id", "pipeline_preset",
-        "outcome": "failed", "error_type", "error", "partial_run_summary",
-        "warnings"}`` -- the ``partial_run_summary`` carries the stages
-        completed before a sort failure (from :class:`PipelineStageError`) or
-        ``None`` when the caught error carries none (a preflight or zero-unit
-        failure), and ``warnings`` carries this group's preflight advisories so
-        the batch warning count does not under-report failed groups. Wrap with
-        ``describe_run(results)`` for a receipt table.
+        "outcome": "failed", "error_type", "error", "stage",
+        "original_error_type", "partial_run_summary", "warnings"}``. For a stage
+        failure (:class:`PipelineStageError`) ``stage`` names the failing stage,
+        ``original_error_type`` is the underlying error it wrapped (e.g.
+        ``"IndexError"``), and ``partial_run_summary`` carries the stages
+        completed before the failure (including their ``stage_seconds`` timing);
+        all three are ``None`` for a preflight or zero-unit failure. ``warnings``
+        carries this group's preflight advisories so the batch warning count does
+        not under-report failed groups. Wrap with ``describe_run(results)`` for a
+        receipt table.
 
     Raises
     ------
@@ -998,6 +1006,10 @@ def run_v2_pipeline_session(
                         "outcome": "failed",
                         "error_type": "PreflightError",
                         "error": "\n".join(row["errors"]),
+                        # A preflight failure is not a stage failure -- keep the
+                        # structured fields present (shape-consistent) but None.
+                        "stage": None,
+                        "original_error_type": None,
                         "partial_run_summary": None,
                         # Carry this group's advisories too, so describe_run /
                         # the batch warning count do not under-report failures.
@@ -1042,6 +1054,12 @@ def run_v2_pipeline_session(
                     "outcome": "failed",
                     "error_type": type(exc).__name__,
                     "error": str(exc),
+                    # Surface the failing STAGE and the underlying error type (a
+                    # PipelineStageError wraps e.g. an IndexError) so a batch
+                    # caller can triage without re-parsing the message. Both are
+                    # None for non-stage failures (preflight / zero-unit).
+                    "stage": getattr(exc, "stage", None),
+                    "original_error_type": getattr(exc, "original_type", None),
                     "partial_run_summary": getattr(
                         exc, "partial_run_summary", None
                     ),

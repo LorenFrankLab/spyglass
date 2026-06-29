@@ -370,7 +370,10 @@ def test_session_runner_continue_on_error(monkeypatch):
     def fake_run(*, sort_group_id, **kw):
         if sort_group_id == 1:
             raise PipelineStageError(
-                "sorting", {"recording_id": "r1"}, "sorter crashed"
+                "sorting",
+                {"recording_id": "r1"},
+                "sorter crashed",
+                original_type="IndexError",
             )
         return {"merge_id": f"m{sort_group_id}", "n_units": 3}
 
@@ -392,6 +395,9 @@ def test_session_runner_continue_on_error(monkeypatch):
     assert by_id[1]["partial_run_summary"] == {"recording_id": "r1"}
     assert by_id[1]["error_type"] == "PipelineStageError"
     assert "sorting" in by_id[1]["error"]
+    # Structured triage fields: the failing stage and the wrapped error type.
+    assert by_id[1]["stage"] == "sorting"
+    assert by_id[1]["original_error_type"] == "IndexError"
 
 
 @pytest.mark.unit
