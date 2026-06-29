@@ -179,7 +179,9 @@ def run_v2_pipeline(
         Run summary with the following stage keys:
             ``pipeline_preset``          : the pipeline-preset name
             ``recording_id``             : RecordingSelection PK
-            ``artifact_detection_id``    : ArtifactDetectionSelection PK
+            ``artifact_detection_id``    : ArtifactDetectionSelection PK, or
+                ``None`` when the preset runs no artifact detection
+                (``artifact_detection_params_name`` is ``None``)
             ``sorting_id``               : SortingSelection PK
             ``curation_id``              : CurationV2 PK
             ``merge_id``                 : SpikeSortingOutput master PK
@@ -193,7 +195,9 @@ def run_v2_pipeline(
             ``recording_status`` / ``artifact_detection_status`` /
             ``sorting_status`` / ``curation_status`` : ``"computed"`` if the stage did work
                 this call, ``"reused"`` if its row already existed and the
-                call no-opped (see ``_STAGE_STATUSES``).
+                call no-opped, or ``"skipped"`` if the preset configured no such
+                stage (only ``artifact_detection_status`` for a no-artifact
+                preset) -- see ``_STAGE_STATUSES``.
             ``stage_seconds``     : dict of monotonic wall-clock seconds
                 spent per stage (keys ``"recording"`` / ``"artifact_detection"``
                 / ``"sorting"`` / ``"curation"``) **this call** -- ≈0 on an
@@ -235,26 +239,11 @@ def run_v2_pipeline(
         surfaces untranslated. ``preflight=True`` catches these earlier
         as a ``PreflightError`` with the exact fix.
     """
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import (
-        PipelineInputError,
-        PreflightError,
-        ZeroUnitSortError,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-    )
-    from spyglass.spikesorting.v2.sorting import (
-        Sorting,
-        SortingSelection,
-    )
-    from spyglass.utils import logger
+    # Validate the preset DB-free, BEFORE importing the DataJoint table modules
+    # (importing them activates @schema and needs a live connection). An unknown
+    # or motion-pinned (concat) preset then fails fast with PipelineInputError
+    # even when the database is offline, rather than an opaque connection error.
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
     if pipeline_preset not in _PIPELINE_PRESETS:
         raise PipelineInputError(
@@ -280,6 +269,26 @@ def run_v2_pipeline(
             "wired into run_v2_pipeline yet; choose a non-concat preset, or sort "
             "the members individually with one of the single-session presets."
         )
+
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetection,
+        ArtifactDetectionSelection,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import (
+        PreflightError,
+        ZeroUnitSortError,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        Sorting,
+        SortingSelection,
+    )
+    from spyglass.utils import logger
 
     # Fail fast: a read-only config check before any insert/populate, so a
     # missing team / interval / sort group / param row / sorter binary

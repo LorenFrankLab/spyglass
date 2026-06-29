@@ -622,26 +622,9 @@ def test_preflight_skips_artifact_when_params_none(
     # No artifact id is expected.
     assert report.expected_ids["artifact_detection_id"]["id"] is None
     assert report.expected_ids["artifact_detection_id"]["exists"] is False
-
-
-@pytest.mark.database
-def test_preflight_flags_motion_pinned_concat_preset(preflight_inputs):
-    """A motion-pinned (concat) preset fails preflight's single-session check.
-
-    The shipped same-day concat preset pins motion correction, so it targets a
-    concatenated session group; preflight (which inspects the single-session
-    inputs) must flag it as not runnable here rather than report it green.
-    """
-    report = preflight_v2_pipeline(
-        **{
-            **preflight_inputs,
-            "pipeline_preset": "franklab_concat_hippocampus_30khz_ms5_2026_06",
-        }
-    )
-    assert report.ok is False
-    failed = [c for c in report.checks if c.name == "single_session_preset"]
-    assert failed and not failed[0].ok
-    assert any("concatenated session group" in e for e in report.errors)
+    # The DB-free fail-fast rejection of a motion-pinned (concat) preset is
+    # regressed in tests/spikesorting/v2/test_pipeline_presets.py
+    # (test_preflight_rejects_motion_pinned_preset_without_db).
 
 
 @pytest.mark.database

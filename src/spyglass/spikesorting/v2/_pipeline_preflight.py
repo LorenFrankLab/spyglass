@@ -331,8 +331,9 @@ def preflight_v2_pipeline(
     # A motion-pinned preset targets a concatenated session group (motion
     # correction runs on the ConcatenatedRecording path, not single-session
     # Recording), which run_v2_pipeline's single-session inputs cannot drive
-    # yet, so flag it rather than let the preset look runnable here.
-    _check(
+    # yet. Short-circuit BEFORE the SpikeInterface / DB-touching checks (like the
+    # unknown-preset case above) so this verdict stays database-free.
+    if not _check(
         "single_session_preset",
         bundle.motion_correction_params_name is None,
         f"pipeline_preset {pipeline_preset!r} pins motion correction "
@@ -340,7 +341,15 @@ def preflight_v2_pipeline(
         "so it targets a concatenated session group; run_v2_pipeline's "
         "single-session inputs cannot run it yet. Choose a non-concat preset, or "
         "sort the members individually.",
-    )
+    ):
+        return PreflightReport(
+            ok=False,
+            errors=[c.fix for c in checks if not c.ok],
+            warnings=warnings,
+            resolved_pipeline_preset=pipeline_preset,
+            expected_ids={},
+            checks=checks,
+        )
 
     import spikeinterface.sorters as sis
 

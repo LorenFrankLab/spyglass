@@ -780,8 +780,10 @@ def pipeline_preset_specs() -> dict[str, dict]:
         # ArtifactDetectionSource row) and pins motion correction to the
         # "auto_default" row (preset "auto", which resolves to rigid_fast for a
         # same-day group). Otherwise the same MS5 hippocampus recipe as the
-        # single-session default; run it through run_v2_pipeline's
-        # concat_session_group_owner / concat_session_group_name inputs.
+        # single-session default. NOTE: the concat run path is not wired into
+        # run_v2_pipeline yet (it accepts only single-session inputs and rejects
+        # this motion-pinned preset); this registration makes the recipe
+        # discoverable and clonable until that path lands.
         "franklab_concat_hippocampus_30khz_ms5_2026_06": dict(
             preprocessing_params_name=HIPPOCAMPUS_PREPROC,
             artifact_detection_params_name=None,
@@ -794,22 +796,27 @@ def pipeline_preset_specs() -> dict[str, dict]:
             target_region="hippocampus",
             sampling_rate_hz=30000,
             sorter_family="mountainsort5",
-            recommendation_status="alternative",
+            recommendation_status="experimental",
             intended_use=(
                 "Frank-lab same-day chronic hippocampal probes at 30 kHz: "
                 "concatenate a SessionGroup's members into one "
-                "ConcatenatedRecording and sort once (MountainSort5). Run it via "
-                "run_v2_pipeline's concat_session_group_owner / "
-                "concat_session_group_name inputs, not the single-session inputs."
+                "ConcatenatedRecording and sort once (MountainSort5). The "
+                "concatenated run path is NOT wired into run_v2_pipeline yet "
+                "(it takes only single-session inputs and rejects this "
+                "motion-pinned preset); for now this recipe is discoverable and "
+                "clonable, and the members can be sorted individually with a "
+                "single-session preset."
             ),
             threshold_units="sigma of the whitened signal (~5.5)",
             notes=(
                 "Concatenated sorts run NO artifact detection "
                 "(artifact_detection_params_name is None -- there is no "
                 "ArtifactDetectionSource row), and motion correction is pinned "
-                "to 'auto', which resolves to rigid_fast for a same-day group. "
-                "Otherwise the same MS5 hippocampus recipe as the single-session "
-                "default; MS5 runs under the v2 numpy>=2 baseline."
+                "to the 'auto_default' row (preset 'auto', which resolves to "
+                "rigid_fast for a same-day group). Otherwise the same MS5 "
+                "hippocampus recipe as the single-session default; MS5 runs "
+                "under the v2 numpy>=2 baseline. Marked experimental until the "
+                "concatenated run path is wired into run_v2_pipeline."
             ),
         ),
     }

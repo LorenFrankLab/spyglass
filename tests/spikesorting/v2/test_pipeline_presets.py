@@ -825,6 +825,52 @@ def test_concat_preset_is_registered_and_shaped():
     assert preset.auto_curation_rules_name == "v1_default_nn_noise"
 
 
+def test_run_v2_pipeline_rejects_motion_pinned_preset_without_db():
+    """A motion-pinned (concat) preset is rejected fail-fast, before any DB use.
+
+    ``run_v2_pipeline`` validates the preset (unknown / motion-pinned) BEFORE
+    importing its DataJoint table modules, so selecting the same-day concat
+    preset raises ``PipelineInputError`` even with no database connection -- this
+    test takes no ``dj_conn`` fixture and never reaches a populate.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    with pytest.raises(PipelineInputError, match="concatenated session group"):
+        run_v2_pipeline(
+            nwb_file_name="dummy.nwb",
+            sort_group_id=0,
+            interval_list_name="dummy",
+            team_name="dummy",
+            pipeline_preset=_CONCAT_PRESET,
+        )
+
+
+def test_preflight_rejects_motion_pinned_preset_without_db():
+    """Preflight flags a motion-pinned (concat) preset fail-fast, before any DB.
+
+    The ``single_session_preset`` check short-circuits before the
+    SpikeInterface / DB-touching checks, so preflighting the concat preset
+    returns a not-ok report (with empty ``expected_ids``) and no database
+    connection.
+    """
+    from spyglass.spikesorting.v2.pipeline import preflight_v2_pipeline
+
+    report = preflight_v2_pipeline(
+        nwb_file_name="dummy.nwb",
+        sort_group_id=0,
+        interval_list_name="dummy",
+        team_name="dummy",
+        pipeline_preset=_CONCAT_PRESET,
+    )
+    assert report.ok is False
+    failed = [c for c in report.checks if c.name == "single_session_preset"]
+    assert failed and not failed[0].ok
+    assert any("concatenated session group" in e for e in report.errors)
+    # Short-circuited before the DB checks: no expected ids were computed.
+    assert report.expected_ids == {}
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 
