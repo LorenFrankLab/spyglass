@@ -439,6 +439,8 @@ def test_register_preset_rejects_bad_name(monkeypatch):
 # (5.5), so it exercises both a nested preprocessing override and a flat sorter
 # override.
 _CLONE_BASE = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+# The same-day concat preset: the one shipped no-artifact / motion-pinned preset.
+_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_06"
 
 
 @pytest.fixture
@@ -783,8 +785,15 @@ def test_every_preset_declares_curation_params():
     for name, preset in _PIPELINE_PRESETS.items():
         assert preset.metric_params_name.strip(), f"{name}.metric blank"
         assert preset.auto_curation_rules_name.strip(), f"{name}.rules blank"
-        # Single-session presets leave motion correction unset.
-        assert preset.motion_correction_params_name is None
+
+    # The single-session presets run an artifact stage and leave motion
+    # correction unset; the same-day concat preset is the inverse (no artifact
+    # stage, motion pinned).
+    for name, preset in _PIPELINE_PRESETS.items():
+        if name == _CONCAT_PRESET:
+            continue
+        assert preset.artifact_detection_params_name is not None, name
+        assert preset.motion_correction_params_name is None, name
 
     clusterless = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
     assert clusterless.metric_params_name == "minimal"
@@ -797,6 +806,23 @@ def test_every_preset_declares_curation_params():
     npx = _PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
     assert npx.metric_params_name == "neuropixels_default"
     assert npx.auto_curation_rules_name == "v1_default_nn_noise"
+
+
+def test_concat_preset_is_registered_and_shaped():
+    """The same-day concat preset ships with no artifact stage + pinned motion.
+
+    It is the one shipped preset whose ``artifact_detection_params_name`` is
+    None (concat sorts carry no ArtifactDetectionSource row) and whose
+    ``motion_correction_params_name`` is set ("auto" -> rigid_fast for a
+    same-day group). Otherwise it is the MS5 hippocampus recipe.
+    """
+    assert _CONCAT_PRESET in list_pipeline_presets()
+    preset = _PIPELINE_PRESETS[_CONCAT_PRESET]
+    assert preset.artifact_detection_params_name is None
+    assert preset.motion_correction_params_name == "auto_default"
+    assert preset.sorter == "mountainsort5"
+    assert preset.metric_params_name == "franklab_default"
+    assert preset.auto_curation_rules_name == "v1_default_nn_noise"
 
 
 def test_preset_model_artifact_optional_and_motion_field():
@@ -930,3 +956,27 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
     # The other stages still resolve.
     assert (detail["stage"] == "preprocessing").sum() > 0
     assert (detail["stage"] == "sorter").sum() > 0
+
+
+def test_clone_preset_no_artifact_base(dj_conn, clone_env):
+    """Cloning a no-artifact preset works and forks only the touched stage.
+
+    The concat preset runs no artifact stage, so a clone that tunes the sorter
+    must not try to fetch a base artifact row; only the sorter stage is forked
+    and the clone inherits the None artifact.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    new_name = "lab_concat_thresh_2026_06"
+    clone_env.append(new_name)
+
+    clone_preset(_CONCAT_PRESET, new_name, detect_threshold=4.0)
+
+    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    assert clone.artifact_detection_params_name is None
+    assert clone.sorter_params_name == new_name
+    assert clone.motion_correction_params_name == "auto_default"
+
+    detail = describe_pipeline_preset(new_name)
+    assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
+    assert (detail["stage"] == "artifact_detection").sum() == 0

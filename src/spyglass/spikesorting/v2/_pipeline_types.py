@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypeAlias, TypedDict
 from uuid import UUID
 
-StageStatus: TypeAlias = Literal["computed", "reused"]
+StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
 
 
@@ -72,7 +72,9 @@ class RunV2PipelineSummary(TypedDict):
 
     pipeline_preset: str
     recording_id: UUID
-    artifact_detection_id: UUID
+    # None when the preset runs no artifact detection (artifact_detection_status
+    # is then "skipped" and no ArtifactDetectionSource row is created).
+    artifact_detection_id: "UUID | None"
     sorting_id: UUID
     curation_id: int
     merge_id: UUID

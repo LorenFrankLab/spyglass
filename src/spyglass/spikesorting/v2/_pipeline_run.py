@@ -312,36 +312,42 @@ def run_v2_pipeline(
     )
     run_summary["recording_id"] = recording_key["recording_id"]
 
-    artifact_detection_key = ArtifactDetectionSelection.insert_selection(
-        {
-            "recording_id": recording_key["recording_id"],
-            "artifact_detection_params_name": bundle.artifact_detection_params_name,
-        }
-    )
-    (
-        _,
-        run_summary["artifact_detection_status"],
-        stage_seconds["artifact_detection"],
-    ) = _run_stage(
-        "artifact_detection",
-        bool(ArtifactDetection & artifact_detection_key),
-        lambda: ArtifactDetection.populate(
-            artifact_detection_key, reserve_jobs=False
-        ),
-        run_summary,
-    )
-    run_summary["artifact_detection_id"] = artifact_detection_key[
-        "artifact_detection_id"
-    ]
+    # A None artifact name means the preset runs no artifact detection: skip the
+    # ArtifactDetectionSelection/populate stage entirely and sort straight off
+    # the recording. SortingSelection then carries no ArtifactDetectionSource
+    # row (artifact_detection_id=None), the form the concat path also uses.
+    if bundle.artifact_detection_params_name is None:
+        artifact_detection_id = None
+        run_summary["artifact_detection_status"] = "skipped"
+        stage_seconds["artifact_detection"] = 0.0
+    else:
+        artifact_detection_key = ArtifactDetectionSelection.insert_selection(
+            {
+                "recording_id": recording_key["recording_id"],
+                "artifact_detection_params_name": bundle.artifact_detection_params_name,
+            }
+        )
+        (
+            _,
+            run_summary["artifact_detection_status"],
+            stage_seconds["artifact_detection"],
+        ) = _run_stage(
+            "artifact_detection",
+            bool(ArtifactDetection & artifact_detection_key),
+            lambda: ArtifactDetection.populate(
+                artifact_detection_key, reserve_jobs=False
+            ),
+            run_summary,
+        )
+        artifact_detection_id = artifact_detection_key["artifact_detection_id"]
+    run_summary["artifact_detection_id"] = artifact_detection_id
 
     sorting_key = SortingSelection.insert_selection(
         {
             "recording_id": recording_key["recording_id"],
             "sorter": bundle.sorter,
             "sorter_params_name": bundle.sorter_params_name,
-            "artifact_detection_id": artifact_detection_key[
-                "artifact_detection_id"
-            ],
+            "artifact_detection_id": artifact_detection_id,
         }
     )
     _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(

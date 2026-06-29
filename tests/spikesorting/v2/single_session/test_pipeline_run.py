@@ -936,3 +936,52 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
             allow_param_mutation=True,
         )
     assert verify_v2_default_catalog() == []
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
+    polymer_smoke_session, monkeypatch
+):
+    """A preset with ``artifact_detection_params_name=None`` sorts off the
+    recording directly, with no artifact-detection stage.
+
+    The orchestrator must skip ``ArtifactDetection`` entirely
+    (``artifact_detection_status="skipped"``, no ``artifact_detection_id``) and
+    build a ``SortingSelection`` with no ``ArtifactDetectionSource`` row, then
+    sort as usual. Mirrors the MS5 hippocampus recipe but drops the artifact
+    stage, the shape a concat preset uses.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+
+    no_artifact = pl._PipelinePreset(
+        preprocessing_params_name="franklab_hippocampus_2026_06",
+        artifact_detection_params_name=None,
+        sorter="mountainsort5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        metric_params_name="franklab_default",
+        auto_curation_rules_name="v1_default_nn_noise",
+    )
+    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_run_no_artifact", no_artifact)
+
+    run_summary = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        pipeline_preset="_run_no_artifact",
+    )
+
+    assert run_summary["artifact_detection_status"] == "skipped"
+    assert run_summary["artifact_detection_id"] is None
+    assert run_summary["n_units"] >= 1
+    # The sort carries no ArtifactDetectionSource row.
+    assert not (
+        SortingSelection.ArtifactDetectionSource
+        & {"sorting_id": run_summary["sorting_id"]}
+    )

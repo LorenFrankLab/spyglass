@@ -587,6 +587,44 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
 
 
 @pytest.mark.database
+def test_preflight_skips_artifact_when_params_none(
+    preflight_inputs, monkeypatch
+):
+    """A preset with no artifact stage passes preflight without an artifact row.
+
+    ``artifact_detection_params_name=None`` means the sort runs no artifact
+    detection: preflight must not check for an ArtifactDetectionParameters row
+    (there is none to require) and must report a None expected
+    artifact_detection_id rather than deriving one.
+    """
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    no_artifact = pl._PipelinePreset(
+        preprocessing_params_name="default",
+        artifact_detection_params_name=None,
+        sorter="mountainsort5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        metric_params_name="minimal",
+        auto_curation_rules_name="none",
+    )
+    monkeypatch.setitem(
+        pl._PIPELINE_PRESETS, "_preflight_no_artifact", no_artifact
+    )
+
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": "_preflight_no_artifact"}
+    )
+    assert report.ok is True
+    # The artifact-row existence check is omitted entirely.
+    assert not any(
+        c.name == "artifact_detection_params_exist" for c in report.checks
+    )
+    # No artifact id is expected.
+    assert report.expected_ids["artifact_detection_id"]["id"] is None
+    assert report.expected_ids["artifact_detection_id"]["exists"] is False
+
+
+@pytest.mark.database
 def test_preflight_is_read_only(preflight_inputs):
     """Preflight inserts nothing: every Selection/Lookup count is unchanged."""
     from spyglass.common.common_lab import LabTeam

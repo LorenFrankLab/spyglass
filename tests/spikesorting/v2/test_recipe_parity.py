@@ -115,27 +115,54 @@ def test_presets_reference_shipped_rows(dj_conn):
     not point at a Lookup row that ``insert_default`` does not create.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     preproc = {r[0] for r in PreprocessingParameters._DEFAULT_CONTENTS}
     artifact = {r[0] for r in ArtifactDetectionParameters._DEFAULT_CONTENTS}
     sorter = {(r[0], r[1]) for r in SorterParameters._DEFAULT_CONTENTS}
+    metric = {
+        r["metric_params_name"] for r in QualityMetricParameters._default_rows()
+    }
+    motion = {r[0] for r in MotionCorrectionParameters._DEFAULT_CONTENTS}
+    rules = {
+        master["auto_curation_rules_name"]
+        for master, _ in AutoCurationRules._default_payloads()
+    }
 
     for name, p in _PIPELINE_PRESETS.items():
         assert (
             p.preprocessing_params_name in preproc
         ), f"{name}: preproc {p.preprocessing_params_name!r} not shipped"
-        assert (
-            p.artifact_detection_params_name in artifact
-        ), f"{name}: artifact {p.artifact_detection_params_name!r} not shipped"
+        # artifact is optional: a None name means no artifact stage.
+        if p.artifact_detection_params_name is not None:
+            assert (
+                p.artifact_detection_params_name in artifact
+            ), f"{name}: artifact {p.artifact_detection_params_name!r} not shipped"
         assert (
             p.sorter,
             p.sorter_params_name,
         ) in sorter, (
             f"{name}: sorter {(p.sorter, p.sorter_params_name)!r} absent"
         )
+        assert (
+            p.metric_params_name in metric
+        ), f"{name}: metric {p.metric_params_name!r} not shipped"
+        assert (
+            p.auto_curation_rules_name in rules
+        ), f"{name}: rules {p.auto_curation_rules_name!r} not shipped"
+        if p.motion_correction_params_name is not None:
+            assert (
+                p.motion_correction_params_name in motion
+            ), f"{name}: motion {p.motion_correction_params_name!r} not shipped"
 
 
 @pytest.mark.database

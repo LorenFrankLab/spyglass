@@ -674,7 +674,10 @@ def clone_preset(
 
     # One descriptor per stage. ``sorter`` is the per-sorter dispatch key (and
     # the extra ``SorterParameters`` primary-key column / ``execution_params``
-    # carrier); it is None for the single-key Lookups.
+    # carrier); it is None for the single-key Lookups. The artifact-detection
+    # stage is included only when the base preset runs one (a None artifact name
+    # means no artifact stage -- a skip-artifact or concat preset -- so there is
+    # no base row to fetch and no artifact key to override).
     stages = {
         "preprocessing": {
             "table": PreprocessingParameters,
@@ -682,14 +685,6 @@ def clone_preset(
             "pk_field": "preprocessing_params_name",
             "base_row_name": base.preprocessing_params_name,
             "schema_cls": PreprocessingParamsSchema,
-            "sorter": None,
-        },
-        "artifact_detection": {
-            "table": ArtifactDetectionParameters,
-            "table_name": "ArtifactDetectionParameters",
-            "pk_field": "artifact_detection_params_name",
-            "base_row_name": base.artifact_detection_params_name,
-            "schema_cls": ArtifactDetectionParamsSchema,
             "sorter": None,
         },
         "sorter": {
@@ -701,6 +696,15 @@ def clone_preset(
             "sorter": base.sorter,
         },
     }
+    if base.artifact_detection_params_name is not None:
+        stages["artifact_detection"] = {
+            "table": ArtifactDetectionParameters,
+            "table_name": "ArtifactDetectionParameters",
+            "pk_field": "artifact_detection_params_name",
+            "base_row_name": base.artifact_detection_params_name,
+            "schema_cls": ArtifactDetectionParamsSchema,
+            "sorter": None,
+        }
 
     def _base_restriction(stage):
         restriction = {stage["pk_field"]: stage["base_row_name"]}

@@ -427,15 +427,18 @@ def preflight_v2_pipeline(
         f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
         "missing. Run initialize_v2_defaults().",
     )
-    _check(
-        "artifact_detection_params_exist",
-        ArtifactDetectionParameters
-        & {
-            "artifact_detection_params_name": bundle.artifact_detection_params_name
-        },
-        f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
-        "is missing. Run initialize_v2_defaults().",
-    )
+    # A None artifact name means the preset runs no artifact stage (skip /
+    # concat), so there is no ArtifactDetectionParameters row to require.
+    if bundle.artifact_detection_params_name is not None:
+        _check(
+            "artifact_detection_params_exist",
+            ArtifactDetectionParameters
+            & {
+                "artifact_detection_params_name": bundle.artifact_detection_params_name
+            },
+            f"ArtifactDetectionParameters row {bundle.artifact_detection_params_name!r} "
+            "is missing. Run initialize_v2_defaults().",
+        )
     sorter_params_query = SorterParameters & {
         "sorter": bundle.sorter,
         "sorter_params_name": bundle.sorter_params_name,
@@ -593,13 +596,20 @@ def preflight_v2_pipeline(
             }
         ),
     )
-    artifact_detection_id = deterministic_id(
-        "artifact_detection",
-        artifact_detection_identity_payload(
-            artifact_detection_params_name=bundle.artifact_detection_params_name,
-            recording_id=recording_id,
-        ),
-    )
+    # A None artifact name means no artifact-detection pass: the sort's
+    # identity carries artifact_detection_id=None (matching
+    # build_sorting_selection_plan), so the expected sorting_id derives from
+    # None and there is no ArtifactDetectionSelection PK to expect.
+    if bundle.artifact_detection_params_name is None:
+        artifact_detection_id = None
+    else:
+        artifact_detection_id = deterministic_id(
+            "artifact_detection",
+            artifact_detection_identity_payload(
+                artifact_detection_params_name=bundle.artifact_detection_params_name,
+                recording_id=recording_id,
+            ),
+        )
     sorting_id = deterministic_id(
         "sorting",
         sorting_identity_payload(
@@ -614,13 +624,17 @@ def preflight_v2_pipeline(
             "id": recording_id,
             "exists": bool(RecordingSelection & {"recording_id": recording_id}),
         },
-        "artifact_detection_id": {
-            "id": artifact_detection_id,
-            "exists": bool(
-                ArtifactDetectionSelection
-                & {"artifact_detection_id": artifact_detection_id}
-            ),
-        },
+        "artifact_detection_id": (
+            {"id": None, "exists": False}
+            if artifact_detection_id is None
+            else {
+                "id": artifact_detection_id,
+                "exists": bool(
+                    ArtifactDetectionSelection
+                    & {"artifact_detection_id": artifact_detection_id}
+                ),
+            }
+        ),
         "sorting_id": {
             "id": sorting_id,
             "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
