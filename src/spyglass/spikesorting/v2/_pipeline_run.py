@@ -1311,15 +1311,13 @@ def describe_unit_match_choices(
             "interval_list_name": member["interval_list_name"],
             "team_name": member["team_name"],
         }
-        # Find the member's recordings by session/sort-group/interval only --
-        # team_name is a provenance tag in the v2 model, not an identity
-        # boundary, so a sort run under a different team tag still surfaces here.
-        recording_restriction = {
-            k: member_id[k]
-            for k in ("nwb_file_name", "sort_group_id", "interval_list_name")
-        }
+        # Match the member's recordings on the FULL member identity, INCLUDING
+        # team_name. UnitMatchSelection's ownership validator compares the whole
+        # (nwb_file_name, sort_group_id, interval_list_name, team_name) tuple, so
+        # a curation sorted under a different team tag would be rejected at run
+        # time -- surfacing it here would offer an un-pickable choice.
         recording_ids = list(
-            (RecordingSelection & recording_restriction).fetch("recording_id")
+            (RecordingSelection & member_id).fetch("recording_id")
         )
         choices: list[dict] = []
         if recording_ids:
