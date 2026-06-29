@@ -46,6 +46,8 @@ from spyglass.spikesorting.v2.metric_curation import (
     CurationEvaluationSelection,
 )
 from spyglass.spikesorting.v2.pipeline import (
+    clone_preset,
+    describe_pipeline_preset,
     describe_pipeline_presets,
     describe_run,
     describe_sort_groups,
@@ -53,6 +55,7 @@ from spyglass.spikesorting.v2.pipeline import (
     plot_sort_group_geometry,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
+    register_preset,
     run_v2_pipeline,
     run_v2_pipeline_session,
 )
@@ -180,6 +183,47 @@ describe_pipeline_presets()
 #   Hippocampal display/metric rows intentionally use 0.5/0.5 ms windows and up
 #   to 20000 spikes per unit.
 
+# ### Customize a preset
+#
+# The shipping presets cover the common Frank Lab recipes, but you can adapt them
+# without hand-editing parameter rows. `describe_pipeline_preset(name)` expands
+# one preset into the exact parameter row each stage uses:
+
+describe_pipeline_preset(pipeline_preset)
+
+# `clone_preset` derives a new preset from an existing one by tuning a single
+# knob: pass the parameter you want to change as a keyword and it builds only the
+# new parameter rows that differ, reusing the base preset's rows for every
+# untouched stage. Here we lower the MountainSort5 detection threshold (a common
+# tweak for low-amplitude units). The clone is then selectable by name like any
+# shipping preset — set `pipeline_preset` to it to use it below.
+
+clone_preset(
+    pipeline_preset,
+    "my_lab_ms5_lower_threshold",
+    detect_threshold=5.0,
+)
+describe_pipeline_preset("my_lab_ms5_lower_threshold")
+
+# For a fully custom pipeline — a different sorter, or a stage combination no
+# shipping preset covers — `register_preset(name, {...})` adds a preset from the
+# parameter-row names you choose (each must already exist; `initialize_v2_defaults`
+# seeded the rows below). The registration lives for this session; to ship a
+# durable recipe, add it to the preset catalog. The mapping is the stages a run
+# touches:
+
+register_preset(
+    "my_lab_custom",
+    {
+        "preprocessing_params_name": "franklab_hippocampus_2026_06",
+        "artifact_detection_params_name": "default",
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+    },
+)
+
 # ## 4. Preflight — a fast, fail-early check
 #
 # `preflight_v2_pipeline` verifies in ~1 s (inserting nothing, never calling
@@ -252,9 +296,18 @@ describe_units(run_summary["sorting_id"])
 # labels curation *accepts* are the canonical set `CurationV2.label_options()`
 # (the `CurationLabel` enum); custom labels need `allow_custom_labels=True`.
 #
-# Curation is a loop built on `CurationEvaluation`, which scores a **committed**
-# curation in that curation's OWN unit namespace (a merged unit is scored over
-# its merged template, not inherited from a contributor):
+# There are three ways to curate, from most automated to most hands-on:
+#
+# - **Automated** — `run_v2_pipeline(auto_curate=True)` scores the sort and
+#   commits the rule set's labels in the same call (section 7-auto).
+# - **In a browser** — `run_v2_pipeline(figpack=True)` publishes an interactive
+#   FigPack view you label and merge in a browser (section 7-browser).
+# - **Step by step** — the evaluate → accept → merge → re-evaluate loop below
+#   (sections 7a–7e), for full control over each decision.
+#
+# The step-by-step loop is built on `CurationEvaluation`, which scores a
+# **committed** curation in that curation's OWN unit namespace (a merged unit is
+# scored over its merged template, not inherited from a contributor):
 #
 # 1. **Evaluate** the committed curation — `CurationEvaluation` walks its
 #    analyzer, computes quality metrics, and proposes labels from a rule set.
@@ -267,11 +320,49 @@ describe_units(run_summary["sorting_id"])
 # 4. **Re-evaluate the merged curation** — merging changes each unit's template
 #    (and so its SNR / ISI-violation fraction / PC-NN separation), so metrics
 #    over the *post-merge* templates are the numbers of record.
-#
-# > Interactive web curation (label/merge in a browser) is coming via FigPack
-# > in a later release; it will slot in here.
 
 CurationV2.summarize_curation(run_summary)
+
+# ### 7-auto. Automated labeling in one call
+#
+# When you trust the rule set for a batch, `auto_curate=True` folds the
+# evaluate-and-accept steps into the `run_v2_pipeline` call itself: it scores the
+# root curation with the preset's metric + auto-curation rows and commits a child
+# curation whose labels ARE the rule set's verdict. The run summary then carries
+# `auto_curation_id` / `auto_merge_id` (the committed labeled curation) alongside
+# the root keys. It is idempotent like the rest of the pipeline, so this reuses
+# the sort already computed above and only adds the curation step.
+
+auto_summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    pipeline_preset=pipeline_preset,
+    auto_curate=True,
+)
+display(describe_run(auto_summary))
+# Key downstream code off `auto_merge_id` to use the auto-labeled result.
+auto_summary["auto_merge_id"]
+
+# ### 7-browser. Curate in a browser with FigPack
+#
+# When you want to label and merge by eye but prefer a point-and-click view over
+# the plots below, `figpack=True` publishes a FigPack curation view of the root
+# curation and returns its location in `figpack_uri`. Offline it is a
+# self-contained bundle on disk — open `index.html` from `figpack_uri` in a
+# browser, label/merge there, and your edits are saved alongside the bundle for a
+# later round trip back into a Spyglass curation.
+
+figpack_summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name=interval_list_name,
+    team_name=team_name,
+    pipeline_preset=pipeline_preset,
+    figpack=True,
+)
+print("FigPack view:", figpack_summary.get("figpack_uri"))
 
 # ### 7a. Evaluate the root curation (pass 1)
 #
@@ -481,7 +572,8 @@ ssviz.available_visualizations()
 # 3D `ax=` for a probe with z-coordinates), and
 # `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
-# off the display analyzer. FigPack curation-state round trip is a later release.
+# off the display analyzer. To label and merge in a browser instead, publish a
+# FigPack curation view with `run_v2_pipeline(figpack=True)` (section 7-browser).
 
 # +
 sorting_key = {"sorting_id": run_summary["sorting_id"]}
@@ -559,6 +651,9 @@ describe_run(session_results)
 
 # ## Next steps
 #
+# - Sort and track units across multiple sessions — concatenate same-day
+#   recordings and match units across days — with
+#   [Cross-Session Spike Sorting](./14_Spike_Sorting_CrossSession.ipynb).
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).
