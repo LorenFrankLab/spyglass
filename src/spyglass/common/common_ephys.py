@@ -7,7 +7,6 @@ import pynwb
 
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401

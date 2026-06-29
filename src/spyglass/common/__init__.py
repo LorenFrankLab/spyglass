@@ -30,17 +30,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_censor,
-    interval_list_contains,
-    interval_list_contains_ind,
-    interval_list_excludes,
-    interval_list_excludes_ind,
-    interval_list_intersect,
-    interval_list_union,
-    intervals_by_length,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
@@ -123,14 +113,6 @@ __all__ = [
     "get_position_interval_epoch",
     "get_raw_eseries",
     "get_valid_intervals",
-    "interval_list_censor",
-    "interval_list_contains",
-    "interval_list_contains_ind",
-    "interval_list_excludes",
-    "interval_list_excludes_ind",
-    "interval_list_intersect",
-    "interval_list_union",
-    "intervals_by_length",
     "populate_all_common",
     "populate_from_yaml",
     "prepopulate",
