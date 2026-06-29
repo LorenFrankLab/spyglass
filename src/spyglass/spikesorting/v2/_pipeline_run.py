@@ -91,6 +91,7 @@ def run_v2_pipeline(
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     description: str = "",
     require_units: bool = False,
+    auto_curate: bool = False,
     preflight: bool = True,
 ) -> RunV2PipelineSummary:
     """End-to-end single-session sort: recording -> artifact detection -> sort -> curation.
@@ -165,6 +166,18 @@ def run_v2_pipeline(
         ``SpikeSortingOutput`` row. If True, a zero-unit sort raises
         ``ZeroUnitSortError`` instead (for callers that treat zero units
         as a hard error).
+    auto_curate
+        If False (default), the run stops at the root curation, so a
+        convenience call never silently commits suggested labels. If True,
+        the run additionally scores the root curation with the preset's
+        ``metric_params_name`` + ``auto_curation_rules_name`` rows
+        (``CurationEvaluation``) and materializes a committed child curation
+        whose labels ARE the evaluation's verdict. The summary then carries
+        ``curation_evaluation_id`` (the suggestion selection PK),
+        ``auto_curation_id`` / ``auto_merge_id`` (the materialized child
+        curation), and ``auto_curation_status`` (these keys are absent when
+        ``auto_curate=False``). ``CurationEvaluation`` builds a whitened PCA
+        analyzer, so this adds the heaviest populate of the run.
     preflight
         If True (default), run ``preflight_v2_pipeline`` first as a fast,
         read-only check that the session / interval / team / sort-group
@@ -466,6 +479,61 @@ def run_v2_pipeline(
     stage_seconds["curation"] = curation_seconds
     run_summary["curation_id"] = curation_key["curation_id"]
     run_summary["merge_id"] = merge_id
+
+    # Optional auto-curation: only when the caller opts in. Score the root
+    # curation with the preset's metric + auto-curation rule rows, then
+    # materialize a committed child curation whose labels ARE the evaluation's
+    # verdict. The default (auto_curate=False) leaves the run
+    # initial-curation-only, so a convenience call never silently commits
+    # suggested labels. These keys are added to the summary only when opted in
+    # (they are NotRequired), so a default run's summary is unchanged.
+    if auto_curate:
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluation,
+            CurationEvaluationSelection,
+        )
+
+        eval_key = CurationEvaluationSelection.insert_selection(
+            {
+                "sorting_id": sorting_key["sorting_id"],
+                "curation_id": curation_key["curation_id"],
+                "metric_params_name": bundle.metric_params_name,
+                "auto_curation_rules_name": bundle.auto_curation_rules_name,
+            }
+        )
+        # "reused" iff the evaluation is already populated for this selection;
+        # use_evaluation_labels(reuse_existing=True) reuses the child curation.
+        auto_curate_exists = bool(CurationEvaluation & eval_key)
+
+        def _auto_curate_and_register():
+            CurationEvaluation.populate(eval_key, reserve_jobs=False)
+            child = CurationEvaluation().use_evaluation_labels(
+                eval_key,
+                description=(
+                    "run_v2_pipeline auto-curation "
+                    f"(pipeline_preset={pipeline_preset})"
+                ),
+                reuse_existing=True,
+            )
+            auto_merge_id = (SpikeSortingOutput.CurationV2 & child).fetch1(
+                "merge_id"
+            )
+            return child, auto_merge_id
+
+        (child, auto_merge_id), auto_status, auto_seconds = _run_stage(
+            "auto_curation",
+            auto_curate_exists,
+            _auto_curate_and_register,
+            run_summary,
+        )
+        run_summary["auto_curation_status"] = auto_status
+        stage_seconds["auto_curation"] = auto_seconds
+        run_summary["curation_evaluation_id"] = eval_key[
+            "curation_evaluation_id"
+        ]
+        run_summary["auto_curation_id"] = child["curation_id"]
+        run_summary["auto_merge_id"] = auto_merge_id
+
     run_summary["stage_seconds"] = stage_seconds
     return cast(RunV2PipelineSummary, run_summary)
 
@@ -478,6 +546,7 @@ def run_v2_pipeline_session(
     sort_group_ids: "list[int] | None" = None,
     description: str = "",
     require_units: bool = False,
+    auto_curate: bool = False,
     preflight: bool = True,
     continue_on_error: bool = False,
 ) -> list[RunV2PipelineSessionResult]:
@@ -642,6 +711,7 @@ def run_v2_pipeline_session(
                 pipeline_preset=pipeline_preset,
                 description=description,
                 require_units=require_units,
+                auto_curate=auto_curate,
                 preflight=False,
             )
         except (

@@ -8,7 +8,7 @@ modules or opening a database connection.
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypeAlias, TypedDict
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 from uuid import UUID
 
 StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
@@ -65,6 +65,8 @@ class PipelineStageSeconds(TypedDict):
     artifact_detection: float
     sorting: float
     curation: float
+    # Present only when ``run_v2_pipeline(auto_curate=True)``.
+    auto_curation: NotRequired[float]
 
 
 class RunV2PipelineSummary(TypedDict):
@@ -85,6 +87,14 @@ class RunV2PipelineSummary(TypedDict):
     curation_status: StageStatus
     stage_seconds: PipelineStageSeconds
     warnings: list[str]
+    # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
+    # the CurationEvaluation suggestion selection PK, and the materialized child
+    # CurationV2 (its curation_id + merge table id) whose labels are the
+    # evaluation's verdict.
+    curation_evaluation_id: NotRequired[UUID]
+    auto_curation_id: NotRequired[int]
+    auto_merge_id: NotRequired[UUID]
+    auto_curation_status: NotRequired[StageStatus]
 
 
 class RunV2PipelineSessionOk(RunV2PipelineSummary):

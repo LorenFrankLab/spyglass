@@ -1001,3 +1001,79 @@ def test_stage_statuses_vocabulary_includes_skipped():
     # The DB-free fail-fast rejection of a motion-pinned (concat) preset is
     # regressed in tests/spikesorting/v2/test_pipeline_presets.py
     # (test_run_v2_pipeline_rejects_motion_pinned_preset_without_db).
+
+
+def test_run_v2_pipeline_auto_curate_param_defaults_false():
+    """``auto_curate`` is an opt-in flag on both orchestrators, default False.
+
+    The convenience call stays initial-curation-only by default so it never
+    silently commits suggested labels into a new curation; the caller opts in.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_pipeline,
+        run_v2_pipeline_session,
+    )
+
+    for fn in (run_v2_pipeline, run_v2_pipeline_session):
+        param = inspect.signature(fn).parameters["auto_curate"]
+        assert param.default is False, fn.__name__
+
+
+@pytest.mark.slow
+def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
+    """``auto_curate=True`` scores the root curation and commits a labeled child.
+
+    The default run carries no auto-curation keys. Opting in (reusing the same
+    recording / artifact / sorting / root curation) adds the
+    ``CurationEvaluation`` suggestion id plus a materialized child ``CurationV2``
+    -- a real child of the root, registered on the merge table -- whose labels
+    are the evaluation's verdict.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    common = dict(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    )
+    auto_keys = (
+        "curation_evaluation_id",
+        "auto_curation_id",
+        "auto_merge_id",
+        "auto_curation_status",
+    )
+
+    # Default run: stops at the root curation, no auto-curation keys.
+    base = run_v2_pipeline(**common)
+    for key in auto_keys:
+        assert key not in base
+    assert "auto_curation" not in base["stage_seconds"]
+
+    # Opt in: upstream stages are reused; the evaluation + child are added.
+    curated = run_v2_pipeline(**common, auto_curate=True)
+    for key in auto_keys:
+        assert key in curated, key
+    assert curated["recording_id"] == base["recording_id"]  # reused upstream
+    assert curated["curation_id"] == base["curation_id"]  # same root curation
+    assert curated["auto_curation_status"] in {"computed", "reused"}
+    assert curated["stage_seconds"]["auto_curation"] >= 0.0
+
+    # The materialized child is a real CurationV2 child of the root, registered.
+    child_pk = {
+        "sorting_id": curated["sorting_id"],
+        "curation_id": curated["auto_curation_id"],
+    }
+    parent = (CurationV2 & child_pk).fetch1("parent_curation_id")
+    assert parent == base["curation_id"]  # child of the root curation
+    assert SpikeSortingOutput.CurationV2 & {
+        "merge_id": curated["auto_merge_id"]
+    }
