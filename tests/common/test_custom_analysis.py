@@ -365,6 +365,7 @@ class TestCleanupAndRegistry:
         teardown,
         common,
         mock_create,
+        request,
     ):
         """Test orphan detection across all registered tables.
 
@@ -382,6 +383,16 @@ class TestCleanupAndRegistry:
 
         master_table = common.common_nwbfile.AnalysisNwbfile()
         custom_table, downstream = custom_analysis_tables
+        created_paths = {}
+
+        def _cleanup_created_files():
+            if not teardown:
+                return
+            for path in created_paths.values():
+                if path.exists():
+                    path.unlink()
+
+        request.addfinalizer(_cleanup_created_files)
 
         # Use mock_create fixture for fast file creation
         mock_create(custom_table)
@@ -408,10 +419,60 @@ class TestCleanupAndRegistry:
         downstream.insert_by_name(export_file)
         custom_table._copy_to_common(export_file)
 
-        # TODO: use `cleanup()` logic to find orphans
-        # Simulate orphan detection across all registered tables
-        # insert table entries without downstream fk-references
+        created_paths = {
+            "null": Path(null_fp).resolve(),
+            "orphan": Path(orph_fp).resolve(),
+            "valid": Path(valid_fp).resolve(),
+            "export": Path(export_fp).resolve(),
+        }
+        expected_deleted_paths = {
+            created_paths["null"],
+            created_paths["orphan"],
+        }
+
+        def _relative_paths(paths):
+            return [
+                (
+                    str(path.relative_to(base_dir))
+                    if path.is_relative_to(base_dir)
+                    else str(path)
+                )
+                for path in sorted(paths)
+            ]
+
+        before_cleanup = {
+            path for path in created_paths.values() if path.exists()
+        }
+        missing_before_cleanup = set(created_paths.values()) - before_cleanup
+        assert not missing_before_cleanup, (
+            "AnalysisNwbfile.cleanup test setup did not create expected files: "
+            f"{_relative_paths(missing_before_cleanup)}"
+        )
+
+        # Run cleanup in dry-run mode first as a smoke check, then run the
+        # destructive path so the test verifies real orphan-row cleanup and
+        # filesystem unlinking. cleanup() legitimately deletes orphaned analysis
+        # files left by other tests in the shared base_dir, so this test asserts
+        # only on the files it created (see below), not on the full set
+        # cleanup() removes.
+        master_table.cleanup(dry_run=True)
         master_table.cleanup()
+
+        after_cleanup = {
+            path for path in created_paths.values() if path.exists()
+        }
+        deleted_paths = before_cleanup - after_cleanup
+        missing_deleted_paths = expected_deleted_paths - deleted_paths
+        unexpected_deleted_paths = deleted_paths - expected_deleted_paths
+        assert not unexpected_deleted_paths, (
+            "AnalysisNwbfile.cleanup deleted .nwb files not created as "
+            "expected cleanup targets by this test: "
+            f"{_relative_paths(unexpected_deleted_paths)}"
+        )
+        assert not missing_deleted_paths, (
+            "AnalysisNwbfile.cleanup did not delete expected cleanup targets: "
+            f"{_relative_paths(missing_deleted_paths)}"
+        )
 
         assert not Path(null_fp).exists(), "Null file should be deleted"
 

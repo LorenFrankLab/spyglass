@@ -1,5 +1,7 @@
 import os
 import re
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
 
@@ -39,6 +41,31 @@ END
 """
 
 schema = dj.schema("common_nwbfile")
+
+
+@dataclass(frozen=True)
+class CleanupPlan:
+    """Filesystem cleanup plan for analysis NWB files.
+
+    Attributes
+    ----------
+    scanned_files : set of pathlib.Path
+        Analysis ``*.nwb`` paths found under the configured analysis directory.
+    tracked_files : set of pathlib.Path
+        Analysis paths currently referenced by DataJoint external stores.
+    files_to_delete : set of pathlib.Path
+        Files selected for filesystem deletion.
+    empty_files : set of pathlib.Path
+        Empty (0-byte) analysis files selected for deletion.
+    untracked_files : set of pathlib.Path
+        Non-empty files selected because no external store references them.
+    """
+
+    scanned_files: Set[Path]
+    tracked_files: Set[Path]
+    files_to_delete: Set[Path]
+    empty_files: Set[Path]
+    untracked_files: Set[Path]
 
 
 @schema
@@ -644,8 +671,115 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
+    def _build_untracked_file_plan(
+        self, custom_tables: List[SpyglassAnalysis]
+    ) -> CleanupPlan:
+        """Build a cleanup plan for untracked or empty analysis NWB files."""
+
+        def paths_from_external(tbl) -> Set[Path]:
+            return {
+                Path(fp[1]).expanduser().resolve()
+                for fp in tbl._ext_tbl.fetch_external_paths()
+            }
+
+        tracked = paths_from_external(self)
+        for tbl in custom_tables:
+            tracked.update(paths_from_external(tbl))
+
+        scanned = set()
+        empty = set()
+        untracked = set()
+        for path in tqdm(
+            Path(self._analysis_dir).rglob("*.nwb"),
+            desc="Scanning analysis files  ",  # Note extra spaces for alignment
+        ):
+            # rglob("*.nwb") only yields files; skip symlinks so a stray
+            # symlink under analysis_dir can't add its target (potentially
+            # outside analysis_dir) to the deletion plan.
+            if path.is_symlink():
+                try:
+                    target = os.readlink(path)
+                except OSError:
+                    target = "<unreadable>"
+                logger.warning(
+                    f"Skipping symlink in analysis dir: {path} -> {target}"
+                )
+                continue
+            resolved_path = path.expanduser().resolve()
+            scanned.add(resolved_path)
+            if path.stat().st_size == 0:
+                empty.add(resolved_path)
+            elif resolved_path not in tracked:
+                untracked.add(resolved_path)
+
+        return CleanupPlan(
+            scanned_files=scanned,
+            tracked_files=tracked,
+            files_to_delete=empty | untracked,
+            empty_files=empty,
+            untracked_files=untracked,
+        )
+
+    @staticmethod
+    def _validate_cleanup_plan(
+        plan: CleanupPlan,
+        *,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+    ) -> tuple[bool, str | None]:
+        """Check a cleanup plan against destructive-cleanup safety limits.
+
+        Returns
+        -------
+        tuple[bool, str | None]
+            ``(True, None)`` when the plan is safe to apply, otherwise
+            ``(False, reason)`` where ``reason`` explains the refusal. Callers
+            decide whether to raise (real run) or warn (dry run).
+        """
+        scanned_count = len(plan.scanned_files)
+        tracked_count = len(plan.tracked_files)
+        delete_count = len(plan.files_to_delete)
+
+        if delete_count == 0:
+            return True, None
+
+        if tracked_count == 0:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count} files after scanning {scanned_count} files, "
+                "but no tracked analysis files were found. Refusing "
+                "destructive cleanup; run with dry_run=True and verify the "
+                "configured analysis directory."
+            )
+
+        delete_fraction = delete_count / max(scanned_count, 1)
+        if delete_fraction > max_delete_fraction:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count}/{scanned_count} scanned analysis files "
+                f"({delete_fraction:.1%}), above the safety limit "
+                f"{max_delete_fraction:.1%}. Refusing destructive cleanup; "
+                "run with dry_run=True and verify the cleanup plan."
+            )
+
+        delete_ratio = delete_count / tracked_count
+        if delete_ratio > max_delete_to_tracked_ratio:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count} files with only {tracked_count} tracked "
+                f"analysis files ({delete_ratio:.1f}x), above the safety "
+                f"limit {max_delete_to_tracked_ratio:.1f}x. Refusing "
+                "destructive cleanup; run with dry_run=True and verify the "
+                "configured analysis directory."
+            )
+
+        return True, None
+
     def _remove_untracked_files(
-        self, custom_tables: List[SpyglassAnalysis], dry_run: bool = True
+        self,
+        custom_tables: List[SpyglassAnalysis],
+        dry_run: bool = True,
+        plan: CleanupPlan | None = None,
     ) -> tuple[Set[Path], Set[Path]]:
         """Remove analysis files that are empty (0 bytes) or not tracked.
 
@@ -661,46 +795,42 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             If True, return the files that would be deleted. Defaults to True.
         custom_tables : list
             List of custom analysis table instances to check for tracked files.
-            If None, only checks common table. Defaults to None.
+        plan : CleanupPlan, optional
+            Precomputed cleanup plan. If omitted, the directory is scanned.
 
         Returns
         -------
         tuple[Set[Path], Set[Path]]
-            (files_to_delete, all_files_scanned) - The second set can be reused
-            to avoid re-scanning the directory.
+            (files_to_delete, tracked_files)
         """
 
-        def paths_from_external(tbl) -> Set[Path]:
-            return set([fp[1] for fp in tbl._ext_tbl.fetch_external_paths()])
-
-        # Collect tracked files from common table, then custom tables
-        tracked = paths_from_external(self)
-        for tbl in custom_tables:
-            tracked.update(paths_from_external(tbl))
-
-        to_delete = set()
-        for path in tqdm(
-            Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files  ",  # Note extra spaces for alignment
-        ):
-            is_empty_file = path.is_file() and path.stat().st_size == 0
-            is_empty_dir = path.is_dir() and not any(path.iterdir())
-            if is_empty_file or is_empty_dir:
-                to_delete.add(path)
-            elif path not in tracked:
-                to_delete.add(path)
+        plan = plan or self._build_untracked_file_plan(custom_tables)
 
         if dry_run:
-            logger.info(f"  {len(to_delete)} untracked or empty analysis files")
-            return to_delete, tracked
+            logger.info(
+                f"  {len(plan.files_to_delete)} untracked or empty analysis "
+                f"files ({len(plan.untracked_files)} untracked, "
+                f"{len(plan.empty_files)} empty)"
+            )
+            return plan.files_to_delete, plan.tracked_files
 
-        for path in to_delete:
+        # files_to_delete holds resolved paths, and Path.resolve() follows
+        # symlinks — a symlink inside analysis_dir resolves to its target.
+        # Skip any path that resolves outside analysis_dir so cleanup cannot
+        # delete data elsewhere via a symlink placed in the analysis directory.
+        analysis_root = Path(self._analysis_dir).expanduser().resolve()
+        for path in plan.files_to_delete:
+            if not path.is_relative_to(analysis_root):
+                logger.warning(
+                    f"Skipping deletion outside analysis dir: {path}"
+                )
+                continue
             try:
                 path.unlink()
-            except Exception as e:
+            except OSError as e:
                 self._logger.error(f"Error deleting file {path}: {e}")
 
-        return to_delete, tracked
+        return plan.files_to_delete, plan.tracked_files
 
     def _cleanup_custom_table(
         self,
@@ -751,7 +881,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return common_orphans
 
-    def cleanup(self, dry_run: bool = False) -> None:
+    def cleanup(
+        self,
+        dry_run: bool = False,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+    ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -789,13 +924,26 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             cleanup actions without deleting database entries or files.
             If False, apply the cleanup changes, including deleting orphaned
             entries and associated files.
+        max_delete_fraction : float
+            Maximum fraction of scanned analysis NWB files that may be deleted
+            by filesystem cleanup. Set high by default (0.9) so it only
+            catches a catastrophically misconfigured analysis directory (one
+            where the sweep would wipe nearly everything), not routine large
+            cleanups. Defaults to 0.9.
+        max_delete_to_tracked_ratio : float
+            Maximum ratio of filesystem cleanup deletions to tracked analysis
+            files. Set high by default (10.0) so it only flags scans where
+            untracked-file count dwarfs tracked-file count by an order of
+            magnitude — a strong signal that the analysis directory is mixed
+            with non-analysis data or a wrong path was supplied. This limit
+            applies only to filesystem deletion of untracked or empty analysis
+            NWB files, not to orphan row deletion. Defaults to 10.0.
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
         self._info_msg(heading + suffix)
 
         registry = AnalysisRegistry()
-
         registry.block_new_inserts(dry_run=dry_run)
 
         # Get all custom tables first so we can check their tracked files
@@ -804,6 +952,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         common_orphans = self.get_orphans().proj()
 
         try:
+            untracked_file_plan = self._build_untracked_file_plan(custom_tables)
+            plan_ok, plan_err = self._validate_cleanup_plan(
+                untracked_file_plan,
+                max_delete_fraction=max_delete_fraction,
+                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+            )
+            if not plan_ok:
+                # Dry-run previews must surface refusal; real runs must abort.
+                if dry_run:
+                    self._logger.warning(
+                        f"Cleanup plan would be refused: {plan_err}"
+                    )
+                else:
+                    raise RuntimeError(plan_err)
+
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans
             for i, analysis_tbl in enumerate(custom_tables, start=1):
@@ -827,12 +990,39 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
-            # Remove untracked files
-            _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
+            # Reuse the pre-pass plan rather than rescanning: rescanning here
+            # would bypass the validate-before-act guard already applied to
+            # this plan. Files newly orphaned by this run's orphan deletion
+            # are caught on the next cleanup invocation.
+            _ = self._remove_untracked_files(
+                custom_tables, dry_run=dry_run, plan=untracked_file_plan
+            )
 
         finally:
             if not dry_run:
-                registry.unblock_new_inserts()
+                # Capture the outer try-block exception (if any) BEFORE the
+                # inner try: sys.exc_info() inside the inner except returns
+                # the inner exception, not the outer one. We only want to
+                # re-raise an unblock failure when no other exception is
+                # already propagating from the cleanup body.
+                cleanup_exc = sys.exc_info()[1]
+                try:
+                    registry.unblock_new_inserts()
+                except Exception as unblock_err:
+                    # A failed unblock halts ALL inserts across the database
+                    # until manually cleared, so this must be loud regardless
+                    # of whether another exception is already propagating.
+                    self._logger.critical(
+                        "Failed to unblock inserts after cleanup: "
+                        f"{unblock_err}. Analysis inserts remain BLOCKED "
+                        "database-wide until restored; run "
+                        "AnalysisRegistry().unblock_new_inserts() manually."
+                    )
+                    # Re-raise only when no other exception is already
+                    # propagating; otherwise we would mask the original
+                    # cleanup error (the critical log above is the signal).
+                    if cleanup_exc is None:
+                        raise
 
     def check_all_files(
         self, resolve_tables: bool = False, verbose: bool = False

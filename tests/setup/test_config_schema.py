@@ -708,3 +708,128 @@ class TestExampleConfigSync:
         assert isinstance(
             config, dict
         ), "Example config should be a JSON object (dict)"
+
+
+class TestTestModeBaseDirGuard:
+    """Tests for the SpyglassConfig.load_config test_mode base_dir guard."""
+
+    def test_refuses_non_tests_base_dir(self, tmp_path):
+        """test_mode=True base_dir must contain a 'tests' path component."""
+        from spyglass.settings import SpyglassConfig
+
+        bad_base = tmp_path / "not-a-test-dir"
+        bad_base.mkdir()
+
+        config = SpyglassConfig()
+        with pytest.raises(ValueError, match="does not contain a 'tests'"):
+            config.load_config(
+                base_dir=str(bad_base),
+                test_mode=True,
+                force_reload=True,
+            )
+
+    def test_accepts_base_dir_with_tests_component(self, tmp_path):
+        """test_mode=True accepts a base_dir whose path has a 'tests' part."""
+        from spyglass.settings import SpyglassConfig
+
+        good_base = tmp_path / "tests" / "data"
+        good_base.mkdir(parents=True)
+
+        config = SpyglassConfig()
+        # Should not raise.
+        config.load_config(
+            base_dir=str(good_base),
+            test_mode=True,
+            force_reload=True,
+        )
+
+
+class TestTestModeEnvVarIgnore:
+    """Tests that test_mode=True ignores directory env vars.
+
+    A shell-exported SPYGLASS_RAW_DIR / DLC_BASE_DIR / DLC_PROJECT_PATH /
+    MOSEQ_BASE_DIR / KACHERY_ZONE pointing at production must not leak
+    into the resolved test configuration.
+    """
+
+    @pytest.fixture
+    def test_base(self, tmp_path):
+        base = tmp_path / "tests" / "data"
+        base.mkdir(parents=True)
+        return base
+
+    def test_ignores_per_key_dir_env_var(self, monkeypatch, test_base):
+        """SPYGLASS_RAW_DIR is ignored under test_mode; resolves to base/raw."""
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-raw"
+        monkeypatch.setenv("SPYGLASS_RAW_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg.raw_dir == str(test_base / "raw")
+
+    def test_ignores_dlc_base_dir_env_var(self, monkeypatch, test_base):
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-dlc"
+        monkeypatch.setenv("DLC_BASE_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg._dlc_base == str(test_base / "deeplabcut")
+
+    def test_ignores_dlc_project_path_env_var(self, monkeypatch, test_base):
+        """DLC_PROJECT_PATH is the other env-var fallback for DLC base dir."""
+        from spyglass.settings import SpyglassConfig
+
+        monkeypatch.delenv("DLC_BASE_DIR", raising=False)
+        evil = "/tmp/some-production/projects/foo"
+        monkeypatch.setenv("DLC_PROJECT_PATH", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg._dlc_base == str(test_base / "deeplabcut")
+
+    def test_ignores_moseq_base_dir_env_var(self, monkeypatch, test_base):
+        from spyglass.settings import SpyglassConfig
+
+        evil = "/tmp/some-production-moseq"
+        monkeypatch.setenv("MOSEQ_BASE_DIR", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg._moseq_base == str(test_base / "moseq")
+
+    def test_ignores_kachery_zone_env_var(self, monkeypatch, test_base):
+        from spyglass.settings import SpyglassConfig
+        import datajoint as dj
+
+        # Use monkeypatch.setitem on dj.config["custom"] so the original
+        # kachery_zone (if any) is restored after the test runs.
+        custom = dj.config.setdefault("custom", {})
+        if "kachery_zone" in custom:
+            monkeypatch.setitem(custom, "kachery_zone", custom["kachery_zone"])
+            del custom["kachery_zone"]
+
+        evil = "evil.production.zone"
+        monkeypatch.setenv("KACHERY_ZONE", evil)
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg.config.get("KACHERY_ZONE") == "franklab.default"

@@ -137,6 +137,10 @@ class SpyglassConfig:
         4. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
         5. resolved_base_dir/X for non-base dirs
 
+        When test_mode=True, environment variables are not consulted for any
+        directory path, and the resolved base_dir must contain a 'tests' path
+        component.
+
         Parameters
         ----------
         base_dir: str
@@ -148,7 +152,9 @@ class SpyglassConfig:
         Raises
         ------
         ValueError
-            If base_dir is not set in either dj.config or os.environ.
+            If base_dir is not set in either dj.config or os.environ, or if
+            test_mode=True and the resolved base_dir does not contain a
+            'tests' path component.
 
         Returns
         -------
@@ -191,6 +197,15 @@ class SpyglassConfig:
                 base_path.mkdir(parents=True, exist_ok=True)
             resolved_base = str(base_path)
 
+            if self._test_mode and "tests" not in base_path.parts:
+                raise ValueError(
+                    f"Refusing to load Spyglass in test_mode with base_dir "
+                    f"{resolved_base!r}: path does not contain a 'tests' "
+                    "component. Run pytest with --base-dir pointing inside a "
+                    "tests/ directory (default: ./tests/_data/) to keep "
+                    "destructive operations off shared/production storage."
+                )
+
         if not resolved_base:
             if not on_startup:  # Only warn if not on startup
                 logger.error(
@@ -201,17 +216,22 @@ class SpyglassConfig:
             self.load_failed = True
             return
 
+        def env_or_none(var: str) -> str | None:
+            """Read an env var, ignored in test_mode to keep the sandbox."""
+            return None if self._test_mode else os.environ.get(var)
+
+        dlc_project = env_or_none("DLC_PROJECT_PATH")
         self._dlc_base = (
             dj_dlc.get("base")
-            or os.environ.get("DLC_BASE_DIR")
-            or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
+            or env_or_none("DLC_BASE_DIR")
+            or (dlc_project.split("projects")[0] if dlc_project else None)
             or str(Path(resolved_base) / "deeplabcut")
         )
         Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
 
         self._moseq_base = (
             dj_moseq.get("base")
-            or os.environ.get("MOSEQ_BASE_DIR")
+            or env_or_none("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
         Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
@@ -228,9 +248,9 @@ class SpyglassConfig:
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
-                env_loc = (  # Ignore env vars if base was passed to func
+                env_loc = (  # Ignore env vars if base was passed to func or in test_mode
                     os.environ.get(dir_env_fmt)
-                    if not self.supplied_base_dir
+                    if not self.supplied_base_dir and not self._test_mode
                     else None
                 )
                 source_config = source_config_lookup.get(prefix, dj_spyglass)
@@ -244,7 +264,7 @@ class SpyglassConfig:
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
-                os.environ.get("KACHERY_ZONE")
+                env_or_none("KACHERY_ZONE")
                 or dj.config.get("custom", {}).get("kachery_zone")
                 or "franklab.default"
             )

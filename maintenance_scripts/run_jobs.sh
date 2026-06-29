@@ -92,7 +92,12 @@ fi
 
 # Run cleanup script; capture any file issues to a temp file for Slack reporting
 FILE_ISSUES_OUT=$(mktemp)
-FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py || {
+  cleanup_status=$?
+  rm -f "$FILE_ISSUES_OUT"
+  on_fail "cleanup.py failed with exit code $cleanup_status"
+  exit "$cleanup_status"
+}
 
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:

@@ -20,6 +20,7 @@ pytest tests/position/v1/test_trodes.py
 pytest --cov=spyglass --cov-report term-missing
 
 # Debug mode (preserve database, verbose output)
+# --base-dir defaults to ./tests/_data/, so it can be omitted
 pytest --no-teardown -v
 ```
 
@@ -193,8 +194,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-pytest --no-teardown  # Avoid container restart overhead
+pytest --no-teardown
 ```
+
+Persists state across runs in the default `./tests/_data/` base.
 
 **Run specific test files:**
 
@@ -249,11 +252,18 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ### Data and Database Options
 
 ```bash
---base_dir PATH     # Where to store downloaded/created files
-# Default: ./tests/_data/
+--base-dir PATH     # Where to store downloaded/created files
+# Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is ignored
+# by the test suite — a shell-exported value pointing at shared/production
+# storage would let destructive tests (e.g. AnalysisNwbfile.cleanup) scan
+# and delete real data. Pass --base-dir explicitly to override the default.
+#
+# settings.py enforces, in test_mode=True, that the resolved base_dir
+# contains a 'tests' path component. Pointing --base-dir at a path outside
+# any tests/ directory raises a ValueError before tests collect.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-# Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management

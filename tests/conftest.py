@@ -202,7 +202,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -272,7 +273,8 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default './tests/_data/'. Dir for local input files.
+        SPYGLASS_BASE_DIR is ignored by the test suite.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
@@ -289,12 +291,13 @@ def pytest_addoption(parser):
     parser.addoption(
         "--base-dir",
         action="store",
-        default=None,
+        default="./tests/_data/",
         dest="base_dir",
         help=(
-            "Directory for local input file. "
-            "Also reads SPYGLASS_BASE_DIR env var when unset. "
-            "Default: './tests/_data/'."
+            "Directory for local test input files. "
+            "Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is "
+            "ignored by the test suite to keep destructive tests off shared "
+            "storage; pass --base-dir explicitly to override the default."
         ),
     )
     parser.addoption(
@@ -335,7 +338,8 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -344,12 +348,23 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    _base_dir = config.option.base_dir or os.environ.get(
-        "SPYGLASS_BASE_DIR", "./tests/_data/"
-    )
-    BASE_DIR = Path(_base_dir).expanduser().absolute()
+    # Tests never honor SPYGLASS_BASE_DIR — a shell-exported value pointing at
+    # shared/production storage would let destructive tests (e.g.
+    # AnalysisNwbfile.cleanup) scan and delete real analysis files. Warn once
+    # if set so the user notices, then drop it from the environment.
+    _env_base = os.environ.pop("SPYGLASS_BASE_DIR", None)
+    if _env_base:
+        warnings.warn(
+            f"Ignoring SPYGLASS_BASE_DIR={_env_base!r} in the test environment; "
+            "pass --base-dir to override the ./tests/_data/ default.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    BASE_DIR = Path(config.option.base_dir).expanduser().resolve()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
+
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
@@ -368,6 +383,13 @@ def pytest_configure(config):
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
 
+    # Point spyglass_dirs.base at the resolved test base so dj.config and the
+    # resolved path agree. Non-test directory paths in dj.config["custom"] are
+    # refused by the SpyglassConfig test_mode guard at load_config time.
+    dj.config.setdefault("custom", {})["spyglass_dirs"] = {
+        "base": str(BASE_DIR)
+    }
+
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
@@ -376,16 +398,16 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
+    server = globals().get("SERVER")
+    if server is None:
+        return
+
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
     close_nwb_files()
-    if TEARDOWN:
-        SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+
+    if globals().get("TEARDOWN", False):
+        server.stop()
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------

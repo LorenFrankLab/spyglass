@@ -2056,7 +2056,11 @@ class TestConfigCompatibility:
 
         from spyglass.settings import SpyglassConfig
 
-        base_dir = tmp_path / "spyglass_data"
+        # Include "tests" in the base_dir so the SpyglassConfig test_mode
+        # guard accepts it. The pytest session sets test_mode=True globally
+        # (see tests/container.py), so any test instantiating SpyglassConfig
+        # with a path that lacks a "tests" component raises ValueError.
+        base_dir = tmp_path / "tests" / "spyglass_data"
         dir_schema = load_directory_schema()
         dirs = build_directory_structure(
             base_dir, schema=dir_schema, create=True, verbose=False
