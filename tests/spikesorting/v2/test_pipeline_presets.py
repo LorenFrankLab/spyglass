@@ -396,3 +396,18 @@ def test_register_preset_catches_missing_lookup_row(dj_conn, monkeypatch):
         ValueError, match="not found in PreprocessingParameters"
     ):
         register_preset("lab_missing_2026_06", spec)
+
+
+def test_register_preset_rejects_bad_name(monkeypatch):
+    """A non-string or blank name is rejected before touching the registry."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    for bad_name in (1, "", "   ", None):
+        with pytest.raises(ValueError, match="non-empty string"):
+            register_preset(bad_name, _custom_spec(), validate_rows=False)
+    assert 1 not in list_pipeline_presets()

@@ -436,9 +436,16 @@ def register_preset(name: str, preset, *, validate_rows: bool = True) -> str:
     Raises
     ------
     ValueError
-        If ``name`` already exists, the preset fails Pydantic validation, or
-        (when ``validate_rows``) a referenced parameter row is missing.
+        If ``name`` is not a non-empty string, already exists, the preset fails
+        Pydantic validation, or (when ``validate_rows``) a referenced parameter
+        row is missing.
     """
+    # Guard the registry key first: a non-string name breaks list_pipeline_presets
+    # (it sorts mixed-type keys) and an empty/blank name is unusable.
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(
+            f"register_preset: name must be a non-empty string, got {name!r}."
+        )
     if name in _PIPELINE_PRESETS:
         raise ValueError(
             f"pipeline preset {name!r} is already registered. Choose a fresh "
