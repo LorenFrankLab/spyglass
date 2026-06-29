@@ -628,6 +628,68 @@ def test_preflight_skips_artifact_when_params_none(
 
 
 @pytest.mark.database
+def test_preflight_auto_curate_adds_prereq_checks(preflight_inputs):
+    """``auto_curate=True`` adds the auto-curation prerequisite checks.
+
+    Auto-curation scores the root curation with the preset's metric +
+    auto-curation rule rows on the whitened metric analyzer recipe, so preflight
+    must gate those rows up front -- but only when opted in, so a default
+    preflight is unchanged.
+    """
+    auto_check_names = {
+        "metric_params_exist",
+        "auto_curation_rules_exist",
+        "metric_waveform_params_exist",
+    }
+
+    base = preflight_v2_pipeline(**preflight_inputs)
+    assert auto_check_names.isdisjoint(c.name for c in base.checks)
+
+    curated = preflight_v2_pipeline(**preflight_inputs, auto_curate=True)
+    names = {c.name for c in curated.checks}
+    assert auto_check_names <= names
+    # The fixture seeds the default rows, so the new checks pass.
+    assert all(c.ok for c in curated.checks if c.name in auto_check_names)
+    assert curated.ok is True
+
+
+@pytest.mark.database
+def test_preflight_auto_curate_flags_missing_metric_row(
+    preflight_inputs, monkeypatch
+):
+    """A missing auto-curation metric row fails preflight only when opted in.
+
+    Without ``auto_curate`` the row is irrelevant and not checked; with it, a
+    missing ``QualityMetricParameters`` row is a blocking error caught before
+    the upstream compute.
+    """
+    import inspect
+
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    # preflight_inputs omits pipeline_preset (it relies on the function
+    # default); base the bogus preset on that same default so only the metric
+    # row is corrupted -- its preproc/sorter checks still pass.
+    default_preset = (
+        inspect.signature(pl.preflight_v2_pipeline)
+        .parameters["pipeline_preset"]
+        .default
+    )
+    base = pl._PIPELINE_PRESETS[default_preset]
+    bogus = base.model_copy(update={"metric_params_name": "missing_metric_xyz"})
+    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_bad_metric", bogus)
+    inputs = {**preflight_inputs, "pipeline_preset": "_preflight_bad_metric"}
+
+    flagged = preflight_v2_pipeline(**inputs, auto_curate=True)
+    assert flagged.ok is False
+    assert "metric_params_exist" in {c.name for c in flagged.checks if not c.ok}
+
+    # Not opted in -> the missing metric row is not checked.
+    default = preflight_v2_pipeline(**inputs)
+    assert not any(c.name == "metric_params_exist" for c in default.checks)
+
+
+@pytest.mark.database
 def test_preflight_is_read_only(preflight_inputs):
     """Preflight inserts nothing: every Selection/Lookup count is unchanged."""
     from spyglass.common.common_lab import LabTeam

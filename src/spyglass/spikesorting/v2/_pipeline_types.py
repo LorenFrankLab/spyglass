@@ -34,6 +34,7 @@ class RunV2PipelineInputs(RunV2PipelineRequiredInputs, total=False):
     pipeline_preset: str
     description: str
     require_units: bool
+    auto_curate: bool
     preflight: bool
 
 
@@ -54,6 +55,7 @@ class RunV2PipelineSessionInputs(
     sort_group_ids: list[int]
     description: str
     require_units: bool
+    auto_curate: bool
     preflight: bool
     continue_on_error: bool
 

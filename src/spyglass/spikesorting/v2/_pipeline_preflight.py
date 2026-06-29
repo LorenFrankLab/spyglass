@@ -268,6 +268,7 @@ def preflight_v2_pipeline(
     interval_list_name: str,
     team_name: str,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
+    auto_curate: bool = False,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -292,6 +293,11 @@ def preflight_v2_pipeline(
     ----------
     nwb_file_name, sort_group_id, interval_list_name, team_name, pipeline_preset
         The same inputs as :func:`run_v2_pipeline`.
+    auto_curate
+        Match ``run_v2_pipeline(auto_curate=...)``. When True, also verify the
+        auto-curation prerequisites (the preset's ``QualityMetricParameters`` /
+        ``AutoCurationRules`` rows and the whitened metric analyzer recipe), so
+        a missing one fails preflight rather than after the upstream compute.
 
     Returns
     -------
@@ -380,6 +386,12 @@ def preflight_v2_pipeline(
         SorterParameters,
         SortingSelection,
     )
+
+    if auto_curate:
+        from spyglass.spikesorting.v2.metric_curation import (
+            AutoCurationRules,
+            QualityMetricParameters,
+        )
 
     sort_group_id = int(sort_group_id)
 
@@ -492,6 +504,40 @@ def preflight_v2_pipeline(
         f"{bundle.preprocessing_params_name!r}) is missing. Run "
         "initialize_v2_defaults().",
     )
+
+    # 8a. auto-curation prerequisites -- only when the caller opts into
+    # auto_curate, so a default run is unchanged. CurationEvaluation scores the
+    # root curation with the preset's metric + auto-curation rule rows on the
+    # whitened (metric) analyzer recipe, so a missing one of those would
+    # otherwise fail only after the upstream compute. The metric waveform row is
+    # the [1] element of the same source-resolved (display, metric) pair.
+    if auto_curate:
+        _check(
+            "metric_params_exist",
+            QualityMetricParameters
+            & {"metric_params_name": bundle.metric_params_name},
+            f"QualityMetricParameters row {bundle.metric_params_name!r} (the "
+            "auto-curation metric set) is missing. Run "
+            "initialize_v2_defaults().",
+        )
+        _check(
+            "auto_curation_rules_exist",
+            AutoCurationRules
+            & {"auto_curation_rules_name": bundle.auto_curation_rules_name},
+            f"AutoCurationRules row {bundle.auto_curation_rules_name!r} (the "
+            "auto-curation rule set) is missing. Run initialize_v2_defaults().",
+        )
+        metric_waveform_params_name = waveform_params_for_preprocessing(
+            bundle.preprocessing_params_name
+        )[1]
+        _check(
+            "metric_waveform_params_exist",
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": metric_waveform_params_name},
+            f"AnalyzerWaveformParameters row {metric_waveform_params_name!r} "
+            "(the whitened metric analyzer recipe auto-curation scores on) is "
+            "missing. Run initialize_v2_defaults().",
+        )
 
     # 8b. sampling_rate_matches. The MS4/MS5 snippet window (clip_size /
     # detect_interval on the rate-keyed sorter row) assumes a specific
@@ -767,6 +813,7 @@ def preflight_v2_pipeline_session(
     team_name: str,
     pipeline_preset: "str | None" = None,
     sort_group_ids: "list[int] | None" = None,
+    auto_curate: bool = False,
 ) -> PreflightSessionReport:
     """Read-only preflight for every target sort group in a session.
 
@@ -820,6 +867,7 @@ def preflight_v2_pipeline_session(
             interval_list_name=interval_list_name,
             team_name=team_name,
             pipeline_preset=pipeline_preset,
+            auto_curate=auto_curate,
         )
         group_reports.append(
             {

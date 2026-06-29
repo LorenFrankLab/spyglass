@@ -315,6 +315,7 @@ def run_v2_pipeline(
             interval_list_name=interval_list_name,
             team_name=team_name,
             pipeline_preset=pipeline_preset,
+            auto_curate=auto_curate,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -488,6 +489,7 @@ def run_v2_pipeline(
     # suggested labels. These keys are added to the summary only when opted in
     # (they are NotRequired), so a default run's summary is unchanged.
     if auto_curate:
+        from spyglass.spikesorting.v2.exceptions import PipelineStageError
         from spyglass.spikesorting.v2.metric_curation import (
             CurationEvaluation,
             CurationEvaluationSelection,
@@ -501,12 +503,23 @@ def run_v2_pipeline(
                 "auto_curation_rules_name": bundle.auto_curation_rules_name,
             }
         )
-        # "reused" iff the evaluation is already populated for this selection;
-        # use_evaluation_labels(reuse_existing=True) reuses the child curation.
-        auto_curate_exists = bool(CurationEvaluation & eval_key)
-
-        def _auto_curate_and_register():
+        # The stage does two things: populate the evaluation AND accept its
+        # labels into a committed child curation. Classify it honestly --
+        # "reused" only when BOTH were already done (the evaluation was
+        # populated and the accepted child already existed), else "computed" --
+        # so a run that (re)created the child is never mislabeled "reused" just
+        # because the evaluation pre-existed. ``_run_stage``'s exists-before-work
+        # model cannot express that (the child id is only known after
+        # acceptance), so time + wrap the stage here, preserving the same
+        # stage-aware ``PipelineStageError``.
+        eval_was_populated = bool(CurationEvaluation & eval_key)
+        sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
+        auto_start = time.perf_counter()
+        try:
             CurationEvaluation.populate(eval_key, reserve_jobs=False)
+            children_before = set(
+                (CurationV2 & sorting_restriction).fetch("curation_id")
+            )
             child = CurationEvaluation().use_evaluation_labels(
                 eval_key,
                 description=(
@@ -518,16 +531,18 @@ def run_v2_pipeline(
             auto_merge_id = (SpikeSortingOutput.CurationV2 & child).fetch1(
                 "merge_id"
             )
-            return child, auto_merge_id
-
-        (child, auto_merge_id), auto_status, auto_seconds = _run_stage(
-            "auto_curation",
-            auto_curate_exists,
-            _auto_curate_and_register,
-            run_summary,
+        except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
+            raise PipelineStageError(
+                "auto_curation",
+                dict(run_summary),
+                str(exc),
+                original_type=type(exc).__name__,
+            ) from exc
+        stage_seconds["auto_curation"] = time.perf_counter() - auto_start
+        child_created = child["curation_id"] not in children_before
+        run_summary["auto_curation_status"] = (
+            "reused" if eval_was_populated and not child_created else "computed"
         )
-        run_summary["auto_curation_status"] = auto_status
-        stage_seconds["auto_curation"] = auto_seconds
         run_summary["curation_evaluation_id"] = eval_key[
             "curation_evaluation_id"
         ]
@@ -657,6 +672,7 @@ def run_v2_pipeline_session(
             team_name=team_name,
             pipeline_preset=pipeline_preset,
             sort_group_ids=targets,
+            auto_curate=auto_curate,
         )
         # Capture each group's non-blocking advisories. OK groups run below with
         # preflight=False (the DB checks are not repeated), so without this their

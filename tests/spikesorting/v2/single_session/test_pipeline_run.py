@@ -1021,6 +1021,22 @@ def test_run_v2_pipeline_auto_curate_param_defaults_false():
         assert param.default is False, fn.__name__
 
 
+def test_run_v2_pipeline_input_typeddicts_carry_auto_curate():
+    """The public input TypedDicts mirror the new ``auto_curate`` keyword.
+
+    The ``*Inputs`` bundles document "optional keys mirror the function
+    defaults" for typed ``run_v2_pipeline(**inputs)`` call sites, so a new
+    optional kwarg must appear there too.
+    """
+    from spyglass.spikesorting.v2._pipeline_types import (
+        RunV2PipelineInputs,
+        RunV2PipelineSessionInputs,
+    )
+
+    assert "auto_curate" in RunV2PipelineInputs.__optional_keys__
+    assert "auto_curate" in RunV2PipelineSessionInputs.__optional_keys__
+
+
 @pytest.mark.slow
 def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     """``auto_curate=True`` scores the root curation and commits a labeled child.
@@ -1030,9 +1046,18 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     ``CurationEvaluation`` suggestion id plus a materialized child ``CurationV2``
     -- a real child of the root, registered on the merge table -- whose labels
     are the evaluation's verdict.
+
+    The status reflects whether the accepted CHILD was (re)created this call,
+    not merely whether the evaluation already existed: a pre-populated
+    evaluation whose acceptance has not happened still reports ``"computed"``,
+    and only a full no-op reports ``"reused"``.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
@@ -1058,13 +1083,30 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         assert key not in base
     assert "auto_curation" not in base["stage_seconds"]
 
-    # Opt in: upstream stages are reused; the evaluation + child are added.
+    # Pre-populate the evaluation WITHOUT accepting it, so the evaluation
+    # already exists but the child curation does not -- the scenario where a
+    # naive "reused = evaluation exists" classifier would mislabel the run.
+    eval_key = CurationEvaluationSelection.insert_selection(
+        {
+            "sorting_id": base["sorting_id"],
+            "curation_id": base["curation_id"],
+            "metric_params_name": "franklab_default",
+            "auto_curation_rules_name": "v1_default_nn_noise",
+        }
+    )
+    CurationEvaluation.populate(eval_key)
+
+    # Opt in: the evaluation pre-exists, but the child is created THIS call, so
+    # the stage is "computed", not "reused".
     curated = run_v2_pipeline(**common, auto_curate=True)
     for key in auto_keys:
         assert key in curated, key
     assert curated["recording_id"] == base["recording_id"]  # reused upstream
     assert curated["curation_id"] == base["curation_id"]  # same root curation
-    assert curated["auto_curation_status"] in {"computed", "reused"}
+    assert (
+        curated["curation_evaluation_id"] == eval_key["curation_evaluation_id"]
+    )  # reused the pre-populated evaluation
+    assert curated["auto_curation_status"] == "computed"  # child created now
     assert curated["stage_seconds"]["auto_curation"] >= 0.0
 
     # The materialized child is a real CurationV2 child of the root, registered.
@@ -1077,3 +1119,8 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     assert SpikeSortingOutput.CurationV2 & {
         "merge_id": curated["auto_merge_id"]
     }
+
+    # Full no-op re-run: the evaluation AND the child already exist -> "reused".
+    rerun = run_v2_pipeline(**common, auto_curate=True)
+    assert rerun["auto_curation_id"] == curated["auto_curation_id"]
+    assert rerun["auto_curation_status"] == "reused"
