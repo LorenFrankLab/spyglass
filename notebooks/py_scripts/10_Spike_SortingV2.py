@@ -701,9 +701,9 @@ describe_run(session_results)
 
 # ## Next steps
 #
-# - Sort and track units across multiple sessions: concatenate same-day
-#   recordings (`run_v2_pipeline` over a `SessionGroup`) and match units across
-#   days (`run_v2_unit_match`) — see `docs/src/Features/SpikeSortingV2.md`.
+# - Sort and track units across multiple sessions — concatenate same-day
+#   recordings and match units across days — with
+#   [Cross-Session Spike Sorting](./14_Spike_Sorting_CrossSession.ipynb).
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).
