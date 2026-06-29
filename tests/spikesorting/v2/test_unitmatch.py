@@ -2914,3 +2914,100 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         mp._MATCHER_REGISTRY.update(saved_matchers)
         mp._SCHEMA_REGISTRY.clear()
         mp._SCHEMA_REGISTRY.update(saved_schemas)
+
+
+@pytest.mark.slow
+def test_describe_unit_match_choices_excludes_other_team(
+    two_session_curated_group, monkeypatch
+):
+    """A curation under a different team (same nwb/sort-group/interval) is not
+    offered as a choice.
+
+    Regression for the describe/validator consistency fix:
+    ``describe_unit_match_choices`` filters on the FULL member identity including
+    ``team_name``, matching ``UnitMatchSelection``'s ownership validator. A sort
+    of the same session/sort-group/interval under a different team tag must NOT
+    appear as a pickable curation -- otherwise the helper would offer a choice
+    that ``run_v2_unit_match`` then rejects. The member's OWN curation must still
+    be offered.
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import describe_unit_match_choices
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    grp = two_session_curated_group
+    member = grp["members"][0]
+    own_choice = grp["choices"][0]
+    other_team = "xteam_describe_filter"
+
+    LabTeam.insert1(
+        {
+            "team_name": other_team,
+            "team_description": "describe filter regression",
+        },
+        skip_duplicates=True,
+    )
+    # Same session/sort-group/interval/preproc as member 0, different team tag --
+    # a distinct recording_id (team is part of the content-addressed identity).
+    other_rec = RecordingSelection.insert_selection(
+        {
+            **member,
+            "preprocessing_params_name": "default",
+            "team_name": other_team,
+        }
+    )
+    other_sort = None
+    try:
+        if not (Recording & other_rec):
+            Recording.populate(other_rec, reserve_jobs=False)
+        monkeypatch.setattr(
+            Sorting, "_run_sorter", staticmethod(_plant_single_unit)
+        )
+        other_sort = SortingSelection.insert_selection(
+            {
+                "recording_id": other_rec["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": _ensure_minirec_ms5_params(),
+            }
+        )
+        if not (Sorting & other_sort):
+            Sorting.populate(other_sort, reserve_jobs=False)
+        clear_curations_for(other_sort)
+        other_curation = CurationV2.insert_curation(
+            sorting_key={"sorting_id": other_sort["sorting_id"]}
+        )
+
+        described = describe_unit_match_choices(grp["owner"], grp["group_name"])
+        member0 = next(m for m in described if m["member_index"] == 0)
+        offered = {
+            (c["sorting_id"], c["curation_id"]) for c in member0["choices"]
+        }
+        # The member's own (member-team) curation IS offered ...
+        assert (own_choice["sorting_id"], own_choice["curation_id"]) in offered
+        # ... but the same-session curation under another team is NOT.
+        assert (
+            other_curation["sorting_id"],
+            other_curation["curation_id"],
+        ) not in offered
+    finally:
+        if other_sort is not None:
+            for mid in (SpikeSortingOutput.CurationV2 & other_sort).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            (CurationV2 & other_sort).super_delete(warn=False)
+            (Sorting & other_sort).super_delete(warn=False)
+            (SortingSelection & other_sort).super_delete(warn=False)
+        (Recording & other_rec).super_delete(warn=False)
+        (RecordingSelection & other_rec).super_delete(warn=False)
+        (LabTeam & {"team_name": other_team}).super_delete(warn=False)
