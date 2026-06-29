@@ -777,6 +777,20 @@ def _resolve_session_sort_group_ids(
             f"pipeline presets: {sorted(_PIPELINE_PRESETS)}. Call "
             "describe_pipeline_presets() to see what each preset does."
         )
+    # A motion-pinned preset targets a concatenated session group, which the
+    # single-session session runner cannot drive. Reject it here -- before the
+    # SortGroupV2 access below -- so the session helpers fail fast (database-free)
+    # with the concat-preset message, matching the single-group helpers.
+    bundle = _PIPELINE_PRESETS[pipeline_preset]
+    if bundle.motion_correction_params_name is not None:
+        raise PipelineInputError(
+            f"{caller}: pipeline_preset {pipeline_preset!r} pins motion "
+            "correction (motion_correction_params_name="
+            f"{bundle.motion_correction_params_name!r}), so it targets a "
+            "concatenated session group, not the single-session inputs the "
+            "session runner drives. Concatenated (same-day) sorting is not wired "
+            "in yet; choose a non-concat preset."
+        )
 
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -832,6 +846,9 @@ def preflight_v2_pipeline_session(
     sort_group_ids
         Optional explicit subset of sort groups to check. ``None`` (default)
         checks every ``SortGroupV2`` row for the session.
+    auto_curate
+        Match ``run_v2_pipeline_session(auto_curate=...)``; when True, each
+        group's check also verifies the auto-curation prerequisite rows.
 
     Returns
     -------

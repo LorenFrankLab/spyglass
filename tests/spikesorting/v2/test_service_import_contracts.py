@@ -111,6 +111,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "pipeline_preset",
         "description",
         "require_units",
+        "auto_curate",
         "preflight",
     }
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
@@ -118,4 +119,12 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "interval_list_name",
         "team_name",
         "pipeline_preset",
+    }
+    assert pipeline_types.RunV2PipelineSessionInputs.__optional_keys__ == {
+        "sort_group_ids",
+        "description",
+        "require_units",
+        "auto_curate",
+        "preflight",
+        "continue_on_error",
     }

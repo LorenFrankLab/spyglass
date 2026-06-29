@@ -599,7 +599,7 @@ def run_v2_pipeline_session(
 
     Parameters
     ----------
-    nwb_file_name, interval_list_name, team_name, description, require_units
+    nwb_file_name, interval_list_name, team_name, description, require_units, auto_curate
         As in :func:`run_v2_pipeline`; applied to every group.
     pipeline_preset
         Required pipeline-preset name (no default). See

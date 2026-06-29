@@ -871,6 +871,32 @@ def test_preflight_rejects_motion_pinned_preset_without_db():
     assert report.expected_ids == {}
 
 
+def test_session_runners_reject_motion_pinned_preset_without_db():
+    """The whole-session helpers also reject a concat preset fail-fast.
+
+    ``run_v2_pipeline_session`` / ``preflight_v2_pipeline_session`` validate the
+    preset (unknown / motion-pinned) before any ``SortGroupV2`` access, so
+    selecting the concat preset raises ``PipelineInputError`` with no database
+    connection -- this test takes no ``dj_conn`` fixture.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline_session,
+        run_v2_pipeline_session,
+    )
+
+    for fn in (run_v2_pipeline_session, preflight_v2_pipeline_session):
+        with pytest.raises(
+            PipelineInputError, match="concatenated session group"
+        ):
+            fn(
+                nwb_file_name="dummy.nwb",
+                interval_list_name="dummy",
+                team_name="dummy",
+                pipeline_preset=_CONCAT_PRESET,
+            )
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 
