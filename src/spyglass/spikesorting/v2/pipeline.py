@@ -45,6 +45,7 @@ from spyglass.spikesorting.v2._pipeline_preflight import (
 from spyglass.spikesorting.v2._pipeline_presets import (
     _PIPELINE_PRESETS,
     _PipelinePreset,
+    clone_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
     describe_preset,

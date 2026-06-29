@@ -20,6 +20,7 @@ import pytest
 
 from spyglass.spikesorting.v2.pipeline import (
     _PIPELINE_PRESETS,
+    clone_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
     describe_preset,
@@ -411,3 +412,340 @@ def test_register_preset_rejects_bad_name(monkeypatch):
         with pytest.raises(ValueError, match="non-empty string"):
             register_preset(bad_name, _custom_spec(), validate_rows=False)
     assert 1 not in list_pipeline_presets()
+
+
+# --------------------------------------------------------------------------- #
+# clone_preset
+# --------------------------------------------------------------------------- #
+
+# A runnable MS5 built-in used as the clone base across the DB tests: its
+# preprocessing row (franklab_hippocampus_2026_06) carries a bandpass_filter
+# (freq_min=600) and its mountainsort5 sorter row carries a detect_threshold
+# (5.5), so it exercises both a nested preprocessing override and a flat sorter
+# override.
+_CLONE_BASE = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
+
+
+@pytest.fixture
+def clone_env(dj_conn, monkeypatch):
+    """Install defaults, isolate the registry, drop derived rows after.
+
+    The clone base is a shipped preset, so its parameter rows must exist;
+    ``initialize_v2_defaults()`` installs them (idempotent). Mutating the
+    module-global ``_PIPELINE_PRESETS`` and inserting derived parameter rows
+    would leak across tests, so swap in a copy of the registry and record the
+    derived-row names to ``delete_quick`` on teardown. Tests append every
+    parameter-row name they create (clone-derived or pre-seeded) to the yielded
+    list.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    names: list[str] = []
+    yield names
+
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    for table, col in (
+        (PreprocessingParameters, "preprocessing_params_name"),
+        (ArtifactDetectionParameters, "artifact_detection_params_name"),
+        (SorterParameters, "sorter_params_name"),
+    ):
+        for name in names:
+            (table & {col: name}).delete_quick()
+
+
+def _stage_value(df, stage, key):
+    """Read one flattened ``describe_pipeline_preset`` value for a stage/key."""
+    row = df[(df["stage"] == stage) & (df["key"] == key)]
+    assert len(row) == 1, f"{stage}.{key} not uniquely present: {len(row)} rows"
+    return row.iloc[0]["value"]
+
+
+def test_clone_preset_unknown_base_raises():
+    """An unknown base preset raises before any DB read, pointing at discovery."""
+    with pytest.raises(ValueError, match="unknown"):
+        clone_preset("definitely_not_a_preset", "lab_clone_2026_06", x=1)
+
+
+def test_clone_preset_rejects_duplicate_new_name():
+    """A new_name already in the registry raises rather than overwriting."""
+    existing = next(iter(_PIPELINE_PRESETS))
+    with pytest.raises(ValueError, match="already registered"):
+        clone_preset(_CLONE_BASE, existing, detect_threshold=4.0)
+
+
+def test_clone_preset_rejects_bad_new_name(monkeypatch):
+    """A non-string or blank new_name is rejected before any DB work."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    for bad_name in (1, "", "   ", None):
+        with pytest.raises(ValueError, match="non-empty string"):
+            clone_preset(_CLONE_BASE, bad_name, detect_threshold=4.0)
+
+
+def test_clone_preset_requires_at_least_one_override(monkeypatch):
+    """Cloning with no overrides raises (use register_preset for an alias)."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    with pytest.raises(ValueError, match="at least one override"):
+        clone_preset(_CLONE_BASE, "lab_no_override_2026_06")
+
+
+def test_clone_preset_flat_sorter_override_round_trips(dj_conn, clone_env):
+    """A one-knob sorter override produces a working, inspectable clone.
+
+    Overriding the MS5 ``detect_threshold`` registers a new preset whose
+    sorter row reflects the change while the untouched preprocessing/artifact
+    rows are reused (same names as the base), and the base preset's own rows
+    are left unchanged.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    new_name = "lab_ms5_thresh_2026_06"
+    clone_env.append(new_name)
+
+    base = presets_mod._PIPELINE_PRESETS[_CLONE_BASE]
+    base_detail = describe_pipeline_preset(_CLONE_BASE)
+    base_threshold = _stage_value(base_detail, "sorter", "detect_threshold")
+    assert float(base_threshold) == 5.5  # the shipped MS5 default
+
+    returned = clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    assert returned == new_name
+    assert new_name in list_pipeline_presets()
+
+    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    # Only the sorter row is forked; untouched stages reuse the base rows.
+    assert clone.sorter_params_name == new_name
+    assert clone.preprocessing_params_name == base.preprocessing_params_name
+    assert (
+        clone.artifact_detection_params_name
+        == base.artifact_detection_params_name
+    )
+    assert clone.sorter == base.sorter  # mountainsort5 carried over
+
+    detail = describe_pipeline_preset(new_name)
+    assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
+    # The untouched preprocessing knob is unchanged in the clone.
+    assert (
+        float(_stage_value(detail, "preprocessing", "bandpass_filter.freq_min"))
+        == 600.0
+    )
+
+    # The base preset's sorter row is NOT mutated.
+    assert (
+        float(
+            _stage_value(
+                describe_pipeline_preset(_CLONE_BASE),
+                "sorter",
+                "detect_threshold",
+            )
+        )
+        == 5.5
+    )
+
+
+def test_clone_preset_nested_dotted_override_round_trips(dj_conn, clone_env):
+    """A dotted override edits a nested preprocessing key on a forked row."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    new_name = "lab_hp700_2026_06"
+    clone_env.append(new_name)
+
+    clone_preset(_CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0})
+
+    base = presets_mod._PIPELINE_PRESETS[_CLONE_BASE]
+    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    assert clone.preprocessing_params_name == new_name
+    # The sorter row is untouched, so it is reused, not forked.
+    assert clone.sorter_params_name == base.sorter_params_name
+
+    detail = describe_pipeline_preset(new_name)
+    assert (
+        float(_stage_value(detail, "preprocessing", "bandpass_filter.freq_min"))
+        == 700.0
+    )
+    # freq_max is carried over from the base unchanged.
+    assert (
+        float(_stage_value(detail, "preprocessing", "bandpass_filter.freq_max"))
+        == 6000.0
+    )
+
+    # The base preprocessing row keeps its original high-pass.
+    assert (
+        float(
+            _stage_value(
+                describe_pipeline_preset(_CLONE_BASE),
+                "preprocessing",
+                "bandpass_filter.freq_min",
+            )
+        )
+        == 600.0
+    )
+
+
+def test_clone_preset_unknown_override_key_raises(dj_conn, clone_env):
+    """An override that matches no stage param raises and inserts nothing."""
+    new_name = "lab_bad_key_2026_06"
+    clone_env.append(new_name)
+
+    with pytest.raises(ValueError, match="does not match any"):
+        clone_preset(_CLONE_BASE, new_name, no_such_knob=1)
+
+    # Nothing was registered or inserted.
+    assert new_name not in list_pipeline_presets()
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    assert not (
+        PreprocessingParameters & {"preprocessing_params_name": new_name}
+    )
+    assert not (SorterParameters & {"sorter_params_name": new_name})
+
+
+def test_clone_preset_invalid_override_value_raises(dj_conn, clone_env):
+    """A schema-invalid override raises the same teaching error as a direct insert.
+
+    ``detect_threshold`` must be > 0; a negative value fails the MS5 Pydantic
+    schema, and nothing is registered or inserted.
+    """
+    new_name = "lab_bad_value_2026_06"
+    clone_env.append(new_name)
+
+    with pytest.raises((ValueError, TypeError), match="detect_threshold"):
+        clone_preset(_CLONE_BASE, new_name, detect_threshold=-1.0)
+
+    assert new_name not in list_pipeline_presets()
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    assert not (SorterParameters & {"sorter_params_name": new_name})
+
+
+def test_clone_preset_duplicate_content_under_new_name_raises(
+    dj_conn, clone_env
+):
+    """A derived row whose content matches a different existing row raises.
+
+    Overriding the hippocampus preprocessing high-pass to 300 Hz reproduces
+    the shipped cortex preprocessing row exactly, so forking it under a new
+    name is refused with ``DuplicateParameterContentError`` rather than
+    silently duplicating provenance.
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+
+    new_name = "lab_dup_content_2026_06"
+    clone_env.append(new_name)
+
+    with pytest.raises(
+        DuplicateParameterContentError, match="franklab_cortex_2026_06"
+    ):
+        clone_preset(
+            _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 300.0}
+        )
+    assert new_name not in list_pipeline_presets()
+
+
+def test_clone_preset_allow_duplicate_params_opts_in(dj_conn, clone_env):
+    """``allow_duplicate_params=True`` forks content matching another row.
+
+    The same override that is refused by default (it reproduces the cortex
+    preprocessing row) is allowed when the duplicate-content opt-in is passed,
+    registering the clone under the new name.
+    """
+    new_name = "lab_dup_optin_2026_06"
+    clone_env.append(new_name)
+
+    clone_preset(
+        _CLONE_BASE,
+        new_name,
+        allow_duplicate_params=True,
+        **{"bandpass_filter.freq_min": 300.0},
+    )
+    assert new_name in list_pipeline_presets()
+    detail = describe_pipeline_preset(new_name)
+    assert (
+        float(_stage_value(detail, "preprocessing", "bandpass_filter.freq_min"))
+        == 300.0
+    )
+
+
+def test_clone_preset_name_collision_different_content_raises(
+    dj_conn, clone_env
+):
+    """A derived-row name that already exists with different content raises.
+
+    A parameter row already named like the clone, but with different content,
+    must not be silently re-pointed; the clone refuses the name collision.
+    """
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    new_name = "lab_name_collision_2026_06"
+    clone_env.append(new_name)
+
+    # Pre-seed a preprocessing row under new_name with unrelated content
+    # (freq_min=777 is unique among the shipped rows).
+    PreprocessingParameters.insert1(
+        {
+            "preprocessing_params_name": new_name,
+            "params": PreprocessingParamsSchema.model_validate(
+                {"bandpass_filter": {"freq_min": 777.0, "freq_max": 6000.0}}
+            ).model_dump(),
+        }
+    )
+
+    with pytest.raises(ValueError, match="different content"):
+        clone_preset(
+            _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
+        )
+    assert new_name not in list_pipeline_presets()
+
+
+def test_clone_preset_idempotent_rerun(dj_conn, clone_env):
+    """Re-running a clone with identical overrides is a no-op, not a fork.
+
+    The derived rows are content-addressed by name, so a second run (after the
+    in-memory registration is cleared, as on a fresh process) reuses the
+    existing rows without raising a duplicate-content error.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    new_name = "lab_idempotent_2026_06"
+    clone_env.append(new_name)
+
+    clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    # Simulate a fresh process: the DB rows persist but the registry does not.
+    presets_mod._PIPELINE_PRESETS.pop(new_name)
+
+    # Identical re-run must succeed and reflect the same override.
+    clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    assert new_name in list_pipeline_presets()
+    detail = describe_pipeline_preset(new_name)
+    assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
+
+    # Exactly one sorter row exists under the derived name.
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    assert len(SorterParameters & {"sorter_params_name": new_name}) == 1

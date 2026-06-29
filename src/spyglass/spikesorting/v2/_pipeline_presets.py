@@ -9,6 +9,7 @@ are unchanged.
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -460,3 +461,352 @@ def register_preset(name: str, preset, *, validate_rows: bool = True) -> str:
         _assert_preset_rows_exist(name, validated)
     _PIPELINE_PRESETS[name] = validated
     return name
+
+
+def _path_exists(blob, parts: list[str]) -> bool:
+    """Return whether the dotted ``parts`` resolve to a key in ``blob``."""
+    node = blob
+    for part in parts:
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _deep_set(blob: dict, dotted_key: str, value) -> None:
+    """Replace the value at ``dotted_key`` (known to exist) in ``blob``."""
+    parts = dotted_key.split(".")
+    node = blob
+    for part in parts[:-1]:
+        node = node[part]
+    node[parts[-1]] = value
+
+
+def clone_preset(
+    base_name: str,
+    new_name: str,
+    *,
+    allow_duplicate_params: bool = False,
+    **overrides,
+) -> str:
+    """Clone a pipeline preset with one or more parameter values changed.
+
+    The "tune one knob" path: a user who wants a single non-default value need
+    not hand-write a full Pydantic params dict. ``clone_preset`` resolves
+    ``base_name`` to its preprocessing / artifact-detection / sorter parameter
+    rows, applies ``overrides`` to the relevant stage's ``params`` blob, inserts
+    the derived parameter rows under ``new_name``, and registers ``new_name`` via
+    :func:`register_preset`. Inspect the result with
+    :func:`describe_pipeline_preset`.
+
+    Each override key is a dotted path into a stage's scientific ``params`` blob
+    -- e.g. ``detect_threshold=4.0`` (a flat sorter knob, passable as a keyword)
+    or ``**{"bandpass_filter.freq_min": 700.0}`` (a nested preprocessing knob;
+    dotted keys are not valid Python identifiers, so pass them via ``**{...}``).
+    The override is routed to whichever stage's blob already contains that path;
+    a key that is not present in any stage blob is rejected rather than silently
+    added. Only the scientific ``params`` blob is editable -- ``job_kwargs`` and
+    the sorter's ``execution_params`` are carried over from the base row
+    verbatim; change those by inserting a parameter row directly.
+
+    Stages the overrides do not touch are not forked: the clone reuses the base
+    preset's existing row names for them, so a one-knob change adds exactly one
+    derived parameter row.
+
+    The clone never mutates the base preset or its parameter rows -- it only adds
+    new rows and a new registration. The derived rows are named ``new_name``, so
+    re-running ``clone_preset`` with identical overrides (e.g. on a fresh process,
+    where the in-memory registry is empty but the DB rows persist) is a no-op
+    rather than a fork.
+
+    Parameters
+    ----------
+    base_name : str
+        A registered pipeline-preset name (see :func:`list_pipeline_presets`).
+    new_name : str
+        The fresh name for the clone. Must be a non-empty string not already in
+        the preset registry, and is also used to name each derived parameter row.
+    allow_duplicate_params : bool, optional
+        If True, opt out of the duplicate-content guard when a derived row's
+        content matches an existing row under a different name (see
+        :func:`register_preset` / the parameter Lookups). Default False refuses
+        to fork provenance, mirroring the parameter tables.
+    **overrides
+        Dotted ``stage_blob`` paths mapped to their new values.
+
+    Returns
+    -------
+    str
+        The registered ``new_name``.
+
+    Raises
+    ------
+    ValueError
+        If ``base_name`` is unknown; ``new_name`` is not a fresh non-empty
+        string; no overrides are given; an override key matches no stage param
+        (or is ambiguous across stages); an override value fails the stage's
+        Pydantic schema; or a derived row name already exists with different
+        content.
+    DuplicateParameterContentError
+        If a derived row's content matches an existing row under a different
+        name and ``allow_duplicate_params`` is False.
+    """
+    # --- cheap, database-free validation (mirrors register_preset / describe) ---
+    # Validate before importing the table modules: importing them triggers
+    # DataJoint ``@schema`` decoration (a DB connection), so these checks stay
+    # database-free and fail fast before any row is touched.
+    if base_name not in _PIPELINE_PRESETS:
+        raise ValueError(
+            f"unknown pipeline_preset {base_name!r}. Available pipeline "
+            f"presets: {sorted(_PIPELINE_PRESETS)}. Call "
+            "describe_pipeline_presets() to see what each one does."
+        )
+    if not isinstance(new_name, str) or not new_name.strip():
+        raise ValueError(
+            f"clone_preset: new_name must be a non-empty string, got "
+            f"{new_name!r}."
+        )
+    if new_name in _PIPELINE_PRESETS:
+        raise ValueError(
+            f"pipeline preset {new_name!r} is already registered. Choose a "
+            f"fresh name; existing presets: {sorted(_PIPELINE_PRESETS)}."
+        )
+    if not overrides:
+        raise ValueError(
+            "clone_preset requires at least one override (the knob to change); "
+            "to register an alias of an existing preset under a new name use "
+            "register_preset()."
+        )
+    base = _PIPELINE_PRESETS[base_name]
+
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import (
+        _jsonable_blob,
+        transaction_or_noop,
+    )
+
+    # One descriptor per stage. ``sorter`` is the per-sorter dispatch key (and
+    # the extra ``SorterParameters`` primary-key column / ``execution_params``
+    # carrier); it is None for the single-key Lookups.
+    stages = {
+        "preprocessing": {
+            "table": PreprocessingParameters,
+            "table_name": "PreprocessingParameters",
+            "pk_field": "preprocessing_params_name",
+            "base_row_name": base.preprocessing_params_name,
+            "schema_cls": PreprocessingParamsSchema,
+            "sorter": None,
+        },
+        "artifact_detection": {
+            "table": ArtifactDetectionParameters,
+            "table_name": "ArtifactDetectionParameters",
+            "pk_field": "artifact_detection_params_name",
+            "base_row_name": base.artifact_detection_params_name,
+            "schema_cls": ArtifactDetectionParamsSchema,
+            "sorter": None,
+        },
+        "sorter": {
+            "table": SorterParameters,
+            "table_name": "SorterParameters",
+            "pk_field": "sorter_params_name",
+            "base_row_name": base.sorter_params_name,
+            "schema_cls": _get_sorter_schema(base.sorter),
+            "sorter": base.sorter,
+        },
+    }
+
+    def _base_restriction(stage):
+        restriction = {stage["pk_field"]: stage["base_row_name"]}
+        if stage["sorter"] is not None:
+            restriction["sorter"] = stage["sorter"]
+        return restriction
+
+    # Fetch every base row's params (and the carried-over blobs) up front: the
+    # routing step needs all three blobs to disambiguate an override, and a
+    # missing row must fail with an actionable message, not an opaque fetch1.
+    for stage in stages.values():
+        rel = stage["table"] & _base_restriction(stage)
+        if not rel:
+            raise ValueError(
+                f"clone_preset: {stage['table_name']} row "
+                f"{stage['base_row_name']!r} referenced by preset "
+                f"{base_name!r} is not in the database. Run "
+                "initialize_v2_defaults() to install the shipped parameter "
+                "catalog."
+            )
+        if stage["sorter"] is not None:
+            params, psv, job_kwargs, exec_params, exec_psv = rel.fetch1(
+                "params",
+                "params_schema_version",
+                "job_kwargs",
+                "execution_params",
+                "execution_params_schema_version",
+            )
+            stage["base_execution_params"] = _jsonable_blob(exec_params)
+            stage["base_execution_params_schema_version"] = int(exec_psv)
+        else:
+            params, psv, job_kwargs = rel.fetch1(
+                "params", "params_schema_version", "job_kwargs"
+            )
+        stage["base_params"] = _jsonable_blob(params)
+        stage["base_params_schema_version"] = int(psv)
+        stage["base_job_kwargs"] = _jsonable_blob(job_kwargs)
+
+    # Route each override to the one stage whose params blob already contains
+    # its dotted path. A path present in no stage is a typo / unsupported key; a
+    # path present in more than one (e.g. a top-level key shared across stages)
+    # cannot be disambiguated by a dotted key alone.
+    stage_overrides: dict[str, dict] = {name: {} for name in stages}
+    for dotted_key, value in overrides.items():
+        parts = dotted_key.split(".")
+        matches = [
+            name
+            for name, stage in stages.items()
+            if _path_exists(stage["base_params"], parts)
+        ]
+        if not matches:
+            raise ValueError(
+                f"clone_preset: override key {dotted_key!r} does not match any "
+                "parameter in the base preset's preprocessing, "
+                "artifact-detection, or sorter params. Call "
+                f"describe_pipeline_preset({base_name!r}) to see the keys you "
+                "can override."
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"clone_preset: override key {dotted_key!r} is ambiguous -- it "
+                f"matches multiple stages {sorted(matches)}. clone_preset "
+                "cannot disambiguate a top-level key shared across stages; "
+                "insert the parameter row directly for this change."
+            )
+        stage_overrides[matches[0]][dotted_key] = value
+
+    touched = [name for name in stages if stage_overrides[name]]
+
+    # Phase 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
+    # so a bad override raises the same teaching error as a direct parameter
+    # insert and leaves the database untouched.
+    derived_params: dict[str, dict] = {}
+    for name in touched:
+        stage = stages[name]
+        blob = copy.deepcopy(stage["base_params"])
+        for dotted_key, value in stage_overrides[name].items():
+            _deep_set(blob, dotted_key, value)
+        derived_params[name] = (
+            stage["schema_cls"].model_validate(blob).model_dump()
+        )
+
+    def _fingerprint(
+        stage,
+        *,
+        params,
+        params_schema_version,
+        job_kwargs,
+        execution_params,
+        execution_params_schema_version,
+    ):
+        return parameter_fingerprint(
+            stage["table_name"],
+            params=_jsonable_blob(params),
+            params_schema_version=int(params_schema_version),
+            job_kwargs=_jsonable_blob(job_kwargs),
+            sorter=stage["sorter"],
+            execution_params=execution_params,
+            execution_params_schema_version=execution_params_schema_version,
+        )
+
+    # Phase 2 -- insert the derived rows atomically. For each touched stage,
+    # reconcile against any existing row already named ``new_name``: identical
+    # content is an idempotent no-op (a re-run reuses it), different content is a
+    # name collision and refused. The duplicate-content guard inside the table
+    # ``insert`` separately refuses a derived row whose content matches a
+    # DIFFERENT existing name (unless ``allow_duplicate_params``).
+    with transaction_or_noop(PreprocessingParameters.connection):
+        for name in touched:
+            stage = stages[name]
+            exec_params = stage.get("base_execution_params")
+            exec_psv = (
+                stage.get("base_execution_params_schema_version")
+                if stage["sorter"] is not None
+                else None
+            )
+            derived_fp = _fingerprint(
+                stage,
+                params=derived_params[name],
+                params_schema_version=stage["base_params_schema_version"],
+                job_kwargs=stage["base_job_kwargs"],
+                execution_params=exec_params,
+                execution_params_schema_version=exec_psv,
+            )
+
+            new_restriction = {stage["pk_field"]: new_name}
+            if stage["sorter"] is not None:
+                new_restriction["sorter"] = stage["sorter"]
+            existing = stage["table"] & new_restriction
+            if existing:
+                if stage["sorter"] is not None:
+                    e_params, e_psv, e_jk, e_ep, e_epsv = existing.fetch1(
+                        "params",
+                        "params_schema_version",
+                        "job_kwargs",
+                        "execution_params",
+                        "execution_params_schema_version",
+                    )
+                    existing_fp = _fingerprint(
+                        stage,
+                        params=e_params,
+                        params_schema_version=e_psv,
+                        job_kwargs=e_jk,
+                        execution_params=_jsonable_blob(e_ep),
+                        execution_params_schema_version=int(e_epsv),
+                    )
+                else:
+                    e_params, e_psv, e_jk = existing.fetch1(
+                        "params", "params_schema_version", "job_kwargs"
+                    )
+                    existing_fp = _fingerprint(
+                        stage,
+                        params=e_params,
+                        params_schema_version=e_psv,
+                        job_kwargs=e_jk,
+                        execution_params=None,
+                        execution_params_schema_version=None,
+                    )
+                if existing_fp == derived_fp:
+                    continue  # idempotent: the derived row already exists
+                raise ValueError(
+                    f"clone_preset: a {stage['table_name']} row named "
+                    f"{new_name!r} already exists with different content. "
+                    "Choose a different new_name, or drop the existing row "
+                    "before re-cloning."
+                )
+
+            row = {
+                stage["pk_field"]: new_name,
+                "params": derived_params[name],
+                "job_kwargs": stage["base_job_kwargs"],
+            }
+            if stage["sorter"] is not None:
+                row["sorter"] = stage["sorter"]
+                row["execution_params"] = stage["base_execution_params"]
+            stage["table"].insert1(
+                row, allow_duplicate_params=allow_duplicate_params
+            )
+
+    derived_preset = base.model_copy(
+        update={stages[name]["pk_field"]: new_name for name in touched}
+    )
+    register_preset(new_name, derived_preset, validate_rows=True)
+    return new_name
