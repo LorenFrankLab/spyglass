@@ -228,6 +228,42 @@ class Electrode(SpyglassIngestion, dj.Imported):
                     entry.update(cfg)
         return entries
 
+    @classmethod
+    def create_from_config(cls, nwb_file_name: str):
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log("Electrode.create_from_config")
+
+        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        config = get_config(nwb_file_abspath, calling_table=cls.__name__)
+        if "Electrode" not in config:
+            return  # See #849
+        self_table = cls()
+        entries = self_table.generate_entries_from_config(
+            config, base_key={"nwb_file_name": nwb_file_name}
+        )[self_table]
+
+        inserts = []
+        updates = []
+        for entry in entries:
+            entry_pk = {
+                k: v for k, v in entry.items() if k in self_table.primary_key
+            }
+            query = cls() & entry_pk
+            if len(query):
+                updates.append(entry)
+                logger.info(
+                    f"Updated {cls.__name__} with PK {entry_pk} from config."
+                )
+            else:
+                inserts.append(entry)
+                logger.info(
+                    f"Inserted {cls.__name__} with PK {entry_pk} from config."
+                )
+        cls.insert(inserts, skip_duplicates=True, allow_direct_insert=True)
+        for update in updates:
+            cls.update1(update)
+
     def make(self, key):
         """Deprecated in favor of insert_from_nwbfile."""
         raise NotImplementedError(
