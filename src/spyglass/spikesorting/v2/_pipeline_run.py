@@ -522,7 +522,9 @@ def run_v2_pipeline(
         # single concat call is as self-contained as a single-session run. The
         # member-recording build is its own stage so a member populate failure
         # surfaces as a PipelineStageError with timing + partial run summary,
-        # the same contract as every other stage.
+        # the same contract as every other stage. Order by member_index so
+        # member_recording_ids is deterministic and matches the concat
+        # identity/snapshot ordering, not the implicit DB fetch order.
         member_recording_keys = [
             RecordingSelection.insert_selection(
                 {
@@ -533,7 +535,9 @@ def run_v2_pipeline(
                     "team_name": member["team_name"],
                 }
             )
-            for member in (SessionGroup.Member & group_key).fetch(as_dict=True)
+            for member in (SessionGroup.Member & group_key).fetch(
+                as_dict=True, order_by="member_index"
+            )
         ]
 
         def _populate_member_recordings():
