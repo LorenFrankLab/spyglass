@@ -39,9 +39,23 @@ class _PipelinePreset(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     preprocessing_params_name: str
-    artifact_detection_params_name: str
     sorter: str
     sorter_params_name: str
+    # Curation-stage row names: the quality-metric set and the auto-curation
+    # rule set the preset computes/suggests. Required so every preset declares
+    # its curation; consumed by the orchestrator only when the caller opts into
+    # auto-curation (otherwise a convenience run stays initial-curation-only).
+    metric_params_name: str
+    auto_curation_rules_name: str
+    # artifact_detection_params_name is optional: None means the preset runs no
+    # artifact detection (a skip-artifact single-session preset, or a concat
+    # preset -- concat sorts carry no ArtifactDetectionSource row). A non-None
+    # value names the ArtifactDetectionParameters row.
+    artifact_detection_params_name: "str | None" = None
+    # motion_correction_params_name is optional: None for ordinary single-
+    # session presets (motion is selected per recording); a concat preset sets
+    # it ("auto" resolves to rigid_fast for same-day session groups).
+    motion_correction_params_name: "str | None" = None
     # Discovery metadata (no runtime behavior) -- the axes a scientist picks a
     # preset by. probe_type is informational: the recipe is set by target
     # region (the preproc high-pass) and sampling rate (the sorter window),
@@ -131,6 +145,9 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         "preprocessing_params_name",
         "artifact_detection_params_name",
         "sorter_params_name",
+        "metric_params_name",
+        "auto_curation_rules_name",
+        "motion_correction_params_name",
         "intended_use",
         "threshold_units",
         "notes",
@@ -150,6 +167,11 @@ def describe_pipeline_presets() -> "pd.DataFrame":
                 preset.artifact_detection_params_name
             ),
             "sorter_params_name": preset.sorter_params_name,
+            "metric_params_name": preset.metric_params_name,
+            "auto_curation_rules_name": preset.auto_curation_rules_name,
+            "motion_correction_params_name": (
+                preset.motion_correction_params_name
+            ),
             "intended_use": preset.intended_use,
             "threshold_units": preset.threshold_units,
             "notes": preset.notes,
@@ -279,12 +301,20 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             ("target_region", preset.target_region),
             ("sampling_rate_hz", preset.sampling_rate_hz),
             ("recommendation_status", preset.recommendation_status),
+            ("metric_params_name", preset.metric_params_name),
+            ("auto_curation_rules_name", preset.auto_curation_rules_name),
+            (
+                "motion_correction_params_name",
+                preset.motion_correction_params_name,
+            ),
             ("threshold_units", preset.threshold_units),
             ("intended_use", preset.intended_use),
             ("notes", preset.notes),
         )
     ]
-    for stage, row_name, row in (
+    # Build the value-resolving stages. Artifact detection is optional: a None
+    # name means the preset runs no artifact stage, so there is no row to unpack.
+    stage_specs = [
         (
             "preprocessing",
             preset.preprocessing_params_name,
@@ -294,19 +324,24 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                 "PreprocessingParameters",
             ),
         ),
-        (
-            "artifact_detection",
-            preset.artifact_detection_params_name,
-            _fetch_params(
-                ArtifactDetectionParameters,
-                {
-                    "artifact_detection_params_name": (
-                        preset.artifact_detection_params_name
-                    )
-                },
-                "ArtifactDetectionParameters",
-            ),
-        ),
+    ]
+    if preset.artifact_detection_params_name is not None:
+        stage_specs.append(
+            (
+                "artifact_detection",
+                preset.artifact_detection_params_name,
+                _fetch_params(
+                    ArtifactDetectionParameters,
+                    {
+                        "artifact_detection_params_name": (
+                            preset.artifact_detection_params_name
+                        )
+                    },
+                    "ArtifactDetectionParameters",
+                ),
+            )
+        )
+    stage_specs.append(
         (
             "sorter",
             preset.sorter_params_name,
@@ -318,8 +353,9 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                 },
                 "SorterParameters",
             ),
-        ),
-    ):
+        )
+    )
+    for stage, row_name, row in stage_specs:
         for key, value in _flatten("", row["params"]):
             rows.append(
                 _detail_row(
@@ -370,25 +406,22 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     table so the fix is obvious.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    checks = (
+    checks = [
         (
             PreprocessingParameters,
             {"preprocessing_params_name": preset.preprocessing_params_name},
             "PreprocessingParameters",
             preset.preprocessing_params_name,
-        ),
-        (
-            ArtifactDetectionParameters,
-            {
-                "artifact_detection_params_name": (
-                    preset.artifact_detection_params_name
-                )
-            },
-            "ArtifactDetectionParameters",
-            preset.artifact_detection_params_name,
         ),
         (
             SorterParameters,
@@ -399,7 +432,49 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
             "SorterParameters",
             preset.sorter_params_name,
         ),
-    )
+        (
+            QualityMetricParameters,
+            {"metric_params_name": preset.metric_params_name},
+            "QualityMetricParameters",
+            preset.metric_params_name,
+        ),
+        (
+            AutoCurationRules,
+            {"auto_curation_rules_name": preset.auto_curation_rules_name},
+            "AutoCurationRules",
+            preset.auto_curation_rules_name,
+        ),
+    ]
+    # artifact detection is optional: a None name means the preset runs no
+    # artifact stage (skip / concat), so there is no row to require.
+    if preset.artifact_detection_params_name is not None:
+        checks.append(
+            (
+                ArtifactDetectionParameters,
+                {
+                    "artifact_detection_params_name": (
+                        preset.artifact_detection_params_name
+                    )
+                },
+                "ArtifactDetectionParameters",
+                preset.artifact_detection_params_name,
+            )
+        )
+    # motion correction is optional: only presets that pin one (e.g. concat
+    # presets) carry it.
+    if preset.motion_correction_params_name is not None:
+        checks.append(
+            (
+                MotionCorrectionParameters,
+                {
+                    "motion_correction_params_name": (
+                        preset.motion_correction_params_name
+                    )
+                },
+                "MotionCorrectionParameters",
+                preset.motion_correction_params_name,
+            )
+        )
     for table, restriction, label, row_name in checks:
         if not (table & restriction):
             raise ValueError(

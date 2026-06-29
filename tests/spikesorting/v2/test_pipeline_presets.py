@@ -69,6 +69,9 @@ _COLUMNS = [
     "preprocessing_params_name",
     "artifact_detection_params_name",
     "sorter_params_name",
+    "metric_params_name",
+    "auto_curation_rules_name",
+    "motion_correction_params_name",
     "intended_use",
     "threshold_units",
     "notes",
@@ -153,6 +156,18 @@ def test_describe_pipeline_presets_matches_preset_objects():
             == pipeline_preset.artifact_detection_params_name
         )
         assert row["sorter_params_name"] == pipeline_preset.sorter_params_name
+        assert row["metric_params_name"] == pipeline_preset.metric_params_name
+        assert (
+            row["auto_curation_rules_name"]
+            == pipeline_preset.auto_curation_rules_name
+        )
+        # motion is optional (None for single-session presets); pandas coerces a
+        # None to NaN only in an all-numeric column, but this column is all
+        # strings/None, so compare directly.
+        assert (
+            row["motion_correction_params_name"]
+            == pipeline_preset.motion_correction_params_name
+        )
         assert row["intended_use"] == pipeline_preset.intended_use
         assert row["threshold_units"] == pipeline_preset.threshold_units
         assert row["notes"] == pipeline_preset.notes
@@ -749,3 +764,169 @@ def test_clone_preset_idempotent_rerun(dj_conn, clone_env):
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     assert len(SorterParameters & {"sorter_params_name": new_name}) == 1
+
+
+# --------------------------------------------------------------------------- #
+# preset curation fields (metric / auto-curation / motion)
+# --------------------------------------------------------------------------- #
+
+
+def test_every_preset_declares_curation_params():
+    """Every shipped preset names a quality-metric + auto-curation rule set.
+
+    These became required fields, so a preset that omitted them would fail to
+    build. The shipped mapping: franklab / Neuropixels presets pair their
+    ``*_default`` metric set with the noise-labeling ``v1_default_nn_noise``
+    rules, while the clusterless preset (no clustered units to merge) pairs the
+    ``minimal`` metric set with the inert ``none`` rules.
+    """
+    for name, preset in _PIPELINE_PRESETS.items():
+        assert preset.metric_params_name.strip(), f"{name}.metric blank"
+        assert preset.auto_curation_rules_name.strip(), f"{name}.rules blank"
+        # Single-session presets leave motion correction unset.
+        assert preset.motion_correction_params_name is None
+
+    clusterless = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
+    assert clusterless.metric_params_name == "minimal"
+    assert clusterless.auto_curation_rules_name == "none"
+
+    ms5 = _PIPELINE_PRESETS[_CLONE_BASE]
+    assert ms5.metric_params_name == "franklab_default"
+    assert ms5.auto_curation_rules_name == "v1_default_nn_noise"
+
+    npx = _PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
+    assert npx.metric_params_name == "neuropixels_default"
+    assert npx.auto_curation_rules_name == "v1_default_nn_noise"
+
+
+def test_preset_model_artifact_optional_and_motion_field():
+    """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
+
+    ``artifact_detection_params_name`` is optional (``None`` for concat presets
+    that run no artifact detection) and ``motion_correction_params_name`` is an
+    optional field a concat preset sets; unknown fields are still rejected.
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    preset = presets_mod._PipelinePreset(
+        preprocessing_params_name="franklab_hippocampus_2026_06",
+        artifact_detection_params_name=None,
+        sorter="mountainsort5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        metric_params_name="franklab_default",
+        auto_curation_rules_name="v1_default_nn_noise",
+        motion_correction_params_name="auto",
+    )
+    assert preset.artifact_detection_params_name is None
+    assert preset.motion_correction_params_name == "auto"
+
+    with pytest.raises(ValueError):
+        presets_mod._PipelinePreset(
+            preprocessing_params_name="franklab_hippocampus_2026_06",
+            sorter="mountainsort5",
+            sorter_params_name="franklab_30khz_ms5_2026_06",
+            metric_params_name="franklab_default",
+            auto_curation_rules_name="v1_default_nn_noise",
+            bogus_field=1,
+        )
+
+
+def _spec_with(**overrides) -> dict:
+    """A valid built-in preset spec with field overrides applied."""
+    return {**_custom_spec(), **overrides}
+
+
+def test_register_preset_catches_missing_metric_row(dj_conn, monkeypatch):
+    """A preset naming an absent quality-metric row fails with a clear pointer."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    spec = _spec_with(metric_params_name="missing_metric_xyz")
+    with pytest.raises(
+        ValueError, match="not found in QualityMetricParameters"
+    ):
+        register_preset("lab_missing_metric_2026_06", spec)
+
+
+def test_register_preset_catches_missing_auto_curation_row(
+    dj_conn, monkeypatch
+):
+    """A preset naming an absent auto-curation rule set fails clearly."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    spec = _spec_with(auto_curation_rules_name="missing_rules_xyz")
+    with pytest.raises(ValueError, match="not found in AutoCurationRules"):
+        register_preset("lab_missing_rules_2026_06", spec)
+
+
+def test_register_preset_catches_missing_motion_row(dj_conn, monkeypatch):
+    """A preset naming an absent motion-correction row fails clearly.
+
+    The motion row is only checked when the preset sets it (single-session
+    presets leave it None and skip the check).
+    """
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    spec = _spec_with(motion_correction_params_name="missing_motion_xyz")
+    with pytest.raises(
+        ValueError, match="not found in MotionCorrectionParameters"
+    ):
+        register_preset("lab_missing_motion_2026_06", spec)
+
+
+def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
+    """The preset detail view surfaces the metric + auto-curation row names."""
+    detail = describe_pipeline_preset(_CLONE_BASE)
+    assert (
+        _stage_value(detail, "preset", "metric_params_name")
+        == "franklab_default"
+    )
+    assert (
+        _stage_value(detail, "preset", "auto_curation_rules_name")
+        == "v1_default_nn_noise"
+    )
+
+
+def test_describe_pipeline_preset_artifact_none_skips_artifact(
+    dj_conn, clone_env
+):
+    """A preset with no artifact stage unpacks without an artifact section.
+
+    Registered with ``validate_rows=False`` (it references real preproc / sorter
+    / curation rows but a ``None`` artifact), the detail view must skip the
+    artifact stage rather than raise on a ``None`` row name.
+    """
+    name = "lab_no_artifact_2026_06"
+    register_preset(
+        name,
+        _spec_with(artifact_detection_params_name=None),
+        validate_rows=False,
+    )
+    detail = describe_pipeline_preset(name)
+    assert (detail["stage"] == "artifact_detection").sum() == 0
+    # The other stages still resolve.
+    assert (detail["stage"] == "preprocessing").sum() > 0
+    assert (detail["stage"] == "sorter").sum() > 0

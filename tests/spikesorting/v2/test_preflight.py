@@ -460,6 +460,8 @@ def test_preflight_sorter_misspelled(preflight_inputs, monkeypatch):
         artifact_detection_params_name="default",
         sorter="not_a_real_sorter_xyz",
         sorter_params_name="default",
+        metric_params_name="minimal",
+        auto_curation_rules_name="none",
     )
     monkeypatch.setitem(
         pl._PIPELINE_PRESETS, "_preflight_bogus_sorter", bogus_preset
@@ -568,6 +570,8 @@ def test_preflight_warns_on_none_artifact_params(preflight_inputs, monkeypatch):
         artifact_detection_params_name="none",
         sorter="mountainsort5",
         sorter_params_name="franklab_30khz_ms5_2026_06",
+        metric_params_name="minimal",
+        auto_curation_rules_name="none",
     )
     monkeypatch.setitem(
         pl._PIPELINE_PRESETS, "_preflight_none_artifact", none_preset
@@ -853,6 +857,8 @@ def test_preflight_matlab_local_backend_errors(
         artifact_detection_params_name="default",
         sorter="kilosort2_5",
         sorter_params_name="preflight_local",
+        metric_params_name="minimal",
+        auto_curation_rules_name="none",
     )
     monkeypatch.setitem(
         pl._PIPELINE_PRESETS, "_preflight_matlab_local", matlab_local
