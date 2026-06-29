@@ -1152,8 +1152,11 @@ def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
 
     A single-session run that finds units additionally builds an offline FigPack
     manual-curation bundle of the root curation and surfaces its local URI; the
-    figpack stage is observable and reused on an idempotent rerun.
+    figpack stage is observable and reused on an idempotent rerun. If the local
+    bundle is cleaned out from under a reused row, the rerun rebuilds it rather
+    than returning a dead path.
     """
+    import shutil
     from pathlib import Path
 
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -1181,3 +1184,11 @@ def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
     rerun = run_v2_pipeline(**run_kwargs)
     assert rerun["figpack_uri"] == figpack_uri
     assert rerun["figpack_status"] == "reused"
+
+    # Self-heal: if the offline bundle is purged, a rerun rebuilds it rather than
+    # reporting "reused" with a dead path.
+    shutil.rmtree(figpack_uri)
+    assert not Path(figpack_uri).exists()
+    rebuilt = run_v2_pipeline(**run_kwargs)
+    assert rebuilt["figpack_status"] == "computed"
+    assert Path(rebuilt["figpack_uri"]).exists()

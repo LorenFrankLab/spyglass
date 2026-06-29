@@ -141,3 +141,48 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "preflight",
         "continue_on_error",
     }
+    # The result/stage contracts mix always-present and mode/opt-in keys: their
+    # NotRequired keys MUST surface as optional in the runtime TypedDict metadata
+    # (codegen + callers inspect __optional_keys__). This silently breaks under
+    # postponed annotations -- ``from __future__ import annotations`` in
+    # _pipeline_types would stringize the ``NotRequired`` wrapper and reclassify
+    # every key as required -- so pin the split here.
+    assert pipeline_types.PipelineStageSeconds.__required_keys__ == {
+        "sorting",
+        "curation",
+    }
+    assert pipeline_types.PipelineStageSeconds.__optional_keys__ == {
+        "recording",
+        "artifact_detection",
+        "member_recording",
+        "concat_recording",
+        "auto_curation",
+        "figpack",
+    }
+    assert pipeline_types.RunV2PipelineSummary.__required_keys__ == {
+        "pipeline_preset",
+        "sorting_id",
+        "curation_id",
+        "merge_id",
+        "n_units",
+        "sorting_status",
+        "curation_status",
+        "stage_seconds",
+        "warnings",
+    }
+    assert pipeline_types.RunV2PipelineSummary.__optional_keys__ == {
+        "recording_id",
+        "recording_status",
+        "artifact_detection_id",
+        "artifact_detection_status",
+        "member_recording_status",
+        "member_recording_ids",
+        "concat_recording_id",
+        "concat_recording_status",
+        "curation_evaluation_id",
+        "auto_curation_id",
+        "auto_merge_id",
+        "auto_curation_status",
+        "figpack_uri",
+        "figpack_status",
+    }

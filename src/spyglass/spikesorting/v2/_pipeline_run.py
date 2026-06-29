@@ -801,6 +801,8 @@ def run_v2_pipeline(
             run_summary["figpack_status"] = "skipped"
             stage_seconds["figpack"] = 0.0
         else:
+            from pathlib import Path
+
             from spyglass.spikesorting.v2.figpack_curation import (
                 FigPackCuration,
                 FigPackCurationSelection,
@@ -814,13 +816,24 @@ def run_v2_pipeline(
                 label_options=figpack_label_options,
                 upload=False,
             )
+            # Reuse only when the FigPackCuration row AND its offline bundle are
+            # both present. The run returns figpack_uri as an output, so a row
+            # whose local bundle was cleaned out (e.g. the figpack / temp dir was
+            # purged) must be rebuilt rather than reported "reused" with a dead
+            # path: drop the stale row so populate rebuilds the bundle.
+            built = FigPackCuration & figpack_selection
+            bundle_present = (
+                bool(built) and Path(built.fetch1("figpack_uri")).exists()
+            )
+            if bool(built) and not bundle_present:
+                built.delete_quick()
             (
                 _,
                 run_summary["figpack_status"],
                 stage_seconds["figpack"],
             ) = _run_stage(
                 "figpack",
-                bool(FigPackCuration & figpack_selection),
+                bundle_present,
                 lambda: FigPackCuration.populate(figpack_selection),
                 run_summary,
             )

@@ -4,9 +4,13 @@ This module is DB-free by design: it imports only stdlib typing helpers and
 ``uuid.UUID``. Keep it that way so humans, IDEs, and code-generation agents can
 inspect the pipeline input / result shapes without importing DataJoint schema
 modules or opening a database connection.
-"""
 
-from __future__ import annotations
+Annotations are deliberately NOT postponed (no ``from __future__ import
+annotations``): with stringized annotations a ``TypedDict`` cannot see the
+``NotRequired`` wrapper, so every key would be misclassified as required and
+``__required_keys__`` / ``__optional_keys__`` -- the runtime metadata callers
+and codegen inspect -- would be wrong.
+"""
 
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 from uuid import UUID
@@ -54,7 +58,7 @@ class RunV2PipelineInputs(TypedDict, total=False):
     auto_curate: bool
     preflight: bool
     figpack: bool
-    figpack_label_options: list[str]
+    figpack_label_options: list[str] | None
 
 
 class RunV2PipelineSessionRequiredInputs(TypedDict):
