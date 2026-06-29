@@ -52,6 +52,7 @@ from spyglass.spikesorting.v2.pipeline import (
     describe_run,
     describe_sort_groups,
     describe_units,
+    list_pipeline_presets,
     plot_sort_group_geometry,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
@@ -196,13 +197,15 @@ describe_pipeline_preset(pipeline_preset)
 # new parameter rows that differ, reusing the base preset's rows for every
 # untouched stage. Here we lower the MountainSort5 detection threshold (a common
 # tweak for low-amplitude units). The clone is then selectable by name like any
-# shipping preset — set `pipeline_preset` to it to use it below.
+# shipping preset — set `pipeline_preset` to it to use it below. (Registering a
+# name that already exists raises, so each cell is guarded to be safe to re-run.)
 
-clone_preset(
-    pipeline_preset,
-    "my_lab_ms5_lower_threshold",
-    detect_threshold=5.0,
-)
+if "my_lab_ms5_lower_threshold" not in list_pipeline_presets():
+    clone_preset(
+        pipeline_preset,
+        "my_lab_ms5_lower_threshold",
+        detect_threshold=5.0,
+    )
 describe_pipeline_preset("my_lab_ms5_lower_threshold")
 
 # For a fully custom pipeline — a different sorter, or a stage combination no
@@ -212,17 +215,18 @@ describe_pipeline_preset("my_lab_ms5_lower_threshold")
 # durable recipe, add it to the preset catalog. The mapping is the stages a run
 # touches:
 
-register_preset(
-    "my_lab_custom",
-    {
-        "preprocessing_params_name": "franklab_hippocampus_2026_06",
-        "artifact_detection_params_name": "default",
-        "sorter": "mountainsort5",
-        "sorter_params_name": "franklab_30khz_ms5_2026_06",
-        "metric_params_name": "franklab_default",
-        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
-    },
-)
+if "my_lab_custom" not in list_pipeline_presets():
+    register_preset(
+        "my_lab_custom",
+        {
+            "preprocessing_params_name": "franklab_hippocampus_2026_06",
+            "artifact_detection_params_name": "default",
+            "sorter": "mountainsort5",
+            "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            "metric_params_name": "franklab_default",
+            "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+        },
+    )
 
 # ## 4. Preflight — a fast, fail-early check
 #
@@ -347,22 +351,60 @@ auto_summary["auto_merge_id"]
 
 # ### 7-browser. Curate in a browser with FigPack
 #
-# When you want to label and merge by eye but prefer a point-and-click view over
-# the plots below, `figpack=True` publishes a FigPack curation view of the root
-# curation and returns its location in `figpack_uri`. Offline it is a
-# self-contained bundle on disk — open `index.html` from `figpack_uri` in a
-# browser, label/merge there, and your edits are saved alongside the bundle for a
-# later round trip back into a Spyglass curation.
+# To inspect units in a point-and-click view, `figpack=True` publishes a FigPack
+# curation view of the root curation and returns its location in `figpack_uri`.
+# This needs the optional FigPack packages (the `spikesorting-v2-curation`
+# extra); without them `run_v2_pipeline(figpack=True)` raises, so the cell below
+# runs only when they are installed.
+#
+# Offline, the view is a self-contained static bundle on disk — open `index.html`
+# from `figpack_uri` in a browser to inspect the sort. Edits made to a static
+# bundle in the browser are **not** written back automatically. To bring labels
+# and merges from a FigPack figure into a Spyglass curation, read them with
+# `FigPackCuration.fetch_curation_from_uri(uri)` and commit them with
+# `CurationV2.save_manual_curation(...)` (the round-trip cell below). A
+# never-edited figure reads back empty.
 
-figpack_summary = run_v2_pipeline(
-    nwb_file_name=nwb_file_name,
-    sort_group_id=sort_group_id,
-    interval_list_name=interval_list_name,
-    team_name=team_name,
-    pipeline_preset=pipeline_preset,
-    figpack=True,
+import importlib.util
+
+figpack_available = (
+    importlib.util.find_spec("figpack") is not None
+    and importlib.util.find_spec("figpack_spike_sorting") is not None
 )
-print("FigPack view:", figpack_summary.get("figpack_uri"))
+figpack_summary = None
+if figpack_available:
+    figpack_summary = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        pipeline_preset=pipeline_preset,
+        figpack=True,
+    )
+    print("FigPack view:", figpack_summary["figpack_uri"])
+else:
+    print(
+        "FigPack extra not installed; skipping. Install the "
+        "'spikesorting-v2-curation' extra to publish a browser curation view."
+    )
+
+# Round-trip: read the figure's annotation state, then commit it as the next
+# curation. After labeling/merging in the browser, re-run this to import the
+# edits (here, on a fresh sort, the figure reads back empty).
+
+if figpack_summary is not None:
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    labels, merge_groups = FigPackCuration.fetch_curation_from_uri(
+        figpack_summary["figpack_uri"]
+    )
+    print("from figure — labels:", labels, "| merge groups:", merge_groups)
+    # With real edits, commit them as the next curation:
+    # CurationV2.save_manual_curation(
+    #     {"sorting_id": run_summary["sorting_id"]},
+    #     labels=labels,
+    #     merge_groups=merge_groups,
+    # )
 
 # ### 7a. Evaluate the root curation (pass 1)
 #
@@ -651,9 +693,9 @@ describe_run(session_results)
 
 # ## Next steps
 #
-# - Sort and track units across multiple sessions — concatenate same-day
-#   recordings and match units across days — with
-#   [Cross-Session Spike Sorting](./14_Spike_Sorting_CrossSession.ipynb).
+# - Sort and track units across multiple sessions: concatenate same-day
+#   recordings (`run_v2_pipeline` over a `SessionGroup`) and match units across
+#   days (`run_v2_unit_match`) — see `docs/src/Features/SpikeSortingV2.md`.
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).
