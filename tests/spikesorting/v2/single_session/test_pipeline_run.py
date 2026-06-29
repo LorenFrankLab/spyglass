@@ -65,12 +65,18 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         PreprocessingParameters,
         SortGroupV2,
     )
-    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    # The display analyzer recipe is a single-session run prerequisite (gated by
+    # preflight), so seed it too -- otherwise this test fails in isolation.
+    AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {
             "team_name": "v2_test_team",
@@ -172,6 +178,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         SortGroupV2,
     )
     from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
         SorterParameters,
         SortingSelection,
     )
@@ -180,6 +187,9 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
+    # The display analyzer recipe is a single-session run prerequisite (gated by
+    # preflight), so seed it too -- otherwise this test fails in isolation.
+    AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
         skip_duplicates=True,
