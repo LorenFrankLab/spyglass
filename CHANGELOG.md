@@ -179,7 +179,7 @@ for label, interval_data in results.groupby("interval_labels"):
     #1490
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
-    #1505
+    #1505, #1633
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
@@ -220,6 +220,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Save disk checks as csv, predict runway of primary data directory #1611
 - Fix package scanning without database import #1621
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
+- Remove items scheduled for 0.6.0 deprecation #1633
 
 ### Pipelines
 

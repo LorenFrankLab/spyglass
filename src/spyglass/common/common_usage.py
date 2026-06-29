@@ -86,7 +86,7 @@ class ActivityLog(dj.Manual):
         """
         if warning and name not in _warned_functions:
             _warned_functions.add(name)
-            msg = f"DEPRECATION scheduled for Spyglass 0.6.0: {name}"
+            msg = f"DEPRECATION scheduled for Spyglass 0.7.0: {name}"
             if alt:
                 msg += f"\n\tUse instead: {alt}"
             if doc:

@@ -62,52 +62,24 @@ class PopulateMixin(BaseMixin):
 
         # Decide if using transaction protection
         use_transact = kwargs.pop("use_transaction", None)
-        if use_transact is None:  # if user does not specify, use class default
-            use_transact = self._use_transaction
-            if self._use_transaction is False:  # To be deprecated #1422
-                from spyglass.common.common_usage import ActivityLog
-
-                ActivityLog().deprecate_log(
-                    f"no_transact:{self.full_table_name}"[:64],
-                    alt="tri-part make",
-                    doc="https://lorenfranklab.github.io/spyglass/latest/Features/Populate/",
-                )
-
-        if use_transact is False and processes > 1:
-            raise RuntimeError(
-                "Must use transaction protection with parallel processing.\n"
-                + "Call with use_transation=True.\n"
-                + f"Table default transaction use: {self._use_transaction}"
+        if use_transact is None:
+            use_transact = getattr(self, "_use_transaction", None)
+        if use_transact is False:
+            raise NotImplementedError(
+                "Non-transaction populate no longer supported. Please use "
+                + "tri-part make. See DataJoint documentation for details."
             )
 
         # Get keys, needed for no-transact or multi-process w/_parallel_make
         keys = [True]
-        if use_transact is False or (processes > 1 and self._parallel_make):
+        if processes > 1 and self._parallel_make:
             keys = (self._jobs_to_do(restrictions) - self.target).fetch(
                 "KEY", limit=kwargs.get("limit", None)
             )
 
-        if use_transact is False:
-            upstream_hash = self._hash_upstream(keys)
-            if kwargs:  # Warn of ignoring populate kwargs, bc using `make`
-                self._logger.warning(
-                    "Ignoring kwargs when not using transaction protection."
-                )
-
         if processes == 1 or not self._parallel_make:
-            if use_transact:  # Pass single-process populate to super
-                kwargs["processes"] = processes
-                return super().populate(*restrictions, **kwargs)
-            else:  # No transaction protection, use bare make
-                for key in keys:
-                    self.make(key)
-                if upstream_hash != self._hash_upstream(keys):
-                    (self & keys).delete(safemode=False)
-                    self._logger.error(
-                        "Upstream tables changed during non-transaction "
-                        + "populate. Please try again."
-                    )
-                return None
+            kwargs["processes"] = processes
+            return super().populate(*restrictions, **kwargs)
 
         # If parallel in both make and populate, use non-daemon processes
         # package the call list

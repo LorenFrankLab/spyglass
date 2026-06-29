@@ -7,7 +7,6 @@ import pynwb
 
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
@@ -77,15 +76,10 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         return "Unknown"
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="ElectrodeGroup.make", alt="insert_from_nwbfile"
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ElectrodeGroup.make is deprecated. Use insert_from_nwbfile."
         )
-        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
@@ -271,15 +265,10 @@ class Electrode(SpyglassIngestion, dj.Imported):
             cls.update1(update)
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="Electrode.make", alt="insert_from_nwbfile"
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Electrode.make is deprecated. Use insert_from_nwbfile."
         )
-        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
@@ -364,15 +353,10 @@ class Raw(SpyglassIngestion, dj.Imported):
         }
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(name="Raw.make", alt="insert_from_nwbfile")
-
-        # Call the new SpyglassIngestion method
-        self.insert_from_nwbfile(key["nwb_file_name"])
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Raw.make is deprecated. Use insert_from_nwbfile."
+        )
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
