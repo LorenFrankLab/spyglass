@@ -51,6 +51,45 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: pipeline orchestrator, preset tuning, FigPack curation, and canonical notebooks
+
+Adds the full pipeline-orchestrator, preset-tuning, and FigPack-curation surface
+to v2, with canonical notebooks for both single-session and cross-session
+workflows. v2 is the recommended pipeline for new sorts under SpikeInterface
+0.104; v0/v1 stay in-tree and queryable, with active v0/v1 runtime workflows on
+the legacy SI 0.99 environment. Additive only (FigPack tables + preset
+registrations); existing v2 table definitions are unchanged.
+
+- **`run_v2_pipeline` gains opt-in stages.** `auto_curate=True` runs metric
+  evaluation + auto-curation rules and commits the accepted labels into a child
+  `CurationV2` — the default stays initial-curation-only, so a convenience call
+  never silently commits labels or merges. `figpack=True` publishes an offline
+  FigPack curation bundle of the root curation and returns its URI. A
+  `concat_session_group_owner` / `concat_session_group_name` pair routes the run
+  through `ConcatenatedRecording` for same-day chronic sorting (mutually
+  exclusive with the single-session inputs; no artifact stage). `require_units`
+  keeps the graceful zero-unit default (an empty-but-real, merge-keyable row).
+- **`run_v2_unit_match(session_group_owner, session_group_name, ...)`** is the
+  separate sort-then-match convenience function: it requires explicit per-member
+  `curation_choices` (never auto-picks "latest"), populates `UnitMatch` +
+  `TrackedUnit`, and is idempotent. `describe_unit_match_choices` lists each
+  member's selectable curations.
+- **Preset tuning without editing source.** `register_preset(name, preset)`
+  adds a lab preset; `clone_preset(base, new, **overrides)` derives a one-knob
+  variant, validating every derived parameter row before insert and refusing
+  ambiguous or duplicate names. `describe_pipeline_presets` /
+  `describe_pipeline_preset` inspect the catalog.
+- **FigPack offline curation.** `FigPackCurationSelection` + `FigPackCuration`
+  build a self-contained local bundle (label / merge units in a browser);
+  `FigPackCuration.fetch_curation_from_uri` reads the edits back for
+  `CurationV2.save_manual_curation`. An optional hosted figpack.org publish
+  exists for an uncurated root curation. Needs the `spikesorting-v2-curation`
+  extra.
+- **Canonical notebooks.** `notebooks/10_Spike_SortingV2.ipynb` is the
+  single-session walkthrough (preset choice, run, curation paths) and
+  `notebooks/14_Spike_Sorting_CrossSession.ipynb` covers concatenate-and-sort
+  plus cross-session unit matching.
+
 #### Spike Sorting v2: concat member-set identity, verify-on-read, and split conservation
 
 Brings the cross-session `ConcatenatedRecording` cache to parity with the
@@ -462,8 +501,8 @@ the interim `AnalyzerCuration` table is removed.
   v1/FigURL payload (`labelsByUnit` / `mergeGroups`), a v2 payload, or unpacked
   `labels=` / `merge_groups=` into the next curation, with an explicit
   `merge_action` (`"preview"` / `"commit"`). v1 association maps are unioned
-  transitively. This is the payload-save bridge the (still pending) FigPack web
-  UI would post to.
+  transitively. This is the same payload `FigPackCuration.fetch_curation_from_uri`
+  reads back from an edited FigPack curation bundle.
 - **`AnalyzerCuration` / `AnalyzerCurationSelection` removed.** v2 is
   pre-production with no back-compat requirement, so the interim raw-sort
   auto-curation tables are deleted outright in favor of `CurationEvaluation` and
