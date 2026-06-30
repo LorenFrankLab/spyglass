@@ -207,6 +207,55 @@ def canonicalize_match_pairs(
     return [oriented[identity] for identity in sorted(oriented)]
 
 
+def assert_distinct_member_sessions(members) -> None:
+    """Reject a UnitMatch selection with two members from one recording session.
+
+    Cross-session matching tracks a unit ACROSS recording sessions, so every
+    member must come from a distinct session (``nwb_file_name``). A
+    ``SessionGroup`` may legitimately carry several members from one NWB for
+    *concatenation* (different intervals / sort groups), but matching within a
+    single session is biologically degenerate and would be reported as a
+    multi-session identity. Called by ``UnitMatchSelection.insert_selection``
+    before any row is minted.
+
+    Parameters
+    ----------
+    members : iterable of dict
+        ``SessionGroup.Member`` rows, each carrying ``member_index`` and
+        ``nwb_file_name``.
+
+    Raises
+    ------
+    SameSessionMatchError
+        If two or more members share an ``nwb_file_name``.
+    """
+    from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
+
+    by_session: dict = {}
+    for member in members:
+        by_session.setdefault(member["nwb_file_name"], []).append(
+            int(member["member_index"])
+        )
+    collisions = {
+        nwb: sorted(indices)
+        for nwb, indices in by_session.items()
+        if len(indices) > 1
+    }
+    if collisions:
+        detail = "; ".join(
+            f"{nwb!r}: member_index {indices}"
+            for nwb, indices in sorted(collisions.items())
+        )
+        raise SameSessionMatchError(
+            "UnitMatchSelection.insert_selection: cross-session matching "
+            "requires each member from a distinct recording session, but these "
+            f"members share the same recording session (nwb_file_name) -- "
+            f"{detail}. Same-session members are valid for "
+            "ConcatenatedRecording, not UnitMatch; build the match group from "
+            "one member per session."
+        )
+
+
 def derive_tracked_units(
     node_universe: "list[CuratedUnit]",
     edges: "list[tuple[CuratedUnit, CuratedUnit, float]]",
@@ -214,6 +263,7 @@ def derive_tracked_units(
     threshold: float,
     max_strict_nodes: int,
     policy: str = STRICT_POLICY,
+    session_by_sorting: "dict | None" = None,
 ) -> list[dict]:
     """Group curated units into tracked (biological) units via strict cliques.
 
@@ -249,6 +299,13 @@ def derive_tracked_units(
         search runs.
     policy : str, optional
         Persisted on every row. Only ``"strict"`` ships today.
+    session_by_sorting : dict, optional
+        ``{sorting_id: session_key}`` (the session key is the member's
+        ``nwb_file_name``). When given, ``n_sessions_observed`` counts distinct
+        RECORDING SESSIONS, so two sortings from one nwb (different sort groups
+        of the same day) count once -- a within-session match cannot inflate to
+        multi-session. When ``None`` (or a sorting is absent), it falls back to
+        counting distinct ``(sorting_id, curation_id)``.
 
     Returns
     -------
@@ -334,7 +391,18 @@ def derive_tracked_units(
         if not members:
             continue
         claimed.update(members)
-        sessions = {(node[0], node[1]) for node in members}
+        # Count distinct RECORDING SESSIONS, not (sorting_id, curation_id):
+        # two sortings from one nwb (different sort groups of the same day) are
+        # one session, so a within-session match can never inflate the
+        # cross-session count. Fall back to (sorting_id, curation_id) when no
+        # session map is supplied (or a sorting is missing from it).
+        if session_by_sorting is None:
+            sessions = {(node[0], node[1]) for node in members}
+        else:
+            sessions = {
+                session_by_sorting.get(node[0], (node[0], node[1]))
+                for node in members
+            }
         edge_probs = _clique_edge_probs(members)
         median_prob = float(median(edge_probs)) if edge_probs else None
         tracked.append(

@@ -344,6 +344,15 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # wrong-member choice raises here, before the master or part inserts).
         _validate_member_curations(members, choices_by_member, ValueError)
 
+        # Cross-session matching requires one member per recording session;
+        # reject a group pairing two members from the same nwb (valid for
+        # concatenation, degenerate for matching) before minting any row.
+        from spyglass.spikesorting.v2._matcher_graph import (
+            assert_distinct_member_sessions,
+        )
+
+        assert_distinct_member_sessions(members)
+
         # Honor unit semantics: warn (don't block -- the cheap clusterless
         # thresholder is a valid sort) when a member's units are threshold
         # crossings rather than sorted neurons, since matching them across
@@ -1314,11 +1323,24 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
             for pair in (UnitMatch.Pair & key).fetch(as_dict=True)
         ]
 
+        # Map each member sorting to its recording session (nwb) so
+        # n_sessions_observed counts distinct SESSIONS, not (sorting_id,
+        # curation_id) -- two sort groups of one day must not read as two
+        # sessions even if a same-session selection slipped past the
+        # insert_selection guard via a raw insert.
+        session_by_sorting = {
+            str(row["sorting_id"]): row["nwb_file_name"]
+            for row in (
+                (UnitMatchSelection.MemberCuration & key) * SessionGroup.Member
+            ).fetch("sorting_id", "nwb_file_name", as_dict=True)
+        }
+
         tracked = derive_tracked_units(
             node_universe,
             edges,
             threshold=threshold,
             max_strict_nodes=max_strict_nodes,
+            session_by_sorting=session_by_sorting,
         )
 
         master_rows = []

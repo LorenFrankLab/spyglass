@@ -276,6 +276,59 @@ def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
     assert len(all_members) == len(set(all_members))
 
 
+def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
+    """A tracked unit spanning two sortings from the SAME nwb counts as ONE
+    session. ``n_sessions_observed`` is a cross-session-identity claim, so it
+    must key on the recording session (nwb), not on (sorting_id, curation_id) --
+    otherwise a within-day match across two sort groups inflates to multi-session.
+    """
+    from spyglass.spikesorting.v2._matcher_graph import derive_tracked_units
+
+    # Sortings "A" and "B" are two sort groups of the SAME day; "C" is another day.
+    a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
+    edges = [(a, b, 0.9), (b, c, 0.9), (a, c, 0.9)]
+    tracked = derive_tracked_units(
+        [a, b, c],
+        edges,
+        threshold=0.5,
+        max_strict_nodes=100,
+        session_by_sorting={"A": "day1.nwb", "B": "day1.nwb", "C": "day2.nwb"},
+    )
+    assert len(tracked) == 1
+    # Three sortings, but only two distinct recording sessions (day1, day2).
+    assert tracked[0]["n_sessions_observed"] == 2
+
+
+def test_assert_distinct_member_sessions_rejects_same_nwb():
+    """Two members from the same nwb cannot seed a cross-session match -- the
+    selection is rejected before any row is minted."""
+    from spyglass.spikesorting.v2._matcher_graph import (
+        assert_distinct_member_sessions,
+    )
+    from spyglass.spikesorting.v2.exceptions import SameSessionMatchError
+
+    members = [
+        {"member_index": 0, "nwb_file_name": "day1.nwb"},
+        {"member_index": 1, "nwb_file_name": "day1.nwb"},
+    ]
+    with pytest.raises(SameSessionMatchError, match="same recording session"):
+        assert_distinct_member_sessions(members)
+
+
+def test_assert_distinct_member_sessions_accepts_distinct_nwb():
+    """Members on distinct nwbs (genuine cross-session) pass."""
+    from spyglass.spikesorting.v2._matcher_graph import (
+        assert_distinct_member_sessions,
+    )
+
+    assert_distinct_member_sessions(
+        [
+            {"member_index": 0, "nwb_file_name": "day1.nwb"},
+            {"member_index": 1, "nwb_file_name": "day2.nwb"},
+        ]
+    )  # no raise
+
+
 def test_chronological_member_order_sorts_by_date_then_index():
     """recording_date drives matcher feed order; member_index only breaks ties.
 

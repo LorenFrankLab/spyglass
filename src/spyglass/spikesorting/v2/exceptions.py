@@ -340,6 +340,19 @@ class UnknownMatcherError(ValueError):
     """
 
 
+class SameSessionMatchError(ValueError):
+    """Raise when a UnitMatch selection has two members from one recording session.
+
+    Cross-session matching tracks a unit ACROSS recording sessions, so every
+    member must come from a distinct session (``nwb_file_name``). A
+    ``SessionGroup`` may legitimately carry several members from one NWB for
+    *concatenation* (different intervals / sort groups), but feeding such a
+    group to ``UnitMatchSelection.insert_selection`` would match within a single
+    session and report it as a multi-session identity. Rejected at selection
+    time; message names the offending ``member_index`` / ``nwb_file_name`` pairs.
+    """
+
+
 class UnitMatchSelectionIntegrityError(RuntimeError):
     """Raise when pinned member curations do not match the session group.
 
