@@ -1176,9 +1176,10 @@ def run_v2_unit_match(
         ``session_group_owner`` / ``session_group_name`` / ``matcher_params_name``,
         the ``unitmatch_id`` selection PK, ``n_pairs`` (pairwise matches) and
         ``n_tracked_units`` (cross-session biological units), the per-stage
-        ``unitmatch_status`` / ``tracked_unit_status`` (``"computed"`` /
-        ``"reused"``), ``stage_seconds`` (keys ``unit_match`` / ``tracked_unit``),
-        and ``warnings``.
+        ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
+        ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
+        fills the receipt), ``stage_seconds`` (keys ``unit_match`` /
+        ``tracked_unit``), and ``warnings``.
 
     Raises
     ------
@@ -1243,7 +1244,7 @@ def run_v2_unit_match(
     # Pairwise cross-session match.
     (
         _,
-        run_summary["unitmatch_status"],
+        run_summary["unit_match_status"],
         stage_seconds["unit_match"],
     ) = _run_stage(
         "unit_match",

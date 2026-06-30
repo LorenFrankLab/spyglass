@@ -2976,11 +2976,25 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         selection_pk = {"unitmatch_id": summary["unitmatch_id"]}
         assert summary["session_group_name"] == grp["group_name"]
         assert summary["matcher_params_name"] == matcher_name
-        assert summary["unitmatch_status"] in {"computed", "reused"}
+        assert summary["unit_match_status"] in {"computed", "reused"}
         assert summary["tracked_unit_status"] in {"computed", "reused"}
         assert summary["n_pairs"] == 1
         assert summary["n_tracked_units"] >= 1
         assert set(summary["stage_seconds"]) == {"unit_match", "tracked_unit"}
+        # describe_run fills the receipt's per-stage status from
+        # ``f"{stage}_status"``, so the summary's status-key stem must match the
+        # stage_seconds key. A regression that renamed one but not the other
+        # would render a blank status here.
+        from spyglass.spikesorting.v2._pipeline_reporting import describe_run
+
+        receipt = describe_run(summary)
+        stage_status = (
+            receipt[receipt["row_type"] == "stage"]
+            .set_index("stage")["status"]
+            .to_dict()
+        )
+        assert stage_status["unit_match"] in {"computed", "reused"}
+        assert stage_status["tracked_unit"] in {"computed", "reused"}
         # The matched pair forms exactly one 2-session tracked unit.
         matched = [
             row
@@ -2997,7 +3011,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             curation_choices=grp["choices"],
         )
         assert rerun["unitmatch_id"] == summary["unitmatch_id"]
-        assert rerun["unitmatch_status"] == "reused"
+        assert rerun["unit_match_status"] == "reused"
         assert rerun["tracked_unit_status"] == "reused"
         assert rerun["n_pairs"] == 1
     finally:

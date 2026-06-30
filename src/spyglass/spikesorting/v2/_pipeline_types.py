@@ -258,7 +258,7 @@ class RunV2UnitMatchSummary(TypedDict):
     session_group_name: str
     matcher_params_name: str
     unitmatch_id: UUID
-    unitmatch_status: StageStatus
+    unit_match_status: StageStatus
     n_pairs: int
     tracked_unit_status: StageStatus
     n_tracked_units: int
