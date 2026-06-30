@@ -127,6 +127,44 @@ For manual installation and advanced configuration:
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 - [Database Setup Guide](docs/src/GettingStarted/DATABASE.md)
 
+## Quick example
+
+Spike sorting is a common starting point for ephys analyses. The v2 pipeline is
+the recommended path for new sorts under SpikeInterface 0.104: one call
+preprocesses the recording, detects artifacts, runs the sorter, writes the
+initial curation, and registers the result on the spike-sorting merge table.
+
+```python
+from spyglass.common.common_lab import LabTeam
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+from spyglass.spikesorting.v2.recording import SortGroupV2
+
+nwb_file_name = "your_session.nwb"  # already ingested via insert_sessions
+
+initialize_v2_defaults()  # install the default parameter rows
+LabTeam.insert1(
+    {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
+)
+SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+run_summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=0,  # pick the shank you want to sort
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+)
+merge_id = run_summary["merge_id"]  # key downstream analyses off this
+```
+
+See
+[Spike Sorting v2](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2/)
+for presets, curation, concatenation, and cross-session unit matching, and the
+[v1→v2 migration guide](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Migration/)
+for porting existing v1 workflows. Existing v0/v1 sorts stay queryable; active
+v0/v1 runtime workflows use the legacy SpikeInterface 0.99 environment.
+
 ## Tutorials
 
 The tutorials for `spyglass` are currently in the form of Jupyter Notebooks and
