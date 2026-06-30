@@ -619,6 +619,31 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     and _is_duplicate_key_error(exc)
                     and attempt < _CURATION_ID_RACE_RETRIES
                 ):
+                    # If reuse is on and a concurrent insert created the SAME
+                    # logical child (the likely cause of the collision), return
+                    # it rather than staging a duplicate under a fresh id.
+                    if reuse_existing:
+                        existing_child = cls._find_matching_child_curation(
+                            sorting_id=sorting_id,
+                            parent_curation_id=parent_curation_id,
+                            labels=labels,
+                            unit_rows=unit_rows,
+                            kept_unit_to_contributors=(
+                                kept_unit_to_contributors
+                            ),
+                            apply_merge=apply_merge,
+                            description=description,
+                            curation_source=curation_source,
+                        )
+                        if existing_child is not None:
+                            logger.warning(
+                                "CurationV2.insert_curation: a concurrent "
+                                "insert created the matching child for "
+                                f"sorting_id={sorting_id}, parent_curation_id="
+                                f"{parent_curation_id}; returning it instead of "
+                                "staging a duplicate."
+                            )
+                            return existing_child
                     new_id = cls._next_curation_id(sorting_id)
                     logger.warning(
                         "CurationV2.insert_curation: curation_id "

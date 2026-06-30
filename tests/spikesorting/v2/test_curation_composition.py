@@ -529,3 +529,71 @@ def test_insert_curation_retries_on_curation_id_collision(
         assert CurationV2 & {**sort_pk, "curation_id": 2}
     finally:
         clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_insert_curation_retry_reuses_concurrent_winner(
+    planted_three_unit_sort, monkeypatch
+):
+    """Under a curation_id collision, if a concurrent insert created the SAME
+    logical child, the retry RETURNS it (reuse_existing) instead of staging a
+    duplicate child under a fresh id.
+
+    Simulates the race: the pre-loop reuse check misses (winner not visible
+    yet), the id allocation collides with the winner's id, and the retry's
+    reuse re-check then finds the winner.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sort_pk)  # curation_id 0
+        # The "concurrent winner": a child with specific content at id 1.
+        winner = CurationV2.insert_curation(
+            sort_pk,
+            parent_curation_id=root["curation_id"],
+            labels={0: ["noise"]},
+        )
+        assert winner["curation_id"] == 1
+
+        # Pre-loop reuse check MISSES (as if the winner is not yet visible);
+        # the retry's re-check finds it via the real implementation.
+        real_find = CurationV2._find_matching_child_curation.__func__
+        find_calls = {"n": 0}
+
+        def fake_find(cls, **kwargs):
+            find_calls["n"] += 1
+            if find_calls["n"] == 1:
+                return None
+            return real_find(cls, **kwargs)
+
+        monkeypatch.setattr(
+            CurationV2,
+            "_find_matching_child_curation",
+            classmethod(fake_find),
+        )
+        # Force the id allocation to collide with the winner (1).
+        id_calls = {"n": 0}
+
+        def fake_next_id(cls, sorting_id):
+            id_calls["n"] += 1
+            return 1 if id_calls["n"] == 1 else 2
+
+        monkeypatch.setattr(
+            CurationV2, "_next_curation_id", classmethod(fake_next_id)
+        )
+
+        # Insert the SAME logical child again with reuse on.
+        result = CurationV2.insert_curation(
+            sort_pk,
+            parent_curation_id=root["curation_id"],
+            labels={0: ["noise"]},
+            reuse_existing=True,
+        )
+        # Returned the winner; did NOT stage a duplicate child at id 2.
+        assert result["curation_id"] == winner["curation_id"] == 1
+        assert not (CurationV2 & {**sort_pk, "curation_id": 2})
+    finally:
+        clear_curations_for(sort_pk)
