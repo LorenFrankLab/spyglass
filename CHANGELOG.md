@@ -86,10 +86,12 @@ registrations); existing v2 table definitions are unchanged.
   `CurationV2.save_manual_curation`. An optional hosted figpack.org publish
   exists for an uncurated root curation. Needs the `spikesorting-v2-curation`
   extra.
-- **Canonical notebooks.** `notebooks/10_Spike_SortingV2.ipynb` is the
-  single-session walkthrough (preset choice, run, curation paths) and
-  `notebooks/10_Spike_SortingV2_CrossSession.ipynb` covers concatenate-and-sort
-  plus cross-session unit matching.
+- **Canonical notebooks.** The v2 walkthroughs are grouped under the `10_`
+  prefix: `10_Spike_SortingV2.ipynb` (the lean first-sort path),
+  `10_Spike_SortingV2_Curation.ipynb` (browser + step-by-step curation),
+  `10_Spike_SortingV2_Presets.ipynb` (preset customization + whole-session
+  sorting), and `10_Spike_SortingV2_CrossSession.ipynb` (concatenate-and-sort
+  plus cross-session unit matching).
 
 #### Spike Sorting v2: concat member-set identity, verify-on-read, and split conservation
 

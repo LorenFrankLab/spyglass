@@ -83,24 +83,17 @@ def _execute_notebook(ipynb_path: Path, parameters: dict) -> dict:
     return namespace
 
 
-@pytest.mark.slow
-def test_single_session_notebook_runs(dj_conn):
-    """``10_Spike_SortingV2`` runs end-to-end on the polymer smoke session.
+def _prepare_notebook_session(dj_conn, dest_name):
+    """Ingest the smoke fixture + build sort groups; return (nwb, sort_group_id).
 
-    Exercises the published single-session walkthrough: preset customization,
-    preflight, the run, automated + browser (FigPack) curation, the
-    curation-evaluation loop, the SpikeInterface bridge, the downstream accessor,
-    and the whole-session sweep -- each as the user would, against one fixture.
+    The notebooks pick a sort group only when exactly one exists; build the
+    groups here and hand the notebook the first id so the multi-shank guard does
+    not stop the run.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     _require_fixture()
-    nwb_file_name = copy_and_insert_nwb(
-        _FIXTURE_PATH, dest_name="notebook_single.nwb"
-    )
-    # The notebook picks a sort group only when exactly one exists; build the
-    # groups here and hand it the first id so the multi-shank branch does not
-    # stop the run.
+    nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH, dest_name=dest_name)
     if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
     sort_group_id = int(
@@ -110,21 +103,80 @@ def test_single_session_notebook_runs(dj_conn):
             )
         )[0]
     )
+    return nwb_file_name, sort_group_id
 
+
+def _notebook_params(nwb_file_name, sort_group_id):
+    return {
+        "nwb_file_name": nwb_file_name,
+        "team_name": "notebook_exec_team",
+        "interval_list_name": "raw data valid times",
+        "pipeline_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
+        "sort_group_id": sort_group_id,
+    }
+
+
+@pytest.mark.slow
+def test_single_session_notebook_runs(dj_conn):
+    """``10_Spike_SortingV2`` (the lean first-sort path) runs end-to-end.
+
+    Exercises the published first-sort walkthrough on one fixture: setup,
+    preset choice, preflight, the run, one-call auto-curation, and the
+    downstream accessor. (Browser/step-by-step curation moved to the Curation
+    how-to; preset customization + the whole-session sweep to the Presets how-to,
+    each with its own test below.)
+    """
+    nwb_file_name, sort_group_id = _prepare_notebook_session(
+        dj_conn, "notebook_single.nwb"
+    )
     namespace = _execute_notebook(
         _NOTEBOOKS / "10_Spike_SortingV2.ipynb",
-        {
-            "nwb_file_name": nwb_file_name,
-            "team_name": "notebook_exec_team",
-            "interval_list_name": "raw data valid times",
-            "pipeline_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
-            "sort_group_id": sort_group_id,
-        },
+        _notebook_params(nwb_file_name, sort_group_id),
     )
+    # The walkthrough produced a real, merge-keyable auto-curated result.
+    assert namespace["run_summary"]["n_units"] >= 0
+    assert namespace["auto_summary"]["auto_merge_id"] is not None
+    assert namespace["merge_id"] is not None
 
-    # The walkthrough produced a real, merge-keyable result.
+
+@pytest.mark.slow
+def test_curation_notebook_runs(dj_conn):
+    """``10_Spike_SortingV2_Curation`` runs end-to-end on the smoke session.
+
+    Self-contained: it sets up, sorts to a root curation, then exercises the
+    FigPack browser path (self-skips without the curation extra) and the
+    step-by-step evaluate -> merge -> re-evaluate loop, producing a final
+    curated, merge-keyable result.
+    """
+    nwb_file_name, sort_group_id = _prepare_notebook_session(
+        dj_conn, "notebook_curation.nwb"
+    )
+    namespace = _execute_notebook(
+        _NOTEBOOKS / "10_Spike_SortingV2_Curation.ipynb",
+        _notebook_params(nwb_file_name, sort_group_id),
+    )
     assert namespace["run_summary"]["n_units"] >= 0
     assert namespace["final_merge_id"] is not None
+
+
+@pytest.mark.slow
+def test_presets_notebook_runs(dj_conn):
+    """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session.
+
+    Self-contained: setup, then customize a preset (clone + register) and sort
+    the whole session at once with ``run_v2_pipeline_session``.
+    """
+    nwb_file_name, sort_group_id = _prepare_notebook_session(
+        dj_conn, "notebook_presets.nwb"
+    )
+    namespace = _execute_notebook(
+        _NOTEBOOKS / "10_Spike_SortingV2_Presets.ipynb",
+        _notebook_params(nwb_file_name, sort_group_id),
+    )
+    # The clone is registered, and the whole-session sweep returns per-group rows.
+    assert "my_lab_ms5_lower_threshold" in namespace["list_pipeline_presets"]()
+    assert isinstance(namespace["session_results"], list)
+    assert namespace["session_results"]
 
 
 class _NotebookMatcherParams(BaseModel):

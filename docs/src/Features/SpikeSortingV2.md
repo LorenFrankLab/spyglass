@@ -167,8 +167,14 @@ directory join.
 
 The fastest way to learn the pipeline is to run the notebook
 [`notebooks/10_Spike_SortingV2.ipynb`](../notebooks/10_Spike_SortingV2.ipynb),
-which walks the whole happy path on one already-ingested session. In prose, the
-path is:
+which walks the first-sort happy path on one already-ingested session; the
+deeper how-tos are split into companion notebooks —
+[`10_Spike_SortingV2_Curation.ipynb`](../notebooks/10_Spike_SortingV2_Curation.ipynb)
+(browser + step-by-step curation),
+[`10_Spike_SortingV2_Presets.ipynb`](../notebooks/10_Spike_SortingV2_Presets.ipynb)
+(customize a preset, sort a whole session), and
+[`10_Spike_SortingV2_CrossSession.ipynb`](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)
+(concatenate + cross-session matching). In prose, the first-sort path is:
 
 1. **Defaults** -- `initialize_v2_defaults()` seeds every parameter row.
 2. **Sort group** -- `SortGroupV2.set_group_by_shank(nwb_file_name=...)`,
