@@ -390,6 +390,7 @@ jobs:
           tests/spikesorting/v2/test_figpack_curation_integration.py \
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_publishes_offline_view" \
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_zero_units_skips_view" \
+          tests/spikesorting/v2/test_notebook_execution.py::test_curation_notebook_runs \
           --no-docker --no-dlc -q
 
   pytest-legacy:
