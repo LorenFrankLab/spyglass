@@ -226,6 +226,37 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 # Both paths converge at the [Pose Estimation](#PoseEstim) section below.
 
 # %% [markdown]
+# ### Shared state for both paths
+#
+# The Pose Estimation and pose-processing sections below reference the variables
+# initialized here **regardless of which path you run** — so you can run either
+# Path A or Path B without the other. Each path fills in `model_key`; the
+# tutorial bootstrap fills in the video/session variables.
+
+# %%
+# Tutorial-only scaffolding: import the bootstrap helper from the test suite so
+# it lives in one place (and is exercised by the test suite). NOT for production.
+import sys
+
+import spyglass
+
+_tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
+if str(_tests_v2) not in sys.path:
+    sys.path.insert(0, str(_tests_v2))
+from make_example_dlc_project import bootstrap_from_video_paths  # noqa: E402
+
+# Shared state — set by whichever path you run (A: train, B: import). Both the
+# Pose Estimation and pose-processing sections read these, so they are defined
+# up front to keep the two paths independent.
+model_key = None
+config_path = None
+nwb_file_name = None
+inf_vid_path = None
+training_vid_group_id = None
+skeleton_id = None
+DEMO_OUTPUT_DIR = None
+
+# %% [markdown]
 # ## Path A: Train a New Model <a id="PathA"></a>
 #
 # **🎯 Goal**: Create a DLC project from videos in Spyglass, label frames, and
@@ -299,32 +330,11 @@ training_bodyparts = ["whiteLED", "tailBase"]
 # </details>
 
 # %%
-# Tutorial bootstrap helper — sourced from the test utility module so it is
-# maintained in one place and exercised by the test suite.
-# sys.path is extended to allow importing from tests/ without installing a
-# separate package. This pattern is NOT for production use.
-import sys
-
-import spyglass
-
-_tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
-if str(_tests_v2) not in sys.path:
-    sys.path.insert(0, str(_tests_v2))
-
-# %%
+# Path-A tutorial imports. The bootstrap helper and shared-state variables are
+# defined once in "Shared state for both paths" above (Setup), so Path A and
+# Path B stay independent; here we only add the training-specific helpers.
 import yaml
-from make_example_dlc_project import (  # noqa: E402
-    bootstrap_from_video_paths,
-    make_dlc_project,
-)
-
-# Shared state initialized here; both paths (A and B) update these variables.
-DEMO_OUTPUT_DIR = None
-model_key = None
-nwb_file_name = None
-inf_vid_path = None
-training_vid_group_id = None
-config_path = None
+from make_example_dlc_project import make_dlc_project  # noqa: E402
 
 # ── Tutorial: create a minimal example DLC project if none exists ─────────
 _demo_dlc_dir = Path.home() / "DeepLabCut" / "examples"
@@ -1802,7 +1812,7 @@ fig = Model().plot_training_history(
 # - [00_Setup.ipynb](./00_Setup.ipynb) - Initial Spyglass configuration
 # - [02_Insert_Data.ipynb](./02_Insert_Data.ipynb) - DataJoint basics
 # - [21_DLC.ipynb](./21_DLC.ipynb) - Legacy Position V1 pipeline
-# - [24_Linearization.ipynb](./24_Linearization.ipynb) - Convert 2D → 1D position
+# - [26_Linearization.ipynb](./26_Linearization.ipynb) - Convert 2D → 1D position
 # - [41_Decoding_Clusterless.ipynb](./41_Decoding_Clusterless.ipynb) \- Use
 #     position for decoding
 #

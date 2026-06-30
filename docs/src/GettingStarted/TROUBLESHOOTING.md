@@ -292,6 +292,64 @@ it at all.
     PyTorch (DeepLabCut/SLEAP) dependency trees conflict, keep them in separate
     conda environments rather than one shared environment.
 
+### TensorFlow / jax conflict (Position V1 → V2 migration)
+
+**Symptoms:**
+
+- `E ... Unable to register cuDNN factory: Attempting to register factory for   plugin cuDNN when one has already been registered`
+    (also cuFFT, cuBLAS), printed when TensorFlow loads alongside a `jax`-using
+    pipeline.
+- DeepLabCut/pose work crashes or hangs on the GPU, or `jax` is stuck on an old
+    version that will not upgrade.
+
+**Cause:**
+
+This almost always happens when a Position **V1** environment is reused or
+cloned for **V2**. V1's DeepLabCut used the **TensorFlow** backend; V2's
+DeepLabCut 3.x uses **PyTorch** and does not need TensorFlow. Meanwhile the rest
+of Spyglass pulls in `jax` (via `non_local_detector`). TensorFlow and `jaxlib`
+each bundle their own XLA runtime and collide when both load in one process, and
+TensorFlow's `ml-dtypes` pin holds `jax` to an old version. V2's code is
+engine-agnostic — see
+[Position → Why V2 uses the PyTorch backend](./POSITION.md); the conflict is
+purely about the two dependency stacks coexisting.
+
+**Solutions:**
+
+1. **Check the environment** (imports neither TensorFlow nor jax, so it is safe
+    to run first):
+
+    ```bash
+    python src/spyglass/position/v2/env_check.py
+    ```
+
+    or, inside a notebook:
+
+    ```python
+    from spyglass.position.v2 import check_environment
+
+    check_environment()
+    ```
+
+2. **Remove the leftover TensorFlow stack** (DeepLabCut 3.x runs on the PyTorch
+    that is already installed):
+
+    ```bash
+    pip uninstall -y tensorflow tensorflow-estimator \
+        tensorflow-io-gcs-filesystem keras tf-keras tf-slim tensorpack
+    ```
+
+3. **Or rebuild from a clean environment file** instead of reusing a V1 env:
+
+    ```bash
+    mamba env create -f environments/environment_dlc.yml
+    ```
+
+4. **Must keep a TensorFlow-trained DLC model?** Run that inference in a
+    separate environment with no `jax` / `non_local_detector`, then ingest the
+    `.h5`/NWB output via `PoseEstimSelection` with `task_mode="load"` or via
+    `ImportedPose`.
+
 ### SpyglassConfig Issues
 
 **Symptoms:**

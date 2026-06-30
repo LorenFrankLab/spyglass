@@ -41,7 +41,7 @@ can employ two different methods:
     animal's body parts.
 
 Either case can be followed by the
-[Linearization notebook](./24_Linearization.ipynb) if the user wants to
+[Linearization notebook](./26_Linearization.ipynb) if the user wants to
 linearize the position data for later use.
 
 ## 3. LFP Pipeline

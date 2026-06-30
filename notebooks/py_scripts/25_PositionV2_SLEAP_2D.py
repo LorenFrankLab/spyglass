@@ -31,7 +31,7 @@
 # > share the DeepLabCut environment — SLEAP's modern backend needs NumPy 2 /
 # > Python ≥ 3.11, while DeepLabCut pins `numpy<2`.  **Run this notebook in the
 # > `spyglass-sleap` environment.**  For the DeepLabCut workflow, see the
-# > [DLC notebook](./23_PositionV2_DLC.ipynb).
+# > [DLC notebook](./23_PositionV2_DLC_2D.ipynb).
 #
 # This is one notebook in a multi-part series on Spyglass.
 #
@@ -41,7 +41,7 @@
 #   inserts, see
 #   [the Insert Data notebook](./02_Insert_Data.ipynb)
 # - For the DeepLabCut Position V2 workflow, see
-#   [the DLC notebook](./23_PositionV2_DLC.ipynb)
+#   [the DLC notebook](./23_PositionV2_DLC_2D.ipynb)
 # - For the legacy V1 DLC pipeline, see
 #   [the DLC V1 notebook](./21_DLC.ipynb)
 #
@@ -231,6 +231,27 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 # Both paths converge at the [Pose Estimation](#PoseEstim) section below.
 
 # %% [markdown]
+# ### Shared state for both paths
+#
+# The Pose Estimation and pose-processing sections below read the variables
+# initialized here **regardless of which path you run**. They are defined up
+# front so Path B (the default) runs without Path A, and Path A runs without
+# leaving the others undefined.
+
+# %%
+# Shared state — set by whichever path you run (A: train, B: import).
+model_key = None
+nwb_file_name = None
+inf_vid_path = None
+training_vid_group_id = None
+vid_group_id = None
+config_path = None
+skeleton_id = None
+# Optional: point at a folder of existing *.analysis.h5 to load instead of
+# triggering inference (set in the Pose Estimation section below).
+SLEAP_OUTPUT_DIR = None
+
+# %% [markdown]
 # ## Path A: Train a SLEAP Model <a id="PathA"></a>
 #
 # **🎯 Goal**: Train a SLEAP model in Spyglass from a labeled `.slp` file.
@@ -285,15 +306,8 @@ training_edges = [("A", "B")]
 # file to train for real.
 
 # %%
-# Shared state initialized here; both paths (A and B) update these variables.
-# Path B (the default) overrides these below.
-model_key = None
-nwb_file_name = None
-inf_vid_path = None
-training_vid_group_id = None
-vid_group_id = None
-config_path = None
-skeleton_id = None
+# Shared state is defined once in "Shared state for both paths" above (Setup),
+# so Path A and Path B stay independent. Path B (the default) sets model_key.
 
 # ── Path A (explanatory, non-executing) ──────────────────────────────────────
 # Flip to True and provide a real .slp labels file to train a SLEAP model.
@@ -1688,9 +1702,9 @@ else:
 # ### Related Notebooks
 # - [00_Setup.ipynb](./00_Setup.ipynb) - Initial Spyglass configuration
 # - [02_Insert_Data.ipynb](./02_Insert_Data.ipynb) - DataJoint basics
-# - [23_PositionV2_DLC.ipynb](./23_PositionV2_DLC.ipynb) - Position V2 with DeepLabCut
+# - [23_PositionV2_DLC_2D.ipynb](./23_PositionV2_DLC_2D.ipynb) - Position V2 with DeepLabCut
 # - [21_DLC.ipynb](./21_DLC.ipynb) - Legacy Position V1 pipeline
-# - [25_Linearization.ipynb](./25_Linearization.ipynb) - Convert 2D → 1D position
+# - [26_Linearization.ipynb](./26_Linearization.ipynb) - Convert 2D → 1D position
 # - [41_Decoding_Clusterless.ipynb](./41_Decoding_Clusterless.ipynb) \- Use
 #     position for decoding
 #

@@ -65,7 +65,7 @@ nav:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
           - Looping DLC: notebooks/22_DLC_Loop.ipynb
-          - Linearization: notebooks/24_Linearization.ipynb
+          - Linearization: notebooks/26_Linearization.ipynb
       - LFP:
           - LFP: notebooks/30_LFP.ipynb
           - Theta: notebooks/31_Theta.ipynb
