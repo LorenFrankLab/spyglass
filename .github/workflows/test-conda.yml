@@ -367,6 +367,30 @@ jobs:
           tests/spikesorting/v2/test_unitmatch.py \
           tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
           --no-docker --no-dlc -q
+    # --- FigPack curation extra lane (separate env). The curation extra
+    # (figpack + figpack-spike-sorting) is kept out of the default v2 env, so
+    # the FigPack table layer AND the orchestrator figpack=True path otherwise
+    # run in NO CI environment. A separate env mirrors the matching lane above:
+    # the figpack pins are light, but isolating them keeps the default env's
+    # SpikeInterface pin uncoupled from the figpack-verified SI combo. These
+    # tests build a real v2 analyzer, so they reach the run-tests MySQL service
+    # via --no-docker and need the smoke fixture, like the matcher lane.
+    - name: FigPack curation tests (separate env)
+      run: |
+        conda create -y -n spyglass_v2_curation python=3.11
+        # NO ``|| true``: a failed curation install must fail the step. The
+        # figpack tests below gate on a figpack import, so a silent install
+        # failure would leave them skipping while CI stayed green -- exactly the
+        # gap this lane closes.
+        conda run -n spyglass_v2_curation pip install \
+          -e ".[test,spikesorting-v2,spikesorting-v2-curation]"
+        conda run -n spyglass_v2_curation python \
+          tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
+        conda run -n spyglass_v2_curation pytest \
+          tests/spikesorting/v2/test_figpack_curation_integration.py \
+          "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_publishes_offline_view" \
+          "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_zero_units_skips_view" \
+          --no-docker --no-dlc -q
 
   pytest-legacy:
     # Legacy (v0/v1) spike-sorting tests run under SpikeInterface 0.99,

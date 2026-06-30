@@ -1144,6 +1144,52 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
 
 
 @pytest.mark.slow
+def test_run_v2_pipeline_auto_curate_wraps_stage_error(
+    polymer_smoke_session, monkeypatch
+):
+    """A failure inside the auto-curation stage raises a typed PipelineStageError.
+
+    The auto-curation stage is hand-rolled (it bypasses ``_run_stage`` because
+    the child curation id is only known after acceptance), so its error wrapping
+    is pinned here: a populate failure surfaces as
+    ``PipelineStageError(stage="auto_curation")`` carrying the partial summary of
+    the stages that completed first (sorting + root curation), with the original
+    error type preserved.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("synthetic curation-evaluation failure")
+
+    # The auto-curation stage calls CurationEvaluation.populate first; force it
+    # to fail so the stage's bespoke try/except is exercised.
+    monkeypatch.setattr(CurationEvaluation, "populate", _boom)
+
+    with pytest.raises(PipelineStageError) as excinfo:
+        run_v2_pipeline(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=sort_group_id,
+            interval_list_name="raw data valid times",
+            team_name=team_name,
+            pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+            auto_curate=True,
+        )
+    err = excinfo.value
+    assert err.stage == "auto_curation"
+    assert err.original_type == "RuntimeError"
+    # The partial summary carries the stages that completed before auto-curation.
+    assert err.partial_run_summary is not None
+    assert err.partial_run_summary.get("sorting_id") is not None
+    assert err.partial_run_summary.get("curation_id") is not None
+
+
+@pytest.mark.slow
 @pytest.mark.skipif(
     _FIGPACK_MISSING, reason="optional FigPack packages not installed"
 )
@@ -1192,3 +1238,36 @@ def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
     rebuilt = run_v2_pipeline(**run_kwargs)
     assert rebuilt["figpack_status"] == "computed"
     assert Path(rebuilt["figpack_uri"]).exists()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _FIGPACK_MISSING, reason="optional FigPack packages not installed"
+)
+def test_run_v2_pipeline_figpack_zero_units_skips_view(polymer_smoke_session):
+    """``figpack=True`` on a zero-unit sort skips the view instead of failing.
+
+    A zero-unit sort has no analyzer to summarize, so the FigPack stage is
+    skipped (``figpack_status == "skipped"``, no ``figpack_uri``) and the run
+    still returns a complete, merge-keyable summary rather than raising.
+    """
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
+        polymer_smoke_session
+    )
+    # The shipped clusterless default (100 uV) finds zero peaks on the smoke
+    # fixture -- the zero-unit path, here with figpack opted in.
+    summary = run_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name=team_name,
+        pipeline_preset="franklab_clusterless_2026_06",
+        figpack=True,
+    )
+    assert summary["n_units"] == 0
+    assert summary["figpack_status"] == "skipped"
+    assert "figpack_uri" not in summary
+    # The run is still complete and merge-keyable despite the skipped view.
+    assert summary["merge_id"] is not None

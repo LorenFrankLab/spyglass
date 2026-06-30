@@ -10,12 +10,14 @@ namespace, papermill-style parameter overrides injected right after the
 keeps the notebook on the test's own DataJoint connection + fixtures (no
 subprocess credential plumbing) and renders plots to a headless Agg backend.
 
-The notebooks gate their optional-extra cells on import checks. FigPack is in
-the default v2 test env, so 10_'s browser-curation cells run. UnitMatch's bundle
-extraction needs the optional UnitMatchPy package, which the default env
-excludes, so 14_'s match (Part B) runs only where it is installed -- the
-cross-session test below stands in a lightweight fixture matcher there, and
-exercises Part A (concat) everywhere.
+The notebooks gate their optional-extra cells on import checks, and neither
+optional extra is in the default v2 test env. 10_'s browser-curation cells need
+the ``spikesorting-v2-curation`` extra (figpack), so they self-skip in the
+default job and run in the separate curation CI lane. UnitMatch's bundle
+extraction needs the ``spikesorting-v2-matching`` extra (UnitMatchPy), so 14_'s
+match (Part B) runs only in the matching lane -- the cross-session test below
+stands in a lightweight fixture matcher there and exercises Part A (concat)
+everywhere.
 
 Heavy (real MountainSort5 sorts + curation-evaluation PCA), hence
 ``@pytest.mark.slow``.

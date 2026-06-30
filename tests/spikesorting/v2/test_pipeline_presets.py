@@ -1047,6 +1047,29 @@ def test_run_v2_unit_match_requires_explicit_curation_choices():
         run_v2_unit_match("owner", "group")  # curation_choices defaults to None
 
 
+def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
+    """An unknown matcher_params_name raises PipelineInputError before selection.
+
+    With ``curation_choices`` supplied (so the DB-free None check passes), an
+    absent ``MatcherParameters`` row is caught by a row-existence check that runs
+    BEFORE any SessionGroup / curation access -- so a typo'd matcher name fails
+    with a clear message instead of an opaque FK error deep in
+    ``UnitMatchSelection.insert_selection``. Needs the DB to query
+    ``MatcherParameters`` (but not the UnitMatchPy backend, which is only touched
+    at populate time).
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    with pytest.raises(PipelineInputError, match="unknown matcher_params_name"):
+        run_v2_unit_match(
+            "no_such_owner",
+            "no_such_group",
+            matcher_params_name="definitely_not_a_matcher_2026",
+            curation_choices={0: {"sorting_id": "x", "curation_id": 0}},
+        )
+
+
 def test_preset_model_artifact_optional_and_motion_field():
     """``_PipelinePreset`` accepts a concat-shaped preset and forbids extras.
 
