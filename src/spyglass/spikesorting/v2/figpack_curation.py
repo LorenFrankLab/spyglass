@@ -619,7 +619,18 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Build, publish, and record one FigPack curation view."""
+        """Build, publish, and record one FigPack curation view.
+
+        Monolithic ``make`` BY DESIGN -- this is a deliberate exception to the
+        v2 tri-part (``make_fetch`` / ``make_compute`` / ``make_insert``)
+        convention, recorded in
+        ``test_integrity.test_tripart_dispatch_active_on_all_v2_computed_tables``.
+        Tri-part exists to keep heavy work OUTSIDE the DataJoint transaction so
+        it can roll back cleanly, but ``_publish_view`` performs a NETWORK upload
+        when ``upload=True`` that cannot be transactionally rolled back, so
+        splitting the work buys nothing here. Keeping it monolithic is the honest
+        shape; do not "fix" it into tri-part to match the other tables.
+        """
         import figpack
         import figpack_spike_sorting
         import spikeinterface

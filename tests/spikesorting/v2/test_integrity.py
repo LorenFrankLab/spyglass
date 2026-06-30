@@ -62,9 +62,13 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     matcher, the concat cache, the recompute QC tables, the curation-evaluation
     metrics, the drift estimate, AND the ``*Versions`` inventory tables (which
     open the NWB / load + hash the analyzer -- not "pure bookkeeping" as once
-    assumed). ``TrackedUnit`` is the only heavy-ish table intentionally excluded:
-    it does DB reads + a bounded pure-Python clique partition (no SI/NWB I/O), so
-    a monolithic make is acceptable there.
+    assumed). Two tables are intentionally excluded (documented, not
+    oversights -- asserted below): ``TrackedUnit`` does DB reads + a bounded
+    pure-Python clique partition (no SI/NWB I/O), and ``FigPackCuration``
+    publishes a figpack bundle including a NETWORK upload that cannot be rolled
+    back inside a DataJoint transaction, so tri-part (which exists to keep heavy
+    work OUT of the transaction) buys nothing there -- a monolithic make is the
+    honest shape for both.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
@@ -107,6 +111,19 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
             f"{cls.__name__}._parallel_make is not True; the "
             "non-daemon parallel-populate flag from Spyglass's "
             "PopulateMixin is off."
+        )
+
+    # Intentional monolithic-make exclusions (recorded so they read as
+    # deliberate, not as a table that was forgotten above). TrackedUnit does no
+    # SI/NWB I/O; FigPackCuration's make does a non-rollback-able network upload
+    # (upload=True), so keeping its work outside a transaction is pointless.
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit
+
+    for excluded in (TrackedUnit, FigPackCuration):
+        assert hasattr(excluded, "make"), (
+            f"{excluded.__name__} should still define a make; it is a "
+            "documented monolithic exclusion from the tri-part gate above."
         )
 
 
