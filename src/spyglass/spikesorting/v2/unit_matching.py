@@ -389,10 +389,13 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         if existing is not None:
             return existing
 
-        # Geometry preflight: reject a cross-day / cross-probe geometry mismatch
-        # NOW, at selection time, before UnitMatch.make's expensive dense bundle
-        # extraction would hit it deep in the matcher. Only on the new-insert path
-        # (an idempotent re-call of an already-validated selection skips the I/O).
+        # Electrode-space + geometry preflight: reject members on different
+        # physical electrode spaces (identity check: group / ids / regions) and
+        # a cross-day / cross-probe geometry mismatch NOW, at selection time,
+        # before UnitMatch.make's expensive dense bundle extraction would hit it
+        # deep in the matcher. Only on the new-insert path (an idempotent re-call
+        # of an already-validated selection skips the I/O).
+        cls._assert_members_share_electrode_space(choices_by_member)
         cls._assert_members_share_geometry(choices_by_member)
 
         master_row = {**identity, "unitmatch_id": unitmatch_id}
@@ -464,6 +467,49 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             for member_index in sorted(choices_by_member)
         ]
         assert_consistent_channel_geometry(named_positions)
+
+    @classmethod
+    def _member_electrode_signature(cls, sorting_id):
+        """Electrode/region signature for one member's curated sort group.
+
+        Resolves the member's ``(nwb_file_name, sort_group_id)`` and returns the
+        same ``(electrode_group_name, electrode_id, region)`` signature the
+        concat path uses, so two physically distinct probes never collapse to
+        one electrode space even when their channel geometry coincides.
+        """
+        from spyglass.spikesorting.v2.session_group import (
+            _member_electrode_signature,
+        )
+
+        nwb_file_name, sort_group_id, _interval, _team = (
+            _curation_member_identity(sorting_id)
+        )
+        return _member_electrode_signature(
+            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        )
+
+    @classmethod
+    def _assert_members_share_electrode_space(cls, choices_by_member) -> None:
+        """Reject members on different physical electrode spaces.
+
+        ``_assert_members_share_geometry`` compares channel POSITIONS, which can
+        coincide across two physically distinct probes / sort groups. This
+        compares electrode IDENTITY (group + ids + regions) via the shared
+        :func:`._matcher_graph.assert_members_share_electrode_space`, so reused
+        ids across electrode groups or divergent regions are caught even when
+        the geometry matches. Single-member selections skip.
+        """
+        if len(choices_by_member) < 2:
+            return
+        from spyglass.spikesorting.v2._matcher_graph import (
+            assert_members_share_electrode_space,
+        )
+
+        signatures = {
+            member_index: cls._member_electrode_signature(choice[0])
+            for member_index, choice in choices_by_member.items()
+        }
+        assert_members_share_electrode_space(signatures)
 
     @classmethod
     def _find_existing_pk(
@@ -811,6 +857,21 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         }
         _validate_member_curations(
             members, choices_by_member, UnitMatchSelectionIntegrityError
+        )
+
+        # Re-check the cross-session + electrode-space invariants at the compute
+        # boundary. insert_selection enforces them, but a direct-insert bypass
+        # (allow_direct_insert / maintenance) could attach same-NWB members or
+        # members on different physical electrode spaces; re-validating here
+        # stops the matcher from writing pairs across a within-session or
+        # cross-probe set even when insert_selection was skipped.
+        from spyglass.spikesorting.v2._matcher_graph import (
+            assert_distinct_member_sessions,
+        )
+
+        assert_distinct_member_sessions(members)
+        UnitMatchSelection._assert_members_share_electrode_space(
+            choices_by_member
         )
 
         # Re-derive the content address from the pinned parts and reject a row

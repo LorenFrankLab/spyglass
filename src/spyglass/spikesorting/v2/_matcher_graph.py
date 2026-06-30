@@ -256,6 +256,45 @@ def assert_distinct_member_sessions(members) -> None:
         )
 
 
+def assert_members_share_electrode_space(signatures_by_member) -> None:
+    """Reject members whose electrode signatures diverge from the anchor.
+
+    Channel GEOMETRY (positions) can coincide across two physically distinct
+    probes / sort groups, so a geometry-only check would let the matcher track
+    unrelated units as one chronic identity. This compares each member's
+    electrode IDENTITY signature -- e.g. the
+    ``(electrode_group_name, electrode_id, region)`` tuple the concat path uses
+    -- against the anchor (lowest ``member_index``), catching reused ids across
+    electrode groups and divergent regions that geometry alone misses.
+
+    Parameters
+    ----------
+    signatures_by_member : dict
+        ``{member_index: electrode_signature}``. The signature is any hashable,
+        equality-comparable value (the caller builds it from the DB).
+
+    Raises
+    ------
+    ValueError
+        If any member's signature differs from the anchor's.
+    """
+    if len(signatures_by_member) < 2:
+        return
+    ordered = sorted(signatures_by_member)
+    anchor_index = ordered[0]
+    anchor_signature = signatures_by_member[anchor_index]
+    for member_index in ordered[1:]:
+        if signatures_by_member[member_index] != anchor_signature:
+            raise ValueError(
+                "UnitMatchSelection: member_index "
+                f"{member_index} maps to a different physical electrode space "
+                f"than the anchor member (index {anchor_index}): its electrode "
+                "group / ids / regions differ. Cross-session matching tracks "
+                "one chronic electrode space, so matching distinct probes is "
+                "unsupported even when their channel geometry coincides."
+            )
+
+
 def derive_tracked_units(
     node_universe: "list[CuratedUnit]",
     edges: "list[tuple[CuratedUnit, CuratedUnit, float]]",
