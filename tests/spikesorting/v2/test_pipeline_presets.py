@@ -1158,6 +1158,34 @@ def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
     )
 
 
+def test_describe_pipeline_preset_unpacks_curation_values(dj_conn, clone_env):
+    """The detail view unpacks the metric + auto-curation ROWS, not just names.
+
+    The new curation fields must resolve to actual values (metric kwargs, label
+    rules) under their own stages -- not appear only as opaque row names -- so a
+    user can read the full execution recipe before running.
+    """
+    detail = describe_pipeline_preset(_CLONE_BASE)
+
+    # Metric stage unpacks the QualityMetricParameters columns (metric_names /
+    # skip_pc_metrics are always emitted; metric_kwargs only when non-empty).
+    metric = detail[detail["stage"] == "metric"]
+    assert not metric.empty
+    metric_keys = set(metric["key"])
+    assert "metric_names" in metric_keys
+    assert "skip_pc_metrics" in metric_keys
+    assert (metric["params_row_name"] == "franklab_default").all()
+
+    # Auto-curation stage carries the master fields plus one row per label rule.
+    auto = detail[detail["stage"] == "auto_curation"]
+    assert not auto.empty
+    assert "auto_merge_preset" in set(auto["key"])
+    rule_rows = auto[auto["key"].str.startswith("rule.")]
+    assert not rule_rows.empty, "expected at least one auto-curation rule row"
+    # Each rule value reads as "<name>: <metric> <op> <threshold> -> <label>".
+    assert all("->" in v for v in rule_rows["value"])
+
+
 def test_describe_pipeline_preset_artifact_none_skips_artifact(
     dj_conn, clone_env
 ):

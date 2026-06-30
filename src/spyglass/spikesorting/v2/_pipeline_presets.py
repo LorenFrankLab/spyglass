@@ -197,7 +197,8 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     The singular companion to :func:`describe_pipeline_presets`: where the
     plural helper lists every preset and the parameter-row *names* each stage
     uses, this resolves ONE preset to the actual VALUES of its preprocessing,
-    artifact-detection, and sorter parameter rows -- so you can see exactly what
+    artifact-detection, sorter, metric, auto-curation, and (for concat presets)
+    motion-correction parameter rows -- so you can see exactly what
     ``run_v2_pipeline(..., pipeline_preset=name)`` will do before running it.
 
     Unlike the DB-free :func:`describe_pipeline_presets`, this reads the live
@@ -214,9 +215,17 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     -------
     pandas.DataFrame
         Long-format, one row per parameter, columns ``stage`` (``"preset"`` /
-        ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"`` /
-        ``"sorter_execution"``), ``params_row_name``, ``key`` (dotted path into
-        the validated blob), and ``value``. Parameter-row entries also carry
+        ``"preprocessing"`` / ``"artifact_detection"`` / ``"motion_correction"``
+        / ``"sorter"`` / ``"sorter_execution"`` / ``"metric"`` /
+        ``"auto_curation"``), ``params_row_name``, ``key`` (dotted path into
+        the validated blob), and ``value``. The ``"motion_correction"`` stage is
+        present only for a concat preset (one that pins a motion row); the
+        ``"metric"`` rows unpack the ``QualityMetricParameters`` columns
+        (``metric_names`` / ``metric_kwargs`` / ``template_metric_columns`` /
+        ``skip_pc_metrics``) and the ``"auto_curation"`` rows carry the
+        ``AutoCurationRules`` master fields plus one ``rule.<index>`` entry per
+        ordered label rule (``"<rule_name>: <metric> <op> <threshold> ->
+        <label>"``). Parameter-row entries also carry
         ``params_schema_version`` and ``job_kwargs`` so the display shows the
         full row resolved by the preset, not just the core params blob. The
         ``"sorter_execution"`` rows surface the sorter's ``execution_params``
@@ -241,7 +250,14 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     preset = _PIPELINE_PRESETS[name]
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
     from spyglass.spikesorting.v2.utils import _jsonable_blob
 
@@ -341,6 +357,25 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                 ),
             )
         )
+    # Motion correction is optional: only a concat preset pins one. Its row has
+    # the same params / schema / job_kwargs shape as preprocessing, so it unpacks
+    # through the shared helper.
+    if preset.motion_correction_params_name is not None:
+        stage_specs.append(
+            (
+                "motion_correction",
+                preset.motion_correction_params_name,
+                _fetch_params(
+                    MotionCorrectionParameters,
+                    {
+                        "motion_correction_params_name": (
+                            preset.motion_correction_params_name
+                        )
+                    },
+                    "MotionCorrectionParameters",
+                ),
+            )
+        )
     stage_specs.append(
         (
             "sorter",
@@ -388,6 +423,108 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                 params_row_name=preset.sorter_params_name,
                 key=key,
                 value=value,
+            )
+        )
+
+    # Curation recipe values. QualityMetricParameters stores named columns (not a
+    # single params blob), so unpack them into a params-shaped dict and flatten.
+    metric_rel = QualityMetricParameters & {
+        "metric_params_name": preset.metric_params_name
+    }
+    if not metric_rel:
+        raise ValueError(
+            "describe_pipeline_preset: QualityMetricParameters row "
+            f"{preset.metric_params_name!r} referenced by preset {name!r} is "
+            "not in the database. Run initialize_v2_defaults() to install the "
+            "shipped parameter catalog."
+        )
+    (
+        metric_names,
+        metric_kwargs,
+        template_metric_columns,
+        skip_pc_metrics,
+        metric_schema_version,
+        metric_job_kwargs,
+    ) = metric_rel.fetch1(
+        "metric_names",
+        "metric_kwargs",
+        "template_metric_columns",
+        "skip_pc_metrics",
+        "params_schema_version",
+        "job_kwargs",
+    )
+    metric_params = {
+        "metric_names": _jsonable_blob(metric_names),
+        "metric_kwargs": _jsonable_blob(metric_kwargs),
+        "template_metric_columns": _jsonable_blob(template_metric_columns),
+        "skip_pc_metrics": bool(skip_pc_metrics),
+    }
+    for key, value in _flatten("", metric_params):
+        rows.append(
+            _detail_row(
+                stage="metric",
+                params_row_name=preset.metric_params_name,
+                key=key,
+                value=value,
+                params_schema_version=int(metric_schema_version),
+                job_kwargs=_jsonable_blob(metric_job_kwargs),
+            )
+        )
+
+    # Auto-curation: the master row (merge preset + kwargs) plus one row per
+    # ordered label rule from the Rule part, so the actual thresholds are visible
+    # rather than hidden behind the row name.
+    auto_rel = AutoCurationRules & {
+        "auto_curation_rules_name": preset.auto_curation_rules_name
+    }
+    if not auto_rel:
+        raise ValueError(
+            "describe_pipeline_preset: AutoCurationRules row "
+            f"{preset.auto_curation_rules_name!r} referenced by preset "
+            f"{name!r} is not in the database. Run initialize_v2_defaults() to "
+            "install the shipped parameter catalog."
+        )
+    (
+        auto_merge_preset,
+        auto_merge_kwargs,
+        auto_schema_version,
+        auto_job_kwargs,
+    ) = auto_rel.fetch1(
+        "auto_merge_preset",
+        "auto_merge_kwargs",
+        "params_schema_version",
+        "job_kwargs",
+    )
+    auto_master = {
+        "auto_merge_preset": auto_merge_preset,
+        "auto_merge_kwargs": _jsonable_blob(auto_merge_kwargs),
+    }
+    for key, value in _flatten("", auto_master):
+        rows.append(
+            _detail_row(
+                stage="auto_curation",
+                params_row_name=preset.auto_curation_rules_name,
+                key=key,
+                value=value,
+                params_schema_version=int(auto_schema_version),
+                job_kwargs=_jsonable_blob(auto_job_kwargs),
+            )
+        )
+    rule_rows = (
+        AutoCurationRules.Rule
+        & {"auto_curation_rules_name": preset.auto_curation_rules_name}
+    ).fetch(order_by="rule_index", as_dict=True)
+    for rule in rule_rows:
+        rows.append(
+            _detail_row(
+                stage="auto_curation",
+                params_row_name=preset.auto_curation_rules_name,
+                key=f"rule.{rule['rule_index']}",
+                value=(
+                    f"{rule['rule_name']}: {rule['metric_name']} "
+                    f"{rule['operator']} {rule['threshold']} -> {rule['label']}"
+                ),
+                params_schema_version=int(auto_schema_version),
             )
         )
     return pd.DataFrame(rows, columns=_PRESET_DETAIL_COLUMNS)
