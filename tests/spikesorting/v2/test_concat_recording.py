@@ -530,7 +530,8 @@ def test_electrode_signature_distinguishes_reused_ids_across_groups():
 
 def test_electrode_signature_matches_for_identical_physical_electrodes():
     """Identical electrode group / id / region across members -> equal
-    signature, regardless of fetched-row order (signature is order-invariant)."""
+    signature, regardless of fetched-row order (signature is order-invariant).
+    """
     from spyglass.spikesorting.v2._concat_recording import (
         electrode_signature_from_rows,
     )
