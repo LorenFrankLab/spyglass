@@ -1257,6 +1257,9 @@ def run_v2_unit_match(
         warnings.append(
             UnitMatchSelection._divergent_electrode_space_message(divergent)
         )
+    # Record now (not after the stages) so a PipelineStageError snapshot from a
+    # failing stage still carries the advisory -- it is known pre-stage.
+    run_summary["warnings"] = warnings
 
     # Pairwise cross-session match.
     (
@@ -1287,7 +1290,6 @@ def run_v2_unit_match(
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
 
     run_summary["stage_seconds"] = stage_seconds
-    run_summary["warnings"] = warnings
     return cast(RunV2UnitMatchSummary, run_summary)
 
 

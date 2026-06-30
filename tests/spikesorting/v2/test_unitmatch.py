@@ -3045,6 +3045,65 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
 
 @pytest.mark.slow
+def test_run_v2_unit_match_warning_survives_stage_failure(
+    two_session_curated_group, monkeypatch
+):
+    """A UnitMatch-stage failure's partial summary still carries the warning.
+
+    The divergent-electrode advisory is known from the selection, before either
+    populate stage runs. ``_run_stage`` snapshots the run summary into the raised
+    ``PipelineStageError``, so a stage failure must not drop the warning --
+    mirrors the single-session curation-stage invariant where ``warnings`` is
+    known pre-stage (see test_pipeline_observability).
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineStageError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    grp = two_session_curated_group
+    sentinel = RuntimeError("injected unit_match failure")
+
+    def _boom(*args, **kwargs):
+        raise sentinel
+
+    # Force the advisory warning, then break the first populate stage so the
+    # summary is only ever observed through the failure snapshot.
+    monkeypatch.setattr(
+        UnitMatchSelection,
+        "_divergent_electrode_space_members",
+        classmethod(lambda cls, choices: [1]),
+    )
+    monkeypatch.setattr(UnitMatch, "populate", _boom)
+
+    try:
+        with pytest.raises(PipelineStageError) as exc:
+            run_v2_unit_match(
+                grp["owner"],
+                grp["group_name"],
+                matcher_params_name="unitmatch_default",
+                curation_choices=grp["choices"],
+            )
+        err = exc.value
+        assert err.stage == "unit_match"
+        assert err.__cause__ is sentinel
+        assert "warnings" in err.partial_run_summary
+        assert any(
+            "electrode space" in w for w in err.partial_run_summary["warnings"]
+        ), err.partial_run_summary["warnings"]
+    finally:
+        (
+            UnitMatchSelection
+            & {
+                "session_group_owner": grp["owner"],
+                "session_group_name": grp["group_name"],
+            }
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_describe_unit_match_choices_excludes_other_team(
     two_session_curated_group, monkeypatch
 ):
