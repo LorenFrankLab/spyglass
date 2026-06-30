@@ -14,7 +14,8 @@ orchestrator looks them up at first call. The shipped presets are the dated
 franklab production recipes -- the MountainSort4 family by target region
 (hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling rate, a
 MountainSort5 preset, and a clusterless preset. The ``run_v2_pipeline``
-default is the MountainSort5 tetrode-hippocampus recipe: it runs under the v2
+default is the MountainSort5 hippocampus recipe
+``franklab_probe_hippocampus_30khz_ms5_2026_06``: it runs under the v2
 ``numpy>=2`` baseline, whereas MountainSort4's ``ml_ms4alg`` backend needs
 ``numpy<2`` (see the MS4 preset notes). Call ``describe_pipeline_presets()``
 for the catalog and ``list_pipeline_presets()`` for the names.

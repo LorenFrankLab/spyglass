@@ -244,7 +244,7 @@ class FigPackUploadError(RuntimeError):
     ``FigPackCuration`` was asked to publish a hosted figpack.org figure
     (``upload=True``) but ``FIGPACK_API_KEY`` is unset and the figure is not
     ``ephemeral`` -- OR a curation that already carries labels/merges was asked
-    to upload before cloud seeding of the initial curation state is verified.
+    to upload, which does not seed that initial state into the hosted figure.
     Message points the caller at setting the API key, using ``ephemeral=True``
     for a temporary figure, or ``upload=False`` to save a seeded local bundle.
     """
@@ -257,8 +257,8 @@ class FigPackCurationNamespaceError(RuntimeError):
     ``Sorting.Unit`` namespace). A merged curation -- or a label-only child of a
     merged curation -- lives in a different unit namespace, so rendering the raw
     analyzer would show the wrong units. Raised by
-    ``FigPackCurationSelection.insert_selection`` until curation-scoped analyzers
-    are supported; curate the root curation instead.
+    ``FigPackCurationSelection.insert_selection``; curate the root curation
+    instead.
     """
 
 

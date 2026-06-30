@@ -439,7 +439,9 @@ def run_v2_pipeline(
     elif preflight and is_concat:
         # Minimal concat preflight: the SessionGroup, its members, and the
         # preset's motion-correction row must exist before the heavy member /
-        # concat populate (a fuller concat preflight is future work).
+        # concat populate. It deliberately does not check the preset's
+        # preprocessing / sorter rows or the sorter binary (those surface as
+        # native errors during populate).
         from spyglass.spikesorting.v2.session_group import (
             MotionCorrectionParameters,
             SessionGroup,

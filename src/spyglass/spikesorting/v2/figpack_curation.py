@@ -298,28 +298,26 @@ def _assert_figpack_curatable(curation_key: dict) -> None:
     if not _curation_matches_raw_namespace(curation_key):
         raise FigPackCurationNamespaceError(
             "FigPack curation of a merged curation (or a label-only child of a "
-            "merged curation) is not yet supported: the view renders the raw "
+            "merged curation) is not supported: the view renders the raw "
             "sort's unit namespace, not this curation's units. "
             f"curation_key={curation_key}. Curate the root curation instead."
         )
 
 
 def _reject_unsupported_metrics(metrics) -> None:
-    """Reject a non-empty metric-column request (not yet supported).
+    """Reject a non-empty metric-column request (unsupported).
 
     The builder ensures only the four summary extensions, not
     ``quality_metrics`` / ``template_metrics``, so a requested metric absent from
     the display analyzer would be silently warned-and-dropped by SpikeInterface
     -- producing a populated row whose unit table does not show it. Refuse rather
-    than mislead until metric columns are wired to computed metrics.
+    than mislead: the view shows only the four summary extensions.
     """
     if metrics:
         raise ValueError(
-            "FigPackCuration metric-column selection is not yet supported: a "
+            "FigPackCuration does not support metric-column selection: a "
             f"requested metric in {list(metrics)} absent from the display "
-            "analyzer would be silently dropped. Omit `metrics` for now; metric "
-            "columns will be wired to computed CurationEvaluation metrics in a "
-            "follow-up."
+            "analyzer would be silently dropped. Omit `metrics`."
         )
 
 
@@ -483,7 +481,7 @@ class FigPackCurationSelection(
             Curation label palette, in display order. Defaults to
             ``["accept", "mua", "noise"]``.
         metrics : list of str, optional
-            Metric columns to display. NOT yet supported -- a non-empty value
+            Metric columns to display. Not supported -- a non-empty value
             raises ``ValueError`` (a requested metric absent from the display
             analyzer would be silently dropped). Defaults to ``[]``.
         upload : bool, optional
@@ -640,10 +638,10 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         if upload and (seed_labels or seed_merges):
             raise FigPackUploadError(
                 "Hosted upload (upload=True) of a curation that already carries "
-                "labels/merges is not yet supported: seeding the initial curation "
-                "state into the hosted figure's annotations.json has not been "
-                "verified. Use upload=False (the seeded local bundle), or open a "
-                "fresh root curation."
+                "labels/merges is not supported: the initial curation state is "
+                "not written into the hosted figure's annotations.json. Use "
+                "upload=False (the seeded local bundle), or open a fresh root "
+                "curation."
             )
 
         view = _build_curation_view(
