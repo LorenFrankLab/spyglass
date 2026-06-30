@@ -23,14 +23,14 @@ dependencies:
   # - libgcc # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy
+  - numpy>=2,<3
   - pip
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
   - python>=3.10,<3.13
-  - pytorch<1.12.0
+  - pytorch>=2  # numpy>=2-compatible (the v2 stack needs torch>=2); the old <1.12 cap forced numpy<2
   - ripple_detection
   - scipy>=1.13  # numpy>=2 (the v2 SI 0.104 stack) needs scipy>=1.13; the legacy SI 0.99 env is environments/environment_spikesorting_legacy.yml
   - seaborn
