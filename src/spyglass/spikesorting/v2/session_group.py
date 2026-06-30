@@ -49,37 +49,47 @@ schema = dj.schema("spikesorting_v2_session_group")
 
 
 def _member_electrode_signature(member: dict) -> tuple:
-    """Return a member sort group's ordered ``(electrode_id, region)`` signature.
+    """Return a member sort group's electrode/region signature.
 
-    The signature identifies the physical electrode space a member contributes:
-    its sort group's electrode ids (in id order) paired with each electrode's
-    brain region. ``electrode_id`` is per-NWB but stable across an animal's
-    sessions, and the region pins the physical target -- so two members of the
-    same implant share a signature while members from different sort groups,
-    probes, or regions diverge. An electrode without a region maps to ``None``.
+    Fetches the sort group's electrodes (each with its owning
+    ``electrode_group_name``) and per-electrode brain region, then delegates the
+    signature shape to
+    :func:`._concat_recording.electrode_signature_from_rows`. Each electrode is
+    keyed by ``(electrode_group_name, electrode_id)`` because the ``Electrode``
+    primary key carries the group and ids can repeat across groups -- so two
+    physically distinct probes with reused ids and matching regions never
+    collapse into one electrode space. ``electrode_id`` is per-NWB but stable
+    across an animal's sessions, so two members of the same implant share a
+    signature while members on different sort groups, probes, or regions
+    diverge. An electrode without a region maps to ``None``.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
+    from spyglass.spikesorting.v2._concat_recording import (
+        electrode_signature_from_rows,
+    )
 
     restriction = {
         "nwb_file_name": member["nwb_file_name"],
         "sort_group_id": member["sort_group_id"],
     }
-    electrode_ids = sorted(
-        int(eid)
-        for eid in (SortGroupV2.SortGroupElectrode & restriction).fetch(
-            "electrode_id"
-        )
+    electrode_rows = (SortGroupV2.SortGroupElectrode & restriction).fetch(
+        "electrode_group_name", "electrode_id", as_dict=True
     )
-    region_by_electrode = {
-        int(row["electrode_id"]): str(row["region_name"])
+    region_by_key = {
+        (
+            str(row["electrode_group_name"]),
+            int(row["electrode_id"]),
+        ): str(row["region_name"])
         for row in (
             (SortGroupV2.SortGroupElectrode & restriction)
             * Electrode
             * BrainRegion
-        ).fetch("electrode_id", "region_name", as_dict=True)
+        ).fetch(
+            "electrode_group_name", "electrode_id", "region_name", as_dict=True
+        )
     }
-    return tuple((eid, region_by_electrode.get(eid)) for eid in electrode_ids)
+    return electrode_signature_from_rows(electrode_rows, region_by_key)
 
 
 def assert_members_share_electrode_space(members: list[dict]) -> None:

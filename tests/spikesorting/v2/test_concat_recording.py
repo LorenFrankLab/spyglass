@@ -495,3 +495,65 @@ def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
     b_off.set_channel_offsets([5.0, 5.0])
     with pytest.raises(ValueError, match="offset"):
         assert_concat_compatible([a_off, b_off])
+
+
+# ---------- electrode_signature_from_rows ----------------------------------
+
+
+def test_electrode_signature_distinguishes_reused_ids_across_groups():
+    """Two members whose sort groups carry the SAME electrode ids and regions
+    but on DIFFERENT electrode groups (ids reused across probes -- a documented
+    hazard, since the Electrode PK is (nwb, electrode_group_name, electrode_id))
+    must get DIFFERENT signatures. Dropping the group name would collapse two
+    physically distinct electrode spaces into one and let the concat read one
+    member in the other's frame."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        electrode_signature_from_rows,
+    )
+
+    rows_a = [
+        {"electrode_group_name": "probeA", "electrode_id": 0},
+        {"electrode_group_name": "probeA", "electrode_id": 1},
+    ]
+    rows_b = [
+        {"electrode_group_name": "probeB", "electrode_id": 0},
+        {"electrode_group_name": "probeB", "electrode_id": 1},
+    ]
+    region_a = {("probeA", 0): "ca1", ("probeA", 1): "ca1"}
+    region_b = {("probeB", 0): "ca1", ("probeB", 1): "ca1"}
+
+    sig_a = electrode_signature_from_rows(rows_a, region_a)
+    sig_b = electrode_signature_from_rows(rows_b, region_b)
+
+    assert sig_a != sig_b
+
+
+def test_electrode_signature_matches_for_identical_physical_electrodes():
+    """Identical electrode group / id / region across members -> equal
+    signature, regardless of fetched-row order (signature is order-invariant)."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        electrode_signature_from_rows,
+    )
+
+    rows = [
+        {"electrode_group_name": "probeA", "electrode_id": 1},
+        {"electrode_group_name": "probeA", "electrode_id": 0},
+    ]
+    region = {("probeA", 0): "ca1", ("probeA", 1): "ca1"}
+
+    assert electrode_signature_from_rows(
+        rows, region
+    ) == electrode_signature_from_rows(list(reversed(rows)), region)
+
+
+def test_electrode_signature_marks_missing_region_as_none():
+    """An electrode absent from the region map maps to None (best-effort
+    region), not a KeyError."""
+    from spyglass.spikesorting.v2._concat_recording import (
+        electrode_signature_from_rows,
+    )
+
+    sig = electrode_signature_from_rows(
+        [{"electrode_group_name": "probeA", "electrode_id": 0}], {}
+    )
+    assert sig == (("probeA", 0, None),)

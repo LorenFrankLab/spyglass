@@ -406,6 +406,50 @@ def split_unit_spike_trains(
     return per_member
 
 
+def electrode_signature_from_rows(
+    electrode_rows: list[dict], region_by_key: dict
+) -> tuple:
+    """Build a member sort group's electrode/region signature.
+
+    The signature identifies the physical electrode space a member contributes
+    so two members of the same implant share a signature while members on
+    different probes, sort groups, or regions diverge. Each electrode is keyed
+    by ``(electrode_group_name, electrode_id)`` -- NOT ``electrode_id`` alone --
+    because the ``Electrode`` primary key is
+    ``(nwb_file_name, electrode_group_name, electrode_id)`` and the same
+    ``electrode_id`` can repeat across electrode groups; collapsing on the id
+    would let two physically distinct probes with reused ids and matching
+    regions pass as one electrode space.
+
+    Parameters
+    ----------
+    electrode_rows : list of dict
+        Every sort-group electrode, each carrying ``electrode_group_name`` and
+        ``electrode_id``.
+    region_by_key : dict
+        ``{(electrode_group_name, electrode_id): region_name}``. An electrode
+        absent from the map (no registered region) maps to ``None``.
+
+    Returns
+    -------
+    tuple
+        Deterministically ordered tuple of
+        ``(electrode_group_name, electrode_id, region)`` triples.
+    """
+    return tuple(
+        sorted(
+            (
+                str(row["electrode_group_name"]),
+                int(row["electrode_id"]),
+                region_by_key.get(
+                    (str(row["electrode_group_name"]), int(row["electrode_id"]))
+                ),
+            )
+            for row in electrode_rows
+        )
+    )
+
+
 def assert_concat_compatible(recordings: list) -> None:
     """Reject member recordings that cannot be concatenated channel-for-channel.
 
