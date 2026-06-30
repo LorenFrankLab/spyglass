@@ -35,8 +35,9 @@ notebook. For the pipeline overview, see
 
   Rows are keyed by the `(sorter, sorter_params_name)` pair, so a bare
   `"default"` is unambiguous per sorter.
-- **`apply_merge` is singular.** `CurationV2.insert_curation(...,
-  apply_merge=True)` (v1 used `apply_merges`).
+- **`apply_merge` is singular, matching v1.**
+  `CurationV2.insert_curation(..., apply_merge=True)` keeps v1's spelling, so a
+  v1 call needs no rename here.
 - **Filter fields are `freq_min` / `freq_max`** (v1:
   `frequency_min` / `frequency_max`), nested under `bandpass_filter` in
   the preprocessing schema.
@@ -146,10 +147,11 @@ notebook. For the pipeline overview, see
   regression; re-curate against the new values rather than comparing absolute
   amplitudes across the v1→v2 boundary.
 
-## 4. What has a v2 replacement vs. what is still pending
+## 4. What has a v2 replacement
 
-Most post-sort (curation / metric) surfaces now have v2 replacements. Use the
-v1 chain only for features still listed as pending.
+The post-sort (curation / metric) surfaces have v2 replacements. The only
+surface that stays v1-only is the stored per-pair burst metrics
+(`BurstPairUnit`); everything else below has a v2 path.
 
 - **Available in v2** — `metric_curation` now provides
   `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`,
@@ -180,13 +182,17 @@ v1 chain only for features still listed as pending.
   and `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables (no longer
   stubs), and `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
   concatenate-and-sort.
-- **Still pending** — `figpack_curation` remains an import-safe placeholder that
-  raises an informative error on public-name import.
+- **Available in v2** — `figpack_curation` provides `FigPackCurationSelection`
+  and `FigPackCuration`, the v2 replacement for v1's FigURL curation views. They
+  build a self-contained **offline** FigPack bundle (label / merge units in a
+  browser) and read the edits back with
+  `FigPackCuration.fetch_curation_from_uri`, which feeds
+  `CurationV2.save_manual_curation`. Needs the `spikesorting-v2-curation` extra.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
 | Metric / auto-merge curation | v1 still available for legacy rows | `CurationEvaluation` (`QualityMetricParameters`, `AutoCurationRules`) |
-| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation views (roadmap) |
+| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation (offline bundle; `spikesorting-v2-curation` extra) |
 | Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table |
 | Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
 | Concatenated recording / session group | (no v1 equivalent) | same-day chronic concatenate-and-sort (available) |

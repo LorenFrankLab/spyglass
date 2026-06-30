@@ -621,8 +621,10 @@ child = CurationV2.save_manual_curation(
 )
 ```
 
-This is the same JSON the FigPack **web** UI (still pending) would submit -- only
-the browser views are unimplemented, not the save path.
+This is the same labels / merge-groups payload that
+`FigPackCuration.fetch_curation_from_uri(uri)` extracts from a FigPack bundle
+edited in the browser, so a browser round-trip and a hand-built dict both reach
+`CurationV2` through this one entry point.
 
 Notes:
 
@@ -1230,22 +1232,26 @@ The legacy v0/v1 workflows (`Waveforms`, `MetricCuration`, `BurstPair`,
 v1 `ArtifactDetection`) still require the SI 0.99 Spyglass environment;
 calling them under SI 0.104 raises a clear `RuntimeError`.
 
-## Status
+## Capabilities at a glance
 
 The single-session sort chain, analyzer-driven curation (metrics +
 auto-curation, above), same-day chronic concatenate-and-sort (the
 [Chronic same-day recordings](#chronic-same-day-recordings) section below), and
 cross-session unit matching ([Cross-session unit tracking](#cross-session-unit-tracking))
-are available now. Not yet available:
+all run end-to-end through `run_v2_pipeline` / `run_v2_unit_match` and the
+underlying tables.
 
-- FigPack **web** curation views (the interactive browser UI)
-
-Only the FigPack *web UI* is pending. The payload-save bridge it would post to is
-already available: `CurationV2.save_manual_curation` ingests a FigURL/FigPack-style
-JSON payload (or already-unpacked labels / merge groups) into the next curation
-(see [Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
-The `figpack_curation` module name itself remains an import-safe placeholder until
-the web views land.
+FigPack curation runs **offline**: `FigPackCuration` (or
+`run_v2_pipeline(..., figpack=True)`) builds a self-contained static bundle you
+open in a browser to label and merge units. The bundle is local — there is no
+hosted upload in this path — and browser edits are not written back
+automatically. `FigPackCuration.fetch_curation_from_uri(uri)` reads the edited
+labels / merge groups out of the bundle, and `CurationV2.save_manual_curation`
+ingests them into the next curation (see
+[Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
+FigPack curation needs the `spikesorting-v2-curation` extra
+(`pip install -e ".[spikesorting-v2-curation]"`); cross-session matching needs
+the `spikesorting-v2-matching` extra.
 
 ## Streaming, parallel populate, and v1 parity
 
@@ -1300,8 +1306,10 @@ CHANGELOG for the full list. Key user-visible items:
   available source (`v0`/`v1`, plus `v2` when the v2 module is
   importable), so v2 users copying v1 notebook patterns see v2
   merge_ids without an explicit `sources=` arg, while v0/v1-only
-  deployments are unaffected. Unknown restriction keys raise
-  `ValueError` instead of silently dropping.
+  deployments are unaffected. With an explicit `sources=` list the v2
+  resolver is strict — an unknown restriction key raises `ValueError`;
+  the default (no `sources=`) stays lenient, since a key meant for v0/v1
+  is not a v2 typo.
 
 ## Rerunning fixtures + tests against an existing v2 database
 
