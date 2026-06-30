@@ -291,7 +291,12 @@ def assert_members_share_electrode_space(signatures_by_member) -> None:
                 f"than the anchor member (index {anchor_index}): its electrode "
                 "group / ids / regions differ. Cross-session matching tracks "
                 "one chronic electrode space, so matching distinct probes is "
-                "unsupported even when their channel geometry coincides."
+                "unsupported even when their channel geometry coincides. NOTE: "
+                "electrode-group NAMES are part of this identity and are taken "
+                "from each NWB file's ElectrodeGroup. If these members ARE the "
+                "same chronic implant but were ingested with per-session group "
+                "names, give the implant a stable electrode-group name across "
+                "sessions so its identity matches."
             )
 
 
