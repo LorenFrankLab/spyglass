@@ -389,13 +389,13 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         if existing is not None:
             return existing
 
-        # Electrode-space + geometry preflight: reject members on different
-        # physical electrode spaces (identity check: group / ids / regions) and
-        # a cross-day / cross-probe geometry mismatch NOW, at selection time,
-        # before UnitMatch.make's expensive dense bundle extraction would hit it
-        # deep in the matcher. Only on the new-insert path (an idempotent re-call
-        # of an already-validated selection skips the I/O).
-        cls._assert_members_share_electrode_space(choices_by_member)
+        # Preflight NOW, at selection time, before UnitMatch.make's expensive
+        # dense bundle extraction: warn if members map to different electrode
+        # identities (advisory -- group names / ids are not lab-stable), and
+        # HARD-reject a cross-day / cross-probe geometry mismatch. Only on the
+        # new-insert path (an idempotent re-call of an already-validated
+        # selection skips the I/O).
+        cls._warn_on_divergent_electrode_space(choices_by_member)
         cls._assert_members_share_geometry(choices_by_member)
 
         master_row = {**identity, "unitmatch_id": unitmatch_id}
@@ -489,27 +489,41 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def _assert_members_share_electrode_space(cls, choices_by_member) -> None:
-        """Reject members on different physical electrode spaces.
+    def _warn_on_divergent_electrode_space(cls, choices_by_member) -> None:
+        """Warn (don't block) when members map to different electrode spaces.
 
-        ``_assert_members_share_geometry`` compares channel POSITIONS, which can
-        coincide across two physically distinct probes / sort groups. This
-        compares electrode IDENTITY (group + ids + regions) via the shared
-        :func:`._matcher_graph.assert_members_share_electrode_space`, so reused
-        ids across electrode groups or divergent regions are caught even when
-        the geometry matches. Single-member selections skip.
+        ``_assert_members_share_geometry`` compares channel POSITIONS (a hard
+        check); this compares electrode IDENTITY (group + ids + regions) via
+        :func:`._matcher_graph.divergent_electrode_space_members`. Unlike concat
+        (which stitches data in one electrode frame and rejects a mismatch),
+        UnitMatch does not stitch, and electrode-group names / ids come from each
+        NWB file's ``ElectrodeGroup`` and are NOT guaranteed stable across labs'
+        ingestion -- so a divergence is logged as a WARNING rather than blocking
+        a possibly-legitimate chronic match. Single-member selections skip.
         """
         if len(choices_by_member) < 2:
             return
         from spyglass.spikesorting.v2._matcher_graph import (
-            assert_members_share_electrode_space,
+            divergent_electrode_space_members,
         )
 
         signatures = {
             member_index: cls._member_electrode_signature(choice[0])
             for member_index, choice in choices_by_member.items()
         }
-        assert_members_share_electrode_space(signatures)
+        divergent = divergent_electrode_space_members(signatures)
+        if divergent:
+            logger.warning(
+                "UnitMatchSelection: member(s) %s map to a different electrode "
+                "space (electrode group / ids / regions) than the anchor, "
+                "though channel geometry still matched. If these are NOT the "
+                "same chronic implant the match is meaningless. Electrode-group "
+                "names / ids come from each NWB file's ElectrodeGroup and are "
+                "not guaranteed stable across sessions, so this is a warning, "
+                "not a rejection -- a genuine distinct-probe mix-up will also "
+                "show as poor matcher AUC / few pairs.",
+                divergent,
+            )
 
     @classmethod
     def _find_existing_pk(
@@ -862,17 +876,16 @@ class UnitMatch(SpyglassMixin, dj.Computed):
         # Re-check the cross-session + electrode-space invariants at the compute
         # boundary. insert_selection enforces them, but a direct-insert bypass
         # (allow_direct_insert / maintenance) could attach same-NWB members or
-        # members on different physical electrode spaces; re-validating here
-        # stops the matcher from writing pairs across a within-session or
-        # cross-probe set even when insert_selection was skipped.
+        # members on different electrode spaces. Re-running here stops the
+        # matcher from writing pairs across a within-session set (hard reject)
+        # even when insert_selection was skipped, and re-warns on a divergent
+        # electrode space.
         from spyglass.spikesorting.v2._matcher_graph import (
             assert_distinct_member_sessions,
         )
 
         assert_distinct_member_sessions(members)
-        UnitMatchSelection._assert_members_share_electrode_space(
-            choices_by_member
-        )
+        UnitMatchSelection._warn_on_divergent_electrode_space(choices_by_member)
 
         # Re-derive the content address from the pinned parts and reject a row
         # whose stored ``curation_set_hash`` disagrees with its MemberCuration

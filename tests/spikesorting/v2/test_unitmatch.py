@@ -329,12 +329,14 @@ def test_assert_distinct_member_sessions_accepts_distinct_nwb():
     )  # no raise
 
 
-def test_assert_members_share_electrode_space_rejects_divergent_signature():
-    """Members with identical channel GEOMETRY but different electrode identity
-    (group / ids / regions) are rejected -- geometry coincidence must not let
-    two physical probes be tracked as one chronic electrode space."""
+def test_divergent_electrode_space_members_flags_distinct_probe():
+    """A member with identical channel GEOMETRY but different electrode identity
+    (group / ids / regions) is reported as divergent. The signal is ADVISORY,
+    not a rejection: electrode-group names / ids are taken from each NWB and are
+    not guaranteed stable across labs' ingestion, so UnitMatch warns rather than
+    blocking a legitimate chronic match."""
     from spyglass.spikesorting.v2._matcher_graph import (
-        assert_members_share_electrode_space,
+        divergent_electrode_space_members,
     )
 
     # Same (electrode_id, region) layout, different electrode_group_name.
@@ -342,20 +344,19 @@ def test_assert_members_share_electrode_space_rejects_divergent_signature():
         0: (("probeA", 0, "ca1"), ("probeA", 1, "ca1")),
         1: (("probeB", 0, "ca1"), ("probeB", 1, "ca1")),
     }
-    with pytest.raises(ValueError, match="electrode space"):
-        assert_members_share_electrode_space(sigs)
+    assert divergent_electrode_space_members(sigs) == [1]
 
 
-def test_assert_members_share_electrode_space_accepts_matching():
-    """Members on the same physical electrode space (identical signature) pass;
-    a single-member selection trivially passes."""
+def test_divergent_electrode_space_members_empty_when_matching():
+    """Members on the same electrode space (identical signature) -> no divergent
+    members; a single-member selection trivially has none."""
     from spyglass.spikesorting.v2._matcher_graph import (
-        assert_members_share_electrode_space,
+        divergent_electrode_space_members,
     )
 
     sig = (("probeA", 0, "ca1"), ("probeA", 1, "ca1"))
-    assert_members_share_electrode_space({0: sig, 1: sig})  # no raise
-    assert_members_share_electrode_space({0: sig})  # single member, no raise
+    assert divergent_electrode_space_members({0: sig, 1: sig}) == []
+    assert divergent_electrode_space_members({0: sig}) == []
 
 
 def test_chronological_member_order_sorts_by_date_then_index():

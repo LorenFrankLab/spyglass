@@ -1039,15 +1039,19 @@ across sessions to recover the same biological unit over time. This is the
 cross-day complement to same-day concatenation — both reuse `SessionGroup`, but
 matching pins one curation **per member** and never concatenates the raw data.
 
-**Chronic electrode-space contract.** Matched members must share one physical
-electrode space. UnitMatch requires identical electrode *identity* across
-members — each sort group's
-`(electrode_group_name, electrode_id, brain_region)` signature — not just
-channel geometry, since two distinct probes can share a layout. Electrode-group
-names come from each NWB file's `ElectrodeGroup`, so a chronic implant must keep
-a **stable electrode-group name across sessions**; if the same implant is
-ingested with per-session group names, UnitMatch rejects the members as
-different electrode spaces (the error explains how to fix it).
+**Chronic electrode-space contract.** Matched members should share one physical
+electrode space. UnitMatch **hard-rejects** a channel-**geometry** mismatch
+across members (the lab-agnostic check), and **warns** when members differ in
+electrode *identity* — each sort group's
+`(electrode_group_name, electrode_id, brain_region)` signature — since two
+distinct probes can share a layout. The identity divergence is a *warning, not a
+rejection*: electrode-group names / ids come from each NWB file's
+`ElectrodeGroup` and are not guaranteed stable across labs' ingestion, so
+blocking on them would reject legitimate chronic matches. If you keep a **stable
+electrode-group name across sessions** for a chronic implant the warning stays
+quiet; a genuine distinct-probe mix-up also shows up as poor matcher AUC / few
+pairs. (Concatenation is stricter — it reads members in one electrode frame, so
+a mismatched electrode space is rejected outright.)
 
 Matching is pluggable behind a `MatcherProtocol`. The shipped backend is
 [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch) (`matcher="unitmatch"`),

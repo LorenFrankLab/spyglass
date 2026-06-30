@@ -256,48 +256,45 @@ def assert_distinct_member_sessions(members) -> None:
         )
 
 
-def assert_members_share_electrode_space(signatures_by_member) -> None:
-    """Reject members whose electrode signatures diverge from the anchor.
+def divergent_electrode_space_members(signatures_by_member) -> list:
+    """Return member indexes whose electrode signature differs from the anchor.
 
     Channel GEOMETRY (positions) can coincide across two physically distinct
-    probes / sort groups, so a geometry-only check would let the matcher track
-    unrelated units as one chronic identity. This compares each member's
-    electrode IDENTITY signature -- e.g. the
-    ``(electrode_group_name, electrode_id, region)`` tuple the concat path uses
-    -- against the anchor (lowest ``member_index``), catching reused ids across
-    electrode groups and divergent regions that geometry alone misses.
+    probes / sort groups, so a geometry match alone does not prove two members
+    are the same chronic implant. This compares each member's electrode IDENTITY
+    signature -- e.g. the ``(electrode_group_name, electrode_id, region)`` tuple
+    the concat path uses -- against the anchor (lowest ``member_index``).
+
+    The result is ADVISORY, not a rejection. Unlike concatenation (which reads
+    members in one electrode frame, so a mismatch corrupts data and is rejected
+    outright), UnitMatch does not stitch recordings, and electrode-group names /
+    ids come from each NWB file's ``ElectrodeGroup`` and are NOT guaranteed
+    stable across labs' ingestion. So the UnitMatch caller WARNS on a divergence
+    rather than blocking a possibly-legitimate chronic match -- a genuine
+    distinct-probe mix-up still surfaces as poor matcher AUC / few pairs.
 
     Parameters
     ----------
     signatures_by_member : dict
-        ``{member_index: electrode_signature}``. The signature is any hashable,
+        ``{member_index: electrode_signature}``. The signature is any
         equality-comparable value (the caller builds it from the DB).
 
-    Raises
-    ------
-    ValueError
-        If any member's signature differs from the anchor's.
+    Returns
+    -------
+    list
+        Member indexes (sorted, excluding the anchor) whose signature differs
+        from the anchor's. Empty when all match or there are fewer than two
+        members.
     """
     if len(signatures_by_member) < 2:
-        return
+        return []
     ordered = sorted(signatures_by_member)
-    anchor_index = ordered[0]
-    anchor_signature = signatures_by_member[anchor_index]
-    for member_index in ordered[1:]:
-        if signatures_by_member[member_index] != anchor_signature:
-            raise ValueError(
-                "UnitMatchSelection: member_index "
-                f"{member_index} maps to a different physical electrode space "
-                f"than the anchor member (index {anchor_index}): its electrode "
-                "group / ids / regions differ. Cross-session matching tracks "
-                "one chronic electrode space, so matching distinct probes is "
-                "unsupported even when their channel geometry coincides. NOTE: "
-                "electrode-group NAMES are part of this identity and are taken "
-                "from each NWB file's ElectrodeGroup. If these members ARE the "
-                "same chronic implant but were ingested with per-session group "
-                "names, give the implant a stable electrode-group name across "
-                "sessions so its identity matches."
-            )
+    anchor_signature = signatures_by_member[ordered[0]]
+    return [
+        member_index
+        for member_index in ordered[1:]
+        if signatures_by_member[member_index] != anchor_signature
+    ]
 
 
 def derive_tracked_units(
