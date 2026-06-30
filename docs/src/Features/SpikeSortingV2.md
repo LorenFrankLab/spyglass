@@ -225,7 +225,10 @@ IntervalList & {"nwb_file_name": nwb_file_name}
 # Build the sort groups (one per shank), then choose one DELIBERATELY after
 # reviewing the table + geometry plot -- don't default to the first row.
 # (For "sort every shank", use run_v2_pipeline_session below instead.)
-SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+# set_group_by_shank refuses to overwrite existing sort groups, so guard the
+# re-run (or delete them first via the inspect-before-destroy contract).
+if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 sort_groups = describe_sort_groups(nwb_file_name)
 plot_sort_group_geometry(nwb_file_name)
 sort_groups  # inspect membership, brain_region, and geometry, then:
@@ -1061,14 +1064,22 @@ installed via the optional extra:
 pip install -e ".[spikesorting-v2-matching]"   # UnitMatchPy + mat73
 ```
 
-The **validated path is the 128-channel LLNL polymer probe** (the current
-Frank-lab implant); a ground-truth MEArec gate
-(`test_v2_unitmatch_polymer_mearec_ground_truth`) requires AUC > 0.85 on a
-two-session polymer recording with planted cross-session correspondences. This
-gate is verified locally; in CI it runs in the matching-extra environment and is
-enforced once the two-session polymer fixtures are uploaded (it skips cleanly
-until then — see the fixture URLs in
-`tests/spikesorting/v2/fixtures/_fetch.py`).
+The reference probe is the **128-channel LLNL polymer** (the current Frank-lab
+implant). Two levels of matcher validation exist, with different CI status:
+
+- **Real-matcher recovery** (`test_unitmatch_backend.py::test_match_recovers_planted_correspondences`)
+  runs real UnitMatchPy on the 60s polymer fixture and checks that planted
+  cross-session correspondences are recovered as high-probability matches. The
+  fixture is hosted, so this runs in the matching-extra CI lane whenever that
+  fixture is fetched (scheduled / manual runs); it skips cleanly on per-PR runs
+  that don't fetch it.
+- **Ground-truth AUC gate** (`test_v2_unitmatch_polymer_mearec_ground_truth`)
+  requires AUC > 0.85 on a *two-session* polymer recording with planted
+  correspondences. It is verified **locally**; in CI it is NOT yet enforced
+  because the two-session polymer fixtures are not uploaded (their URLs in
+  `tests/spikesorting/v2/fixtures/_fetch.py` are still `None`, so the gate skips
+  cleanly). Uploading them + adding them to `SPYGLASS_V2_REQUIRE_FIXTURES`
+  enforces it.
 
 ```python
 from spyglass.spikesorting.v2 import initialize_v2_defaults
