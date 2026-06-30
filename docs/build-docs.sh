@@ -3,18 +3,26 @@
 # Then, navigate to localhost:8000/ to inspect site, then ctrl+c to exit
 # For auto-reload during dev, use `mkdocs serve -f ./docs/mkdocs.yml`
 
-# Copy top-level repo files for docs display
-cp ./CHANGELOG.md ./docs/src/CHANGELOG.md
-cp ./LICENSE ./docs/src/LICENSE.md
-mkdir -p ./docs/src/GettingStarted
-cp ./QUICKSTART.md ./docs/src/GettingStarted/QUICKSTART.md
-mkdir -p ./docs/src/notebooks
-rm -fr ./docs/src/notebooks/*
-cp ./notebooks/*ipynb ./docs/src/notebooks/
-cp ./notebooks/*md ./docs/src/notebooks/
-mv ./docs/src/notebooks/README.md ./docs/src/notebooks/index.md
-cp -r ./notebook-images ./docs/src/notebooks/
-cp -r ./notebook-images ./docs/src/
+# Top-level repo files (CHANGELOG, LICENSE, QUICKSTART, notebooks, and
+# notebook-images) are surfaced under docs/src/ via committed symlinks, so no
+# copying is needed here. To refresh those links (e.g. after adding a
+# notebook), run ./docs/link-docs.sh
+
+# Verify each notebook has a matching committed symlink under docs/src (does
+# not modify anything). Catches a notebook added without running link-docs.sh.
+missing_links=""
+for nb in ./notebooks/*.ipynb; do
+    link="./docs/src/notebooks/$(basename "$nb")"
+    if [ ! -L "$link" ]; then
+        missing_links="${missing_links}\n  - ${link}"
+    fi
+done
+if [ -n "$missing_links" ]; then
+    echo "ERROR: missing notebook symlinks under docs/src/notebooks/:" >&2
+    echo -e "$missing_links" >&2
+    echo "Run ./docs/link-docs.sh and commit the new symlinks." >&2
+    exit 1
+fi
 
 # Function for checking major version format: #.#
 check_format() {

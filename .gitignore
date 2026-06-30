@@ -196,10 +196,11 @@ dj_local_conf*
 
 # Documentation
 docs/site/
-docs/src/CHANGELOG.md
-docs/src/LICENSE.md
-docs/src/notebooks/
-docs/src/GettingStarted/QUICKSTART.md
+# NOTE: CHANGELOG.md, LICENSE.md, GettingStarted/QUICKSTART.md, and the
+# notebooks/ contents under docs/src/ are committed symlinks to top-level repo
+# files (see docs/build-docs.sh), so they are intentionally not ignored here.
+# The notebook symlinks must override the global *.ipynb ignore above.
+!docs/src/notebooks/*.ipynb
 !docs/src/images/*png
 temp*
 

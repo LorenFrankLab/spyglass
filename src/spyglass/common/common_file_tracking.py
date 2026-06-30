@@ -355,7 +355,13 @@ class AnalysisFileIssues(dj.Manual):
 
         return updated
 
-    def check1_file(self, analysis_tbl, analysis_file_name, deleted_files=None):
+    def check1_file(
+        self,
+        analysis_tbl,
+        analysis_file_name,
+        deleted_files=None,
+        verbose=False,
+    ):
         """Check a single file and insert only if there's an issue.
 
         Parameters
@@ -386,6 +392,9 @@ class AnalysisFileIssues(dj.Manual):
             "full_table_name": analysis_tbl.full_table_name,
             "analysis_file_name": analysis_file_name,
         }
+
+        if verbose:
+            print(".", end="")
 
         try:
             fname = analysis_tbl.get_abs_path(analysis_file_name)

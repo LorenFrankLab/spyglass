@@ -7,7 +7,13 @@
 
 # Load env
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/.env" # load environment variables from this directory
+source "$SCRIPT_DIR/.env"
+
+# Parse flags
+DRY_RUN=false
+for arg in "$@"; do
+    [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
+done
 
 # Check for required variables
 if [[ -z "${SPACE_CHECK_DRIVES}" \
@@ -22,53 +28,61 @@ if [[ -z "${SPACE_CHECK_DRIVES}" \
   exit 1
 fi
 
-# Inputs to arrays
+# --- Initialize variables ---
 IFS=' ' read -r -a DRIVE_LIST <<< "$SPACE_CHECK_DRIVES"
 IFS=' ' read -r -a LIMIT_LIST <<< "$SPACE_DRIVE_LIMITS"
 
-if [[ "${#SPACE_CHECK_DRIVES[@]}" -ne "${#SPACE_DRIVE_LIMITS[@]}" ]]; then
+if [[ "${#DRIVE_LIST[@]}" -ne "${#LIMIT_LIST[@]}" ]]; then
   echo "Error: Number of drives does not match number of limits"
   exit 1
 fi
 
-echo "SPACE CHECK: $(date)" >> "$SPACE_LOG"
-
-# Email template
-EMAIL_TEMPLATE=$(cat <<-EOF
-From: "Spyglass" <$SPACE_EMAIL_SRC>
-To: %s
-Subject: %s
-
-%s
-EOF
-)
-
-# Send email alert
-send_email_message() {
-  local RECIPIENT="$1"
-  local SUBJECT="$2"
-  local BODY="$3"
-  EMAIL=$(printf "$EMAIL_TEMPLATE" "$RECIPIENT" "$SUBJECT" "$BODY")
-  curl -sS --url "smtps://smtp.gmail.com:465" \
-      --ssl-reqd \
-      --user "$SPACE_EMAIL_SRC:$SPACE_EMAIL_PASS" \
-      --mail-from "$SPACE_EMAIL_SRC" \
-      --mail-rcpt "$RECIPIENT" \
-      -T <(echo "$EMAIL")
-}
-
-source "$SCRIPT_DIR/slack_utils.sh"
-SLACK_LOG="$SPACE_LOG"
-
-# Find the longest drive name for padding
+LOGFILE="$SPACE_LOG"
+RUNWAY_CSV="${SPACE_CSV_LOG:-}"  # preserve for runway read
+RUN_TS=$(date --iso-8601=seconds)
+OUTPUT=""
+FOUND_ISSUE=0
 MAX_DRIVE_LEN=0
+
+# Calculate max drive name length for padding
 for DRIVE in $SPACE_CHECK_DRIVES; do
     LEN=${#DRIVE}
     [[ $LEN -gt $MAX_DRIVE_LEN ]] && MAX_DRIVE_LEN=$LEN
 done
 
-OUTPUT=""
-FOUND_ISSUE=0
+[[ -n "${SPYGLASS_CONDA_PATH:-}" ]] && source "$SPYGLASS_CONDA_PATH"
+PYTHON="python3"
+[[ -n "${SPYGLASS_CONDA_ENV:-}" ]] && \
+  PYTHON="conda run --no-capture-output -n $SPYGLASS_CONDA_ENV python3"
+
+# Dry-run: route output to stdout, suppress CSV writes.
+# RUNWAY_CSV retains the original path so the runway read still works.
+if [[ "$DRY_RUN" == "true" ]]; then
+    LOGFILE=/dev/stdout
+    SPACE_CSV_LOG=""
+fi
+
+source "$SCRIPT_DIR/script_utils.sh"
+SLACK_LOG="$LOGFILE"
+
+# In dry-run mode, replace send functions with stdout printers
+if [[ "$DRY_RUN" == "true" ]]; then
+    send_email_message() {
+        echo "[DRY RUN] EMAIL to: $1"
+        echo "  Subject: $2"
+        echo "  Body: $3"
+    }
+    send_slack_message() {
+        echo "[DRY RUN] SLACK: $1"
+    }
+fi
+
+# Initialize CSV log with header if it doesn't exist
+if [[ -n "${SPACE_CSV_LOG:-}" ]] && [[ ! -f "$SPACE_CSV_LOG" ]]; then
+    echo "timestamp,path,avail_bytes,total_bytes" > "$SPACE_CSV_LOG"
+fi
+
+echo "SPACE CHECK: $(date)" >> "$LOGFILE"
 
 # Check each drive
 for i in "${!DRIVE_LIST[@]}"; do
@@ -80,7 +94,7 @@ for i in "${!DRIVE_LIST[@]}"; do
 
     # Skip nonexistent drives
     if [[ ! -d "$DRIVE" ]]; then
-        echo "WARNING: Drive $DRIVE not found. Skipping." >> "$SPACE_LOG"
+        echo "WARNING: Drive $DRIVE not found. Skipping." >> "$LOGFILE"
         continue
     fi
 
@@ -89,6 +103,10 @@ for i in "${!DRIVE_LIST[@]}"; do
     TOTAL_BYTES=$(df --output=size "$DRIVE" | awk 'NR==2 {print $1 * 1024}')
     FREE_HUMAN=$(numfmt --to=iec "$FREE_BYTES")
     TOTAL_HUMAN=$(numfmt --to=iec "$TOTAL_BYTES")
+
+    if [[ -n "${SPACE_CSV_LOG:-}" ]]; then
+        echo "$RUN_TS,$DRIVE,$FREE_BYTES,$TOTAL_BYTES" >> "$SPACE_CSV_LOG"
+    fi
 
     # Log with left-padded drive names
     if [[ "$DRIVE" == "/" ]]; then
@@ -110,11 +128,10 @@ for i in "${!DRIVE_LIST[@]}"; do
 
     FOUND_ISSUE=1
 
-    # Send email alert
     BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
     SUBJ="${NAME}"
 
-    echo $BODY >> "$SPACE_LOG"
+    echo "$BODY" >> "$LOGFILE"
 
     send_slack_message "$BODY"
 
@@ -124,9 +141,16 @@ for i in "${!DRIVE_LIST[@]}"; do
 
 done
 
+# Append runway prediction if a readable CSV exists
+if [[ -n "$RUNWAY_CSV" ]] && [[ -f "$RUNWAY_CSV" ]]; then
+    RUNWAY=$($PYTHON "$SCRIPT_DIR/predict_runway.py" "$RUNWAY_CSV" 2>>"$LOGFILE")
+    OUTPUT+="$RUNWAY
+"
+fi
+
 # NOTE: `echo` may cause issues on alternative shells.
 # If needed, can extend to use `printf` instead.
-echo "$OUTPUT" >> "$SPACE_LOG"
+echo "$OUTPUT" >> "$LOGFILE"
 
 # Send full disk space report via Slack every Monday
 if [[ "$(date +%u)" == "1" ]]; then
