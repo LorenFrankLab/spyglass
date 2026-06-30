@@ -24,6 +24,7 @@ via ``PositionOutput.fetch1_dataframe()``.
 """
 
 # Import submodules to make them accessible
+from spyglass.position.v2.env_check import check_environment
 from spyglass.position.v2.estim import (
     PoseEstim,
     PoseEstimParams,
@@ -49,6 +50,7 @@ from spyglass.position.v2.video import (
 __all__ = [
     "BodyPart",
     "Calibration",
+    "check_environment",
     "CameraRig",
     "Model",
     "ModelParams",

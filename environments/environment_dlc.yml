@@ -13,6 +13,18 @@
 # Note: SLEAP cannot share this environment — its NumPy-2 / Python >=3.11
 #       stack conflicts with DeepLabCut 3.x (numpy<2). For SLEAP, use the
 #       separate environments/environment_sleap.yml.
+#
+# MIGRATING FROM POSITION V1: create a FRESH environment from this file — do
+#       NOT reuse, clone, or `env update` onto a Position-V1 environment.
+#       V1's DeepLabCut used the TensorFlow backend; V2's DeepLabCut 3.x uses
+#       PyTorch and pulls in jax (via non_local_detector). A leftover
+#       TensorFlow install collides with jax on the GPU ("Unable to register
+#       cuDNN factory ... already registered") and pins jax to an old version.
+#       Check an existing environment with:
+#         python src/spyglass/position/v2/env_check.py
+#       and, if flagged, remove the leftover TensorFlow stack:
+#         pip uninstall -y tensorflow tensorflow-estimator \
+#           tensorflow-io-gcs-filesystem keras tf-keras tf-slim tensorpack
 name: spyglass-dlc
 channels:
   - defaults
@@ -40,6 +52,12 @@ dependencies:
   - torchvision
   - track_linearization>=2.3
   - pip:
+      # jax/jaxlib pulled in by non_local_detector. Constrain to the
+      # NumPy-1.26-compatible line (DeepLabCut 3.x requires numpy<2); the jax
+      # 0.5 series moves to NumPy 2. The lower bound keeps the resolver off the
+      # old wedged builds; the upper bound keeps it off the NumPy-2 ones.
+      - jax>=0.4.38,<0.5
+      - jaxlib>=0.4.38,<0.5
       - ghostipy
       - mountainsort4
       - ndx-pose>=0.2.0

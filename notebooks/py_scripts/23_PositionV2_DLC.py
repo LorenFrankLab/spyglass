@@ -154,6 +154,7 @@ from spyglass.position.v2 import (
     PoseV2,
     Skeleton,
     VidFileGroup,
+    check_environment,
     estim,
     train,
     video,
@@ -180,6 +181,18 @@ _ = (
 )
 
 print("All imports successful!")
+
+# %% [markdown]
+# ### Check the environment
+#
+# Catches common dependency issues before you train or run inference. The most
+# frequent one for users coming from **Position V1** is a leftover TensorFlow
+# install (V1's DeepLabCut backend) colliding with V2's jax stack on the GPU.
+# If flagged, follow the printed fix (or rebuild from
+# `environments/environment_dlc.yml`), then restart the kernel.
+
+# %%
+check_environment()
 
 # %% [markdown]
 # ### Diagram

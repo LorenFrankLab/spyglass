@@ -276,6 +276,8 @@ class NDXPoseBuilder(BaseMixin):
         timestamps: np.ndarray = None,
         source_software: str = "DeepLabCut",
         unit: str = "cm",
+        name: str = "PoseEstimation",
+        skeleton_name: str = None,
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
 
@@ -303,6 +305,13 @@ class NDXPoseBuilder(BaseMixin):
         unit : str, optional
             Coordinate unit stored in each PoseEstimationSeries, by default
             "cm".  Use "pixels" when coordinates have not been converted.
+        name : str, optional
+            Name of the PoseEstimation NWB object, by default "PoseEstimation".
+            Pass a unique name per camera when storing several in one file.
+        skeleton_name : str, optional
+            Name of the Skeleton NWB object.  Defaults to
+            ``f"skeleton_{model_id}"``; pass a unique name per camera to avoid
+            collisions when several pose objects share one file.
 
         Returns
         -------
@@ -331,7 +340,7 @@ class NDXPoseBuilder(BaseMixin):
             edge_array = np.array([], dtype="uint8").reshape(0, 2)
 
         skeleton = ndx_pose.Skeleton(
-            name=f"skeleton_{model_id}",
+            name=skeleton_name or f"skeleton_{model_id}",
             nodes=bodyparts,
             edges=edge_array,
         )
@@ -368,7 +377,7 @@ class NDXPoseBuilder(BaseMixin):
             pose_series_list.append(series)
 
         pose_estimation = ndx_pose.PoseEstimation(
-            name="PoseEstimation",
+            name=name,
             pose_estimation_series=pose_series_list,
             description=description or f"Pose estimation from model {model_id}",
             original_videos=original_videos or [],
@@ -505,8 +514,16 @@ class NDXPoseBuilder(BaseMixin):
             else:
                 behavior_module = nwbf.processing["behavior"]
 
-            skeletons = ndx_pose.Skeletons(skeletons=[skeleton])
-            behavior_module.add(skeletons)
+            # A single NWB file may hold several pose objects (e.g. one per
+            # camera plus the 3D result).  ndx-pose stores all skeletons in one
+            # ``Skeletons`` container, so append to it when it already exists
+            # rather than creating a second container with the same name.
+            if "Skeletons" in behavior_module.data_interfaces:
+                behavior_module.data_interfaces["Skeletons"].add_skeletons(
+                    [skeleton]
+                )
+            else:
+                behavior_module.add(ndx_pose.Skeletons(skeletons=[skeleton]))
             behavior_module.add(pose_estimation)
             nwb_io.write(nwbf)
 

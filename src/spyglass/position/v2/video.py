@@ -460,30 +460,6 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def create_from_directory_legacy(
-        cls,
-        directory: Union[str, Path],
-        description: str,
-        vid_group_id: Union[str, None] = None,
-        pattern: str = "*.mp4",
-        recursive: bool = False,
-    ) -> dict:
-        """Legacy interface for create_from_directory (backward compatibility).
-
-        This method provides the original multi-parameter interface while
-        internally using the optimized VideoGroupParams approach.
-        """
-        return cls.create_from_directory(
-            VideoGroupParams(
-                directory=directory,
-                description=description,
-                vid_group_id=vid_group_id,
-                pattern=pattern,
-                recursive=recursive,
-            )
-        )
-
-    @classmethod
     def add_files(
         cls,
         vid_group_id: str,
@@ -809,10 +785,15 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name"
         )
 
-        if not len(nwbs) == 1:
+        # Multi-camera (3D) groups hold one File row per camera, all sharing a
+        # single parent NWB; dedup so they collapse to that common file rather
+        # than counting once per camera.
+        distinct_nwbs = set(nwbs)
+        if not len(distinct_nwbs) == 1:
             raise ValueError(
                 f"Expected exactly 1 common NWB file across videos in group "
-                f"{vid_group_id}, but found {len(nwbs)}: {nwbs}"
+                f"{vid_group_id}, but found {len(distinct_nwbs)}: "
+                f"{sorted(distinct_nwbs)}"
             )
 
-        return {"nwb_file_name": nwbs[0]}
+        return {"nwb_file_name": distinct_nwbs.pop()}

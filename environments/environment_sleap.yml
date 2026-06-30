@@ -5,6 +5,12 @@
 # numpy<2. The two cannot coexist in one environment. Use this file for SLEAP
 # and environments/environment_dlc.yml for DeepLabCut.
 #
+# MIGRATING FROM POSITION V1: create a FRESH environment from this file — do
+# NOT reuse, clone, or `env update` onto a Position-V1 environment. A leftover
+# TensorFlow install (V1's DeepLabCut backend) collides with V2's jax stack
+# (via non_local_detector) on the GPU. Check an existing environment with
+# `python src/spyglass/position/v2/env_check.py`.
+#
 # 1. Install the correct GPU driver for your machine.
 #    See https://stackoverflow.com/a/30820690
 # 2. Create the environment:

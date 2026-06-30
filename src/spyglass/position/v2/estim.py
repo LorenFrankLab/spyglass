@@ -55,10 +55,6 @@ from spyglass.position.v2.train import (
     default_pk_name,
     resolve_model_path,
 )
-from spyglass.position.v2.utils.skeleton import (
-    canonicalize,
-    normalize_label,
-)
 from spyglass.position.v2.utils.nwb_io import (
     NDXPoseBuilder,
     PoseInferenceRunner,
@@ -70,6 +66,7 @@ from spyglass.position.v2.utils.params import (
     PoseParameterSet,
     SmoothingParams,
 )
+from spyglass.position.v2.utils.skeleton import canonicalize, normalize_label
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import pose_output_dir
 from spyglass.utils import SpyglassMixin, logger
@@ -377,6 +374,99 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
 
         self._info_msg("Inserted entry into PoseEstimSelection")
         return {**key, "task_mode": task_mode}
+
+    def insert_from_videofile(
+        self,
+        model_id,
+        videos=None,
+        restriction=None,
+        params=None,
+        task_mode="trigger",
+        output_dir=None,
+        skip_duplicates=True,
+    ):
+        """Queue inference tasks directly from ``VideoFile`` keys/restriction.
+
+        Convenience entry point for users who identify videos through the
+        upstream ``VideoFile`` table rather than by path. One ``VidFileGroup``
+        and one ``PoseEstimSelection`` task is created **per matched video**
+        (single-camera inference). For multi-camera 3-D grouping, build the
+        ``VidFileGroup`` explicitly (with ``camera_index``) and use
+        :meth:`insert_estimation_task`.
+
+        Parameters
+        ----------
+        model_id : str
+            Trained ``Model`` to run.
+        videos : dict or list[dict], optional
+            One or more ``VideoFile`` key dicts. Mutually exclusive with
+            *restriction*.
+        restriction : dict or str, optional
+            A DataJoint restriction applied to ``VideoFile``, e.g.
+            ``{"nwb_file_name": "example_.nwb"}``. Mutually exclusive with
+            *videos*.
+        params : dict, optional
+            Tool-specific inference params; resolved to one ``PoseEstimParams``
+            entry shared by every queued task.
+        task_mode : str, optional
+            ``'trigger'`` (run inference) or ``'load'`` (read existing output),
+            by default ``'trigger'``.
+        output_dir : str, optional
+            Output directory; inferred per task when None.
+        skip_duplicates : bool, optional
+            Skip tasks that already exist, by default True.
+
+        Returns
+        -------
+        list[dict]
+            One inserted ``PoseEstimSelection`` key per video.
+
+        Raises
+        ------
+        ValueError
+            If not exactly one of *videos*/*restriction* is given, or no
+            ``VideoFile`` rows match the selector.
+        """
+        if (videos is None) == (restriction is None):
+            raise ValueError(
+                "Provide exactly one of 'videos' or 'restriction'."
+            )
+
+        selector = videos if videos is not None else restriction
+        video_keys = (VideoFile & selector).fetch("KEY", as_dict=True)
+        if not video_keys:
+            raise ValueError(
+                f"No VideoFile rows match: {selector!r}. "
+                "Check the restriction against the VideoFile table."
+            )
+
+        # Resolve params once so every queued task shares one PoseEstimParams.
+        params_key = PoseEstimParams.insert_params(
+            params or {}, skip_duplicates=True
+        )
+
+        inserted = []
+        for vkey in video_keys:
+            description = "pose: " + ", ".join(
+                f"{k}={v}" for k, v in vkey.items()
+            )
+            group_key = VidFileGroup().insert1(
+                {"description": description, "files": [vkey]},
+                skip_duplicates=True,
+            )
+            sel_key = self.insert_estimation_task(
+                {"model_id": model_id, **group_key, **params_key},
+                task_mode=task_mode,
+                output_dir=output_dir,
+                skip_duplicates=skip_duplicates,
+            )
+            inserted.append(sel_key)
+
+        self._info_msg(
+            f"Queued {len(inserted)} pose estimation task(s) for "
+            f"model {model_id}."
+        )
+        return inserted
 
     @staticmethod
     def _infer_output_dir(key):
@@ -1472,9 +1562,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 description=f"2D pose estimation from camera {ci} (pixels)",
                 timestamps=vid_timestamps,
                 unit="pixels",
+                name=f"PoseEstimation_cam{ci}",
+                skeleton_name=f"skeleton_{key['model_id']}_cam{ci}",
             )
-            cam_pe.name = f"PoseEstimation_cam{ci}"
-            cam_skel.name = f"skeleton_{key['model_id']}_cam{ci}"
             builder.store_to_nwb(cam_pe, cam_skel, analysis_abs_path)
 
         # 3D triangulated PoseEstimation object (coords in cm).

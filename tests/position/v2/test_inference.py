@@ -400,6 +400,73 @@ class TestInsertEstimationTaskValidation:
             )
 
 
+class TestInsertFromVideoFile:
+    """PoseEstimSelection.insert_from_videofile() — VideoFile-keyed entry."""
+
+    def test_neither_videos_nor_restriction_raises(self, position_v2):
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        with pytest.raises(ValueError, match="exactly one"):
+            PoseEstimSelection().insert_from_videofile(model_id="m")
+
+    def test_both_videos_and_restriction_raises(self, position_v2):
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        with pytest.raises(ValueError, match="exactly one"):
+            PoseEstimSelection().insert_from_videofile(
+                model_id="m",
+                videos={"nwb_file_name": "x"},
+                restriction={"nwb_file_name": "x"},
+            )
+
+    def test_empty_restriction_raises(self, position_v2):
+        """A restriction matching no VideoFile rows gives an actionable error."""
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        with pytest.raises(ValueError, match="No VideoFile rows match"):
+            PoseEstimSelection().insert_from_videofile(
+                model_id="m",
+                restriction={"nwb_file_name": "definitely_absent_xyz_.nwb"},
+            )
+
+    def test_restriction_and_keys_create_tasks(
+        self,
+        position_v2,
+        model,
+        dlc_project_config,
+        dlc_bootstrapped_session,
+        skip_if_no_dlc,
+    ):
+        """A VideoFile restriction (and a key list) queue one task per video."""
+        from spyglass.common import VideoFile
+
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        model_key = model.load(model_path=str(dlc_project_config))
+        nwb_file_name = dlc_bootstrapped_session
+        restr = {"nwb_file_name": nwb_file_name}
+        vf_keys = (VideoFile & restr).fetch("KEY", as_dict=True)
+        assert vf_keys, "bootstrap did not populate VideoFile"
+
+        # restriction form
+        keys = PoseEstimSelection().insert_from_videofile(
+            model_id=model_key["model_id"], restriction=restr
+        )
+        assert len(keys) == len(vf_keys)  # one task per matched video
+        pk_fields = ("model_id", "vid_group_id", "pose_estim_params_id")
+        for k in keys:
+            assert VidFileGroup() & {"vid_group_id": k["vid_group_id"]}
+            # restrict on the PK only — task_mode is a secondary attr a
+            # pre-existing row (shared container) may already hold.
+            assert PoseEstimSelection() & {f: k[f] for f in pk_fields}
+
+        # explicit key-list form is idempotent (skip_duplicates) and matches
+        keys2 = PoseEstimSelection().insert_from_videofile(
+            model_id=model_key["model_id"], videos=vf_keys
+        )
+        assert {k["vid_group_id"] for k in keys2} == {
+            k["vid_group_id"] for k in keys
+        }
+
+
 class TestPoseEstimMakeValidation:
     """Tests for PoseEstim.make() fail-fast validation."""
 
