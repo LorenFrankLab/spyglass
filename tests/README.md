@@ -150,11 +150,19 @@ ______________________________________________________________________
 
 **File**: `.github/workflows/test-conda.yml`
 
-**Trigger Modes:**
+**Trigger Modes** (the `run-tests` job — the general suite):
 
 - `push`: Runs fast tests only (`-m "not slow and not very_slow"`)
 - `pull_request` (closed + merged): Runs full test suite
 - `workflow_dispatch`: Manual trigger with mode selection (fast/full)
+
+The `fast`/`full` selection applies **only to the general `run-tests` job**. The
+separate `pytest-v2` and `pytest-legacy` jobs ignore it and always run their full
+applicable suite; what they cover is keyed on the *event*, not the mode — `push`
+runs the smoke-fixture tier, `schedule` (nightly) adds the 60s fixture, and a
+manual `workflow_dispatch` additionally pulls the scenario fixtures
+(Neuropixels / tetrode) and requires them, so a manual dispatch is the most
+thorough v2 run regardless of the `fast`/`full` choice.
 
 **Optimizations:**
 

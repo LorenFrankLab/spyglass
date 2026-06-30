@@ -304,6 +304,11 @@ jobs:
       # fixture is present (scheduled / manual runs) the merge, MS5
       # ground-truth, and clusterless sparse-id cases run too -- otherwise
       # they skip cleanly via their ``*_PATH.exists()`` / fixture guards.
+      # NOTE: this job does NOT honor the workflow_dispatch fast/full
+      # ``test_mode`` input (that governs the general ``run-tests`` job only).
+      # The v2 coverage tier is keyed on the EVENT (push=smoke, schedule=+60s,
+      # manual dispatch=+scenario fixtures + REQUIRE), so a manual dispatch is
+      # always the most thorough v2 run; there is no fast v2 lane by design.
       run: |
         pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
     # --- Matching-extra resolver-evidence job.
