@@ -88,7 +88,7 @@ registrations); existing v2 table definitions are unchanged.
   extra.
 - **Canonical notebooks.** `notebooks/10_Spike_SortingV2.ipynb` is the
   single-session walkthrough (preset choice, run, curation paths) and
-  `notebooks/14_Spike_Sorting_CrossSession.ipynb` covers concatenate-and-sort
+  `notebooks/10_Spike_SortingV2_CrossSession.ipynb` covers concatenate-and-sort
   plus cross-session unit matching.
 
 #### Spike Sorting v2: concat member-set identity, verify-on-read, and split conservation

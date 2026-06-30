@@ -708,7 +708,7 @@ describe_run(session_results)
 #
 # - Sort and track units across multiple sessions — concatenate same-day
 #   recordings and match units across days — with
-#   [Cross-Session Spike Sorting](./14_Spike_Sorting_CrossSession.ipynb).
+#   [Cross-Session Spike Sorting](./10_Spike_SortingV2_CrossSession.ipynb).
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
 #   (`SortedSpikesGroup`).

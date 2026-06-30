@@ -174,7 +174,7 @@ class _NotebookFixtureMatcher:
 
 @pytest.mark.slow
 def test_cross_session_notebook_runs(dj_conn):
-    """``14_Spike_Sorting_CrossSession`` runs both workflows on two sessions.
+    """``10_Spike_SortingV2_CrossSession`` runs both workflows on two sessions.
 
     Ingests the polymer smoke fixture twice (identical, same-day sessions) and
     runs the notebook: Part A concatenates and sorts them; Part B sorts each
@@ -251,7 +251,7 @@ def test_cross_session_notebook_runs(dj_conn):
             )
             parameters["matcher_params_name"] = matcher_params_name
         namespace = _execute_notebook(
-            _NOTEBOOKS / "14_Spike_Sorting_CrossSession.ipynb", parameters
+            _NOTEBOOKS / "10_Spike_SortingV2_CrossSession.ipynb", parameters
         )
     finally:
         if registry is not None:
