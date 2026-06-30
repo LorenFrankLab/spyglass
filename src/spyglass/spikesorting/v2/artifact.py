@@ -125,9 +125,14 @@ class ArtifactDetectionParameters(
     """Validated artifact-detection parameter blob.
 
     The ``params`` blob is validated by
-    :class:`ArtifactDetectionParamsSchema`. ``insert_default`` ships two
-    presets: ``"none"`` (detect=False, skip artifact scanning) and
-    ``"default"`` (amplitude threshold + proportion-above-thresh).
+    :class:`ArtifactDetectionParamsSchema`. ``insert_default`` ships four rows:
+    ``"none"`` (detect=False, skip artifact scanning), ``"default"`` (the 500 uV
+    schema default: amplitude threshold + proportion-above-thresh), and the two
+    production Frank-lab recipes ``"franklab_100uv_p07_2026_06"`` (100 uV, 0.7
+    proportion) and ``"franklab_50uv_p07_2026_06"`` (50 uV, 0.7). A preset that
+    omits ``artifact_detection_params_name`` runs no detection at all (no
+    ``ArtifactDetectionSource`` row), which is the only valid shape for a concat
+    sort.
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
     governs the chunked detection scan
