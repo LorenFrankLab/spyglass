@@ -153,7 +153,10 @@ initialize_v2_defaults()  # install the default parameter rows
 LabTeam.insert1(
     {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
 )
-SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+# set_group_by_shank refuses to overwrite existing sort groups, so guard the
+# re-run (or delete the groups first; see the docs).
+if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
 run_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
@@ -162,7 +165,11 @@ run_summary = run_v2_pipeline(
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
-merge_id = run_summary["merge_id"]  # key downstream analyses off this
+# run_summary["merge_id"] is the UNCURATED root curation. For downstream
+# science, curate first -- pass auto_curate=True and key off
+# auto_summary["auto_merge_id"], or curate by hand and use that curation's
+# merge_id (see the SpikeSortingV2 docs).
+merge_id = run_summary["merge_id"]
 ```
 
 See
