@@ -142,7 +142,12 @@ def _load_annotations_json(uri: str) -> dict:
 
     if base.startswith(("http://", "https://")):
         try:
-            with urllib.request.urlopen(annotations_url) as response:
+            # Bound the fetch so a stalled host fails closed instead of hanging
+            # indefinitely (a read timeout raises a bare TimeoutError, not a
+            # URLError, so both are caught below).
+            with urllib.request.urlopen(
+                annotations_url, timeout=30
+            ) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
@@ -150,9 +155,10 @@ def _load_annotations_json(uri: str) -> dict:
             raise FigPackRetrievalError(
                 f"Failed to fetch {annotations_url}: HTTP {exc.code}."
             ) from exc
-        except urllib.error.URLError as exc:
+        except (urllib.error.URLError, TimeoutError) as exc:
+            reason = getattr(exc, "reason", exc)
             raise FigPackRetrievalError(
-                f"Could not reach {annotations_url}: {exc.reason}. Refusing to "
+                f"Could not reach {annotations_url}: {reason}. Refusing to "
                 "treat an unreachable figure as having no edits."
             ) from exc
         try:
@@ -701,6 +707,18 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             upload=upload,
             ephemeral=ephemeral,
         )
+        # An offline bundle lives under a temp dir that can be purged; if the
+        # row exists but its local bundle is gone, drop the stale row so populate
+        # rebuilds it rather than returning a dead path (mirrors run_v2_pipeline's
+        # figpack reuse guard). A hosted (upload=True) URI is remote, so the
+        # on-disk check does not apply.
+        built = cls & selection
+        if (
+            not upload
+            and built
+            and not Path(built.fetch1("figpack_uri")).exists()
+        ):
+            built.delete_quick()
         cls.populate(selection)
         return (cls & selection).fetch1("figpack_uri")
 
