@@ -2087,7 +2087,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert "concat_recording" in summary["stage_seconds"]
         # Sorted + curated + registered on the merge table.
         assert summary["n_units"] >= 0
-        assert SpikeSortingOutput.CurationV2 & {"merge_id": summary["merge_id"]}
+        assert SpikeSortingOutput.CurationV2 & {
+            "merge_id": summary["root_merge_id"]
+        }
 
         # Idempotent: a rerun reuses the concat sort + curation.
         rerun = run_v2_pipeline(
@@ -2096,7 +2098,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             pipeline_preset=preset_name,
         )
         assert rerun["sorting_id"] == summary["sorting_id"]
-        assert rerun["merge_id"] == summary["merge_id"]
+        assert rerun["root_merge_id"] == summary["root_merge_id"]
         assert rerun["concat_recording_status"] == "reused"
     finally:
         presets_mod._PIPELINE_PRESETS.pop(preset_name, None)

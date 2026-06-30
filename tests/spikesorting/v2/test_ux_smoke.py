@@ -61,8 +61,11 @@ _STABLE_KEYS = (
     "recording_id",
     "artifact_detection_id",
     "sorting_id",
-    "curation_id",
-    "merge_id",
+    "root_curation_id",
+    "root_merge_id",
+    # Always present; None on a root-only run (stable None across reruns).
+    "analysis_curation_id",
+    "analysis_merge_id",
     "n_units",
 )
 _STATUS_KEYS = (
@@ -217,20 +220,25 @@ def test_ux_smoke_first_hour(first_hour):
 
     # 5. summarize_curation accepts the run_summary directly and agrees with the
     #    minimal curation key.
-    summary = CurationV2.summarize_curation(run_summary)
-    assert summary["merge_id"] == run_summary["merge_id"]
-    assert summary["curation_id"] == run_summary["curation_id"]
+    # summarize_curation describes ONE curation, so it keeps the bare
+    # merge_id / curation_id; the run summary names its root curation
+    # root_curation_id / root_merge_id. Build the curation key explicitly.
+    root_key = {
+        "sorting_id": run_summary["sorting_id"],
+        "curation_id": run_summary["root_curation_id"],
+    }
+    summary = CurationV2.summarize_curation(root_key)
+    assert summary["merge_id"] == run_summary["root_merge_id"]
+    assert summary["curation_id"] == run_summary["root_curation_id"]
     assert summary["sorting_id"] == run_summary["sorting_id"]
     assert summary["n_units"] == run_summary["n_units"]
-    minimal_key = {
-        "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["curation_id"],
-    }
-    assert CurationV2.summarize_curation(minimal_key) == summary
+    assert CurationV2.summarize_curation(root_key) == summary
 
     # 6. the sort resolves downstream and yields sane per-unit spike arrays.
+    #    A root-only run exposes the root via root_merge_id (analysis_merge_id
+    #    is None until curated); the root is queryable for inspection.
     spike_times = SpikeSortingOutput().get_spike_times(
-        {"merge_id": run_summary["merge_id"]}
+        {"merge_id": run_summary["root_merge_id"]}
     )
     assert isinstance(spike_times, list)
     assert len(spike_times) == run_summary["n_units"]
@@ -344,8 +352,8 @@ def test_user_notebook_executes(first_hour):
 
     assert saw_parameters, "notebook is missing its 'parameters'-tagged cell"
     assert (
-        namespace["run_summary"]["merge_id"]
-        == first_hour["run_summary"]["merge_id"]
+        namespace["run_summary"]["root_merge_id"]
+        == first_hour["run_summary"]["root_merge_id"]
     )
     assert isinstance(namespace["spike_times"], list)
 

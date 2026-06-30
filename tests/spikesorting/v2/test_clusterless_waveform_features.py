@@ -492,7 +492,7 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
         # non-positional id.
         merge_id = _curation_merge_id(
             sort_pk,
-            parent_curation_id=run_summary["curation_id"],
+            parent_curation_id=run_summary["root_curation_id"],
             merge_groups=[source_ids],
             apply_merge=True,
         )

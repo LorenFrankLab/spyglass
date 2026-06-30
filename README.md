@@ -165,11 +165,23 @@ run_summary = run_v2_pipeline(
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
-# run_summary["merge_id"] is the UNCURATED root curation. For downstream
-# science, curate first: a run_v2_pipeline(..., auto_curate=True) summary
-# carries an "auto_merge_id" (the auto-curated child), or curate by hand and
-# use that curation's merge_id (see the SpikeSortingV2 docs).
-merge_id = run_summary["merge_id"]
+# A default run stops at the UNCURATED root. run_summary["root_merge_id"] is
+# fine for a quick look, but is NOT analysis-ready, and
+# run_summary["analysis_merge_id"] is None -- there is deliberately nothing
+# called "merge_id" to copy straight into a decode.
+root_merge_id = run_summary["root_merge_id"]  # quick inspection only
+
+# For downstream science, curate first. auto_curate=True commits an
+# auto-labeled child and fills analysis_merge_id (the analysis-ready handle):
+analysis_summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=0,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    auto_curate=True,
+)
+merge_id = analysis_summary["analysis_merge_id"]  # send THIS downstream
 ```
 
 See

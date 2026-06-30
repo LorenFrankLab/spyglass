@@ -912,7 +912,8 @@ _RUN_COLUMNS = [
     "status",
     "seconds",
     "n_units",
-    "merge_id",
+    "root_merge_id",
+    "analysis_merge_id",
     "warning",
     "error",
 ]
@@ -975,13 +976,24 @@ def _describe_run_single_rows(
     stage_names += [s for s in stage_seconds if s not in stage_names]
 
     rows = []
+    analysis_merge_id = run_summary.get("analysis_merge_id")
+    # The root-only / auto-curated status is a run_v2_pipeline concept, keyed on
+    # its root_merge_id. Other dict summaries that flow through describe_run
+    # (e.g. a run_v2_unit_match manifest) have no root_merge_id -- leave their
+    # summary status blank rather than mislabeling them "root only".
+    if "root_merge_id" in run_summary:
+        summary_status = "auto-curated" if analysis_merge_id else "root only"
+    else:
+        summary_status = None
     header = _run_blank_row()
     header.update(
         row_type="summary",
         sort_group_id=sort_group_id,
+        status=summary_status,
         seconds=_run_stage_seconds_total(run_summary),
         n_units=run_summary.get("n_units"),
-        merge_id=run_summary.get("merge_id"),
+        root_merge_id=run_summary.get("root_merge_id"),
+        analysis_merge_id=analysis_merge_id,
     )
     rows.append(header)
     for stage in stage_names:
@@ -1014,18 +1026,26 @@ def describe_run(result) -> "pd.DataFrame":
     warning, a failed group -- are first-class rows, not a value buried in a
     nested dict. Warnings never disappear into a print statement.
 
-    Pass either a single ``run_v2_pipeline`` run summary (``dict``) or a
-    ``run_v2_pipeline_session`` result (``list`` of dicts). For the session
-    form, a leading ``summary`` row carries the ok / failed / zero-unit /
-    with-warnings counts and ``seconds`` is ``sum(stage_seconds.values())`` per
-    group; partial / missing summaries on failed groups are tolerated.
+    Pass a single ``dict`` run summary -- a ``run_v2_pipeline`` summary or a
+    ``run_v2_unit_match`` manifest (both carry ``stage_seconds`` + per-stage
+    ``*_status`` keys) -- or a ``run_v2_pipeline_session`` result (``list`` of
+    dicts). For the session form, a leading ``summary`` row carries the ok /
+    failed / zero-unit / with-warnings counts and ``seconds`` is
+    ``sum(stage_seconds.values())`` per group; partial / missing summaries on
+    failed groups are tolerated.
 
     Returns
     -------
     pandas.DataFrame
         Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"group"`` /
         ``"warning"``), ``sort_group_id``, ``stage``, ``status``, ``seconds``,
-        ``n_units``, ``merge_id``, ``warning``, ``error``.
+        ``n_units``, ``root_merge_id``, ``analysis_merge_id``, ``warning``,
+        ``error``. For a ``run_v2_pipeline`` summary the ``summary`` row's
+        ``status`` is ``"root only"`` / ``"auto-curated"`` (and
+        ``analysis_merge_id`` is ``None`` until a curation makes the sort
+        analysis-ready); for any other dict summary (e.g. ``run_v2_unit_match``,
+        which has no ``root_merge_id``) the ``summary`` status is blank and its
+        stages render from its own ``*_status`` keys.
     """
     import pandas as pd
 
@@ -1049,7 +1069,10 @@ def describe_run(result) -> "pd.DataFrame":
             )
             warnings = _run_warnings(entry, partial)
             n_units = _run_metadata(entry, partial, "n_units")
-            merge_id = _run_metadata(entry, partial, "merge_id")
+            root_merge_id = _run_metadata(entry, partial, "root_merge_id")
+            analysis_merge_id = _run_metadata(
+                entry, partial, "analysis_merge_id"
+            )
             if outcome == "failed":
                 n_failed += 1
             elif outcome == "ok":
@@ -1086,7 +1109,8 @@ def describe_run(result) -> "pd.DataFrame":
                 status=outcome,
                 seconds=seconds,
                 n_units=n_units,
-                merge_id=merge_id,
+                root_merge_id=root_merge_id,
+                analysis_merge_id=analysis_merge_id,
                 error=entry.get("error"),
             )
             rows.append(group)

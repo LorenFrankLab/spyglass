@@ -19,15 +19,22 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 
 
-def _run_summary(*, n_units=3, warnings=None):
-    """A minimal run_v2_pipeline-shaped summary."""
+def _run_summary(*, n_units=3, warnings=None, analysis=False):
+    """A minimal run_v2_pipeline-shaped summary.
+
+    ``analysis=False`` is a root-only run (``analysis_*`` are ``None``);
+    ``analysis=True`` mimics ``auto_curate=True``, where ``analysis_*`` point at
+    the auto-curated child.
+    """
     return {
         "pipeline_preset": "preset_x",
         "recording_id": "rec",
         "artifact_detection_id": "art",
         "sorting_id": "sort",
-        "curation_id": 0,
-        "merge_id": "merge-1",
+        "root_curation_id": 0,
+        "root_merge_id": "root-merge-1",
+        "analysis_curation_id": 1 if analysis else None,
+        "analysis_merge_id": "analysis-merge-1" if analysis else None,
         "n_units": n_units,
         "recording_status": "computed",
         "artifact_detection_status": "computed",
@@ -55,12 +62,58 @@ def test_describe_run_single_columns_and_rows():
 
     summary = frame.iloc[0]
     assert summary["n_units"] == 3
-    assert summary["merge_id"] == "merge-1"
+    assert summary["root_merge_id"] == "root-merge-1"
+    # A root-only run has no analysis-ready id, and the status says so plainly
+    # (so a user can't mistake the root for the downstream-science handle).
+    assert summary["analysis_merge_id"] is None
+    assert summary["status"] == "root only"
     assert summary["seconds"] == pytest.approx(3.5)  # 1 + 2 + 0 + 0.5
 
     stage_rows = frame[frame["row_type"] == "stage"].set_index("stage")
     assert stage_rows.loc["sorting", "status"] == "reused"
     assert stage_rows.loc["recording", "seconds"] == pytest.approx(1.0)
+
+
+def test_describe_run_single_auto_curated_status():
+    # auto_curate=True fills analysis_*; the receipt shows the analysis merge id
+    # and flips the summary status to "auto-curated".
+    frame = describe_run(_run_summary(analysis=True))
+    summary = frame.iloc[0]
+    assert summary["root_merge_id"] == "root-merge-1"
+    assert summary["analysis_merge_id"] == "analysis-merge-1"
+    assert summary["status"] == "auto-curated"
+
+
+def _unit_match_summary():
+    """A minimal run_v2_unit_match-shaped summary (no root/analysis merge id)."""
+    return {
+        "session_group_owner": "owner",
+        "session_group_name": "grp",
+        "matcher_params_name": "unitmatch_default",
+        "unitmatch_id": "um-1",
+        "unit_match_status": "computed",
+        "n_pairs": 3,
+        "tracked_unit_status": "computed",
+        "n_tracked_units": 2,
+        "stage_seconds": {"unit_match": 1.0, "tracked_unit": 0.5},
+        "warnings": [],
+    }
+
+
+def test_describe_run_unit_match_summary_not_labeled_root_only():
+    # run_v2_unit_match summaries flow through describe_run too, but have no
+    # analysis_merge_id. The "root only" / "auto-curated" status is a
+    # run_v2_pipeline concept -- a UnitMatch receipt must NOT be mislabeled
+    # "root only"; its summary status stays blank.
+    frame = describe_run(_unit_match_summary())
+    summary = frame.iloc[0]
+    assert summary["row_type"] == "summary"
+    assert pd.isna(summary["status"])
+    assert summary["root_merge_id"] is None
+    assert summary["analysis_merge_id"] is None
+    # The match stages still render as their own rows.
+    stages = set(frame[frame["row_type"] == "stage"]["stage"])
+    assert {"unit_match", "tracked_unit"} <= stages
 
 
 def test_describe_run_single_warning_is_its_own_row():
@@ -118,7 +171,7 @@ def test_describe_run_session_surfaces_partial_summary_seconds():
         "partial_run_summary": {
             "stage_seconds": {"recording": 4.0},
             "n_units": 0,
-            "merge_id": "merge-before-failure",
+            "root_merge_id": "root-merge-before-failure",
             "warnings": ["zero units before curation failure"],
         },
     }
@@ -126,7 +179,7 @@ def test_describe_run_session_surfaces_partial_summary_seconds():
     group = frame[frame["row_type"] == "group"].iloc[0]
     assert group["seconds"] == pytest.approx(4.0)
     assert group["n_units"] == 0
-    assert group["merge_id"] == "merge-before-failure"
+    assert group["root_merge_id"] == "root-merge-before-failure"
     header = frame.iloc[0]
     assert header["status"] == "0 ok, 1 failed, 1 zero-unit, 1 with warnings"
     warning = frame[frame["row_type"] == "warning"].iloc[0]

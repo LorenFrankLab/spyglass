@@ -50,7 +50,6 @@ from spyglass.spikesorting.v2.pipeline import (
 from spyglass.spikesorting.v2.session_group import SessionGroup
 
 dj.config["display.limit"] = 12
-
 # -
 
 # ## 1. One-time setup
@@ -151,7 +150,7 @@ if run_concat:
     print(
         f"{len(concat_summary['member_recording_ids'])} member recordings -> "
         f"one concatenated sort with {concat_summary['n_units']} unit(s); "
-        f"merge_id={concat_summary['merge_id']}"
+        f"root_merge_id={concat_summary['root_merge_id']}"
     )
 
 # ## Part B — Match units across sessions
@@ -163,12 +162,27 @@ if run_concat:
 
 # ### B1. Group the sessions and sort each one
 #
-# Sort each member with the single-session preset (these reuse anything already
-# computed). We drive Part B off the group's **persisted** members — the rows
-# `create_group` stored — not the parameter list, so editing the group (or a
-# member carrying its own `team_name`) sorts exactly the set that will be matched.
+# Sort each member with the single-session preset and `auto_curate=True`, so each
+# member contributes an **analysis-ready** (auto-labeled) curation to the match
+# rather than the uncurated root (these reuse anything already computed). We drive
+# Part B off the group's **persisted** members — the rows `create_group` stored —
+# not the parameter list, so editing the group (or a member carrying its own
+# `team_name`) sorts exactly the set that will be matched.
 
-if run_unit_match:
+# +
+import importlib.util
+
+# Check the matcher backend BEFORE the expensive per-member sorts: without the
+# optional UnitMatchPy extra there is no point sorting + auto-curating every
+# member for a match that then can't run.
+unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
+member_summaries = {}
+if run_unit_match and not unitmatch_available:
+    print(
+        "UnitMatchPy not installed (the 'spikesorting-v2-matching' extra); "
+        "skipping Part B (member sorts + matching). Install the extra to run it."
+    )
+elif run_unit_match:
     match_key = {
         "session_group_owner": session_group_owner,
         "session_group_name": match_group_name,
@@ -184,41 +198,48 @@ if run_unit_match:
         as_dict=True, order_by="member_index"
     )
 
-    member_summaries = {}
     for member in group_members:
+        # auto_curate=True so each member contributes an ANALYSIS-ready
+        # (auto-labeled) curation to the match, not the uncurated root. To
+        # match a hand-curated result instead, curate each member (see the
+        # Curation how-to) and pin that (sorting_id, curation_id) below.
         summary = run_v2_pipeline(
             nwb_file_name=member["nwb_file_name"],
             sort_group_id=int(member["sort_group_id"]),
             interval_list_name=member["interval_list_name"],
             team_name=member["team_name"],
             pipeline_preset=single_preset,
+            auto_curate=True,
         )
         member_summaries[int(member["member_index"])] = summary
         print(
             f"member {member['member_index']} ({member['nwb_file_name']}): "
             f"sorting_id={summary['sorting_id']} ({summary['n_units']} units)"
         )
+# -
 
 # ### B2. Pin each member's curation
 #
 # `describe_unit_match_choices` lists, per member, every committed
 # `(sorting_id, curation_id)` you may pin — useful to see what is available. Here
-# we pin the EXACT sort each member just produced in B1 (from `member_summaries`),
-# rather than guessing an entry from the list: a member may have an older sort of
-# the same session under a different preset, and matching the wrong one would be
+# we pin each member's **analysis-ready** curation from B1 (its
+# `analysis_curation_id`, the auto-curated child), from `member_summaries`, rather
+# than guessing an entry from the list: a member may have an older sort of the
+# same session under a different preset, and matching the wrong one would be
 # silent. Pinning the curation explicitly is required by design — an implicit
 # "latest" would make a match change when a source session gains a new curation.
-# To match a labeled/merged curation instead, take its `(sorting_id, curation_id)`
-# from the table below.
+# To match a hand-labeled/merged curation instead, take its
+# `(sorting_id, curation_id)` from the table below.
 
-if run_unit_match:
+if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
 
-    # Pin the root curation of the sort each member just produced above.
+    # Pin each member's analysis-ready (auto-curated) curation from B1 --
+    # analysis_curation_id, not the uncurated root.
     curation_choices = {
         member_index: {
             "sorting_id": summary["sorting_id"],
-            "curation_id": summary["curation_id"],
+            "curation_id": summary["analysis_curation_id"],
         }
         for member_index, summary in member_summaries.items()
     }

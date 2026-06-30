@@ -437,17 +437,19 @@ def test_summarize_curation_fields(populated_sorting):
     expected_merge = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
     assert summary["merge_id"] == expected_merge
 
-    # A full run_v2_pipeline run summary (extra, non-PK keys) normalizes to the
-    # same summary as the minimal curation key.
-    run_summary_like = {
+    # summarize_curation ignores extra, non-PK keys (normalizing to the
+    # (sorting_id, curation_id) PK), so a caller can splat a key carrying extra
+    # metadata. (A run_v2_pipeline summary names its curation root_curation_id,
+    # so a caller builds the PK from that -- see summarize_curation's docstring.)
+    key_with_extras = {
         **key,
         "pipeline_preset": "irrelevant",
         "recording_id": "irrelevant",
         "artifact_detection_id": "irrelevant",
         "n_units": 999,
-        "merge_id": "irrelevant",
+        "root_merge_id": "irrelevant",
     }
-    assert CurationV2.summarize_curation(run_summary_like) == summary
+    assert CurationV2.summarize_curation(key_with_extras) == summary
 
 
 @pytest.mark.database

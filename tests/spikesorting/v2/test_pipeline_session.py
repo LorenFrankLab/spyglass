@@ -327,7 +327,7 @@ def test_session_runner_preflight_continue(monkeypatch):
 
     def fake_run(**kw):
         calls.append(kw)
-        return {"merge_id": f"m{kw['sort_group_id']}", "n_units": 2}
+        return {"root_merge_id": f"m{kw['sort_group_id']}", "n_units": 2}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -343,7 +343,7 @@ def test_session_runner_preflight_continue(monkeypatch):
     assert all(c["preflight"] is False for c in calls)
     assert [r["sort_group_id"] for r in results] == [0, 1]
     by_id = {r["sort_group_id"]: r for r in results}
-    assert by_id[0]["outcome"] == "ok" and by_id[0]["merge_id"] == "m0"
+    assert by_id[0]["outcome"] == "ok" and by_id[0]["root_merge_id"] == "m0"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] is None
     assert by_id[1]["error_type"] == "PreflightError"
@@ -375,7 +375,7 @@ def test_session_runner_continue_on_error(monkeypatch):
                 "sorter crashed",
                 original_type="IndexError",
             )
-        return {"merge_id": f"m{sort_group_id}", "n_units": 3}
+        return {"root_merge_id": f"m{sort_group_id}", "n_units": 3}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -389,8 +389,8 @@ def test_session_runner_continue_on_error(monkeypatch):
 
     assert [r["sort_group_id"] for r in results] == [0, 1, 2]
     by_id = {r["sort_group_id"]: r for r in results}
-    assert by_id[0]["outcome"] == "ok" and by_id[0]["merge_id"] == "m0"
-    assert by_id[2]["outcome"] == "ok" and by_id[2]["merge_id"] == "m2"
+    assert by_id[0]["outcome"] == "ok" and by_id[0]["root_merge_id"] == "m0"
+    assert by_id[2]["outcome"] == "ok" and by_id[2]["root_merge_id"] == "m2"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] == {"recording_id": "r1"}
     assert by_id[1]["error_type"] == "PipelineStageError"
@@ -456,7 +456,11 @@ def test_session_runner_propagates_preflight_warnings(monkeypatch):
     def fake_run(*, sort_group_id, **kw):
         if sort_group_id == 2:  # passes preflight, fails mid-run
             raise PipelineStageError("sorting", {"recording_id": "r2"}, "boom")
-        return {"merge_id": f"m{sort_group_id}", "n_units": 1, "warnings": []}
+        return {
+            "root_merge_id": f"m{sort_group_id}",
+            "n_units": 1,
+            "warnings": [],
+        }
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -496,7 +500,7 @@ def test_session_runner_fail_fast(monkeypatch):
             raise PipelineStageError(
                 "sorting", {"recording_id": "r1"}, "sorter crashed"
             )
-        return {"merge_id": f"m{sort_group_id}", "n_units": 3}
+        return {"root_merge_id": f"m{sort_group_id}", "n_units": 3}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -533,7 +537,7 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
     def fake_run(*, sort_group_id, **kw):
         if sort_group_id == 1:
             raise ZeroUnitSortError("zero units on a quiet shank")
-        return {"merge_id": f"m{sort_group_id}", "n_units": 4}
+        return {"root_merge_id": f"m{sort_group_id}", "n_units": 4}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -546,7 +550,7 @@ def test_session_runner_continue_on_error_zero_units(monkeypatch):
         continue_on_error=True,
     )
     by_id = {r["sort_group_id"]: r for r in results}
-    assert by_id[0]["outcome"] == "ok" and by_id[0]["merge_id"] == "m0"
+    assert by_id[0]["outcome"] == "ok" and by_id[0]["root_merge_id"] == "m0"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] is None  # ZeroUnitSortError has none
     assert by_id[1]["error_type"] == "ZeroUnitSortError"
@@ -568,7 +572,7 @@ def test_session_runner_preflight_false_skips_session_preflight(monkeypatch):
 
     def fake_run(**kw):
         calls.append(kw)
-        return {"merge_id": f"m{kw['sort_group_id']}"}
+        return {"root_merge_id": f"m{kw['sort_group_id']}"}
 
     monkeypatch.setattr(plr, "run_v2_pipeline", fake_run)
 
@@ -724,7 +728,7 @@ def test_session_runner_all_groups(session_run, session_inputs):
     for entry in session_run:
         assert entry["outcome"] == "ok"
         # A successful entry is a full single-group run summary.
-        assert "merge_id" in entry and "n_units" in entry
+        assert "root_merge_id" in entry and "n_units" in entry
         assert entry["pipeline_preset"] == _PRESET
         # Fresh session: the first run computes every stage. Paired with the
         # idempotent test's all-"reused" assertion, this makes the
@@ -740,15 +744,15 @@ def test_session_runner_all_groups(session_run, session_inputs):
                 entry["sort_group_id"],
                 status_key,
             )
-    # Distinct merge_ids per group (each shank is its own sort).
-    merge_ids = [r["merge_id"] for r in session_run]
+    # Distinct root_merge_ids per group (each shank is its own sort).
+    merge_ids = [r["root_merge_id"] for r in session_run]
     assert len(set(merge_ids)) == len(merge_ids)
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_session_runner_idempotent(session_run, session_inputs):
-    """A second run returns the same merge_ids and every stage ``"reused"``."""
+    """A second run returns the same root_merge_ids and every stage ``"reused"``."""
     second = run_v2_pipeline_session(
         **session_inputs, pipeline_preset=_PRESET, continue_on_error=False
     )
@@ -757,7 +761,10 @@ def test_session_runner_idempotent(session_run, session_inputs):
     assert set(second_by_id) == set(first_by_id)
     for sort_group_id, entry in second_by_id.items():
         assert entry["outcome"] == "ok"
-        assert entry["merge_id"] == first_by_id[sort_group_id]["merge_id"]
+        assert (
+            entry["root_merge_id"]
+            == first_by_id[sort_group_id]["root_merge_id"]
+        )
         for status_key in (
             "recording_status",
             "artifact_detection_status",

@@ -38,14 +38,18 @@ downstream code keys off `merge_id` regardless of which produced the sort.
    interval, and `team_name`.
 2. Build v2 sort groups (`SortGroupV2.set_group_by_shank`) and call
    `run_v2_pipeline(...)` with the matching preset. The returned run summary's
-   `merge_id` is the **root** (uncurated, `parent_curation_id=-1`) curation.
+   `root_merge_id` is the **root** (uncurated, `parent_curation_id=-1`)
+   curation; `analysis_merge_id` is `None` until you curate (there is no bare
+   `merge_id` to grab).
 3. Curate from that root — evaluate + label, then merge (see the
-   [curation flow](./SpikeSortingV2.md#the-evaluate-accept-merge-curation-flow)).
-   The **final curated** `CurationV2` row is the one you carry forward, not the
-   root.
+   [curation flow](./SpikeSortingV2.md#the-evaluate-accept-merge-curation-flow)),
+   or pass `auto_curate=True` to fill `analysis_merge_id` in one call. The
+   **final curated** `CurationV2` row is the one you carry forward, not the root.
 4. Key downstream analysis and export off the **final** curation's `merge_id`
-   via the same `SpikeSortingOutput.get_spike_times({"merge_id": ...})` accessor
-   used for v1 sorts.
+   (the run summary's `analysis_merge_id`, or a hand-curated curation's
+   `merge_id`) via the same
+   `SpikeSortingOutput.get_spike_times({"merge_id": ...})` accessor used for v1
+   sorts.
 
 ## 1. What you call differently
 

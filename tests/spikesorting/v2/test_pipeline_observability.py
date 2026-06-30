@@ -38,8 +38,8 @@ _STABLE_KEYS = (
     "recording_id",
     "artifact_detection_id",
     "sorting_id",
-    "curation_id",
-    "merge_id",
+    "root_curation_id",
+    "root_merge_id",
     "n_units",
 )
 _STATUS_KEYS = (
@@ -247,7 +247,10 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
         "n_units",
     } <= set(err.partial_run_summary)
     assert "warnings" in err.partial_run_summary
-    assert "curation_id" not in err.partial_run_summary
+    # The curation stage failed before writing the root id, so neither the root
+    # nor the (always-None-until-curated) analysis id is in the partial summary.
+    assert "root_curation_id" not in err.partial_run_summary
+    assert "analysis_curation_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
 
 
@@ -294,7 +297,7 @@ def test_curation_stage_wraps_missing_merge_registration(first_run):
     )  # reused; curation exists + registered
     curation_pk = {
         "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["curation_id"],
+        "curation_id": run_summary["root_curation_id"],
     }
     sort_pk = {"sorting_id": run_summary["sorting_id"]}
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")

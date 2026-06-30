@@ -22,7 +22,7 @@ for the catalog and ``list_pipeline_presets()`` for the names.
 
 The orchestrator is idempotent: re-running with the same inputs finds
 existing rows via the insert_selection helpers and returns the same
-run summary (with the same merge_id) without inserting duplicates.
+run summary (with the same root_merge_id) without inserting duplicates.
 
 This module is a thin facade: the implementation lives in the
 ``_pipeline_*`` submodules (presets, geometry, preflight, reporting, run),

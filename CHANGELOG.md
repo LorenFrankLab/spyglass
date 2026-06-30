@@ -877,9 +877,9 @@ dropping; `restrict_by_artifact=True` now honors the v2
   circuits and the Sorting row still commits with `n_units=0`.
   `run_v2_pipeline` then writes an EMPTY (but real) curation + merge
   row -- matching v1, which writes an empty Units table -- and returns
-  a full run summary with real `curation_id` / `merge_id` and `n_units=0`,
-  so downstream consumers treat it like any other `SpikeSortingOutput`
-  row instead of special-casing a `None` merge_id. Pass
+  a full run summary with real `root_curation_id` / `root_merge_id` and
+  `n_units=0`, so downstream consumers treat it like any other
+  `SpikeSortingOutput` row instead of special-casing a `None` merge_id. Pass
   `require_units=True` to raise `ZeroUnitSortError` instead. Users with
   zero-unit sorts should lower `detect_threshold` or revisit artifact
   masking before retrying.

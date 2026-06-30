@@ -87,7 +87,7 @@ def _file_names(run_summary):
     from spyglass.spikesorting.v2.recording import Recording
 
     cur_part = SpikeSortingOutput.CurationV2 & {
-        "merge_id": run_summary["merge_id"]
+        "merge_id": run_summary["root_merge_id"]
     }
     cur_key = (CurationV2 & cur_part).fetch1("KEY")
     units_nwb = (CurationV2 & cur_key).fetch1("analysis_file_name")
@@ -158,7 +158,7 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
 
     try:
         selection, final = _export_and_populate(
-            run_summary["merge_id"], paper_id
+            run_summary["root_merge_id"], paper_id
         )
 
         # The supported path captures BOTH analysis files in the final export.
@@ -202,7 +202,7 @@ def test_v2_zero_unit_export_path(export_smoke_session):
         f"fixture; got {run_summary['n_units']}"
     )
     assert (
-        run_summary["merge_id"] is not None
+        run_summary["root_merge_id"] is not None
     ), "zero-unit sort must be merge-keyable"
     units_nwb, recording_nwb = _file_names(run_summary)
 
@@ -210,7 +210,7 @@ def test_v2_zero_unit_export_path(export_smoke_session):
         # also_spike_times exercises get_spike_times on the empty units
         # table -- must not raise KeyError: 'spike_times'.
         selection, final = _export_and_populate(
-            run_summary["merge_id"], paper_id, also_spike_times=True
+            run_summary["root_merge_id"], paper_id, also_spike_times=True
         )
 
         # The empty-but-real units NWB is logged at the selection stage:

@@ -114,8 +114,10 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "recording_id",
         "artifact_detection_id",
         "sorting_id",
-        "curation_id",
-        "merge_id",
+        "root_curation_id",
+        "root_merge_id",
+        "analysis_curation_id",
+        "analysis_merge_id",
         "n_units",
     }
     assert stable_keys <= set(run_summary.keys())
@@ -123,7 +125,10 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         run_summary["pipeline_preset"]
         == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     )
-    assert run_summary["curation_id"] == 0  # root curation
+    assert run_summary["root_curation_id"] == 0  # root curation
+    # A default (root-only) run has no analysis-ready curation yet.
+    assert run_summary["analysis_curation_id"] is None
+    assert run_summary["analysis_merge_id"] is None
     assert run_summary["n_units"] >= 1
     # The smoke fixture's clusterless 100 uV default IS exercised in
     # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
@@ -145,8 +150,8 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         == run_summary["artifact_detection_id"]
     )
     assert run_summary2["sorting_id"] == run_summary["sorting_id"]
-    assert run_summary2["curation_id"] == run_summary["curation_id"]
-    assert run_summary2["merge_id"] == run_summary["merge_id"]
+    assert run_summary2["root_curation_id"] == run_summary["root_curation_id"]
+    assert run_summary2["root_merge_id"] == run_summary["root_merge_id"]
 
     # Unknown pipeline preset raises PipelineInputError.
     with pytest.raises(PipelineInputError, match="unknown pipeline_preset"):
@@ -219,7 +224,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     # rather than re-clustering, so this does not depend on sorter
     # determinism).
     run_summary2 = run_v2_pipeline(**kwargs)
-    assert run_summary2["merge_id"] == run_summary["merge_id"]
+    assert run_summary2["root_merge_id"] == run_summary["root_merge_id"]
 
     # Count by LOGICAL identity, not by the generated UUID PK. The PKs
     # (recording_id, artifact_detection_id, sorting_id, merge_id) are fresh
@@ -281,7 +286,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
             SpikeSortingOutput.CurationV2
             & {
                 "sorting_id": run_summary["sorting_id"],
-                "curation_id": run_summary["curation_id"],
+                "curation_id": run_summary["root_curation_id"],
             }
         ),
     }
@@ -430,8 +435,8 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             "recording_id",
             "artifact_detection_id",
             "sorting_id",
-            "curation_id",
-            "merge_id",
+            "root_curation_id",
+            "root_merge_id",
         ):
             assert (
                 run_summary.get(key) is not None
@@ -459,9 +464,9 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
 
     A zero-unit sort yields an EMPTY (but real) curation + merge row --
     matching v1's empty Units table -- so the run_summary is complete
-    (``curation_id`` + ``merge_id`` present, ``n_units=0``) and downstream
-    code can treat it like any other ``SpikeSortingOutput`` row instead of
-    special-casing a ``None`` merge_id.
+    (``root_curation_id`` + ``root_merge_id`` present, ``n_units=0``) and
+    downstream code can treat it like any other ``SpikeSortingOutput`` row
+    instead of special-casing a ``None`` merge_id.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -502,12 +507,12 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
             run_summary.get(key) is not None
         ), f"Zero-unit run_summary missing {key!r}; got {run_summary}."
     assert run_summary["n_units"] == 0
-    assert run_summary["curation_id"] is not None, (
-        f"Zero-unit sort should still write an empty curation row; "
+    assert run_summary["root_curation_id"] is not None, (
+        f"Zero-unit sort should still write an empty root curation row; "
         f"got {run_summary}."
     )
-    assert run_summary["merge_id"] is not None, (
-        "Zero-unit sort should still write an empty merge row so the "
+    assert run_summary["root_merge_id"] is not None, (
+        "Zero-unit sort should still write an empty root merge row so the "
         f"result is merge-keyable; got {run_summary}."
     )
 
@@ -566,7 +571,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     # the same zero-unit guard).
     curation_pk = {
         "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["curation_id"],
+        "curation_id": run_summary["root_curation_id"],
     }
     assert len(CurationV2.Unit & curation_pk) == 0
     empty_curated = CurationV2().get_sorting(curation_pk)
@@ -636,19 +641,19 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
         first = run_v2_pipeline(**common)
         second = run_v2_pipeline(**common)
         assert (
-            second["curation_id"] == first["curation_id"]
+            second["root_curation_id"] == first["root_curation_id"]
         ), "second run must return the existing root curation, not a duplicate"
-        assert second["merge_id"] == first["merge_id"]
+        assert second["root_merge_id"] == first["root_merge_id"]
 
         # A child curation (parent != -1) must NOT divert the short-circuit.
         CurationV2.insert_curation(
             sorting_key={"sorting_id": first["sorting_id"]},
-            parent_curation_id=first["curation_id"],
+            parent_curation_id=first["root_curation_id"],
             description="child curation",
         )
         third = run_v2_pipeline(**common)
         assert (
-            third["curation_id"] == first["curation_id"]
+            third["root_curation_id"] == first["root_curation_id"]
         ), "a non-root child must not divert the root short-circuit"
     finally:
         _clean_session_v2(polymer_smoke_session)
@@ -1099,6 +1104,9 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     for key in auto_keys:
         assert key not in base
     assert "auto_curation" not in base["stage_seconds"]
+    # ...and the always-present analysis pointer is None (nothing curated yet).
+    assert base["analysis_curation_id"] is None
+    assert base["analysis_merge_id"] is None
 
     # Pre-populate the evaluation WITHOUT accepting it, so the evaluation
     # already exists but the child curation does not -- the scenario where a
@@ -1106,7 +1114,7 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     eval_key = CurationEvaluationSelection.insert_selection(
         {
             "sorting_id": base["sorting_id"],
-            "curation_id": base["curation_id"],
+            "curation_id": base["root_curation_id"],
             "metric_params_name": "franklab_default",
             "auto_curation_rules_name": "v1_default_nn_noise",
         }
@@ -1119,11 +1127,18 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     for key in auto_keys:
         assert key in curated, key
     assert curated["recording_id"] == base["recording_id"]  # reused upstream
-    assert curated["curation_id"] == base["curation_id"]  # same root curation
+    assert (
+        curated["root_curation_id"] == base["root_curation_id"]
+    )  # same root curation
     assert (
         curated["curation_evaluation_id"] == eval_key["curation_evaluation_id"]
     )  # reused the pre-populated evaluation
     assert curated["auto_curation_status"] == "computed"  # child created now
+    # The analysis pointer now resolves to the auto-curated child (the
+    # downstream-science handle), not the uncurated root.
+    assert curated["analysis_curation_id"] == curated["auto_curation_id"]
+    assert curated["analysis_merge_id"] == curated["auto_merge_id"]
+    assert curated["analysis_merge_id"] != curated["root_merge_id"]
     assert curated["stage_seconds"]["auto_curation"] >= 0.0
 
     # The materialized child is a real CurationV2 child of the root, registered.
@@ -1132,7 +1147,7 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         "curation_id": curated["auto_curation_id"],
     }
     parent = (CurationV2 & child_pk).fetch1("parent_curation_id")
-    assert parent == base["curation_id"]  # child of the root curation
+    assert parent == base["root_curation_id"]  # child of the root curation
     assert SpikeSortingOutput.CurationV2 & {
         "merge_id": curated["auto_merge_id"]
     }
@@ -1211,10 +1226,12 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
     err = excinfo.value
     assert err.stage == "auto_curation"
     assert err.original_type == "RuntimeError"
-    # The partial summary carries the stages that completed before auto-curation.
+    # The partial summary carries the stages that completed before auto-curation
+    # (the root curation is done; analysis ids are not yet set).
     assert err.partial_run_summary is not None
     assert err.partial_run_summary.get("sorting_id") is not None
-    assert err.partial_run_summary.get("curation_id") is not None
+    assert err.partial_run_summary.get("root_curation_id") is not None
+    assert err.partial_run_summary.get("analysis_curation_id") is None
 
 
 @pytest.mark.slow
@@ -1298,4 +1315,4 @@ def test_run_v2_pipeline_figpack_zero_units_skips_view(polymer_smoke_session):
     assert summary["figpack_status"] == "skipped"
     assert "figpack_uri" not in summary
     # The run is still complete and merge-keyable despite the skipped view.
-    assert summary["merge_id"] is not None
+    assert summary["root_merge_id"] is not None

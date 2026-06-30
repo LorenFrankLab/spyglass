@@ -1650,19 +1650,22 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         """Return a notebook-printable summary of one curation.
 
         Pure read accessor: it reads only existing master fields and part
-        rows, computing nothing new. Accepts either a minimal curation key
-        (``{"sorting_id", "curation_id"}``) or a full ``run_v2_pipeline``
-        run summary -- the run summary carries keys that are NOT part of the
-        curation primary key (``pipeline_preset`` / ``recording_id`` /
-        ``artifact_detection_id`` / ``n_units`` / ...), so it is normalized
-        to the ``(sorting_id, curation_id)`` PK before any restriction.
+        rows, computing nothing new. Pass a curation key carrying
+        ``sorting_id`` + ``curation_id``; any extra keys are ignored
+        (normalized to the ``(sorting_id, curation_id)`` PK before any
+        restriction). A ``run_v2_pipeline`` summary names its curations
+        ``root_curation_id`` / ``analysis_curation_id`` (it has no bare
+        ``curation_id``, since one run can produce two curations), so build the
+        key from the one you mean, e.g.
+        ``{"sorting_id": s["sorting_id"], "curation_id": s["root_curation_id"]}``.
 
         Parameters
         ----------
         curation_key
-            A curation key or a ``run_v2_pipeline`` run summary. Must carry both
-            ``sorting_id`` and ``curation_id`` (``curation_id`` is only unique
-            within a sort).
+            A curation key carrying ``sorting_id`` and ``curation_id``
+            (``curation_id`` is only unique within a sort). From a
+            ``run_v2_pipeline`` summary, build it from ``root_curation_id`` or
+            ``analysis_curation_id``.
 
         Returns
         -------

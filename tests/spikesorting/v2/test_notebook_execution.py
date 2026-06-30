@@ -133,9 +133,11 @@ def test_single_session_notebook_runs(dj_conn):
         _NOTEBOOKS / "10_Spike_SortingV2.ipynb",
         _notebook_params(nwb_file_name, sort_group_id),
     )
-    # The walkthrough produced a real, merge-keyable auto-curated result.
+    # The walkthrough produced a real, merge-keyable auto-curated result. The
+    # notebook keys downstream off analysis_merge_id (the analysis-ready handle
+    # auto-curation fills), not the uncurated root_merge_id.
     assert namespace["run_summary"]["n_units"] >= 0
-    assert namespace["auto_summary"]["auto_merge_id"] is not None
+    assert namespace["auto_summary"]["analysis_merge_id"] is not None
     assert namespace["merge_id"] is not None
 
 

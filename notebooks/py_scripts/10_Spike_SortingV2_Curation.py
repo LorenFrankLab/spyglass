@@ -130,9 +130,10 @@ run_summary = run_v2_pipeline(
 
 # ## 7. Inspect and curate
 #
-# `run_v2_pipeline` leaves you a root curation. `summarize_curation` accepts the
-# run summary directly and returns a plain dict (`n_units`, `labels`,
-# `merge_groups`, `merges_applied`, `is_merge_preview`, `merge_id`, ...). The
+# `run_v2_pipeline` leaves you a root curation. `summarize_curation` describes
+# **one** curation and returns a plain dict (`n_units`, `labels`, `merge_groups`,
+# `merges_applied`, `is_merge_preview`, `merge_id`, ...); build its key from the
+# summary's `root_curation_id` (a run summary has no bare `curation_id`). The
 # labels curation *accepts* are the canonical set `CurationV2.label_options()`
 # (the `CurationLabel` enum); custom labels need `allow_custom_labels=True`.
 #
@@ -161,7 +162,11 @@ run_summary = run_v2_pipeline(
 #    (and so its SNR / ISI-violation fraction / PC-NN separation), so metrics
 #    over the *post-merge* templates are the numbers of record.
 
-CurationV2.summarize_curation(run_summary)
+root_key = {
+    "sorting_id": run_summary["sorting_id"],
+    "curation_id": run_summary["root_curation_id"],
+}
+CurationV2.summarize_curation(root_key)
 
 # ### 7-browser. Curate in a browser with FigPack
 #
@@ -214,13 +219,13 @@ if figpack_summary is not None:
     )
     print("from figure — labels:", labels, "| merge groups:", merge_groups)
     # With real edits, commit them as a CHILD of the root curation (pass the
-    # root's curation_id as the parent — the default parent_curation_id=-1 would
-    # try to re-create the root and raise). `merge_action="commit"` applies the
-    # browser's merges into the child's unit set; use `"preview"` instead to
-    # store them as proposals you review in section 7 first.
+    # root's root_curation_id as the parent — the default parent_curation_id=-1
+    # would try to re-create the root and raise). `merge_action="commit"`
+    # applies the browser's merges into the child's unit set; use `"preview"`
+    # instead to store them as proposals you review in section 7 first.
     # CurationV2.save_manual_curation(
     #     {"sorting_id": figpack_summary["sorting_id"]},
-    #     parent_curation_id=figpack_summary["curation_id"],
+    #     parent_curation_id=figpack_summary["root_curation_id"],
     #     labels=labels,
     #     merge_groups=merge_groups,
     #     merge_action="commit",
@@ -246,7 +251,7 @@ if figpack_summary is not None:
 eval_sel = CurationEvaluationSelection.insert_selection(
     {
         "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["curation_id"],
+        "curation_id": run_summary["root_curation_id"],
         "metric_params_name": "franklab_default",
         "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
     }

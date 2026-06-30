@@ -114,7 +114,7 @@ def run_v2_pipeline(
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
     call. Idempotent: re-running with the same inputs returns the same
-    run summary (same merge_id, same intermediate PKs) without
+    run summary (same root_merge_id, same intermediate PKs) without
     duplicating rows.
 
     Prerequisites (set these up first, in order)
@@ -200,8 +200,10 @@ def run_v2_pipeline(
         ``curation_evaluation_id`` (the suggestion selection PK),
         ``auto_curation_id`` / ``auto_merge_id`` (the materialized child
         curation), and ``auto_curation_status`` (these keys are absent when
-        ``auto_curate=False``). ``CurationEvaluation`` builds a whitened PCA
-        analyzer, so this adds the heaviest populate of the run.
+        ``auto_curate=False``); the always-present ``analysis_curation_id`` /
+        ``analysis_merge_id`` are set to that child (they stay ``None`` on a
+        root-only run). ``CurationEvaluation`` builds a whitened PCA analyzer,
+        so this adds the heaviest populate of the run.
     preflight
         If True (default), run a fast, read-only prerequisite check before any
         populate; a failure raises ``PreflightError`` (with the exact fix). The
@@ -246,8 +248,14 @@ def run_v2_pipeline(
             ``source_mode``              : ``"single_session"`` or ``"concat"``
                 (the discriminant for the mode-specific source keys below)
             ``sorting_id``               : SortingSelection PK
-            ``curation_id``              : CurationV2 PK
-            ``merge_id``                 : SpikeSortingOutput master PK
+            ``root_curation_id``         : the ROOT (uncurated) CurationV2 PK
+            ``root_merge_id``            : the root's SpikeSortingOutput PK
+            ``analysis_curation_id``     : the analysis-ready CurationV2 PK, or
+                ``None`` on a root-only run (curate first); equals
+                ``auto_curation_id`` when ``auto_curate=True``
+            ``analysis_merge_id``        : the analysis-ready SpikeSortingOutput
+                PK, or ``None`` on a root-only run; equals ``auto_merge_id``
+                when ``auto_curate=True``
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Single-session mode adds:
             ``recording_id``             : RecordingSelection PK
@@ -260,9 +268,12 @@ def run_v2_pipeline(
         ``figpack=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
-        Downstream consumers should key off ``merge_id``. A zero-unit
-        sort yields an empty (but real) curation/merge row, not
-        ``None``, so the result is always merge-keyable.
+        For downstream science key off ``analysis_merge_id`` (the curated,
+        analysis-ready handle) -- NOT ``root_merge_id``, the uncurated root.
+        There is deliberately no bare ``merge_id``: a default run has no
+        analysis-ready id to copy. A zero-unit sort yields an empty (but real)
+        root curation/merge row, not ``None``, so the root is always
+        merge-keyable.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
@@ -726,8 +737,13 @@ def run_v2_pipeline(
     )
     run_summary["curation_status"] = curation_status
     stage_seconds["curation"] = curation_seconds
-    run_summary["curation_id"] = curation_key["curation_id"]
-    run_summary["merge_id"] = merge_id
+    run_summary["root_curation_id"] = curation_key["curation_id"]
+    run_summary["root_merge_id"] = merge_id
+    # Analysis-ready pointer: None until something curates the root. A default
+    # (root-only) run leaves these None on purpose, so downstream code can't
+    # silently decode the uncurated root. ``auto_curate=True`` fills them below.
+    run_summary["analysis_curation_id"] = None
+    run_summary["analysis_merge_id"] = None
 
     # Optional auto-curation: only when the caller opts in. Score the root
     # curation with the preset's metric + auto-curation rule rows, then
@@ -796,6 +812,9 @@ def run_v2_pipeline(
         ]
         run_summary["auto_curation_id"] = child["curation_id"]
         run_summary["auto_merge_id"] = auto_merge_id
+        # The auto-curated child IS the analysis-ready curation for this run.
+        run_summary["analysis_curation_id"] = child["curation_id"]
+        run_summary["analysis_merge_id"] = auto_merge_id
 
     # Optional FigPack manual-curation view: only when the caller opts in.
     # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes

@@ -113,8 +113,19 @@ class _RunV2SummaryBase(TypedDict):
 
     pipeline_preset: str
     sorting_id: UUID
-    curation_id: int
-    merge_id: UUID
+    # The ROOT (uncurated) curation the run always creates. Named ``root_*`` --
+    # not bare ``merge_id`` / ``curation_id`` -- so a root-only run has nothing
+    # called simply ``merge_id`` to copy downstream by mistake (the root is
+    # uncurated and not analysis-ready).
+    root_curation_id: int
+    root_merge_id: UUID
+    # The ANALYSIS-ready (downstream-science) curation. Always present, so a
+    # consumer can branch on it: ``None`` on a root-only run
+    # (``auto_curate=False``) -- there is no analysis-ready id yet, curate first
+    # -- and equal to ``auto_curation_id`` / ``auto_merge_id`` when
+    # ``auto_curate=True``.
+    analysis_curation_id: "int | None"
+    analysis_merge_id: "UUID | None"
     n_units: int
     sorting_status: StageStatus
     curation_status: StageStatus
@@ -123,7 +134,8 @@ class _RunV2SummaryBase(TypedDict):
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
     # CurationV2 (its curation_id + merge table id) whose labels are the
-    # evaluation's verdict.
+    # evaluation's verdict. ``analysis_curation_id`` / ``analysis_merge_id``
+    # mirror these when auto-curation ran.
     curation_evaluation_id: NotRequired[UUID]
     auto_curation_id: NotRequired[int]
     auto_merge_id: NotRequired[UUID]
