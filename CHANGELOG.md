@@ -70,10 +70,11 @@ registrations); existing v2 table definitions are unchanged.
   exclusive with the single-session inputs; no artifact stage). `require_units`
   keeps the graceful zero-unit default (an empty-but-real, merge-keyable row).
 - **`run_v2_unit_match(session_group_owner, session_group_name, ...)`** is the
-  separate sort-then-match convenience function: it requires explicit per-member
-  `curation_choices` (never auto-picks "latest"), populates `UnitMatch` +
-  `TrackedUnit`, and is idempotent. `describe_unit_match_choices` lists each
-  member's selectable curations.
+  match-and-track convenience function for the sort-then-match workflow (it does
+  not sort the members): it requires explicit per-member `curation_choices`
+  (never auto-picks "latest"), populates `UnitMatch` + `TrackedUnit` from
+  already-curated member sorts, and is idempotent. `describe_unit_match_choices`
+  lists each member's selectable curations.
 - **Preset tuning without editing source.** `register_preset(name, preset)`
   adds a lab preset; `clone_preset(base, new, **overrides)` derives a one-knob
   variant, validating every derived parameter row before insert and refusing
