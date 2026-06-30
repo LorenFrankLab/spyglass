@@ -166,9 +166,9 @@ run_summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 # run_summary["merge_id"] is the UNCURATED root curation. For downstream
-# science, curate first -- pass auto_curate=True and key off
-# auto_summary["auto_merge_id"], or curate by hand and use that curation's
-# merge_id (see the SpikeSortingV2 docs).
+# science, curate first: a run_v2_pipeline(..., auto_curate=True) summary
+# carries an "auto_merge_id" (the auto-curated child), or curate by hand and
+# use that curation's merge_id (see the SpikeSortingV2 docs).
 merge_id = run_summary["merge_id"]
 ```
 

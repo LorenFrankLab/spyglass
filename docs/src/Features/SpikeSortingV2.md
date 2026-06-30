@@ -1158,11 +1158,11 @@ Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
 `SpikeSortingOutput` merge table, so existing downstream code (decoding,
 ripple detection, etc.) keeps working unchanged. **`run_summary["merge_id"]`
 is the uncurated root curation** — for downstream science, curate first and
-carry the curated curation's `merge_id` forward: `auto_summary["auto_merge_id"]`
-from an `auto_curate=True` run, or the `merge_id` of the curation you build by
-hand (see the [evaluate → accept → merge curation
-flow](#the-evaluate-accept-merge-curation-flow)). Pass whichever `merge_id` you
-choose to the accessors below:
+carry the curated curation's `merge_id` forward: the `auto_merge_id` key of a
+`run_v2_pipeline(..., auto_curate=True)` summary (the auto-curated child), or
+the `merge_id` of the curation you build by hand (see the [evaluate → accept →
+merge curation flow](#the-evaluate-accept-merge-curation-flow)). Pass whichever
+`merge_id` you choose to the accessors below:
 
 #### What do I call next?
 
