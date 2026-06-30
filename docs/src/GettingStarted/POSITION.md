@@ -34,6 +34,7 @@ linearization.
 | **Status**         | Stable, production      | Active development                    |
 | **Tables**         | ~15 separate tables     | 3 core tables                         |
 | **Tools**          | DLC only                | DLC, SLEAP (planned), ndx-pose import |
+| **Backend**        | TensorFlow (DLC 2.x)    | PyTorch (DLC 3.x, SLEAP)              |
 | **Storage**        | Custom NWB objects      | ndx-pose extension                    |
 | **Parameters**     | 3 separate param tables | 1 unified `PoseParams`                |
 | **Shared science** | `position/utils/`       | same                                  |
@@ -41,6 +42,31 @@ linearization.
 Both pipelines share the same underlying mathematical functions
 (`position/utils/`). V2 consolidates V1's many intermediate tables into a
 cleaner three-step flow: `PoseEstim → PoseV2 → PositionOutput`.
+
+### Why V2 uses the PyTorch backend
+
+V2's code is **engine-agnostic** — DeepLabCut 3.x supports both PyTorch and
+TensorFlow engines, and V2 dispatches to whichever a model was trained with. So
+V2 does not *need* PyTorch in principle.
+
+In practice PyTorch is required for **dependency coexistence**, not by the pose
+code. The rest of Spyglass pulls in `jax` (via `non_local_detector`), and
+TensorFlow cannot cleanly share one environment with `jax`:
+
+- **XLA collision.** TensorFlow and `jaxlib` each bundle their own XLA/CUDA and
+    both try to register cuDNN/cuFFT/cuBLAS on the GPU
+    (`Unable to register cuDNN factory ... already registered`).
+- **Version wedge.** DeepLabCut 3.x pins `numpy<2`; within that, TensorFlow
+    forces an old `jax`, and the newer TensorFlow/`jax` releases that would line
+    up each require `numpy 2`. No single set of versions satisfies all three.
+
+PyTorch has neither problem, so it keeps the whole Spyglass stack in one working
+environment. If you are locked to a TensorFlow-trained DLC model, run that
+inference in a **separate** environment (no `jax` / `non_local_detector`) and
+ingest the resulting `.h5`/NWB via `PoseEstimSelection` with `task_mode="load"`
+or via `ImportedPose`. See
+[Troubleshooting → TensorFlow / jax conflict](./TROUBLESHOOTING.md) for the
+migration fix.
 
 ______________________________________________________________________
 
