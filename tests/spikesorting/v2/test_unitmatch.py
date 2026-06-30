@@ -7,7 +7,8 @@ with no database; the table-wiring goals (registry-validating insert, the
 explicit per-member curation selection, the ``make()`` provenance recheck, and
 the ``Pair`` foreign-key integrity) drive the real DataJoint tables over a
 two-session synthetic sort. The ground-truth AUC gate runs UnitMatch end to end
-on the polymer two-session fixture and is the ship criterion.
+on the polymer two-session fixture; it is verified locally and is not yet
+CI-enforced (the two-session fixtures are unhosted, so it skips in CI).
 
 The pure-logic and external-matcher sections need neither a database nor
 UnitMatchPy. The database sections request ``dj_conn``; the gate additionally
@@ -2374,8 +2375,9 @@ def _bandpassed_polymer_recording(fixture_path):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
-    """Ship gate: AUC of UnitMatch probability vs ground-truth correspondence
-    on the two-session polymer probe is > 0.85.
+    """Ship-readiness target (verified locally, not yet CI-enforced -- see the
+    gate banner above): AUC of UnitMatch probability vs ground-truth
+    correspondence on the two-session polymer probe is > 0.85.
 
     The two sessions are built from one MEArec template set sharing a
     ``template_seed`` (so ground-truth unit ``i`` is the same neuron in both

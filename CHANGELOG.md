@@ -711,7 +711,7 @@ annotation restored; `noise_levels=[1.0]` forwarded to
 would silently become a MAD multiplier); cross-channel z-score for
 artifact detection (common-mode events) restored; artifact-combine
 flipped back to OR semantics; job_kwargs resolution wired into all
-three compute stages; `cache_hash` switched to `NwbfileHasher` per
+three compute stages; `content_hash` switched to `NwbfileHasher` per
 the documented contract; dead `common_reference.reference` field
 removed; v1's `Curation.get_recording` / `get_sort_group_info`
 methods added to `CurationV2` (without these, the merge dispatcher
@@ -779,7 +779,7 @@ dropping; `restrict_by_artifact=True` now honors the v2
   the subtraction). v1 and v2 caches for the same multi-interval
   input are therefore not byte-equivalent at the per-interval
   boundary; the trace arrays differ by one sample per interval.
-  `cache_hash` will not match.
+  `content_hash` will not match.
 - **`SortGroupV2` grouping helpers inherit the configured reference by
   default + fail loud on ambiguity.** `set_group_by_shank` and
   `set_group_by_electrode_table_column` now resolve referencing **per sort
@@ -1636,7 +1636,7 @@ for label, interval_data in results.groupby("interval_labels"):
         high-drift sessions can be flagged/queried. It is **computed, never
         applied** — nothing corrects the traces or the sort with it (drift
         correction stays deferred to the sorter); populating it leaves the
-        upstream `Recording`'s `cache_hash` and `get_recording` traces unchanged.
+        upstream `Recording`'s `content_hash` and `get_recording` traces unchanged.
         It is a `dj.Computed` table populated **on demand**
         (`DriftEstimate.populate(recording_key)`), never eagerly alongside
         `Recording`, and uses the same tri-part `make_fetch`/`make_compute`/
