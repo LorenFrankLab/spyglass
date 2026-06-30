@@ -48,6 +48,7 @@ from spyglass.spikesorting.v2.utils import (
     CurationSource,
     FactoryOnlyMaster,
     _assert_v2_db_safe,
+    _is_duplicate_key_error,
     transaction_or_noop,
     unit_brain_region_df,
 )
@@ -64,6 +65,13 @@ if TYPE_CHECKING:
 
 _assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
+
+#: How many times ``insert_curation`` recomputes a child ``curation_id`` and
+#: retries after a concurrent insert claimed the id it allocated (the id is
+#: chosen outside the insert transaction, so two concurrent children of one
+#: sorting can collide). Small: the contention window is brief and each retry
+#: just re-reads ``max(curation_id) + 1``.
+_CURATION_ID_RACE_RETRIES = 5
 
 
 @schema
@@ -528,74 +536,111 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 )
                 return existing_child
 
-        # Build the raw MergeGroup + parent-operation rows ONCE (pure, no DB
-        # I/O) and reuse them for BOTH the NWB merge-lineage scratch and the
-        # CurationV2.MergeGroup insert, so the file's lineage matches the DB
-        # exactly -- including for a child of a merged parent, whose raw
-        # contributors are expanded here (the source-namespace
-        # ``kept_unit_to_contributors`` would carry only inherited singletons).
-        merge_group_rows, parent_merge_group_rows = (
-            cls._build_merge_provenance_rows(
-                sorting_id=sorting_id,
-                curation_id=curation_id,
-                kept_unit_to_contributors=kept_unit_to_contributors,
-                parent_raw_contributors=parent_raw_contributors,
+        # Build the id-stamped rows, stage the NWB, and insert -- retrying on a
+        # concurrent curation_id collision. A child's curation_id is allocated
+        # as max(existing)+1 OUTSIDE the insert transaction and the NWB is
+        # staged before it, so two concurrent children of one sorting can pick
+        # the same id; the loser would otherwise fail with a duplicate-key error
+        # after the filesystem write. On that collision recompute the id,
+        # rebuild the id-stamped rows + NWB, and retry (lock-free).
+        for attempt in range(_CURATION_ID_RACE_RETRIES + 1):
+            # Build the raw MergeGroup + parent-operation rows ONCE (pure, no DB
+            # I/O) and reuse them for BOTH the NWB merge-lineage scratch and the
+            # CurationV2.MergeGroup insert, so the file's lineage matches the DB
+            # exactly -- including for a child of a merged parent, whose raw
+            # contributors are expanded here (the source-namespace
+            # ``kept_unit_to_contributors`` would carry only inherited
+            # singletons).
+            merge_group_rows, parent_merge_group_rows = (
+                cls._build_merge_provenance_rows(
+                    sorting_id=sorting_id,
+                    curation_id=curation_id,
+                    kept_unit_to_contributors=kept_unit_to_contributors,
+                    parent_raw_contributors=parent_raw_contributors,
+                )
             )
+
+            # Stage the curated-units NWB (filesystem side-effect; the DB row
+            # registration happens inside the transaction below so it rolls back
+            # atomically). Staging MUST run OUTSIDE the transaction to keep the
+            # inner transaction short -- pinned by
+            # ``test_v1_parity.test_curation_v2_nwb_write_outside_transaction``.
+            analysis_file_name, units_object_id, staged_parent_nwb = (
+                cls._stage_curation_artifact(
+                    sorting_id=sorting_id,
+                    kept_unit_to_contributors=kept_unit_to_contributors,
+                    apply_merge=apply_merge,
+                    labels=labels,
+                    unit_rows=unit_rows,
+                    source_units_abs_path=source_units_abs_path,
+                    merge_group_rows=merge_group_rows,
+                    curation_header={
+                        "sorting_id": str(sorting_id),
+                        "curation_id": int(curation_id),
+                        "parent_curation_id": int(parent_curation_id),
+                        # Canonical string for the enum option on the row.
+                        "curation_source": getattr(
+                            curation_source, "value", curation_source
+                        ),
+                        "merges_applied": bool(apply_merge),
+                        "description": description,
+                    },
+                )
+            )
+
+            try:
+                cls._insert_curation_rows_transaction(
+                    sorting_id=sorting_id,
+                    curation_id=curation_id,
+                    parent_curation_id=parent_curation_id,
+                    analysis_file_name=analysis_file_name,
+                    units_object_id=units_object_id,
+                    staged_parent_nwb=staged_parent_nwb,
+                    apply_merge=apply_merge,
+                    curation_source=curation_source,
+                    description=description,
+                    unit_rows=unit_rows,
+                    labels=labels,
+                    merge_group_rows=merge_group_rows,
+                    parent_merge_group_rows=parent_merge_group_rows,
+                    allow_custom_labels=allow_custom_labels,
+                )
+            except Exception as exc:
+                # The transaction rolled back the AnalysisNwbfile row and the
+                # CurationV2 rows together; only the file on disk is left to
+                # clean up.
+                cls._cleanup_staged_curation_file(analysis_file_name)
+                # A concurrent insert claimed this curation_id between our
+                # allocation and the transaction: recompute and retry. Children
+                # only -- a root's id is 0 and root idempotency is handled
+                # above; any non-duplicate error propagates.
+                if (
+                    parent_curation_id != -1
+                    and _is_duplicate_key_error(exc)
+                    and attempt < _CURATION_ID_RACE_RETRIES
+                ):
+                    new_id = cls._next_curation_id(sorting_id)
+                    logger.warning(
+                        "CurationV2.insert_curation: curation_id "
+                        f"{curation_id} for sorting_id={sorting_id} was claimed "
+                        "by a concurrent insert; retrying with curation_id "
+                        f"{new_id} (attempt {attempt + 1})."
+                    )
+                    curation_id = new_id
+                    # Re-stamp the curation_id-bearing Unit rows; the master,
+                    # label, merge, and NWB rows are rebuilt from curation_id at
+                    # the top of the next iteration / inside the transaction.
+                    unit_rows = [
+                        {**row, "curation_id": curation_id} for row in unit_rows
+                    ]
+                    continue
+                raise
+            return {"sorting_id": sorting_id, "curation_id": curation_id}
+        # Unreachable: the final attempt either returns or re-raises above.
+        raise RuntimeError(  # pragma: no cover
+            "CurationV2.insert_curation: exhausted curation_id retries without "
+            "inserting or raising."
         )
-
-        # Stage the curated-units NWB (filesystem side-effect; the DB
-        # row registration happens inside the transaction below so it
-        # rolls back atomically). Staging MUST run OUTSIDE the
-        # transaction to keep the inner transaction short -- pinned by
-        # ``test_v1_parity.test_curation_v2_nwb_write_outside_transaction``.
-        analysis_file_name, units_object_id, staged_parent_nwb = (
-            cls._stage_curation_artifact(
-                sorting_id=sorting_id,
-                kept_unit_to_contributors=kept_unit_to_contributors,
-                apply_merge=apply_merge,
-                labels=labels,
-                unit_rows=unit_rows,
-                source_units_abs_path=source_units_abs_path,
-                merge_group_rows=merge_group_rows,
-                curation_header={
-                    "sorting_id": str(sorting_id),
-                    "curation_id": int(curation_id),
-                    "parent_curation_id": int(parent_curation_id),
-                    # Canonical string for the enum option stored on the row.
-                    "curation_source": getattr(
-                        curation_source, "value", curation_source
-                    ),
-                    "merges_applied": bool(apply_merge),
-                    "description": description,
-                },
-            )
-        )
-
-        try:
-            cls._insert_curation_rows_transaction(
-                sorting_id=sorting_id,
-                curation_id=curation_id,
-                parent_curation_id=parent_curation_id,
-                analysis_file_name=analysis_file_name,
-                units_object_id=units_object_id,
-                staged_parent_nwb=staged_parent_nwb,
-                apply_merge=apply_merge,
-                curation_source=curation_source,
-                description=description,
-                unit_rows=unit_rows,
-                labels=labels,
-                merge_group_rows=merge_group_rows,
-                parent_merge_group_rows=parent_merge_group_rows,
-                allow_custom_labels=allow_custom_labels,
-            )
-        except Exception:
-            # The transaction rolled back the AnalysisNwbfile row and
-            # the CurationV2 rows together; only the file on disk is
-            # left to clean up.
-            cls._cleanup_staged_curation_file(analysis_file_name)
-            raise
-
-        return {"sorting_id": sorting_id, "curation_id": curation_id}
 
     # ---- insert_curation steps (extracted helpers) -----------------------
 
@@ -900,6 +945,18 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def _next_curation_id(cls, sorting_id) -> int:
+        """Return the next auto-increment ``curation_id`` for a sorting.
+
+        ``max(existing) + 1`` (0 for the first curation). This read is NOT
+        serialized against concurrent inserts, so two child curations of one
+        sorting can resolve the same id; ``insert_curation`` retries on the
+        resulting duplicate-key error rather than locking.
+        """
+        existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
+        return int(max(existing_ids)) + 1 if len(existing_ids) else 0
+
+    @classmethod
     def _build_curation_insert_plan(
         cls,
         sorting_id,
@@ -929,8 +986,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         # Resolve which curation_id to use (auto-increment within sort) --
         # the one DB-coupled step; the rest of the plan is pure.
-        existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
-        curation_id = int(max(existing_ids)) + 1 if len(existing_ids) else 0
+        curation_id = cls._next_curation_id(sorting_id)
 
         return build_curation_insert_plan(
             sorting_id=sorting_id,

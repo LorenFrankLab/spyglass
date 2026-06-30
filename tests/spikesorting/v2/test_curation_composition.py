@@ -477,3 +477,55 @@ def test_insert_curation_rejects_preview_parent(planted_two_unit_sort):
         assert CurationV2.is_committed_curation(child)
     finally:
         clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_insert_curation_retries_on_curation_id_collision(
+    planted_three_unit_sort, monkeypatch
+):
+    """A concurrent insert claiming the allocated curation_id is recovered.
+
+    The child curation_id is allocated as ``max+1`` outside the insert
+    transaction (and the NWB is staged before it), so a concurrent child can
+    take the same id. Simulate that by forcing ``_next_curation_id`` to first
+    return an id that is already occupied (collision -> duplicate-key error
+    after staging), then a fresh one: ``insert_curation`` must retry and
+    succeed rather than crash.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sort_pk)  # curation_id 0
+        child_a = CurationV2.insert_curation(
+            sort_pk,
+            parent_curation_id=root["curation_id"],
+            labels={0: ["noise"]},
+        )  # curation_id 1
+        assert child_a["curation_id"] == 1
+
+        # First allocation returns the already-taken id 1 (collision), every
+        # later call returns the real next id (2).
+        calls = {"n": 0}
+
+        def _fake_next(cls, sorting_id):
+            calls["n"] += 1
+            return 1 if calls["n"] == 1 else 2
+
+        monkeypatch.setattr(
+            CurationV2, "_next_curation_id", classmethod(_fake_next)
+        )
+
+        child_b = CurationV2.insert_curation(
+            sort_pk,
+            parent_curation_id=root["curation_id"],
+            labels={2: ["mua"]},  # distinct content -> not a reuse of child_a
+        )
+        # Retried past the collision to the fresh id, no crash.
+        assert child_b["curation_id"] == 2
+        assert calls["n"] >= 2  # initial allocation + at least one retry
+        assert CurationV2 & {**sort_pk, "curation_id": 2}
+    finally:
+        clear_curations_for(sort_pk)
