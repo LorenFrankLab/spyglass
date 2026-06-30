@@ -1179,7 +1179,8 @@ def run_v2_unit_match(
         ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
         ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
         fills the receipt), ``stage_seconds`` (keys ``unit_match`` /
-        ``tracked_unit``), and ``warnings``.
+        ``tracked_unit``), and ``warnings`` (advisory notes, e.g. an
+        electrode-space divergence across members; also logged).
 
     Raises
     ------
@@ -1241,6 +1242,22 @@ def run_v2_unit_match(
     )
     run_summary["unitmatch_id"] = selection["unitmatch_id"]
 
+    # Surface the advisory electrode-space divergence in the receipt (it is also
+    # logged inside insert_selection / make_fetch). Recomputed here from the
+    # explicit choices so the summary carries it even on a reused selection.
+    warnings: list[str] = []
+    choices_by_member = {
+        int(idx): (choice["sorting_id"], int(choice["curation_id"]))
+        for idx, choice in curation_choices.items()
+    }
+    divergent = UnitMatchSelection._divergent_electrode_space_members(
+        choices_by_member
+    )
+    if divergent:
+        warnings.append(
+            UnitMatchSelection._divergent_electrode_space_message(divergent)
+        )
+
     # Pairwise cross-session match.
     (
         _,
@@ -1270,7 +1287,7 @@ def run_v2_unit_match(
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
 
     run_summary["stage_seconds"] = stage_seconds
-    run_summary["warnings"] = []
+    run_summary["warnings"] = warnings
     return cast(RunV2UnitMatchSummary, run_summary)
 
 

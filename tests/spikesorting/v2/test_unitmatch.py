@@ -3003,6 +3003,20 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         ]
         assert len(matched) == 1
 
+        # The same-probe chronic fixture diverges in no electrode space, so the
+        # receipt's warnings are empty -- the field is populated, not a dead [].
+        assert summary["warnings"] == []
+
+        # Surfacing: force a divergence and confirm it reaches the receipt's
+        # warnings on the next run (it is also logged in the selection path).
+        from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+        monkeypatch.setattr(
+            UnitMatchSelection,
+            "_divergent_electrode_space_members",
+            classmethod(lambda cls, choices: [1]),
+        )
+
         # Idempotent: a rerun reuses both stages.
         rerun = run_v2_unit_match(
             grp["owner"],
@@ -3014,6 +3028,9 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         assert rerun["unit_match_status"] == "reused"
         assert rerun["tracked_unit_status"] == "reused"
         assert rerun["n_pairs"] == 1
+        assert any("electrode space" in w for w in rerun["warnings"]), rerun[
+            "warnings"
+        ]
     finally:
         if selection_pk is not None:
             (UnitMatch & selection_pk).super_delete(warn=False)

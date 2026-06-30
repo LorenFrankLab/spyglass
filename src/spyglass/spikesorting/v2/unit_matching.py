@@ -489,20 +489,19 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def _warn_on_divergent_electrode_space(cls, choices_by_member) -> None:
-        """Warn (don't block) when members map to different electrode spaces.
+    def _divergent_electrode_space_members(cls, choices_by_member) -> list:
+        """Member indexes whose electrode signature diverges from the anchor.
 
-        ``_assert_members_share_geometry`` compares channel POSITIONS (a hard
-        check); this compares electrode IDENTITY (group + ids + regions) via
-        :func:`._matcher_graph.divergent_electrode_space_members`. Unlike concat
-        (which stitches data in one electrode frame and rejects a mismatch),
-        UnitMatch does not stitch, and electrode-group names / ids come from each
-        NWB file's ``ElectrodeGroup`` and are NOT guaranteed stable across labs'
-        ingestion -- so a divergence is logged as a WARNING rather than blocking
-        a possibly-legitimate chronic match. Single-member selections skip.
+        Compares electrode IDENTITY (group + ids + regions) -- the lab-dependent
+        signal channel geometry can't catch -- via
+        :func:`._matcher_graph.divergent_electrode_space_members`. The caller
+        WARNS rather than blocks (see :meth:`_warn_on_divergent_electrode_space`)
+        because electrode-group names / ids come from each NWB's
+        ``ElectrodeGroup`` and are not guaranteed stable across labs' ingestion.
+        Single-member selections return ``[]``.
         """
         if len(choices_by_member) < 2:
-            return
+            return []
         from spyglass.spikesorting.v2._matcher_graph import (
             divergent_electrode_space_members,
         )
@@ -511,18 +510,40 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             member_index: cls._member_electrode_signature(choice[0])
             for member_index, choice in choices_by_member.items()
         }
-        divergent = divergent_electrode_space_members(signatures)
+        return divergent_electrode_space_members(signatures)
+
+    @staticmethod
+    def _divergent_electrode_space_message(divergent) -> str:
+        """The advisory message for a divergent-electrode-space result.
+
+        Shared by the log warning and the ``run_v2_unit_match`` receipt so both
+        carry identical text.
+        """
+        return (
+            f"member(s) {divergent} map to a different electrode space "
+            "(electrode group / ids / regions) than the anchor, though channel "
+            "geometry still matched. If these are NOT the same chronic implant "
+            "the match is meaningless. Electrode-group names / ids come from "
+            "each NWB file's ElectrodeGroup and are not guaranteed stable across "
+            "sessions, so this is a warning, not a rejection -- a genuine "
+            "distinct-probe mix-up will also show as poor matcher AUC / few "
+            "pairs."
+        )
+
+    @classmethod
+    def _warn_on_divergent_electrode_space(cls, choices_by_member) -> None:
+        """Log a WARNING (don't block) when members differ in electrode space.
+
+        The hard checks (geometry, same-session) live elsewhere; this signal is
+        advisory because electrode-group names / ids are not lab-stable.
+        ``run_v2_unit_match`` also surfaces it in the receipt's ``warnings``.
+        Single-member selections skip.
+        """
+        divergent = cls._divergent_electrode_space_members(choices_by_member)
         if divergent:
             logger.warning(
-                "UnitMatchSelection: member(s) %s map to a different electrode "
-                "space (electrode group / ids / regions) than the anchor, "
-                "though channel geometry still matched. If these are NOT the "
-                "same chronic implant the match is meaningless. Electrode-group "
-                "names / ids come from each NWB file's ElectrodeGroup and are "
-                "not guaranteed stable across sessions, so this is a warning, "
-                "not a rejection -- a genuine distinct-probe mix-up will also "
-                "show as poor matcher AUC / few pairs.",
-                divergent,
+                "UnitMatchSelection: %s",
+                cls._divergent_electrode_space_message(divergent),
             )
 
     @classmethod
