@@ -8,13 +8,14 @@ Execution is in-process -- each code cell's source is ``exec``'d in one shared
 namespace, papermill-style parameter overrides injected right after the
 ``parameters``-tagged cell -- rather than in an isolated Jupyter kernel. That
 keeps the notebook on the test's own DataJoint connection + fixtures (no
-subprocess credential plumbing) and renders plots to a headless Agg backend. The
-notebooks gate their optional-extra cells (FigPack, UnitMatch) on import checks,
-both of which are installed in the v2 test env, so those run too.
+subprocess credential plumbing) and renders plots to a headless Agg backend.
 
-The cross-session notebook needs multi-unit data on two same-day sessions; the
-MEArec polymer smoke fixture (6 simulated units) ingested twice supplies it --
-identical sessions concatenate and match without UnitMatchPy's small-N failure.
+The notebooks gate their optional-extra cells on import checks. FigPack is in
+the default v2 test env, so 10_'s browser-curation cells run. UnitMatch's bundle
+extraction needs the optional UnitMatchPy package, which the default env
+excludes, so 14_'s match (Part B) runs only where it is installed -- the
+cross-session test below stands in a lightweight fixture matcher there, and
+exercises Part A (concat) everywhere.
 
 Heavy (real MountainSort5 sorts + curation-evaluation PCA), hence
 ``@pytest.mark.slow``.
@@ -175,18 +176,27 @@ def test_cross_session_notebook_runs(dj_conn):
 
     Ingests the polymer smoke fixture twice (identical, same-day sessions) and
     runs the notebook: Part A concatenates and sorts them; Part B sorts each
-    independently and matches units across them. A real sort of the smoke
-    fixture recovers too few units for UnitMatchPy, so the notebook's matcher is
+    independently and matches units across them.
+
+    UnitMatch's bundle extraction needs the optional ``UnitMatchPy`` package, so
+    Part B runs only where it is installed (the default v2 test env excludes the
+    matching extra). When it IS present, a real sort of the tiny fixture recovers
+    too few units for UnitMatchPy's metric path, so the notebook's matcher is
     pointed (via its ``matcher_params_name`` parameter) at a registered
     lightweight fixture matcher -- the same substrate the unit-match table tests
-    use -- so the full match + tracked-unit chain still runs in-process.
+    use -- so the full match + tracked-unit chain runs in-process. Without
+    UnitMatchPy, only Part A (concat) is exercised here; the match API is covered
+    by the unit-match table tests.
     """
+    import importlib.util
+
     from spyglass.spikesorting.v2 import matcher_protocol as mp
     from spyglass.spikesorting.v2.matcher_protocol import register_matcher
     from spyglass.spikesorting.v2.recording import SortGroupV2
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     _require_fixture()
+    unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
     members = []
     for dest in ("notebook_xsession_a.nwb", "notebook_xsession_b.nwb"):
         nwb_file_name = copy_and_insert_nwb(_FIXTURE_PATH, dest_name=dest)
@@ -207,50 +217,52 @@ def test_cross_session_notebook_runs(dj_conn):
             }
         )
 
-    matcher_name = "notebook_fixture_matcher"
+    parameters = {
+        "team_name": "notebook_xsession_team",
+        "session_group_owner": "notebook_xsession_team",
+        "same_day_members": members,
+        "concat_group_name": "notebook_concat",
+        "concat_preset": "franklab_concat_hippocampus_30khz_ms5_2026_06",
+        "match_members": members,
+        "match_group_name": "notebook_match",
+        "single_preset": "franklab_probe_hippocampus_30khz_ms5_2026_06",
+        "run_concat": True,
+        "run_unit_match": unitmatch_available,
+    }
+
     matcher_params_name = "notebook_fixture_matcher_params"
-    saved_matchers = dict(mp._MATCHER_REGISTRY)
-    saved_schemas = dict(mp._SCHEMA_REGISTRY)
-    register_matcher(_NotebookFixtureMatcher(), _NotebookMatcherParams)
+    registry = None
     try:
-        MatcherParameters().insert1(
-            {
-                "matcher_params_name": matcher_params_name,
-                "matcher": matcher_name,
-                "params": {"probability": 0.99},
-            },
-            skip_duplicates=True,
-        )
+        if unitmatch_available:
+            registry = (
+                dict(mp._MATCHER_REGISTRY),
+                dict(mp._SCHEMA_REGISTRY),
+            )
+            register_matcher(_NotebookFixtureMatcher(), _NotebookMatcherParams)
+            MatcherParameters().insert1(
+                {
+                    "matcher_params_name": matcher_params_name,
+                    "matcher": "notebook_fixture_matcher",
+                    "params": {"probability": 0.99},
+                },
+                skip_duplicates=True,
+            )
+            parameters["matcher_params_name"] = matcher_params_name
         namespace = _execute_notebook(
-            _NOTEBOOKS / "14_Spike_Sorting_CrossSession.ipynb",
-            {
-                "team_name": "notebook_xsession_team",
-                "session_group_owner": "notebook_xsession_team",
-                "same_day_members": members,
-                "concat_group_name": "notebook_concat",
-                "concat_preset": (
-                    "franklab_concat_hippocampus_30khz_ms5_2026_06"
-                ),
-                "match_members": members,
-                "match_group_name": "notebook_match",
-                "single_preset": (
-                    "franklab_probe_hippocampus_30khz_ms5_2026_06"
-                ),
-                "matcher_params_name": matcher_params_name,
-                "run_concat": True,
-                "run_unit_match": True,
-            },
+            _NOTEBOOKS / "14_Spike_Sorting_CrossSession.ipynb", parameters
         )
     finally:
-        (
-            MatcherParameters & {"matcher_params_name": matcher_params_name}
-        ).super_delete(warn=False)
-        mp._MATCHER_REGISTRY.clear()
-        mp._MATCHER_REGISTRY.update(saved_matchers)
-        mp._SCHEMA_REGISTRY.clear()
-        mp._SCHEMA_REGISTRY.update(saved_schemas)
+        if registry is not None:
+            (
+                MatcherParameters & {"matcher_params_name": matcher_params_name}
+            ).super_delete(warn=False)
+            mp._MATCHER_REGISTRY.clear()
+            mp._MATCHER_REGISTRY.update(registry[0])
+            mp._SCHEMA_REGISTRY.clear()
+            mp._SCHEMA_REGISTRY.update(registry[1])
 
-    # Part A concatenated both members into one sort.
+    # Part A concatenated both members into one sort (runs everywhere).
     assert len(namespace["concat_summary"]["member_recording_ids"]) == 2
-    # Part B matched units across the two sessions into tracked units.
-    assert namespace["match_summary"]["n_tracked_units"] >= 1
+    # Part B matched units into tracked units (only where UnitMatchPy is present).
+    if unitmatch_available:
+        assert namespace["match_summary"]["n_tracked_units"] >= 1
