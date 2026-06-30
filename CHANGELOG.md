@@ -425,25 +425,25 @@ them if you computed results on a pre-fix build.
   now recomputes metrics over the committed curation's own units -- a merged
   unit over its merged train -- and rejects preview/draft curations rather than
   scoring their unmerged units.
-- **Sorter output survives temp-dir cleanup (R4).** `run_si_sorter` now
+- **Sorter output survives temp-dir cleanup.** `run_si_sorter` now
   materializes the sorter's file-backed output into an in-memory `NumpySorting`
   before its temp dir is cleaned, so downstream analyzer/artifact staging no
   longer read freed files.
-- **Preview (unapplied-merge) curations are guarded (R3).** `UnitMatch` now
+- **Preview (unapplied-merge) curations are guarded.** `UnitMatch` now
   rejects a member curation with unapplied proposed merges (matching unmerged
   units across sessions is wrong), and `SpikeSortingOutput.get_spike_times`
   warns when a consumed merge is such a preview curation (the strict decoding
   raise is unchanged).
-- **Curated-units NWBs carry `obs_intervals` (CNEP-1).** The curated writer
+- **Curated-units NWBs carry `obs_intervals`.** The curated writer
   dropped the per-unit observation window and the reader never read it back, so
   NWB-only firing-rate / presence-ratio / duration denominators over a curated
   export assumed the full session. Curated exports now carry `obs_intervals`
   (a merged unit gets the conservative intersection of its contributors').
-- **Label filters apply to all-unlabeled curated exports (CNEP-2).** An
+- **Label filters apply to all-unlabeled curated exports.** An
   all-unlabeled curated NWB omits the label column, so `include_labels=["accept"]`
   returned every unit instead of none; the consumer now applies the filter
   against synthesized empty labels (include-only → none, exclude-only → all).
-- **Artifact valid-time ownership + mask-boundary validation (AVTM-2/3).**
+- **Artifact valid-time ownership + mask-boundary validation.**
   `Sorting.make_fetch` resolves the artifact-removed intervals through the strict
   ownership helper (rejecting a partially-deleted artifact or a hand-inserted
   same-name `IntervalList`), and `apply_artifact_mask` now rejects non-finite or
@@ -451,7 +451,8 @@ them if you computed results on a pre-fix build.
 
 #### Spike Sorting v2: final quality metrics over committed curations
 
-`CurationEvaluation` adds the post-merge metric path the R27 guard left missing:
+`CurationEvaluation` adds the post-merge metric path that scoring raw sortings
+left missing:
 it scores an existing committed `CurationV2` row (root, label-only, or
 applied-merge) in **that curation's own unit namespace**. A merged unit's
 metrics (SNR / ISI-violation / PC-NN separation) are now **recomputed over the

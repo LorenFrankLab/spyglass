@@ -312,7 +312,7 @@ jobs:
     # test logic is a single resolver assertion (numpy major >= 2) plus
     # import gates -- if a future UnitMatchPy re-forces numpy<2 (as
     # 3.2.8+ did), the assertion fires and the resolver ticket re-opens.
-    - name: Phase 0c matching-extra resolver evidence (separate env)
+    - name: Matching-extra resolver evidence (separate env)
       env:
         # Promotes the test's "extras not importable" branch from
         # ``pytest.skip`` to ``pytest.fail``. The install step below
