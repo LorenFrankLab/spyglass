@@ -32,7 +32,7 @@ dependencies:
   - python>=3.10,<3.13
   - pytorch<1.12.0
   - ripple_detection
-  - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
+  - scipy>=1.13  # numpy>=2 (the v2 SI 0.104 stack) needs scipy>=1.13; the legacy SI 0.99 env is environments/environment_spikesorting_legacy.yml
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
