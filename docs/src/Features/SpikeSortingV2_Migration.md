@@ -183,11 +183,13 @@ surface that stays v1-only is the stored per-pair burst metrics
   stubs), and `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
   concatenate-and-sort.
 - **Available in v2** — `figpack_curation` provides `FigPackCurationSelection`
-  and `FigPackCuration`, the v2 replacement for v1's FigURL curation views. They
-  build a self-contained **offline** FigPack bundle (label / merge units in a
-  browser) and read the edits back with
-  `FigPackCuration.fetch_curation_from_uri`, which feeds
-  `CurationV2.save_manual_curation`. Needs the `spikesorting-v2-curation` extra.
+  and `FigPackCuration`, the v2 replacement for v1's FigURL curation views. The
+  default path builds a self-contained **offline** bundle (label / merge units
+  in a browser) whose edits round-trip back via
+  `FigPackCuration.fetch_curation_from_uri` → `CurationV2.save_manual_curation`;
+  `insert_selection(..., upload=True)` can instead publish a hosted figpack.org
+  figure (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
+  `spikesorting-v2-curation` extra.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |

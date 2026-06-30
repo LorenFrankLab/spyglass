@@ -1241,15 +1241,20 @@ cross-session unit matching ([Cross-session unit tracking](#cross-session-unit-t
 all run end-to-end through `run_v2_pipeline` / `run_v2_unit_match` and the
 underlying tables.
 
-FigPack curation runs **offline**: `FigPackCuration` (or
-`run_v2_pipeline(..., figpack=True)`) builds a self-contained static bundle you
-open in a browser to label and merge units. The bundle is local — there is no
-hosted upload in this path — and browser edits are not written back
-automatically. `FigPackCuration.fetch_curation_from_uri(uri)` reads the edited
-labels / merge groups out of the bundle, and `CurationV2.save_manual_curation`
-ingests them into the next curation (see
+FigPack curation is offline by default: `FigPackCuration` (and
+`run_v2_pipeline(..., figpack=True)`, which forces `upload=False`) builds a
+self-contained local bundle you open in a browser to label and merge units.
+Edits to a local bundle are not written back automatically —
+`FigPackCuration.fetch_curation_from_uri(uri)` reads the edited labels / merge
+groups out of it, and `CurationV2.save_manual_curation` ingests them into the
+next curation (see
 [Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
-FigPack curation needs the `spikesorting-v2-curation` extra
+The lower-level `FigPackCurationSelection.insert_selection(..., upload=True)`
+can instead publish a hosted figpack.org figure (needs `FIGPACK_API_KEY`, or
+`ephemeral=True` for a temporary one); hosted publish is for sharing a view of
+an uncurated root curation, while the local bundle is the path that round-trips
+edited labels back into Spyglass. FigPack curation needs the
+`spikesorting-v2-curation` extra
 (`pip install -e ".[spikesorting-v2-curation]"`); cross-session matching needs
 the `spikesorting-v2-matching` extra.
 
