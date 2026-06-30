@@ -354,9 +354,18 @@ jobs:
             mearec_polymer_128ch_2sessions_s1 \
             mearec_polymer_128ch_2sessions_s2 || true
         fi
+        # This env is the only one with UnitMatchPy installed, so it also owns
+        # the cross-session NOTEBOOK end-to-end test: notebook 14's Part B match
+        # needs UnitMatchPy (bundle extraction), so the default v2 job (no
+        # matching extra) runs only its concat half. Fetch the smoke fixture it
+        # drives off (no ``|| true``: an absent smoke fixture must fail the step,
+        # not silently skip the match path).
+        conda run -n spyglass_v2_matching python \
+          tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
         conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
           tests/spikesorting/v2/test_unitmatch.py \
+          tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
           --no-docker --no-dlc -q
 
   pytest-legacy:
