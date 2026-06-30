@@ -1,9 +1,15 @@
 """Typed public contracts for the v2 pipeline orchestration helpers.
 
-This module is DB-free by design: it imports only stdlib typing helpers and
-``uuid.UUID``. Keep it that way so humans, IDEs, and code-generation agents can
-inspect the pipeline input / result shapes without importing DataJoint schema
-modules or opening a database connection.
+This module is DB-free by design: it imports only stdlib typing helpers,
+``typing_extensions`` (for ``NotRequired``), and ``uuid.UUID``. Keep it that way
+so humans, IDEs, and code-generation agents can inspect the pipeline input /
+result shapes without importing DataJoint schema modules or opening a database
+connection.
+
+``NotRequired`` is imported from ``typing_extensions`` rather than ``typing``:
+``typing.NotRequired`` exists only on Python 3.11+, and this package supports
+3.10. ``typing_extensions`` (a transitive dependency of pydantic / datajoint)
+back-ports the identical object, so the runtime metadata below is unchanged.
 
 Annotations are deliberately NOT postponed (no ``from __future__ import
 annotations``): with stringized annotations a ``TypedDict`` cannot see the
@@ -12,8 +18,10 @@ annotations``): with stringized annotations a ``TypedDict`` cannot see the
 and codegen inspect -- would be wrong.
 """
 
-from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Any, Literal, TypeAlias, TypedDict
 from uuid import UUID
+
+from typing_extensions import NotRequired
 
 StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
