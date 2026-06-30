@@ -770,12 +770,13 @@ def remove_artifact_interval_rows(restrictions):
     """
     from spyglass.common import IntervalList
 
-    # Clean up the matching IntervalList rows through cautious_delete
-    # (the user already passed the same team-permission check on the
-    # parent ArtifactDetection rows above keyed by the same
-    # nwb_file_name, so the IntervalList check is a re-verification,
-    # not a bypass). super_delete here would silently delete other
-    # users' rows under shared lab sessions.
+    # Clean up the matching IntervalList rows through the cautious
+    # ``.delete(safemode=False)`` (IntervalList is a SpyglassMixin, so its
+    # ``.delete`` IS the cautious path; safemode=False only suppresses the
+    # re-prompt -- the user already passed the same team-permission check on the
+    # parent ArtifactDetection rows above keyed by the same nwb_file_name, so the
+    # IntervalList check is a re-verification, not a bypass). super_delete here
+    # would silently delete other users' rows under shared lab sessions.
     for restriction in restrictions:
         rows = IntervalList & restriction
         if len(rows) == 0:

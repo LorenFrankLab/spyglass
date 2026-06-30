@@ -16,6 +16,10 @@ missing required keys, str-vs-UUID normalization) are cheap to pin.
 
 Dependency-light: imports only :mod:`_selection_identity` (itself DB-free)
 -- no v2 schema modules, no ``spyglass.common``.
+
+Naming note: "plan" here (and in :mod:`_curation_plan`) is a domain noun -- the
+computed set of rows to insert, like a query plan -- NOT a project-phase or
+milestone reference.
 """
 
 from __future__ import annotations

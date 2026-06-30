@@ -17,21 +17,22 @@ Isolating the pure halves makes the row-shaping + stray-label decision
 matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop) and
 the summary formatting unit-testable without a DataJoint transaction.
 
-Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and
-stdlib logging.
+Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and the
+shared spyglass logger.
+
+Naming note: "plan" here is a domain noun -- the computed set of rows/labels to
+insert, like a query plan -- NOT a project-phase or milestone reference.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import NamedTuple
 
 from spyglass.spikesorting.v2._curation_transforms import (
     build_curated_unit_rows,
     compose_curation_labels,
 )
-
-logger = logging.getLogger("spyglass")
+from spyglass.utils import logger
 
 
 class CurationInsertPlan(NamedTuple):

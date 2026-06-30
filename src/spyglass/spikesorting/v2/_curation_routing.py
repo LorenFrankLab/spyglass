@@ -20,15 +20,13 @@ and run the classification without a database.
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import NamedTuple
 
 from spyglass.spikesorting.v2._artifact_naming import (
     parse_artifact_detection_interval_list_name,
 )
-
-logger = logging.getLogger("spyglass")
+from spyglass.utils import logger
 
 # Single-recording-ONLY source restriction keys: route through
 # ``SortingSelection.RecordingSource`` -> ``RecordingSelection``. These columns
