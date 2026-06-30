@@ -241,7 +241,10 @@ run_summary = run_v2_pipeline(
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
-merge_id = run_summary["merge_id"]  # key off this downstream
+# run_summary["merge_id"] is the UNCURATED root curation -- fine for a quick
+# look, but for downstream science curate first (auto_curate=True or by hand)
+# and key off the curated curation's merge_id (see "Downstream consumers").
+merge_id = run_summary["merge_id"]
 
 # Receipt: stages + warnings as explicit rows (a zero-unit sort can't hide in a
 # print), then the per-unit sort-time snapshot (n_spikes, firing_rate_hz over
@@ -1128,8 +1131,13 @@ Key behaviors and caveats:
 
 Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
 `SpikeSortingOutput` merge table, so existing downstream code (decoding,
-ripple detection, etc.) keeps working unchanged. For most downstream work,
-carry `merge_id = run_summary["merge_id"]` forward:
+ripple detection, etc.) keeps working unchanged. **`run_summary["merge_id"]`
+is the uncurated root curation** — for downstream science, curate first and
+carry the curated curation's `merge_id` forward: `auto_summary["auto_merge_id"]`
+from an `auto_curate=True` run, or the `merge_id` of the curation you build by
+hand (see the [evaluate → accept → merge curation
+flow](#the-evaluate-accept-merge-curation-flow)). Pass whichever `merge_id` you
+choose to the accessors below:
 
 #### What do I call next?
 
@@ -1307,9 +1315,9 @@ CHANGELOG for the full list. Key user-visible items:
   is accepted (semantically equivalent to `{}`).
 - `Sorting.get_sorting(key, as_dataframe=True)` and
   `CurationV2.get_sorting(key, as_dataframe=True)` both return a
-  pandas DataFrame with `unit_id` + `spike_times` (seconds) columns;
-  the CurationV2 form also joins the `curation_label` list column
-  from `UnitLabel`.
+  pandas DataFrame indexed by `unit_id` with a `spike_times`
+  (seconds) column; the CurationV2 form also joins the
+  `curation_label` list column from `UnitLabel`.
 - `get_spiking_sorting_v2_merge_ids(restriction, as_dict=False)` in
   `spyglass.spikesorting.v2.utils` is the notebook-discoverable
   parallel of v1's `get_spiking_sorting_v1_merge_ids`.
