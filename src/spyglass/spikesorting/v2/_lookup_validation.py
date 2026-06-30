@@ -292,6 +292,75 @@ def reject_duplicate_parameter_content(
         claimed.setdefault(fingerprint, name)
 
 
+def reject_duplicate_quality_metric_content(
+    stored_rows,
+    incoming_rows,
+    *,
+    allow_duplicate_params: bool = False,
+) -> None:
+    """Reject a ``QualityMetricParameters`` row whose content duplicates a name.
+
+    ``QualityMetricParameters`` spreads its content across several columns
+    (``metric_names`` / ``metric_kwargs`` / ``template_metric_columns`` /
+    ``skip_pc_metrics``) rather than a single ``params`` blob, so it cannot
+    reuse :func:`reject_duplicate_parameter_content`. This is the equivalent
+    guard: fingerprint each row's content (``metric_params_name`` excluded) and
+    reject a second name for identical content, raising
+    :class:`~spyglass.spikesorting.v2.exceptions.DuplicateParameterContentError`
+    -- so two differently-named QMP rows with identical parameters cannot
+    silently fork provenance, matching the sibling parameter Lookups. A
+    re-insert of an already-stored name is idempotent (``insert_default`` stays
+    re-runnable); ``allow_duplicate_params=True`` is the documented escape hatch.
+
+    Parameters
+    ----------
+    stored_rows : list[dict]
+        QMP rows already in the table (``table.fetch(as_dict=True)``).
+    incoming_rows : list[dict]
+        The validated rows about to be inserted.
+    allow_duplicate_params : bool, optional
+        Opt out of the guard.
+    """
+    if allow_duplicate_params:
+        return
+
+    def _fingerprint(row: dict) -> str:
+        return parameter_fingerprint(
+            "QualityMetricParameters",
+            params=_jsonable_blob(
+                {
+                    "metric_names": row["metric_names"],
+                    "metric_kwargs": row["metric_kwargs"],
+                    "template_metric_columns": row["template_metric_columns"],
+                    "skip_pc_metrics": bool(row["skip_pc_metrics"]),
+                }
+            ),
+            params_schema_version=int(row["params_schema_version"]),
+            job_kwargs=_jsonable_blob(row.get("job_kwargs")),
+        )
+
+    existing_names = {row["metric_params_name"] for row in stored_rows}
+    claimed: dict[str, str] = {}
+    for stored in stored_rows:
+        claimed.setdefault(_fingerprint(stored), stored["metric_params_name"])
+
+    for row in incoming_rows:
+        name = row["metric_params_name"]
+        if name in existing_names:
+            continue
+        fingerprint = _fingerprint(row)
+        prior = claimed.get(fingerprint)
+        if prior is not None and prior != name:
+            raise DuplicateParameterContentError(
+                f"QualityMetricParameters: row {name!r} duplicates the content "
+                f"of existing row {prior!r} (fingerprint {fingerprint[:12]}). A "
+                "second name for identical parameters forks provenance. Reuse "
+                f"{prior!r}, change the parameters, or pass "
+                "allow_duplicate_params=True to insert it anyway."
+            )
+        claimed.setdefault(fingerprint, name)
+
+
 def _insert_row_to_dict(row, attr_names) -> dict:
     """Normalize a DataJoint insert row to a mutable dict.
 

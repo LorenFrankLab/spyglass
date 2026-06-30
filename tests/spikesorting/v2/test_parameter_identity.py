@@ -312,10 +312,121 @@ def test_nan_or_inf_param_is_rejected_not_silently_encoded():
 
 
 # ---------------------------------------------------------------------------
+# QualityMetricParameters duplicate-content guard (pure -- it spreads content
+# across several columns instead of one ``params`` blob, so it has its own
+# guard rather than reusing ``reject_duplicate_parameter_content``).
+# ---------------------------------------------------------------------------
+
+
+def _qmp_row(name, *, metric_names, **overrides):
+    row = {
+        "metric_params_name": name,
+        "metric_names": metric_names,
+        "metric_kwargs": {},
+        "template_metric_columns": [],
+        "skip_pc_metrics": True,
+        "params_schema_version": 1,
+        "job_kwargs": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_quality_metric_duplicate_content_rejected():
+    """A second NAME for identical QMP content forks provenance -> rejected."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_duplicate_quality_metric_content,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+
+    stored = [_qmp_row("preset_a", metric_names=["snr", "isi_violation"])]
+    incoming = [_qmp_row("preset_b", metric_names=["snr", "isi_violation"])]
+    with pytest.raises(DuplicateParameterContentError, match="preset_a"):
+        reject_duplicate_quality_metric_content(stored, incoming)
+
+
+def test_quality_metric_same_name_reinsert_is_idempotent():
+    """Re-inserting the same name+content never trips the guard."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_duplicate_quality_metric_content,
+    )
+
+    stored = [_qmp_row("preset_a", metric_names=["snr"])]
+    reject_duplicate_quality_metric_content(
+        stored, [_qmp_row("preset_a", metric_names=["snr"])]
+    )  # no raise
+
+
+def test_quality_metric_different_content_allowed():
+    """A new name with DIFFERENT content is fine."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_duplicate_quality_metric_content,
+    )
+
+    stored = [_qmp_row("preset_a", metric_names=["snr"])]
+    incoming = [_qmp_row("preset_b", metric_names=["snr", "firing_rate"])]
+    reject_duplicate_quality_metric_content(stored, incoming)  # no raise
+
+
+def test_quality_metric_duplicate_escape_hatch():
+    """``allow_duplicate_params=True`` opts out of the guard."""
+    from spyglass.spikesorting.v2._lookup_validation import (
+        reject_duplicate_quality_metric_content,
+    )
+
+    stored = [_qmp_row("preset_a", metric_names=["snr"])]
+    incoming = [_qmp_row("preset_b", metric_names=["snr"])]
+    reject_duplicate_quality_metric_content(
+        stored, incoming, allow_duplicate_params=True
+    )  # no raise
+
+
+# ---------------------------------------------------------------------------
 # Duplicate-content guard + describe_parameter_rows (DB-backed). Each imports
 # the v2 schema modules lazily and takes ``dj_conn`` so the schema's
 # ``dj.schema(...)`` import has a live connection.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.database
+def test_quality_metric_insert_rejects_duplicate_content(dj_conn):
+    """End-to-end QMP dedup: a new name with content identical to a shipped row
+    is rejected; the intentional franklab/neuropixels duplicate in
+    insert_default still succeeds via the escape hatch."""
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    # insert_default ships franklab_default and neuropixels_default with
+    # identical content -- it must NOT raise (opts out of the guard).
+    QualityMetricParameters.insert_default()
+    shipped = (
+        QualityMetricParameters & {"metric_params_name": "minimal"}
+    ).fetch1()
+
+    dup = {
+        "metric_params_name": "minimal_copy",
+        "metric_names": shipped["metric_names"],
+        "metric_kwargs": shipped["metric_kwargs"],
+        "template_metric_columns": shipped["template_metric_columns"],
+        "skip_pc_metrics": shipped["skip_pc_metrics"],
+    }
+    with pytest.raises(
+        DuplicateParameterContentError, match="duplicates the content"
+    ):
+        QualityMetricParameters().insert(dup)
+
+    # The documented escape hatch still inserts it.
+    QualityMetricParameters().insert(dup, allow_duplicate_params=True)
+    assert QualityMetricParameters & {"metric_params_name": "minimal_copy"}
+    (
+        QualityMetricParameters & {"metric_params_name": "minimal_copy"}
+    ).delete_quick()
 
 
 @pytest.mark.database

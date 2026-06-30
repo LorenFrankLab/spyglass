@@ -75,6 +75,7 @@ from spyglass.spikesorting.v2.utils import (
     _jsonable_blob,
     _resolved_job_kwargs,
     _validate_params,
+    reject_duplicate_quality_metric_content,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -357,8 +358,15 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """Validate one row's params then insert it."""
         self.insert([row], **kwargs)
 
-    def insert(self, rows, **kwargs):
-        """Validate every row's params blob before a single bulk insert."""
+    def insert(self, rows, *, allow_duplicate_params=False, **kwargs):
+        """Validate every row's params, reject duplicate content, then insert.
+
+        Like the sibling parameter Lookups, a second NAME for content identical
+        to an existing row raises ``DuplicateParameterContentError`` so
+        provenance never silently forks. ``allow_duplicate_params=True`` opts
+        out (the shipped franklab/neuropixels defaults use it -- see
+        ``insert_default``).
+        """
         if isinstance(rows, dict):
             rows = [rows]
         validated = []
@@ -390,12 +398,25 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                     "job_kwargs": row.get("job_kwargs"),
                 }
             )
+        reject_duplicate_quality_metric_content(
+            self.fetch(as_dict=True),
+            validated,
+            allow_duplicate_params=allow_duplicate_params,
+        )
         super().insert(validated, **kwargs)
 
     @classmethod
     def insert_default(cls):
         """Insert the default quality-metric parameter rows (idempotent)."""
-        cls().insert(cls._default_rows(), skip_duplicates=True)
+        # franklab_default and neuropixels_default deliberately ship identical
+        # content under two names (kept separate so a probe-specific divergence
+        # can be expressed later), so the shipped defaults opt out of the
+        # duplicate-content guard.
+        cls().insert(
+            cls._default_rows(),
+            skip_duplicates=True,
+            allow_duplicate_params=True,
+        )
 
     @classmethod
     def available_quality_metrics(cls) -> list[str]:
