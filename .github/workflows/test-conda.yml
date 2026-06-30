@@ -306,7 +306,7 @@ jobs:
       # they skip cleanly via their ``*_PATH.exists()`` / fixture guards.
       run: |
         pytest tests/spikesorting/v2/ --no-docker --no-dlc -q
-    # --- Phase 0c plan-line 125 matching-extra resolver-evidence job.
+    # --- Matching-extra resolver-evidence job.
     # Runs in a SEPARATE conda env (the matching extra pulls torch +
     # CUDA; kept out of the default v2 env for weight, not numpy). The
     # test logic is a single resolver assertion (numpy major >= 2) plus

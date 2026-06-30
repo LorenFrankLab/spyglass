@@ -418,7 +418,7 @@ them if you computed results on a pre-fix build.
   most-negative channel instead of its true peak. SNR now uses the sorter's
   resolved sign (matching per-unit attribution). Negative-going sorts (the
   defaults) are numerically unchanged; *positive/bidirectional sorts change.*
-- **Curation metrics are scored in the curation's own unit namespace (R27).**
+- **Curation metrics are scored in the curation's own unit namespace.**
   Scoring a merged curation against the raw-sort unit-id namespace landed
   metrics/labels on the wrong units. The curation-metric path
   (`CurationEvaluation`, which superseded the interim `AnalyzerCuration` table)

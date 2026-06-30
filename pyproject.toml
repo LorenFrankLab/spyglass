@@ -76,8 +76,8 @@ dependencies = [
                                     # shifts untyped sorter defaults. Snapshot
                                     # tests (test_*_si_defaults_unchanged) fail
                                     # loudly on a bump; move the pin + audit the
-                                    # diff together. Loosen only after the
-                                    # parent plan's Phase 0c SI migration.
+                                    # diff together. Loosen only after a
+                                    # deliberate SpikeInterface migration.
   "track-linearization>=2.3",
 ]
 
@@ -278,8 +278,7 @@ markers = [
   "serial: Tests that must run serially (not parallel-safe)",
   "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
 
-  # Test-tier markers (spike sorting v2 Phase 1b plan).
-  # Convention from .claude/docs/plans/spikesorting-v2/phase-1b-runtime-regressions.md:
+  # Test-tier markers for the spike-sorting v2 suite. Convention:
   #   T1 unit          - <1s, no Docker
   #   T2 db_unit       - <5s, Docker MySQL only (no populate)
   #   T3 stage         - 10-60s, populate one Computed table
