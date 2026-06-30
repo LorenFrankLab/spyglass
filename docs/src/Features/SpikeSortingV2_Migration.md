@@ -8,6 +8,45 @@ reference" subsection; this page covers the deltas you actually touch in a
 notebook. For the pipeline overview, see
 [Spike Sorting v2](./SpikeSortingV2.md).
 
+## Choosing v1 or v2
+
+For **new sorts**, use v2. It runs under the SpikeInterface 0.104 environment,
+is the actively developed path, and `run_v2_pipeline` collapses the v1 manual
+chain into one call (preset → preprocess → artifact → sort → curation → merge).
+v2 also adds same-day concatenate-and-sort, cross-session unit matching,
+content-addressed identity, and hash-verifiable recompute.
+
+Keep using **v1** for **existing v1 sorts**: they stay queryable through the v1
+tables, and active v1 *runtime* workflows (populating `Waveforms` /
+`MetricCuration` / `BurstPair`, v1 `ArtifactDetection`) require the legacy
+SpikeInterface 0.99 Spyglass environment — calling them under SI 0.104 raises a
+clear `RuntimeError`. v2 does not auto-migrate v1 rows, and there is no one-shot
+"convert a `CurationV1` row to `CurationV2`" tool, so a v1 sort you want under v2
+is re-run through `run_v2_pipeline` from its selection.
+
+Externally-curated or ground-truth NWB Units are neither a v1 nor a v2 sort:
+ingest them with the existing `ImportedSpikeSorting` workflow. They surface in
+`SpikeSortingOutput.ImportedSpikeSorting` and are not reinserted as `CurationV2`
+rows.
+
+Both pipelines register on the same `SpikeSortingOutput` merge table, so
+downstream code keys off `merge_id` regardless of which produced the sort.
+
+### Porting a v1 sort to v2
+
+1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,
+   interval, and `team_name`.
+2. Build v2 sort groups (`SortGroupV2.set_group_by_shank`) and call
+   `run_v2_pipeline(...)` with the matching preset. The returned run summary's
+   `merge_id` is the **root** (uncurated, `parent_curation_id=-1`) curation.
+3. Curate from that root — evaluate + label, then merge (see the
+   [curation flow](./SpikeSortingV2.md#the-evaluate-accept-merge-curation-flow)).
+   The **final curated** `CurationV2` row is the one you carry forward, not the
+   root.
+4. Key downstream analysis and export off the **final** curation's `merge_id`
+   via the same `SpikeSortingOutput.get_spike_times({"merge_id": ...})` accessor
+   used for v1 sorts.
+
 ## 1. What you call differently
 
 - **Parameter rows are named differently — no back-compat aliases.** The
