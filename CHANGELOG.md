@@ -138,8 +138,8 @@ changed `concat_recording_id` payload; pre-production, no migration.
   (`ConcatenatedRecordingArtifact*`, the analogues of the recording recompute
   trio) are **not** added in this change. Rebuild-on-missing + content
   verification cover correctness; the audit/`delete_files` reclamation surface is
-  deferred until the first retention of concat outputs (e.g. when Phase 5 begins
-  retaining concat data), at which point it should reuse the shared recompute
+  deferred until concat outputs are first retained, at which point it should
+  reuse the shared recompute
   helpers rather than a bespoke table family.
 
 #### Spike Sorting v2: execution dispatch, dependency pins, and security hardening

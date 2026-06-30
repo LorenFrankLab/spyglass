@@ -109,7 +109,7 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     ``{unit_id: obs_intervals}`` (the per-unit ``(n, 2)`` observation window),
     ``None`` when the ``obs_intervals`` column is absent (legacy files), or
     ``{}`` for an empty Units table. The curated writer carries ``obs`` forward
-    so a curated export keeps the correct observation window (CNEP-1); without
+    so a curated export keeps the correct observation window; without
     it, NWB-only firing-rate / presence-ratio / duration denominators over a
     curated export silently assume the full session.
 
@@ -895,7 +895,7 @@ def _write_curated_units_nwb_body(
     units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
     (``{unit_id: (n, 2) array}`` or ``None`` for a legacy source) carries the
     per-unit observation window forward so a curated export keeps the correct
-    firing-rate / presence-ratio / duration denominator (CNEP-1).
+    firing-rate / presence-ratio / duration denominator.
     """
     import numpy as np
     import pynwb
@@ -1032,7 +1032,7 @@ def _write_curated_units_nwb_body(
                     unit_kwargs[SPIKE_SAMPLE_INDEX_COLUMN] = np.asarray(
                         spike_indices, dtype=np.int64
                     )
-                # CNEP-1: carry the per-unit observation window forward so a
+                # Carry the per-unit observation window forward so a
                 # curated export keeps the correct firing-rate / presence-ratio
                 # / duration denominator. Omitted only for a legacy source NWB
                 # that had no obs_intervals column (obs is None).

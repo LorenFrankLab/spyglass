@@ -1956,7 +1956,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         preview curation has unapplied proposed merges, so scoring it would
         attach metrics to the UNMERGED preview units rather than the final
         merged unit set the user intends. Mirrors
-        ``_assert_curation_not_merged`` (the R27 raw-namespace guard) but in the
+        ``_assert_curation_in_raw_namespace`` (the raw-namespace guard) but in the
         opposite direction -- there the danger is a merged parent under a
         raw-sort analyzer; here it is a NOT-yet-merged preview under a
         committed-state evaluation.

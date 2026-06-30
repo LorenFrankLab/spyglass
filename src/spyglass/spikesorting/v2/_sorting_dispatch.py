@@ -654,7 +654,7 @@ def run_si_sorter(
             effective_params = sorter_params
         try:
             raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
-            # R4: run_sorter returns a sorting that READS from sorter_temp_dir,
+            # run_sorter returns a sorting that READS from sorter_temp_dir,
             # which the outer finally cleans up -- downstream _build_analyzer /
             # _stage_sorting_artifact would then read freed files. Sever the
             # file backing here, while the temp dir still exists, by

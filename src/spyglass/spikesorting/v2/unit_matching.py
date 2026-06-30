@@ -1536,7 +1536,7 @@ def _validate_member_curations(members, choices_by_member, exc_class):
                 f"{curation_identity}. A curation from another member cannot be "
                 "pinned here. Use UnitMatchSelection.insert_selection()."
             )
-        # R3: matching UNMERGED units across sessions is unambiguously wrong --
+        # Matching UNMERGED units across sessions is unambiguously wrong --
         # a curation created with apply_merge=False (proposed merges recorded
         # but not applied) would feed oversplit units into the matcher. Reject
         # at both guard sites (insert_selection and UnitMatch.make_fetch both

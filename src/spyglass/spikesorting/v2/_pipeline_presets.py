@@ -911,7 +911,7 @@ def clone_preset(
 
     touched = [name for name in stages if stage_overrides[name]]
 
-    # Phase 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
+    # Step 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
     # so a bad override raises the same teaching error as a direct parameter
     # insert and leaves the database untouched.
     derived_params: dict[str, dict] = {}
@@ -943,7 +943,7 @@ def clone_preset(
             execution_params_schema_version=execution_params_schema_version,
         )
 
-    # Phase 2 -- insert the derived rows atomically. For each touched stage,
+    # Step 2 -- insert the derived rows atomically. For each touched stage,
     # reconcile against any existing row already named ``new_name``: identical
     # content is an idempotent no-op (a re-run reuses it), different content is a
     # name collision and refused. The duplicate-content guard inside the table

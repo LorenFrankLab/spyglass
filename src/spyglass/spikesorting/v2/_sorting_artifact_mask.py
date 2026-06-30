@@ -103,7 +103,7 @@ def apply_artifact_mask(
             "_apply_artifact_mask: valid_times must be an (n, 2) array "
             f"of (start, end) seconds; got shape {valid_times.shape}."
         )
-    # AVTM-3: reject NaN/Inf before any comparison. NaN slips silently through
+    # Reject NaN/Inf before any comparison. NaN slips silently through
     # the < / sorted checks below (every NaN comparison is False), so a
     # non-finite interval would otherwise under-mask instead of failing loudly.
     if not np.all(np.isfinite(valid_times)):
@@ -171,7 +171,7 @@ def apply_artifact_mask(
             "recording's monotonic timestamp invariant is violated and the "
             "searchsorted frame mapping would silently mis-mask."
         )
-    # AVTM-3: reject intervals outside the recording envelope before the walk.
+    # Reject intervals outside the recording envelope before the walk.
     # The complement walk silently clips to [t_first, t_last], so an interval
     # starting before the first sample or ending past the last (a units/
     # alignment error -- e.g. ms vs s) would be quietly ignored rather than

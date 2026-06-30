@@ -1290,7 +1290,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             # blanked the signal. When ``artifact_detection_id`` is unset,
             # make_compute falls back to the recording's full envelope.
             if sel_row.get("artifact_detection_id") is not None:
-                # AVTM-2: route through the strict ownership helper instead of
+                # Route through the strict ownership helper instead of
                 # fetching the IntervalList directly by reconstructed name. The
                 # direct fetch would accept a partially-deleted artifact (no
                 # ownership part rows) or a hand-inserted same-name IntervalList;

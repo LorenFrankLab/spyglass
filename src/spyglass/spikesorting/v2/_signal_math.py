@@ -203,7 +203,7 @@ def intersect_interval_sets(interval_sets):
 
     Returns the ``(m, 2)`` float array of time spans contained in EVERY input
     set -- the conservative observation window for a merged unit whose
-    contributors have differing ``obs_intervals`` (CNEP-1). Each input is a
+    contributors have differing ``obs_intervals``. Each input is a
     ``(n, 2)`` ``[start, end]`` array assumed sorted by start and disjoint (the
     sort-time writer's ``obs_intervals`` shape). An empty input list returns an
     empty ``(0, 2)`` array; a single set returns itself. Identical inputs (the
@@ -666,7 +666,7 @@ def frames_for_times(recording, times_s, *, segment_index=0):
     import numpy as np
 
     times = np.atleast_1d(np.asarray(times_s, dtype=np.float64))
-    # AVTM-3: reject non-finite query times. searchsorted sorts NaN as +inf, so
+    # Reject non-finite query times. searchsorted sorts NaN as +inf, so
     # a NaN/Inf query silently maps to frame n (or 0) instead of failing. Note
     # this guards ONLY finiteness: out-of-range *finite* times intentionally
     # clamp to [0, n] (the searchsorted contract the artifact-mask complement
