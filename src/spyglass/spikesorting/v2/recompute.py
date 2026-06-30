@@ -451,10 +451,12 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
 
         Mirrors v1 ``remove_matched``: drop selections that target a recording
         with a matched recompute (in ANY env) but are NOT themselves the
-        matched attempt. Those redundant selections carry no dependent
-        recompute row, so ``delete_quick`` cannot hit the Recompute->Selection
-        FK. Selections whose own recompute matched are kept -- they are the
-        verification record.
+        matched attempt. A redundant selection MAY carry a dependent recompute
+        row -- a FAILED (matched=0) attempt in one env while the artifact
+        matched in another -- so this uses cautious ``delete`` (not
+        ``delete_quick``), which cascades that failed child rather than hitting
+        the Recompute->Selection FK. Selections whose own recompute matched are
+        kept; they are the verification record.
         """
         matched = RecordingArtifactRecompute & "matched=1"
         artifact_pk = RecordingArtifactVersions.primary_key
@@ -462,13 +464,19 @@ class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
             "KEY", as_dict=True
         )
         redundant = (cls & restriction & matched_artifacts) - matched.proj()
-        count = len(redundant)
+        # Materialize the redundant PKs before deleting: ``redundant`` is built
+        # by antijoining the Recompute table, so a cascading delete on it
+        # directly would reference the child table in its own FROM clause
+        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
+        # while still cascading the failed (matched=0) child rows.
+        redundant_keys = redundant.fetch("KEY")
+        count = len(redundant_keys)
         if dry_run or count == 0:
             logger.info(
                 f"remove_matched: {count} redundant rows (dry_run={dry_run})."
             )
             return count
-        redundant.delete_quick()
+        (cls & redundant_keys).delete(safemode=False)
         return count
 
 
@@ -918,8 +926,10 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
 
         Mirrors v1 ``remove_matched`` (see the recording variant): drop
         selections targeting a sort with a matched recompute (any env) that are
-        not themselves the matched attempt, so ``delete_quick`` cannot hit the
-        Recompute->Selection FK.
+        not themselves the matched attempt. A redundant selection may carry a
+        FAILED (matched=0) recompute child from another env, so this uses
+        cautious ``delete`` (not ``delete_quick``) to cascade that child rather
+        than hitting the Recompute->Selection FK.
         """
         matched = SortingAnalyzerRecompute & "matched=1"
         artifact_pk = SortingAnalyzerVersions.primary_key
@@ -927,13 +937,19 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
             "KEY", as_dict=True
         )
         redundant = (cls & restriction & matched_artifacts) - matched.proj()
-        count = len(redundant)
+        # Materialize the redundant PKs before deleting: ``redundant`` is built
+        # by antijoining the Recompute table, so a cascading delete on it
+        # directly would reference the child table in its own FROM clause
+        # (MySQL error 1093). Restricting by concrete fetched keys avoids that
+        # while still cascading the failed (matched=0) child rows.
+        redundant_keys = redundant.fetch("KEY")
+        count = len(redundant_keys)
         if dry_run or count == 0:
             logger.info(
                 f"remove_matched: {count} redundant rows (dry_run={dry_run})."
             )
             return count
-        redundant.delete_quick()
+        (cls & redundant_keys).delete(safemode=False)
         return count
 
 

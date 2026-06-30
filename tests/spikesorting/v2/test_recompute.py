@@ -380,6 +380,76 @@ def test_recording_recompute_matches_and_delete_gate(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_remove_matched_drops_redundant_failed_cross_env_selection(
+    populated_sorting, clean_recompute
+):
+    """remove_matched must delete a redundant selection even when it carries a
+    FAILED (matched=0) recompute child from another env.
+
+    A selection attempted in env A that failed, while the same artifact matched
+    in env B, is redundant (the artifact is verified elsewhere) but DOES have a
+    dependent recompute row -- so a raw ``delete_quick`` hits the
+    Recompute->Selection foreign key and raises ``IntegrityError``. Cautious
+    ``delete`` cascades the failed child instead.
+    """
+    _assert_temp_base_dir()
+    from spyglass.common.common_user import UserEnvironment
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+        _artifact_created_at,
+    )
+
+    rec_key = _recording_key(populated_sorting)
+
+    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    assert RecordingArtifactRecompute & rec_key & "matched=1"
+
+    # Plant a SECOND selection under a stale env whose recompute FAILED
+    # (matched=0) on the SAME artifact that matched in the current env.
+    stale_env = "planted_stale_env_00"
+    UserEnvironment().insert1(
+        {
+            "env_id": stale_env,
+            "env_hash": "0" * 32,
+            "env": {"planted": True},
+            "has_editable": 0,
+        },
+        skip_duplicates=True,
+    )
+    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    stale_sel = {
+        **{k: v for k, v in sel_key.items() if k != "env_id"},
+        "env_id": stale_env,
+    }
+    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingArtifactRecompute.insert1(
+        {
+            **stale_sel,
+            "matched": 0,
+            "err_msg": "planted failed attempt",
+            "created_at": _artifact_created_at(rec_key),
+            "deleted": 0,
+        },
+        allow_direct_insert=True,
+    )
+
+    # The redundant stale-env selection (with its failed child) is removed
+    # without raising; the current-env matched selection is kept.
+    removed = RecordingArtifactRecomputeSelection.remove_matched(
+        rec_key, dry_run=False
+    )
+    assert removed >= 1
+    assert not (RecordingArtifactRecomputeSelection & stale_sel)
+    assert not (RecordingArtifactRecompute & stale_sel)
+    assert RecordingArtifactRecompute & rec_key & "matched=1"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_recording_recompute_refuses_unmatched(
     populated_sorting, clean_recompute
 ):
