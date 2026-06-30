@@ -112,7 +112,6 @@ import UnitMatchPy.save_utils as su
 import UnitMatchPy.assign_unique_id as aid
 import UnitMatchPy.default_params as default_params
 
-
 # -
 
 # ## Read the polymer fixture (recording + ground-truth spike trains)
@@ -121,6 +120,7 @@ import UnitMatchPy.default_params as default_params
 # and its planted ground-truth units in a sidecar `ground_truth/units` table
 # (the top-level `Units` slot is intentionally left free). We read both with
 # SpikeInterface + pynwb — no Spyglass/DataJoint import is required for the spike.
+
 
 # +
 def find_fixture(name="mearec_polymer_128ch_60s.nwb"):
@@ -133,7 +133,9 @@ def find_fixture(name="mearec_polymer_128ch_60s.nwb"):
 
 
 FIXTURE = find_fixture()
-recording = read_nwb_recording(FIXTURE, electrical_series_path="acquisition/e-series")
+recording = read_nwb_recording(
+    FIXTURE, electrical_series_path="acquisition/e-series"
+)
 fs = recording.get_sampling_frequency()
 recording = spre.bandpass_filter(recording, freq_min=300.0, freq_max=6000.0)
 # The fixture stores contacts in the XY plane with rel_z = 0, so SpikeInterface
@@ -145,10 +147,14 @@ with NWBHDF5IO(str(FIXTURE), "r") as io:
     gt = io.read().processing["ground_truth"].data_interfaces["units"]
     # NumpySorting.from_times_and_labels takes spike times in SECONDS (the
     # docstring's "spike samples" wording is wrong); pass GT seconds verbatim.
-    gt_trains = {int(u): np.asarray(gt["spike_times"][i]) for i, u in enumerate(gt.id[:])}
+    gt_trains = {
+        int(u): np.asarray(gt["spike_times"][i]) for i, u in enumerate(gt.id[:])
+    }
 
-print(f"{recording.get_num_channels()} channels, {fs/1000:.0f} kHz, "
-      f"{recording.get_num_samples()/fs:.0f} s, {len(gt_trains)} ground-truth units")
+print(
+    f"{recording.get_num_channels()} channels, {fs/1000:.0f} kHz, "
+    f"{recording.get_num_samples()/fs:.0f} s, {len(gt_trains)} ground-truth units"
+)
 # -
 
 # ## Two pseudo-sessions with a known overlapping unit set
@@ -161,9 +167,11 @@ print(f"{recording.get_num_channels()} channels, {fs/1000:.0f} kHz, "
 # future work; this walkthrough only needs a realistic input to exercise the API.)
 
 # +
-S1_IDS = list(range(0, 16))   # session 1 keeps units 0..15 over the first half
-S2_IDS = list(range(8, 24))   # session 2 keeps units 8..23 over the second half
-SHARED = sorted(set(S1_IDS) & set(S2_IDS))  # 8..15 -> 8 true cross-session pairs
+S1_IDS = list(range(0, 16))  # session 1 keeps units 0..15 over the first half
+S2_IDS = list(range(8, 24))  # session 2 keeps units 8..23 over the second half
+SHARED = sorted(
+    set(S1_IDS) & set(S2_IDS)
+)  # 8..15 -> 8 true cross-session pairs
 print("shared (true match) units:", SHARED)
 
 
@@ -179,8 +187,14 @@ def session_sorting(unit_ids):
 n = recording.get_num_samples()
 mid = n // 2
 sessions = {
-    "Session1": (recording.frame_slice(0, mid), session_sorting(S1_IDS).frame_slice(0, mid)),
-    "Session2": (recording.frame_slice(mid, n), session_sorting(S2_IDS).frame_slice(mid, n)),
+    "Session1": (
+        recording.frame_slice(0, mid),
+        session_sorting(S1_IDS).frame_slice(0, mid),
+    ),
+    "Session2": (
+        recording.frame_slice(mid, n),
+        session_sorting(S2_IDS).frame_slice(mid, n),
+    ),
 }
 # -
 
@@ -196,9 +210,14 @@ srec1, ssort1 = sessions["Session1"]
 v2_analyzer = si.create_sorting_analyzer(ssort1, srec1, sparse=True)
 v2_analyzer.compute(["random_spikes", "noise_levels", "templates", "waveforms"])
 v2_analyzer.compute("unit_locations")
-print("v2 analyzer extensions:", sorted(v2_analyzer.get_loaded_extension_names()))
-print("templates extension shape:",
-      v2_analyzer.get_extension("templates").get_data().shape, "(sparse)")
+print(
+    "v2 analyzer extensions:", sorted(v2_analyzer.get_loaded_extension_names())
+)
+print(
+    "templates extension shape:",
+    v2_analyzer.get_extension("templates").get_data().shape,
+    "(sparse)",
+)
 
 # ## Wrapper-owned UnitMatch bundle
 #
@@ -215,6 +234,7 @@ print("templates extension shape:",
 # - `channel_positions.npy` — `(n_channels, 2)`
 # - `cluster_group.tsv` — `cluster_id`/`group` columns; `good` rows are matched
 
+
 # +
 def write_bundle(session_dir, srec, ssort):
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -224,20 +244,36 @@ def write_bundle(session_dir, srec, ssort):
         analyzer = si.create_sorting_analyzer(
             ssort.frame_slice(a0, a1), srec.frame_slice(a0, a1), sparse=False
         )
-        analyzer.compute("random_spikes", method="uniform", max_spikes_per_unit=100, seed=0)
+        analyzer.compute(
+            "random_spikes", method="uniform", max_spikes_per_unit=100, seed=0
+        )
         # Symmetric window so the trough sits at the centre sample; UnitMatch's
         # load_good_waveforms forces peak_loc = spike_width // 2, so an asymmetric
         # window would misplace the peak and flag every unit "bad".
         analyzer.compute("waveforms", ms_before=1.5, ms_after=1.5)
         analyzer.compute("templates")
         t_halves.append(analyzer.get_extension("templates").get_data())
-    avg_waves = np.stack(t_halves, axis=-1)  # (n_units, spike_width, n_channels, 2)
+    avg_waves = np.stack(
+        t_halves, axis=-1
+    )  # (n_units, spike_width, n_channels, 2)
     unit_ids = np.asarray(ssort.get_unit_ids(), dtype=int)
     np.save(session_dir / "channel_positions.npy", srec.get_channel_locations())
-    erd.save_avg_waveforms(avg_waves, str(session_dir), unit_ids, unit_ids,
-                           extract_good_units_only=False)
-    rows = [np.array(("cluster_id", "group"))] + [np.array((str(i), "good")) for i in unit_ids]
-    np.savetxt(session_dir / "cluster_group.tsv", np.vstack(rows), fmt=["%s", "%s"], delimiter="\t")
+    erd.save_avg_waveforms(
+        avg_waves,
+        str(session_dir),
+        unit_ids,
+        unit_ids,
+        extract_good_units_only=False,
+    )
+    rows = [np.array(("cluster_id", "group"))] + [
+        np.array((str(i), "good")) for i in unit_ids
+    ]
+    np.savetxt(
+        session_dir / "cluster_group.tsv",
+        np.vstack(rows),
+        fmt=["%s", "%s"],
+        delimiter="\t",
+    )
 
 
 bundle_root = Path(tempfile.mkdtemp(prefix="unitmatch_bundle_"))
@@ -247,9 +283,15 @@ for name, (srec, ssort) in sessions.items():
     write_bundle(sdir, srec, ssort)
     session_dirs.append(str(sdir))
 
-sample = next((Path(session_dirs[0]) / "RawWaveforms").glob("Unit*_RawSpikes.npy"))
+sample = next(
+    (Path(session_dirs[0]) / "RawWaveforms").glob("Unit*_RawSpikes.npy")
+)
 print("bundle files:", sorted(p.name for p in Path(session_dirs[0]).iterdir()))
-print("per-unit RawWaveforms shape:", np.load(sample).shape, "(spike_width, n_channels, 2)")
+print(
+    "per-unit RawWaveforms shape:",
+    np.load(sample).shape,
+    "(spike_width, n_channels, 2)",
+)
 # -
 
 # ## Run UnitMatch
@@ -270,7 +312,9 @@ param = uutil.get_probe_geometry(raw_positions, param)
 print(f"probe geometry: {param['no_shanks']} shanks")
 
 waveform, session_id, session_switch, within_session, good_units, param = (
-    uutil.load_good_waveforms(wave_paths, label_paths, param, good_units_only=True)
+    uutil.load_good_waveforms(
+        wave_paths, label_paths, param, good_units_only=True
+    )
 )
 # Zero-centre: subtract the mean of the first 15 samples (per-unit, per-channel).
 waveform = waveform - np.broadcast_to(
@@ -282,27 +326,35 @@ clus_info = {
     "session_id": session_id,
     "original_ids": np.concatenate(good_units),
 }
-print(f"stacked waveform {waveform.shape}: n_units={param['n_units']} "
-      f"(per session {param['n_units_per_session']}), spike_width={param['spike_width']}, "
-      f"peak_loc={param['peak_loc']}, n_channels={param['n_channels']}")
+print(
+    f"stacked waveform {waveform.shape}: n_units={param['n_units']} "
+    f"(per session {param['n_units_per_session']}), spike_width={param['spike_width']}, "
+    f"peak_loc={param['peak_loc']}, n_channels={param['n_channels']}"
+)
 
 # +
 t_start = time.monotonic()
 extracted = ov.extract_parameters(waveform, channel_pos, clus_info, param)
-total_score, candidate_pairs, scores_to_include, predictors = ov.extract_metric_scores(
-    extracted, session_switch, within_session, param, niter=2
+total_score, candidate_pairs, scores_to_include, predictors = (
+    ov.extract_metric_scores(
+        extracted, session_switch, within_session, param, niter=2
+    )
 )
 # n_expected_matches is populated by extract_metric_scores (this call order matters)
 prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
 priors = np.array((prior_match, 1 - prior_match))
 labels = candidate_pairs.astype(int)
 cond = np.unique(labels)
-kernels = bf.get_parameter_kernels(scores_to_include, labels, cond, param, add_one=1)
+kernels = bf.get_parameter_kernels(
+    scores_to_include, labels, cond, param, add_one=1
+)
 probability = bf.apply_naive_bayes(kernels, priors, predictors, param, cond)
 prob_matrix = probability[:, 1].reshape(param["n_units"], param["n_units"])
 runtime_s = time.monotonic() - t_start
 
-print(f"probability matrix {prob_matrix.shape}, range [{prob_matrix.min():.3f}, {prob_matrix.max():.3f}]")
+print(
+    f"probability matrix {prob_matrix.shape}, range [{prob_matrix.min():.3f}, {prob_matrix.max():.3f}]"
+)
 print(f"metric scores: {list(scores_to_include.keys())}")
 # -
 
@@ -331,12 +383,22 @@ unique_ids = aid.assign_unique_id(prob_matrix, param, clus_info)
 # tier — the strict tracked-unit analog; index it explicitly, not by guesswork.
 conservative_uids = unique_ids[2]
 match_table = su.make_match_table(
-    scores_to_include, matches, prob_matrix, total_score, output_threshold,
-    clus_info, param, UIDs=unique_ids,
+    scores_to_include,
+    matches,
+    prob_matrix,
+    total_score,
+    output_threshold,
+    clus_info,
+    param,
+    UIDs=unique_ids,
 )
-print("assign_unique_id -> list of", np.shape(unique_ids),
-      "(rows: Liberal / Intermediate / Conservative / default);",
-      "n distinct Conservative groups:", len(np.unique(conservative_uids)))
+print(
+    "assign_unique_id -> list of",
+    np.shape(unique_ids),
+    "(rows: Liberal / Intermediate / Conservative / default);",
+    "n distinct Conservative groups:",
+    len(np.unique(conservative_uids)),
+)
 print("make_match_table ->", type(match_table).__name__, match_table.shape)
 print("columns:", list(match_table.columns))
 match_table.head()
@@ -360,17 +422,25 @@ scores = np.concatenate([true_pairs, false_pairs])
 order = np.argsort(scores)
 ranks = np.empty_like(order, dtype=float)
 ranks[order] = np.arange(1, len(scores) + 1)
-auc = (ranks[: true_pairs.size].sum() - true_pairs.size * (true_pairs.size + 1) / 2) / (
-    true_pairs.size * false_pairs.size
-)
+auc = (
+    ranks[: true_pairs.size].sum() - true_pairs.size * (true_pairs.size + 1) / 2
+) / (true_pairs.size * false_pairs.size)
 
 peak_rss_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9
 print(f"true pairs:  mean={true_pairs.mean():.3f}  min={true_pairs.min():.3f}")
-print(f"false pairs: mean={false_pairs.mean():.3f}  max={false_pairs.max():.3f}")
-print(f"true > {threshold}: {(true_pairs > threshold).sum()}/{true_pairs.size}  |  "
-      f"AUC = {auc:.3f}")
-print(f"compute cost: {runtime_s:.1f} s inference, {peak_rss_gb:.2f} GB peak RSS")
-assert auc > 0.85, "cross-session match probability failed to separate true pairs"
+print(
+    f"false pairs: mean={false_pairs.mean():.3f}  max={false_pairs.max():.3f}"
+)
+print(
+    f"true > {threshold}: {(true_pairs > threshold).sum()}/{true_pairs.size}  |  "
+    f"AUC = {auc:.3f}"
+)
+print(
+    f"compute cost: {runtime_s:.1f} s inference, {peak_rss_gb:.2f} GB peak RSS"
+)
+assert (
+    auc > 0.85
+), "cross-session match probability failed to separate true pairs"
 # -
 
 fig, ax = plt.subplots(figsize=(5, 4))

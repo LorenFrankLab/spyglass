@@ -366,9 +366,9 @@ def test_check_path_deleted_but_rebuilt_is_tracked(
         deleted_files={"rebuilt.nwb"},
         hash_map={"rebuilt.nwb": "a-different-stored-hash"},
     )
-    assert result is not None, (
-        "a rebuilt-but-flagged file must be tracked, not skipped"
-    )
+    assert (
+        result is not None
+    ), "a rebuilt-but-flagged file must be tracked, not skipped"
     assert "checksum mismatch" in result["issue"]
 
 

@@ -361,9 +361,9 @@ def test_export_file_rows_removed_on_overwrite(common, teardown):
                 "spyglass_version": "test",
             }
         )
-        return (
-            sel & {"paper_id": paper, "analysis_id": analysis_id}
-        ).fetch1("export_id")
+        return (sel & {"paper_id": paper, "analysis_id": analysis_id}).fetch1(
+            "export_id"
+        )
 
     e1 = _make_selection("a1")  # superseded (already exported)
     e2 = _make_selection("a2")  # superseding (max) export
@@ -399,9 +399,7 @@ def test_export_file_rows_removed_on_overwrite(common, teardown):
             (export & {"paper_id": paper}).super_delete(
                 warn=False, safemode=False
             )
-            (sel & {"paper_id": paper}).super_delete(
-                warn=False, safemode=False
-            )
+            (sel & {"paper_id": paper}).super_delete(warn=False, safemode=False)
 
 
 def test_invalid_export_id(export_tbls):

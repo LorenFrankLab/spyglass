@@ -557,6 +557,7 @@ is_interneuron = (shape["firing_rate"] > rate_cut_hz) & (
 )
 
 import matplotlib.pyplot as plt
+
 fig, ax = plt.subplots(figsize=(5, 4))
 ax.scatter(
     shape.loc[~is_interneuron, "trough_half_width"] * 1e3,
@@ -576,7 +577,9 @@ ax.axvline(width_cut_s * 1e3, ls="--", c="gray")
 ax.axhline(rate_cut_hz, ls="--", c="gray")
 ax.set_xlabel("trough_half_width (ms)")
 ax.set_ylabel("firing_rate (Hz)")
-ax.set_title("Putative cell types — YOUR hippocampal thresholds, not the pipeline's")
+ax.set_title(
+    "Putative cell types — YOUR hippocampal thresholds, not the pipeline's"
+)
 ax.legend()
 print(
     f"{int(is_interneuron.sum())} putative interneuron(s), "
@@ -660,7 +663,9 @@ ssviz.plot_metrics(final_eval_sel)  # the routed Spyglass metric table, plotted
 # Here we fetch spike times: one array of spike times (seconds) per unit.
 #
 
-merge_id = final_merge_id  # the curated result (root is run_summary["merge_id"])
+merge_id = (
+    final_merge_id  # the curated result (root is run_summary["merge_id"])
+)
 spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 print(f"{len(spike_times)} unit(s)")
 spike_times

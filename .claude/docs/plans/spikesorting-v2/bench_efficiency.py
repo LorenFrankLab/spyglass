@@ -67,8 +67,10 @@ def m1_get_times():
     import spikeinterface.full as si
 
     sizes = [1_000_000, 10_000_000, N_REF]
-    print(f"{'n_samples':>12} {'mode':>10} {'dtype':>9} {'MB(array)':>10} "
-          f"{'peak MB':>9} {'median ms':>10}")
+    print(
+        f"{'n_samples':>12} {'mode':>10} {'dtype':>9} {'MB(array)':>10} "
+        f"{'peak MB':>9} {'median ms':>10}"
+    )
     for n in sizes:
         secs = n / FS
         rec = si.generate_recording(
@@ -80,9 +82,11 @@ def m1_get_times():
         del out
         peak = _peak_mb(lambda: rec.get_times())
         med, _ = _timeit(lambda: rec.get_times())
-        print(f"{n:>12,} {'rate-based':>10} {str(np.dtype('float64')):>9} "
-              f"{arr_mb:>10.1f} {peak:>9.1f} {med*1e3:>10.2f}"
-              f"   concrete_ndarray={is_concrete}")
+        print(
+            f"{n:>12,} {'rate-based':>10} {str(np.dtype('float64')):>9} "
+            f"{arr_mb:>10.1f} {peak:>9.1f} {med*1e3:>10.2f}"
+            f"   concrete_ndarray={is_concrete}"
+        )
         del rec
         gc.collect()
 
@@ -93,11 +97,15 @@ def m1_get_times():
     )
     rec.set_times(np.arange(n, dtype=np.float64) / FS, segment_index=0)
     out = rec.get_times()
-    print(f"{n:>12,} {'explicit':>10} {str(out.dtype):>9} "
-          f"{out.nbytes/2**20:>10.1f} {'--':>9} {'--':>10}"
-          f"   concrete_ndarray={isinstance(out, np.ndarray)}")
-    print(f"\n  -> get_times() materializes float64 = 8 bytes/sample in BOTH "
-          f"modes; at N_REF={N_REF:,} that is {N_REF*8/2**20:.0f} MB per call.")
+    print(
+        f"{n:>12,} {'explicit':>10} {str(out.dtype):>9} "
+        f"{out.nbytes/2**20:>10.1f} {'--':>9} {'--':>10}"
+        f"   concrete_ndarray={isinstance(out, np.ndarray)}"
+    )
+    print(
+        f"\n  -> get_times() materializes float64 = 8 bytes/sample in BOTH "
+        f"modes; at N_REF={N_REF:,} that is {N_REF*8/2**20:.0f} MB per call."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -107,8 +115,10 @@ def m2_artifact_frames():
     _section("M2  artifact_frames = every masked sample (R2 detail)")
     rng = np.random.default_rng(SEED)
     print(f"  N_REF = {N_REF:,} samples (1 h @ 30 kHz)")
-    print(f"{'artifact %':>11} {'n_spans':>9} {'frames(M)':>10} "
-          f"{'int64 MB':>9} {'concat ms':>10}")
+    print(
+        f"{'artifact %':>11} {'n_spans':>9} {'frames(M)':>10} "
+        f"{'int64 MB':>9} {'concat ms':>10}"
+    )
     for frac in (0.001, 0.01, 0.05):
         masked = int(N_REF * frac)
         n_spans = 2000  # artifact bursts scattered across the recording
@@ -123,12 +133,16 @@ def m2_artifact_frames():
 
         frames = build()
         med, _ = _timeit(build)
-        print(f"{frac*100:>10.1f}% {n_spans:>9,} {frames.size/1e6:>10.2f} "
-              f"{frames.nbytes/2**20:>9.1f} {med*1e3:>10.2f}")
+        print(
+            f"{frac*100:>10.1f}% {n_spans:>9,} {frames.size/1e6:>10.2f} "
+            f"{frames.nbytes/2**20:>9.1f} {med*1e3:>10.2f}"
+        )
         del frames
-    print("\n  -> the trigger array passed to SI's RemoveArtifacts scales with "
-          "total masked samples; a heavily-artifacted hour reaches tens of "
-          "millions of int64 frames.")
+    print(
+        "\n  -> the trigger array passed to SI's RemoveArtifacts scales with "
+        "total masked samples; a heavily-artifacted hour reaches tens of "
+        "millions of int64 frames."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -165,8 +179,10 @@ def m3_concat_split():
     rng = np.random.default_rng(SEED)
     per_member_samples = 9_000_000  # 5 min @ 30 kHz per member
     spikes_per_unit = 20_000
-    print(f"{'members':>8} {'units':>6} {'cur ms':>9} {'vec ms':>9} "
-          f"{'speedup':>8} {'equal':>6}")
+    print(
+        f"{'members':>8} {'units':>6} {'cur ms':>9} {'vec ms':>9} "
+        f"{'speedup':>8} {'equal':>6}"
+    )
     for n_members in (2, 5, 10, 20):
         for n_units in (50, 200):
             boundaries = [
@@ -181,15 +197,15 @@ def m3_concat_split():
             vec = _split_vectorized(trains, boundaries)
             equal = all(
                 set(cur[m]) == set(vec[m])
-                and all(
-                    np.array_equal(cur[m][u], vec[m][u]) for u in cur[m]
-                )
+                and all(np.array_equal(cur[m][u], vec[m][u]) for u in cur[m])
                 for m in range(n_members)
             )
             cur_med, _ = _timeit(lambda: current(trains, boundaries))
             vec_med, _ = _timeit(lambda: _split_vectorized(trains, boundaries))
-            print(f"{n_members:>8} {n_units:>6} {cur_med*1e3:>9.1f} "
-                  f"{vec_med*1e3:>9.1f} {cur_med/vec_med:>7.2f}x {str(equal):>6}")
+            print(
+                f"{n_members:>8} {n_units:>6} {cur_med*1e3:>9.1f} "
+                f"{vec_med*1e3:>9.1f} {cur_med/vec_med:>7.2f}x {str(equal):>6}"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -215,8 +231,10 @@ def m4_unitmatch_dense():
         print(f"{n:>8} {prob.nbytes/2**20:>9.1f} {peak:>20.1f}")
         del prob
         gc.collect()
-    print("\n  -> several dense n x n arrays on top of UnitMatch's own n x n "
-          "prob matrix; upper-tri indices would allocate only candidate pairs.")
+    print(
+        "\n  -> several dense n x n arrays on top of UnitMatch's own n x n "
+        "prob matrix; upper-tri indices would allocate only candidate pairs."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -249,19 +267,25 @@ def m6_nwb_open():
         session_start_time=datetime(2020, 1, 1, tzinfo=timezone.utc),
     )
     for uid in range(200):
-        nwbf.add_unit(id=uid, spike_times=list(np.sort(
-            np.random.default_rng(uid).random(500))))
+        nwbf.add_unit(
+            id=uid,
+            spike_times=list(np.sort(np.random.default_rng(uid).random(500))),
+        )
     with pynwb.NWBHDF5IO(path=str(tmp), mode="w") as io:
         io.write(nwbf)
 
     def open_read():
-        with pynwb.NWBHDF5IO(path=str(tmp), mode="r", load_namespaces=True) as io:
+        with pynwb.NWBHDF5IO(
+            path=str(tmp), mode="r", load_namespaces=True
+        ) as io:
             f = io.read()
             _ = f.units.id[:]
 
     med, mn = _timeit(open_read)
-    print(f"  units NWB (200 units): open+read median={med*1e3:.1f} ms "
-          f"min={mn*1e3:.1f} ms  (x2 when a call opens it twice)")
+    print(
+        f"  units NWB (200 units): open+read median={med*1e3:.1f} ms "
+        f"min={mn*1e3:.1f} ms  (x2 when a call opens it twice)"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -299,13 +323,19 @@ def _write_explicit_recording_nwb(path, n_samples, n_channels, fs, gap=False):
     grp = nwbf.create_electrode_group("g", "d", "loc", dev)
     for _ in range(n_channels):
         nwbf.add_electrode(
-            x=0.0, y=0.0, z=0.0, imp=0.0, location="loc",
-            filtering="f", group=grp, group_name="g",
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            imp=0.0,
+            location="loc",
+            filtering="f",
+            group=grp,
+            group_name="g",
         )
     region = nwbf.create_electrode_table_region(list(range(n_channels)), "all")
     ts = np.arange(n_samples, dtype=np.float64) / fs
     if gap:  # one disjoint wall-clock gap halfway (explicit, non-uniform)
-        ts[n_samples // 2:] += 5.0
+        ts[n_samples // 2 :] += 5.0
     data = np.zeros((n_samples, n_channels), dtype=np.float32)
     chunk = (min(n_samples, 32768), n_channels)
     es = ElectricalSeries(
@@ -332,7 +362,9 @@ def _peak_op(factory, op):
 
 
 def t1_artifact_timestamp_memory():
-    _section("T1  artifact timestamp consumers: peak memory (explicit recording)")
+    _section(
+        "T1  artifact timestamp consumers: peak memory (explicit recording)"
+    )
     import tempfile
     from pathlib import Path
 
@@ -353,17 +385,24 @@ def t1_artifact_timestamp_memory():
 
     n_channels = 4
     tmpdir = Path(tempfile.mkdtemp())
-    params_no_detect = ArtifactDetectionParamsSchema.model_validate(dict(
-        detect=False, amplitude_threshold_uv=1000.0, zscore_threshold=None,
-        proportion_above_threshold=1.0, removal_window_ms=1.0,
-        join_window_ms=1.0, min_length_s=0.001,
-    ))
+    params_no_detect = ArtifactDetectionParamsSchema.model_validate(
+        dict(
+            detect=False,
+            amplitude_threshold_uv=1000.0,
+            zscore_threshold=None,
+            proportion_above_threshold=1.0,
+            removal_window_ms=1.0,
+            join_window_ms=1.0,
+            min_length_s=0.001,
+        )
+    )
 
     def _old_apply_get_times(recording, valid_times):
         """Frozen pre-T1 apply_artifact_mask root: materialize get_times() +
         searchsorted, then the SAME remove_artifacts trigger as the new path.
         Used only to measure the before/after delta (the get_times() materialize
-        the T1 change removes); the residual trigger-array cost (M2) is shared."""
+        the T1 change removes); the residual trigger-array cost (M2) is shared.
+        """
         valid_times = np.asarray(valid_times, dtype=float)
         timestamps = recording.get_times()
         frame_ranges = []
@@ -382,23 +421,35 @@ def t1_artifact_timestamp_memory():
         if not frame_ranges:
             return recording
         import spikeinterface.preprocessing as sip
-        af = np.concatenate([np.arange(s, e, dtype=np.int64)
-                             for s, e in frame_ranges])
-        return sip.remove_artifacts(recording=recording, list_triggers=[af],
-                                    ms_before=None, ms_after=None, mode="zeros")
 
-    print(f"{'n_samples':>11} {'vec MB':>8} | bounded T1 consumers (peak MB) "
-          f"{'':>4}| apply_mask peak MB")
-    print(f"{'':>11} {'':>8} | {'get_times':>9} {'base+gaps':>9} "
-          f"{'finger':>7} {'frames':>7} {'detect=F':>8} | "
-          f"{'OLD':>7} {'NEW':>7} {'Δ(saved)':>9}")
+        af = np.concatenate(
+            [np.arange(s, e, dtype=np.int64) for s, e in frame_ranges]
+        )
+        return sip.remove_artifacts(
+            recording=recording,
+            list_triggers=[af],
+            ms_before=None,
+            ms_after=None,
+            mode="zeros",
+        )
+
+    print(
+        f"{'n_samples':>11} {'vec MB':>8} | bounded T1 consumers (peak MB) "
+        f"{'':>4}| apply_mask peak MB"
+    )
+    print(
+        f"{'':>11} {'':>8} | {'get_times':>9} {'base+gaps':>9} "
+        f"{'finger':>7} {'frames':>7} {'detect=F':>8} | "
+        f"{'OLD':>7} {'NEW':>7} {'Δ(saved)':>9}"
+    )
     for n in (1_000_000, 5_000_000):
         path = tmpdir / f"rec_{n}.nwb"
         _write_explicit_recording_nwb(path, n, n_channels, FS)
 
         def factory():
             return se.read_nwb_recording(
-                str(path), electrical_series_path="acquisition/es",
+                str(path),
+                electrical_series_path="acquisition/es",
                 load_time_vector=True,
             )
 
@@ -423,25 +474,31 @@ def t1_artifact_timestamp_memory():
         peak_apply_new = _peak_op(
             factory, lambda r: apply_artifact_mask(r, valid_times)
         )
-        print(f"{n:>11,} {vec_mb:>8.1f} | {peak_get_times:>8.1f}M "
-              f"{peak_base:>8.1f}M {peak_fp:>6.1f}M {peak_frames:>6.2f}M "
-              f"{peak_detect:>7.1f}M | {peak_apply_old:>6.1f}M "
-              f"{peak_apply_new:>6.1f}M {peak_apply_old - peak_apply_new:>+8.1f}M")
-    print(f"\n  -> get_times() peak grows 8 bytes/sample (~{N_REF*8/2**20:.0f} MB "
-          f"at N_REF={N_REF:,}); the T1 consumers (base+gaps / fingerprint /\n"
-          "     frames / detect=False) stay bounded by the ~1 s chunk regardless"
-          " of length.\n"
-          "  -> apply_mask Δ(saved) == the removed get_times() materialization; "
-          "the residual NEW\n     apply peak is the artifact_frames trigger array"
-          " (M2), which T1 does not change.")
+        print(
+            f"{n:>11,} {vec_mb:>8.1f} | {peak_get_times:>8.1f}M "
+            f"{peak_base:>8.1f}M {peak_fp:>6.1f}M {peak_frames:>6.2f}M "
+            f"{peak_detect:>7.1f}M | {peak_apply_old:>6.1f}M "
+            f"{peak_apply_new:>6.1f}M {peak_apply_old - peak_apply_new:>+8.1f}M"
+        )
+    print(
+        f"\n  -> get_times() peak grows 8 bytes/sample (~{N_REF*8/2**20:.0f} MB "
+        f"at N_REF={N_REF:,}); the T1 consumers (base+gaps / fingerprint /\n"
+        "     frames / detect=False) stay bounded by the ~1 s chunk regardless"
+        " of length.\n"
+        "  -> apply_mask Δ(saved) == the removed get_times() materialization; "
+        "the residual NEW\n     apply peak is the artifact_frames trigger array"
+        " (M2), which T1 does not change."
+    )
 
 
 def main():
     print("Spikesorting v2 efficiency microbenchmarks")
     import spikeinterface as si
 
-    print(f"  python={platform.python_version()} numpy={np.__version__} "
-          f"spikeinterface={si.__version__}")
+    print(
+        f"  python={platform.python_version()} numpy={np.__version__} "
+        f"spikeinterface={si.__version__}"
+    )
     print(f"  platform={platform.platform()}")
     print(f"  SEED={SEED} REPEATS={REPEATS} N_REF={N_REF:,}")
     m5_njobs_default()

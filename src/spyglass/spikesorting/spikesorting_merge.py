@@ -21,6 +21,7 @@ from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
+
 # v2 is in-development and gated behind the DB-host safety guard
 # (raises on non-localhost). Import the v2 module lazily and wrap in
 # try/except so v0/v1-only environments keep working unchanged; the
@@ -48,7 +49,9 @@ def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
     """
     try:
         from spyglass.spikesorting.v2.curation import CurationV2
-    except Exception as err:  # noqa: BLE001 -- see docstring (RuntimeError path)
+    except (
+        Exception
+    ) as err:  # noqa: BLE001 -- see docstring (RuntimeError path)
         logger.warning(
             "spikesorting v2 is unavailable; SpikeSortingOutput will be "
             "declared without its CurationV2 part in this process. "

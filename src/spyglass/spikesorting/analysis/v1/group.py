@@ -267,9 +267,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     sorting_spike_times = list(
                         compress(sorting_spike_times, include_unit)
                     )
-                    file_unit_ids = list(
-                        compress(file_unit_ids, include_unit)
-                    )
+                    file_unit_ids = list(compress(file_unit_ids, include_unit))
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
