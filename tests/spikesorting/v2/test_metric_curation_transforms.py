@@ -113,6 +113,34 @@ def test_apply_label_rules_non_finite_compares_false(value, operator):
     assert labels == {}
 
 
+def test_is_finite_metric_value_warns_on_non_numeric(caplog):
+    """A genuinely non-numeric metric cell (an SI shape/dtype drift) is filtered
+    AND logged -- the swallow must be visible, unlike a legitimate NaN which is
+    a silent low-spike skip."""
+    from spyglass.spikesorting.v2._metric_curation import (
+        _is_finite_metric_value,
+    )
+
+    with caplog.at_level("WARNING"):
+        result = _is_finite_metric_value("not-a-number")
+    assert result is False
+    assert any(
+        "metric" in record.getMessage().lower() for record in caplog.records
+    ), "non-numeric metric value was filtered silently"
+
+
+def test_is_finite_metric_value_nan_filtered_silently(caplog):
+    """A legitimate NaN (low-spike unit) is filtered without any warning."""
+    from spyglass.spikesorting.v2._metric_curation import (
+        _is_finite_metric_value,
+    )
+
+    with caplog.at_level("WARNING"):
+        result = _is_finite_metric_value(np.nan)
+    assert result is False
+    assert not caplog.records
+
+
 def test_apply_label_rules_missing_metric_raises():
     """A rule referencing an absent metric column fails loudly before write."""
     metrics = pd.DataFrame({"snr": [1.0]}, index=[0])

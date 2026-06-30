@@ -15,6 +15,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from spyglass.utils import logger
+
 # Threshold-rule comparison operators. Mirrors the ``operator`` enum on
 # ``AutoCurationRules.Rule`` and the ``RuleOperator`` Literal in
 # ``_params/metric_curation.py``. Non-finite metric values are filtered before
@@ -31,12 +33,28 @@ _COMPARISON_TO_FUNCTION = {
 
 
 def _is_finite_metric_value(value) -> bool:
-    """Return whether one metric scalar can participate in thresholding."""
+    """Return whether one metric scalar can participate in thresholding.
+
+    A legitimate ``NaN`` (a low-spike unit's metric) is filtered silently. A
+    genuinely non-numeric value -- which would mean SpikeInterface's metric
+    output drifted to a non-scalar shape/dtype -- is also filtered, but logged
+    at WARNING rather than swallowed, so an auto-curation rule that silently
+    stops flagging a unit is visible (mirroring the write path, which warns
+    when it coerces a non-scalar metric to NaN).
+    """
     if pd.isna(value):
         return False
     try:
         return bool(np.isfinite(value))
     except TypeError:
+        logger.warning(
+            "auto-curation: metric value %r (type %s) is not a finite number; "
+            "the unit is skipped for this threshold rule. This usually means a "
+            "quality-metric column drifted to a non-scalar dtype -- check the "
+            "QualityMetricParameters output.",
+            value,
+            type(value).__name__,
+        )
         return False
 
 
