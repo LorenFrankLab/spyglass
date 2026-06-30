@@ -2149,7 +2149,21 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
         ).super_delete(warn=False)
         if saved_registry is not None:
             _restore_matcher_registry(saved_registry)
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
         for child in accepted_children:
+            # Accepting an evaluation registers the child curation on the
+            # SpikeSortingOutput merge table, so drop the merge master (it
+            # cascades to its CurationV2 part) BEFORE deleting the curation --
+            # DataJoint refuses to delete the part ahead of its master.
+            for mid in (SpikeSortingOutput.CurationV2 & child).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
             (CurationV2 & child).super_delete(warn=False)
 
 
