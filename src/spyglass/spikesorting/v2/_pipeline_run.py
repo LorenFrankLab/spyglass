@@ -236,11 +236,15 @@ def run_v2_pipeline(
     Returns
     -------
     RunV2PipelineSummary
-        Run summary. The sort / curation / merge keys are always present; the
-        source-stage keys depend on the input mode.
+        Run summary -- a ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``
+        (the two arms of the ``RunV2PipelineSummary`` union). The sort / curation
+        / merge keys are always present; the source-stage keys depend on the
+        input mode, discriminated by ``source_mode``.
 
         Always present:
             ``pipeline_preset``          : the pipeline-preset name
+            ``source_mode``              : ``"single_session"`` or ``"concat"``
+                (the discriminant for the mode-specific source keys below)
             ``sorting_id``               : SortingSelection PK
             ``curation_id``              : CurationV2 PK
             ``merge_id``                 : SpikeSortingOutput master PK
@@ -489,6 +493,7 @@ def run_v2_pipeline(
 
     if is_single:
         # Single-session: recording (+ optional artifact detection) -> sort.
+        run_summary["source_mode"] = "single_session"
         recording_key = RecordingSelection.insert_selection(
             {
                 "nwb_file_name": nwb_file_name,
@@ -554,6 +559,7 @@ def run_v2_pipeline(
         # The concat SortingSelection carries no ArtifactDetectionSource row, so
         # the manifest omits the artifact stage and carries concat_recording_id
         # in place of recording_id.
+        run_summary["source_mode"] = "concat"
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
             ConcatenatedRecordingSelection,

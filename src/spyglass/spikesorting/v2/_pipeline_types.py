@@ -25,19 +25,7 @@ from typing_extensions import NotRequired
 
 StageStatus: TypeAlias = Literal["computed", "reused", "skipped"]
 PipelineOutcome: TypeAlias = Literal["ok", "failed"]
-
-
-class RunV2PipelineRequiredInputs(TypedDict):
-    """Required ``run_v2_pipeline`` keyword arguments for a single-session run.
-
-    A concat run instead supplies ``concat_session_group_owner`` /
-    ``concat_session_group_name`` (see ``RunV2PipelineInputs``).
-    """
-
-    nwb_file_name: str
-    sort_group_id: int
-    interval_list_name: str
-    team_name: str
+SourceMode: TypeAlias = Literal["single_session", "concat"]
 
 
 class RunV2PipelineInputs(TypedDict, total=False):
@@ -113,15 +101,14 @@ class PipelineStageSeconds(TypedDict):
     figpack: NotRequired[float]
 
 
-class RunV2PipelineSummary(TypedDict):
-    """Return value of ``run_v2_pipeline``.
+class _RunV2SummaryBase(TypedDict):
+    """Keys present in every ``run_v2_pipeline`` summary (both input modes).
 
-    The source keys depend on the input mode. Single-session runs carry
-    ``recording_id`` / ``recording_status`` and ``artifact_detection_id`` /
-    ``artifact_detection_status``; concat runs carry ``concat_recording_id`` /
-    ``concat_recording_status`` and ``member_recording_ids`` instead, and omit
-    the artifact keys (a concat sort has no ArtifactDetectionSource row). The
-    sorting / curation / merge keys are always present.
+    Not a public type on its own -- a summary always carries a ``source_mode``
+    discriminant from one of the concrete subclasses below. This base holds the
+    always-present sort / curation / merge keys plus the flag-gated
+    auto-curation / FigPack keys (which apply to either mode), so the
+    single-session and concat summaries share one definition.
     """
 
     pipeline_preset: str
@@ -133,17 +120,6 @@ class RunV2PipelineSummary(TypedDict):
     curation_status: StageStatus
     stage_seconds: PipelineStageSeconds
     warnings: list[str]
-    # Single-session source keys. ``artifact_detection_id`` is None when the
-    # preset runs no artifact detection (status is then "skipped").
-    recording_id: NotRequired[UUID]
-    recording_status: NotRequired[StageStatus]
-    artifact_detection_id: NotRequired["UUID | None"]
-    artifact_detection_status: NotRequired[StageStatus]
-    # Concat source keys (concat mode only).
-    member_recording_status: NotRequired[StageStatus]
-    member_recording_ids: NotRequired[list[UUID]]
-    concat_recording_id: NotRequired[UUID]
-    concat_recording_status: NotRequired[StageStatus]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
     # CurationV2 (its curation_id + merge table id) whose labels are the
@@ -160,8 +136,49 @@ class RunV2PipelineSummary(TypedDict):
     figpack_status: NotRequired[StageStatus]
 
 
-class RunV2PipelineSessionOk(RunV2PipelineSummary):
-    """Successful entry returned by ``run_v2_pipeline_session``."""
+class RunV2SingleSessionSummary(_RunV2SummaryBase):
+    """``run_v2_pipeline`` summary for a single-session run.
+
+    ``source_mode == "single_session"``. Always carries the recording and
+    artifact-detection keys; ``artifact_detection_id`` is ``None`` (and
+    ``artifact_detection_status`` is ``"skipped"``) when the preset runs no
+    artifact detection.
+    """
+
+    source_mode: Literal["single_session"]
+    recording_id: UUID
+    recording_status: StageStatus
+    artifact_detection_id: "UUID | None"
+    artifact_detection_status: StageStatus
+
+
+class RunV2ConcatSummary(_RunV2SummaryBase):
+    """``run_v2_pipeline`` summary for a concat (SessionGroup) run.
+
+    ``source_mode == "concat"``. Carries the per-member recording PKs and the
+    ConcatenatedRecording keys in place of the single-session recording keys,
+    and has no artifact stage (a concat SortingSelection has no
+    ArtifactDetectionSource row).
+    """
+
+    source_mode: Literal["concat"]
+    member_recording_status: StageStatus
+    member_recording_ids: list[UUID]
+    concat_recording_id: UUID
+    concat_recording_status: StageStatus
+
+
+# A run_v2_pipeline summary is exactly one of the two modes; ``source_mode`` is
+# the discriminant a consumer narrows on.
+RunV2PipelineSummary: TypeAlias = RunV2SingleSessionSummary | RunV2ConcatSummary
+
+
+class RunV2PipelineSessionOk(RunV2SingleSessionSummary):
+    """Successful entry returned by ``run_v2_pipeline_session``.
+
+    ``run_v2_pipeline_session`` sorts every sort group of one session, so each
+    entry is a single-session summary plus the sort group id and outcome.
+    """
 
     sort_group_id: int
     outcome: Literal["ok"]
@@ -220,6 +237,16 @@ class UnitMatchMemberChoices(TypedDict):
     choices: list[UnitMatchCurationChoice]
 
 
+class UnitMatchStageSeconds(TypedDict):
+    """Per-stage wall-clock seconds for one ``run_v2_unit_match`` call.
+
+    ≈0 on an idempotent re-run (NOT cumulative compute cost).
+    """
+
+    unit_match: float
+    tracked_unit: float
+
+
 class RunV2UnitMatchSummary(TypedDict):
     """Return value of ``run_v2_unit_match``.
 
@@ -235,25 +262,26 @@ class RunV2UnitMatchSummary(TypedDict):
     n_pairs: int
     tracked_unit_status: StageStatus
     n_tracked_units: int
-    # Per-stage wall-clock seconds (keys ``unit_match`` / ``tracked_unit``) this
-    # call -- ≈0 on an idempotent re-run, NOT cumulative compute cost.
-    stage_seconds: dict[str, float]
+    stage_seconds: UnitMatchStageSeconds
     warnings: list[str]
 
 
 __all__ = [
     "PipelineOutcome",
     "PipelineStageSeconds",
+    "RunV2ConcatSummary",
     "RunV2PipelineInputs",
-    "RunV2PipelineRequiredInputs",
     "RunV2PipelineSessionFailed",
     "RunV2PipelineSessionInputs",
     "RunV2PipelineSessionOk",
     "RunV2PipelineSessionRequiredInputs",
     "RunV2PipelineSessionResult",
     "RunV2PipelineSummary",
+    "RunV2SingleSessionSummary",
     "RunV2UnitMatchSummary",
+    "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
     "UnitMatchMemberChoices",
+    "UnitMatchStageSeconds",
 ]

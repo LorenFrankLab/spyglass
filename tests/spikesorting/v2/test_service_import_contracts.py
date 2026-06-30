@@ -120,13 +120,6 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "figpack",
         "figpack_label_options",
     }
-    # The single-session required quartet is still documented as its own type.
-    assert pipeline_types.RunV2PipelineRequiredInputs.__required_keys__ == {
-        "nwb_file_name",
-        "sort_group_id",
-        "interval_list_name",
-        "team_name",
-    }
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
         "nwb_file_name",
         "interval_list_name",
@@ -159,8 +152,15 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "auto_curation",
         "figpack",
     }
-    assert pipeline_types.RunV2PipelineSummary.__required_keys__ == {
+    # RunV2PipelineSummary is a single/concat tagged union (discriminated by
+    # ``source_mode``), so pin each arm's keys rather than the alias (a union has
+    # no __required_keys__). The mode-specific source keys are REQUIRED on their
+    # arm -- the whole point of the union is that an illegal mix (e.g. a concat
+    # summary carrying recording_id) is unrepresentable. The flag-gated
+    # auto-curation / figpack keys stay optional on both arms.
+    _SUMMARY_BASE_REQUIRED = {
         "pipeline_preset",
+        "source_mode",
         "sorting_id",
         "curation_id",
         "merge_id",
@@ -170,19 +170,40 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "stage_seconds",
         "warnings",
     }
-    assert pipeline_types.RunV2PipelineSummary.__optional_keys__ == {
-        "recording_id",
-        "recording_status",
-        "artifact_detection_id",
-        "artifact_detection_status",
-        "member_recording_status",
-        "member_recording_ids",
-        "concat_recording_id",
-        "concat_recording_status",
+    _SUMMARY_OPTIONAL = {
         "curation_evaluation_id",
         "auto_curation_id",
         "auto_merge_id",
         "auto_curation_status",
         "figpack_uri",
         "figpack_status",
+    }
+    assert pipeline_types.RunV2SingleSessionSummary.__required_keys__ == (
+        _SUMMARY_BASE_REQUIRED
+        | {
+            "recording_id",
+            "recording_status",
+            "artifact_detection_id",
+            "artifact_detection_status",
+        }
+    )
+    assert (
+        pipeline_types.RunV2SingleSessionSummary.__optional_keys__
+        == _SUMMARY_OPTIONAL
+    )
+    assert pipeline_types.RunV2ConcatSummary.__required_keys__ == (
+        _SUMMARY_BASE_REQUIRED
+        | {
+            "member_recording_status",
+            "member_recording_ids",
+            "concat_recording_id",
+            "concat_recording_status",
+        }
+    )
+    assert (
+        pipeline_types.RunV2ConcatSummary.__optional_keys__ == _SUMMARY_OPTIONAL
+    )
+    assert pipeline_types.UnitMatchStageSeconds.__required_keys__ == {
+        "unit_match",
+        "tracked_unit",
     }
