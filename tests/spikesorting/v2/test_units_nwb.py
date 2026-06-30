@@ -443,6 +443,59 @@ def test_sample_indices_to_times_maps_only_requested_frames():
     assert rec.time_slice_calls == []
 
 
+def test_affine_start_time_uses_recording_start():
+    """When the recording reports an absolute start time, it is used as-is."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        _affine_recording_start_time,
+    )
+
+    rec = _FakeRecording([5.0, 5.0 + 1 / _FS, 5.0 + 2 / _FS], explicit=False)
+    assert _affine_recording_start_time(rec) == pytest.approx(5.0)
+
+
+def test_affine_start_time_warns_and_zeros_when_no_start_api(caplog):
+    """A recording exposing no start-time API uses relative timing (t_start=0.0)
+    but logs a warning, so the fallback is never silent (a v2 sort that lost its
+    session start must be visible, not fabricated into a 0.0 offset quietly)."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        _affine_recording_start_time,
+    )
+
+    class _NoStartTimeRecording:
+        def get_sampling_frequency(self):
+            return _FS
+
+        # deliberately exposes no get_start_time
+
+    with caplog.at_level("WARNING"):
+        t_start = _affine_recording_start_time(_NoStartTimeRecording())
+    assert t_start == 0.0
+    assert any(
+        "relative timing" in record.getMessage() for record in caplog.records
+    ), "no-start-time fallback to 0.0 was not logged"
+
+
+def test_affine_start_time_warns_and_zeros_when_start_is_none(caplog):
+    """get_start_time returning None (no absolute origin set) -> 0.0 + warning."""
+    from spyglass.spikesorting.v2._units_nwb import (
+        _affine_recording_start_time,
+    )
+
+    class _NoneStartRecording:
+        def get_sampling_frequency(self):
+            return _FS
+
+        def get_start_time(self, segment_index=0):
+            return None
+
+    with caplog.at_level("WARNING"):
+        t_start = _affine_recording_start_time(_NoneStartRecording())
+    assert t_start == 0.0
+    assert any(
+        "relative timing" in record.getMessage() for record in caplog.records
+    )
+
+
 def test_base_intervals_from_recording_detects_gaps():
     """Gap detection yields one interval per contiguous run from bounded
     timestamp chunks."""

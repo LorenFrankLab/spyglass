@@ -431,6 +431,43 @@ def empty_spike_times_dataframe():
     )
 
 
+def _affine_recording_start_time(recording) -> float:
+    """Absolute start time (seconds) for an affine (rate-based) recording.
+
+    Returns the recording's absolute start time, or ``0.0`` (relative timing)
+    when the recording exposes no usable absolute origin. A recording with no
+    ``get_start_time`` API, or one that returns ``None``, has no session-start
+    to offset by, so frames/fs seconds relative to ``t=0`` are correct -- this
+    is the legitimate legacy / relative-timing case, NOT an error to raise on.
+
+    The ``0.0`` fallback is NOT silent: it is logged at WARNING, because a v2
+    sort whose source recording should carry a session start but does not would
+    otherwise write absolute ``spike_times`` quietly offset by the missing
+    origin. Any OTHER error from ``get_start_time`` (a genuinely broken
+    recording) is left to propagate -- only the no-origin cases fall back.
+    """
+    try:
+        t_start = recording.get_start_time(segment_index=0)
+    except TypeError:
+        # Older single-segment signature without segment_index.
+        t_start = recording.get_start_time()
+    except AttributeError:
+        # Recording exposes no start-time API at all -> no absolute origin.
+        t_start = None
+    if t_start is None:
+        from spyglass.utils import logger
+
+        logger.warning(
+            "spike times: recording exposes no absolute start time; using "
+            "relative timing (t_start=0.0). For a v2 sort this usually means "
+            "the source recording carries no session start -- absolute "
+            "spike_times will be offset by the true session start if one "
+            "exists."
+        )
+        return 0.0
+    return float(t_start)
+
+
 def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
     """Map stored sample frames to absolute times without full-vector allocation."""
     import numpy as np
@@ -441,13 +478,7 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 
     fs = float(recording.get_sampling_frequency())
     if not _recording_has_explicit_time_vector(recording):
-        try:
-            t_start = recording.get_start_time(segment_index=0)
-        except TypeError:
-            t_start = recording.get_start_time()
-        except AttributeError:
-            t_start = 0.0
-        t_start = 0.0 if t_start is None else float(t_start)
+        t_start = _affine_recording_start_time(recording)
         return {
             int(uid): np.asarray(frames, dtype=np.int64) / fs + t_start
             for uid, frames in sample_indices_by_unit.items()
