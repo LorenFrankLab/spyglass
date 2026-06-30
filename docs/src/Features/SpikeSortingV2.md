@@ -39,8 +39,10 @@ RecordingSelection --> Recording          (bandpass + common reference)
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_sorting`,
-`spikesorting_v2_curation`, `spikesorting_v2_recompute`), so the v0/v1 schemas
-are untouched. `CurationV2` registers as a new part on the existing
+`spikesorting_v2_curation`, `spikesorting_v2_metric_curation`,
+`spikesorting_v2_figpack_curation`, `spikesorting_v2_session_group`,
+`spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`), so the v0/v1
+schemas are untouched. `CurationV2` registers as a new part on the existing
 `SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations all
 coexist under one merge surface.
 
@@ -1332,10 +1334,14 @@ CHANGELOG for the full list. Key user-visible items:
   applies merges lazily at fetch regardless of the `merges_applied`
   flag (matching v1 semantics where a curation created with
   `apply_merge=False` can still be inspected as merged).
-- `CurationV2.insert_curation` is idempotent on root curations
-  (`parent_curation_id=-1`): a second call for the same `sorting_id`
-  returns the existing key + emits a `logger.warning` instead of
-  staging a duplicate NWB + new row.
+- `CurationV2.insert_curation` is idempotent on a *default-content* root
+  curation (`parent_curation_id=-1`): a second call for the same `sorting_id`
+  that passes no labels / merge groups / description / `apply_merge` and the
+  default `curation_source` returns the existing key + emits a `logger.warning`
+  instead of staging a duplicate NWB + new row. A second root call that *does*
+  carry such content would have it silently dropped by reuse, so that case
+  raises `ValueError` unless you pass `reuse_existing=True` (reuse the root) or
+  curate as a child with `parent_curation_id=<existing root curation_id>`.
 - The `apply_merge` kwarg name is back (v1 spelling); `labels=None`
   is accepted (semantically equivalent to `{}`).
 - `Sorting.get_sorting(key, as_dataframe=True)` and

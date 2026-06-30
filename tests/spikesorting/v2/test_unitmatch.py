@@ -2310,9 +2310,12 @@ def test_unitmatch_populate_with_committed_merged_child_member(
 
 
 # --------------------------------------------------------------------------- #
-# Ground-truth AUC gate (slow / heavy). The ship criterion: UnitMatch          #
-# discriminates planted cross-session correspondences on the polymer probe with #
-# AUC > 0.85. Skips when the two-session fixture or UnitMatchPy is absent.       #
+# Ground-truth AUC gate (slow / heavy). Target: UnitMatch discriminates planted #
+# cross-session correspondences on the polymer probe with AUC > 0.85. Verified  #
+# LOCALLY only -- NOT yet CI-enforced: the two-session polymer fixtures are      #
+# unhosted (their _fetch.py URLs are None), so this skips when they or           #
+# UnitMatchPy are absent. Uploading them + adding to SPYGLASS_V2_REQUIRE_FIXTURES #
+# turns this into a hard CI gate.                                                #
 # --------------------------------------------------------------------------- #
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
