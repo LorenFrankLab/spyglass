@@ -201,7 +201,7 @@ def _assert_curation_in_raw_namespace(
     ids absent from the raw sort, so reading its waveforms / correlograms /
     peak amplitudes off the raw analyzer would silently mix namespaces. The
     analyzer-backed notebook/plot helpers therefore reject such a curation and
-    point the caller at the routed ``get_metrics`` / ``get_merge_groups``
+    point the caller at the routed ``get_metrics`` / ``get_suggested_merge_groups``
     accessors (which carry the curation's own unit namespace) or at plotting the
     raw sort directly.
     """
@@ -214,7 +214,7 @@ def _assert_curation_in_raw_namespace(
             "the raw sort (it is a merged curation or a label-only child of "
             "one), so the raw-sort display analyzer cannot render it in the "
             "curation's namespace. Use the routed get_metrics() / "
-            "get_merge_groups() accessors (curation namespace), or plot the raw "
+            "get_suggested_merge_groups() accessors (curation namespace), or plot the raw "
             "sort directly via the sorting_id."
         )
 
@@ -1741,7 +1741,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         return read_proposed_labels(abs_path, row["proposed_labels_object_id"])
 
     @classmethod
-    def get_merge_groups(cls, key) -> list:
+    def get_suggested_merge_groups(cls, key) -> list:
         """Return proposed merge groups as a list of unit-id lists."""
         row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -1801,7 +1801,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         if use_all_suggested_merges:
             return [
                 [int(u) for u in group]
-                for group in self.get_merge_groups(key)
+                for group in self.get_suggested_merge_groups(key)
                 if len(group) >= 2
             ]
         if merge_groups is not None:
@@ -1913,7 +1913,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         Enforces the populated-evaluation contract BEFORE resolving suggestions:
         the ``use_all_suggested_merges`` path reads the evaluation NWB via
-        ``get_merge_groups``, which on an unpopulated selection would fail with
+        ``get_suggested_merge_groups``, which on an unpopulated selection would fail with
         an opaque fetch error instead of the friendly "populate first" message.
         """
         self._evaluated_curation_key(key)  # populated-evaluation guard
@@ -2484,7 +2484,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         display analyzer, so it is REJECTED for a merged curation (or a
         label-only child of one) whose unit namespace differs from the raw sort
         -- those would mix namespaces. The routed ``get_metrics()`` /
-        ``get_merge_groups()`` accessors carry the curation's own namespace.
+        ``get_suggested_merge_groups()`` accessors carry the curation's own namespace.
         """
         sel = (CurationEvaluationSelection & key).fetch1()
         _assert_curation_in_raw_namespace(

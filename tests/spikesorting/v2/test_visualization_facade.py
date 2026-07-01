@@ -3,7 +3,7 @@
 These exercise the key -> recording/analyzer/metric routing without populating a
 sort: SI widget/exporter functions, ``Sorting.get_analyzer`` /
 ``Recording.get_recording`` / ``CurationEvaluation.get_metrics`` /
-``CurationEvaluation.get_merge_groups`` and the curation->sort resolver are
+``CurationEvaluation.get_suggested_merge_groups`` and the curation->sort resolver are
 monkeypatched with fakes, and the assertions pin which analyzer (display vs
 whitened) and which extensions each helper touches. The ``db_unit`` mark is for
 the schema-class imports (Docker MySQL only); nothing here populates. Real
@@ -575,7 +575,7 @@ def test_plot_potential_merges_uses_persisted_merge_groups(
     # Persisted groups: one real merge (>=2) plus a singleton to be dropped.
     monkeypatch.setattr(
         CurationEvaluation,
-        "get_merge_groups",
+        "get_suggested_merge_groups",
         classmethod(lambda cls, key: [[1, 2], [3]]),
     )
 
@@ -611,7 +611,7 @@ def test_plot_potential_merges_errors_when_no_persisted_suggestions(
 
     monkeypatch.setattr(
         CurationEvaluation,
-        "get_merge_groups",
+        "get_suggested_merge_groups",
         classmethod(lambda cls, key: [[3]]),
     )
     with pytest.raises(ValueError, match="never recomputes"):
@@ -773,7 +773,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     )
     monkeypatch.setattr(
         CurationEvaluation,
-        "get_merge_groups",
+        "get_suggested_merge_groups",
         classmethod(lambda cls, key: [[1, 2]]),
     )
     for name in (

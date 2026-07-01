@@ -25,7 +25,7 @@ Routing (the load-bearing invariant, see the table contract):
 - The official metric overview (``plot_metrics``) plots the Spyglass-routed
   ``CurationEvaluation.get_metrics()`` table (configured quality metrics plus the
   surfaced waveform-shape columns), not an SI analyzer extension.
-- Potential-merge plots pass the **persisted** ``CurationEvaluation.get_merge_groups()``
+- Potential-merge plots pass the **persisted** ``CurationEvaluation.get_suggested_merge_groups()``
   suggestions to SI; they never recompute merge candidates at plot time.
 
 Plot helpers are read-only by default: a richer widget that needs a missing
@@ -423,7 +423,7 @@ def plot_potential_merges(
 ):
     """Plot the persisted potential-merge suggestions (SI ``plot_potential_merges``).
 
-    Passes the **persisted** ``CurationEvaluation.get_merge_groups()`` suggestions
+    Passes the **persisted** ``CurationEvaluation.get_suggested_merge_groups()`` suggestions
     (groups of >=2 units) to SI ``plot_potential_merges`` over the display
     analyzer. It never calls ``compute_merge_unit_groups`` / recomputes
     candidates at plot time -- that could use a different analyzer / preset /
@@ -441,7 +441,7 @@ def plot_potential_merges(
 
     groups = [
         group
-        for group in CurationEvaluation.get_merge_groups(
+        for group in CurationEvaluation.get_suggested_merge_groups(
             curation_evaluation_key
         )
         if len(group) >= 2

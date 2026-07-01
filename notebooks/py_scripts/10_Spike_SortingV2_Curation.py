@@ -424,7 +424,8 @@ print(
 # while the raw SpikeInterface metric widgets are separately named
 # (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
 # extensions directly. `plot_potential_merges` shows the **persisted**
-# `get_merge_groups()` suggestions and never recomputes candidates at plot time.
+# `get_suggested_merge_groups()` suggestions and never recomputes candidates at
+# plot time.
 
 from spyglass.spikesorting.v2 import visualization as ssviz
 

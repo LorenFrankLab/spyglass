@@ -583,7 +583,7 @@ CurationEvaluation.populate(sel)
 
 metrics = CurationEvaluation.get_metrics(sel)        # DataFrame, indexed by the curation's unit ids
 labels = CurationEvaluation.get_labels(sel)          # {unit_id: [label, ...]}
-merges = CurationEvaluation.get_merge_groups(sel)    # [[unit_id, ...], ...] suggestions
+merges = CurationEvaluation.get_suggested_merge_groups(sel)  # [[unit_id, ...], ...] suggestions
 
 # Accept the proposals into a COMMITTED child CurationV2
 # (curation_source='curation_evaluation'). Labels are two VISIBLY DIFFERENT
@@ -683,7 +683,8 @@ root, or a label-only child of one) -- they read the raw sort's display
 analyzer, whose unit namespace is the raw sort. On a **merged** curation (or a
 label-only child of one) they **raise** rather than silently render the wrong
 units; inspect a merged curation through the routed `get_metrics(sel)` /
-`get_merge_groups(sel)` accessors (which carry the curation's own namespace), or
+`get_suggested_merge_groups(sel)` accessors (which carry the curation's own
+namespace), or
 run the burst-pair plots on the pre-merge curation. Building these plots over
 curation-scoped (merged) analyzers is deferred (it needs the persistent
 curation-scoped analyzer cache).

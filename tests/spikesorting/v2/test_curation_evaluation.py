@@ -1042,7 +1042,7 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         assert CurationEvaluation & sel
         assert CurationEvaluation.get_metrics(sel).empty
         assert CurationEvaluation.get_labels(sel) == {}
-        assert CurationEvaluation.get_merge_groups(sel) == []
+        assert CurationEvaluation.get_suggested_merge_groups(sel) == []
         # The zero-unit artifact is still self-describing: the provenance header
         # is written even though there are no metrics (no analyzer is built, so
         # the source-analyzer manifest is None).
@@ -1173,7 +1173,7 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
         suggestion = [[unit_ids[0], unit_ids[1]]]
         monkeypatch.setattr(
             CurationEvaluation,
-            "get_merge_groups",
+            "get_suggested_merge_groups",
             classmethod(lambda cls, key: suggestion),
         )
 
@@ -1777,7 +1777,7 @@ def test_accept_all_suggested_merges_action_uses_persisted_suggestions(
     suggestion = [[unit_ids[0], unit_ids[1]]]
     monkeypatch.setattr(
         CurationEvaluation,
-        "get_merge_groups",
+        "get_suggested_merge_groups",
         classmethod(lambda cls, key: suggestion),
     )
     clear_curations_for(planted_two_unit_sort)
@@ -1818,7 +1818,7 @@ def test_accept_merge_actions_require_a_real_merge(
 
     monkeypatch.setattr(
         CurationEvaluation,
-        "get_merge_groups",
+        "get_suggested_merge_groups",
         classmethod(lambda cls, key: []),
     )
     sorting_key = dict(planted_two_unit_sort)
@@ -1833,7 +1833,7 @@ def test_accept_merge_actions_require_a_real_merge(
             }
         )
         # Populated so the actions reach the "needs a real merge" guard rather
-        # than the populated-evaluation guard (get_merge_groups is monkeypatched
+        # than the populated-evaluation guard (get_suggested_merge_groups is monkeypatched
         # empty above to drive the no-merge path).
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
