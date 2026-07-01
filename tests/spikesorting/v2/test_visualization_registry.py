@@ -22,7 +22,10 @@ import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2.ipynb"
+# The ``ssviz`` visualization facade is taught in the curation walkthrough,
+# where inspecting units is the task at hand (the main notebook only shows the
+# sort-group geometry helper).
+_NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2_Curation.ipynb"
 
 from spyglass.spikesorting.v2._visualization import (  # noqa: E402
     DISPLAY_WIDGET_EXTENSIONS,
