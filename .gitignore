@@ -9,6 +9,7 @@ root_*.y*ml
 # Notebooks
 *.ipynb
 !notebooks/[0-9]*.ipynb
+!notebooks/dev/*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

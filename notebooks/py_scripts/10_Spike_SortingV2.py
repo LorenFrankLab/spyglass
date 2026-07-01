@@ -34,8 +34,8 @@
 #   session at once.
 # - [Cross-session](./10_Spike_SortingV2_CrossSession.ipynb) — concatenate
 #   same-day recordings and track units across days.
-# - A table-by-table tour of the internals is in
-#   `10_Spike_SortingV2_dev_walkthrough.ipynb`.
+# - A developer-only table-by-table tour of the internals is in
+#   `notebooks/dev/10_Spike_SortingV2_dev_walkthrough.ipynb`.
 
 # +
 import datajoint as dj
