@@ -9,29 +9,9 @@ the contract the split must preserve.
 
 from __future__ import annotations
 
-# The public surface notebooks/users import from the pipeline facade. Keep in
-# sync with the re-exports in ``pipeline.py``; a drop here is a breaking change.
-_PUBLIC_API = (
-    # presets
-    "list_pipeline_presets",
-    "describe_pipeline_presets",
-    "describe_pipeline_preset",
-    # geometry
-    "describe_sort_groups",
-    "plot_sort_group_geometry",
-    # preflight
-    "PreflightCheck",
-    "PreflightReport",
-    "PreflightSessionReport",
-    "preflight_v2_pipeline",
-    "preflight_v2_pipeline_session",
-    # reporting
-    "describe_parameter_rows",
-    "describe_run",
-    "describe_units",
-    # run
-    "run_v2_pipeline",
-    "run_v2_pipeline_session",
+from spyglass.spikesorting.v2._pipeline_public import (
+    PACKAGE_ROOT_REEXPORTS,
+    PIPELINE_FACADE_EXPORTS,
 )
 
 
@@ -39,7 +19,10 @@ def test_pipeline_facade_reexports_public_api():
     """Every public name resolves from ``spyglass.spikesorting.v2.pipeline``."""
     import spyglass.spikesorting.v2.pipeline as pl
 
-    missing = [name for name in _PUBLIC_API if not hasattr(pl, name)]
+    assert tuple(pl.__all__) == PIPELINE_FACADE_EXPORTS
+    missing = [
+        name for name in PIPELINE_FACADE_EXPORTS if not hasattr(pl, name)
+    ]
     assert not missing, f"pipeline facade no longer exports: {missing}"
 
 
@@ -47,17 +30,7 @@ def test_pipeline_facade_reexports_public_api():
 # must also import from the PACKAGE ROOT (``spyglass.spikesorting.v2``), where
 # ``initialize_v2_defaults`` already lives, so the natural
 # ``from spyglass.spikesorting.v2 import run_v2_pipeline`` does not raise.
-_ROOT_REEXPORTS = (
-    "run_v2_pipeline",
-    "run_v2_pipeline_session",
-    "run_v2_unit_match",
-    "plan_v2_unit_match",
-    "preflight_v2_pipeline",
-    "preflight_v2_pipeline_session",
-    "describe_run",
-    "describe_pipeline_presets",
-    "list_pipeline_presets",
-)
+_ROOT_REEXPORTS = PACKAGE_ROOT_REEXPORTS
 
 
 def test_package_root_reexports_primary_entrypoints():
@@ -104,7 +77,7 @@ def test_pipeline_facade_is_a_thin_reexport():
     """
     import spyglass.spikesorting.v2.pipeline as pl
 
-    for name in _PUBLIC_API:
+    for name in PIPELINE_FACADE_EXPORTS:
         obj = getattr(pl, name)
         module = getattr(obj, "__module__", "")
         assert module != pl.__name__, (

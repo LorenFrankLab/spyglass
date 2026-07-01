@@ -75,9 +75,9 @@ registrations); existing v2 table definitions are unchanged.
   (never auto-picks "latest"), populates `UnitMatch` + `TrackedUnit` from
   already-curated member sorts, and is idempotent. `describe_unit_match_choices`
   lists each member's selectable curations.
-- **Preset tuning without editing source.** `register_preset(name, preset)`
-  adds a lab preset; `clone_preset(base, new, **overrides)` derives a one-knob
-  variant, validating every derived parameter row before insert and refusing
+- **Preset tuning without editing source.** `register_pipeline_preset(name, preset)`
+  adds a lab preset; `clone_pipeline_preset(base, new, **overrides)` derives a
+  one-knob variant, validating every derived parameter row before insert and refusing
   ambiguous or duplicate names. `describe_pipeline_presets` /
   `describe_pipeline_preset` inspect the catalog.
 - **FigPack offline curation.** `FigPackCurationSelection` + `FigPackCuration`

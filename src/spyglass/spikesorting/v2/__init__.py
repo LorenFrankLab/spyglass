@@ -12,7 +12,10 @@ is re-exported from the stdlib-only ``_enums`` module so notebook users can
 discover the canonical label set without importing a table module.
 """
 
+from importlib import import_module
+
 from spyglass.spikesorting.v2._enums import CurationLabel
+from spyglass.spikesorting.v2._pipeline_public import PACKAGE_ROOT_REEXPORTS
 
 
 def initialize_v2_defaults() -> None:
@@ -89,25 +92,7 @@ def initialize_v2_defaults() -> None:
 # resolved on first access (not at package import), so a bare
 # ``import spyglass.spikesorting.v2`` stays dependency-light: the DataJoint /
 # Pydantic / SpikeInterface layers load only when an entrypoint is actually used.
-_PIPELINE_REEXPORTS = (
-    "run_v2_pipeline",
-    "run_v2_pipeline_session",
-    "run_v2_unit_match",
-    "plan_v2_unit_match",
-    "preflight_v2_pipeline",
-    "preflight_v2_pipeline_session",
-    "describe_run",
-    "describe_units",
-    "describe_parameter_rows",
-    "describe_sort_groups",
-    "describe_pipeline_presets",
-    "describe_pipeline_preset",
-    "list_pipeline_presets",
-    "register_pipeline_preset",
-    "clone_pipeline_preset",
-    "describe_unit_match_choices",
-    "plot_sort_group_geometry",
-)
+_PIPELINE_REEXPORTS = PACKAGE_ROOT_REEXPORTS
 
 
 __all__ = [
@@ -133,9 +118,11 @@ def __getattr__(name):
             verify_v2_default_catalog,
         )
 
+        globals()[name] = verify_v2_default_catalog
         return verify_v2_default_catalog
     if name in _PIPELINE_REEXPORTS:
-        from spyglass.spikesorting.v2 import pipeline
-
-        return getattr(pipeline, name)
+        pipeline = import_module(f"{__name__}.pipeline")
+        value = getattr(pipeline, name)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

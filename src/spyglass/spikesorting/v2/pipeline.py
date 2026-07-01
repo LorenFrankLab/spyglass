@@ -53,6 +53,7 @@ from spyglass.spikesorting.v2._pipeline_presets import (
     list_pipeline_presets,
     register_pipeline_preset,
 )
+from spyglass.spikesorting.v2._pipeline_public import PIPELINE_FACADE_EXPORTS
 from spyglass.spikesorting.v2._pipeline_reporting import (
     describe_parameter_rows,
     describe_run,
@@ -85,3 +86,5 @@ from spyglass.spikesorting.v2._pipeline_types import (
     UnitMatchMemberChoices,
     UnitMatchStageSeconds,
 )
+
+__all__ = PIPELINE_FACADE_EXPORTS
