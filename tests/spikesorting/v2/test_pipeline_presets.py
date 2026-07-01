@@ -20,12 +20,11 @@ import pytest
 
 from spyglass.spikesorting.v2.pipeline import (
     _PIPELINE_PRESETS,
-    clone_preset,
+    clone_pipeline_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
-    describe_preset,
     list_pipeline_presets,
-    register_preset,
+    register_pipeline_preset,
 )
 
 pytestmark = pytest.mark.unit
@@ -320,11 +319,6 @@ def test_describe_pipeline_preset_unknown_name_raises():
         describe_pipeline_preset("definitely_not_a_preset")
 
 
-def test_describe_preset_is_alias():
-    """``describe_preset`` is the shorter discovery alias for the same helper."""
-    assert describe_preset is describe_pipeline_preset
-
-
 @pytest.mark.database
 def test_describe_pipeline_preset_missing_row_points_to_initialize_defaults(
     dj_conn, monkeypatch
@@ -361,7 +355,7 @@ def _custom_spec() -> dict:
     return base.model_dump()
 
 
-def test_register_preset_adds_to_registry(monkeypatch):
+def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     """A registered preset appears in the catalog (no DB row check)."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -370,18 +364,20 @@ def test_register_preset_adds_to_registry(monkeypatch):
         "_PIPELINE_PRESETS",
         dict(presets_mod._PIPELINE_PRESETS),
     )
-    register_preset("lab_custom_2026_06", _custom_spec(), validate_rows=False)
+    register_pipeline_preset(
+        "lab_custom_2026_06", _custom_spec(), validate_rows=False
+    )
     assert "lab_custom_2026_06" in list_pipeline_presets()
 
 
-def test_register_preset_rejects_duplicate():
+def test_register_pipeline_preset_rejects_duplicate():
     """Re-registering an existing name raises rather than overwriting."""
     existing = next(iter(_PIPELINE_PRESETS))
     with pytest.raises(ValueError, match="already registered"):
-        register_preset(existing, _custom_spec(), validate_rows=False)
+        register_pipeline_preset(existing, _custom_spec(), validate_rows=False)
 
 
-def test_register_preset_rejects_unknown_field(monkeypatch):
+def test_register_pipeline_preset_rejects_unknown_field(monkeypatch):
     """Pydantic extra=forbid rejects a typo'd preset field."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -392,10 +388,12 @@ def test_register_preset_rejects_unknown_field(monkeypatch):
     )
     spec = {**_custom_spec(), "bogus_field": 1}
     with pytest.raises(ValueError):
-        register_preset("lab_bad_2026_06", spec, validate_rows=False)
+        register_pipeline_preset("lab_bad_2026_06", spec, validate_rows=False)
 
 
-def test_register_preset_catches_missing_lookup_row(dj_conn, monkeypatch):
+def test_register_pipeline_preset_catches_missing_lookup_row(
+    dj_conn, monkeypatch
+):
     """Validating against the DB names the missing row and its table."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -411,10 +409,10 @@ def test_register_preset_catches_missing_lookup_row(dj_conn, monkeypatch):
     with pytest.raises(
         ValueError, match="not found in PreprocessingParameters"
     ):
-        register_preset("lab_missing_2026_06", spec)
+        register_pipeline_preset("lab_missing_2026_06", spec)
 
 
-def test_register_preset_rejects_bad_name(monkeypatch):
+def test_register_pipeline_preset_rejects_bad_name(monkeypatch):
     """A non-string or blank name is rejected before touching the registry."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -425,12 +423,14 @@ def test_register_preset_rejects_bad_name(monkeypatch):
     )
     for bad_name in (1, "", "   ", None):
         with pytest.raises(ValueError, match="non-empty string"):
-            register_preset(bad_name, _custom_spec(), validate_rows=False)
+            register_pipeline_preset(
+                bad_name, _custom_spec(), validate_rows=False
+            )
     assert 1 not in list_pipeline_presets()
 
 
 # --------------------------------------------------------------------------- #
-# clone_preset
+# clone_pipeline_preset
 # --------------------------------------------------------------------------- #
 
 # A runnable MS5 built-in used as the clone base across the DB tests: its
@@ -487,20 +487,22 @@ def _stage_value(df, stage, key):
     return row.iloc[0]["value"]
 
 
-def test_clone_preset_unknown_base_raises():
+def test_clone_pipeline_preset_unknown_base_raises():
     """An unknown base preset raises before any DB read, pointing at discovery."""
     with pytest.raises(ValueError, match="unknown"):
-        clone_preset("definitely_not_a_preset", "lab_clone_2026_06", x=1)
+        clone_pipeline_preset(
+            "definitely_not_a_preset", "lab_clone_2026_06", x=1
+        )
 
 
-def test_clone_preset_rejects_duplicate_new_name():
+def test_clone_pipeline_preset_rejects_duplicate_new_name():
     """A new_name already in the registry raises rather than overwriting."""
     existing = next(iter(_PIPELINE_PRESETS))
     with pytest.raises(ValueError, match="already registered"):
-        clone_preset(_CLONE_BASE, existing, detect_threshold=4.0)
+        clone_pipeline_preset(_CLONE_BASE, existing, detect_threshold=4.0)
 
 
-def test_clone_preset_rejects_bad_new_name(monkeypatch):
+def test_clone_pipeline_preset_rejects_bad_new_name(monkeypatch):
     """A non-string or blank new_name is rejected before any DB work."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -511,11 +513,11 @@ def test_clone_preset_rejects_bad_new_name(monkeypatch):
     )
     for bad_name in (1, "", "   ", None):
         with pytest.raises(ValueError, match="non-empty string"):
-            clone_preset(_CLONE_BASE, bad_name, detect_threshold=4.0)
+            clone_pipeline_preset(_CLONE_BASE, bad_name, detect_threshold=4.0)
 
 
-def test_clone_preset_requires_at_least_one_override(monkeypatch):
-    """Cloning with no overrides raises (use register_preset for an alias)."""
+def test_clone_pipeline_preset_requires_at_least_one_override(monkeypatch):
+    """Cloning with no overrides raises (use register_pipeline_preset for an alias)."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
     monkeypatch.setattr(
@@ -524,10 +526,12 @@ def test_clone_preset_requires_at_least_one_override(monkeypatch):
         dict(presets_mod._PIPELINE_PRESETS),
     )
     with pytest.raises(ValueError, match="at least one override"):
-        clone_preset(_CLONE_BASE, "lab_no_override_2026_06")
+        clone_pipeline_preset(_CLONE_BASE, "lab_no_override_2026_06")
 
 
-def test_clone_preset_flat_sorter_override_round_trips(dj_conn, clone_env):
+def test_clone_pipeline_preset_flat_sorter_override_round_trips(
+    dj_conn, clone_env
+):
     """A one-knob sorter override produces a working, inspectable clone.
 
     Overriding the MS5 ``detect_threshold`` registers a new preset whose
@@ -545,7 +549,9 @@ def test_clone_preset_flat_sorter_override_round_trips(dj_conn, clone_env):
     base_threshold = _stage_value(base_detail, "sorter", "detect_threshold")
     assert float(base_threshold) == 5.5  # the shipped MS5 default
 
-    returned = clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    returned = clone_pipeline_preset(
+        _CLONE_BASE, new_name, detect_threshold=4.0
+    )
     assert returned == new_name
     assert new_name in list_pipeline_presets()
 
@@ -580,14 +586,18 @@ def test_clone_preset_flat_sorter_override_round_trips(dj_conn, clone_env):
     )
 
 
-def test_clone_preset_nested_dotted_override_round_trips(dj_conn, clone_env):
+def test_clone_pipeline_preset_nested_dotted_override_round_trips(
+    dj_conn, clone_env
+):
     """A dotted override edits a nested preprocessing key on a forked row."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
     new_name = "lab_hp700_2026_06"
     clone_env.append(new_name)
 
-    clone_preset(_CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0})
+    clone_pipeline_preset(
+        _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
+    )
 
     base = presets_mod._PIPELINE_PRESETS[_CLONE_BASE]
     clone = presets_mod._PIPELINE_PRESETS[new_name]
@@ -619,13 +629,13 @@ def test_clone_preset_nested_dotted_override_round_trips(dj_conn, clone_env):
     )
 
 
-def test_clone_preset_unknown_override_key_raises(dj_conn, clone_env):
+def test_clone_pipeline_preset_unknown_override_key_raises(dj_conn, clone_env):
     """An override that matches no stage param raises and inserts nothing."""
     new_name = "lab_bad_key_2026_06"
     clone_env.append(new_name)
 
     with pytest.raises(ValueError, match="does not match any"):
-        clone_preset(_CLONE_BASE, new_name, no_such_knob=1)
+        clone_pipeline_preset(_CLONE_BASE, new_name, no_such_knob=1)
 
     # Nothing was registered or inserted.
     assert new_name not in list_pipeline_presets()
@@ -638,7 +648,9 @@ def test_clone_preset_unknown_override_key_raises(dj_conn, clone_env):
     assert not (SorterParameters & {"sorter_params_name": new_name})
 
 
-def test_clone_preset_invalid_override_value_raises(dj_conn, clone_env):
+def test_clone_pipeline_preset_invalid_override_value_raises(
+    dj_conn, clone_env
+):
     """A schema-invalid override raises the same teaching error as a direct insert.
 
     ``detect_threshold`` must be > 0; a negative value fails the MS5 Pydantic
@@ -648,7 +660,7 @@ def test_clone_preset_invalid_override_value_raises(dj_conn, clone_env):
     clone_env.append(new_name)
 
     with pytest.raises((ValueError, TypeError), match="detect_threshold"):
-        clone_preset(_CLONE_BASE, new_name, detect_threshold=-1.0)
+        clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=-1.0)
 
     assert new_name not in list_pipeline_presets()
     from spyglass.spikesorting.v2.sorting import SorterParameters
@@ -656,7 +668,7 @@ def test_clone_preset_invalid_override_value_raises(dj_conn, clone_env):
     assert not (SorterParameters & {"sorter_params_name": new_name})
 
 
-def test_clone_preset_duplicate_content_under_new_name_raises(
+def test_clone_pipeline_preset_duplicate_content_under_new_name_raises(
     dj_conn, clone_env
 ):
     """A derived row whose content matches a different existing row raises.
@@ -676,13 +688,15 @@ def test_clone_preset_duplicate_content_under_new_name_raises(
     with pytest.raises(
         DuplicateParameterContentError, match="franklab_cortex_2026_06"
     ):
-        clone_preset(
+        clone_pipeline_preset(
             _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 300.0}
         )
     assert new_name not in list_pipeline_presets()
 
 
-def test_clone_preset_allow_duplicate_params_opts_in(dj_conn, clone_env):
+def test_clone_pipeline_preset_allow_duplicate_params_opts_in(
+    dj_conn, clone_env
+):
     """``allow_duplicate_params=True`` forks content matching another row.
 
     The same override that is refused by default (it reproduces the cortex
@@ -692,7 +706,7 @@ def test_clone_preset_allow_duplicate_params_opts_in(dj_conn, clone_env):
     new_name = "lab_dup_optin_2026_06"
     clone_env.append(new_name)
 
-    clone_preset(
+    clone_pipeline_preset(
         _CLONE_BASE,
         new_name,
         allow_duplicate_params=True,
@@ -706,7 +720,7 @@ def test_clone_preset_allow_duplicate_params_opts_in(dj_conn, clone_env):
     )
 
 
-def test_clone_preset_name_collision_different_content_raises(
+def test_clone_pipeline_preset_name_collision_different_content_raises(
     dj_conn, clone_env
 ):
     """A derived-row name that already exists with different content raises.
@@ -734,13 +748,13 @@ def test_clone_preset_name_collision_different_content_raises(
     )
 
     with pytest.raises(ValueError, match="different content"):
-        clone_preset(
+        clone_pipeline_preset(
             _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
         )
     assert new_name not in list_pipeline_presets()
 
 
-def test_clone_preset_idempotent_rerun(dj_conn, clone_env):
+def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
     """Re-running a clone with identical overrides is a no-op, not a fork.
 
     The derived rows are content-addressed by name, so a second run (after the
@@ -752,12 +766,12 @@ def test_clone_preset_idempotent_rerun(dj_conn, clone_env):
     new_name = "lab_idempotent_2026_06"
     clone_env.append(new_name)
 
-    clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
     # Simulate a fresh process: the DB rows persist but the registry does not.
     presets_mod._PIPELINE_PRESETS.pop(new_name)
 
     # Identical re-run must succeed and reflect the same override.
-    clone_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+    clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
     assert new_name in list_pipeline_presets()
     detail = describe_pipeline_preset(new_name)
     assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
@@ -907,31 +921,45 @@ def test_run_v2_pipeline_requires_exactly_one_input_mode():
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
-    msg = "exactly one input mode"
-    bad_calls = (
-        {},  # no mode
-        {  # both modes
-            "nwb_file_name": "x.nwb",
-            "sort_group_id": 0,
-            "interval_list_name": "i",
-            "team_name": "t",
-            "concat_session_group_owner": "o",
-            "concat_session_group_name": "g",
-        },
-        {  # partial single-session (missing team_name)
-            "nwb_file_name": "x.nwb",
-            "sort_group_id": 0,
-            "interval_list_name": "i",
-        },
-        {"concat_session_group_owner": "o"},  # partial concat
-        {  # concat + a stray single-session field (team_name invalid in concat)
-            "concat_session_group_owner": "o",
-            "concat_session_group_name": "g",
-            "team_name": "t",
-        },
+    generic = "exactly one input mode"
+    # No mode, or fields from BOTH modes set, gets the generic mode explanation;
+    # a partial single/concat call names the specific missing field(s).
+    cases = (
+        ({}, generic),  # no mode at all
+        (
+            {  # both modes fully set -> a genuine clash
+                "nwb_file_name": "x.nwb",
+                "sort_group_id": 0,
+                "interval_list_name": "i",
+                "team_name": "t",
+                "concat_session_group_owner": "o",
+                "concat_session_group_name": "g",
+            },
+            generic,
+        ),
+        (
+            {  # concat + a stray single-session field -> clash
+                "concat_session_group_owner": "o",
+                "concat_session_group_name": "g",
+                "team_name": "t",
+            },
+            generic,
+        ),
+        (
+            {  # partial single-session -> names the missing field
+                "nwb_file_name": "x.nwb",
+                "sort_group_id": 0,
+                "interval_list_name": "i",
+            },
+            r"single-session mode is missing.*team_name",
+        ),
+        (
+            {"concat_session_group_owner": "o"},  # partial concat
+            r"concat mode is missing.*concat_session_group_name",
+        ),
     )
-    for kwargs in bad_calls:
-        with pytest.raises(PipelineInputError, match=msg):
+    for kwargs, expected in cases:
+        with pytest.raises(PipelineInputError, match=expected):
             run_v2_pipeline(**kwargs)
 
 
@@ -1107,7 +1135,9 @@ def _spec_with(**overrides) -> dict:
     return {**_custom_spec(), **overrides}
 
 
-def test_register_preset_catches_missing_metric_row(dj_conn, monkeypatch):
+def test_register_pipeline_preset_catches_missing_metric_row(
+    dj_conn, monkeypatch
+):
     """A preset naming an absent quality-metric row fails with a clear pointer."""
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
 
@@ -1123,10 +1153,10 @@ def test_register_preset_catches_missing_metric_row(dj_conn, monkeypatch):
     with pytest.raises(
         ValueError, match="not found in QualityMetricParameters"
     ):
-        register_preset("lab_missing_metric_2026_06", spec)
+        register_pipeline_preset("lab_missing_metric_2026_06", spec)
 
 
-def test_register_preset_catches_missing_auto_curation_row(
+def test_register_pipeline_preset_catches_missing_auto_curation_row(
     dj_conn, monkeypatch
 ):
     """A preset naming an absent auto-curation rule set fails clearly."""
@@ -1142,10 +1172,12 @@ def test_register_preset_catches_missing_auto_curation_row(
     )
     spec = _spec_with(auto_curation_rules_name="missing_rules_xyz")
     with pytest.raises(ValueError, match="not found in AutoCurationRules"):
-        register_preset("lab_missing_rules_2026_06", spec)
+        register_pipeline_preset("lab_missing_rules_2026_06", spec)
 
 
-def test_register_preset_catches_missing_motion_row(dj_conn, monkeypatch):
+def test_register_pipeline_preset_catches_missing_motion_row(
+    dj_conn, monkeypatch
+):
     """A preset naming an absent motion-correction row fails clearly.
 
     The motion row is only checked when the preset sets it (single-session
@@ -1165,7 +1197,7 @@ def test_register_preset_catches_missing_motion_row(dj_conn, monkeypatch):
     with pytest.raises(
         ValueError, match="not found in MotionCorrectionParameters"
     ):
-        register_preset("lab_missing_motion_2026_06", spec)
+        register_pipeline_preset("lab_missing_motion_2026_06", spec)
 
 
 def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
@@ -1219,7 +1251,7 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
     artifact stage rather than raise on a ``None`` row name.
     """
     name = "lab_no_artifact_2026_06"
-    register_preset(
+    register_pipeline_preset(
         name,
         _spec_with(artifact_detection_params_name=None),
         validate_rows=False,
@@ -1231,7 +1263,7 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
     assert (detail["stage"] == "sorter").sum() > 0
 
 
-def test_clone_preset_no_artifact_base(dj_conn, clone_env):
+def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     """Cloning a no-artifact preset works and forks only the touched stage.
 
     The concat preset runs no artifact stage, so a clone that tunes the sorter
@@ -1243,7 +1275,7 @@ def test_clone_preset_no_artifact_base(dj_conn, clone_env):
     new_name = "lab_concat_thresh_2026_06"
     clone_env.append(new_name)
 
-    clone_preset(_CONCAT_PRESET, new_name, detect_threshold=4.0)
+    clone_pipeline_preset(_CONCAT_PRESET, new_name, detect_threshold=4.0)
 
     clone = presets_mod._PIPELINE_PRESETS[new_name]
     assert clone.artifact_detection_params_name is None

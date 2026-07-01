@@ -2041,7 +2041,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import (
-        register_preset,
+        register_pipeline_preset,
         run_v2_pipeline,
     )
     from tests.spikesorting.v2._smoke_constants import (
@@ -2055,7 +2055,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     # A concat preset (motion set -> concat-mode) using the default preproc +
     # smoke clusterless sorter the chronic minirec is known to sort. The "none"
     # motion row is a valid concat motion recipe (no correction).
-    register_preset(
+    register_pipeline_preset(
         preset_name,
         {
             "preprocessing_params_name": grp["preprocessing_params_name"],

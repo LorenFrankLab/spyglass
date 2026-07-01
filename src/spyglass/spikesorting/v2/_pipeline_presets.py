@@ -3,8 +3,7 @@
 Extracted verbatim from ``pipeline.py`` (behavior-preserving) to keep the
 orchestration facade small. ``pipeline.py`` re-exports the public names
 (``list_pipeline_presets``, ``describe_pipeline_presets``,
-``describe_pipeline_preset``, ``describe_preset``) so notebook import paths
-are unchanged.
+``describe_pipeline_preset``) so notebook import paths are unchanged.
 """
 
 from __future__ import annotations
@@ -530,15 +529,11 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     return pd.DataFrame(rows, columns=_PRESET_DETAIL_COLUMNS)
 
 
-# Alias: shorter discovery name for the same helper.
-describe_preset = describe_pipeline_preset
-
-
 def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     """Raise ``ValueError`` if any Lookup row the preset references is absent.
 
     A preset is only usable if every parameter row it names already exists, so
-    ``register_preset`` checks them up front rather than letting the orchestrator
+    ``register_pipeline_preset`` checks them up front rather than letting the orchestrator
     fail with an opaque FK error mid-populate. Names the missing row and the
     table so the fix is obvious.
     """
@@ -615,13 +610,15 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     for table, restriction, label, row_name in checks:
         if not (table & restriction):
             raise ValueError(
-                f"register_preset({name!r}): row {row_name!r} not found in "
+                f"register_pipeline_preset({name!r}): row {row_name!r} not found in "
                 f"{label}. Insert it (e.g. via initialize_v2_defaults() or the "
                 "table's insert) before registering the preset."
             )
 
 
-def register_preset(name: str, preset, *, validate_rows: bool = True) -> str:
+def register_pipeline_preset(
+    name: str, preset, *, validate_rows: bool = True
+) -> str:
     """Register a custom pipeline preset at runtime; return its name.
 
     The public, source-free way for a lab to add a preset: external labs use the
@@ -657,7 +654,7 @@ def register_preset(name: str, preset, *, validate_rows: bool = True) -> str:
     # (it sorts mixed-type keys) and an empty/blank name is unusable.
     if not isinstance(name, str) or not name.strip():
         raise ValueError(
-            f"register_preset: name must be a non-empty string, got {name!r}."
+            f"register_pipeline_preset: name must be a non-empty string, got {name!r}."
         )
     if name in _PIPELINE_PRESETS:
         raise ValueError(
@@ -694,7 +691,7 @@ def _deep_set(blob: dict, dotted_key: str, value) -> None:
     node[parts[-1]] = value
 
 
-def clone_preset(
+def clone_pipeline_preset(
     base_name: str,
     new_name: str,
     *,
@@ -704,11 +701,11 @@ def clone_preset(
     """Clone a pipeline preset with one or more parameter values changed.
 
     The "tune one knob" path: a user who wants a single non-default value need
-    not hand-write a full Pydantic params dict. ``clone_preset`` resolves
+    not hand-write a full Pydantic params dict. ``clone_pipeline_preset`` resolves
     ``base_name`` to its preprocessing / artifact-detection / sorter parameter
     rows, applies ``overrides`` to the relevant stage's ``params`` blob, inserts
     the derived parameter rows under ``new_name``, and registers ``new_name`` via
-    :func:`register_preset`. Inspect the result with
+    :func:`register_pipeline_preset`. Inspect the result with
     :func:`describe_pipeline_preset`.
 
     Each override key is a dotted path into a stage's scientific ``params`` blob
@@ -727,7 +724,7 @@ def clone_preset(
 
     The clone never mutates the base preset or its parameter rows -- it only adds
     new rows and a new registration. The derived rows are named ``new_name``, so
-    re-running ``clone_preset`` with identical overrides (e.g. on a fresh process,
+    re-running ``clone_pipeline_preset`` with identical overrides (e.g. on a fresh process,
     where the in-memory registry is empty but the DB rows persist) is a no-op
     rather than a fork.
 
@@ -741,7 +738,7 @@ def clone_preset(
     allow_duplicate_params : bool, optional
         If True, opt out of the duplicate-content guard when a derived row's
         content matches an existing row under a different name (see
-        :func:`register_preset` / the parameter Lookups). Default False refuses
+        :func:`register_pipeline_preset` / the parameter Lookups). Default False refuses
         to fork provenance, mirroring the parameter tables.
     **overrides
         Dotted ``stage_blob`` paths mapped to their new values.
@@ -763,7 +760,7 @@ def clone_preset(
         If a derived row's content matches an existing row under a different
         name and ``allow_duplicate_params`` is False.
     """
-    # --- cheap, database-free validation (mirrors register_preset / describe) ---
+    # --- cheap, database-free validation (mirrors register_pipeline_preset / describe) ---
     # Validate before importing the table modules: importing them triggers
     # DataJoint ``@schema`` decoration (a DB connection), so these checks stay
     # database-free and fail fast before any row is touched.
@@ -775,7 +772,7 @@ def clone_preset(
         )
     if not isinstance(new_name, str) or not new_name.strip():
         raise ValueError(
-            f"clone_preset: new_name must be a non-empty string, got "
+            f"clone_pipeline_preset: new_name must be a non-empty string, got "
             f"{new_name!r}."
         )
     if new_name in _PIPELINE_PRESETS:
@@ -785,9 +782,9 @@ def clone_preset(
         )
     if not overrides:
         raise ValueError(
-            "clone_preset requires at least one override (the knob to change); "
+            "clone_pipeline_preset requires at least one override (the knob to change); "
             "to register an alias of an existing preset under a new name use "
-            "register_preset()."
+            "register_pipeline_preset()."
         )
     base = _PIPELINE_PRESETS[base_name]
 
@@ -856,7 +853,7 @@ def clone_preset(
         rel = stage["table"] & _base_restriction(stage)
         if not rel:
             raise ValueError(
-                f"clone_preset: {stage['table_name']} row "
+                f"clone_pipeline_preset: {stage['table_name']} row "
                 f"{stage['base_row_name']!r} referenced by preset "
                 f"{base_name!r} is not in the database. Run "
                 "initialize_v2_defaults() to install the shipped parameter "
@@ -894,7 +891,7 @@ def clone_preset(
         ]
         if not matches:
             raise ValueError(
-                f"clone_preset: override key {dotted_key!r} does not match any "
+                f"clone_pipeline_preset: override key {dotted_key!r} does not match any "
                 "parameter in the base preset's preprocessing, "
                 "artifact-detection, or sorter params. Call "
                 f"describe_pipeline_preset({base_name!r}) to see the keys you "
@@ -902,8 +899,8 @@ def clone_preset(
             )
         if len(matches) > 1:
             raise ValueError(
-                f"clone_preset: override key {dotted_key!r} is ambiguous -- it "
-                f"matches multiple stages {sorted(matches)}. clone_preset "
+                f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous -- it "
+                f"matches multiple stages {sorted(matches)}. clone_pipeline_preset "
                 "cannot disambiguate a top-level key shared across stages; "
                 "insert the parameter row directly for this change."
             )
@@ -1003,7 +1000,7 @@ def clone_preset(
                 if existing_fp == derived_fp:
                     continue  # idempotent: the derived row already exists
                 raise ValueError(
-                    f"clone_preset: a {stage['table_name']} row named "
+                    f"clone_pipeline_preset: a {stage['table_name']} row named "
                     f"{new_name!r} already exists with different content. "
                     "Choose a different new_name, or drop the existing row "
                     "before re-cloning."
@@ -1024,5 +1021,5 @@ def clone_preset(
     derived_preset = base.model_copy(
         update={stages[name]["pk_field"]: new_name for name in touched}
     )
-    register_preset(new_name, derived_preset, validate_rows=True)
+    register_pipeline_preset(new_name, derived_preset, validate_rows=True)
     return new_name

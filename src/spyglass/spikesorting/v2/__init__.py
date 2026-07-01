@@ -82,11 +82,46 @@ def initialize_v2_defaults() -> None:
         )
 
 
+# Primary orchestration entrypoints re-exported lazily from the ``.pipeline``
+# facade so ``from spyglass.spikesorting.v2 import run_v2_pipeline`` works from
+# the same package root where ``initialize_v2_defaults`` already lives -- a
+# newcomer should not have to learn the ``.pipeline`` submodule split. These are
+# resolved on first access (not at package import), so a bare
+# ``import spyglass.spikesorting.v2`` stays dependency-light: the DataJoint /
+# Pydantic / SpikeInterface layers load only when an entrypoint is actually used.
+_PIPELINE_REEXPORTS = (
+    "run_v2_pipeline",
+    "run_v2_pipeline_session",
+    "run_v2_unit_match",
+    "plan_v2_unit_match",
+    "preflight_v2_pipeline",
+    "preflight_v2_pipeline_session",
+    "describe_run",
+    "describe_units",
+    "describe_parameter_rows",
+    "describe_sort_groups",
+    "describe_pipeline_presets",
+    "describe_pipeline_preset",
+    "list_pipeline_presets",
+    "register_pipeline_preset",
+    "clone_pipeline_preset",
+    "describe_unit_match_choices",
+    "plot_sort_group_geometry",
+)
+
+
 __all__ = [
     "initialize_v2_defaults",
     "verify_v2_default_catalog",
     "CurationLabel",
+    *_PIPELINE_REEXPORTS,
 ]
+
+
+def __dir__():
+    # Surface the lazily re-exported names to tab-completion / ``dir()``; the
+    # module globals alone would hide them behind ``__getattr__``.
+    return sorted({*globals(), *__all__})
 
 
 def __getattr__(name):
@@ -99,4 +134,8 @@ def __getattr__(name):
         )
 
         return verify_v2_default_catalog
+    if name in _PIPELINE_REEXPORTS:
+        from spyglass.spikesorting.v2 import pipeline
+
+        return getattr(pipeline, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
