@@ -28,6 +28,7 @@ Tables
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from typing import NamedTuple
 
 import datajoint as dj
@@ -2470,18 +2471,16 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         analyzer = Sorting().get_analyzer({"sorting_id": sel["sorting_id"]})
         return _WaveformsAccessor(analyzer)
 
-    def _analyzer_for(self, key):
-        """Return the sort's DISPLAY (unwhitened) analyzer.
+    def _display_analyzer_key(self, key):
+        """Resolve + namespace-validate the DISPLAY-analyzer key for a plot.
 
-        All burst-pair legs, peak amplitudes, and the notebook plots load
-        through here, so they all read real waveforms / amplitudes / positions
-        -- never the whitened metric analyzer (which is built only for the PC/NN
-        cluster-separation metrics). ``get_analyzer`` with no recipe name
-        resolves the sort's stored display recipe. This is the RAW sort's
-        display analyzer, so it is REJECTED for a merged curation (or a
-        label-only child of one) whose unit namespace differs from the raw sort
-        -- those would mix namespaces. The routed ``get_metrics()`` /
-        ``get_suggested_merge_groups()`` accessors carry the curation's own namespace.
+        Returns the ``{"sorting_id": ...}`` the sort's DISPLAY (unwhitened)
+        analyzer loads from. This is the RAW sort's display analyzer, so it is
+        REJECTED for a merged curation (or a label-only child of one) whose unit
+        namespace differs from the raw sort -- those would mix namespaces. The
+        routed ``get_metrics()`` / ``get_suggested_merge_groups()`` accessors
+        carry the curation's own namespace. Shared by the read-only
+        ``_analyzer_for`` and the write-locking ``_locked_display_analyzer``.
         """
         sel = (CurationEvaluationSelection & key).fetch1()
         _assert_curation_in_raw_namespace(
@@ -2489,7 +2488,42 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             int(sel["curation_id"]),
             context="CurationEvaluation analyzer-backed plot",
         )
-        return Sorting().get_analyzer({"sorting_id": sel["sorting_id"]})
+        return {"sorting_id": sel["sorting_id"]}
+
+    def _analyzer_for(self, key):
+        """Return the sort's DISPLAY (unwhitened) analyzer, read-only.
+
+        All burst-pair legs, peak amplitudes, and the notebook plots load
+        through here, so they all read real waveforms / amplitudes / positions
+        -- never the whitened metric analyzer (which is built only for the PC/NN
+        cluster-separation metrics). ``get_analyzer`` with no recipe name
+        resolves the sort's stored display recipe.
+
+        The returned analyzer MUST NOT be mutated: it is loaded WITHOUT holding
+        ``analyzer_cache_lock``, so any accessor that computes-and-persists an
+        extension must go through ``_locked_display_analyzer`` instead, or it
+        could write the shared canonical zarr store concurrently with a locked
+        populate / rebuild / recompute writer and corrupt it.
+        """
+        return Sorting().get_analyzer(self._display_analyzer_key(key))
+
+    @contextmanager
+    def _locked_display_analyzer(self, key):
+        """Yield the DISPLAY analyzer while holding ``analyzer_cache_lock``.
+
+        The plot accessors that compute-and-persist extensions into the
+        canonical display analyzer (``plot_units_qc``,
+        ``plot_burst_pair_metrics``) must hold the per-sort cache lock across the
+        load + mutate -- the same lock the populate / rebuild / recompute writers
+        take -- so two processes never write the shared zarr store at once.
+        """
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
+
+        sorting_key = self._display_analyzer_key(key)
+        with analyzer_cache_lock(sorting_key["sorting_id"]):
+            yield Sorting().get_analyzer(sorting_key)
 
     def plot_units_qc(
         self, key, *, metric_names=None, color_metric: str = "snr", axes=None
@@ -2520,10 +2554,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         metrics = self.get_metrics(key)
         try:
-            analyzer = self._analyzer_for(key)
-            ensure_extensions(analyzer, ["unit_locations"])
-            locations = analyzer.get_extension("unit_locations").get_data()
-            unit_ids = list(analyzer.unit_ids)
+            with self._locked_display_analyzer(key) as analyzer:
+                ensure_extensions(analyzer, ["unit_locations"])
+                locations = analyzer.get_extension("unit_locations").get_data()
+                unit_ids = list(analyzer.unit_ids)
         except ZeroUnitAnalyzerError:
             locations, unit_ids = None, []
         return plot_units_qc_figure(
@@ -2620,19 +2654,19 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
 
         Scatters waveform similarity vs cross-correlogram asymmetry, one point
-        per unit pair, computed on the fly from the analyzer's extensions
-        (nothing is stored). v1 laid out one panel per sort group; a v2 sort is
-        a single sort group, so this renders that sort's pairs. ``pairs``
-        defaults to all ordered pairs.
+        per unit pair, computed on the fly from the analyzer's extensions (no
+        pair metrics are stored, though the required display extensions are
+        computed into the analyzer under the cache lock). v1 laid out one panel
+        per sort group; a v2 sort is a single sort group, so this renders that
+        sort's pairs. ``pairs`` defaults to all ordered pairs.
         """
         from spyglass.spikesorting.utils_burst import plot_burst_metrics
         from spyglass.spikesorting.v2._metric_curation_plots import (
             burst_pair_metrics_from_analyzer,
         )
 
-        rows = burst_pair_metrics_from_analyzer(
-            self._analyzer_for(key), pairs=pairs
-        )
+        with self._locked_display_analyzer(key) as analyzer:
+            rows = burst_pair_metrics_from_analyzer(analyzer, pairs=pairs)
         return plot_burst_metrics(rows)
 
     # ---- SI metric / merge delegates (see v2.visualization facade) --------

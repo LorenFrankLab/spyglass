@@ -1105,3 +1105,52 @@ def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
     assert (
         str(unrelated) not in disk_side
     ), "a non-canonical directory must never be an orphan-deletion candidate"
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_curation_evaluation_locked_display_analyzer_holds_cache_lock(
+    monkeypatch,
+):
+    """The mutating plot accessors load the display analyzer through
+    ``_locked_display_analyzer``, which holds ``analyzer_cache_lock`` keyed on
+    the sort id across the load + mutate. Without it a compute-and-persist
+    extension write (``plot_units_qc`` / ``plot_burst_pair_metrics``) could race
+    a locked populate/rebuild writer on the same canonical zarr store."""
+    from spyglass.spikesorting.v2 import _analyzer_cache
+    from spyglass.spikesorting.v2 import metric_curation as mc
+
+    acquired: list[str] = []
+    state = {"held": False}
+
+    class _FakeLock:
+        def __enter__(self):
+            state["held"] = True
+
+        def __exit__(self, *exc):
+            state["held"] = False
+
+    def _fake_lock(sorting_id, **kwargs):
+        acquired.append(str(sorting_id))
+        return _FakeLock()
+
+    monkeypatch.setattr(_analyzer_cache, "analyzer_cache_lock", _fake_lock)
+    monkeypatch.setattr(
+        mc.CurationEvaluation,
+        "_display_analyzer_key",
+        lambda self, key: {"sorting_id": "sidLOCK"},
+    )
+    sentinel = object()
+
+    def _fake_get_analyzer(self, sorting_key, *args, **kwargs):
+        assert state["held"], "display analyzer loaded outside the cache lock"
+        return sentinel
+
+    monkeypatch.setattr(mc.Sorting, "get_analyzer", _fake_get_analyzer)
+
+    evaluation = mc.CurationEvaluation()
+    with evaluation._locked_display_analyzer({"sorting_id": "x"}) as analyzer:
+        assert analyzer is sentinel
+        assert state["held"] is True
+
+    assert acquired == ["sidLOCK"], "must hold exactly the sort's cache lock"
+    assert state["held"] is False, "the lock must release after the block"
