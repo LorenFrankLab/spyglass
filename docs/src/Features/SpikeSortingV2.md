@@ -89,9 +89,10 @@ coexist under one merge surface.
     suggestions, and BurstPair-style plots over a **committed** `CurationV2` row,
     scored in that curation's own unit namespace (a merged unit's metrics are
     recomputed over the merged template, not inherited). Proposals are persisted
-    to NWB; committing them to a child curation is an explicit
-    `create_curation` / `use_evaluation_labels` step. Preview/draft curations are
-    rejected. Replaces the removed `AnalyzerCuration`. See
+    to NWB; committing them to a child curation is an explicit action-method
+    step (`use_evaluation_labels`, `accept_merges`, or the expert
+    `accept_evaluation_outputs`). Preview/draft curations are rejected.
+    Replaces the removed `AnalyzerCuration`. See
     [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
     verification families for safely reclaiming preprocessed recording/artifact
@@ -548,7 +549,8 @@ quality metrics, propose merge suggestions, and propose auto-curation labels. A
 merged unit gets SNR / ISI-violation / PC-NN separation recomputed over its
 **merged** template -- never inherited from the highest-amplitude contributor.
 The proposals are written to NWB; turning them into a committed child
-`CurationV2` is an explicit step (`create_curation` / `use_evaluation_labels`).
+`CurationV2` is an explicit step (`use_evaluation_labels`, `accept_merges`, or
+the expert `accept_evaluation_outputs`).
 
 ```python
 from spyglass.spikesorting.v2.metric_curation import (
@@ -618,11 +620,11 @@ unit is not silently excluded downstream), while `overlay_evaluation_labels`
 retains the curation's current labels. (In a UI these are the "Use Evaluation
 Labels" and "Overlay Evaluation Labels" actions.)
 
-The lower-level `create_curation` is the **expert/combined** API (merges + labels
-in one call); note its `labels=None` default fetches and applies the
-evaluation's pre-merge labels, so prefer the action methods unless you are
-deliberately combining surviving-unit labels with a merge. `create_preview_curation`
-is the explicit expert draft opt-in behind `preview_merges`.
+The lower-level `accept_evaluation_outputs` is the **expert/combined** API
+(merges + labels in one call); note its `labels=None` default fetches and
+applies the evaluation's pre-merge labels, so prefer the action methods unless
+you are deliberately combining surviving-unit labels with a merge.
+`preview_merges` is the explicit draft opt-in for unapplied merge review.
 
 #### Saving a manual FigURL-style payload
 
@@ -826,30 +828,32 @@ the `Electrode.bad_channel` flags for a session. It loads the raw recording,
 bandpass-filters it, and runs SpikeInterface's `detect_bad_channels`
 (`coherence+psd`, the IBL coherence/PSD method) **per full shank** (the
 coherence method is spatially local, so each physical shank is scanned on its
-own). It is **suggest-then-confirm**: the default `write=False` changes nothing
+own). It is **suggest-then-confirm**: the default `persist=False` changes nothing
 and just returns a report.
 
 ```python
 from spyglass.spikesorting.v2.bad_channels import suggest_bad_channels
 
 # 1. Review (default): mutates nothing, returns one dict per flagged electrode.
-report = suggest_bad_channels(nwb_file_name, write=False)
-for entry in report:
+reviewed_report = suggest_bad_channels(nwb_file_name, persist=False)
+for entry in reviewed_report:
     print(entry)  # {"electrode_group_name", "electrode_id", "probe_shank", "label"}
 
 # 2. Confirm: persist exactly the report you reviewed (no re-detection).
-suggest_bad_channels(nwb_file_name, write=True, report=report)
+suggest_bad_channels(
+    nwb_file_name, persist=True, reviewed_report=reviewed_report
+)
 ```
 
-Pass the reviewed `report` back to the confirm call so it persists precisely what
-you saw. A bare `suggest_bad_channels(nwb_file_name, write=True)` re-detects, and
+Pass the reviewed report back to the confirm call so it persists precisely what
+you saw. A bare `suggest_bad_channels(nwb_file_name, persist=True)` re-detects, and
 since the method samples random chunks (`seed=None`) it may flag a slightly
 different set than the review returned — fine for a one-shot run, but pass
-`report=` (or a fixed `detection_params={"seed": ...}` to both calls) when the
-reviewed and persisted sets must match.
+`reviewed_report=` (or a fixed `detection_params={"seed": ...}` to both calls)
+when the reviewed and persisted sets must match.
 
 Each flagged electrode carries its **label** (`dead`, `noise`, or `out`) so you
-can see what kind of bad it is before persisting. `write=True` sets
+can see what kind of bad it is before persisting. `persist=True` sets
 `Electrode.bad_channel='True'` for **`dead`/`noise` only** and is **additive** —
 it never clears a flag you have already curated. `out` (outside-brain) channels
 are **report-only**: they are surfaced for awareness but **never** written,
@@ -858,7 +862,7 @@ channel that is safe to interpolate or remove — it must not mark an
 outside-brain channel. To keep an `out` channel out of a sort, omit it from the
 group's membership (e.g.
 `SortGroupV2.set_group_by_electrode_table_column(nwb_file_name,
-column="electrode_id", groups=[[...in-brain electrode_ids...]])`).
+electrode_column="electrode_id", value_groups=[[...in-brain electrode_ids...]])`).
 
 The detection thresholds are SpikeInterface defaults (Neuropixels-derived);
 pass `detection_params=` (e.g. `{"dead_channel_threshold": -0.4}`) to recalibrate
@@ -1099,7 +1103,7 @@ implant). Two levels of matcher validation exist, with different CI status:
   enforces it.
 
 The recommended path is the **plan-then-run** orchestrator — pin curations by a
-named strategy, review the plan, then run (each session already sorted +
+named curation strategy, review the plan, then run (each session already sorted +
 curated, grouped as a `SessionGroup` as in step 1 below):
 
 ```python
@@ -1108,11 +1112,11 @@ from spyglass.spikesorting.v2.pipeline import (
     run_v2_unit_match,
 )
 
-# strategy is REQUIRED (no implicit "latest"): single_leaf_curated /
+# curation_strategy is REQUIRED (no implicit "latest"): single_leaf_curated /
 # auto_curated / root / manual. plan.as_dataframe() shows the per-member pins;
 # plan.errors flags any member it could not resolve to exactly one curation.
 plan = plan_v2_unit_match(
-    "my_team", "implant_week1", strategy="single_leaf_curated"
+    "my_team", "implant_week1", curation_strategy="single_leaf_curated"
 )
 plan.as_dataframe()
 summary = run_v2_unit_match(plan)   # runs UnitMatch + TrackedUnit
@@ -1323,7 +1327,7 @@ all run end-to-end through `run_v2_pipeline` / `run_v2_unit_match` and the
 underlying tables.
 
 FigPack curation is offline by default: `FigPackCuration` (and
-`run_v2_pipeline(..., figpack=True)`, which forces `upload=False`) builds a
+`run_v2_pipeline(..., build_figpack_view=True)`, which forces `upload=False`) builds a
 self-contained local bundle you open in a browser to label and merge units.
 Edits to a local bundle are not written back automatically —
 `FigPackCuration.fetch_curation_from_uri(uri)` reads the edited labels / merge
@@ -1389,9 +1393,9 @@ CHANGELOG for the full list. Key user-visible items:
   pandas DataFrame indexed by `unit_id` with a `spike_times`
   (seconds) column; the CurationV2 form also joins the
   `curation_label` list column from `UnitLabel`.
-- `get_spiking_sorting_v2_merge_ids(restriction, as_dict=False)` in
+- `get_spike_sorting_v2_merge_ids(restriction, as_dict=False)` in
   `spyglass.spikesorting.v2.utils` is the notebook-discoverable
-  parallel of v1's `get_spiking_sorting_v1_merge_ids`.
+  v2 helper for resolving curation merge IDs.
 - `SpikeSortingOutput.get_restricted_merge_ids` defaults to every
   available source (`v0`/`v1`, plus `v2` when the v2 module is
   importable), so v2 users copying v1 notebook patterns see v2

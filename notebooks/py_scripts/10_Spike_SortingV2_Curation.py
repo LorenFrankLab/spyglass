@@ -140,7 +140,7 @@ run_summary = run_v2_pipeline(
 #
 # - **Automated** — `run_v2_pipeline(auto_curate=True)` scores the sort and
 #   commits the rule set's labels in the same call (section 3-auto).
-# - **In a browser** — `run_v2_pipeline(figpack=True)` publishes an interactive
+# - **In a browser** — `run_v2_pipeline(build_figpack_view=True)` publishes an interactive
 #   FigPack view you label and merge in a browser (section 3-browser).
 # - **Step by step** — the evaluate → accept → merge → re-evaluate loop below
 #   (sections 3a–3e), for full control over each decision.
@@ -152,7 +152,7 @@ run_summary = run_v2_pipeline(
 # 1. **Evaluate** the committed curation — `CurationEvaluation` walks its
 #    analyzer, computes quality metrics, and proposes labels from a rule set.
 # 2. **Accept** the proposals into a committed child — `use_evaluation_labels` writes
-#    the evaluation's label verdict (the final-metrics path); `create_curation`
+#    the evaluation's label verdict (the final-metrics path); `accept_evaluation_outputs`
 #    accepts explicit merges too.
 # 3. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
 #    drift) — find burst pairs with `plot_by_sort_group_ids` /
@@ -169,10 +169,10 @@ CurationV2.summarize_curation(root_key)
 
 # ### 3-browser. Curate in a browser with FigPack
 #
-# To inspect units in a point-and-click view, `figpack=True` publishes a FigPack
+# To inspect units in a point-and-click view, `build_figpack_view=True` publishes a FigPack
 # curation view of the root curation and returns its location in `figpack_uri`.
 # This needs the optional FigPack packages (the `spikesorting-v2-curation`
-# extra); without them `run_v2_pipeline(figpack=True)` raises, so the cell below
+# extra); without them `run_v2_pipeline(build_figpack_view=True)` raises, so the cell below
 # runs only when they are installed.
 #
 # Offline, the view is a self-contained static bundle on disk — open `index.html`
@@ -197,7 +197,7 @@ if figpack_available:
         interval_list_name=interval_list_name,
         team_name=team_name,
         pipeline_preset=pipeline_preset,
-        figpack=True,
+        build_figpack_view=True,
     )
     print("FigPack view:", figpack_summary["figpack_uri"])
 else:
@@ -423,7 +423,7 @@ print(
 # routed `CurationEvaluation.get_metrics()` table (the same numbers as section 3),
 # while the raw SpikeInterface metric widgets are separately named
 # (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
-# extensions directly. `plot_potential_merges` shows the **persisted**
+# extensions directly. `plot_suggested_merges` shows the **persisted**
 # `get_suggested_merge_groups()` suggestions and never recomputes candidates at
 # plot time.
 
@@ -438,14 +438,14 @@ ssviz.available_visualizations()
 # `unit_locations`). Most plot helpers default to local `matplotlib`; SI widgets
 # without a matplotlib backend expose that explicitly (`plot_sorting_summary`
 # requires `backend="spikeinterface_gui"`, `backend="sortingview"`, or
-# `backend="figpack"`, while `plot_potential_merges` defaults to notebook-local
+# `backend="figpack"`, while `plot_suggested_merges` defaults to notebook-local
 # `ipywidgets`). No step here uploads or publishes anything.
 # `plot_recording_probe_map(recording_key)` rounds out the recording view (pass a
 # 3D `ax=` for a probe with z-coordinates), and
 # `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
 # off the display analyzer. To label and merge in a browser instead, publish a
-# FigPack curation view with `run_v2_pipeline(figpack=True)` (section 3-browser).
+# FigPack curation view with `run_v2_pipeline(build_figpack_view=True)` (section 3-browser).
 
 # +
 sorting_key = {"sorting_id": run_summary["sorting_id"]}

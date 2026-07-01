@@ -221,17 +221,17 @@ elif run_unit_match:
 
 # ### B2. Plan the curations to match
 #
-# `plan_v2_unit_match` pins one curation per member by a named **strategy** and
+# `plan_v2_unit_match` pins one curation per member by a named **curation strategy** and
 # returns a reviewable **plan** — the plan-then-run shape mirroring the rest of
-# v2 (describe → plan → run). Here the strategy is `"auto_curated"`: each member's
-# auto-curated child from B1. Pick the strategy that matches your intent:
+# v2 (describe → plan → run). Here the curation strategy is `"auto_curated"`: each member's
+# auto-curated child from B1. Pick the curation strategy that matches your intent:
 #
 # - `single_leaf_curated` — the member's single terminal curated curation.
 # - `auto_curated` — the auto-curated child (what B1 produced here).
 # - `root` — the uncurated root (warns loudly).
 # - `manual` — pin `curation_choices={member_index: {...}}` explicitly.
 #
-# A strategy never picks an implicit "latest" — a member it can't resolve to
+# A curation strategy never picks an implicit "latest" — a member it can't resolve to
 # exactly one curation is a **blocking error** on the plan (`plan.ok` is `False`,
 # listed in `plan.errors`), so a wrong or ambiguous pin surfaces here, not
 # silently in the match. `plan.as_dataframe()` shows the per-member pins to review
@@ -242,17 +242,17 @@ elif run_unit_match:
 if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
 
-    # Pin each member's auto-curated child (from B1) by strategy, and review the
-    # plan before running. Swap the strategy (single_leaf_curated / root /
+    # Pin each member's auto-curated child (from B1) by curation strategy, and review the
+    # plan before running. Swap the curation strategy (single_leaf_curated / root /
     # manual) to change how curations are pinned.
     plan = plan_v2_unit_match(
         session_group_owner,
         match_group_name,
-        strategy="auto_curated",
+        curation_strategy="auto_curated",
         matcher_params_name=matcher_params_name,
     )
     display(plan.as_dataframe())  # one row per member -- review before running
-    for warning in plan.warnings:  # e.g. the "root" strategy warns loudly
+    for warning in plan.warnings:  # e.g. the "root" curation strategy warns loudly
         print("WARNING:", warning)
     if not plan.ok:
         for problem in plan.errors:
