@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 
 import pytest
 
@@ -49,6 +50,43 @@ def _prepare_pipeline_session(session):
         sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
     )
     return nwb_file_name, sort_group_id, "v2_test_team"
+
+
+def test_run_v2_pipeline_names_the_missing_single_session_field():
+    """A partial single-session call points at the missing field (DB-free).
+
+    Omitting ``sort_group_id`` -- the most common first-run slip -- while the
+    other single-session fields are set must identify ``sort_group_id`` as the
+    *missing* field, not fall back to the generic "requires exactly one input
+    mode" message (which merely lists every field name and misreads as if the
+    caller had mixed single-session and concat inputs).
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    with pytest.raises(PipelineInputError) as exc:
+        run_v2_pipeline(
+            nwb_file_name="fake.nwb",
+            interval_list_name="raw data valid times",
+            team_name="v2_test_team",
+            # sort_group_id intentionally omitted (defaults to None)
+        )
+    msg = str(exc.value)
+    # Names sort_group_id as the *missing* field, not merely lists every field.
+    assert re.search(r"missing.*sort_group_id", msg, re.IGNORECASE), msg
+
+
+def test_run_v2_pipeline_empty_call_still_reports_mode_choice():
+    """A call with no mode fields at all keeps the generic mode message (DB-free).
+
+    The sharpened "missing field" message is only for a *started* single-session
+    call; giving nothing should still explain the two available input modes.
+    """
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+
+    with pytest.raises(PipelineInputError, match="input mode"):
+        run_v2_pipeline()
 
 
 @pytest.mark.slow

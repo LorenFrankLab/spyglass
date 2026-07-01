@@ -344,22 +344,44 @@ def run_v2_pipeline(
     # and no concat fields, or both concat fields and no single-session field
     # (team_name is a single-session field, so it is rejected in concat mode --
     # member teams come from SessionGroup.Member).
-    single_fields = (
-        nwb_file_name,
-        sort_group_id,
-        interval_list_name,
-        team_name,
-    )
-    concat_fields = (concat_session_group_owner, concat_session_group_name)
-    is_single = all(f is not None for f in single_fields) and not any(
-        f is not None for f in concat_fields
-    )
-    is_concat = all(f is not None for f in concat_fields) and not any(
-        f is not None for f in single_fields
-    )
-    if (
-        is_single == is_concat
-    ):  # neither complete-and-clean (missing/partial/mixed)
+    single_named = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+        "interval_list_name": interval_list_name,
+        "team_name": team_name,
+    }
+    concat_named = {
+        "concat_session_group_owner": concat_session_group_owner,
+        "concat_session_group_name": concat_session_group_name,
+    }
+    single_set = {k for k, v in single_named.items() if v is not None}
+    concat_set = {k for k, v in concat_named.items() if v is not None}
+    is_single = len(single_set) == len(single_named) and not concat_set
+    is_concat = len(concat_set) == len(concat_named) and not single_set
+
+    if not (is_single or is_concat):
+        # When the caller clearly started ONE mode but left it incomplete, name
+        # the missing field(s) instead of the generic two-mode explanation --
+        # the common first-run slip (e.g. forgetting sort_group_id) otherwise
+        # misreads as if single-session and concat inputs were mixed.
+        if single_set and not concat_set:
+            missing = [k for k in single_named if k not in single_set]
+            raise PipelineInputError(
+                "run_v2_pipeline: single-session mode is missing required "
+                f"field(s): {', '.join(missing)}. Provide all of "
+                f"{', '.join(single_named)}, or switch to concat mode "
+                "(concat_session_group_owner + concat_session_group_name)."
+            )
+        if concat_set and not single_set:
+            missing = [k for k in concat_named if k not in concat_set]
+            raise PipelineInputError(
+                "run_v2_pipeline: concat mode is missing required field(s): "
+                f"{', '.join(missing)}. Provide both of "
+                f"{', '.join(concat_named)}, or switch to single-session mode "
+                "(nwb_file_name, sort_group_id, interval_list_name, team_name)."
+            )
+        # Nothing set, or fields from BOTH modes set (a genuine mode clash):
+        # explain the two available input modes.
         raise PipelineInputError(
             "run_v2_pipeline requires exactly one input mode: either "
             "single-session fields (nwb_file_name, sort_group_id, "
