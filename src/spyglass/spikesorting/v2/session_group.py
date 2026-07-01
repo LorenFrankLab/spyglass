@@ -675,13 +675,15 @@ class ConcatenatedRecordingSelection(
             {"concat_recording_id": concat_recording_id, **row}
             for row in snapshot_rows
         ]
+        from spyglass.spikesorting.v2.utils import transaction_or_noop
+
         try:
             # allow_direct_insert: this helper IS the validation boundary (it
             # has already checked every member's Recording exists, frozen the
             # snapshot, and minted the deterministic id), so it bypasses the
             # master insert guard. Master + snapshot land in one transaction so
             # a concat id never exists without its frozen member set.
-            with cls.connection.transaction:
+            with transaction_or_noop(cls.connection):
                 cls.insert1(
                     {
                         **identity,

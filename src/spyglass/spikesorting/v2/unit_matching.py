@@ -408,7 +408,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             for index, _member in ordered_members
         ]
         try:
-            with cls.connection.transaction:
+            with transaction_or_noop(cls.connection):
                 # allow_direct_insert: this helper IS the validation boundary
                 # (it has already validated coverage/ownership and minted the
                 # deterministic id), so it bypasses the master insert guard.
