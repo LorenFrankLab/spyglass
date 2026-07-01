@@ -1,12 +1,12 @@
 """The eager v2 part-table probe in ``spikesorting_merge``.
 
 ``spikesorting_merge`` imports the v2 ``CurationV2`` part target inside a broad
-``except Exception`` so that v0/v1-only environments -- and v0/v1 environments
-on a *production* (non-localhost) database -- can still load the merge table.
-That breadth is load-bearing: ``curation`` calls ``_assert_v2_db_safe()`` at
-import, which raises ``RuntimeError`` (not ``ImportError``) on a non-localhost
-DB. Narrowing the except to ``ImportError`` would let that ``RuntimeError``
-propagate and break ``spikesorting_merge`` import on every production deploy.
+``except Exception`` so that v0/v1-only environments -- which may lack the
+optional modern-SpikeInterface / Pydantic v2 dependencies -- can still load the
+merge table when the v2 ``curation`` import fails. That breadth is deliberate:
+it tolerates any import-time failure of the optional v2 layer (an ``ImportError``
+from a missing dependency, or any other exception raised while the v2 modules
+import) rather than letting it break ``spikesorting_merge`` import for everyone.
 
 The fix for silent failures is visibility, not narrowing: the probe logs the
 captured cause via ``logger.warning`` while still tolerating it. These tests
@@ -36,9 +36,9 @@ def _force_v2_curation_error(monkeypatch, exc):
     "exc",
     [
         ImportError("v2 module missing"),
-        RuntimeError("v2 refuses to register schemas on a non-localhost DB"),
+        RuntimeError("v2 module raised at import (e.g. a version skew)"),
     ],
-    ids=["import_error", "db_safety_runtime_error"],
+    ids=["import_error", "non_import_error"],
 )
 def test_unexpected_v2_import_error_is_logged(
     dj_conn, monkeypatch, caplog, exc
@@ -53,8 +53,8 @@ def test_unexpected_v2_import_error_is_logged(
     with caplog.at_level("WARNING"):
         curation, captured = _probe_v2_curation()
 
-    # Tolerated, not propagated -- including the DB-safety RuntimeError, so a
-    # v0/v1 env on a non-localhost DB still loads the merge table.
+    # Tolerated, not propagated -- including a non-ImportError, so a v0/v1 env
+    # still loads the merge table even if the v2 layer raises at import.
     assert curation is None
     assert captured is exc
 

@@ -34,7 +34,6 @@ from spyglass.spikesorting.v2.utils import (
     FactoryOnlyMaster,
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    _assert_v2_db_safe,
     _validate_params,
     reject_duplicate_parameter_content,
     validate_lookup_rows,
@@ -44,7 +43,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 if TYPE_CHECKING:
     import spikeinterface as si
 
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_session_group")
 
 

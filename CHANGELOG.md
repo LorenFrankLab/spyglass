@@ -51,6 +51,11 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: register schemas against any configured database host
+
+Importing `spyglass.spikesorting.v2` registers its schemas against whatever
+database host `dj.config` points at (previously restricted to `localhost`).
+
 #### Spike Sorting v2: pipeline orchestrator, preset tuning, FigPack curation, and canonical notebooks
 
 Adds the full pipeline-orchestrator, preset-tuning, and FigPack-curation surface
@@ -170,13 +175,10 @@ identity, or `content_hash` change.
   directory join. A new "Security & trust model" section documents the
   trusted-operator assumptions (`execution_params` can run container images by
   design; the DB is not internet-facing; `team_name` is a provenance tag).
-- **`metric_curation` and `recompute` declare their own DB-safety guard** (call
-  `_assert_v2_db_safe` before `dj.schema(...)`) instead of relying on transitive
-  coverage.
 - **The eager v2 merge-table probe surfaces failures.** `spikesorting_merge`
   logs the captured cause (`logger.warning`) while keeping the broad
-  `except Exception` load-bearing — a non-localhost `RuntimeError` is tolerated
-  so v0/v1 environments on a production DB still load the merge table.
+  `except Exception` — a v2 import failure is tolerated so v0/v1 environments
+  still load the merge table.
 - **Destructive footguns closed.** recompute `delete_files` rejects a negative
   `days_since_creation`; the disk-side analyzer orphan sweep only considers
   canonical `{sorting_id}__{recipe}.zarr` folders (a misconfigured root can't

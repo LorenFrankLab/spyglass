@@ -69,7 +69,6 @@ from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     SourceResolution,
-    _assert_v2_db_safe,
     _validate_params,
     find_orphaned_masters,
     reject_duplicate_parameter_content,
@@ -79,7 +78,6 @@ from spyglass.spikesorting.v2.utils import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_artifact")
 
 

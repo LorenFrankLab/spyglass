@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import numbers
-import os
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -695,61 +694,6 @@ class SourceResolution:
         "shared_artifact_group",
     ]
     key: dict
-
-
-# ---------------------------------------------------------------------------
-# Database-host safety guard
-# ---------------------------------------------------------------------------
-
-_SAFE_DB_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-_OVERRIDE_ENV = "SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB"
-
-
-def _assert_v2_db_safe() -> None:
-    """Refuse to register v2 schemas against a non-test database.
-
-    Called at module-import time by every v2 schema module before
-    ``schema = dj.schema(...)`` runs. While the v2 pipeline is under
-    active development we hard-fail any attempt to declare or write to
-    v2 schemas on a database other than the isolated test docker
-    container (host ``localhost`` / ``127.0.0.1`` / ``::1``).
-
-    The check is intentionally narrow: it pins the database host only.
-    Other isolation guarantees (the ``pytests``/``test`` schema prefix,
-    the temp ``SPYGLASS_BASE_DIR`` path) are handled by
-    ``bootstrap_v2_test_environment``. This guard is the last line of
-    defense if some other code path repointed ``dj.config`` at the
-    production server after bootstrap ran.
-
-    Raises
-    ------
-    RuntimeError
-        If ``dj.config['database.host']`` is set to a non-local host
-        and the override env var is not set.
-
-    Override
-    --------
-    Set ``SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1`` to bypass the
-    guard. This requires an explicit deliberate action; do NOT export
-    it for a shell session in which you might accidentally run v2
-    populate / insert calls.
-    """
-    if os.environ.get(_OVERRIDE_ENV) == "1":
-        return
-
-    host = dj.config.get("database.host")
-    if host in _SAFE_DB_HOSTS:
-        return
-
-    raise RuntimeError(
-        f"v2 spike sorting refuses to register schemas against host "
-        f"{host!r}. Expected one of {sorted(_SAFE_DB_HOSTS)} (the "
-        f"isolated test docker container). Run "
-        f"`bootstrap_v2_test_environment` from "
-        f"`tests/spikesorting/v2/test_env.py` before importing v2 "
-        f"runtime modules. To bypass with full understanding of the "
-        f"risk, set {_OVERRIDE_ENV}=1 in the environment."
-    )
 
 
 def _assert_noise_levels_length(

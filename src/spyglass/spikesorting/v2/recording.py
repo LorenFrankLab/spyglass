@@ -75,7 +75,6 @@ from spyglass.spikesorting.v2._sort_group_planning import (
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    _assert_v2_db_safe,
     _validate_params,
     _validate_reference_fields,
     reject_duplicate_parameter_content,
@@ -87,7 +86,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 if TYPE_CHECKING:
     import spikeinterface as si
 
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_recording")
 
 

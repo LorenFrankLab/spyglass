@@ -185,9 +185,9 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
     """``get_restricted_merge_ids`` must not force v2 in a v0/v1-only env.
 
     A literal ``sources=["v0","v1","v2"]`` default made the no-argument
-    path raise wherever v2 is unavailable (the localhost DB guard) even
-    when the caller never requested v2. The default now resolves to only
-    the available sources; an explicit list is still honored verbatim.
+    path raise wherever the optional v2 layer is unavailable even when the
+    caller never requested v2. The default now resolves to only the
+    available sources; an explicit list is still honored verbatim.
     (``dj_conn`` only because importing the merge module declares its
     DataJoint schema; the assertions touch no table.)
     """

@@ -47,7 +47,6 @@ from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     CurationSource,
     FactoryOnlyMaster,
-    _assert_v2_db_safe,
     _is_duplicate_key_error,
     transaction_or_noop,
     unit_brain_region_df,
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
 
     from spyglass.spikesorting.v2._curation_plan import CurationInsertPlan
 
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_curation")
 
 #: How many times ``insert_curation`` recomputes a child ``curation_id`` and

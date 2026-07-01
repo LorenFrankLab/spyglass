@@ -6,10 +6,7 @@ cross-session matching, see the full [Spike Sorting v2](./SpikeSortingV2.md)
 reference and the [notebooks](../notebooks/10_Spike_SortingV2.ipynb).
 
 This assumes you have already ingested the session with `insert_sessions` (see
-[Insert Data](../notebooks/02_Insert_Data.ipynb)) and are on a **local / test**
-database — importing `spyglass.spikesorting.v2` registers its schemas only
-against a `localhost` host and otherwise raises (set
-`SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1` to allow another host).
+[Insert Data](../notebooks/02_Insert_Data.ipynb)).
 
 ## 1. One-time setup (3 things)
 

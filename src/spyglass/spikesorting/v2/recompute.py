@@ -62,13 +62,9 @@ from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
     Sorting,
 )
-from spyglass.spikesorting.v2.utils import _assert_v2_db_safe
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 
-# Gate schema declaration on the v2 DB-host safety guard (mirrors recording.py)
-# so this module no longer relies on transitive coverage from its imports.
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_recompute")
 
 _ZERO_HASH = "0" * 64

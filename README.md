@@ -134,12 +134,9 @@ the recommended path for new sorts under SpikeInterface 0.104: one call
 preprocesses the recording, detects artifacts, runs the sorter, writes the
 initial curation, and registers the result on the spike-sorting merge table.
 
-Two prerequisites for the snippet below. Install the `spikesorting-v2` extra
+One prerequisite for the snippet below: install the `spikesorting-v2` extra
 (`pip install "spyglass-neuro[spikesorting-v2]"`), which provides the default
-MountainSort5 sorter. And run against a **local / test** database: importing
-`spyglass.spikesorting.v2` registers its schemas only against a `localhost`
-database host (`localhost` / `127.0.0.1` / `::1`) and otherwise raises; set
-`SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1` to allow another host.
+MountainSort5 sorter.
 
 ```python
 from spyglass.common.common_lab import LabTeam

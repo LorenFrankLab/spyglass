@@ -51,7 +51,6 @@ from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    _assert_v2_db_safe,
     transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -59,7 +58,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 if TYPE_CHECKING:
     import pandas as pd
 
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_unit_matching")
 
 

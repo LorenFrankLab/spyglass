@@ -71,7 +71,6 @@ from spyglass.spikesorting.v2.sorting import (
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    _assert_v2_db_safe,
     _jsonable_blob,
     _resolved_job_kwargs,
     _validate_params,
@@ -79,9 +78,6 @@ from spyglass.spikesorting.v2.utils import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
-# Gate schema declaration on the v2 DB-host safety guard (mirrors recording.py)
-# so this module no longer relies on transitive coverage from its imports.
-_assert_v2_db_safe()
 schema = dj.schema("spikesorting_v2_metric_curation")
 
 # Extensions CurationEvaluation adds to the sort-time analyzer before metrics and

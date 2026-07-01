@@ -148,10 +148,8 @@ model as the rest of Spyglass:
   That is a deliberate capability for reproducible containerized sorting, not a
   vulnerability — but it means inserting parameter rows is equivalent to running
   code on the compute host. Restrict write access accordingly.
-- **The database is not internet-facing.** v2 hard-refuses to register or write
-  its schemas against a non-localhost database host (the import-time
-  `_assert_v2_db_safe` guard) while the pipeline is pre-production; deployment
-  is on a lab-internal DB reachable only by trusted operators.
+- **The database is not internet-facing.** v2 is deployed on a lab-internal DB
+  reachable only by trusted operators, not exposed to the public internet.
 - **`team_name` is a provenance tag, not access enforcement.** It records which
   team owns a selection; it does not gate reads or writes. Because sort groups
   in one session can belong to different teams, overwriting a session's sort

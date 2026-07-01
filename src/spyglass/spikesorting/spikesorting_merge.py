@@ -22,36 +22,34 @@ from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 
-# v2 is in-development and gated behind the DB-host safety guard
-# (raises on non-localhost). Import the v2 module lazily and wrap in
-# try/except so v0/v1-only environments keep working unchanged; the
-# v2 part table on SpikeSortingOutput is only declared when v2 is
-# importable in the current environment, because DataJoint requires
-# the FK target table to exist at schema-compile time.
+# v2 is an optional layer. Import the v2 module lazily and
+# wrap in try/except so v0/v1-only environments (which may lack the v2
+# dependencies) keep working unchanged; the v2 part table on
+# SpikeSortingOutput is only declared when v2 is importable in the current
+# environment, because DataJoint requires the FK target table to exist at
+# schema-compile time.
 #
 # When v2 is unavailable we keep the original import exception in
 # ``_v2_import_error`` and surface it (with traceback context) the
 # moment a v2-requiring helper is called — otherwise users see an
 # opaque "v2 not loaded" message and have to dig for the real cause
-# (non-localhost DB, missing pydantic, SI version skew, etc).
+# (missing pydantic, SI version skew, a v2 code error, etc).
 def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
     """Import the v2 ``CurationV2`` part-table target for this merge table.
 
     Returns ``(CurationV2_or_None, import_error_or_None)``.
 
-    The broad ``except Exception`` is load-bearing and must NOT be narrowed to
-    ``ImportError``: ``curation`` calls ``_assert_v2_db_safe()`` at import,
-    which raises ``RuntimeError`` (not ``ImportError``) on a non-localhost DB.
-    That is the expected, tolerated path that lets v0/v1 environments on a
-    production database still load this merge table. The captured error is
-    logged (in addition to being returned) so a genuinely unexpected v2
-    failure is surfaced rather than silently swallowed.
+    The broad ``except Exception`` is deliberate and must NOT be narrowed to
+    ``ImportError``: the optional v2 layer can fail to import for reasons beyond
+    a missing dependency (e.g. a SpikeInterface / Pydantic version skew raising
+    at import), and v0/v1-only environments must still be able to load this
+    merge table when that happens. The captured error is logged (in addition to
+    being returned) so a genuinely unexpected v2 failure is surfaced rather than
+    silently swallowed.
     """
     try:
         from spyglass.spikesorting.v2.curation import CurationV2
-    except (
-        Exception
-    ) as err:  # noqa: BLE001 -- see docstring (RuntimeError path)
+    except Exception as err:  # noqa: BLE001 -- see docstring
         logger.warning(
             "spikesorting v2 is unavailable; SpikeSortingOutput will be "
             "declared without its CurationV2 part in this process. "
@@ -68,10 +66,10 @@ def _raise_v2_unavailable(caller: str) -> None:
     """Raise a clear RuntimeError when v2 is requested but didn't import.
 
     Surfaces the original import exception (set at module load) so users
-    don't have to guess whether v2 failed because of the non-localhost
-    DB guard, a missing dependency, or a code-level error in the v2
-    module. Use this from every v2-requiring helper instead of letting
-    `_CurationV2 is None` propagate as an `AttributeError` later.
+    don't have to guess whether v2 failed because of a missing dependency,
+    a version skew, or a code-level error in the v2 module. Use this from
+    every v2-requiring helper instead of letting `_CurationV2 is None`
+    propagate as an `AttributeError` later.
     """
     cause = _v2_import_error
     detail = (
@@ -81,10 +79,8 @@ def _raise_v2_unavailable(caller: str) -> None:
     )
     raise RuntimeError(
         f"{caller}: spyglass.spikesorting.v2 is not importable in "
-        "this environment. The v2 DB-host safety guard refuses "
-        "non-localhost databases; set "
-        "SPYGLASS_SPIKESORTING_V2_ALLOW_NONLOCAL_DB=1 to bypass with "
-        f"the documented risk caveat.{detail}"
+        "this environment (e.g. a missing optional dependency or a "
+        f"version skew in the v2 stack).{detail}"
     ) from cause
 
 
@@ -92,8 +88,8 @@ def _available_merge_sources() -> list:
     """Default ``sources`` for ``get_restricted_merge_ids``.
 
     v0/v1 are always present; v2 is appended only when its module
-    imported. v2 is gated behind the localhost DB guard and is absent in
-    v0/v1-only deployments, so a literal ``["v0", "v1", "v2"]`` default
+    imported. v2 is absent in v0/v1-only deployments (which may lack its
+    optional dependencies), so a literal ``["v0", "v1", "v2"]`` default
     would make the no-argument path raise there even when the caller
     never requested v2.
     """
@@ -284,8 +280,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         sources : list, optional
             list of sources to restrict to. Defaults to every AVAILABLE
             source: ``["v0", "v1"]`` plus ``"v2"`` only when the v2 module
-            imported (it is gated behind the localhost DB guard and is
-            absent in v0/v1-only deployments). Pass an explicit list to
+            imported (v2 is absent in v0/v1-only deployments that lack its
+            optional dependencies). Pass an explicit list to
             override; a list containing ``"v2"`` in an env where v2 did
             not import raises a clear error.
         restrict_by_artifact : bool, optional
