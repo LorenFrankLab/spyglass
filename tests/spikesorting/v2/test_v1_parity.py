@@ -321,7 +321,7 @@ def test_clusterless_schema_documents_dead_fields_or_drops_them():
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
+def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
     populated_sorting,
 ):
     """The notebook helper resolves a restriction to its v2 merge_id(s).
@@ -336,6 +336,7 @@ def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.utils import (
         get_spiking_sorting_v2_merge_ids,
+        get_spike_sorting_v2_merge_ids,
     )
 
     # Clear any prior curation (master-before-part) then mint a root,
@@ -355,10 +356,11 @@ def test_get_spiking_sorting_v2_merge_ids_resolves_restriction(
     assert expected, "insert_curation must register a v2 merge row"
 
     restriction = {"sorting_id": populated_sorting["sorting_id"]}
-    ids = get_spiking_sorting_v2_merge_ids(restriction)
+    ids = get_spike_sorting_v2_merge_ids(restriction)
     assert {str(m) for m in ids} == expected
+    assert get_spiking_sorting_v2_merge_ids(restriction) == ids
 
-    dicts = get_spiking_sorting_v2_merge_ids(restriction, as_dict=True)
+    dicts = get_spike_sorting_v2_merge_ids(restriction, as_dict=True)
     assert all(set(d.keys()) == {"merge_id"} for d in dicts)
     assert {str(d["merge_id"]) for d in dicts} == expected
 

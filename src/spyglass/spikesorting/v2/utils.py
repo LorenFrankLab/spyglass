@@ -930,20 +930,19 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
     return effective
 
 
-def get_spiking_sorting_v2_merge_ids(
+def get_spike_sorting_v2_merge_ids(
     restriction: dict, as_dict: bool = False
 ) -> list:
     """Return merge ids for a v2 spike-sorting restriction.
 
-    Notebook-discoverable parallel of ``get_spiking_sorting_v1_merge_ids``;
+    Notebook-discoverable helper for downstream-analysis handoffs;
     thin wrapper over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
-    users can do ``get_spiking_sorting_v2_merge_ids(restriction)``
+    users can do ``get_spike_sorting_v2_merge_ids(restriction)``
     without poking at the private merge-table method directly.
 
     ``as_dict=True`` returns ``{"merge_id": uuid}`` dicts; the default
-    ``False`` returns a plain list of UUIDs, matching the
-    ``get_spiking_sorting_v1_merge_ids`` return shape so a caller copied
-    verbatim works unchanged.
+    ``False`` returns a plain list of UUIDs, matching the v1 helper return
+    shape.
 
     Parameters
     ----------
@@ -962,3 +961,14 @@ def get_spiking_sorting_v2_merge_ids(
     return SpikeSortingOutput()._get_restricted_merge_ids_v2(
         restriction, as_dict=as_dict
     )
+
+
+def get_spiking_sorting_v2_merge_ids(
+    restriction: dict, as_dict: bool = False
+) -> list:
+    """Backward-compatible v1-shaped spelling of the v2 merge-id helper.
+
+    Prefer :func:`get_spike_sorting_v2_merge_ids` in new code. This alias is
+    kept so copied v1-style helper calls continue to work.
+    """
+    return get_spike_sorting_v2_merge_ids(restriction, as_dict=as_dict)

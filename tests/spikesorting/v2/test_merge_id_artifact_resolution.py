@@ -1,7 +1,7 @@
 """Regression tests for v2 merge-id resolution by artifact detection.
 
 ``SpikeSortingOutput._get_restricted_merge_ids_v2`` (and its public wrapper
-``get_spiking_sorting_v2_merge_ids``) advertises ``artifact_detection_id`` as a
+``get_spike_sorting_v2_merge_ids``) advertises ``artifact_detection_id`` as a
 restriction key, but ``artifact_detection_id`` is NOT on ``SortingSelection`` -- it
 lives on the optional ``SortingSelection.ArtifactDetectionSource`` part. Restricting
 the recording/sorter join (``sort_master``) by ``artifact_detection_id`` silently
@@ -108,22 +108,20 @@ def test_merge_ids_artifact_restriction_is_exclusive(two_sorts_one_recording):
     """Restricting by ``artifact_detection_id`` returns only the matching sort's
     merge_id -- not both sorts on the recording."""
     from spyglass.spikesorting.v2.utils import (
-        get_spiking_sorting_v2_merge_ids,
+        get_spike_sorting_v2_merge_ids,
     )
 
     ctx = two_sorts_one_recording
 
     # Sanity: with no artifact-detection restriction, the recording matches both sorts.
-    both = get_spiking_sorting_v2_merge_ids(
-        {"recording_id": ctx["recording_id"]}
-    )
+    both = get_spike_sorting_v2_merge_ids({"recording_id": ctx["recording_id"]})
     assert set(both) == {
         ctx["merge_id_artifact"],
         ctx["merge_id_no_artifact"],
     }
 
     # With the artifact-detection restriction, only the matching sort resolves.
-    restricted = get_spiking_sorting_v2_merge_ids(
+    restricted = get_spike_sorting_v2_merge_ids(
         {
             "recording_id": ctx["recording_id"],
             "artifact_detection_id": ctx["artifact_detection_id"],
@@ -140,13 +138,13 @@ def test_merge_ids_restrict_by_artifact_interval_name(
     """The ``interval_list_name='artifact_detection_{uuid}'`` convention resolves to
     the single matching merge_id (exercises the str->UUID cast)."""
     from spyglass.spikesorting.v2.utils import (
-        get_spiking_sorting_v2_merge_ids,
+        get_spike_sorting_v2_merge_ids,
     )
 
     ctx = two_sorts_one_recording
     interval_list_name = f"artifact_detection_{ctx['artifact_detection_id']}"
 
-    resolved = get_spiking_sorting_v2_merge_ids(
+    resolved = get_spike_sorting_v2_merge_ids(
         {
             "recording_id": ctx["recording_id"],
             "interval_list_name": interval_list_name,
@@ -166,12 +164,12 @@ def test_merge_ids_artifact_detection_id_none_selects_no_artifact_sort(
     not both sorts on the recording.
     """
     from spyglass.spikesorting.v2.utils import (
-        get_spiking_sorting_v2_merge_ids,
+        get_spike_sorting_v2_merge_ids,
     )
 
     ctx = two_sorts_one_recording
 
-    resolved = get_spiking_sorting_v2_merge_ids(
+    resolved = get_spike_sorting_v2_merge_ids(
         {"recording_id": ctx["recording_id"], "artifact_detection_id": None}
     )
     assert list(resolved) == [ctx["merge_id_no_artifact"]]
@@ -184,12 +182,12 @@ def test_merge_ids_no_artifact_sort_unaffected(two_sorts_one_recording):
     the optional-part intersection is skipped when no artifact detection is asked
     for, so it is not dropped."""
     from spyglass.spikesorting.v2.utils import (
-        get_spiking_sorting_v2_merge_ids,
+        get_spike_sorting_v2_merge_ids,
     )
 
     ctx = two_sorts_one_recording
 
-    resolved = get_spiking_sorting_v2_merge_ids(
+    resolved = get_spike_sorting_v2_merge_ids(
         {"sorting_id": ctx["sorting_id_no_artifact"]}
     )
     assert list(resolved) == [ctx["merge_id_no_artifact"]]
