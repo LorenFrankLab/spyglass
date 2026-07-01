@@ -137,7 +137,7 @@ def test_degenerate_single_session_returns_empty(clean_registry):
     mp = clean_registry
     matcher = _dummy_matcher(mp)
     one = mp.SessionMatcherInput(
-        session_key={"sorting_id": "s", "curation_id": 0},
+        curation_key={"sorting_id": "s", "curation_id": 0},
         waveform_dir=Path("/tmp/x"),
         channel_positions_path=Path("/tmp/x/channel_positions.npy"),
         recording_date=None,

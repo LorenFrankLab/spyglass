@@ -729,7 +729,7 @@ actually applies merges at fetch (matching v1 semantics);
 `Sorting.get_sorting(as_dataframe=True)` for pre-curation peek;
 `CurationV2.get_sorting(as_dataframe=True)` includes the
 `curation_label` column joined from `CurationV2.UnitLabel`;
-`get_spiking_sorting_v2_merge_ids` notebook-discoverable helper
+`get_spike_sorting_v2_merge_ids` notebook-discoverable helper
 mirroring v1's surface.
 
 **Cross-pipeline fixes:** sparse unit_id consumers in

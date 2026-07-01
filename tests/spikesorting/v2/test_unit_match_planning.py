@@ -126,15 +126,15 @@ def test_root_curation_strategy_picks_root_and_warns_loudly():
     assert any("root" in w.lower() for w in plan.warnings)
 
 
-def test_single_leaf_curated_picks_the_terminal_child():
+def test_final_curated_picks_the_terminal_child():
     # root(0) -> child(1); the leaf is the curated child.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)])]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     assert plan.ok
     assert plan.curation_choices == {0: {"sorting_id": _S0, "curation_id": 1}}
 
 
-def test_single_leaf_curated_follows_a_chain_to_the_terminal_leaf():
+def test_final_curated_follows_a_chain_to_the_terminal_leaf():
     # root(0) -> child(1) -> grandchild(2): only 2 is a leaf.
     members = [
         _member(
@@ -143,11 +143,11 @@ def test_single_leaf_curated_follows_a_chain_to_the_terminal_leaf():
             [_cur(_S0, 0, -1), _cur(_S0, 1, 0), _cur(_S0, 2, 1)],
         )
     ]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     assert plan.curation_choices == {0: {"sorting_id": _S0, "curation_id": 2}}
 
 
-def test_single_leaf_curated_ambiguous_two_leaves_errors():
+def test_final_curated_ambiguous_two_leaves_errors():
     # root(0) -> child(1) AND child(2): two curated leaves -> not resolvable.
     members = [
         _member(
@@ -156,15 +156,15 @@ def test_single_leaf_curated_ambiguous_two_leaves_errors():
             [_cur(_S0, 0, -1), _cur(_S0, 1, 0), _cur(_S0, 2, 0)],
         )
     ]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     assert not plan.ok
     assert any("member 0" in e for e in plan.errors)
     assert any("manual" in e for e in plan.errors)  # points to the escape hatch
 
 
-def test_single_leaf_curated_root_only_errors():
+def test_final_curated_root_only_errors():
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     assert not plan.ok
     assert any("member 0" in e for e in plan.errors)
 
@@ -203,7 +203,7 @@ def test_manual_canonicalizes_and_validates_membership():
     plan = _plan(
         members,
         "manual",
-        manual_choices={
+        manual_curation_choices={
             0: {"sorting_id": _S0, "curation_id": 1},
             1: {"sorting_id": _S1, "curation_id": 0},
         },
@@ -220,21 +220,21 @@ def test_manual_rejects_a_pin_not_among_the_members_choices():
     plan = _plan(
         members,
         "manual",
-        manual_choices={0: {"sorting_id": _S0, "curation_id": 99}},
+        manual_curation_choices={0: {"sorting_id": _S0, "curation_id": 99}},
     )
     assert not plan.ok
     assert any("member 0" in e for e in plan.errors)
 
 
 def test_manual_rejects_extra_member_indices():
-    # A curation_choices entry for a member index that is not in the group
+    # A manual_curation_choices entry for a member index that is not in the group
     # (stale / mistyped) is a blocking error -- exact coverage, not silently
     # dropped.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
     plan = _plan(
         members,
         "manual",
-        manual_choices={
+        manual_curation_choices={
             0: {"sorting_id": _S0, "curation_id": 0},
             9: {"sorting_id": _S1, "curation_id": 0},  # not a member
         },
@@ -243,7 +243,7 @@ def test_manual_rejects_extra_member_indices():
     assert any("[9]" in e for e in plan.errors)
 
 
-def test_curation_choices_rejected_with_a_non_manual_curation_strategy():
+def test_manual_curation_choices_rejected_with_a_non_manual_strategy():
     # Explicit pins with an automatic curation strategy would be silently ignored
     # -> the planner rejects the combination up front.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
@@ -251,7 +251,7 @@ def test_curation_choices_rejected_with_a_non_manual_curation_strategy():
         _plan(
             members,
             "auto_curated",
-            manual_choices={0: {"sorting_id": _S0, "curation_id": 0}},
+            manual_curation_choices={0: {"sorting_id": _S0, "curation_id": 0}},
         )
 
 
@@ -263,7 +263,7 @@ def test_manual_requires_a_choice_for_every_member():
     plan = _plan(
         members,
         "manual",
-        manual_choices={0: {"sorting_id": _S0, "curation_id": 0}},
+        manual_curation_choices={0: {"sorting_id": _S0, "curation_id": 0}},
     )
     assert not plan.ok
     assert any("member 1" in e for e in plan.errors)
@@ -274,7 +274,7 @@ def test_unknown_curation_strategy_raises():
         _plan([_member(0, "day1.nwb", [_cur(_S0, 0, -1)])], "latest")
 
 
-def test_single_leaf_curated_ambiguous_across_two_sortings_errors():
+def test_final_curated_ambiguous_across_two_sortings_errors():
     # A re-sorted member: TWO separate sortings, each with its own curated leaf.
     # "single leaf" spans all the member's curations, so this is ambiguous
     # across sortings -> error (not a silent pick of one sorting).
@@ -290,7 +290,7 @@ def test_single_leaf_curated_ambiguous_across_two_sortings_errors():
             ],
         )
     ]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     assert not plan.ok
     assert any("member 0" in e and "manual" in e for e in plan.errors)
 
@@ -326,13 +326,11 @@ def test_run_v2_unit_match_rejects_a_not_ok_plan():
         session_group_owner="owner",
         session_group_name="grp",
         matcher_params_name="unitmatch_default",
-        curation_strategy="single_leaf_curated",
+        curation_strategy="final_curated",
         curation_choices={},
         rows=[],
         warnings=[],
-        errors=[
-            "member 0 (day1.nwb): curation_strategy='single_leaf_curated' ..."
-        ],
+        errors=["member 0 (day1.nwb): curation_strategy='final_curated' ..."],
     )
     assert not plan.ok
     with pytest.raises(PipelineInputError, match="could not pin"):
@@ -344,7 +342,7 @@ def test_plan_dataframe_and_truthiness():
         _member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)]),
         _member(1, "day2.nwb", [_cur(_S1, 0, -1)]),
     ]
-    plan = _plan(members, "single_leaf_curated")
+    plan = _plan(members, "final_curated")
     # A member with no curated leaf makes the whole plan not-ok, but the frame
     # still lists every member for review.
     df = plan.as_dataframe()

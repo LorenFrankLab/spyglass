@@ -620,7 +620,7 @@ def test_curation_labels_raise_on_stray_unit_ids(
 ):
     """``insert_curation`` raises when labels reference a unit_id not in
     the sorting (the stray label would otherwise vanish silently);
-    ``permissive_labels=True`` restores the warn-and-drop behavior.
+    ``allow_unknown_unit_ids=True`` restores the warn-and-drop behavior.
     """
     from spyglass.spikesorting.v2 import curation as curation_mod
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -646,7 +646,7 @@ def test_curation_labels_raise_on_stray_unit_ids(
         sorting_key=populated_sorting,
         labels={999999: ["noise"]},
         description="stray-label permissive test",
-        permissive_labels=True,
+        allow_unknown_unit_ids=True,
     )
     assert any("999999" in m for m in captured), captured
     # The stray label was dropped, not persisted.

@@ -117,7 +117,7 @@ def test_propose_merge_records_not_applies(polymer_60s_sort):
     units_after = {int(u) for u in (CurationV2.Unit & key).fetch("unit_id")}
     assert {a, b} <= units_after
     # The proposed merge is recorded as a >1-contributor group.
-    groups = CurationV2.get_merge_groups(key)
+    groups = CurationV2.get_unit_contributor_groups(key)
     assert any(len(c) > 1 for c in groups.values())
     assert CurationV2.summarize_curation(key)["is_merge_preview"] is True
 
@@ -430,7 +430,9 @@ def test_summarize_curation_fields(populated_sorting):
     assert summary["curation_id"] == key["curation_id"]
     assert summary["n_units"] == len(CurationV2.Unit & key)
     assert summary["labels"].get(a) == ["mua"]
-    assert summary["merge_groups"] == CurationV2.get_merge_groups(key)
+    assert summary["merge_groups"] == CurationV2.get_unit_contributor_groups(
+        key
+    )
     assert summary["merges_applied"] is False
     assert summary["is_merge_preview"] is False
     assert summary["description"] == "summary test"

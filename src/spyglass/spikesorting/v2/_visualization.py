@@ -61,10 +61,10 @@ SI_METRIC_WIDGET_EXTENSIONS = {
 
 # SI ``export_report`` unconditionally computes ``unit_locations`` when absent
 # (mutating the on-disk display analyzer), so it is the one extension the
-# read-only (``force_computation=False``) path must require present. The wider
+# read-only (``compute_missing=False``) path must require present. The wider
 # set is exactly the display-safe extensions SI's ``export_report`` actually
 # renders (``spike_amplitudes`` distributions, ``correlograms`` in the per-unit
-# summaries, ``unit_locations`` maps), so ``force_computation=True`` precomputes
+# summaries, ``unit_locations`` maps), so ``compute_missing=True`` precomputes
 # only those -- a richer report renders with no SI-side mutation, and nothing
 # unread is computed onto the display analyzer.
 REPORT_REQUIRED_EXTENSIONS = ("unit_locations",)

@@ -341,7 +341,7 @@ class UnitMatchBackend:
         # bundle extraction); this is the post-extraction backstop.
         assert_consistent_channel_geometry(
             [
-                (s.session_key, np.load(s.channel_positions_path))
+                (s.curation_key, np.load(s.channel_positions_path))
                 for s in session_inputs
             ]
         )
@@ -473,8 +473,8 @@ class UnitMatchBackend:
         # unordered cross-session pair appears once, side A = the earlier
         # session block (i < j).
         for i, j in np.argwhere(mask):
-            key_a = session_inputs[int(session_ids[i])].session_key
-            key_b = session_inputs[int(session_ids[j])].session_key
+            key_a = session_inputs[int(session_ids[i])].curation_key
+            key_b = session_inputs[int(session_ids[j])].curation_key
             pairs.append(
                 MatchPair(
                     session_a_sorting_id=str(key_a["sorting_id"]),

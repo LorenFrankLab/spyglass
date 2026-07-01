@@ -217,14 +217,14 @@ def test_preflight_session_collects_group_errors(monkeypatch):
 
 @pytest.mark.unit
 def test_session_runner_requires_pipeline_preset(monkeypatch):
-    """The runner requires an explicit preset, before any DB or run."""
+    """The runner signature requires an explicit preset."""
     _no_db(monkeypatch)
     monkeypatch.setattr(
         plr,
         "run_v2_pipeline",
         lambda **kw: pytest.fail("run_v2_pipeline must not be called"),
     )
-    with pytest.raises(PipelineInputError, match="pipeline_preset is required"):
+    with pytest.raises(TypeError, match="pipeline_preset"):
         run_v2_pipeline_session(
             nwb_file_name="s.nwb",
             interval_list_name=_INTERVAL,

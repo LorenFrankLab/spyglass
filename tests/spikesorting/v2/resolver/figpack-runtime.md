@@ -239,7 +239,7 @@ key (same shape as above) rather than relying on the `curation=` kwarg.
 
 ## Helper shapes the DataJoint tables will wrap
 
-- `build_curation_view(curation_key, label_options=None, metrics=None,
+- `build_curation_view(curation_key, label_options=None,
   upload=..., ephemeral=False) -> str`: load the curation's `SortingAnalyzer`
   via `Sorting().get_analyzer(...)`, **ensure the curation-view extensions**
   (`spike_amplitudes`/`correlograms`/`unit_locations`/`template_similarity`) on

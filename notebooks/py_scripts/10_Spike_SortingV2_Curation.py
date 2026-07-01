@@ -155,7 +155,7 @@ run_summary = run_v2_pipeline(
 #    the evaluation's label verdict (the final-metrics path); `accept_evaluation_outputs`
 #    accepts explicit merges too.
 # 3. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
-#    drift) — find burst pairs with `plot_by_sort_group_ids` /
+#    drift) — find burst pairs with `plot_burst_pair_metrics` /
 #    `investigate_pair_*`, then merge them with `create_merged_curation`.
 # 4. **Re-evaluate the merged curation** — merging changes each unit's template
 #    (and so its SNR / ISI-violation fraction / PC-NN separation), so metrics
@@ -283,7 +283,7 @@ CurationEvaluation.get_metrics(eval_sel)
 
 # ### 3b. Find burst pairs to merge, then accept the auto labels
 #
-# `plot_by_sort_group_ids` scatters waveform similarity vs cross-correlogram
+# `plot_burst_pair_metrics` scatters waveform similarity vs cross-correlogram
 # asymmetry, one point per unit pair — high-similarity, asymmetric pairs are
 # merge candidates (drill into a pair with `investigate_pair_xcorrel` /
 # `investigate_pair_peaks`). Hippocampal pyramidal cells fire complex-spike
@@ -296,7 +296,7 @@ CurationEvaluation.get_metrics(eval_sel)
 # `overlay_evaluation_labels` instead to KEEP existing labels and only add the proposed
 # ones).
 
-CurationEvaluation().plot_by_sort_group_ids(eval_sel)
+CurationEvaluation().plot_burst_pair_metrics(eval_sel)
 labeled_curation = CurationEvaluation().use_evaluation_labels(eval_sel)
 labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 
@@ -442,7 +442,7 @@ ssviz.available_visualizations()
 # `ipywidgets`). No step here uploads or publishes anything.
 # `plot_recording_probe_map(recording_key)` rounds out the recording view (pass a
 # 3D `ax=` for a probe with z-coordinates), and
-# `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
+# `ssviz.export_si_report(sorting_key, folder, compute_missing=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
 # off the display analyzer. To label and merge in a browser instead, publish a
 # FigPack curation view with `run_v2_pipeline(build_figpack_view=True)` (section 3-browser).

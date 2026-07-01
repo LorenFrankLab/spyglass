@@ -451,7 +451,7 @@ def fetch_interior_bad_channel_ids(
                 "electrodes or a null coordinate (pitch undefined)"
             )
         # Curated-bad candidates on this shank, excluding any that are already
-        # sort-group members (a remove_bad_channels=False group keeps its own
+        # sort-group members (an omit_bad_channels=False group keeps its own
         # bad members present; only the *excluded* interior bad are re-included).
         candidate_xyz = [
             (

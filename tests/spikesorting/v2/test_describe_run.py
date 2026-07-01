@@ -90,7 +90,7 @@ def _unit_match_summary():
         "session_group_owner": "owner",
         "session_group_name": "grp",
         "matcher_params_name": "unitmatch_default",
-        "unitmatch_id": "um-1",
+        "unit_match_id": "um-1",
         "unit_match_status": "computed",
         "n_pairs": 3,
         "tracked_unit_status": "computed",

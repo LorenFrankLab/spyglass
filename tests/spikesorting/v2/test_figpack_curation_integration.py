@@ -259,16 +259,25 @@ def test_fetch_from_nonexistent_local_path_fails_closed():
         )
 
 
-def test_metrics_not_yet_supported(populated_sorting_with_curation):
-    """A non-empty metrics request is refused (would be silently dropped)."""
+def test_metrics_not_public_option():
+    """Metric-column selection is not advertised until FigPack supports it."""
+    import inspect
+
     from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
         FigPackCurationSelection,
     )
 
-    with pytest.raises(ValueError, match="metric-column selection"):
-        FigPackCurationSelection.insert_selection(
-            populated_sorting_with_curation, metrics=["snr"]
-        )
+    assert (
+        "metrics"
+        not in inspect.signature(
+            FigPackCurationSelection.insert_selection
+        ).parameters
+    )
+    assert (
+        "metrics"
+        not in inspect.signature(FigPackCuration.build_curation_view).parameters
+    )
 
 
 def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):

@@ -536,17 +536,17 @@ class _DummyMatcher:
                 pairs.append(
                     MatchPair(
                         session_a_sorting_id=str(
-                            left.session_key["sorting_id"]
+                            left.curation_key["sorting_id"]
                         ),
                         session_a_curation_id=int(
-                            left.session_key["curation_id"]
+                            left.curation_key["curation_id"]
                         ),
                         unit_a_id=0,
                         session_b_sorting_id=str(
-                            right.session_key["sorting_id"]
+                            right.curation_key["sorting_id"]
                         ),
                         session_b_curation_id=int(
-                            right.session_key["curation_id"]
+                            right.curation_key["curation_id"]
                         ),
                         unit_b_id=0,
                         match_probability=float(params.get("prob", 0.99)),
@@ -567,7 +567,7 @@ def test_external_matcher_satisfies_protocol_and_runs():
 
     inputs = [
         SessionMatcherInput(
-            session_key={"sorting_id": s, "curation_id": 0},
+            curation_key={"sorting_id": s, "curation_id": 0},
             waveform_dir=Path("/unused"),
             channel_positions_path=Path("/unused/cp.npy"),
         )
@@ -1837,8 +1837,8 @@ def _install_fixture_pairer(
         name = matcher_name
 
         def match(self, session_inputs, params):
-            left = session_inputs[0].session_key
-            right = session_inputs[1].session_key
+            left = session_inputs[0].curation_key
+            right = session_inputs[1].curation_key
             return [
                 MatchPair(
                     session_a_sorting_id=str(left["sorting_id"]),
@@ -1938,8 +1938,8 @@ def test_make_runs_full_matcher_table_path(
         name = "fixture_pairer"
 
         def match(self, session_inputs, params):
-            left = session_inputs[0].session_key
-            right = session_inputs[1].session_key
+            left = session_inputs[0].curation_key
+            right = session_inputs[1].curation_key
             return [
                 MatchPair(
                     session_a_sorting_id=str(left["sorting_id"]),
@@ -2464,11 +2464,11 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
                 fixture_path, dest_name=f"unitmatch_polymer_{index}.nwb"
             )
             nwb_file_names.append(nwb_file_name)
-            session_key = {"nwb_file_name": nwb_file_name}
-            if not (SortGroupV2 & session_key):
+            session_filter = {"nwb_file_name": nwb_file_name}
+            if not (SortGroupV2 & session_filter):
                 SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
             sort_group_id = int(
-                sorted((SortGroupV2 & session_key).fetch("sort_group_id"))[0]
+                sorted((SortGroupV2 & session_filter).fetch("sort_group_id"))[0]
             )
             rec_pk = RecordingSelection.insert_selection(
                 {
@@ -2514,7 +2514,7 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
             extract_unitmatch_bundle(session_dir, recording, gt_sorting)
             session_inputs.append(
                 SessionMatcherInput(
-                    session_key={
+                    curation_key={
                         "sorting_id": f"polymer_gt_{index}",
                         "curation_id": 0,
                     },
@@ -2935,8 +2935,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         name = "fixture_pairer"
 
         def match(self, session_inputs, params):
-            left = session_inputs[0].session_key
-            right = session_inputs[1].session_key
+            left = session_inputs[0].curation_key
+            right = session_inputs[1].curation_key
             return [
                 MatchPair(
                     session_a_sorting_id=str(left["sorting_id"]),
@@ -3005,7 +3005,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
         # Full chain via the orchestrator, driven by the plan.
         summary = run_v2_unit_match(plan)
-        selection_pk = {"unitmatch_id": summary["unitmatch_id"]}
+        selection_pk = {"unitmatch_id": summary["unit_match_id"]}
         assert summary["session_group_name"] == grp["group_name"]
         assert summary["matcher_params_name"] == matcher_name
         assert summary["unit_match_status"] in {"computed", "reused"}
@@ -3056,7 +3056,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             matcher_params_name=matcher_name,
             curation_choices=grp["choices"],
         )
-        assert rerun["unitmatch_id"] == summary["unitmatch_id"]
+        assert rerun["unit_match_id"] == summary["unit_match_id"]
         assert rerun["unit_match_status"] == "reused"
         assert rerun["tracked_unit_status"] == "reused"
         assert rerun["n_pairs"] == 1

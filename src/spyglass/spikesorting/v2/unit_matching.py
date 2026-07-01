@@ -1288,7 +1288,7 @@ class UnitMatch(SpyglassMixin, dj.Computed):
                 )
                 session_inputs.append(
                     SessionMatcherInput(
-                        session_key={
+                        curation_key={
                             "sorting_id": plan["sorting_id"],
                             "curation_id": plan["curation_id"],
                         },

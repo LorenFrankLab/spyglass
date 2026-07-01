@@ -387,7 +387,7 @@ def _existing_curation_state(curation_key: dict) -> tuple[dict, list]:
     labels = CurationV2._labels_by_unit(curation_key)
     merge_groups = [
         sorted({kept, *contributors})
-        for kept, contributors in CurationV2.get_merge_groups(
+        for kept, contributors in CurationV2.get_unit_contributor_groups(
             curation_key
         ).items()
         if len({kept, *contributors}) > 1
@@ -449,7 +449,7 @@ class FigPackCurationSelection(
     """A committed ``CurationV2`` row paired with a FigPack UI configuration.
 
     The ``figpack_curation_id`` PK is content-addressed over the curation plus
-    the UI config (label palette, metric columns, upload/ephemeral mode), so the
+    the UI config (label palette and upload/ephemeral mode), so the
     same configuration always maps to one row and distinct configurations of one
     curation coexist. A raw ``insert`` / ``insert1`` is blocked; use
     ``insert_selection``.
@@ -472,7 +472,6 @@ class FigPackCurationSelection(
         curation_key: dict,
         *,
         label_options: list[str] | None = None,
-        metrics: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
         figpack_curation_id=None,
@@ -486,10 +485,6 @@ class FigPackCurationSelection(
         label_options : list of str, optional
             Curation label palette, in display order. Defaults to
             ``["accept", "mua", "noise"]``.
-        metrics : list of str, optional
-            Metric columns to display. Not supported -- a non-empty value
-            raises ``ValueError`` (a requested metric absent from the display
-            analyzer would be silently dropped). Defaults to ``[]``.
         upload : bool, optional
             Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
             unless ``ephemeral``). Default ``False`` (save a local bundle).
@@ -534,7 +529,7 @@ class FigPackCurationSelection(
         label_options = (
             list(label_options) if label_options else default_label_options()
         )
-        metrics = list(metrics) if metrics else []
+        metrics: list[str] = []
         _reject_unsupported_metrics(metrics)
         config_hash = figpack_config_hash(
             sorting_id=parent_key["sorting_id"],
@@ -700,7 +695,6 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         curation_key: dict,
         *,
         label_options: list[str] | None = None,
-        metrics: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
     ) -> str:
@@ -714,7 +708,6 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         selection = FigPackCurationSelection.insert_selection(
             curation_key,
             label_options=label_options,
-            metrics=metrics,
             upload=upload,
             ephemeral=ephemeral,
         )

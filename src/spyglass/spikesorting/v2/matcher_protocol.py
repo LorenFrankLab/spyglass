@@ -34,7 +34,7 @@ class SessionMatcherInput:
 
     Attributes
     ----------
-    session_key : dict
+    curation_key : dict
         ``{"sorting_id": UUID, "curation_id": int}`` identifying the curated
         sorting this bundle was extracted from. The matcher echoes these keys
         back on every :class:`MatchPair`; it does not use them to read data.
@@ -51,7 +51,7 @@ class SessionMatcherInput:
         ``None`` when a backend does not need it.
     """
 
-    session_key: dict
+    curation_key: dict
     waveform_dir: Path
     channel_positions_path: Path
     recording_date: Any = None

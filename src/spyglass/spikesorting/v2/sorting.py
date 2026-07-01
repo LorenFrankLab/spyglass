@@ -2249,13 +2249,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
     def export_si_report(
-        self, key, output_folder, *, force_computation=False, **kwargs
+        self, key, output_folder, *, compute_missing=False, **kwargs
     ):
         """Delegate to ``visualization.export_si_report`` for this sort."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.export_si_report(
-            key, output_folder, force_computation=force_computation, **kwargs
+            key, output_folder, compute_missing=compute_missing, **kwargs
         )
 
     def export_to_phy(self, key, output_folder, **kwargs):

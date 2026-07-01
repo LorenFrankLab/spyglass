@@ -905,14 +905,3 @@ def get_spike_sorting_v2_merge_ids(
     return SpikeSortingOutput()._get_restricted_merge_ids_v2(
         restriction, as_dict=as_dict
     )
-
-
-def get_spiking_sorting_v2_merge_ids(
-    restriction: dict, as_dict: bool = False
-) -> list:
-    """Backward-compatible v1-shaped spelling of the v2 merge-id helper.
-
-    Prefer :func:`get_spike_sorting_v2_merge_ids` in new code. This alias is
-    kept so copied v1-style helper calls continue to work.
-    """
-    return get_spike_sorting_v2_merge_ids(restriction, as_dict=as_dict)

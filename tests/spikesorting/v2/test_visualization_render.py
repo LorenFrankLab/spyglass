@@ -93,7 +93,7 @@ def test_unit_locations_renders_with_compute_missing(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_local_report_export_writes_folder(populated_sorting, tmp_path):
-    """``export_si_report(force_computation=True)`` writes a local report folder."""
+    """``export_si_report(compute_missing=True)`` writes a local report folder."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
@@ -101,7 +101,7 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
 
     output_folder = tmp_path / "si_report"
     ssviz.export_si_report(
-        populated_sorting, output_folder, force_computation=True
+        populated_sorting, output_folder, compute_missing=True
     )
     assert output_folder.is_dir()
     # SI writes a per-unit figure folder and a unit list; assert the folder is

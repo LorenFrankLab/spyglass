@@ -334,10 +334,7 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.utils import (
-        get_spiking_sorting_v2_merge_ids,
-        get_spike_sorting_v2_merge_ids,
-    )
+    from spyglass.spikesorting.v2.utils import get_spike_sorting_v2_merge_ids
 
     # Clear any prior curation (master-before-part) then mint a root,
     # which registers exactly one v2 merge row for this sorting.
@@ -358,7 +355,6 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
     restriction = {"sorting_id": populated_sorting["sorting_id"]}
     ids = get_spike_sorting_v2_merge_ids(restriction)
     assert {str(m) for m in ids} == expected
-    assert get_spiking_sorting_v2_merge_ids(restriction) == ids
 
     dicts = get_spike_sorting_v2_merge_ids(restriction, as_dict=True)
     assert all(set(d.keys()) == {"merge_id"} for d in dicts)

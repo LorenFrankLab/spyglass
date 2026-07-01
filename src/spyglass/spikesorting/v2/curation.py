@@ -235,7 +235,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         none. A 1-element self-entry is recorded per pass-through child unit so
         every child ``Unit`` row has at least one ``ParentMergeGroup`` row
         keyed by its own ``unit_id`` -- the own-namespace merge view
-        (``get_merge_groups``) reads this for a child.
+        (``get_unit_contributor_groups``) reads this for a child.
         """
 
         definition = """
@@ -253,7 +253,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
             ``parent_unit_id`` is deliberately not a DataJoint FK (a merged
             parent id is absent from ``Sorting.Unit``), so the two invariants
-            that ``get_merge_groups`` relies on are enforced here -- on every
+            that ``get_unit_contributor_groups`` relies on are enforced here -- on every
             insert path, including a direct insert that bypasses
             ``insert_curation``: a ROOT curation gets NO ``ParentMergeGroup``
             rows (their mere presence is the child discriminator), and every
@@ -299,7 +299,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                         "a ROOT (parent_curation_id=-1); a root composes from "
                         "the raw sort and must have no ParentMergeGroup rows "
                         "(their presence is the child discriminator in "
-                        "get_merge_groups)."
+                        "get_unit_contributor_groups)."
                     )
                 parent_unit_set = {
                     int(u)
@@ -332,7 +332,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         description: str = "",
         curation_source: str | CurationSource = "manual",
         reuse_existing: bool = False,
-        permissive_labels: bool = False,
+        allow_unknown_unit_ids: bool = False,
         allow_custom_labels: bool = False,
         label_policy: str = "inherit",
     ) -> dict:
@@ -408,7 +408,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             True reuses an existing child only when the parent, labels, real
             merge groups, ``apply_merge`` state, description, and curation
             source match the curation this call would insert.
-        permissive_labels
+        allow_unknown_unit_ids
             Controls ONLY truly-stray label keys (ids that are neither
             in ``Sorting.Unit`` nor in the curated unit set -- usually a
             typo). If False (default), a truly-stray key raises
@@ -424,7 +424,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             (labs tagging units with custom semantics); the flag is
             forwarded to both ``validate_labels`` and the
             ``UnitLabel.insert`` part-table validation so a custom label
-            survives the whole path. Distinct from ``permissive_labels``,
+            survives the whole path. Distinct from ``allow_unknown_unit_ids``,
             which governs stray unit-id keys, not label values.
         label_policy
             How a CHILD curation (``parent_curation_id != -1``) composes its
@@ -450,7 +450,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             reference an existing curation for the sorting; if a root
             curation already exists and non-default parameters were passed
             without ``reuse_existing=True``; or if ``labels`` reference
-            truly-stray unit_id(s) and ``permissive_labels`` is False.
+            truly-stray unit_id(s) and ``allow_unknown_unit_ids`` is False.
         """
         sorting_id = sorting_key["sorting_id"]
         # Fetch the upstream Sorting.Unit rows once -- the parent
@@ -509,7 +509,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 merge_groups=merge_groups,
                 apply_merge=apply_merge,
                 labels=labels,
-                permissive_labels=permissive_labels,
+                allow_unknown_unit_ids=allow_unknown_unit_ids,
                 parent_labels=parent_labels,
                 label_policy=label_policy,
             )
@@ -737,7 +737,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 continue
             if (
                 cls._normalized_real_merge_groups(
-                    cls.get_merge_groups(candidate)
+                    cls.get_unit_contributor_groups(candidate)
                 )
                 != target_merges
             ):
@@ -835,7 +835,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # Reject building on a PREVIEW/draft parent. A preview
             # (apply_merge=False with an unapplied proposed merge) is not a
             # committed state: a child of it would get self-only
-            # ParentMergeGroup rows -- so get_merge_groups /
+            # ParentMergeGroup rows -- so get_unit_contributor_groups /
             # has_unapplied_proposed_merges would read the child as committed --
             # AND its raw MergeGroup would inherit the parent's UNAPPLIED
             # proposed merge as though it had been applied. Either way the
@@ -987,7 +987,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         merge_groups,
         apply_merge: bool,
         labels: dict,
-        permissive_labels: bool,
+        allow_unknown_unit_ids: bool,
         parent_labels: dict | None = None,
         label_policy: str = "inherit",
     ) -> "CurationInsertPlan":
@@ -1017,7 +1017,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             merge_groups=merge_groups,
             apply_merge=apply_merge,
             labels=labels,
-            permissive_labels=permissive_labels,
+            allow_unknown_unit_ids=allow_unknown_unit_ids,
             curation_id=curation_id,
             parent_labels=parent_labels,
             label_policy=label_policy,
@@ -1535,7 +1535,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         curation_source: str | CurationSource = "manual",
         description: str = "manual curation",
         reuse_existing: bool = False,
-        permissive_labels: bool = False,
+        allow_unknown_unit_ids: bool = False,
         allow_custom_labels: bool = False,
         label_policy: str = "inherit",
     ) -> dict:
@@ -1589,7 +1589,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             description=description,
             curation_source=curation_source,
             reuse_existing=reuse_existing,
-            permissive_labels=permissive_labels,
+            allow_unknown_unit_ids=allow_unknown_unit_ids,
             allow_custom_labels=allow_custom_labels,
             label_policy=label_policy,
         )
@@ -1670,7 +1670,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         dict
             ``sorting_id`` (UUID), ``curation_id`` (int), ``n_units`` (count of
             ``CurationV2.Unit`` rows), ``labels`` (``unit_id -> [label, ...]``
-            from ``UnitLabel``), ``merge_groups`` (from ``get_merge_groups`` --
+            from ``UnitLabel``), ``merge_groups`` (from ``get_unit_contributor_groups`` --
             note this includes a 1-element self-entry per unit; real merges
             have >1 contributor), ``merges_applied`` (the stored field),
             ``is_merge_preview`` (True iff not applied AND at least one
@@ -1682,7 +1682,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         See Also
         --------
         insert_curation : the expert write API.
-        get_merge_groups : the merge-group provenance this summarizes.
+        get_unit_contributor_groups : the merge-group provenance this summarizes.
         """
         # The full-PK guard MUST run before any DB/schema access: importing
         # SpikeSortingOutput activates its dj.schema, so it is imported only
@@ -1730,7 +1730,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             description=description,
             labels=labels,
             merge_id=merge_id,
-            merge_groups=cls.get_merge_groups(pk),
+            merge_groups=cls.get_unit_contributor_groups(pk),
             n_units=len(cls.Unit & pk),
         )
 
@@ -1957,7 +1957,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         if bool(merges_applied):
             return False
         return any(
-            len(contribs) > 1 for contribs in cls.get_merge_groups(key).values()
+            len(contribs) > 1
+            for contribs in cls.get_unit_contributor_groups(key).values()
         )
 
     @classmethod
@@ -2327,8 +2328,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         return unit_semantics_for_sorter(sorter)
 
     @classmethod
-    def get_merge_groups(cls, key) -> dict[int, list[int]]:
-        """Return this curation's merge groups in ITS OWN unit namespace.
+    def get_unit_contributor_groups(cls, key) -> dict[int, list[int]]:
+        """Return kept-unit contributor groups in this curation's namespace.
 
         ``{kept_unit_id: [contributor_unit_id, ...]}`` where the contributor
         ids are in the curation's own (composition) namespace -- the namespace
@@ -2340,8 +2341,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         would misreport a committed child as a preview). Every
         ``CurationV2.Unit`` row has at least one own-namespace entry keyed by
         its own ``unit_id`` (a 1-element self-entry for a pass-through unit);
-        ``len(merge_groups[X]) > 1`` means unit X is the kept-unit leader of a
-        (proposed or applied) merge.
+        ``len(groups[X]) > 1`` means unit X is the kept-unit leader of a
+        proposed or applied merge.
 
         Used by ``get_merged_sorting`` (which filters ``len(contribs) > 1``, so
         self-entries are auto-skipped) and ``has_unapplied_proposed_merges``.
@@ -2426,7 +2427,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # unavoidable in those cases).
         if bool((cls & key).fetch1("merges_applied")):
             return cls.get_sorting(key)
-        merge_groups = cls.get_merge_groups(key)
+        merge_groups = cls.get_unit_contributor_groups(key)
         units_to_merge = [
             contribs
             for kept_uid, contribs in merge_groups.items()

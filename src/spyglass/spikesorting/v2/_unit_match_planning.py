@@ -10,9 +10,9 @@ dict via a named, intent-declaring curation strategy and returns a
 expensive match.
 
 This module is deliberately DB-free: it operates on already-fetched per-member
-curation lists, so the curation-strategy logic is unit-tested without a database. The
-DataJoint plumbing (fetching the members, running the plan) lives in
-``_pipeline_run``. The low-level ``UnitMatchSelection`` stays explicit and
+curation lists, so the curation-strategy logic is unit-tested without a
+database. The DataJoint plumbing (fetching the members, running the plan) lives
+in ``_pipeline_run``. The low-level ``UnitMatchSelection`` stays explicit and
 pinned -- this only redesigns the UX layer that assembles the pins.
 """
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # deliberately no default (an implicit "latest" is exactly what the pinned
 # design forbids).
 STRATEGIES: tuple[str, ...] = (
-    "single_leaf_curated",
+    "final_curated",
     "auto_curated",
     "root",
     "manual",
@@ -115,7 +115,7 @@ class UnitMatchPlan:
 
     @property
     def ok(self) -> bool:
-        """True when the curation strategy pinned exactly one curation for every member."""
+        """True when the strategy pinned exactly one curation per member."""
         return not self.errors
 
     def __bool__(self) -> bool:
@@ -158,7 +158,7 @@ def _candidates(choices: list[dict], curation_strategy: str) -> list[dict]:
         return [c for c in choices if c["parent_curation_id"] == _ROOT_PARENT]
     if curation_strategy == "auto_curated":
         return [c for c in choices if c["curation_source"] == _AUTO_SOURCE]
-    if curation_strategy == "single_leaf_curated":
+    if curation_strategy == "final_curated":
         leaves = _leaf_keys(choices)
         return [
             c
@@ -179,7 +179,7 @@ def _describe_none(curation_strategy: str) -> str:
             "'curation_evaluation'); sort the member with auto_curate=True, or "
             "pin one explicitly with curation_strategy='manual'"
         )
-    if curation_strategy == "single_leaf_curated":
+    if curation_strategy == "final_curated":
         return (
             "has no curated (non-root) leaf curation; curate the member first "
             "(see the Curation how-to), or pin one explicitly with "
@@ -189,7 +189,7 @@ def _describe_none(curation_strategy: str) -> str:
 
 
 def _resolve_member(
-    member: dict, curation_strategy: str, manual_choices: dict | None
+    member: dict, curation_strategy: str, manual_curation_choices: dict | None
 ) -> tuple[dict | None, list[str], list[str]]:
     """Pin one curation for a member per the curation strategy.
 
@@ -202,15 +202,15 @@ def _resolve_member(
     warnings: list[str] = []
 
     if curation_strategy == "manual":
-        chosen = (manual_choices or {}).get(idx)
+        chosen = (manual_curation_choices or {}).get(idx)
         if chosen is None:
             return (
                 None,
                 warnings,
                 [
                     f"member {idx} ({nwb}): curation_strategy='manual' "
-                    "requires an explicit curation_choices entry for this "
-                    "member; none was provided."
+                    "requires an explicit manual_curation_choices entry for "
+                    "this member; none was provided."
                 ],
             )
         pinned = {
@@ -259,7 +259,7 @@ def _resolve_member(
         warnings.append(
             f"member {idx} ({nwb}): curation_strategy='root' pins the "
             "UNCURATED root curation; matching uncurated units is rarely what "
-            "you want -- prefer curation_strategy='single_leaf_curated' or "
+            "you want -- prefer curation_strategy='final_curated' or "
             "'auto_curated'."
         )
     return (
@@ -279,7 +279,7 @@ def build_unit_match_plan(
     matcher_params_name: str,
     curation_strategy: str,
     members: list[dict],
-    manual_choices: dict | None = None,
+    manual_curation_choices: dict | None = None,
 ) -> UnitMatchPlan:
     """Assemble a pinned :class:`UnitMatchPlan` from per-member curation lists.
 
@@ -289,13 +289,13 @@ def build_unit_match_plan(
     ``describe_unit_match_choices`` tabulates the same data. DB-free.
     ``curation_strategy`` is REQUIRED:
 
-    - ``single_leaf_curated`` -- the member's single terminal curated (non-root)
+    - ``final_curated`` -- the member's single terminal curated (non-root)
       curation; errors if a member has zero or more than one.
     - ``auto_curated`` -- the member's auto-curated child
       (``curation_source='curation_evaluation'``); errors on zero / multiple.
     - ``root`` -- the member's root curation, with a loud advisory (uncurated).
-    - ``manual`` -- pins ``manual_choices[member_index]`` per member, validated
-      against the member's committed curations.
+    - ``manual`` -- pins ``manual_curation_choices[member_index]`` per member,
+      validated against the member's committed curations.
 
     A member the curation strategy cannot resolve to exactly one curation becomes a
     blocking ``error`` (``plan.ok is False``); other members still resolve, so
@@ -306,12 +306,13 @@ def build_unit_match_plan(
             "build_unit_match_plan: unknown curation_strategy "
             f"{curation_strategy!r}; choose one of {STRATEGIES}."
         )
-    # manual_choices is only consulted by curation_strategy='manual'; passing it
-    # with an automatic curation strategy would silently do nothing (the planner picks), so
-    # reject it up front rather than let it look intentional.
-    if manual_choices is not None and curation_strategy != "manual":
+    # manual_curation_choices is only consulted by curation_strategy='manual';
+    # passing it with an automatic curation strategy would silently do nothing
+    # (the planner picks), so reject it up front rather than let it look
+    # intentional.
+    if manual_curation_choices is not None and curation_strategy != "manual":
         raise ValueError(
-            "build_unit_match_plan: curation_choices is only used by "
+            "build_unit_match_plan: manual_curation_choices is only used by "
             f"curation_strategy='manual', not {curation_strategy!r}; the "
             "planner picks the curations for the other strategies."
         )
@@ -322,7 +323,7 @@ def build_unit_match_plan(
     errors: list[str] = []
     for member in sorted(members, key=lambda m: m["member_index"]):
         pinned, member_warnings, member_errors = _resolve_member(
-            member, curation_strategy, manual_choices
+            member, curation_strategy, manual_curation_choices
         )
         warnings.extend(member_warnings)
         errors.extend(member_errors)
@@ -338,15 +339,16 @@ def build_unit_match_plan(
             }
         )
 
-    # Manual coverage is EXACT: a curation_choices entry for a member index that
-    # is not in the group (stale / mistyped) is silently unused above, so flag
-    # it as a blocking error rather than let the plan look ok.
-    if curation_strategy == "manual" and manual_choices:
+    # Manual coverage is EXACT: a manual_curation_choices entry for a member
+    # index that is not in the group (stale / mistyped) is silently unused
+    # above, so flag it as a blocking error rather than let the plan look ok.
+    if curation_strategy == "manual" and manual_curation_choices:
         member_indexes = {m["member_index"] for m in members}
-        extra = sorted(set(manual_choices) - member_indexes)
+        extra = sorted(set(manual_curation_choices) - member_indexes)
         if extra:
             errors.append(
-                f"curation_choices has entries for member index(es) {extra} "
+                "manual_curation_choices has entries for member index(es) "
+                f"{extra} "
                 f"that are not SessionGroup members {sorted(member_indexes)} "
                 "(stale or mistyped index)."
             )

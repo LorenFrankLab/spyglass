@@ -933,7 +933,7 @@ def preflight_v2_pipeline(
 
 def _resolve_session_sort_group_ids(
     nwb_file_name: str,
-    pipeline_preset: "str | None",
+    pipeline_preset: str,
     sort_group_ids: "list[int] | None",
     caller: str,
 ) -> list[int]:
@@ -1034,7 +1034,7 @@ def preflight_v2_pipeline_session(
     nwb_file_name: str,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: "str | None" = None,
+    pipeline_preset: str,
     sort_group_ids: "list[int] | None" = None,
     auto_curate: bool = False,
 ) -> PreflightSessionReport:

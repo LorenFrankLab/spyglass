@@ -206,7 +206,7 @@ def test_parent_merge_group_insert_rejects_invalid_provenance(merged_parent):
 
     ``parent_unit_id`` is intentionally not a DataJoint FK (a merged parent id
     is absent from ``Sorting.Unit``), so ``insert`` enforces the two invariants
-    ``get_merge_groups`` relies on: a ROOT curation gets no rows, and a child
+    ``get_unit_contributor_groups`` relies on: a ROOT curation gets no rows, and a child
     row's ``parent_unit_id`` must be a unit in the immediate parent. Without the
     guard a forged row could misclassify a committed curation as a preview or
     break merged-sorting reconstruction.
@@ -251,7 +251,7 @@ def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
     """A PREVIEW child of a merged parent reads/applies its proposed merge in
     the PARENT namespace (via ParentMergeGroup), not the raw MergeGroup.
 
-    This pins the own-namespace path that `get_merge_groups` /
+    This pins the own-namespace path that `get_unit_contributor_groups` /
     `has_unapplied_proposed_merges` / `get_merged_sorting` take for a child:
     proposing to further-merge the parent's merged unit id is a valid draft, is
     reported as a preview (not silently committed), and the lazy merge collapses
@@ -278,7 +278,7 @@ def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
     assert set(
         int(u) for u in (CurationV2.Unit & preview).fetch("unit_id")
     ) == {2, merged_id}
-    own_groups = CurationV2.get_merge_groups(preview)
+    own_groups = CurationV2.get_unit_contributor_groups(preview)
     assert sorted(own_groups[2]) == [2, merged_id]
     assert CurationV2.has_unapplied_proposed_merges(preview) is True
     assert CurationV2.is_committed_curation(preview) is False

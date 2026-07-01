@@ -154,10 +154,11 @@ def test_recording_plot_traces_calls_si_widget(dj_conn, monkeypatch):
 
 
 @pytest.mark.db_unit
-def test_recording_plot_traces_rejects_raw(dj_conn):
-    """``raw=True`` is rejected: only the saved preprocessed recording exists."""
-    with pytest.raises(NotImplementedError, match="raw=True"):
-        ssviz.plot_recording_traces({"recording_id": "r"}, raw=True)
+def test_recording_plot_traces_exposes_only_saved_recording(dj_conn):
+    """No raw toggle is advertised: v2 plots the saved preprocessed recording."""
+    assert (
+        "raw" not in inspect.signature(ssviz.plot_recording_traces).parameters
+    )
 
 
 @pytest.mark.db_unit
@@ -627,9 +628,9 @@ def test_plot_suggested_merges_errors_when_no_persisted_suggestions(
 def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
     """``export_si_report`` wraps SI ``export_report`` over the display analyzer.
 
-    ``force_computation=False`` does not mutate extensions; ``True`` computes only
+    ``compute_missing=False`` does not mutate extensions; ``True`` computes only
     display-safe report extensions; SI is always called with its own
-    ``force_computation=False`` so it never mutates the cache itself.
+    ``compute_missing=False`` so it never mutates the cache itself.
     """
     import spikeinterface.exporters as sie
 
@@ -644,7 +645,7 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
         ),
     )
 
-    # force=False with unit_locations already present: no add_extensions.
+    # compute_missing=False with unit_locations already present: no add_extensions.
     fake_present = _FakeAnalyzer(["unit_locations"])
     wpn = []
     _patch_display_analyzer(monkeypatch, fake_present, recorder=wpn)
@@ -654,7 +655,7 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
     assert captured["kwargs"]["force_computation"] is False
     assert wpn == [None]
 
-    # force=True: computes the missing display-safe report extensions.
+    # compute_missing=True: computes the missing display-safe report extensions.
     fake_missing = _FakeAnalyzer(["unit_locations"])
     _patch_display_analyzer(monkeypatch, fake_missing)
     added = {}
@@ -665,7 +666,7 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
 
     monkeypatch.setattr(Sorting, "add_extensions", _add)
     ssviz.export_si_report(
-        {"sorting_id": "s"}, "/tmp/report_b", force_computation=True
+        {"sorting_id": "s"}, "/tmp/report_b", compute_missing=True
     )
     from spyglass.spikesorting.v2._visualization import (
         REPORT_DISPLAY_EXTENSIONS,
@@ -677,7 +678,7 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
 
 @pytest.mark.db_unit
 def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
-    """``force_computation=False`` refuses to run when ``unit_locations`` is absent.
+    """``compute_missing=False`` refuses to run when ``unit_locations`` is absent.
 
     SI's ``export_report`` computes ``unit_locations`` unconditionally if missing
     (mutating the shared display cache), so the read-only path must raise rather

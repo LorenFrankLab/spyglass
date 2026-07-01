@@ -534,7 +534,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         sort_group_ids: list[int] | None = None,
         reference_mode: str | None = None,
         reference_electrode_id: int | None = None,
-        remove_bad_channels: bool = True,
+        omit_bad_channels: bool = True,
         omit_unitrode: bool = True,
         delete_existing_entries: bool = False,
         confirm: bool = False,
@@ -577,7 +577,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             Electrode id subtracted when ``reference_mode == "specific"``;
             must be None for the other modes. Only meaningful alongside an
             explicit ``reference_mode``.
-        remove_bad_channels, omit_unitrode
+        omit_bad_channels, omit_unitrode
             See ``set_group_by_shank``. Both default to True.
         delete_existing_entries, confirm
             See class docstring.
@@ -637,7 +637,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 f"Valid columns: {valid}."
             )
 
-        if remove_bad_channels:
+        if omit_bad_channels:
             mask = electrodes["bad_channel"] == "False"
             electrodes = electrodes[mask]
 
@@ -1609,7 +1609,7 @@ class Recording(SpyglassMixin, dj.Computed):
 
     # ---- visualization delegates (see v2.visualization facade) -----------
 
-    def plot_traces(self, key, *, raw=False, backend="matplotlib", **kwargs):
+    def plot_traces(self, key, *, backend="matplotlib", **kwargs):
         """Delegate to ``visualization.plot_recording_traces`` for this key.
 
         A local-discoverability one-liner; the SI-widget routing over the saved
@@ -1619,7 +1619,7 @@ class Recording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_recording_traces(
-            key, raw=raw, backend=backend, **kwargs
+            key, backend=backend, **kwargs
         )
 
     def plot_probe_map(self, key, *, backend="matplotlib", **kwargs):

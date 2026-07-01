@@ -38,7 +38,7 @@ def test_match_single_session_returns_empty():
     from spyglass.spikesorting.v2.matcher_protocol import SessionMatcherInput
 
     one = SessionMatcherInput(
-        session_key={"sorting_id": "s", "curation_id": 0},
+        curation_key={"sorting_id": "s", "curation_id": 0},
         waveform_dir=Path("/tmp/does-not-matter"),
         channel_positions_path=Path("/tmp/does-not-matter/cp.npy"),
     )
@@ -50,12 +50,12 @@ def _two_one_unit_sessions():
 
     return [
         SessionMatcherInput(
-            session_key={"sorting_id": "A", "curation_id": 0},
+            curation_key={"sorting_id": "A", "curation_id": 0},
             waveform_dir=Path("/x"),
             channel_positions_path=Path("/x/cp.npy"),
         ),
         SessionMatcherInput(
-            session_key={"sorting_id": "B", "curation_id": 1},
+            curation_key={"sorting_id": "B", "curation_id": 1},
             waveform_dir=Path("/y"),
             channel_positions_path=Path("/y/cp.npy"),
         ),
@@ -109,7 +109,7 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
     np.save(positions, np.zeros((4, 2)))
     inputs = [
         SessionMatcherInput(
-            session_key={"sorting_id": s, "curation_id": 0},
+            curation_key={"sorting_id": s, "curation_id": 0},
             waveform_dir=tmp_path,
             channel_positions_path=positions,
         )
@@ -161,7 +161,7 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
     np.save(positions, np.zeros((4, 2)))
     inputs = [
         SessionMatcherInput(
-            session_key={"sorting_id": s, "curation_id": 0},
+            curation_key={"sorting_id": s, "curation_id": 0},
             waveform_dir=tmp_path,
             channel_positions_path=positions,
         )
@@ -216,12 +216,12 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     )  # different channel count -> different probe
     inputs = [
         SessionMatcherInput(
-            session_key={"sorting_id": "A", "curation_id": 0},
+            curation_key={"sorting_id": "A", "curation_id": 0},
             waveform_dir=tmp_path,
             channel_positions_path=cp_a,
         ),
         SessionMatcherInput(
-            session_key={"sorting_id": "B", "curation_id": 0},
+            curation_key={"sorting_id": "B", "curation_id": 0},
             waveform_dir=tmp_path,
             channel_positions_path=cp_b,
         ),
@@ -386,7 +386,7 @@ def two_session_inputs(tmp_path_factory):
         )
         inputs.append(
             SessionMatcherInput(
-                session_key={"sorting_id": name, "curation_id": 0},
+                curation_key={"sorting_id": name, "curation_id": 0},
                 waveform_dir=sdir,
                 channel_positions_path=sdir / "channel_positions.npy",
             )

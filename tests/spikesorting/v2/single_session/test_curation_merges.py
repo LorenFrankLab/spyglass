@@ -738,7 +738,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     ``get_merged_sorting`` assign the SAME fresh id to the SAME content
     group, frame-for-frame. Existing tests cover the single-group case and
     the ``build_curated_unit_rows`` id assignment; this pins the >=2-group
-    lazy ``get_merge_groups`` order_by path.
+    lazy ``get_unit_contributor_groups`` order_by path.
     """
     import uuid
 
@@ -1040,7 +1040,7 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
     """Applied-path fresh merged ids are numbered in ascending
     min-contributor order, INDEPENDENT of user-input group order, so they
     match the lazy ``get_merged_sorting`` preview path (which numbers merges
-    in ``get_merge_groups`` / ascending-kept-uid order). This is what makes
+    in ``get_unit_contributor_groups`` / ascending-kept-uid order). This is what makes
     ``apply_merge=True`` and an ``apply_merge=False`` preview assign the SAME
     fresh id to the SAME content group -- the preview==apply contract.
 

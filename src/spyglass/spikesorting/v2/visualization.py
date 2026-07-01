@@ -167,23 +167,14 @@ def _curation_sorting_key(curation_evaluation_key) -> dict:
 # ---- recording inspection ------------------------------------------------
 
 
-def plot_recording_traces(
-    recording_key, *, raw=False, backend="matplotlib", **kwargs
-):
+def plot_recording_traces(recording_key, *, backend="matplotlib", **kwargs):
     """Plot the saved preprocessed recording's traces (SI ``plot_traces``).
 
     Reads the saved, bandpass-filtered / common-referenced extractor via
-    ``Recording.get_recording`` -- not any analyzer. ``raw=True`` is rejected:
-    this phase exposes only the persisted preprocessed recording. All SI
-    ``TracesWidget`` kwargs (``time_range``, ``mode``, ``channel_ids``, ``clim``,
+    ``Recording.get_recording`` -- not any analyzer. All SI ``TracesWidget``
+    kwargs (``time_range``, ``mode``, ``channel_ids``, ``clim``,
     ``order_channel_by_depth``, ``ax`` ...) pass straight through.
     """
-    if raw:
-        raise NotImplementedError(
-            "plot_recording_traces(raw=True) is not supported: v2 exposes only "
-            "the saved preprocessed Recording extractor. Inspect the raw source "
-            "directly from its NWB file if you need unprocessed traces."
-        )
     from spyglass.spikesorting.v2.recording import Recording
 
     import spikeinterface.widgets as sw
@@ -467,15 +458,15 @@ def plot_suggested_merges(
 
 
 def export_si_report(
-    sorting_key, output_folder, *, force_computation=False, **kwargs
+    sorting_key, output_folder, *, compute_missing=False, **kwargs
 ):
     """Write a local SI report folder for the sort (SI ``export_report``).
 
-    Uses the display analyzer. ``force_computation=False`` (default) is read-only:
+    Uses the display analyzer. ``compute_missing=False`` (default) is read-only:
     it requires the ``unit_locations`` extension present (SI's ``export_report``
     would otherwise compute and persist it) and lets SI skip any other missing
     optional sections with its own warnings -- the analyzer cache is not mutated.
-    ``force_computation=True`` precomputes the display-safe report extensions SI's
+    ``compute_missing=True`` precomputes the display-safe report extensions SI's
     report actually renders (``spike_amplitudes`` / ``correlograms`` /
     ``unit_locations``) through ``Sorting.add_extensions`` first.
 
@@ -491,11 +482,11 @@ def export_si_report(
 
     required = (
         _viz.REPORT_DISPLAY_EXTENSIONS
-        if force_computation
+        if compute_missing
         else _viz.REPORT_REQUIRED_EXTENSIONS
     )
     analyzer = _display_analyzer_with_extensions(
-        sorting_key, required, compute_missing=force_computation
+        sorting_key, required, compute_missing=compute_missing
     )
     # Never let SI compute extensions itself: anything needed was precomputed
     # above through the display-only add_extensions entry point.

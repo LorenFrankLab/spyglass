@@ -209,17 +209,17 @@ class _NotebookFixtureMatcher:
         if len(session_inputs) < 2:
             return []
         a, b = session_inputs[0], session_inputs[1]
-        units_a = CurationV2().get_matchable_unit_ids(a.session_key)
-        units_b = CurationV2().get_matchable_unit_ids(b.session_key)
+        units_a = CurationV2().get_matchable_unit_ids(a.curation_key)
+        units_b = CurationV2().get_matchable_unit_ids(b.curation_key)
         if not len(units_a) or not len(units_b):
             return []
         return [
             MatchPair(
-                session_a_sorting_id=str(a.session_key["sorting_id"]),
-                session_a_curation_id=int(a.session_key["curation_id"]),
+                session_a_sorting_id=str(a.curation_key["sorting_id"]),
+                session_a_curation_id=int(a.curation_key["curation_id"]),
                 unit_a_id=int(units_a[0]),
-                session_b_sorting_id=str(b.session_key["sorting_id"]),
-                session_b_curation_id=int(b.session_key["curation_id"]),
+                session_b_sorting_id=str(b.curation_key["sorting_id"]),
+                session_b_curation_id=int(b.curation_key["curation_id"]),
                 unit_b_id=int(units_b[0]),
                 match_probability=float(params.get("probability", 0.99)),
             )

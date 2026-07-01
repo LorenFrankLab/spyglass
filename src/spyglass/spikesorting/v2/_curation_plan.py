@@ -61,7 +61,7 @@ def validate_label_unit_ids(
     written_unit_ids: set[int],
     sorting_id,
     apply_merge: bool,
-    permissive_labels: bool,
+    allow_unknown_unit_ids: bool,
 ) -> None:
     """Validate label keys against the source-union-written unit sets.
 
@@ -71,7 +71,7 @@ def validate_label_unit_ids(
 
     * TRULY stray (typo): keys in neither the source sorting nor the
       written curated set -- nothing they could ever refer to. Raises
-      ``ValueError`` by default (typo protection); ``permissive_labels=True``
+      ``ValueError`` by default (typo protection); ``allow_unknown_unit_ids=True``
       restores warn-and-drop.
     * ABSORBED-source: keys that exist in the source sorting but are
       contributors absorbed into a merge (so not written). Always
@@ -93,9 +93,9 @@ def validate_label_unit_ids(
             f"sorting_id={sorting_id} (apply_merge={apply_merge}). "
             f"Curated unit_ids: {sorted(written_unit_ids)}."
         )
-        if not permissive_labels:
+        if not allow_unknown_unit_ids:
             raise ValueError(
-                f"{message} Pass permissive_labels=True to ignore "
+                f"{message} Pass allow_unknown_unit_ids=True to ignore "
                 "stray labels instead of raising."
             )
         logger.warning(f"{message} Those labels are ignored.")
@@ -115,7 +115,7 @@ def build_curation_insert_plan(
     merge_groups,
     apply_merge: bool,
     labels: dict,
-    permissive_labels: bool,
+    allow_unknown_unit_ids: bool,
     curation_id: int,
     parent_labels: dict | None = None,
     label_policy: str = "inherit",
@@ -144,7 +144,7 @@ def build_curation_insert_plan(
         groups, or a member not in ``sorting_units``), from
         ``compose_curation_labels`` (bad ``label_policy``), or from
         ``validate_label_unit_ids`` (truly-stray label keys without
-        ``permissive_labels``).
+        ``allow_unknown_unit_ids``).
     """
     unit_rows, kept_unit_to_contributors = build_curated_unit_rows(
         sorting_id=sorting_id,
@@ -166,7 +166,7 @@ def build_curation_insert_plan(
         written_unit_ids={row["unit_id"] for row in unit_rows},
         sorting_id=sorting_id,
         apply_merge=apply_merge,
-        permissive_labels=permissive_labels,
+        allow_unknown_unit_ids=allow_unknown_unit_ids,
     )
     return CurationInsertPlan(
         curation_id=curation_id,
@@ -212,8 +212,8 @@ def build_curation_summary(
         curation is not merge-registered.
     merge_groups : dict
         ``{kept_unit_id: [contributor_unit_id, ...]}`` from
-        ``get_merge_groups`` (includes a 1-element self-entry per unit; real
-        merges have >1 contributor).
+        ``get_unit_contributor_groups`` (includes a 1-element self-entry per
+        unit; real merges have >1 contributor).
     n_units : int
         Count of ``CurationV2.Unit`` rows.
 

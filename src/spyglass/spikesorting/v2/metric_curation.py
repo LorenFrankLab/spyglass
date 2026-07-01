@@ -2616,7 +2616,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         return peak_amplitudes_from_analyzer(self._analyzer_for(key))
 
-    def plot_by_sort_group_ids(self, key, pairs=None):
+    def plot_burst_pair_metrics(self, key, pairs=None):
         """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
 
         Scatters waveform similarity vs cross-correlogram asymmetry, one point

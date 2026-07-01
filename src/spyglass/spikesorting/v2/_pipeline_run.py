@@ -889,7 +889,7 @@ def run_v2_pipeline_session(
     nwb_file_name: str,
     interval_list_name: str,
     team_name: str,
-    pipeline_preset: "str | None" = None,
+    pipeline_preset: str,
     sort_group_ids: "list[int] | None" = None,
     curation_description: str = "",
     require_units: bool = False,
@@ -1216,7 +1216,7 @@ def run_v2_unit_match(
     -------
     RunV2UnitMatchSummary
         ``session_group_owner`` / ``session_group_name`` / ``matcher_params_name``,
-        the ``unitmatch_id`` selection PK, ``n_pairs`` (pairwise matches) and
+        the ``unit_match_id`` selection PK, ``n_pairs`` (pairwise matches) and
         ``n_tracked_units`` (cross-session biological units), the per-stage
         ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
         ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
@@ -1328,7 +1328,7 @@ def run_v2_unit_match(
         matcher_params_name,
         curation_choices,
     )
-    run_summary["unitmatch_id"] = selection["unitmatch_id"]
+    run_summary["unit_match_id"] = selection["unitmatch_id"]
 
     # Surface the advisory electrode-space divergence in the receipt (it is also
     # logged inside insert_selection / make_fetch). Recomputed here from the
@@ -1387,7 +1387,7 @@ def plan_v2_unit_match(
     *,
     curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
-    curation_choices: "dict | None" = None,
+    manual_curation_choices: "dict | None" = None,
 ) -> "UnitMatchPlan":
     """Build a reviewable plan pinning one curation per member for matching.
 
@@ -1398,7 +1398,7 @@ def plan_v2_unit_match(
     ``UnitMatchPlan`` you inspect BEFORE the expensive match::
 
         plan = plan_v2_unit_match(
-            owner, name, curation_strategy="single_leaf_curated"
+            owner, name, curation_strategy="final_curated"
         )
         display(plan.as_dataframe())   # one row per member
         summary = run_v2_unit_match(plan)
@@ -1411,17 +1411,18 @@ def plan_v2_unit_match(
         REQUIRED (no default -- your declaration of intent, so a match never
         silently pins a "latest" curation):
 
-        - ``"single_leaf_curated"`` -- each member's single terminal curated
+        - ``"final_curated"`` -- each member's single terminal curated
           (non-root) curation; a member with zero or several is a plan error.
         - ``"auto_curated"`` -- each member's auto-curated child (sort members
           with ``run_v2_pipeline(auto_curate=True)`` first).
         - ``"root"`` -- each member's root curation (UNCURATED; warns loudly).
-        - ``"manual"`` -- pin ``curation_choices`` explicitly (required with this
-          curation strategy), validated against each member's committed curations.
+        - ``"manual"`` -- pin ``manual_curation_choices`` explicitly (required
+          with this curation strategy), validated against each member's committed
+          curations.
     matcher_params_name : str, optional
         ``MatcherParameters`` row carried onto the plan (default
         ``"unitmatch_default"``).
-    curation_choices : dict, optional
+    manual_curation_choices : dict, optional
         Only for ``curation_strategy="manual"``:
         ``{member_index: {"sorting_id": ..., "curation_id": ...}}``.
 
@@ -1445,7 +1446,7 @@ def plan_v2_unit_match(
         matcher_params_name=matcher_params_name,
         curation_strategy=curation_strategy,
         members=members,
-        manual_choices=curation_choices,
+        manual_curation_choices=manual_curation_choices,
     )
 
 

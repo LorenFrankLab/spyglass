@@ -699,7 +699,7 @@ and the absorbed raw units are never resurrected:
    `get_metrics(sel)` / `plot_units_qc(sel)`, then `use_evaluation_labels(sel)` to
    commit the proposed labels into a child.
 2. **Manually merge.** Oversplit clusters (MS4/MS5 oversplit and do not track
-   drift) need a human merge. Find burst pairs with `plot_by_sort_group_ids` /
+   drift) need a human merge. Find burst pairs with `plot_burst_pair_metrics` /
    `investigate_pair_xcorrel` / `investigate_pair_peaks`, then commit the merge
    with `CurationV2.create_merged_curation(..., parent_curation_id=child)` (the
    child inherits the parent's labels by default).
@@ -1110,11 +1110,11 @@ from spyglass.spikesorting.v2.pipeline import (
     run_v2_unit_match,
 )
 
-# curation_strategy is REQUIRED (no implicit "latest"): single_leaf_curated /
+# curation_strategy is REQUIRED (no implicit "latest"): final_curated /
 # auto_curated / root / manual. plan.as_dataframe() shows the per-member pins;
 # plan.errors flags any member it could not resolve to exactly one curation.
 plan = plan_v2_unit_match(
-    "my_team", "implant_week1", curation_strategy="single_leaf_curated"
+    "my_team", "implant_week1", curation_strategy="final_curated"
 )
 plan.as_dataframe()
 summary = run_v2_unit_match(plan)   # runs UnitMatch + TrackedUnit
@@ -1371,7 +1371,7 @@ CHANGELOG for the full list. Key user-visible items:
 - The `CurationV2.MergeGroup` part table records every merge group's
   `(kept_unit_id, contributor_unit_id)` rows (contributor ids are
   validated against the sorting's units at insert time);
-  `CurationV2.get_merge_groups(key)` returns a
+  `CurationV2.get_unit_contributor_groups(key)` returns a
   `{kept: [contributors]}` dict, and `CurationV2.get_merged_sorting`
   applies merges lazily at fetch regardless of the `merges_applied`
   flag (matching v1 semantics where a curation created with

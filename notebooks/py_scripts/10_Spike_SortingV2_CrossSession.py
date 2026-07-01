@@ -226,10 +226,10 @@ elif run_unit_match:
 # v2 (describe → plan → run). Here the curation strategy is `"auto_curated"`: each member's
 # auto-curated child from B1. Pick the curation strategy that matches your intent:
 #
-# - `single_leaf_curated` — the member's single terminal curated curation.
+# - `final_curated` — the member's single terminal curated curation.
 # - `auto_curated` — the auto-curated child (what B1 produced here).
 # - `root` — the uncurated root (warns loudly).
-# - `manual` — pin `curation_choices={member_index: {...}}` explicitly.
+# - `manual` — pin `manual_curation_choices={member_index: {...}}` explicitly.
 #
 # A curation strategy never picks an implicit "latest" — a member it can't resolve to
 # exactly one curation is a **blocking error** on the plan (`plan.ok` is `False`,
@@ -243,7 +243,7 @@ if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
 
     # Pin each member's auto-curated child (from B1) by curation strategy, and review the
-    # plan before running. Swap the curation strategy (single_leaf_curated / root /
+    # plan before running. Swap the curation strategy (final_curated / root /
     # manual) to change how curations are pinned.
     plan = plan_v2_unit_match(
         session_group_owner,
@@ -283,7 +283,7 @@ if run_unit_match and unitmatch_available:
     # are queryable through TrackedUnit for downstream cross-session analysis.
     from spyglass.spikesorting.v2.unit_matching import TrackedUnit
 
-    tracked_key = {"unitmatch_id": match_summary["unitmatch_id"]}
+    tracked_key = {"unitmatch_id": match_summary["unit_match_id"]}
     display(TrackedUnit & tracked_key)
     display(TrackedUnit.Member & tracked_key)
 elif run_unit_match:

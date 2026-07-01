@@ -130,7 +130,7 @@ def _validate(labels, source, written, *, permissive=False):
         written_unit_ids=set(written),
         sorting_id="s",
         apply_merge=False,
-        permissive_labels=permissive,
+        allow_unknown_unit_ids=permissive,
     )
 
 
@@ -148,7 +148,7 @@ def test_truly_stray_label_raises_by_default():
 
 
 def test_truly_stray_label_warn_and_drop_when_permissive(caplog):
-    """``permissive_labels=True`` downgrades the typo raise to warn-and-drop."""
+    """``allow_unknown_unit_ids=True`` downgrades the typo raise to warn-and-drop."""
     with caplog.at_level("WARNING", logger="spyglass"):
         _validate({9: ["mua"]}, source={0, 1}, written={0, 1}, permissive=True)
     messages = [r.getMessage() for r in caplog.records if r.name == "spyglass"]
@@ -160,7 +160,7 @@ def test_truly_stray_label_warn_and_drop_when_permissive(caplog):
 
 def test_absorbed_contributor_label_warns_not_raises(caplog):
     """A key in the source but absorbed (not written) warns, never raises --
-    even with permissive_labels=False."""
+    even with allow_unknown_unit_ids=False."""
     with caplog.at_level("WARNING", logger="spyglass"):
         _validate({1: ["mua"]}, source={0, 1}, written={0}, permissive=False)
     messages = [r.getMessage() for r in caplog.records if r.name == "spyglass"]
@@ -181,7 +181,7 @@ def test_plan_no_merge_passthrough_threads_curation_id():
         merge_groups=None,
         apply_merge=False,
         labels={},
-        permissive_labels=False,
+        allow_unknown_unit_ids=False,
         curation_id=3,
     )
     assert plan.curation_id == 3
@@ -199,7 +199,7 @@ def test_plan_apply_merge_assigns_fresh_id_and_inherits_peak():
         merge_groups=[[0, 1]],
         apply_merge=True,
         labels={},
-        permissive_labels=False,
+        allow_unknown_unit_ids=False,
         curation_id=0,
     )
     assert plan.kept_unit_to_contributors == {2: [0, 1]}
@@ -218,7 +218,7 @@ def test_plan_truly_stray_label_raises():
             merge_groups=None,
             apply_merge=False,
             labels={9: ["mua"]},
-            permissive_labels=False,
+            allow_unknown_unit_ids=False,
             curation_id=0,
         )
 
