@@ -184,7 +184,7 @@ def build_curation_summary(
     description,
     labels: dict,
     merge_id,
-    merge_groups: dict,
+    unit_contributor_groups: dict,
     n_units: int,
 ) -> dict:
     """Assemble the ``summarize_curation`` return dict.
@@ -210,7 +210,7 @@ def build_curation_summary(
     merge_id
         The ``SpikeSortingOutput.CurationV2`` merge id, or ``None`` if the
         curation is not merge-registered.
-    merge_groups : dict
+    unit_contributor_groups : dict
         ``{kept_unit_id: [contributor_unit_id, ...]}`` from
         ``get_unit_contributor_groups`` (includes a 1-element self-entry per
         unit; real merges have >1 contributor).
@@ -222,8 +222,13 @@ def build_curation_summary(
     dict
         The ``summarize_curation`` summary.
     """
+    merge_groups = {
+        kept_unit_id: contributors
+        for kept_unit_id, contributors in unit_contributor_groups.items()
+        if len(contributors) > 1
+    }
     is_merge_preview = not bool(merges_applied) and any(
-        len(contribs) > 1 for contribs in merge_groups.values()
+        len(contribs) > 1 for contribs in unit_contributor_groups.values()
     )
     return {
         "sorting_id": sorting_id,
@@ -231,6 +236,7 @@ def build_curation_summary(
         "n_units": n_units,
         "labels": labels,
         "merge_groups": merge_groups,
+        "unit_contributor_groups": unit_contributor_groups,
         "merges_applied": bool(merges_applied),
         "is_merge_preview": is_merge_preview,
         "merge_id": merge_id,

@@ -430,9 +430,13 @@ def test_summarize_curation_fields(populated_sorting):
     assert summary["curation_id"] == key["curation_id"]
     assert summary["n_units"] == len(CurationV2.Unit & key)
     assert summary["labels"].get(a) == ["mua"]
-    assert summary["merge_groups"] == CurationV2.get_unit_contributor_groups(
-        key
-    )
+    contributor_groups = CurationV2.get_unit_contributor_groups(key)
+    assert summary["unit_contributor_groups"] == contributor_groups
+    assert summary["merge_groups"] == {
+        unit_id: contributors
+        for unit_id, contributors in contributor_groups.items()
+        if len(contributors) > 1
+    }
     assert summary["merges_applied"] is False
     assert summary["is_merge_preview"] is False
     assert summary["description"] == "summary test"

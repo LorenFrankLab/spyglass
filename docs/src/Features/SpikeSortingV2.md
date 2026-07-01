@@ -535,7 +535,8 @@ CurationV2.create_merged_curation(
 `create_initial_curation` / `propose_merge_curation` / `create_merged_curation`
 are thin sugar over `insert_curation` (the expert API, still available for full
 control); they pre-fill `parent_curation_id` / `apply_merge` by name.
-`summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`,
+`summarize_curation` returns a plain dict (`n_units`, `labels`, `merge_groups`
+for real >1-unit merges, `unit_contributor_groups` for full provenance,
 `merges_applied`, `is_merge_preview`, `merge_id`, ...) for notebook printing.
 
 ### Quality metrics, evaluation, and acceptance (`CurationEvaluation`)
@@ -1327,6 +1328,14 @@ underlying tables.
 FigPack curation is offline by default: `FigPackCuration` (and
 `run_v2_pipeline(..., build_figpack_view=True)`, which forces `upload=False`) builds a
 self-contained local bundle you open in a browser to label and merge units.
+Pass `displayed_unit_properties=["x", "y", ...]` to
+`FigPackCuration.build_curation_view` /
+`FigPackCurationSelection.insert_selection` to choose the unit-table columns
+shown in the FigPack summary; names come from SpikeInterface sorting
+properties plus any already-computed display-analyzer `quality_metrics`,
+`template_metrics`, and `unit_locations` columns. `None` keeps SpikeInterface's
+default unit-table behavior, while explicit unavailable names raise instead of
+being silently dropped.
 Edits to a local bundle are not written back automatically —
 `FigPackCuration.fetch_curation_from_uri(uri)` reads the edited labels / merge
 groups out of it, and `CurationV2.save_manual_curation` ingests them into the

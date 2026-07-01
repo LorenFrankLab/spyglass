@@ -130,7 +130,8 @@ run_summary = run_v2_pipeline(
 # ## 3. Inspect and curate
 #
 # `run_v2_pipeline` leaves you a root curation. `summarize_curation` describes
-# **one** curation and returns a plain dict (`n_units`, `labels`, `merge_groups`,
+# **one** curation and returns a plain dict (`n_units`, `labels`, `merge_groups`
+# for real >1-unit merges, `unit_contributor_groups` for full provenance,
 # `merges_applied`, `is_merge_preview`, `merge_id`, ...); build its key from the
 # summary's `root_curation_id` (a run summary has no bare `curation_id`). The
 # labels curation *accepts* are the canonical set `CurationV2.label_options()`
@@ -181,7 +182,9 @@ CurationV2.summarize_curation(root_key)
 # and merges from a FigPack figure into a Spyglass curation, read them with
 # `FigPackCuration.fetch_curation_from_uri(uri)` and commit them with
 # `CurationV2.save_manual_curation(...)` (the round-trip cell below). A
-# never-edited figure reads back empty.
+# never-edited figure reads back empty. For custom unit-table columns, call
+# `FigPackCuration.build_curation_view(root_key,
+# displayed_unit_properties=["x", "y"])`; explicit unavailable names raise.
 
 import importlib.util
 

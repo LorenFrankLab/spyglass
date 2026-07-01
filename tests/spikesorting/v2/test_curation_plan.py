@@ -235,7 +235,7 @@ def _summary(**overrides):
         description="d",
         labels={0: ["mua"]},
         merge_id=None,
-        merge_groups={0: [0], 1: [1]},
+        unit_contributor_groups={0: [0], 1: [1]},
         n_units=2,
     )
     kwargs.update(overrides)
@@ -246,23 +246,24 @@ def test_build_curation_summary_is_merge_preview():
     """is_merge_preview is True iff not applied AND a >1-contributor group."""
     # Not applied + a real (>1-contributor) merge group -> preview.
     assert (
-        _summary(merges_applied=False, merge_groups={0: [1, 2]})[
+        _summary(merges_applied=False, unit_contributor_groups={0: [1, 2]})[
             "is_merge_preview"
         ]
         is True
     )
     # Applied -> never a preview, even with a >1-contributor group.
     assert (
-        _summary(merges_applied=True, merge_groups={0: [1, 2]})[
+        _summary(merges_applied=True, unit_contributor_groups={0: [1, 2]})[
             "is_merge_preview"
         ]
         is False
     )
     # Only single-contributor (self-entry) groups -> not a preview.
     assert (
-        _summary(merges_applied=False, merge_groups={0: [0], 1: [1]})[
-            "is_merge_preview"
-        ]
+        _summary(
+            merges_applied=False,
+            unit_contributor_groups={0: [0], 1: [1]},
+        )["is_merge_preview"]
         is False
     )
 
@@ -276,7 +277,7 @@ def test_build_curation_summary_passthrough_and_coercions():
         description=7,  # non-str -> str() -> "7"
         labels={3: ["accept"]},
         merge_id="merge-uuid",
-        merge_groups={3: [3]},
+        unit_contributor_groups={3: [3], 7: [7, 9]},
         n_units=5,
     )
     assert summary == {
@@ -284,7 +285,8 @@ def test_build_curation_summary_passthrough_and_coercions():
         "curation_id": 1,
         "n_units": 5,
         "labels": {3: ["accept"]},
-        "merge_groups": {3: [3]},
+        "merge_groups": {7: [7, 9]},
+        "unit_contributor_groups": {3: [3], 7: [7, 9]},
         "merges_applied": True,
         "is_merge_preview": False,
         "merge_id": "merge-uuid",
