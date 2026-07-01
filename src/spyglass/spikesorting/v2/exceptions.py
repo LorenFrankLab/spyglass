@@ -262,6 +262,16 @@ class FigPackCurationNamespaceError(RuntimeError):
     """
 
 
+class FigPackDisplayedUnitPropertyError(ValueError):
+    """Raise when requested FigPack unit-table columns cannot be rendered.
+
+    ``FigPackCuration`` passes ``displayed_unit_properties`` to SpikeInterface's
+    FigPack summary view. SpikeInterface warns and silently drops unavailable
+    properties; Spyglass treats an explicit request as a contract and raises
+    this error instead. ``None`` still delegates to SpikeInterface defaults.
+    """
+
+
 class FigPackRetrievalError(RuntimeError):
     """Raise when a figure's ``annotations.json`` cannot be retrieved/parsed.
 

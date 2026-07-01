@@ -2,11 +2,11 @@
 
 The v2 successor to v1's FigURL chain
 (``spyglass.spikesorting.v1.figurl_curation``). ``FigPackCurationSelection``
-records an explicit UI configuration (label palette, metric columns, upload
-mode) for a committed ``CurationV2`` row -- not just a bare FK -- so repeated
-calls are idempotent and several UI configurations of the same curation are
-representable. ``FigPackCuration`` builds the interactive view, publishes or
-saves it, and stores the resulting URI; ``fetch_curation_from_uri`` reads the
+records an explicit UI configuration (label palette, unit-table properties, and
+upload mode) for a committed ``CurationV2`` row -- not just a bare FK -- so
+repeated calls are idempotent and several UI configurations of the same curation
+are representable. ``FigPackCuration`` builds the interactive view, publishes
+or saves it, and stores the resulting URI; ``fetch_curation_from_uri`` reads the
 edited labels and merge groups back in the exact shape
 ``CurationV2.insert_curation`` consumes.
 
@@ -41,6 +41,7 @@ from spyglass.spikesorting.v2._figpack_curation import (
     default_label_options,
     figpack_config_hash,
     labels_and_merges_to_annotations,
+    normalize_displayed_unit_properties,
 )
 from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
@@ -50,6 +51,7 @@ from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     DuplicateSelectionError,
     FigPackCurationNamespaceError,
+    FigPackDisplayedUnitPropertyError,
     FigPackRetrievalError,
     FigPackUploadError,
     SchemaBypassError,
@@ -219,33 +221,69 @@ def _coerce_units_table_ids(view) -> None:
     walk(view)
 
 
-def _build_curation_view(curation_key: dict, *, label_options, metrics):
+def _available_displayed_unit_properties(analyzer) -> list[str]:
+    """Return unit-table columns SpikeInterface can render for ``analyzer``."""
+    from spikeinterface.widgets.utils import make_units_table_from_analyzer
+
+    table = make_units_table_from_analyzer(analyzer)
+    return [str(column) for column in table.columns]
+
+
+def _assert_displayed_unit_properties_available(
+    analyzer, displayed_unit_properties
+) -> None:
+    """Fail closed when requested FigPack unit-table columns are unavailable."""
+    requested = normalize_displayed_unit_properties(displayed_unit_properties)
+    if requested is None:
+        return
+    available = _available_displayed_unit_properties(analyzer)
+    missing = [prop for prop in requested if prop not in available]
+    if missing:
+        raise FigPackDisplayedUnitPropertyError(
+            "FigPackCuration cannot display requested unit properties "
+            f"{missing}; available properties on this sort's display analyzer "
+            f"are {available}. `displayed_unit_properties=None` keeps "
+            "SpikeInterface's default display behavior; otherwise compute the "
+            "needed analyzer metric/template/property columns before building "
+            "the FigPack view."
+        )
+
+
+def _build_curation_view(
+    curation_key: dict, *, label_options, displayed_unit_properties
+):
     """Build the FigPack curation view for a curation (minimal-attach).
 
     Lets SpikeInterface compose the whole sorting summary over the sort's
-    display analyzer (ensuring the curation-view extensions), then attaches only
-    the ``SortingCuration`` control as a sibling. Returns the composed
+    display analyzer (ensuring the curation-view extensions and any explicitly
+    requested unit-table columns are available), then attaches only the
+    ``SortingCuration`` control as a sibling. Returns the composed
     ``figpack.views`` object.
     """
-    import spikeinterface.widgets as sw  # noqa: F401 - imported by visualization
+    import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2 import visualization
+    from spyglass.spikesorting.v2 import _visualization as _viz
 
     figpack_views, figpack_ss_views = _require_figpack()
 
-    summary_kwargs = {}
-    if metrics:
-        summary_kwargs["displayed_unit_properties"] = list(metrics)
-
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
-    summary = visualization.plot_sorting_summary(
+    sorting = Sorting()
+    sorting.add_extensions(
         sorting_key,
-        compute_missing=True,
+        list(_viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]),
+    )
+    analyzer = sorting.get_analyzer(sorting_key)
+    _assert_displayed_unit_properties_available(
+        analyzer, displayed_unit_properties
+    )
+
+    summary = sw.plot_sorting_summary(
+        analyzer,
         backend="figpack",
         curation=False,
+        displayed_unit_properties=displayed_unit_properties,
         generate_url=False,
         display=False,
-        **summary_kwargs,
     ).view
 
     control = figpack_ss_views.SortingCuration(
@@ -310,31 +348,15 @@ def _assert_figpack_curatable(curation_key: dict) -> None:
         )
 
 
-def _reject_unsupported_metrics(metrics) -> None:
-    """Reject a non-empty metric-column request (unsupported).
-
-    The builder ensures only the four summary extensions, not
-    ``quality_metrics`` / ``template_metrics``, so a requested metric absent from
-    the display analyzer would be silently warned-and-dropped by SpikeInterface
-    -- producing a populated row whose unit table does not show it. Refuse rather
-    than mislead: the view shows only the four summary extensions.
-    """
-    if metrics:
-        raise ValueError(
-            "FigPackCuration does not support metric-column selection: a "
-            f"requested metric in {list(metrics)} absent from the display "
-            "analyzer would be silently dropped. Omit `metrics`."
-        )
-
-
 def _assert_selection_identity(selection: dict, key: dict) -> None:
     """Recheck the content-addressed identity at consume time (bypass guard).
 
     ``figpack_config_hash`` and ``figpack_curation_id`` are derived from the
     selection's own fields, but ``allow_direct_insert`` can store a row whose PK
-    / hash disagree with its label options, metrics, and upload mode. Recompute
-    both from the row and raise ``SchemaBypassError`` on mismatch, mirroring the
-    consume-time hash recheck the other v2 content-addressed selections do.
+    / hash disagree with its label options, displayed properties, and upload
+    mode. Recompute both from the row and raise ``SchemaBypassError`` on
+    mismatch, mirroring the consume-time hash recheck the other v2
+    content-addressed selections do.
     """
     # insert_selection normalizes ephemeral to False when offline, so an
     # offline + ephemeral row can only come from a raw-insert bypass.
@@ -345,11 +367,22 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
             "normalizes it away). This is a raw-insert bypass -- drop the row "
             "and re-insert via insert_selection()."
         )
+    try:
+        displayed_unit_properties = normalize_displayed_unit_properties(
+            selection["displayed_unit_properties"]
+        )
+    except (TypeError, ValueError) as exc:
+        raise SchemaBypassError(
+            f"FigPackCurationSelection {key['figpack_curation_id']} has "
+            f"invalid displayed_unit_properties "
+            f"{selection.get('displayed_unit_properties')!r} (a raw-insert "
+            "bypass). Drop the row and re-insert via insert_selection()."
+        ) from exc
     expected_hash = figpack_config_hash(
         sorting_id=selection["sorting_id"],
         curation_id=selection["curation_id"],
         label_options=list(selection["label_options"]),
-        metrics=list(selection["metrics"]),
+        displayed_unit_properties=displayed_unit_properties,
         upload=bool(selection["upload"]),
         ephemeral=bool(selection["ephemeral"]),
     )
@@ -357,8 +390,8 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
         raise SchemaBypassError(
             f"FigPackCurationSelection {key['figpack_curation_id']} has a "
             "figpack_config_hash that does not match its own label_options / "
-            "metrics / upload / ephemeral (a raw-insert bypass). Drop the row "
-            "and re-insert via insert_selection()."
+            "displayed_unit_properties / upload / ephemeral (a raw-insert "
+            "bypass). Drop the row and re-insert via insert_selection()."
         )
     expected_id = deterministic_id(
         "figpack_curation",
@@ -449,19 +482,19 @@ class FigPackCurationSelection(
     """A committed ``CurationV2`` row paired with a FigPack UI configuration.
 
     The ``figpack_curation_id`` PK is content-addressed over the curation plus
-    the UI config (label palette and upload/ephemeral mode), so the
-    same configuration always maps to one row and distinct configurations of one
-    curation coexist. A raw ``insert`` / ``insert1`` is blocked; use
-    ``insert_selection``.
+    the UI config (label palette, unit-table properties, and upload/ephemeral
+    mode), so the same configuration always maps to one row and distinct
+    configurations of one curation coexist. A raw ``insert`` / ``insert1`` is
+    blocked; use ``insert_selection``.
     """
 
     definition = """
     figpack_curation_id: uuid
     ---
     -> CurationV2
-    figpack_config_hash: char(64)  # sha256 over label_options, metrics, upload, ephemeral
+    figpack_config_hash: char(64)  # sha256 over FigPack UI config
     label_options: blob            # curation label palette, in display order
-    metrics: blob                  # metric column names to display
+    displayed_unit_properties=null: blob # SI unit-table columns; null means SI default
     upload: bool                   # True publishes a hosted figpack.org URI
     ephemeral: bool                # temporary hosted figure (no API key needed)
     """
@@ -472,6 +505,7 @@ class FigPackCurationSelection(
         curation_key: dict,
         *,
         label_options: list[str] | None = None,
+        displayed_unit_properties: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
         figpack_curation_id=None,
@@ -485,6 +519,11 @@ class FigPackCurationSelection(
         label_options : list of str, optional
             Curation label palette, in display order. Defaults to
             ``["accept", "mua", "noise"]``.
+        displayed_unit_properties : list of str, optional
+            Unit-table properties to pass to SpikeInterface's FigPack sorting
+            summary. ``None`` (default) keeps SpikeInterface's defaults; ``[]``
+            requests no property columns. Names are validated when the view is
+            built so explicit requests cannot be silently dropped.
         upload : bool, optional
             Publish a hosted figpack.org figure (requires ``FIGPACK_API_KEY``
             unless ``ephemeral``). Default ``False`` (save a local bundle).
@@ -529,13 +568,14 @@ class FigPackCurationSelection(
         label_options = (
             list(label_options) if label_options else default_label_options()
         )
-        metrics: list[str] = []
-        _reject_unsupported_metrics(metrics)
+        displayed_unit_properties = normalize_displayed_unit_properties(
+            displayed_unit_properties
+        )
         config_hash = figpack_config_hash(
             sorting_id=parent_key["sorting_id"],
             curation_id=parent_key["curation_id"],
             label_options=label_options,
-            metrics=metrics,
+            displayed_unit_properties=displayed_unit_properties,
             upload=upload,
             ephemeral=ephemeral,
         )
@@ -557,7 +597,7 @@ class FigPackCurationSelection(
             **identity,
             "figpack_curation_id": deterministic_figpack_id,
             "label_options": label_options,
-            "metrics": metrics,
+            "displayed_unit_properties": displayed_unit_properties,
             "upload": bool(upload),
             "ephemeral": bool(ephemeral),
         }
@@ -636,15 +676,17 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             "curation_id": selection["curation_id"],
         }
         label_options = list(selection["label_options"])
+        displayed_unit_properties = normalize_displayed_unit_properties(
+            selection["displayed_unit_properties"]
+        )
         upload = bool(selection["upload"])
 
         # Re-validate at the integrity boundary: insert_selection's guard is
         # bypassable (allow_direct_insert), so re-check everything it enforced
-        # before any view is built -- the curation namespace, the content-
-        # addressed identity, and the unsupported metric-column request.
+        # before any view is built -- the curation namespace and the content-
+        # addressed identity.
         _assert_figpack_curatable(curation_key)
         _assert_selection_identity(selection, key)
-        _reject_unsupported_metrics(list(selection["metrics"]))
 
         seed_labels, seed_merges = _existing_curation_state(curation_key)
         if upload and (seed_labels or seed_merges):
@@ -659,7 +701,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         view = _build_curation_view(
             curation_key,
             label_options=label_options,
-            metrics=list(selection["metrics"]),
+            displayed_unit_properties=displayed_unit_properties,
         )
         title = (
             f"Spyglass curation {curation_key['sorting_id']}"
@@ -695,6 +737,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         curation_key: dict,
         *,
         label_options: list[str] | None = None,
+        displayed_unit_properties: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
     ) -> str:
@@ -708,6 +751,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         selection = FigPackCurationSelection.insert_selection(
             curation_key,
             label_options=label_options,
+            displayed_unit_properties=displayed_unit_properties,
             upload=upload,
             ephemeral=ephemeral,
         )

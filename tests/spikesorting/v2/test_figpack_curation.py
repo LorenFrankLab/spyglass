@@ -8,12 +8,15 @@ These need neither a DataJoint server nor the optional ``figpack`` packages.
 
 from __future__ import annotations
 
+import pytest
+
 from spyglass.spikesorting.v2._figpack_curation import (
     FIGPACK_INSTALL_HINT,
     curation_annotations_to_labels_and_merges,
     default_label_options,
     figpack_config_hash,
     labels_and_merges_to_annotations,
+    normalize_displayed_unit_properties,
 )
 
 _SORTING_ID = "11111111-2222-3333-4444-555555555555"
@@ -24,7 +27,7 @@ def _hash(**overrides):
         sorting_id=_SORTING_ID,
         curation_id=0,
         label_options=["accept", "mua", "noise"],
-        metrics=["snr", "firing_rate"],
+        displayed_unit_properties=None,
         upload=False,
         ephemeral=False,
     )
@@ -49,10 +52,29 @@ def test_config_hash_sensitive_to_every_field():
     base = _hash()
     assert _hash(curation_id=1) != base
     assert _hash(label_options=["mua", "accept", "noise"]) != base  # order
-    assert _hash(metrics=["snr"]) != base
+    assert _hash(displayed_unit_properties=["x", "y"]) != base
+    assert _hash(displayed_unit_properties=["y", "x"]) != _hash(
+        displayed_unit_properties=["x", "y"]
+    )
+    assert _hash(displayed_unit_properties=[]) != base
     assert _hash(upload=True) != base
     assert _hash(ephemeral=True) != base
     assert _hash(sorting_id="99999999-2222-3333-4444-555555555555") != base
+
+
+def test_displayed_unit_properties_normalization():
+    """None, explicit empty, and ordered lists remain distinct configs."""
+    assert normalize_displayed_unit_properties(None) is None
+    assert normalize_displayed_unit_properties([]) == []
+    assert normalize_displayed_unit_properties(("x", "y")) == ["x", "y"]
+    with pytest.raises(ValueError):
+        normalize_displayed_unit_properties(["x", "x"])
+    with pytest.raises(ValueError):
+        normalize_displayed_unit_properties([""])
+    with pytest.raises(TypeError):
+        normalize_displayed_unit_properties("x")
+    with pytest.raises(TypeError):
+        normalize_displayed_unit_properties(["x", 1])
 
 
 def test_curation_state_round_trips():

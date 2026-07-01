@@ -26,6 +26,19 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _units_table_column_keys(bundle: Path) -> list[list[str]]:
+    """Return every FigPack UnitsTable's column keys from an offline bundle."""
+    metadata = json.loads((bundle / "data.zarr" / ".zmetadata").read_text())
+    tables: list[list[str]] = []
+    for path, attrs in metadata.get("metadata", {}).items():
+        if not path.endswith(".zattrs"):
+            continue
+        if attrs.get("view_type") != "spike_sorting.UnitsTable":
+            continue
+        tables.append([column["key"] for column in attrs.get("columns", [])])
+    return tables
+
+
 def test_build_curation_view_offline_creates_bundle(
     populated_sorting_with_curation,
 ):
@@ -39,6 +52,38 @@ def test_build_curation_view_offline_creates_bundle(
     assert bundle.is_dir()
     assert (bundle / "index.html").exists()
     assert (bundle / "data.zarr").exists()
+
+
+def test_displayed_unit_properties_render_in_bundle(
+    populated_sorting_with_curation,
+):
+    """Explicit SI unit-table properties are written into the FigPack bundle."""
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    uri = FigPackCuration.build_curation_view(
+        populated_sorting_with_curation,
+        upload=False,
+        displayed_unit_properties=["x", "y"],
+    )
+    tables = _units_table_column_keys(Path(uri))
+    assert any({"x", "y"} <= set(columns) for columns in tables), tables
+
+
+def test_displayed_unit_properties_reject_missing(
+    populated_sorting_with_curation,
+):
+    """Explicit unavailable unit-table properties fail instead of disappearing."""
+    from spyglass.spikesorting.v2.exceptions import (
+        FigPackDisplayedUnitPropertyError,
+    )
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    with pytest.raises(FigPackDisplayedUnitPropertyError, match="not_a_column"):
+        FigPackCuration.build_curation_view(
+            populated_sorting_with_curation,
+            upload=False,
+            displayed_unit_properties=["not_a_column"],
+        )
 
 
 def test_selection_and_view_are_idempotent(populated_sorting_with_curation):
@@ -259,8 +304,12 @@ def test_fetch_from_nonexistent_local_path_fails_closed():
         )
 
 
-def test_metrics_not_public_option():
-    """Metric-column selection is not advertised until FigPack supports it."""
+def test_displayed_unit_properties_public_but_metrics_not_public(dj_conn):
+    """Expose SI-native unit properties, not v1's narrower metrics name.
+
+    Importing the table classes activates DataJoint schemas, so depend on the
+    DB fixture even though this assertion only inspects public signatures.
+    """
     import inspect
 
     from spyglass.spikesorting.v2.figpack_curation import (
@@ -268,16 +317,16 @@ def test_metrics_not_public_option():
         FigPackCurationSelection,
     )
 
-    assert (
-        "metrics"
-        not in inspect.signature(
-            FigPackCurationSelection.insert_selection
-        ).parameters
-    )
-    assert (
-        "metrics"
-        not in inspect.signature(FigPackCuration.build_curation_view).parameters
-    )
+    selection_params = inspect.signature(
+        FigPackCurationSelection.insert_selection
+    ).parameters
+    build_params = inspect.signature(
+        FigPackCuration.build_curation_view
+    ).parameters
+    assert "displayed_unit_properties" in selection_params
+    assert "displayed_unit_properties" in build_params
+    assert "metrics" not in selection_params
+    assert "metrics" not in build_params
 
 
 def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
@@ -307,7 +356,7 @@ def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "metrics": [],
+            "displayed_unit_properties": None,
             "upload": False,
             "ephemeral": False,
         },
@@ -337,7 +386,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
         sorting_id=populated_sorting_with_curation["sorting_id"],
         curation_id=populated_sorting_with_curation["curation_id"],
         label_options=label_options,
-        metrics=[],
+        displayed_unit_properties=None,
         upload=False,
         ephemeral=True,
     )
@@ -351,7 +400,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "metrics": [],
+            "displayed_unit_properties": None,
             "upload": False,
             "ephemeral": True,
         },
@@ -394,7 +443,7 @@ def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
         sorting_id=merged["sorting_id"],
         curation_id=merged["curation_id"],
         label_options=label_options,
-        metrics=[],
+        displayed_unit_properties=None,
         upload=False,
         ephemeral=False,
     )
@@ -406,7 +455,7 @@ def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
             **identity,
             "figpack_curation_id": figpack_id,
             "label_options": label_options,
-            "metrics": [],
+            "displayed_unit_properties": None,
             "upload": False,
             "ephemeral": False,
         },

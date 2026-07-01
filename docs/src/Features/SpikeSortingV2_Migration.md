@@ -241,12 +241,15 @@ surface that stays v1-only is the stored per-pair burst metrics
   `FigPackCuration.fetch_curation_from_uri` → `CurationV2.save_manual_curation`;
   `insert_selection(..., upload=True)` can instead publish a hosted figpack.org
   figure (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
-  `spikesorting-v2-curation` extra.
+  `spikesorting-v2-curation` extra. v1's `metrics_figurl` display option maps
+  to v2's broader `displayed_unit_properties=[...]`, which selects
+  SpikeInterface unit-table columns from sorting properties and already
+  available display-analyzer metric/template/location extensions.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
 | Metric / auto-merge curation | v1 still available for legacy rows | `CurationEvaluation` (`QualityMetricParameters`, `AutoCurationRules`) |
-| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection` | FigPack curation (offline bundle; `spikesorting-v2-curation` extra) |
+| FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection`; `metrics_figurl=[...]` for metric display columns | FigPack curation (offline bundle; `displayed_unit_properties=[...]`; `spikesorting-v2-curation` extra) |
 | Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table |
 | Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
 | Concatenated recording / session group | (no v1 equivalent) | same-day chronic concatenate-and-sort (available) |
