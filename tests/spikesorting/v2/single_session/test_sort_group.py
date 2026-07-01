@@ -106,8 +106,8 @@ def test_set_group_by_column_matches_by_shank(polymer_smoke_session):
     groups = [[shank] for shank in shanks]
     SortGroupV2.set_group_by_electrode_table_column(
         nwb_file_name=nwb_file_name,
-        column="probe_shank",
-        groups=groups,
+        electrode_column="probe_shank",
+        value_groups=groups,
     )
     assert len(SortGroupV2 & polymer_smoke_session) == 4
     assert len(SortGroupV2.SortGroupElectrode & polymer_smoke_session) == 128
@@ -123,8 +123,8 @@ def test_set_group_by_column_lists_valid_columns_on_typo(
     with pytest.raises(ValueError) as excinfo:
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=polymer_smoke_session["nwb_file_name"],
-            column="probe_shanke",  # typo
-            groups=[[0]],
+            electrode_column="probe_shanke",  # typo
+            value_groups=[[0]],
         )
     msg = str(excinfo.value)
     assert "probe_shanke" in msg
@@ -209,8 +209,8 @@ def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
 
     skipped = SortGroupV2.set_group_by_electrode_table_column(
         nwb_file_name=nwb_file_name,
-        column="electrode_id",
-        groups=[[eids[0]], [eids[1], eids[2]]],
+        electrode_column="electrode_id",
+        value_groups=[[eids[0]], [eids[1], eids[2]]],
         omit_unitrode=True,
     )
     assert isinstance(skipped, list)
@@ -649,7 +649,9 @@ def test_set_group_by_electrode_table_column_auto_and_global_override(
         nwb_file_name, {eid: -2 for eid in by_shank[cmr_shank]}
     ):
         SortGroupV2.set_group_by_electrode_table_column(
-            nwb_file_name=nwb_file_name, column="probe_shank", groups=groups
+            nwb_file_name=nwb_file_name,
+            electrode_column="probe_shank",
+            value_groups=groups,
         )
         # groups[i] == [shanks[i]] -> sort_group_id i on a fresh session.
         cmr_sg = shanks.index(cmr_shank)
@@ -668,8 +670,8 @@ def test_set_group_by_electrode_table_column_auto_and_global_override(
     _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_electrode_table_column(
         nwb_file_name=nwb_file_name,
-        column="probe_shank",
-        groups=groups,
+        electrode_column="probe_shank",
+        value_groups=groups,
         reference_mode="global_median",
     )
     modes = set((SortGroupV2 & polymer_smoke_session).fetch("reference_mode"))
@@ -692,8 +694,8 @@ def test_set_group_reference_electrode_id_without_mode_raises():
     with pytest.raises(ValueError, match="only meaningful"):
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name="ref_guard_irrelevant_.nwb",
-            column="electrode_id",
-            groups=[[0]],
+            electrode_column="electrode_id",
+            value_groups=[[0]],
             reference_electrode_id=5,
         )
 
@@ -763,8 +765,8 @@ def test_set_group_by_nonexistent_specific_reference_raises(
     with pytest.raises(ValueError, match="not in the Electrode table"):
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=nwb_file_name,
-            column="probe_shank",
-            groups=[[0]],
+            electrode_column="probe_shank",
+            value_groups=[[0]],
             reference_mode="specific",
             reference_electrode_id=10_000_000,
         )
@@ -878,8 +880,8 @@ def test_set_group_by_electrode_table_column_empty_match_raises(
     with pytest.raises(ValueError, match="matched no electrodes"):
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=nwb_file_name,
-            column="electrode_id",
-            groups=[[10_000_000]],  # no electrode has this id
+            electrode_column="electrode_id",
+            value_groups=[[10_000_000]],  # no electrode has this id
         )
 
 

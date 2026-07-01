@@ -6,7 +6,7 @@ Two tiers:
   with real SpikeInterface (a synthesized dead channel) and via monkeypatch
   (override forwarding / ``None`` dropping / method pinning).
 - **Integration (DB):** the ``suggest_bad_channels`` suggest-then-confirm helper
-  against the ingested MEArec polymer smoke fixture. The write paths and the
+  against the ingested MEArec polymer smoke fixture. The persist paths and the
   per-shank scope are pinned with a monkeypatched detector so they are
   deterministic; one read-only test runs the real detector end-to-end. Every
   test that mutates ``Electrode.bad_channel`` restores it on teardown.
@@ -213,8 +213,8 @@ def _restore_bad_channel(nwb_file_name: str, electrode_ids):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_suggest_write_false_is_read_only(badchan_session):
-    """``write=False`` returns a labelled report and mutates nothing.
+def test_suggest_persist_false_is_read_only(badchan_session):
+    """``persist=False`` returns a labelled report and mutates nothing.
 
     Runs the real detector end-to-end over every shank of the fixture.
     """
@@ -237,10 +237,10 @@ def test_suggest_write_false_is_read_only(badchan_session):
         }
 
     before = _snapshot()
-    report = suggest_bad_channels(nwb, write=False)
+    reviewed_report = suggest_bad_channels(nwb, persist=False)
 
-    assert isinstance(report, list)
-    for entry in report:
+    assert isinstance(reviewed_report, list)
+    for entry in reviewed_report:
         assert set(entry) == {
             "electrode_group_name",
             "electrode_id",
@@ -253,11 +253,11 @@ def test_suggest_write_false_is_read_only(badchan_session):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_suggest_write_true_writes_quality_bad_not_out(
+def test_suggest_persist_true_writes_quality_bad_not_out(
     badchan_session, monkeypatch
 ):
-    """``write=True`` persists both writable labels (``dead`` and ``noise``)
-    but never the report-only ``out``."""
+    """``persist=True`` persists both writable labels (``dead`` and ``noise``)
+    but never the review-only ``out`` label."""
     from spyglass.spikesorting.v2 import bad_channels
 
     nwb = badchan_session["nwb_file_name"]
@@ -277,9 +277,9 @@ def test_suggest_write_true_writes_quality_bad_not_out(
     monkeypatch.setattr(bad_channels, "detect_bad_channels", fake_detect)
 
     with _restore_bad_channel(nwb, [dead_eid, out_eid, noise_eid]):
-        report = bad_channels.suggest_bad_channels(nwb, write=True)
+        reviewed_report = bad_channels.suggest_bad_channels(nwb, persist=True)
 
-        labels_by_eid = {e["electrode_id"]: e["label"] for e in report}
+        labels_by_eid = {e["electrode_id"]: e["label"] for e in reviewed_report}
         assert labels_by_eid[dead_eid] == "dead"
         assert labels_by_eid[noise_eid] == "noise"
         assert labels_by_eid[out_eid] == "out"  # surfaced in the report ...
@@ -290,10 +290,10 @@ def test_suggest_write_true_writes_quality_bad_not_out(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_suggest_write_true_is_additive_and_idempotent(
+def test_suggest_persist_true_is_additive_and_idempotent(
     badchan_session, monkeypatch
 ):
-    """``write=True`` never clears a pre-set flag and re-runs cleanly."""
+    """``persist=True`` never clears a pre-set flag and re-runs cleanly."""
     from spyglass.spikesorting.v2 import bad_channels
 
     nwb = badchan_session["nwb_file_name"]
@@ -315,12 +315,12 @@ def test_suggest_write_true_is_additive_and_idempotent(
     with _restore_bad_channel(nwb, [preset_eid, flagged_eid]):
         _set_bad_channel(nwb, preset_eid, "True")
 
-        bad_channels.suggest_bad_channels(nwb, write=True)
+        bad_channels.suggest_bad_channels(nwb, persist=True)
         assert _bad_channel(nwb, preset_eid) == "True"  # not cleared
         assert _bad_channel(nwb, flagged_eid) == "True"  # newly written
 
-        # Idempotent: a second write changes nothing and does not raise.
-        bad_channels.suggest_bad_channels(nwb, write=True)
+        # Idempotent: a second persist changes nothing and does not raise.
+        bad_channels.suggest_bad_channels(nwb, persist=True)
         assert _bad_channel(nwb, preset_eid) == "True"
         assert _bad_channel(nwb, flagged_eid) == "True"
 
@@ -354,7 +354,7 @@ def test_suggest_respects_electrode_group_filter(badchan_session, monkeypatch):
 
     monkeypatch.setattr(bad_channels, "detect_bad_channels", spy_detect)
     bad_channels.suggest_bad_channels(
-        nwb, electrode_group_names=[target], write=False
+        nwb, electrode_group_names=[target], persist=False
     )
 
     assert seen == target_ids  # only the requested group's electrodes scanned
@@ -402,9 +402,9 @@ def test_detection_runs_per_shank(badchan_session, monkeypatch):
 
     monkeypatch.setattr(bad_channels, "detect_bad_channels", spy_detect)
 
-    report = bad_channels.suggest_bad_channels(nwb, write=False)
+    reviewed_report = bad_channels.suggest_bad_channels(nwb, persist=False)
 
-    assert report == []
+    assert reviewed_report == []
     assert len(seen) == len(expected)  # one detection call per shank
     # Each call's channel set is exactly one shank's electrodes -- no mixing.
     assert sorted(seen, key=sorted) == sorted(expected.values(), key=sorted)
@@ -428,7 +428,7 @@ def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
 
     monkeypatch.setattr(bad_channels, "detect_bad_channels", spy_detect)
     bad_channels.suggest_bad_channels(
-        nwb, detection_params={"dead_channel_threshold": -0.4}, write=False
+        nwb, detection_params={"dead_channel_threshold": -0.4}, persist=False
     )
 
     assert captured  # at least one shank scanned
@@ -440,7 +440,7 @@ def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
 def test_suggest_persists_reviewed_report_without_redetecting(
     badchan_session, monkeypatch
 ):
-    """``report=`` persists exactly the reviewed entries and skips detection."""
+    """``reviewed_report=`` persists exactly the reviewed entries and skips detection."""
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2 import bad_channels
 
@@ -466,7 +466,7 @@ def test_suggest_persists_reviewed_report_without_redetecting(
 
     with _restore_bad_channel(nwb, [dead_eid, out_eid]):
         returned = bad_channels.suggest_bad_channels(
-            nwb, write=True, report=reviewed
+            nwb, persist=True, reviewed_report=reviewed
         )
         assert returned is reviewed  # returned unchanged
         assert _bad_channel(nwb, dead_eid) == "True"  # reviewed dead persisted
@@ -475,10 +475,12 @@ def test_suggest_persists_reviewed_report_without_redetecting(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_suggest_report_requires_write(badchan_session):
-    """Passing ``report=`` without ``write=True`` is a clear error."""
+def test_suggest_reviewed_report_requires_persist(badchan_session):
+    """Passing ``reviewed_report=`` without ``persist=True`` is a clear error."""
     from spyglass.spikesorting.v2 import bad_channels
 
     nwb = badchan_session["nwb_file_name"]
-    with pytest.raises(ValueError, match="write=True"):
-        bad_channels.suggest_bad_channels(nwb, report=[], write=False)
+    with pytest.raises(ValueError, match="persist=True"):
+        bad_channels.suggest_bad_channels(
+            nwb, reviewed_report=[], persist=False
+        )

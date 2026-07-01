@@ -1555,8 +1555,8 @@ def test_recording_specific_reference_drops_ref_channel(polymer_smoke_session):
     # grouped, so the specific reference is outside every created group.
     SortGroupV2.set_group_by_electrode_table_column(
         nwb_file_name=nwb_file_name,
-        column="probe_shank",
-        groups=[[target_shank]],
+        electrode_column="probe_shank",
+        value_groups=[[target_shank]],
         reference_mode="specific",
         reference_electrode_id=ref_id,
     )

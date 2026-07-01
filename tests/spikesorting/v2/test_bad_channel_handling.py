@@ -453,8 +453,8 @@ def test_make_fetch_reincludes_only_interior_bad(handling_session):
         _set_bad(nwb, gap_bad, "True")
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=nwb,
-            column="electrode_id",
-            groups=[good],
+            electrode_column="electrode_id",
+            value_groups=[good],
             reference_mode="none",
         )
         sg_id = int(
@@ -532,8 +532,8 @@ def test_make_fetch_reincludes_interior_bad_per_shank(handling_session):
             _set_bad(nwb, eid, "True")
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=nwb,
-            column="electrode_id",
-            groups=[good],
+            electrode_column="electrode_id",
+            value_groups=[good],
             reference_mode="none",
         )
         sg_id = int(
@@ -838,8 +838,8 @@ def test_bad_marked_specific_reference_materializes(handling_session):
         _set_bad(nwb, ref, "True")
         SortGroupV2.set_group_by_electrode_table_column(
             nwb_file_name=nwb,
-            column="electrode_id",
-            groups=[members],
+            electrode_column="electrode_id",
+            value_groups=[members],
             reference_mode="specific",
             reference_electrode_id=ref,
         )

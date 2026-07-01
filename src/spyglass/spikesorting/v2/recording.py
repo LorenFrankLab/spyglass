@@ -531,8 +531,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     def set_group_by_electrode_table_column(
         cls,
         nwb_file_name: str,
-        column: str,
-        groups: list[list],
+        electrode_column: str,
+        value_groups: list[list],
         sort_group_ids: list[int] | None = None,
         reference_mode: str | None = None,
         reference_electrode_id: int | None = None,
@@ -545,8 +545,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         Generalizes ``set_group_by_shank`` for labs whose grouping is
         keyed off non-shank metadata (e.g. Berke Lab grouping by
-        ``intan_channel_number``). Each entry in ``groups`` is a list
-        of values to match against ``column``; electrodes matching any
+        ``intan_channel_number``). Each entry in ``value_groups`` is a list
+        of values to match against ``electrode_column``; electrodes matching any
         value in a sublist form one sort group.
 
         Like ``set_group_by_shank``, referencing is resolved **per sort
@@ -560,15 +560,15 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        column
+        electrode_column
             Name of the column in the Electrode table to group by.
             Special aliases ``"index"`` / ``"id"`` / ``"idx"`` /
             ``"electrode_id"`` group by ``electrode_id`` directly.
-        groups
+        value_groups
             Each sublist specifies the column values to include in one
             sort group.
         sort_group_ids
-            Optional explicit IDs, same length as ``groups``. Defaults
+            Optional explicit IDs, same length as ``value_groups``. Defaults
             to the next available integers.
         reference_mode
             Optional call-wide override forcing one mode
@@ -587,8 +587,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If ``column`` is not a valid Electrode-table column, listing
-            the valid choices; if any ``groups`` sublist ends up empty
+            If ``electrode_column`` is not a valid Electrode-table column,
+            listing the valid choices; if any ``value_groups`` sublist ends up empty
             after filtering and ``omit_unitrode=True`` would still leave the
             group empty; if a group's members carry mixed configured
             references and no override resolves them; if a resolved
@@ -625,11 +625,16 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         all_electrodes = electrodes
 
         column_aliases = {"index", "id", "idx", "electrode_id"}
-        resolved_column = "electrode_id" if column in column_aliases else column
+        resolved_column = (
+            "electrode_id"
+            if electrode_column in column_aliases
+            else electrode_column
+        )
         if resolved_column not in electrodes.dtype.names:
             valid = sorted(electrodes.dtype.names)
             raise ValueError(
-                f"set_group_by_electrode_table_column: column {column!r} "
+                "set_group_by_electrode_table_column: electrode_column "
+                f"{electrode_column!r} "
                 f"is not on the Electrode table for {nwb_file_name!r}. "
                 f"Valid columns: {valid}."
             )
@@ -641,12 +646,12 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
             sort_group_ids = cls._next_sort_group_ids(
-                nwb_file_name, len(groups)
+                nwb_file_name, len(value_groups)
             )
-        elif len(sort_group_ids) != len(groups):
+        elif len(sort_group_ids) != len(value_groups):
             raise ValueError(
                 f"set_group_by_electrode_table_column: sort_group_ids has "
-                f"length {len(sort_group_ids)} but {len(groups)} groups "
+                f"length {len(sort_group_ids)} but {len(value_groups)} groups "
                 f"were requested. Lengths must match."
             )
 
@@ -654,9 +659,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             electrodes,
             all_electrodes,
             nwb_file_name,
-            column,
+            electrode_column,
             resolved_column,
-            groups=groups,
+            groups=value_groups,
             sort_group_ids=sort_group_ids,
             omit_unitrode=omit_unitrode,
             override_pair=override_pair,
