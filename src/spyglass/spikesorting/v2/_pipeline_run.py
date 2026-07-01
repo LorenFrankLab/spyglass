@@ -13,6 +13,11 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+# DB-free leaf module (imports no schema / no _pipeline_run), so a top-level
+# import is cycle-free and keeps the UnitMatchPlan annotations resolvable at
+# runtime (e.g. typing.get_type_hints for API docs).
+from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+
 from spyglass.spikesorting.v2._pipeline_preflight import (
     _resolve_session_sort_group_ids,
     assert_concat_preflight,
@@ -213,11 +218,11 @@ def run_v2_pipeline(
         - single-session: ``preflight_v2_pipeline`` -- the session / interval /
           team / sort-group rows, the preset's parameter rows, and the sorter
           binary.
-        - concat: intentionally minimal -- the ``SessionGroup``, its members,
-          and the preset's motion-correction row exist. It does NOT verify the
-          preset's preprocessing / sorter rows or the sorter binary, so a
-          missing one of those surfaces later as its native error (after the
-          member / concat populate), not as a preflight failure.
+        - concat: ``assert_concat_preflight`` -- the ``SessionGroup``, its
+          members, and the preset's motion-correction row, plus the preset's
+          preprocessing / sorter / analyzer-waveform param rows and the sorter
+          binary/runtime (the compute-row checks shared with the single-session
+          preflight; a concat sort runs no artifact stage).
 
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
@@ -1135,7 +1140,7 @@ def run_v2_pipeline_session(
 
 
 def run_v2_unit_match(
-    session_group_owner: "str | Any",
+    session_group_owner: "str | UnitMatchPlan",
     session_group_name: "str | None" = None,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
@@ -1156,10 +1161,12 @@ def run_v2_unit_match(
     -> ``TrackedUnit`` (biological-unit identity across sessions). Idempotent:
     re-running with the same inputs reuses the existing rows.
 
-    ``curation_choices`` is REQUIRED and explicit -- this helper never auto-picks
-    a "latest" curation, which would make the match irreproducible the moment a
-    source session gains a new curation. Build it from
-    :func:`describe_unit_match_choices`.
+    In the explicit form ``curation_choices`` is REQUIRED -- this helper never
+    auto-picks a "latest" curation (which would make the match irreproducible
+    the moment a source session gains a new curation). Build it from
+    :func:`describe_unit_match_choices`, or use the plan form (recommended):
+    :func:`plan_v2_unit_match` pins the curations for you by a named strategy and
+    returns the ``UnitMatchPlan`` you pass here.
 
     Parameters
     ----------
@@ -1341,7 +1348,7 @@ def plan_v2_unit_match(
     strategy: str,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
-) -> "Any":
+) -> "UnitMatchPlan":
     """Build a reviewable plan pinning one curation per member for matching.
 
     The recommended plan-then-run entry point for cross-session matching: it

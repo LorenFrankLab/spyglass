@@ -251,6 +251,8 @@ if run_unit_match and unitmatch_available:
         matcher_params_name=matcher_params_name,
     )
     display(plan.as_dataframe())  # one row per member -- review before running
+    for warning in plan.warnings:  # e.g. the "root" strategy warns loudly
+        print("WARNING:", warning)
     if not plan.ok:
         for problem in plan.errors:
             print("UNRESOLVED:", problem)

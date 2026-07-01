@@ -161,6 +161,35 @@ def test_manual_rejects_a_pin_not_among_the_members_choices():
     assert any("member 0" in e for e in plan.errors)
 
 
+def test_manual_rejects_extra_member_indices():
+    # A curation_choices entry for a member index that is not in the group
+    # (stale / mistyped) is a blocking error -- exact coverage, not silently
+    # dropped.
+    members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
+    plan = _plan(
+        members,
+        "manual",
+        manual_choices={
+            0: {"sorting_id": _S0, "curation_id": 0},
+            9: {"sorting_id": _S1, "curation_id": 0},  # not a member
+        },
+    )
+    assert not plan.ok
+    assert any("[9]" in e for e in plan.errors)
+
+
+def test_curation_choices_rejected_with_a_non_manual_strategy():
+    # Explicit pins with an automatic strategy would be silently ignored -> the
+    # planner rejects the combination up front.
+    members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
+    with pytest.raises(ValueError, match="strategy='manual'"):
+        _plan(
+            members,
+            "auto_curated",
+            manual_choices={0: {"sorting_id": _S0, "curation_id": 0}},
+        )
+
+
 def test_manual_requires_a_choice_for_every_member():
     members = [
         _member(0, "day1.nwb", [_cur(_S0, 0, -1)]),

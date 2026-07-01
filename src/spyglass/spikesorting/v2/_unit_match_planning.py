@@ -239,6 +239,15 @@ def build_unit_match_plan(
             f"build_unit_match_plan: unknown strategy {strategy!r}; choose one "
             f"of {STRATEGIES}."
         )
+    # manual_choices is only consulted by strategy='manual'; passing it with an
+    # automatic strategy would silently do nothing (the planner picks), so
+    # reject it up front rather than let it look intentional.
+    if manual_choices is not None and strategy != "manual":
+        raise ValueError(
+            "build_unit_match_plan: curation_choices is only used by "
+            f"strategy='manual', not {strategy!r}; the planner picks the "
+            "curations for the other strategies."
+        )
 
     curation_choices: dict[int, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
@@ -261,6 +270,19 @@ def build_unit_match_plan(
                 "status": "pinned" if pinned else "UNRESOLVED",
             }
         )
+
+    # Manual coverage is EXACT: a curation_choices entry for a member index that
+    # is not in the group (stale / mistyped) is silently unused above, so flag
+    # it as a blocking error rather than let the plan look ok.
+    if strategy == "manual" and manual_choices:
+        member_indexes = {m["member_index"] for m in members}
+        extra = sorted(set(manual_choices) - member_indexes)
+        if extra:
+            errors.append(
+                f"curation_choices has entries for member index(es) {extra} "
+                f"that are not SessionGroup members {sorted(member_indexes)} "
+                "(stale or mistyped index)."
+            )
 
     return UnitMatchPlan(
         session_group_owner=session_group_owner,
