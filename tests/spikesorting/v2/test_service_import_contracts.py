@@ -28,6 +28,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_curation_routing",
     "_curation_transforms",
     "_enums",
+    "_figpack_curation",
     "_lookup_validation",
     "_nwb_metadata_helpers",
     "_pipeline_presets",
@@ -47,6 +48,7 @@ _DB_FREE_SERVICE_MODULES = [
     "_sorting_artifact_mask",
     "_sorting_dispatch",
     "_sorting_units",
+    "_unitmatch_backend",
     "_units_nwb",
 ]
 
@@ -113,11 +115,11 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "concat_session_group_owner",
         "concat_session_group_name",
         "pipeline_preset",
-        "description",
+        "curation_description",
         "require_units",
         "auto_curate",
         "preflight",
-        "figpack",
+        "build_figpack_view",
         "figpack_label_options",
     }
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
@@ -128,7 +130,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
     }
     assert pipeline_types.RunV2PipelineSessionInputs.__optional_keys__ == {
         "sort_group_ids",
-        "description",
+        "curation_description",
         "require_units",
         "auto_curate",
         "preflight",
@@ -209,3 +211,36 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "unit_match",
         "tracked_unit",
     }
+
+
+def test_package_root_imports_without_optional_extra_modules():
+    """Package-root import must not import optional curation/matching extras."""
+    probe = textwrap.dedent("""
+        import sys
+
+        import spyglass.spikesorting.v2  # noqa: F401
+
+        optional_roots = {
+            "UnitMatchPy",
+            "figpack",
+            "figpack_spike_sorting",
+            "mat73",
+        }
+        leaked = sorted(
+            modname
+            for modname in sys.modules
+            if modname.split(".", 1)[0] in optional_roots
+        )
+        assert not leaked, (
+            "package-root import pulled optional extra modules: "
+            + repr(leaked)
+        )
+        """)
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True
+    )
+    assert result.returncode == 0, (
+        "spyglass.spikesorting.v2 must cold-import without optional "
+        "curation/matching extras\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
+    )
