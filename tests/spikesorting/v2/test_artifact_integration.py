@@ -728,7 +728,7 @@ def test_artifact_compute_kernels_import_without_db():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
-    """AVTM-2: Sorting.make_fetch resolves artifact-removed intervals via the
+    """Sorting.make_fetch resolves artifact-removed intervals via the
     strict ownership helper (read_artifact_removed_intervals, as_dict=True).
 
     The prior direct ``IntervalList & reconstructed_name`` fetch would accept a
@@ -794,7 +794,7 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
 def test_make_fetch_raises_when_recording_absent_from_interval_dict(
     artifact_e2e_session, monkeypatch
 ):
-    """AVTM-2: make_fetch selects this recording's array from the helper's
+    """make_fetch selects this recording's array from the helper's
     per-nwb dict and raises clearly when the key is absent (rather than feeding
     a dict to the mask)."""
     from spyglass.spikesorting.v2.artifact import (

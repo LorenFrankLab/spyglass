@@ -404,7 +404,7 @@ def test_session_runner_continue_on_error(monkeypatch):
 def test_session_runner_propagates_preflight_warnings(monkeypatch):
     """Per-group preflight warnings reach EVERY entry -- ok, failed-preflight,
     and failed-run -- so describe_run / the batch warning count do not
-    under-report (review R2-D + R3-C). Each OK group runs with preflight=False,
+    under-report. Each OK group runs with preflight=False,
     so the warnings must come from the session report, not a per-group rerun.
     """
     monkeypatch.setattr(

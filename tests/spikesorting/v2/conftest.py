@@ -342,8 +342,8 @@ def planted_two_unit_sort(dj_conn):
     """A populated Sorting with two planted units (so a merge group exists).
 
     Shared in conftest (rather than a single test module) so the merge-aware
-    tests across modules -- the preview-merge warnings and the R27
-    merged-parent guard -- resolve the SAME populated sort without a fragile
+    tests across modules -- preview-merge warnings and the merged-parent guard
+    -- resolve the SAME populated sort without a fragile
     cross-module import. The smoke sort yields only one MEArec unit, so this
     monkeypatches ``Sorting._run_sorter`` to plant two units on the real
     recording. Tests clear curations around themselves for isolation.

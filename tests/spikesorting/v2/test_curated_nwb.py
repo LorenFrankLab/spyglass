@@ -1,4 +1,4 @@
-"""CNEP-1: curated-units NWBs carry per-unit ``obs_intervals``.
+"""Curated-units NWBs carry per-unit ``obs_intervals``.
 
 The sort-time writer wrote a per-unit observation window, but the curated
 writer dropped it and the combined reader never read it back -- so any NWB-only

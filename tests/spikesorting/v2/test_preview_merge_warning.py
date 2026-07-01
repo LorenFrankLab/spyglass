@@ -115,7 +115,7 @@ def test_assert_decoding_merge_ids_raises_on_preview_merge(
 def test_get_spike_times_warns_on_preview_merge(
     planted_two_unit_sort, monkeypatch
 ):
-    """R3 (generic accessor): get_spike_times WARNS when a consumed merge_id is
+    """get_spike_times WARNS when a consumed merge_id is
     a preview (apply_merge=False) curation with unapplied proposed merges; an
     applied-merge curation does NOT warn. Warning (not raising) keeps v0/v1
     consumers working; the strict raise stays on the decoding boundary.

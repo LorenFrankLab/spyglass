@@ -485,7 +485,7 @@ def test_filter_units():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_all_unlabeled_curation_include_label_filters(populated_sorting):
-    """CNEP-2: an include/exclude filter applies even when the curated NWB
+    """An include/exclude filter applies even when the curated NWB
     omits the label column (every unit unlabeled).
 
     An all-unlabeled curated export drops the ``curation_label`` column, so the

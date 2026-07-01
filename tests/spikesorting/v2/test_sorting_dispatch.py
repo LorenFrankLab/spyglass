@@ -16,7 +16,7 @@ def _tiny_numpy_sorting():
     """A minimal REAL in-memory sorting for ``run_sorter`` stubs.
 
     ``run_si_sorter`` now materializes the sorter output via
-    ``NumpySorting.from_sorting`` (R4: sever the temp-dir file backing before
+    ``NumpySorting.from_sorting`` (sever the temp-dir file backing before
     cleanup), so a stub must return a real sorting -- a placeholder ``object()``
     no longer satisfies the materialize contract.
     """
@@ -214,7 +214,7 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
     before, after, result = _run_si_sorter_with_patched_run_sorter(
         monkeypatch, lambda *a, **k: _tiny_numpy_sorting()
     )
-    # run_si_sorter materializes the sorter output (R4), so the result is an
+    # run_si_sorter materializes the sorter output, so the result is an
     # in-memory NumpySorting rather than the stub object identity.
     assert isinstance(result, si.NumpySorting)
     # n_jobs=2 differs from SI's default n_jobs=1, so the sort genuinely
@@ -441,7 +441,7 @@ def test_v2_recording_chain_is_container_serializable():
 @pytest.mark.integration
 @pytest.mark.usefixtures("dj_conn")
 def test_run_si_sorter_output_survives_tempdir_cleanup():
-    """R4: a real sorter run's output is readable AFTER run_si_sorter returns.
+    """A real sorter run's output is readable AFTER run_si_sorter returns.
 
     ``sis.run_sorter`` returns a sorting that READS from the sorter temp dir,
     which ``run_si_sorter`` cleans up in its finally; downstream

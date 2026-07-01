@@ -1,4 +1,4 @@
-"""AVTM-3: ``apply_artifact_mask`` rejects non-finite / out-of-envelope times.
+"""``apply_artifact_mask`` rejects non-finite / out-of-envelope times.
 
 The complement walk silently clips ``valid_times`` to the recording envelope
 and a NaN slips through the ``<`` / sorted ordering checks (every NaN compare is

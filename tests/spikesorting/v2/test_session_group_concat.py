@@ -480,7 +480,7 @@ def test_concat_id_changes_with_member_set(same_day_group):
 def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
     same_day_group,
 ):
-    """The exact R39 bug: editing the LIVE SessionGroup.Member set under a fixed
+    """Editing the LIVE SessionGroup.Member set under a fixed
     group name+params re-mints a different concat_recording_id on re-selection,
     and the original concat's frozen MemberSnapshot is unchanged by the edit (old
     concat rows stay valid; the change is not silently absorbed)."""

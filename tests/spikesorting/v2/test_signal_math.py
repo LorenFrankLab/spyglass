@@ -241,7 +241,7 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_frames_for_times_rejects_non_finite(bad):
-    """AVTM-3: a NaN/Inf query time raises (searchsorted would map NaN to +inf
+    """A NaN/Inf query time raises (searchsorted would map NaN to +inf
     and silently mis-map). Out-of-range FINITE times still clamp -- that
     searchsorted contract is pinned by the matches_full_vector test above."""
     import numpy as np
