@@ -347,12 +347,14 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         sort_group_ids: list[int] | None = None,
         delete_existing_entries: bool = False,
         confirm: bool = False,
+        *,
+        omit_bad_channels: bool = True,
     ) -> list[dict]:
         """Auto-group electrodes by probe shank.
 
         Tetrodes (one shank per probe) yield one sort group per
         electrode group. Polymer probes (multiple shanks per probe)
-        yield one sort group per shank. Bad channels are omitted.
+        yield one sort group per shank. Bad channels are omitted by default.
 
         Referencing is resolved **per sort group**. By default each group
         inherits its members' configured reference
@@ -372,6 +374,11 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         omit_unitrode
             If True, sort groups with only one channel after filtering
             are skipped (a unitrode usually means a broken shank).
+        omit_bad_channels
+            If True (default), electrodes flagged ``bad_channel='True'`` are
+            excluded before grouping. Pass False only for diagnostic grouping;
+            preprocessing still handles bad channels according to its own
+            ``bad_channel_handling`` parameter.
         references
             Optional per-group reference override, keyed by
             ``electrode_group_name``. The value is
@@ -442,15 +449,19 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 "reference_mode='specific' too, or use a `references` mapping."
             )
 
-        electrodes = (
-            Electrode()
-            & {"nwb_file_name": nwb_file_name}
-            & {"bad_channel": "False"}
-        ).fetch()
+        electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch()
+        if omit_bad_channels:
+            electrodes = electrodes[electrodes["bad_channel"] == "False"]
         if len(electrodes) == 0:
             raise ValueError(
                 f"SortGroupV2.set_group_by_shank: no electrodes found for "
-                f"{nwb_file_name!r} (or all flagged bad_channel='True'). "
+                f"{nwb_file_name!r}"
+                + (
+                    " (or all flagged bad_channel='True')"
+                    if omit_bad_channels
+                    else ""
+                )
+                + ". "
                 "Check Electrode population and the bad_channel column."
             )
         # The reference electrode itself may be a bad channel (and so absent
@@ -578,7 +589,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             must be None for the other modes. Only meaningful alongside an
             explicit ``reference_mode``.
         omit_bad_channels, omit_unitrode
-            See ``set_group_by_shank``. Both default to True.
+            ``omit_bad_channels`` excludes electrodes flagged
+            ``bad_channel='True'`` before grouping; ``omit_unitrode`` skips
+            groups with one channel after filtering. Both default to True.
         delete_existing_entries, confirm
             See class docstring.
 

@@ -40,6 +40,50 @@ def test_set_group_by_shank_creates_one_group_per_shank(polymer_smoke_session):
 
 
 @pytest.mark.slow
+def test_set_group_by_shank_can_include_bad_channels(polymer_smoke_session):
+    """``omit_bad_channels=False`` includes channels the default omits."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    rows = (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+        "electrode_group_name",
+        "electrode_id",
+        "bad_channel",
+        as_dict=True,
+        order_by="electrode_id",
+    )
+    first = rows[0]
+
+    def _set_bad_channel(value):
+        Electrode.update1(
+            {
+                "nwb_file_name": nwb_file_name,
+                "electrode_group_name": first["electrode_group_name"],
+                "electrode_id": int(first["electrode_id"]),
+                "bad_channel": value,
+            }
+        )
+
+    try:
+        _set_bad_channel("True")
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+        parts = SortGroupV2.SortGroupElectrode & polymer_smoke_session
+        assert len(parts) == 127
+
+        _clean_session_v2(polymer_smoke_session)
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name, omit_bad_channels=False
+        )
+        parts = SortGroupV2.SortGroupElectrode & polymer_smoke_session
+        assert len(parts) == 128
+    finally:
+        _clean_session_v2(polymer_smoke_session)
+        _set_bad_channel(first["bad_channel"])
+
+
+@pytest.mark.slow
 def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
     """Rerun without an override raises (fixes v1 silent-overwrite bug)."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
