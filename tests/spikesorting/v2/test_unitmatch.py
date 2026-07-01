@@ -2894,6 +2894,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
     )
     from spyglass.spikesorting.v2.pipeline import (
         describe_unit_match_choices,
+        plan_v2_unit_match,
         run_v2_unit_match,
     )
     from spyglass.spikesorting.v2.unit_matching import (
@@ -2971,13 +2972,21 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             skip_duplicates=True,
         )
 
-        # Full chain via the orchestrator.
-        summary = run_v2_unit_match(
+        # Plan-then-run: the members' root curations are pinned by a strategy
+        # (each member has exactly one root), reviewed, then run -- exercising
+        # plan_v2_unit_match + the run_v2_unit_match(plan) overload end to end.
+        plan = plan_v2_unit_match(
             grp["owner"],
             grp["group_name"],
+            strategy="root",
             matcher_params_name=matcher_name,
-            curation_choices=grp["choices"],
         )
+        assert plan.ok, plan.errors
+        assert set(plan.curation_choices) == set(grp["choices"])
+        assert not plan.as_dataframe().empty
+
+        # Full chain via the orchestrator, driven by the plan.
+        summary = run_v2_unit_match(plan)
         selection_pk = {"unitmatch_id": summary["unitmatch_id"]}
         assert summary["session_group_name"] == grp["group_name"]
         assert summary["matcher_params_name"] == matcher_name

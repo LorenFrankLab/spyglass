@@ -61,10 +61,12 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 from spyglass.spikesorting.v2._pipeline_run import (
     describe_unit_match_choices,
+    plan_v2_unit_match,
     run_v2_pipeline,
     run_v2_pipeline_session,
     run_v2_unit_match,
 )
+from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
 from spyglass.spikesorting.v2._pipeline_types import (
     PipelineOutcome,
     PipelineStageSeconds,

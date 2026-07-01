@@ -1135,12 +1135,21 @@ def run_v2_pipeline_session(
 
 
 def run_v2_unit_match(
-    session_group_owner: str,
-    session_group_name: str,
+    session_group_owner: "str | Any",
+    session_group_name: "str | None" = None,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
 ) -> RunV2UnitMatchSummary:
     """Match units across a SessionGroup's members in one call, then track them.
+
+    Two call forms:
+
+    - ``run_v2_unit_match(plan)`` -- a :class:`UnitMatchPlan` from
+      :func:`plan_v2_unit_match` (the recommended plan-then-run path; the plan
+      already pinned one curation per member via a strategy). A plan that could
+      not resolve every member (``plan.ok is False``) raises here.
+    - ``run_v2_unit_match(owner, name, matcher_params_name=..., curation_choices=
+      {...})`` -- the explicit form, for power users / back-compat.
 
     Chains the cross-session unit-matching stages into one call:
     ``UnitMatchSelection.insert_selection`` -> ``UnitMatch`` (pairwise matches)
@@ -1189,14 +1198,33 @@ def run_v2_unit_match(
         carries the partial summary). A missing optional matcher backend (e.g.
         ``UnitMatchPy``) surfaces here with the backend's install hint.
     """
+    from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    # Accept a UnitMatchPlan (from plan_v2_unit_match) OR the explicit
+    # (owner, name, ..., curation_choices) form. Unwrap a plan into the explicit
+    # inputs; a plan that could not pin a curation for every member (not ok)
+    # raises here rather than running a partial match.
+    if isinstance(session_group_owner, UnitMatchPlan):
+        plan = session_group_owner
+        if not plan.ok:
+            raise PipelineInputError(
+                "run_v2_unit_match: the plan could not pin a curation for "
+                "every member (strategy="
+                f"{plan.strategy!r}):\n  - " + "\n  - ".join(plan.errors)
+            )
+        session_group_owner = plan.session_group_owner
+        session_group_name = plan.session_group_name
+        matcher_params_name = plan.matcher_params_name
+        curation_choices = plan.curation_choices
 
     # curation_choices is REQUIRED and explicit: an implicit "latest curation"
     # lookup would make the match irreproducible the moment a source session
     # gains a new curation. Validate DB-free, before any table import.
     if curation_choices is None:
         raise PipelineInputError(
-            "run_v2_unit_match requires explicit curation_choices "
+            "run_v2_unit_match requires either a UnitMatchPlan (from "
+            "plan_v2_unit_match) or explicit curation_choices "
             "(member_index -> {'sorting_id': ..., 'curation_id': ...}); it never "
             "auto-picks a curation. List each member's options with "
             "describe_unit_match_choices(session_group_owner, "
@@ -1287,6 +1315,72 @@ def run_v2_unit_match(
     return cast(RunV2UnitMatchSummary, run_summary)
 
 
+def plan_v2_unit_match(
+    session_group_owner: str,
+    session_group_name: str,
+    *,
+    strategy: str,
+    matcher_params_name: str = "unitmatch_default",
+    curation_choices: "dict | None" = None,
+) -> "Any":
+    """Build a reviewable plan pinning one curation per member for matching.
+
+    The recommended plan-then-run entry point for cross-session matching: it
+    lists each member's committed curations (via
+    :func:`describe_unit_match_choices`) and applies the named ``strategy`` to
+    pin exactly one per member, returning a ``UnitMatchPlan`` you inspect BEFORE
+    the expensive match::
+
+        plan = plan_v2_unit_match(owner, name, strategy="single_leaf_curated")
+        display(plan.as_dataframe())   # one row per member
+        summary = run_v2_unit_match(plan)
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name : str
+        Identify the ``SessionGroup`` whose members are matched.
+    strategy : str
+        REQUIRED (no default -- your declaration of intent, so a match never
+        silently pins a "latest" curation):
+
+        - ``"single_leaf_curated"`` -- each member's single terminal curated
+          (non-root) curation; a member with zero or several is a plan error.
+        - ``"auto_curated"`` -- each member's auto-curated child (sort members
+          with ``run_v2_pipeline(auto_curate=True)`` first).
+        - ``"root"`` -- each member's root curation (UNCURATED; warns loudly).
+        - ``"manual"`` -- pin ``curation_choices`` explicitly (required with this
+          strategy), validated against each member's committed curations.
+    matcher_params_name : str, optional
+        ``MatcherParameters`` row carried onto the plan (default
+        ``"unitmatch_default"``).
+    curation_choices : dict, optional
+        Only for ``strategy="manual"``: ``{member_index: {"sorting_id": ...,
+        "curation_id": ...}}``.
+
+    Returns
+    -------
+    UnitMatchPlan
+        Carries ``curation_choices`` (the pins), ``warnings`` / ``errors``, and
+        ``as_dataframe()``. ``plan.ok`` is ``False`` if any member is
+        unresolved; ``run_v2_unit_match(plan)`` then raises with the errors.
+    """
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        build_unit_match_plan,
+    )
+
+    members = describe_unit_match_choices(
+        session_group_owner, session_group_name
+    )
+    return build_unit_match_plan(
+        session_group_owner=session_group_owner,
+        session_group_name=session_group_name,
+        matcher_params_name=matcher_params_name,
+        strategy=strategy,
+        members=members,
+        manual_choices=curation_choices,
+    )
+
+
 def describe_unit_match_choices(
     session_group_owner: str,
     session_group_name: str,
@@ -1374,6 +1468,7 @@ def describe_unit_match_choices(
                     "sorting_id",
                     "curation_id",
                     "parent_curation_id",
+                    "curation_source",
                     "description",
                     as_dict=True,
                     order_by="sorting_id, curation_id",
