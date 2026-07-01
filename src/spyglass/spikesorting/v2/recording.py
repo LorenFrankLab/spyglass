@@ -188,6 +188,34 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             _validate_reference_fields(r)
         super().insert(rows, **kwargs)
 
+    def update1(self, row, *, allow_reference_mutation=False):
+        """Reject an in-place row edit unless ``allow_reference_mutation``.
+
+        A sort group's ``reference_mode`` / ``reference_electrode_id`` shape the
+        referenced traces the ``Recording`` persists, but they are NOT part of
+        ``recording_id`` (which folds only the session, ``sort_group_id``,
+        interval, preprocessing params, and team). Editing them in place under
+        the same key therefore leaves any already-populated ``Recording`` cached
+        with the OLD reference and silently reused. Delete and recreate the sort
+        group instead -- via ``set_group_by_shank`` /
+        ``set_group_by_electrode_table_column`` with ``delete_existing_entries``
+        after reviewing the ``DeletionPreview`` -- so the stale ``Recording``
+        cascades away. Pass ``allow_reference_mutation=True`` only for a
+        deliberate edit of a group with no populated ``Recording``.
+        """
+        if not allow_reference_mutation:
+            raise dj.errors.DataJointError(
+                "In-place update1 of SortGroupV2 is not supported: a group's "
+                "reference config shapes the persisted Recording but is not in "
+                "recording_id, so editing it under the same key leaves an "
+                "already-populated Recording cached with the old reference. "
+                "Delete and recreate the sort group instead (set_group_by_* "
+                "with delete_existing_entries) so the stale Recording cascades "
+                "away. Pass allow_reference_mutation=True only for a group with "
+                "no populated Recording."
+            )
+        super().update1(row)
+
     # ---- Existing-entry safety ------------------------------------------
 
     @classmethod

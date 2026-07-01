@@ -995,3 +995,36 @@ def test_sortgroup_overwrite_preview_lists_cross_team_downstream(
         assert by_team["team_beta"]["recording_selection_rows"] >= 1
     finally:
         _clean_session_v2(polymer_smoke_session)
+
+
+def test_sort_group_v2_update1_rejects_reference_mutation(dj_conn):
+    """A sort group's reference config shapes the persisted Recording but is
+    not in ``recording_id``, so an in-place ``update1`` would leave an
+    already-populated Recording cached with the OLD reference. ``update1`` must
+    reject and direct the caller to delete + recreate the group instead."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    with pytest.raises(
+        dj.errors.DataJointError, match="update1 of SortGroupV2"
+    ):
+        SortGroupV2().update1(
+            {
+                "nwb_file_name": "does_not_matter.nwb",
+                "sort_group_id": 0,
+                "reference_mode": "global_median",
+            }
+        )
+    # The explicit escape hatch is accepted (reaches the real update1, which
+    # then fails on the nonexistent row -- proving the guard is bypassed).
+    with pytest.raises(dj.errors.DataJointError) as excinfo:
+        SortGroupV2().update1(
+            {
+                "nwb_file_name": "does_not_matter.nwb",
+                "sort_group_id": 0,
+                "reference_mode": "global_median",
+            },
+            allow_reference_mutation=True,
+        )
+    assert "update1 of SortGroupV2" not in str(excinfo.value)
