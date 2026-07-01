@@ -866,7 +866,7 @@ def run_v2_pipeline(
                 bool(built) and Path(built.fetch1("figpack_uri")).exists()
             )
             if bool(built) and not bundle_present:
-                built.delete_quick()
+                built.delete(safemode=False)
             (
                 _,
                 run_summary["figpack_status"],

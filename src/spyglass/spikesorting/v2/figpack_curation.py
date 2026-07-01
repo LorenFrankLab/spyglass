@@ -766,7 +766,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             and built
             and not Path(built.fetch1("figpack_uri")).exists()
         ):
-            built.delete_quick()
+            built.delete(safemode=False)
         cls.populate(selection)
         return (cls & selection).fetch1("figpack_uri")
 
