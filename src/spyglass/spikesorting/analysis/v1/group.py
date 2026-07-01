@@ -243,7 +243,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 )
                 file_unit_ids = list(compress(file_unit_ids, include_unit))
             elif group_labels is None:
-                # CNEP-2: an all-unlabeled curated NWB omits the label column,
+                # An all-unlabeled curated NWB omits the label column,
                 # so the filter above is skipped and an include-only selection
                 # would wrongly return ALL units. Synthesize empty per-unit
                 # label lists so the filter still applies: include-only -> no
