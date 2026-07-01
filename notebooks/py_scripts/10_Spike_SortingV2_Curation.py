@@ -56,7 +56,7 @@ pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 sort_group_id = None
 # -
 
-# ## 2. One-time setup
+# ## 1. One-time setup
 #
 # `initialize_v2_defaults()` installs every default parameter row the pipeline
 # needs (preprocessing / artifact / sorter), so there is no per-table
@@ -103,12 +103,11 @@ elif sort_group_id not in available_sort_group_ids:
 sort_group_id
 
 
-# ## Setup and sort
+# ## 2. Run a root sort
 #
-# Install defaults, the team, and the sort groups, then run a sort so we have a
-# root curation to work with (idempotent — reuses an existing sort). See the
-# [first-sort walkthrough](./10_Spike_SortingV2.ipynb) for the details of these
-# steps.
+# Run a sort so we have a root curation to work with (idempotent — reuses an
+# existing sort). See the [first-sort walkthrough](./10_Spike_SortingV2.ipynb)
+# for the details of the recording → artifact → sort stages.
 
 report = preflight_v2_pipeline(
     nwb_file_name=nwb_file_name,
@@ -128,7 +127,7 @@ run_summary = run_v2_pipeline(
     pipeline_preset=pipeline_preset,
 )
 
-# ## 7. Inspect and curate
+# ## 3. Inspect and curate
 #
 # `run_v2_pipeline` leaves you a root curation. `summarize_curation` describes
 # **one** curation and returns a plain dict (`n_units`, `labels`, `merge_groups`,
@@ -140,11 +139,11 @@ run_summary = run_v2_pipeline(
 # There are three ways to curate, from most automated to most hands-on:
 #
 # - **Automated** — `run_v2_pipeline(auto_curate=True)` scores the sort and
-#   commits the rule set's labels in the same call (section 7-auto).
+#   commits the rule set's labels in the same call (section 3-auto).
 # - **In a browser** — `run_v2_pipeline(figpack=True)` publishes an interactive
-#   FigPack view you label and merge in a browser (section 7-browser).
+#   FigPack view you label and merge in a browser (section 3-browser).
 # - **Step by step** — the evaluate → accept → merge → re-evaluate loop below
-#   (sections 7a–7e), for full control over each decision.
+#   (sections 3a–3e), for full control over each decision.
 #
 # The step-by-step loop is built on `CurationEvaluation`, which scores a
 # **committed** curation in that curation's OWN unit namespace (a merged unit is
@@ -168,7 +167,7 @@ root_key = {
 }
 CurationV2.summarize_curation(root_key)
 
-# ### 7-browser. Curate in a browser with FigPack
+# ### 3-browser. Curate in a browser with FigPack
 #
 # To inspect units in a point-and-click view, `figpack=True` publishes a FigPack
 # curation view of the root curation and returns its location in `figpack_uri`.
@@ -222,7 +221,7 @@ if figpack_summary is not None:
     # root's root_curation_id as the parent — the default parent_curation_id=-1
     # would try to re-create the root and raise). `merge_action="commit"`
     # applies the browser's merges into the child's unit set; use `"preview"`
-    # instead to store them as proposals you review in section 7 first.
+    # instead to store them as proposals you review in section 3 first.
     # CurationV2.save_manual_curation(
     #     {"sorting_id": figpack_summary["sorting_id"]},
     #     parent_curation_id=figpack_summary["root_curation_id"],
@@ -233,7 +232,7 @@ if figpack_summary is not None:
     #     description="curated in FigPack",
     # )
 
-# ### 7a. Evaluate the root curation (pass 1)
+# ### 3a. Evaluate the root curation (pass 1)
 #
 # Pair the (committed) root curation with a quality-metric recipe and an
 # auto-curation rule set, then populate. `franklab_default` computes `snr` /
@@ -282,7 +281,7 @@ CurationEvaluation.get_metrics(eval_sel)
 # waveform widths and bursting, so the thresholds and tells above can mislead
 # there.
 
-# ### 7b. Find burst pairs to merge, then accept the auto labels
+# ### 3b. Find burst pairs to merge, then accept the auto labels
 #
 # `plot_by_sort_group_ids` scatters waveform similarity vs cross-correlogram
 # asymmetry, one point per unit pair — high-similarity, asymmetric pairs are
@@ -301,11 +300,11 @@ CurationEvaluation().plot_by_sort_group_ids(eval_sel)
 labeled_curation = CurationEvaluation().use_evaluation_labels(eval_sel)
 labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 
-# ### 7c. Manual merge, then the final evaluation pass (pass 2)
+# ### 3c. Manual merge, then the final evaluation pass (pass 2)
 #
-# List the burst pairs you decided to merge in step 7b in `merge_groups_to_apply`
+# List the burst pairs you decided to merge in step 3b in `merge_groups_to_apply`
 # (each a list of ≥2 unit ids, e.g. `[[3, 7]]`). It starts EMPTY so a run-all
-# never merges arbitrary units — fill it in after inspecting 7b, then re-run.
+# never merges arbitrary units — fill it in after inspecting 3b, then re-run.
 # When you merge, `create_merged_curation` (intent-first sugar over
 # `insert_curation` with `apply_merge=True`) branches off the auto-labeled
 # curation, and `CurationEvaluation` runs once more on the MERGED curation: the
@@ -315,9 +314,9 @@ labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
 # result with `get_metrics` (it carries the curation's own merged namespace).
 # `use_evaluation_labels` commits those final labels so downstream code keys off the
 # curated result, not the uncurated root curation. (Leaving the list empty keeps
-# the auto-labeled curation from 7b as the result — no merge applied.)
+# the auto-labeled curation from 3b as the result — no merge applied.)
 
-merge_groups_to_apply = []  # e.g. [[3, 7]] after inspecting step 7b
+merge_groups_to_apply = []  # e.g. [[3, 7]] after inspecting step 3b
 
 if merge_groups_to_apply:
     merged = CurationV2.create_merged_curation(
@@ -339,16 +338,16 @@ if merge_groups_to_apply:
     display(CurationEvaluation.get_metrics(final_eval_sel))  # merged templates
     final_curation = CurationEvaluation().use_evaluation_labels(final_eval_sel)
 else:
-    final_curation = labeled_curation  # no manual merge yet; use the 7b result
+    final_curation = labeled_curation  # no manual merge yet; use the 3b result
     final_eval_sel = eval_sel  # the curation-evaluation selection of record
 
 final_summary = CurationV2.summarize_curation(final_curation)
 final_merge_id = final_summary["merge_id"]
 final_summary
 
-# ### 7d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
+# ### 3d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
 #
-# Over the final curated result (`final_eval_sel` from section 7c — post-merge if you
+# Over the final curated result (`final_eval_sel` from section 3c — post-merge if you
 # merged, the pass-1 auto curation otherwise), `get_metrics` returns a
 # waveform-shape column next to the quality metrics: `trough_half_width` — the
 # half-amplitude width of the spike trough, in seconds, read from the unwhitened
@@ -405,7 +404,7 @@ print(
     f"{int((~is_interneuron).sum())} putative pyramidal"
 )
 
-# ### 7e. Inspect with the SpikeInterface bridge (`ssviz`)
+# ### 3e. Inspect with the SpikeInterface bridge (`ssviz`)
 #
 # The curation views above are lab-specific. For general inspection there is one
 # discoverable namespace — `visualization` (import it as `ssviz`) — that wraps
@@ -421,7 +420,7 @@ print(
 # **preprocessed** recording; sorting/waveform/location widgets read the sort's
 # **display** (unwhitened) analyzer, so you see real µV waveforms and real probe
 # positions — never the whitened metric analyzer. `plot_metrics` plots the
-# routed `CurationEvaluation.get_metrics()` table (the same numbers as section 7),
+# routed `CurationEvaluation.get_metrics()` table (the same numbers as section 3),
 # while the raw SpikeInterface metric widgets are separately named
 # (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
 # extensions directly. `plot_potential_merges` shows the **persisted**
@@ -445,7 +444,7 @@ ssviz.available_visualizations()
 # `ssviz.export_si_report(sorting_key, folder, force_computation=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
 # off the display analyzer. To label and merge in a browser instead, publish a
-# FigPack curation view with `run_v2_pipeline(figpack=True)` (section 7-browser).
+# FigPack curation view with `run_v2_pipeline(figpack=True)` (section 3-browser).
 
 # +
 sorting_key = {"sorting_id": run_summary["sorting_id"]}
@@ -460,3 +459,43 @@ if unit_ids:
     ssviz.plot_unit_summary(sorting_key, unit_ids[0], compute_missing=True)
 
 ssviz.plot_metrics(final_eval_sel)  # the routed Spyglass metric table, plotted
+
+# ### 3f. Hand-label specific units
+#
+# When you disagree with a rule-set proposal — or want to tag a unit the rules
+# don't (e.g. an oversplit fragment as `mua`) — `save_manual_curation` commits
+# your own per-unit labels as a child of the curated result. Keys are unit ids;
+# values are labels from `CurationV2.label_options()` (`noise` / `mua` /
+# `accept` / ...); pass `allow_custom_labels=True` for a label outside that set.
+# `manual_labels` starts EMPTY so a run-all is a no-op — fill it in after
+# inspecting the units above, then re-run.
+
+manual_labels = {}  # e.g. {5: "noise", 12: "mua"} after inspecting the units
+curated_merge_id = final_merge_id  # default: the section-3c result
+
+if manual_labels:
+    hand_labeled = CurationV2.save_manual_curation(
+        {"sorting_id": run_summary["sorting_id"]},
+        parent_curation_id=final_curation["curation_id"],
+        labels=manual_labels,
+        description="manual per-unit labels",
+    )
+    hand_summary = CurationV2.summarize_curation(hand_labeled)
+    curated_merge_id = hand_summary["merge_id"]
+    display(hand_summary)
+
+# ### 3g. Use the curated result downstream
+#
+# The curated units are consumed like any Spyglass spike-sorting output: pull
+# spike times from `SpikeSortingOutput`, keyed by the curated `merge_id` (from
+# section 3c, or your hand-labeled child above) — NOT the uncurated root. Every
+# existing consumer (decoding, ripple detection, `SortedSpikesGroup`) works on
+# this `merge_id` unchanged.
+
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+curated_spike_times = SpikeSortingOutput().get_spike_times(
+    {"merge_id": curated_merge_id}
+)
+print(f"{len(curated_spike_times)} curated unit(s)")
+curated_spike_times

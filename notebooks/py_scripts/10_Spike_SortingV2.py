@@ -30,7 +30,8 @@
 # - [Curation](./10_Spike_SortingV2_Curation.ipynb) — browser (FigPack) and
 #   step-by-step evaluate → merge → re-evaluate curation.
 # - [Presets](./10_Spike_SortingV2_Presets.ipynb) — customize a preset
-#   (`clone_preset` / `register_preset`) and sort a whole session at once.
+#   (`clone_pipeline_preset` / `register_pipeline_preset`) and sort a whole
+#   session at once.
 # - [Cross-session](./10_Spike_SortingV2_CrossSession.ipynb) — concatenate
 #   same-day recordings and track units across days.
 # - A table-by-table tour of the internals is in
@@ -175,9 +176,9 @@ describe_pipeline_presets()
 #   Hippocampal display/metric rows intentionally use 0.5/0.5 ms windows and up
 #   to 20000 spikes per unit.
 
-# To **adapt** a preset (tune one knob with `clone_preset`, or build a custom one
-# with `register_preset`) without hand-editing parameter rows, see the
-# [Presets how-to](./10_Spike_SortingV2_Presets.ipynb).
+# To **adapt** a preset (tune one knob with `clone_pipeline_preset`, or build a
+# custom one with `register_pipeline_preset`) without hand-editing parameter
+# rows, see the [Presets how-to](./10_Spike_SortingV2_Presets.ipynb).
 
 # ## 4. Preflight — a fast, fail-early check
 #

@@ -269,9 +269,7 @@ if run_unit_match and unitmatch_available:
 # `n_pairs` (pairwise matches) and `n_tracked_units` (biological units across the
 # group).
 
-import importlib.util
-
-unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
+# ``unitmatch_available`` was determined once in Part B1 above.
 if run_unit_match and unitmatch_available:
     match_summary = run_v2_unit_match(plan)
     display(describe_run(match_summary))

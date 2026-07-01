@@ -16,8 +16,8 @@
 #
 # Two how-tos that build on the
 # [first-sort walkthrough](./10_Spike_SortingV2.ipynb): **customizing a pipeline
-# preset** (tune one knob with `clone_preset`, or build a custom one with
-# `register_preset`) without hand-editing parameter rows, and **sorting an entire
+# preset** (tune one knob with `clone_pipeline_preset`, or build a custom one with
+# `register_pipeline_preset`) without hand-editing parameter rows, and **sorting an entire
 # session** (every sort group) in one call with `run_v2_pipeline_session`.
 #
 # Assumes a configured DataJoint connection and an ingested session (see
@@ -30,7 +30,7 @@ from spyglass.common import LabTeam
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
-    clone_preset,
+    clone_pipeline_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
     describe_run,
@@ -38,7 +38,7 @@ from spyglass.spikesorting.v2.pipeline import (
     list_pipeline_presets,
     plot_sort_group_geometry,
     preflight_v2_pipeline_session,
-    register_preset,
+    register_pipeline_preset,
     run_v2_pipeline_session,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -55,7 +55,7 @@ pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 sort_group_id = None
 # -
 
-# ## 2. One-time setup
+# ## 1. One-time setup
 #
 # `initialize_v2_defaults()` installs every default parameter row the pipeline
 # needs (preprocessing / artifact / sorter), so there is no per-table
@@ -102,12 +102,7 @@ elif sort_group_id not in available_sort_group_ids:
 sort_group_id
 
 
-# ## Setup
-#
-# Install defaults, the team, and the sort groups (the same one-time setup as the
-# [first-sort walkthrough](./10_Spike_SortingV2.ipynb)).
-
-# ## 3. Pick a Pipeline Preset
+# ## 2. Pick a pipeline preset
 #
 # `describe_pipeline_presets()` returns a table of what each shipping pipeline
 # preset does — the sorter, the parameter rows each stage uses, the intended
@@ -124,7 +119,7 @@ describe_pipeline_presets()
 
 describe_pipeline_preset(pipeline_preset)
 
-# `clone_preset` derives a new preset from an existing one by tuning a single
+# `clone_pipeline_preset` derives a new preset from an existing one by tuning a single
 # knob: pass the parameter you want to change as a keyword and it builds only the
 # new parameter rows that differ, reusing the base preset's rows for every
 # untouched stage. Here we lower the MountainSort5 detection threshold (a common
@@ -133,7 +128,7 @@ describe_pipeline_preset(pipeline_preset)
 # name that already exists raises, so each cell is guarded to be safe to re-run.)
 
 if "my_lab_ms5_lower_threshold" not in list_pipeline_presets():
-    clone_preset(
+    clone_pipeline_preset(
         pipeline_preset,
         "my_lab_ms5_lower_threshold",
         detect_threshold=5.0,
@@ -141,14 +136,14 @@ if "my_lab_ms5_lower_threshold" not in list_pipeline_presets():
 describe_pipeline_preset("my_lab_ms5_lower_threshold")
 
 # For a fully custom pipeline — a different sorter, or a stage combination no
-# shipping preset covers — `register_preset(name, {...})` adds a preset from the
+# shipping preset covers — `register_pipeline_preset(name, {...})` adds a preset from the
 # parameter-row names you choose (each must already exist; `initialize_v2_defaults`
 # seeded the rows below). The registration lives for this session; to ship a
 # durable recipe, add it to the preset catalog. The mapping is the stages a run
 # touches:
 
 if "my_lab_custom" not in list_pipeline_presets():
-    register_preset(
+    register_pipeline_preset(
         "my_lab_custom",
         {
             "preprocessing_params_name": "franklab_hippocampus_2026_06",
@@ -160,7 +155,7 @@ if "my_lab_custom" not in list_pipeline_presets():
         },
     )
 
-# ## 9. Sort the whole session at once
+# ## 3. Sort the whole session at once
 #
 # A real session has one sort group per shank. `run_v2_pipeline_session` loops
 # the single-group runner over all of them (run `preflight_v2_pipeline_session`
