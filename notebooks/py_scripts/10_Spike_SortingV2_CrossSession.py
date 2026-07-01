@@ -235,8 +235,9 @@ elif run_unit_match:
 # exactly one curation is a **blocking error** on the plan (`plan.ok` is `False`,
 # listed in `plan.errors`), so a wrong or ambiguous pin surfaces here, not
 # silently in the match. `plan.as_dataframe()` shows the per-member pins to review
-# before running. `describe_unit_match_choices` still lists every pinnable
-# curation if you want to inspect them or build a `manual` plan by hand.
+# before running. `describe_unit_match_choices` still shows every pinnable
+# curation (a table, one row per member x curation) if you want to inspect them
+# or build a `manual` plan by hand.
 
 if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))

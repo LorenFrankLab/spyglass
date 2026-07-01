@@ -4,8 +4,8 @@
 exactly one committed curation per SessionGroup member -- so a match never
 silently depends on an implicit "latest" curation. Hand-building that dict is
 error-prone, so :func:`build_unit_match_plan` turns the per-member curation
-lists (from ``describe_unit_match_choices``) into that dict via a named,
-intent-declaring STRATEGY and returns a reviewable :class:`UnitMatchPlan`
+lists (the structured form ``describe_unit_match_choices`` tabulates) into that
+dict via a named, intent-declaring STRATEGY and returns a :class:`UnitMatchPlan`
 (with per-member warnings / errors) to inspect BEFORE the expensive match.
 
 This module is deliberately DB-free: it operates on already-fetched per-member
@@ -18,7 +18,10 @@ pinned -- this only redesigns the UX layer that assembles the pins.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Every strategy is an explicit declaration of intent; there is deliberately no
 # default (an implicit "latest" is exactly what the pinned design forbids).
@@ -31,6 +34,60 @@ STRATEGIES: tuple[str, ...] = (
 
 _ROOT_PARENT = -1
 _AUTO_SOURCE = "curation_evaluation"
+
+# Column order for the ``describe_unit_match_choices`` DataFrame view: the member
+# identity first, then the per-choice curation fields.
+_MEMBER_COLUMNS = (
+    "member_index",
+    "nwb_file_name",
+    "sort_group_id",
+    "interval_list_name",
+    "team_name",
+)
+_CHOICE_COLUMNS = (
+    "sorting_id",
+    "curation_id",
+    "parent_curation_id",
+    "curation_source",
+    "description",
+)
+
+
+def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
+    """Flatten per-member curation choices to one row per (member, choice).
+
+    The human-facing view behind ``describe_unit_match_choices``: each pinnable
+    curation becomes a row carrying the member identity plus the choice fields.
+    A member with no sort yet still appears as a single row with null curation
+    columns, so it stays visible as "sort me first" rather than vanishing.
+    DB-free; ``pandas`` is imported lazily to keep this module import-light.
+    """
+    import pandas as pd
+
+    rows: list[dict] = []
+    for member in members:
+        member_id = {col: member[col] for col in _MEMBER_COLUMNS}
+        choices = member.get("choices") or []
+        if choices:
+            rows.extend(
+                {**member_id, **{c: choice[c] for c in _CHOICE_COLUMNS}}
+                for choice in choices
+            )
+        else:
+            rows.append({**member_id, **{c: None for c in _CHOICE_COLUMNS}})
+    df = pd.DataFrame(rows, columns=list(_MEMBER_COLUMNS + _CHOICE_COLUMNS))
+    # Keep the id columns as nullable ``Int64`` so a sortless member's ``None``
+    # placeholder row does not upcast valid ids to float (a curation_id would
+    # otherwise display / copy as ``0.0`` instead of ``0`` -- the exact
+    # copy-paste footgun this table exists to prevent).
+    for col in (
+        "member_index",
+        "sort_group_id",
+        "curation_id",
+        "parent_curation_id",
+    ):
+        df[col] = df[col].astype("Int64")
+    return df
 
 
 @dataclass
@@ -217,10 +274,11 @@ def build_unit_match_plan(
 ) -> UnitMatchPlan:
     """Assemble a pinned :class:`UnitMatchPlan` from per-member curation lists.
 
-    ``members`` is the ``describe_unit_match_choices`` output (one entry per
-    member: ``member_index`` / ``nwb_file_name`` / ``choices`` list of
-    ``{sorting_id, curation_id, parent_curation_id, curation_source,
-    description}``). DB-free. ``strategy`` is REQUIRED:
+    ``members`` is the structured per-member choices (one entry per member:
+    ``member_index`` / ``nwb_file_name`` / ``choices`` list of ``{sorting_id,
+    curation_id, parent_curation_id, curation_source, description}``) --
+    ``describe_unit_match_choices`` tabulates the same data. DB-free.
+    ``strategy`` is REQUIRED:
 
     - ``single_leaf_curated`` -- the member's single terminal curated (non-root)
       curation; errors if a member has zero or more than one.

@@ -2908,14 +2908,14 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
     # Discovery: each member's available curations include the pinned root.
     described = describe_unit_match_choices(grp["owner"], grp["group_name"])
-    assert [m["member_index"] for m in described] == [0, 1]
-    for index, member in enumerate(described):
+    assert sorted(described["member_index"].unique().tolist()) == [0, 1]
+    for index in (0, 1):
         pinned = grp["choices"][index]
-        assert any(
-            c["sorting_id"] == pinned["sorting_id"]
-            and c["curation_id"] == pinned["curation_id"]
-            for c in member["choices"]
-        )
+        member_rows = described[described["member_index"] == index]
+        assert (
+            (member_rows["sorting_id"] == pinned["sorting_id"])
+            & (member_rows["curation_id"] == pinned["curation_id"])
+        ).any()
 
     matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
     matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
@@ -2989,9 +2989,10 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         # strategy keys off it). The fixture members are 'manual' roots, so
         # against real fetched data auto_curated resolves nothing -> not ok.
         described = describe_unit_match_choices(grp["owner"], grp["group_name"])
-        assert all(
-            "curation_source" in c for m in described for c in m["choices"]
-        )
+        # every offered curation row carries curation_source (auto_curated
+        # keys off it); rows for a sortless member have a null sorting_id.
+        offered = described[described["sorting_id"].notna()]
+        assert offered["curation_source"].notna().all()
         auto_plan = plan_v2_unit_match(
             grp["owner"],
             grp["group_name"],
@@ -3203,10 +3204,8 @@ def test_describe_unit_match_choices_excludes_other_team(
         )
 
         described = describe_unit_match_choices(grp["owner"], grp["group_name"])
-        member0 = next(m for m in described if m["member_index"] == 0)
-        offered = {
-            (c["sorting_id"], c["curation_id"]) for c in member0["choices"]
-        }
+        member0 = described[described["member_index"] == 0]
+        offered = set(zip(member0["sorting_id"], member0["curation_id"]))
         # The member's own (member-team) curation IS offered ...
         assert (own_choice["sorting_id"], own_choice["curation_id"]) in offered
         # ... but the same-session curation under another team is NOT.

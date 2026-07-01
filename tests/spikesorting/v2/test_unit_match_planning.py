@@ -45,6 +45,70 @@ def _plan(members, strategy, **kw):
     )
 
 
+def _full_member(idx, nwb, choices):
+    """A structured member with all identity columns (as the DB builder emits)."""
+    return {
+        "member_index": idx,
+        "nwb_file_name": nwb,
+        "sort_group_id": 0,
+        "interval_list_name": "raw data valid times",
+        "team_name": "t",
+        "choices": choices,
+    }
+
+
+def test_member_choices_to_dataframe_one_row_per_choice():
+    """The ``describe_*`` view flattens to one row per (member, choice)."""
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        member_choices_to_dataframe,
+    )
+
+    members = [
+        _full_member(
+            0,
+            "a.nwb",
+            [_cur(_S0, 0, -1), _cur(_S0, 1, 0, source="curation_evaluation")],
+        ),
+        _full_member(1, "b.nwb", []),  # no sort yet
+    ]
+    df = member_choices_to_dataframe(members)
+
+    assert list(df.columns) == [
+        "member_index",
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+        "sorting_id",
+        "curation_id",
+        "parent_curation_id",
+        "curation_source",
+        "description",
+    ]
+    # two choice rows for member 0 + one placeholder row for the empty member 1
+    assert len(df) == 3
+    member0 = df[df["member_index"] == 0]
+    assert set(zip(member0["sorting_id"], member0["curation_id"])) == {
+        (_S0, 0),
+        (_S0, 1),
+    }
+    # A member with no sort stays visible with null curation columns.
+    member1 = df[df["member_index"] == 1]
+    assert len(member1) == 1
+    assert member1["sorting_id"].isna().all()
+
+    # Integer id columns stay nullable-integer (Int64), NOT float64: the None
+    # placeholder row would otherwise upcast valid ids to e.g. 0.0, reintroducing
+    # the copy-paste footgun this table exists to prevent.
+    for col in (
+        "member_index",
+        "sort_group_id",
+        "curation_id",
+        "parent_curation_id",
+    ):
+        assert str(df[col].dtype) == "Int64", (col, df[col].dtype)
+
+
 def test_root_strategy_picks_root_and_warns_loudly():
     members = [
         _member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)]),

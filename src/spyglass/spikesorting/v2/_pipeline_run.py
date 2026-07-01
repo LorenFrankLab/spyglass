@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # DB-free leaf module (imports no schema / no _pipeline_run), so a top-level
 # import is cycle-free and keeps the UnitMatchPlan annotations resolvable at
@@ -1416,7 +1419,7 @@ def plan_v2_unit_match(
         build_unit_match_plan,
     )
 
-    members = describe_unit_match_choices(
+    members = _unit_match_member_choices(
         session_group_owner, session_group_name
     )
     return build_unit_match_plan(
@@ -1429,14 +1432,14 @@ def plan_v2_unit_match(
     )
 
 
-def describe_unit_match_choices(
+def _unit_match_member_choices(
     session_group_owner: str,
     session_group_name: str,
 ) -> "list[UnitMatchMemberChoices]":
-    """List, per SessionGroup member, the curations you can pin for matching.
+    """Structured per-member curation choices (the DB-fetching core).
 
-    Read-only discovery helper for assembling :func:`run_v2_unit_match`'s
-    ``curation_choices``. For each member (ordered by ``member_index``) it walks
+    Backs both :func:`describe_unit_match_choices` (the DataFrame view) and
+    :func:`plan_v2_unit_match`. For each member (ordered by ``member_index``) it walks
     the member's recordings -> sortings -> committed ``CurationV2`` rows and
     returns every curation you may pin, so you never hand-query the join or rely
     on an implicit "latest". Pick one entry per member and build
@@ -1482,7 +1485,7 @@ def describe_unit_match_choices(
     )
     if len(members) == 0:
         raise PipelineInputError(
-            "describe_unit_match_choices: no SessionGroup.Member rows for "
+            "unit-match choices: no SessionGroup.Member rows for "
             f"{group_key}. Create the group first via "
             "SessionGroup.create_group()."
         )
@@ -1531,3 +1534,38 @@ def describe_unit_match_choices(
             }
         )
     return cast("list[UnitMatchMemberChoices]", out)
+
+
+def describe_unit_match_choices(
+    session_group_owner: str,
+    session_group_name: str,
+) -> "pd.DataFrame":
+    """Table of the curations you can pin per SessionGroup member.
+
+    Read-only discovery helper (the ``describe_*`` family -- returns a
+    ``DataFrame``). One row per (member, pinnable curation): the member identity
+    (``member_index`` / ``nwb_file_name`` / ``sort_group_id`` /
+    ``interval_list_name`` / ``team_name``) plus the curation fields
+    (``sorting_id`` / ``curation_id`` / ``parent_curation_id`` /
+    ``curation_source`` / ``description``; ``parent_curation_id == -1`` marks a
+    root). A member with no sort/curation yet still appears as one row with null
+    curation columns, so it is visibly "sort me first".
+
+    Pick one curation per member and pass its ``{sorting_id, curation_id}`` as
+    ``run_v2_unit_match``'s ``curation_choices``; or, recommended, declare intent
+    with :func:`plan_v2_unit_match` and inspect the resulting plan first. The
+    returned curations are not pre-filtered for match-validity;
+    ``UnitMatchSelection.insert_selection`` is the validation boundary.
+
+    Raises
+    ------
+    PipelineInputError
+        If the ``SessionGroup`` has no members.
+    """
+    from spyglass.spikesorting.v2._unit_match_planning import (
+        member_choices_to_dataframe,
+    )
+
+    return member_choices_to_dataframe(
+        _unit_match_member_choices(session_group_owner, session_group_name)
+    )

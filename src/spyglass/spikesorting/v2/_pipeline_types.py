@@ -223,8 +223,9 @@ RunV2PipelineSessionResult: TypeAlias = (
 class UnitMatchCurationChoice(TypedDict):
     """One pickable curation for a SessionGroup member.
 
-    From ``describe_unit_match_choices``: a committed ``CurationV2`` the user may
-    pin for this member. ``parent_curation_id == -1`` marks a root curation.
+    A committed ``CurationV2`` the user may pin for this member; one such curation
+    is one row of the ``describe_unit_match_choices`` table.
+    ``parent_curation_id == -1`` marks a root curation.
     """
 
     sorting_id: UUID
@@ -237,7 +238,8 @@ class UnitMatchCurationChoice(TypedDict):
 class UnitMatchMemberChoices(TypedDict):
     """One SessionGroup member and the curations available to pin for it.
 
-    From ``describe_unit_match_choices``. Assemble ``run_v2_unit_match``'s
+    The structured per-member form that ``describe_unit_match_choices`` tabulates
+    (one row per member x choice). Assemble ``run_v2_unit_match``'s
     ``curation_choices`` as ``{member_index: {"sorting_id": ...,
     "curation_id": ...}}`` by picking one entry from each member's ``choices``.
     """
