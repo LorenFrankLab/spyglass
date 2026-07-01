@@ -374,12 +374,12 @@ def test_no_phase_label_leakage_in_runtime_code():
         a single uppercase letter from the review namespaces followed by a
         number; an earlier version only caught ``Phase/Task N`` and let
         these slip through.
-    The scan covers the v2 runtime source, the user-facing migration guide,
-    and the CHANGELOG (phase/task only there -- the audit-code regex would
-    false-positive on unrelated historical release entries). Tests and
-    baseline-fixture machinery may still reference these labels because they
-    describe an immutable historical baseline the test corpus compares
-    against, so only the surfaces above are scanned.
+    The scan covers the v2 runtime source, the user-facing v2 guides, tutorial
+    scripts, and the CHANGELOG (phase/task only there -- the audit-code regex
+    would false-positive on unrelated historical release entries). Tests,
+    resolver notes, and baseline-fixture machinery may still reference these
+    labels because they describe historical review evidence, so only shipped
+    runtime/user-facing surfaces are scanned.
     """
     import re
 
@@ -389,8 +389,16 @@ def test_no_phase_label_leakage_in_runtime_code():
     # silently passed; verify the resolved roots exist before scanning.
     repo_root = Path(__file__).resolve().parents[3]
     v2_src = repo_root / "src" / "spyglass" / "spikesorting" / "v2"
-    migration_doc = (
-        repo_root / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md"
+    user_docs = (
+        repo_root / "docs" / "src" / "Features" / "SpikeSortingV2.md",
+        repo_root / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md",
+    )
+    notebook_scripts = tuple(
+        sorted(
+            (repo_root / "notebooks" / "py_scripts").glob(
+                "10_Spike_SortingV2*.py"
+            )
+        )
     )
     changelog = repo_root / "CHANGELOG.md"
     assert v2_src.is_dir(), (
@@ -424,7 +432,14 @@ def test_no_phase_label_leakage_in_runtime_code():
             str(py_path.relative_to(repo_root)),
             (phase_re, audit_re),
         )
-    _scan(migration_doc, "SpikeSortingV2_Migration.md", (phase_re, audit_re))
+    for doc in user_docs:
+        _scan(doc, str(doc.relative_to(repo_root)), (phase_re, audit_re))
+    for notebook_script in notebook_scripts:
+        _scan(
+            notebook_script,
+            str(notebook_script.relative_to(repo_root)),
+            (phase_re, audit_re),
+        )
     _scan(changelog, "CHANGELOG.md", (phase_re,))
 
     assert not offenders, (

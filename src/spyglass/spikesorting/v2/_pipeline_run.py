@@ -1328,6 +1328,8 @@ def run_v2_unit_match(
         matcher_params_name,
         curation_choices,
     )
+    # Public orchestration receipts use the clearer ``unit_match_id`` spelling;
+    # the DataJoint table PK remains ``unitmatch_id`` for schema stability.
     run_summary["unit_match_id"] = selection["unitmatch_id"]
 
     # Surface the advisory electrode-space divergence in the receipt (it is also
