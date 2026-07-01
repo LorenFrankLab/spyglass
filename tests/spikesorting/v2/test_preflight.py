@@ -1015,3 +1015,128 @@ def test_preflight_matlab_local_backend_errors(
     assert "container" in chk.fix
     # The local-install checks do not run for a MATLAB local row.
     assert not any(c.name == "sorter_installed" for c in report.checks)
+
+
+# --------------------------------------------------------------------------- #
+# assert_preset_compute_rows -- the mode-independent compute-row / sorter
+# checks the concat preflight reuses.
+# --------------------------------------------------------------------------- #
+
+_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_06"
+
+
+@pytest.mark.database
+def test_assert_preset_compute_rows_passes_for_seeded_concat_preset(dj_conn):
+    """A seeded concat preset's compute rows + local sorter pass the check."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        assert_preset_compute_rows,
+    )
+
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    initialize_v2_defaults()
+    bundle = _PIPELINE_PRESETS[_CONCAT_PRESET]
+    # No raise: every param row is seeded and mountainsort5 is a local SI sorter.
+    assert_preset_compute_rows(bundle, with_artifact=False)
+
+
+@pytest.mark.database
+def test_assert_preset_compute_rows_raises_on_missing_sorter_row(dj_conn):
+    """A missing SorterParameters row fails fast with the exact fix.
+
+    Guards the concat-preflight gap: before this check a concat run with a
+    missing sorter row failed only deep in the member/concat populate.
+    """
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        assert_preset_compute_rows,
+    )
+
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    initialize_v2_defaults()
+    bundle = _PIPELINE_PRESETS[_CONCAT_PRESET].model_copy(
+        update={"sorter_params_name": "does_not_exist_xyz"}
+    )
+    with pytest.raises(PreflightError, match="SorterParameters row"):
+        assert_preset_compute_rows(bundle, with_artifact=False)
+
+
+@pytest.mark.database
+def test_assert_preset_compute_rows_raises_on_missing_preprocessing_row(
+    dj_conn,
+):
+    """A missing PreprocessingParameters row fails fast with the exact fix."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        assert_preset_compute_rows,
+    )
+
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    initialize_v2_defaults()
+    bundle = _PIPELINE_PRESETS[_CONCAT_PRESET].model_copy(
+        update={"preprocessing_params_name": "does_not_exist_xyz"}
+    )
+    with pytest.raises(PreflightError, match="PreprocessingParameters row"):
+        assert_preset_compute_rows(bundle, with_artifact=False)
+
+
+_CONTAINER_PRESET = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
+
+
+@pytest.mark.database
+def test_assert_concat_preflight_raises_on_missing_group(dj_conn):
+    """The concat preflight fails fast when the SessionGroup does not exist."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        assert_concat_preflight,
+    )
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    initialize_v2_defaults()
+    bundle = _PIPELINE_PRESETS[_CONCAT_PRESET]
+    with pytest.raises(PreflightError, match="does not exist"):
+        assert_concat_preflight("no_owner_xyz", "no_group_xyz", bundle)
+
+
+@pytest.mark.database
+def test_assert_preset_compute_rows_container_backend_checks_runtime(
+    dj_conn, monkeypatch
+):
+    """A container-backend preset's runtime is a BLOCKING preflight check
+    (matching single-session), not silently skipped."""
+    import spyglass.spikesorting.v2._pipeline_preflight as preflight_mod
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        assert_preset_compute_rows,
+    )
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+
+    initialize_v2_defaults()
+    bundle = _PIPELINE_PRESETS[_CONTAINER_PRESET]
+
+    # Runtime unavailable -> a blocking PreflightError (no silent local
+    # fallback). Both engines are patched so the test is backend-agnostic.
+    monkeypatch.setattr(
+        preflight_mod,
+        "_singularity_runtime_available",
+        lambda: (False, "singularity not installed"),
+    )
+    monkeypatch.setattr(
+        preflight_mod,
+        "_docker_runtime_available",
+        lambda: (False, "docker not installed"),
+    )
+    with pytest.raises(PreflightError, match="not runnable here"):
+        assert_preset_compute_rows(bundle, with_artifact=False)
+
+    # Runtime available -> the container check passes (no local install needed).
+    monkeypatch.setattr(
+        preflight_mod, "_singularity_runtime_available", lambda: (True, "ok")
+    )
+    monkeypatch.setattr(
+        preflight_mod, "_docker_runtime_available", lambda: (True, "ok")
+    )
+    assert_preset_compute_rows(bundle, with_artifact=False)

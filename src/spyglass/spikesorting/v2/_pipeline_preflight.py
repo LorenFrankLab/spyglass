@@ -266,6 +266,177 @@ class PreflightSessionReport:
         return self.ok
 
 
+def assert_preset_compute_rows(bundle, *, with_artifact: bool = True) -> None:
+    """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
+    are missing.
+
+    The mode-independent half of ``preflight_v2_pipeline``: the preset's
+    preprocessing / (optional) artifact / sorter / display-analyzer-waveform
+    Lookup rows plus the sorter binary/runtime. ``run_v2_pipeline``'s concat
+    preflight calls this (``with_artifact=False`` -- a concat sort runs no
+    artifact stage) so a concat run fails fast on a missing row instead of deep
+    in the member/concat populate, matching the single-session preflight. The
+    param-row existence queries mirror ``preflight_v2_pipeline``'s (kept in its
+    report-building form there); the sorter binary/runtime check reuses the
+    shared :func:`_check_local_sorter_runtime` via a raise-style adapter.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_execution_params,
+    )
+    from spyglass.spikesorting.v2._recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2._sorting_dispatch import (
+        MATLAB_SORTERS,
+        matlab_container_required_message,
+    )
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
+
+    if not (
+        PreprocessingParameters
+        & {"preprocessing_params_name": bundle.preprocessing_params_name}
+    ):
+        raise PreflightError(
+            "run_v2_pipeline: PreprocessingParameters row "
+            f"{bundle.preprocessing_params_name!r} is missing. Run "
+            "initialize_v2_defaults()."
+        )
+    if with_artifact and bundle.artifact_detection_params_name is not None:
+        if not (
+            ArtifactDetectionParameters
+            & {
+                "artifact_detection_params_name": (
+                    bundle.artifact_detection_params_name
+                )
+            }
+        ):
+            raise PreflightError(
+                "run_v2_pipeline: ArtifactDetectionParameters row "
+                f"{bundle.artifact_detection_params_name!r} is missing. Run "
+                "initialize_v2_defaults()."
+            )
+    sorter_params_query = SorterParameters & {
+        "sorter": bundle.sorter,
+        "sorter_params_name": bundle.sorter_params_name,
+    }
+    if not sorter_params_query:
+        raise PreflightError(
+            "run_v2_pipeline: SorterParameters row (sorter="
+            f"{bundle.sorter!r}, sorter_params_name="
+            f"{bundle.sorter_params_name!r}) is missing. Run "
+            "initialize_v2_defaults()."
+        )
+    display_waveform_params_name = waveform_params_for_preprocessing(
+        bundle.preprocessing_params_name
+    )[0]
+    if not (
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": display_waveform_params_name}
+    ):
+        raise PreflightError(
+            "run_v2_pipeline: AnalyzerWaveformParameters row "
+            f"{display_waveform_params_name!r} (the display analyzer recipe for "
+            f"preprocessing {bundle.preprocessing_params_name!r}) is missing. "
+            "Run initialize_v2_defaults()."
+        )
+
+    def _raise_check(name, ok, fix):
+        if not bool(ok):
+            raise PreflightError(fix)
+        return True
+
+    # Sorter binary/runtime, dispatched on the execution backend exactly like
+    # the single-session preflight: a LOCAL backend needs the sorter installed
+    # here; a CONTAINER backend needs the container runtime (the sorter runtime
+    # lives in the image, so a missing LOCAL install is irrelevant, but a
+    # missing container runtime is a blocking failure -- preflight never falls
+    # back to local execution).
+    execution_params = validate_execution_params(
+        sorter_params_query.fetch1("execution_params")
+    )
+    execution_backend = execution_params["backend"]
+    container_image = execution_params["container_image"]
+    if execution_backend == "local":
+        if bundle.sorter.lower() in MATLAB_SORTERS:
+            raise PreflightError(
+                matlab_container_required_message(bundle.sorter)
+            )
+        _check_local_sorter_runtime(
+            bundle, sis, SorterParameters._NON_SI_SORTERS, _raise_check
+        )
+    else:
+        if execution_backend == "docker":
+            runtime_ok, runtime_detail = _docker_runtime_available()
+        else:
+            runtime_ok, runtime_detail = _singularity_runtime_available()
+        if not runtime_ok:
+            raise PreflightError(
+                f"run_v2_pipeline: the {execution_backend} execution backend "
+                f"(image {container_image!r}) for sorter {bundle.sorter!r} is "
+                f"not runnable here: {runtime_detail}. Install the container "
+                "runtime and its Python package, or pick a local-execution "
+                "preset. Preflight does not fall back to local execution."
+            )
+
+
+def assert_concat_preflight(
+    concat_session_group_owner, concat_session_group_name, bundle
+) -> list[str]:
+    """Raise ``PreflightError`` if a concat run's prerequisites are missing.
+
+    Concat counterpart of :func:`preflight_v2_pipeline` (minus the
+    single-session session / interval / sort-group rows, which a ``SessionGroup``
+    supplies per member): the group + its members + the preset's
+    motion-correction row, plus the compute-time param rows and sorter binary via
+    :func:`assert_preset_compute_rows` (``with_artifact=False`` -- a concat sort
+    runs no artifact stage). Fails fast BEFORE the heavy member / concat populate.
+    Returns the advisory-warning list (currently always empty) for symmetry with
+    :func:`preflight_v2_pipeline`.
+    """
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+        SessionGroup,
+    )
+
+    group_key = {
+        "session_group_owner": concat_session_group_owner,
+        "session_group_name": concat_session_group_name,
+    }
+    if not (SessionGroup & group_key):
+        raise PreflightError(
+            f"run_v2_pipeline: SessionGroup {group_key} does not exist. "
+            "Create it with SessionGroup.create_group(...) first."
+        )
+    if not (SessionGroup.Member & group_key):
+        raise PreflightError(
+            f"run_v2_pipeline: SessionGroup {group_key} has no members."
+        )
+    if not (
+        MotionCorrectionParameters
+        & {
+            "motion_correction_params_name": (
+                bundle.motion_correction_params_name
+            )
+        }
+    ):
+        raise PreflightError(
+            "run_v2_pipeline: MotionCorrectionParameters row "
+            f"{bundle.motion_correction_params_name!r} (the concat preset's "
+            "motion recipe) is missing. Run initialize_v2_defaults()."
+        )
+    assert_preset_compute_rows(bundle, with_artifact=False)
+    return []
+
+
 def preflight_v2_pipeline(
     nwb_file_name: str,
     sort_group_id: int,

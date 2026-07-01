@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from spyglass.spikesorting.v2._pipeline_preflight import (
     _resolve_session_sort_group_ids,
+    assert_concat_preflight,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
 )
@@ -452,42 +453,16 @@ def run_v2_pipeline(
         for warning in preflight_warnings:
             logger.warning(f"run_v2_pipeline preflight: {warning}")
     elif preflight and is_concat:
-        # Minimal concat preflight: the SessionGroup, its members, and the
-        # preset's motion-correction row must exist before the heavy member /
-        # concat populate. It deliberately does not check the preset's
-        # preprocessing / sorter rows or the sorter binary (those surface as
-        # native errors during populate).
-        from spyglass.spikesorting.v2.session_group import (
-            MotionCorrectionParameters,
-            SessionGroup,
+        # Concat preflight: the SessionGroup + members + the preset's
+        # motion-correction row, plus the compute-time param rows and sorter
+        # binary (no artifact stage), all BEFORE the heavy member / concat
+        # populate. Raises PreflightError with the exact fix on the first
+        # missing prerequisite.
+        preflight_warnings = assert_concat_preflight(
+            concat_session_group_owner,
+            concat_session_group_name,
+            bundle,
         )
-
-        group_key = {
-            "session_group_owner": concat_session_group_owner,
-            "session_group_name": concat_session_group_name,
-        }
-        if not (SessionGroup & group_key):
-            raise PreflightError(
-                f"run_v2_pipeline: SessionGroup {group_key} does not exist. "
-                "Create it with SessionGroup.create_group(...) first."
-            )
-        if not (SessionGroup.Member & group_key):
-            raise PreflightError(
-                f"run_v2_pipeline: SessionGroup {group_key} has no members."
-            )
-        if not (
-            MotionCorrectionParameters
-            & {
-                "motion_correction_params_name": (
-                    bundle.motion_correction_params_name
-                )
-            }
-        ):
-            raise PreflightError(
-                "run_v2_pipeline: MotionCorrectionParameters row "
-                f"{bundle.motion_correction_params_name!r} (the concat preset's "
-                "motion recipe) is missing. Run initialize_v2_defaults()."
-            )
 
     # Per-stage observability. For each stage: derive computed-vs-reused from
     # an existence check on the output row BEFORE populate, time the
