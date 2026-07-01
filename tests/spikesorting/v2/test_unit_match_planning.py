@@ -180,6 +180,48 @@ def test_unknown_strategy_raises():
         _plan([_member(0, "day1.nwb", [_cur(_S0, 0, -1)])], "latest")
 
 
+def test_single_leaf_curated_ambiguous_across_two_sortings_errors():
+    # A re-sorted member: TWO separate sortings, each with its own curated leaf.
+    # "single leaf" spans all the member's curations, so this is ambiguous
+    # across sortings -> error (not a silent pick of one sorting).
+    members = [
+        _member(
+            0,
+            "day1.nwb",
+            [
+                _cur(_S0, 0, -1),
+                _cur(_S0, 1, 0),  # sort-0: root -> leaf 1
+                _cur(_S1, 0, -1),
+                _cur(_S1, 1, 0),  # sort-1: root -> leaf 1
+            ],
+        )
+    ]
+    plan = _plan(members, "single_leaf_curated")
+    assert not plan.ok
+    assert any("member 0" in e and "manual" in e for e in plan.errors)
+
+
+def test_run_v2_unit_match_rejects_plan_plus_explicit_args():
+    # Passing a plan AND an explicit arg would silently override one -> reject.
+    # DB-free: the guard fires before any table access.
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
+
+    plan = UnitMatchPlan(
+        session_group_owner="owner",
+        session_group_name="grp",
+        matcher_params_name="unitmatch_default",
+        strategy="root",
+        curation_choices={0: {"sorting_id": _S0, "curation_id": 0}},
+        rows=[],
+        warnings=[],
+        errors=[],
+    )
+    assert plan.ok
+    with pytest.raises(PipelineInputError, match="not both"):
+        run_v2_unit_match(plan, "grp")  # explicit session_group_name too
+
+
 def test_run_v2_unit_match_rejects_a_not_ok_plan():
     # The plan overload short-circuits a not-ok plan with the collected errors
     # BEFORE any database access -- so this is DB-free.

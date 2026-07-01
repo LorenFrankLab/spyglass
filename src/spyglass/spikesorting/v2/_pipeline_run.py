@@ -1207,6 +1207,20 @@ def run_v2_unit_match(
     # raises here rather than running a partial match.
     if isinstance(session_group_owner, UnitMatchPlan):
         plan = session_group_owner
+        # A plan already carries the group + matcher + choices, so the explicit
+        # args must not ALSO be given -- otherwise one would be silently
+        # overridden. (matcher_params_name at its default is treated as unset.)
+        if (
+            session_group_name is not None
+            or curation_choices is not None
+            or matcher_params_name != "unitmatch_default"
+        ):
+            raise PipelineInputError(
+                "run_v2_unit_match: pass a UnitMatchPlan OR the explicit "
+                "(session_group_owner, session_group_name, matcher_params_name, "
+                "curation_choices) form -- not both. The plan already carries "
+                "the group, matcher, and pinned curations."
+            )
         if not plan.ok:
             raise PipelineInputError(
                 "run_v2_unit_match: the plan could not pin a curation for "
@@ -1217,6 +1231,11 @@ def run_v2_unit_match(
         session_group_name = plan.session_group_name
         matcher_params_name = plan.matcher_params_name
         curation_choices = plan.curation_choices
+    elif session_group_name is None:
+        raise PipelineInputError(
+            "run_v2_unit_match: session_group_name is required in the explicit "
+            "form (or pass a UnitMatchPlan from plan_v2_unit_match)."
+        )
 
     # curation_choices is REQUIRED and explicit: an implicit "latest curation"
     # lookup would make the match irreproducible the moment a source session
@@ -1410,7 +1429,9 @@ def describe_unit_match_choices(
     list of UnitMatchMemberChoices
         One entry per member (``member_index`` order): the member identity plus
         a ``choices`` list of ``{sorting_id, curation_id, parent_curation_id,
-        description}`` (``parent_curation_id == -1`` marks a root curation).
+        curation_source, description}`` (``parent_curation_id == -1`` marks a
+        root curation; ``curation_source`` is the CurationV2 enum, e.g.
+        ``'curation_evaluation'`` for an auto-curated child).
 
     Raises
     ------

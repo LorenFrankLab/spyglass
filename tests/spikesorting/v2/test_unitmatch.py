@@ -2985,6 +2985,22 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         assert set(plan.curation_choices) == set(grp["choices"])
         assert not plan.as_dataframe().empty
 
+        # describe_unit_match_choices surfaces curation_source (the auto_curated
+        # strategy keys off it). The fixture members are 'manual' roots, so
+        # against real fetched data auto_curated resolves nothing -> not ok.
+        described = describe_unit_match_choices(grp["owner"], grp["group_name"])
+        assert all(
+            "curation_source" in c for m in described for c in m["choices"]
+        )
+        auto_plan = plan_v2_unit_match(
+            grp["owner"],
+            grp["group_name"],
+            strategy="auto_curated",
+            matcher_params_name=matcher_name,
+        )
+        assert not auto_plan.ok
+        assert any("auto_curate" in e for e in auto_plan.errors)
+
         # Full chain via the orchestrator, driven by the plan.
         summary = run_v2_unit_match(plan)
         selection_pk = {"unitmatch_id": summary["unitmatch_id"]}
