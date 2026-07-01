@@ -161,7 +161,7 @@ if run_concat:
 # shared drift to correct), or when you want each session's units kept distinct
 # and simply *linked*. The match group is created with `allow_multi_day=True`.
 
-# ### B1. Group the sessions and sort each one
+# ### Group the sessions and sort each one
 #
 # Sort each member with the single-session preset and `auto_curate=True`, so each
 # member contributes an **analysis-ready** (auto-labeled) curation to the match
@@ -219,15 +219,15 @@ elif run_unit_match:
         )
 # -
 
-# ### B2. Plan the curations to match
+# ### Plan the curations to match
 #
 # `plan_v2_unit_match` pins one curation per member by a named **curation strategy** and
 # returns a reviewable **plan** — the plan-then-run shape mirroring the rest of
 # v2 (describe → plan → run). Here the curation strategy is `"auto_curated"`: each member's
-# auto-curated child from B1. Pick the curation strategy that matches your intent:
+# auto-curated child from the sorting step. Pick the curation strategy that matches your intent:
 #
 # - `final_curated` — the member's single terminal curated curation.
-# - `auto_curated` — the auto-curated child (what B1 produced here).
+# - `auto_curated` — the auto-curated child produced above.
 # - `root` — the uncurated root (warns loudly).
 # - `manual` — pin `manual_curation_choices={member_index: {...}}` explicitly.
 #
@@ -242,7 +242,7 @@ elif run_unit_match:
 if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
 
-    # Pin each member's auto-curated child (from B1) by curation strategy, and review the
+    # Pin each member's auto-curated child by curation strategy, and review the
     # plan before running. Swap the curation strategy (final_curated / root /
     # manual) to change how curations are pinned.
     plan = plan_v2_unit_match(
@@ -252,13 +252,15 @@ if run_unit_match and unitmatch_available:
         matcher_params_name=matcher_params_name,
     )
     display(plan.as_dataframe())  # one row per member -- review before running
-    for warning in plan.warnings:  # e.g. the "root" curation strategy warns loudly
+    for (
+        warning
+    ) in plan.warnings:  # e.g. the "root" curation strategy warns loudly
         print("WARNING:", warning)
     if not plan.ok:
         for problem in plan.errors:
             print("UNRESOLVED:", problem)
 
-# ### B3. Match and track
+# ### Match and track
 #
 # `run_v2_unit_match(plan)` takes the reviewed plan, pins those curations, runs
 # the matcher across the members, and derives **tracked units** — one identity per
@@ -270,7 +272,7 @@ if run_unit_match and unitmatch_available:
 # `n_pairs` (pairwise matches) and `n_tracked_units` (biological units across the
 # group).
 
-# ``unitmatch_available`` was determined once in Part B1 above.
+# ``unitmatch_available`` was determined once in the sorting step above.
 if run_unit_match and unitmatch_available:
     match_summary = run_v2_unit_match(plan)
     display(describe_run(match_summary))
