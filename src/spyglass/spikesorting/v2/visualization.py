@@ -25,7 +25,7 @@ Routing (the load-bearing invariant, see the table contract):
 - The official metric overview (``plot_metrics``) plots the Spyglass-routed
   ``CurationEvaluation.get_metrics()`` table (configured quality metrics plus the
   surfaced waveform-shape columns), not an SI analyzer extension.
-- Potential-merge plots pass the **persisted** ``CurationEvaluation.get_suggested_merge_groups()``
+- Suggested-merge plots pass the **persisted** ``CurationEvaluation.get_suggested_merge_groups()``
   suggestions to SI; they never recompute merge candidates at plot time.
 
 Plot helpers are read-only by default: a richer widget that needs a missing
@@ -34,7 +34,7 @@ display-safe analyzer extension raises a clear error naming the
 ONLY display-safe extensions through ``Sorting.add_extensions`` first. Most plot
 helpers default to local ``matplotlib``. SI widgets that do not support
 matplotlib expose that honestly: ``plot_sorting_summary`` requires an explicit
-GUI / web backend, and ``plot_potential_merges`` defaults to the notebook-local
+GUI / web backend, and ``plot_suggested_merges`` defaults to the notebook-local
 ``ipywidgets`` backend. No populate path opens a GUI, writes a report, uploads,
 or publishes.
 
@@ -66,7 +66,7 @@ __all__ = [
     "plot_metrics",
     "plot_si_quality_metrics",
     "plot_si_template_metrics",
-    "plot_potential_merges",
+    "plot_suggested_merges",
     "export_si_report",
     "export_to_phy",
     "MissingDisplayExtensionError",
@@ -418,10 +418,10 @@ def plot_si_template_metrics(
     return sw.plot_template_metrics(analyzer, backend=backend, **kwargs)
 
 
-def plot_potential_merges(
+def plot_suggested_merges(
     curation_evaluation_key, *, backend="ipywidgets", **kwargs
 ):
-    """Plot the persisted potential-merge suggestions (SI ``plot_potential_merges``).
+    """Plot the persisted suggested merge groups.
 
     Passes the **persisted** ``CurationEvaluation.get_suggested_merge_groups()`` suggestions
     (groups of >=2 units) to SI ``plot_potential_merges`` over the display
@@ -455,7 +455,7 @@ def plot_potential_merges(
     sorting_key = _curation_sorting_key(curation_evaluation_key)
     analyzer = _display_analyzer_with_extensions(
         sorting_key,
-        _viz.DISPLAY_WIDGET_EXTENSIONS["plot_potential_merges"],
+        _viz.DISPLAY_WIDGET_EXTENSIONS["plot_suggested_merges"],
         compute_missing=False,
     )
     return sw.plot_potential_merges(

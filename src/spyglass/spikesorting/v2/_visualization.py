@@ -48,7 +48,7 @@ DISPLAY_WIDGET_EXTENSIONS = {
     "plot_waveforms": (),
     "plot_spikes_on_traces": ("unit_locations",),
     "plot_unit_locations": ("unit_locations",),
-    "plot_potential_merges": ("spike_amplitudes", "correlograms"),
+    "plot_suggested_merges": ("spike_amplitudes", "correlograms"),
 }
 
 # SI-native metric widgets read these analyzer extensions directly. They are
@@ -173,7 +173,7 @@ _REGISTRY: tuple[dict, ...] = (
         ),
     },
     {
-        "name": "plot_potential_merges",
+        "name": "plot_suggested_merges",
         "key_type": "curation_evaluation",
         # PotentialMergesWidget supports only the interactive ipywidgets backend.
         "implementation": "spikeinterface.widgets.plot_potential_merges",

@@ -48,7 +48,7 @@ _FACADE_FUNCTIONS = (
     "plot_metrics",
     "plot_si_quality_metrics",
     "plot_si_template_metrics",
-    "plot_potential_merges",
+    "plot_suggested_merges",
     "export_si_report",
     "export_to_phy",
 )
@@ -109,7 +109,7 @@ def test_table_delegates_call_facade_if_present(dj_conn):
         CurationEvaluation.plot_metrics: "plot_metrics",
         CurationEvaluation.plot_si_quality_metrics: "plot_si_quality_metrics",
         CurationEvaluation.plot_si_template_metrics: "plot_si_template_metrics",
-        CurationEvaluation.plot_potential_merges: "plot_potential_merges",
+        CurationEvaluation.plot_suggested_merges: "plot_suggested_merges",
     }
     for method, facade_name in delegates.items():
         source = inspect.getsource(method)
@@ -563,7 +563,7 @@ def test_si_metric_widgets_require_explicit_compute_for_missing_extensions(
 
 
 @pytest.mark.db_unit
-def test_plot_potential_merges_uses_persisted_merge_groups(
+def test_plot_suggested_merges_uses_persisted_merge_groups(
     dj_conn, monkeypatch
 ):
     """Wrapper passes persisted merge groups; never recomputes candidates."""
@@ -596,14 +596,14 @@ def test_plot_potential_merges_uses_persisted_merge_groups(
         return "MERGES"
 
     monkeypatch.setattr(sw, "plot_potential_merges", _fake)
-    assert ssviz.plot_potential_merges({"curation_id": 0}) == "MERGES"
+    assert ssviz.plot_suggested_merges({"curation_id": 0}) == "MERGES"
     assert captured["analyzer"] is fake
     # Singleton group dropped; only the real >=2 merge is passed.
     assert captured["potential_merges"] == [[1, 2]]
 
 
 @pytest.mark.db_unit
-def test_plot_potential_merges_errors_when_no_persisted_suggestions(
+def test_plot_suggested_merges_errors_when_no_persisted_suggestions(
     dj_conn, monkeypatch
 ):
     """No persisted >=2 suggestion -> clear error, still no recompute."""
@@ -615,7 +615,7 @@ def test_plot_potential_merges_errors_when_no_persisted_suggestions(
         classmethod(lambda cls, key: [[3]]),
     )
     with pytest.raises(ValueError, match="never recomputes"):
-        ssviz.plot_potential_merges({"curation_id": 0})
+        ssviz.plot_suggested_merges({"curation_id": 0})
 
 
 # --------------------------------------------------------------------------
@@ -799,7 +799,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     ssviz.plot_unit_locations(skey)
     ssviz.plot_si_quality_metrics(ckey)
     ssviz.plot_si_template_metrics(ckey)
-    ssviz.plot_potential_merges(ckey)
+    ssviz.plot_suggested_merges(ckey)
     ssviz.export_si_report(skey, "/tmp/r")
     ssviz.export_to_phy(skey, "/tmp/p")
 
@@ -836,7 +836,7 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
         is None
     )
     assert (
-        inspect.signature(ssviz.plot_potential_merges)
+        inspect.signature(ssviz.plot_suggested_merges)
         .parameters["backend"]
         .default
         == "ipywidgets"

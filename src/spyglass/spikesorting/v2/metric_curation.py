@@ -7,7 +7,7 @@ merges, and propose auto-curation labels in the curation's OWN unit namespace
 (a merged unit is scored over its merged spike train, never inherited from the
 highest-amplitude contributor). The proposed labels/merges are written to NWB;
 turning them into a committed child ``CurationV2`` row is an explicit user
-action (``CurationEvaluation.create_curation`` /
+action (``CurationEvaluation.accept_evaluation_outputs`` /
 ``use_evaluation_labels``).
 
 Tables
@@ -964,9 +964,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     gets metrics recomputed over its merged spike trains/templates, never
     inherited from the highest-amplitude contributor. Outputs (metrics, proposed
     labels, merge suggestions) are written to three NWB scratch tables and are
-    PROPOSALS; the acceptance helpers (``create_curation`` /
+    PROPOSALS; the acceptance helpers (``accept_evaluation_outputs`` /
     ``use_evaluation_labels`` / ``overlay_evaluation_labels`` /
-    ``create_preview_curation``) commit them into a child ``CurationV2`` row.
+    ``preview_merges``) commit them into a child ``CurationV2`` row.
 
     Routing: a committed root / label-only curation (unit set unchanged from the
     raw sort) reuses the cached raw-sort analyzers (the fast path); a committed
@@ -1768,7 +1768,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "CurationEvaluation acceptance requires a POPULATED evaluation "
                 f"(curation_source='curation_evaluation'); no CurationEvaluation "
                 f"row for {dict(key)}. Call CurationEvaluation.populate(key) "
-                "before accepting (create_curation / accept_merges / "
+                "before accepting (accept_evaluation_outputs / accept_merges / "
                 "preview_merges / use_evaluation_labels / ...)."
             )
         sel = (CurationEvaluationSelection & key).fetch1()
@@ -1808,7 +1808,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             return [[int(u) for u in group] for group in merge_groups]
         return []
 
-    def create_curation(
+    def accept_evaluation_outputs(
         self,
         key,
         *,
@@ -1820,13 +1820,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
     ) -> dict:
-        """Accept a ``CurationEvaluation``'s outputs into a COMMITTED child.
+        """Accept selected evaluation outputs into a COMMITTED child curation.
 
         Creates a new committed child ``CurationV2`` row branched off the
         evaluated curation, in that curation's own unit namespace. The child is
         always committed (``assert_committed_curation`` true) -- it never leaves
-        a preview row with unapplied proposed merges; use
-        :meth:`create_preview_curation` for an explicit draft.
+        a preview row with unapplied proposed merges; use :meth:`preview_merges`
+        for an explicit draft.
 
         Merges are applied ONLY when the caller is explicit: pass
         ``merge_groups`` (the exact accepted groups, in the evaluated
@@ -1951,7 +1951,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             use_all_suggested_merges,
             action_name="preview_merges",
         )
-        return self.create_preview_curation(
+        return self._create_preview_curation(
             key,
             merge_groups=accepted,
             use_all_suggested_merges=False,
@@ -1986,7 +1986,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             False,
             action_name="accept_merges",
         )
-        return self.create_curation(
+        return self.accept_evaluation_outputs(
             key,
             merge_groups=accepted,
             labels={},
@@ -2015,7 +2015,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             True,
             action_name="accept_all_suggested_merges",
         )
-        return self.create_curation(
+        return self.accept_evaluation_outputs(
             key,
             merge_groups=accepted,
             labels={},
@@ -2047,7 +2047,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
-        return self.create_curation(
+        return self.accept_evaluation_outputs(
             key,
             merge_groups=None,
             use_all_suggested_merges=False,
@@ -2078,7 +2078,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
-        return self.create_curation(
+        return self.accept_evaluation_outputs(
             key,
             merge_groups=None,
             use_all_suggested_merges=False,
@@ -2089,7 +2089,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             reuse_existing=reuse_existing,
         )
 
-    def create_preview_curation(
+    def _create_preview_curation(
         self,
         key,
         *,
@@ -2107,8 +2107,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         the proposed merges are recorded in ``CurationV2.MergeGroup`` WITHOUT
         being applied (``apply_merge=False``), so the child is a preview --
         ``has_unapplied_proposed_merges`` is True and downstream consumers
-        reject it until it is committed. Distinct from :meth:`create_curation`,
-        which only ever produces committed children. A preview is, by
+        reject it until it is committed. Distinct from
+        :meth:`accept_evaluation_outputs`, which only ever produces committed
+        children. A preview is, by
         definition, an UNAPPLIED merge for review, so it must actually draft a
         merge: pass ``merge_groups`` or ``use_all_suggested_merges=True`` (and
         the latter must resolve at least one merge). With no merge this would
@@ -2125,7 +2126,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         )
         if not accepted:
             raise ValueError(
-                "create_preview_curation drafts an UNAPPLIED merge for "
+                "preview_merges drafts an UNAPPLIED merge for "
                 "review, so it needs at least one merge: pass "
                 "merge_groups=[[...]] or use_all_suggested_merges=True (with "
                 "proposed merges present). For a committed labels-only child, "
@@ -2671,14 +2672,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             key, compute_missing=compute_missing, backend=backend, **kwargs
         )
 
-    def plot_potential_merges(self, key, *, backend="ipywidgets", **kwargs):
-        """Delegate to ``visualization.plot_potential_merges`` for this curation.
+    def plot_suggested_merges(self, key, *, backend="ipywidgets", **kwargs):
+        """Delegate to ``visualization.plot_suggested_merges`` for this curation.
 
         Defaults to the ``ipywidgets`` backend (SI's ``PotentialMergesWidget``
         has no matplotlib backend); see the facade.
         """
         from spyglass.spikesorting.v2 import visualization
 
-        return visualization.plot_potential_merges(
+        return visualization.plot_suggested_merges(
             key, backend=backend, **kwargs
         )

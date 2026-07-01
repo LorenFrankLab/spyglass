@@ -74,7 +74,7 @@ def test_available_visualizations_lists_documented_helpers():
         "plot_metrics",
         "plot_si_quality_metrics",
         "plot_si_template_metrics",
-        "plot_potential_merges",
+        "plot_suggested_merges",
         "export_si_report",
         "export_to_phy",
     }
@@ -102,7 +102,7 @@ def test_available_visualizations_lists_documented_helpers():
     # PotentialMergesWidget supports only ipywidgets.
     assert indexed.loc["plot_sorting_summary", "backend_default"] is None
     assert (
-        indexed.loc["plot_potential_merges", "backend_default"] == "ipywidgets"
+        indexed.loc["plot_suggested_merges", "backend_default"] == "ipywidgets"
     )
     assert indexed.loc["export_si_report", "backend_default"] is None
     assert indexed.loc["export_to_phy", "backend_default"] is None

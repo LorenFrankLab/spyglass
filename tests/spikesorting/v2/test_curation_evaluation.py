@@ -1071,7 +1071,7 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
 def test_evaluation_acceptance_creates_committed_child(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """``create_curation(..., merge_groups=accepted)`` makes a COMMITTED child.
+    """``accept_evaluation_outputs(..., merge_groups=accepted)`` commits a child.
 
     ``use_evaluation_labels`` makes a committed labels-only child. Neither leaves
     a preview row with unapplied proposed merges.
@@ -1102,7 +1102,7 @@ def test_evaluation_acceptance_creates_committed_child(
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
         # Accept an explicit merge -> committed merged child (not a preview).
-        merged_child = CurationEvaluation().create_curation(
+        merged_child = CurationEvaluation().accept_evaluation_outputs(
             sel, merge_groups=[[unit_ids[0], unit_ids[1]]]
         )
         assert CurationV2.is_committed_curation(merged_child)
@@ -1139,8 +1139,9 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
 ):
     """Suggested merges are not silently applied without explicit intent.
 
-    Even when the evaluation HAS a proposed merge, ``create_curation`` applies
-    it only when the caller passes ``merge_groups`` or
+    Even when the evaluation HAS a proposed merge,
+    ``accept_evaluation_outputs`` applies it only when the caller passes
+    ``merge_groups`` or
     ``use_all_suggested_merges=True``; the bare call is labels-only.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -1178,14 +1179,14 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
         )
 
         # Bare acceptance: the suggestion is NOT applied (labels-only child).
-        default_child = CurationEvaluation().create_curation(sel)
+        default_child = CurationEvaluation().accept_evaluation_outputs(sel)
         assert not bool((CurationV2 & default_child).fetch1("merges_applied"))
         assert set(
             int(u) for u in (CurationV2.Unit & default_child).fetch("unit_id")
         ) == set(unit_ids)
 
         # Opt in: use_all_suggested_merges applies the suggestion.
-        all_child = CurationEvaluation().create_curation(
+        all_child = CurationEvaluation().accept_evaluation_outputs(
             sel, use_all_suggested_merges=True
         )
         assert bool((CurationV2 & all_child).fetch1("merges_applied"))
@@ -1195,7 +1196,7 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
 
         # Passing both is a contradiction.
         with pytest.raises(ValueError, match="not both"):
-            CurationEvaluation().create_curation(
+            CurationEvaluation().accept_evaluation_outputs(
                 sel,
                 merge_groups=suggestion,
                 use_all_suggested_merges=True,
@@ -1241,10 +1242,10 @@ def test_evaluation_child_source_is_curation_evaluation(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_evaluation_create_preview_curation_is_a_rejected_draft(
+def test_evaluation_preview_merges_is_a_rejected_draft(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """``create_preview_curation`` produces a DRAFT (preview) child, not a
+    """``preview_merges`` produces a DRAFT (preview) child, not a
     committed one, and that draft is then rejected at the evaluation boundary.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -1272,7 +1273,7 @@ def test_evaluation_create_preview_curation_is_a_rejected_draft(
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
-        preview = CurationEvaluation().create_preview_curation(
+        preview = CurationEvaluation().preview_merges(
             sel, merge_groups=[[unit_ids[0], unit_ids[1]]]
         )
         # It is a draft, not committed: every unit preserved + proposed merge.
@@ -1320,8 +1321,9 @@ def test_workflow_evaluate_accept_merge_reevaluate_use_evaluation_labels_final_c
 ):
     """Common curation workflow ends on final metrics for the final child.
 
-    Evaluate the root, accept an explicit merge with ``create_curation``,
-    re-evaluate the committed merged child, accept the final label verdict with
+    Evaluate the root, accept an explicit merge with
+    ``accept_evaluation_outputs``, re-evaluate the committed merged child,
+    accept the final label verdict with
     ``use_evaluation_labels``, then re-evaluate that final child. The label-only final
     child has ``merges_applied=False`` but a merged unit namespace, so routing
     must key on the actual curation unit set rather than blindly reusing the raw
@@ -1358,7 +1360,7 @@ def test_workflow_evaluate_accept_merge_reevaluate_use_evaluation_labels_final_c
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
         # Accept a merge into a committed merged child; evaluate it.
-        merged = CurationEvaluation().create_curation(
+        merged = CurationEvaluation().accept_evaluation_outputs(
             _eval(root), merge_groups=[[unit_ids[0], unit_ids[1]]]
         )
         assert CurationV2.is_committed_curation(merged)
@@ -1473,9 +1475,10 @@ def test_label_actions_clear_stale_auto_and_preserve_manual_labels(
 def test_acceptance_merge_drops_absorbed_contributor_label(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """When create_curation applies a merge, a label on an absorbed contributor
-    does not silently attach to the merged unit -- it is dropped (re-evaluate
-    the merged child to label it). The drop is warned, not silent.
+    """When accepting a merge, an absorbed contributor label is dropped.
+
+    It does not silently attach to the merged unit -- re-evaluate the merged
+    child to label it. The drop is warned, not silent.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -1506,7 +1509,7 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
         # merged unit is unlabeled (label it by re-evaluating the merged child).
         # unit 0 is absorbed by the merge -> its label warn-drops (not a
         # truly-stray key, so no permissive flag needed).
-        child = CurationEvaluation().create_curation(
+        child = CurationEvaluation().accept_evaluation_outputs(
             sel,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             labels={unit_ids[0]: ["noise"]},
@@ -1601,7 +1604,7 @@ def test_acceptance_rejects_caller_singleton_merge_group(
         # labels={} so the singleton reaches insert_curation's >=2-member guard
         # (the evaluation is populated; get_labels is skipped for the merge).
         with pytest.raises(ValueError, match="at least 2 units"):
-            CurationEvaluation().create_curation(
+            CurationEvaluation().accept_evaluation_outputs(
                 sel, merge_groups=[[unit_ids[0]]], labels={}
             )
     finally:
@@ -1610,12 +1613,12 @@ def test_acceptance_rejects_caller_singleton_merge_group(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_create_preview_curation_requires_a_merge(
+def test_preview_merges_requires_a_merge(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """A preview with no merge is rejected, not silently committed.
 
-    ``create_preview_curation`` is the explicit opt-in for drafting an
+    ``preview_merges`` is the explicit opt-in for drafting an
     UNAPPLIED merge for review. Called with no merge it would otherwise produce
     a normal committed labels-only child (apply_merge=False, no proposed
     merge), contradicting the "preview/draft" contract -- so it raises and
@@ -1644,7 +1647,7 @@ def test_create_preview_curation_requires_a_merge(
         # No merge_groups and use_all_suggested_merges defaults False -> raises
         # before creating any child (no committed labels-only fallback).
         with pytest.raises(ValueError, match="needs at least one merge"):
-            CurationEvaluation().create_preview_curation(sel)
+            CurationEvaluation().preview_merges(sel)
     finally:
         clear_curations_for(planted_two_unit_sort)
 
@@ -1937,12 +1940,9 @@ def test_acceptance_requires_populated_evaluation(
         # Every public acceptance entry point -- including the all-suggested
         # path that reads the evaluation NWB -- raises the friendly guard.
         for call in (
-            lambda: ev.create_curation(sel, labels={}),
+            lambda: ev.accept_evaluation_outputs(sel, labels={}),
             lambda: ev.use_evaluation_labels(sel, labels={}),
             lambda: ev.overlay_evaluation_labels(sel, labels={}),
-            lambda: ev.create_preview_curation(
-                sel, merge_groups=merge, labels={}
-            ),
             lambda: ev.accept_merges(sel, merge_groups=merge),
             lambda: ev.accept_all_suggested_merges(sel),
             lambda: ev.preview_merges(sel, merge_groups=merge),
