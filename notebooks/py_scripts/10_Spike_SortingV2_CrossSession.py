@@ -44,6 +44,7 @@ from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_run,
     describe_unit_match_choices,
+    plan_v2_unit_match,
     run_v2_pipeline,
     run_v2_unit_match,
 )
@@ -218,53 +219,59 @@ elif run_unit_match:
         )
 # -
 
-# ### B2. Pin each member's curation
+# ### B2. Plan the curations to match
 #
-# `describe_unit_match_choices` lists, per member, every committed
-# `(sorting_id, curation_id)` you may pin — useful to see what is available. Here
-# we pin each member's **analysis-ready** curation from B1 (its
-# `analysis_curation_id`, the auto-curated child), from `member_summaries`, rather
-# than guessing an entry from the list: a member may have an older sort of the
-# same session under a different preset, and matching the wrong one would be
-# silent. Pinning the curation explicitly is required by design — an implicit
-# "latest" would make a match change when a source session gains a new curation.
-# To match a hand-labeled/merged curation instead, take its
-# `(sorting_id, curation_id)` from the table below.
+# `plan_v2_unit_match` pins one curation per member by a named **strategy** and
+# returns a reviewable **plan** — the plan-then-run shape mirroring the rest of
+# v2 (describe → plan → run). Here the strategy is `"auto_curated"`: each member's
+# auto-curated child from B1. Pick the strategy that matches your intent:
+#
+# - `single_leaf_curated` — the member's single terminal curated curation.
+# - `auto_curated` — the auto-curated child (what B1 produced here).
+# - `root` — the uncurated root (warns loudly).
+# - `manual` — pin `curation_choices={member_index: {...}}` explicitly.
+#
+# A strategy never picks an implicit "latest" — a member it can't resolve to
+# exactly one curation is a **blocking error** on the plan (`plan.ok` is `False`,
+# listed in `plan.errors`), so a wrong or ambiguous pin surfaces here, not
+# silently in the match. `plan.as_dataframe()` shows the per-member pins to review
+# before running. `describe_unit_match_choices` still lists every pinnable
+# curation if you want to inspect them or build a `manual` plan by hand.
 
 if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
 
-    # Pin each member's analysis-ready (auto-curated) curation from B1 --
-    # analysis_curation_id, not the uncurated root.
-    curation_choices = {
-        member_index: {
-            "sorting_id": summary["sorting_id"],
-            "curation_id": summary["analysis_curation_id"],
-        }
-        for member_index, summary in member_summaries.items()
-    }
-    display(curation_choices)
+    # Pin each member's auto-curated child (from B1) by strategy, and review the
+    # plan before running. Swap the strategy (single_leaf_curated / root /
+    # manual) to change how curations are pinned.
+    plan = plan_v2_unit_match(
+        session_group_owner,
+        match_group_name,
+        strategy="auto_curated",
+        matcher_params_name=matcher_params_name,
+    )
+    display(plan.as_dataframe())  # one row per member -- review before running
+    if not plan.ok:
+        for problem in plan.errors:
+            print("UNRESOLVED:", problem)
 
 # ### B3. Match and track
 #
-# `run_v2_unit_match` pins those curations, runs the matcher across the members,
-# and derives **tracked units** — one identity per biological unit, with the
-# per-session units that compose it. The default `unitmatch_default` matcher uses
-# [UnitMatchPy](https://github.com/EnnyvanBeest/UnitMatch), an **optional** extra
-# (the `spikesorting-v2-matching` extra); without it the run raises, so the cell
-# below runs only when it is installed. The summary reports `n_pairs` (pairwise
-# matches) and `n_tracked_units` (biological units across the group).
+# `run_v2_unit_match(plan)` takes the reviewed plan, pins those curations, runs
+# the matcher across the members, and derives **tracked units** — one identity per
+# biological unit, with the per-session units that compose it. (A not-ok plan
+# raises here rather than running a partial match.) The default `unitmatch_default`
+# matcher uses [UnitMatchPy](https://github.com/EnnyvanBeest/UnitMatch), an
+# **optional** extra (the `spikesorting-v2-matching` extra); without it the run
+# raises, so the cell below runs only when it is installed. The summary reports
+# `n_pairs` (pairwise matches) and `n_tracked_units` (biological units across the
+# group).
 
 import importlib.util
 
 unitmatch_available = importlib.util.find_spec("UnitMatchPy") is not None
 if run_unit_match and unitmatch_available:
-    match_summary = run_v2_unit_match(
-        session_group_owner,
-        match_group_name,
-        matcher_params_name=matcher_params_name,
-        curation_choices=curation_choices,
-    )
+    match_summary = run_v2_unit_match(plan)
     display(describe_run(match_summary))
     print(
         f"{match_summary['n_pairs']} cross-session pair(s) -> "

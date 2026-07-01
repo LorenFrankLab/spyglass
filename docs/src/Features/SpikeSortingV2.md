@@ -1095,6 +1095,28 @@ implant). Two levels of matcher validation exist, with different CI status:
   cleanly). Uploading them + adding them to `SPYGLASS_V2_REQUIRE_FIXTURES`
   enforces it.
 
+The recommended path is the **plan-then-run** orchestrator — pin curations by a
+named strategy, review the plan, then run (each session already sorted +
+curated, grouped as a `SessionGroup` as in step 1 below):
+
+```python
+from spyglass.spikesorting.v2.pipeline import (
+    plan_v2_unit_match,
+    run_v2_unit_match,
+)
+
+# strategy is REQUIRED (no implicit "latest"): single_leaf_curated /
+# auto_curated / root / manual. plan.as_dataframe() shows the per-member pins;
+# plan.errors flags any member it could not resolve to exactly one curation.
+plan = plan_v2_unit_match(
+    "my_team", "implant_week1", strategy="single_leaf_curated"
+)
+plan.as_dataframe()
+summary = run_v2_unit_match(plan)   # runs UnitMatch + TrackedUnit
+```
+
+The orchestrator wraps exactly the low-level table calls below:
+
 ```python
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.session_group import SessionGroup
