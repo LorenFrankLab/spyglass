@@ -50,9 +50,11 @@ coexist under one merge surface.
 
 - **`SortGroupV2`** -- per-session electrode grouping. Constructors
     `set_group_by_shank` and `set_group_by_electrode_table_column` follow
-    the inspect-before-destroy contract: passing
-    `delete_existing_entries=True, confirm=False` returns a `DeletionPreview`
-    so the caller can review cascade impact before committing.
+    the inspect-before-destroy contract: they refuse to overwrite existing
+    sort groups unless called with `delete_existing_entries=True, confirm=True`.
+    Call `SortGroupV2.preview_existing_entries(nwb_file_name)` first to review
+    the `DeletionPreview` (cascade impact) before committing; passing
+    `confirm=False` raises a `ValueError` that embeds the same preview.
 - **`PreprocessingParameters`, `ArtifactDetectionParameters`, `SharedArtifactGroup`,
     `SorterParameters`, `QualityMetricParameters`, `AutoCurationRules`** --
     Pydantic-validated parameter Lookup rows.

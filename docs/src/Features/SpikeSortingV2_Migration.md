@@ -57,10 +57,9 @@ downstream code keys off `merge_id` regardless of which produced the sort.
   June 2026 catalog correction renames every Frank-lab row to a dated,
   content-stable name and drops the brief v1-name alias shim, so old strings
   no longer resolve — update them:
-    - `PreprocessingParameters`: v1's single `default` (and v2's interim
-      `default_franklab`) → `default`; the production region recipes are
-      `franklab_hippocampus_2026_06` (600 Hz high-pass) and
-      `franklab_cortex_2026_06` (300 Hz).
+    - `PreprocessingParameters`: v1's single `default` → `default`; the
+      production region recipes are `franklab_hippocampus_2026_06` (600 Hz
+      high-pass) and `franklab_cortex_2026_06` (300 Hz).
     - `SorterParameters` (MountainSort4): the region-encoded
       `franklab_tetrode_hippocampus_30kHz_ms4` / `franklab_probe_ctx_30kHz_ms4`
       rows — and v1's bare `franklab_tetrode_hippocampus_30KHz` /
@@ -121,13 +120,23 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 
 ## 2. What you query differently
 
-- **No `recording_id`-keyed `IntervalList` row.** v2 stores the
-  valid-times range on the `Recording` row. Reconstruct the old shape
-  with:
+- **No `recording_id`-keyed `IntervalList` row.** v2 does not persist the
+  valid-times range on the `Recording` row (it stores only `duration_s`). The
+  valid times live on the `IntervalList` you selected, reachable through
+  `RecordingSelection`:
 
   ```python
-  row = (Recording & {"recording_id": rid}).fetch1()
-  valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
+  from spyglass.common import IntervalList
+  from spyglass.spikesorting.v2.recording import RecordingSelection
+
+  sel = (RecordingSelection & {"recording_id": rid}).fetch1()
+  valid_times = (
+      IntervalList
+      & {
+          "nwb_file_name": sel["nwb_file_name"],
+          "interval_list_name": sel["interval_list_name"],
+      }
+  ).fetch1("valid_times")  # ndarray, shape (n_intervals, 2)
   ```
 
 - **Artifact `IntervalList` names are prefixed `artifact_detection_{uuid}`**
@@ -210,9 +219,8 @@ surface that stays v1-only is the stored per-pair burst metrics
   `amplitude_cutoff`, `firing_rate`, `isi_violation`, …) stay on the unwhitened
   display analyzer — so expect PC/NN values to differ from any earlier
   single-analyzer v2 run (re-curate against the new scores). The metric recipe
-  is tracked on `CurationEvaluationSelection.metric_waveform_params_name`. (The
-  interim `AnalyzerCuration` raw-sort table was removed in favor of
-  `CurationEvaluation`.)
+  is tracked on `CurationEvaluationSelection.metric_waveform_params_name`.
+  Quality-metric curation is provided by `CurationEvaluation`.
 - **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned as
   a new DataJoint table. Its notebook plotting helpers are available from
   `CurationEvaluation` (`plot_correlograms`, `investigate_pair_xcorrel`,
@@ -222,8 +230,8 @@ surface that stays v1-only is the stored per-pair burst metrics
   verification families: `RecordingArtifactRecompute*` for recording/artifact
   NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
 - **Available in v2** — cross-session unit matching is delivered: `unit_matching`
-  and `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables (no longer
-  stubs), and `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
+  and `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables, and
+  `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
   concatenate-and-sort.
 - **Available in v2** — `figpack_curation` provides `FigPackCurationSelection`
   and `FigPackCuration`, the v2 replacement for v1's FigURL curation views. The

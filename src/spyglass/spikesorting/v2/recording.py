@@ -94,11 +94,12 @@ schema = dj.schema("spikesorting_v2_recording")
 class DeletionPreview(NamedTuple):
     """Read-only summary of what ``SortGroupV2.set_group_by_*`` would delete.
 
-    Returned by :meth:`SortGroupV2.preview_existing_entries` and by the
-    ``set_group_by_*`` helpers when called with
-    ``delete_existing_entries=True, confirm=False``. Wraps the dry-run
-    output of ``SpyglassMixin.cautious_delete`` so callers can inspect
-    cascade impact before committing to a destructive overwrite.
+    Returned by :meth:`SortGroupV2.preview_existing_entries`. The
+    ``set_group_by_*`` helpers do not return it -- when called with
+    ``delete_existing_entries=True, confirm=False`` they embed the same
+    preview in the ``ValueError`` they raise. Wraps the dry-run output of
+    ``SpyglassMixin.cautious_delete`` so callers can inspect cascade impact
+    before committing to a destructive overwrite.
 
     Attributes
     ----------
