@@ -90,6 +90,7 @@ nav:
     - Ingestion: Features/Ingestion.md
     - Interval: Features/Intervals.md
     - Populate: Features/Populate.md
+    - Spike Sorting v2 Quickstart: Features/SpikeSortingV2_Quickstart.md
     - Spike Sorting v2: Features/SpikeSortingV2.md
     - Spike Sorting v1→v2 Migration: Features/SpikeSortingV2_Migration.md
     - Spike Sorting v2 Storage Management: Features/SpikeSortingV2StorageManagement.md
