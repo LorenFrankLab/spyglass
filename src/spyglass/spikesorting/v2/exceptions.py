@@ -468,3 +468,19 @@ class RecordingContentDriftError(RuntimeError):
     the artifact, rerun the recompute under the original environment, or delete
     and repopulate the ``Recording`` row (and its downstream).
     """
+
+
+class MissingDisplayExtensionError(RuntimeError):
+    """A richer SI widget needs display-safe analyzer extensions not present.
+
+    Raised by the read-only default visualization path so a notebook user gets
+    an actionable message (the exact ``add_extensions`` call, or the
+    ``compute_missing=True`` opt-in) instead of a deep SpikeInterface
+    ``check_extensions`` failure. The absent extensions are also exposed on the
+    ``missing`` attribute so a caller can act on them programmatically without
+    parsing the message string.
+    """
+
+    def __init__(self, message: str, *, missing=None):
+        self.missing = list(missing or [])
+        super().__init__(message)

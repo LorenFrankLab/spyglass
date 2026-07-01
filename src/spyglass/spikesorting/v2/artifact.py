@@ -280,7 +280,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             if "recording_id" not in m:
                 raise ValueError(
                     "SharedArtifactGroup.insert_group: every member dict "
-                    "must include 'recording_id'. Got: " + str(m)
+                    f"must include 'recording_id'. Got: {m!r}."
                 )
             member_recording_ids.append(m["recording_id"])
 

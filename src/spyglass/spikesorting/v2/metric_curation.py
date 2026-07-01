@@ -2285,9 +2285,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         if not frames:
             raise ValueError(
-                "No metrics to compute: metric_names contains only PC/NN "
-                "metrics but skip_pc_metrics=True. Set skip_pc_metrics=False "
-                "to compute them."
+                "_compute_metrics: no metrics to compute -- metric_names "
+                f"{sorted(metric_names)} contains only PC/NN metrics but "
+                "skip_pc_metrics=True. Set skip_pc_metrics=False to compute "
+                "them, or include a voltage-based metric."
             )
         if len(frames) > 1:
             # The display and metric analyzers derive from the SAME canonical

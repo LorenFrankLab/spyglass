@@ -24,21 +24,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-
-class MissingDisplayExtensionError(RuntimeError):
-    """A richer SI widget needs display-safe analyzer extensions not present.
-
-    Raised by the read-only default path so a notebook user gets an actionable
-    message (the exact ``add_extensions`` call, or the ``compute_missing=True``
-    opt-in) instead of a deep SpikeInterface ``check_extensions`` failure. The
-    absent extensions are also exposed on the ``missing`` attribute so a caller
-    can act on them programmatically without parsing the message string.
-    """
-
-    def __init__(self, message: str, *, missing=None):
-        self.missing = list(missing or [])
-        super().__init__(message)
-
+# Re-exported from the central exceptions module (the single home for every
+# named v2 invariant); imported here so existing
+# ``from ..._visualization import MissingDisplayExtensionError`` paths keep
+# working.
+from spyglass.spikesorting.v2.exceptions import (  # noqa: F401
+    MissingDisplayExtensionError,
+)
 
 # Display-safe extensions each SpikeInterface display widget reads beyond the
 # sort-time base set (``random_spikes`` / ``noise_levels`` / ``templates`` /
