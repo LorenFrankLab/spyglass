@@ -1886,6 +1886,47 @@ class Model(SpyglassMixin, dj.Computed):
             )
             fig.suptitle(source_text, fontsize=10, y=0.02)
 
+    @staticmethod
+    def _ensure_mp4(video_paths, output_dir):
+        """Convert raw ``.h264`` videos to mp4 for DeepLabCut.
+
+        DLC's frame extraction fails on raw h264 (``__len__() should return
+        >= 0``) because the stream carries no frame count. Position V1
+        converted such videos at project creation; this reuses the same shared
+        ``find_mp4`` converter so V2 does too. Container formats DLC already
+        reads (mp4, avi, mov, …) pass through unchanged.
+
+        Parameters
+        ----------
+        video_paths : list[str]
+            Absolute paths to the source videos.
+        output_dir : str
+            Directory to write converted mp4 files into.
+
+        Returns
+        -------
+        list[str]
+            One path per input: the converted mp4 for ``.h264`` inputs, or the
+            original path otherwise.
+        """
+        from spyglass.position.utils.general import find_mp4
+
+        result = []
+        for path in map(Path, video_paths):
+            if path.suffix.lower() == ".h264":
+                result.append(
+                    str(
+                        find_mp4(
+                            video_path=path.parent,
+                            output_path=output_dir,
+                            video_filename=path.name,
+                        )
+                    )
+                )
+            else:
+                result.append(str(path))
+        return result
+
     def create_project(
         self,
         project_name: str,
@@ -1983,7 +2024,7 @@ class Model(SpyglassMixin, dj.Computed):
             sanitize_filename,
         )
         from spyglass.position.utils.dlc_io import read_yaml, save_yaml
-        from spyglass.settings import pose_project_dir
+        from spyglass.settings import pose_project_dir, pose_video_dir
 
         # Split kwargs by function signature so callers control both steps
         # without us needing to hard-code every parameter name.
@@ -2025,6 +2066,18 @@ class Model(SpyglassMixin, dj.Computed):
                 + "\n".join(f"  {p}" for p in missing)
             )
 
+        # Convert any raw h264 videos to mp4 so DeepLabCut can read them —
+        # DLC's frame extraction fails on raw h264. V1 did this at project
+        # creation. The original paths (which map to VideoFile) are kept for
+        # the VidFileGroup below; DLC gets the (possibly converted) paths.
+        convert_dir = (
+            pose_video_dir
+            or pose_project_dir
+            or str(Path.home() / "dlc_projects")
+        )
+        Path(convert_dir).mkdir(parents=True, exist_ok=True)
+        dlc_videos = self._ensure_mp4(resolved_videos, convert_dir)
+
         # Try to infer a safe frame budget from the shortest video.  If this
         # fails (e.g., codec issues), we keep the user's requested value and
         # rely on DLC's own validation below.
@@ -2033,7 +2086,7 @@ class Model(SpyglassMixin, dj.Computed):
             import cv2
 
             frame_counts = []
-            for video_path in resolved_videos:
+            for video_path in dlc_videos:
                 cap = cv2.VideoCapture(str(video_path))
                 if not cap.isOpened():
                     continue
@@ -2071,7 +2124,7 @@ class Model(SpyglassMixin, dj.Computed):
             or Path.home() / "dlc_projects"
         )
 
-        resolved_video_basenames = {Path(v).name for v in resolved_videos}
+        resolved_video_basenames = {Path(v).name for v in dlc_videos}
         config_path = None
         for candidate in sorted(
             Path(project_directory).glob(f"{project_name}-*-*/config.yaml")
@@ -2099,7 +2152,7 @@ class Model(SpyglassMixin, dj.Computed):
                 create_new_project(
                     project=project_name,
                     experimenter=sanitize_filename(project_name),
-                    videos=resolved_videos,
+                    videos=dlc_videos,
                     working_directory=project_directory,
                     copy_videos=True,
                     multianimal=False,

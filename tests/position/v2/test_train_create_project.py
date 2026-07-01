@@ -12,6 +12,39 @@ import pytest
 # ── Unit tests — no DLC, no DB ───────────────────────────────────────────────
 
 
+class TestEnsureMp4:
+    """Model._ensure_mp4 converts raw h264; other formats pass through."""
+
+    @pytest.fixture(autouse=True)
+    def _model(self, model):
+        self.model = model  # pylint: disable=attribute-defined-outside-init
+
+    def test_only_h264_is_converted(self, monkeypatch, tmp_path):
+        from spyglass.position.utils import general
+
+        calls = []
+
+        def fake_find_mp4(video_path, output_path, video_filename):
+            calls.append((str(video_path), str(output_path), video_filename))
+            return Path(output_path) / (Path(video_filename).stem + ".mp4")
+
+        monkeypatch.setattr(general, "find_mp4", fake_find_mp4)
+
+        out = str(tmp_path)
+        result = self.model._ensure_mp4(
+            ["/data/camA.mp4", "/data/camB.h264", "/data/camC.avi"], out
+        )
+
+        assert result[0] == "/data/camA.mp4"  # mp4 untouched
+        assert result[1] == str(Path(out) / "camB.mp4")  # h264 converted
+        assert result[2] == "/data/camC.avi"  # avi (DLC-readable) untouched
+        assert calls == [("/data", out, "camB.h264")]  # only h264 routed
+        # suffix match is case-insensitive
+        assert self.model._ensure_mp4(["/x/Y.H264"], out) == [
+            str(Path(out) / "Y.mp4")
+        ]
+
+
 class TestCreateProjectUnit:
     """Unit tests that mock DLC calls and DB look-ups."""
 
