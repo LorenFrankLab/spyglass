@@ -138,7 +138,7 @@ def test_edited_curation_round_trips(populated_sorting_with_curation):
 
 
 def test_pristine_view_round_trips_to_empty(populated_sorting_with_curation):
-    """A never-edited (root-curation) figure fetches as no curation."""
+    """A never-edited figure fetches empty and will not import by accident."""
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
 
     uri = FigPackCuration.build_curation_view(
@@ -146,18 +146,16 @@ def test_pristine_view_round_trips_to_empty(populated_sorting_with_curation):
     )
     # The root curation has no labels/merges, so the seeded state is empty.
     assert FigPackCuration.fetch_curation_from_uri(uri) == ({}, [])
+    with pytest.raises(ValueError, match="no edited labels or merge groups"):
+        FigPackCuration.save_curation_from_uri(
+            uri, populated_sorting_with_curation
+        )
 
 
-def test_fetch_from_uri_chains_into_save_manual_curation(
+def test_save_curation_from_uri_commits_browser_edits(
     populated_sorting_with_curation,
 ):
-    """The full FigPack return path: fetch a figure's edited annotations and
-    commit them as the next curation via ``save_manual_curation``.
-
-    Closes the loop between the two halves already tested separately
-    (``fetch_curation_from_uri`` reads annotations; ``save_manual_curation``
-    commits a payload): a browser edit becomes a committed child curation.
-    """
+    """The user workflow: browser edits import as a child curation."""
     from spyglass.spikesorting.v2._figpack_curation import (
         labels_and_merges_to_annotations,
     )
@@ -177,20 +175,20 @@ def test_fetch_from_uri_chains_into_save_manual_curation(
         json.dumps(labels_and_merges_to_annotations(edited_labels, []))
     )
 
-    # Return path: fetch the edited state, then commit it as the next curation.
+    # Return path: the helper reads the edited state and saves a child curation.
     labels, merge_groups = FigPackCuration.fetch_curation_from_uri(uri)
     assert labels == edited_labels
-    child = CurationV2.save_manual_curation(
-        {"sorting_id": root["sorting_id"]},
-        parent_curation_id=root["curation_id"],
-        labels=labels,
-        merge_groups=merge_groups,
-        curation_source="figpack",
-        description="curated in FigPack",
+    child = FigPackCuration.save_curation_from_uri(
+        uri,
+        root,
+        description="curator=alice; curated in FigPack",
     )
 
     assert child["curation_id"] != root["curation_id"]
     assert (CurationV2 & child).fetch1("curation_source") == "figpack"
+    assert (CurationV2 & child).fetch1("description") == (
+        "curator=alice; curated in FigPack"
+    )
     stored = {
         (int(r["unit_id"]), r["curation_label"])
         for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
@@ -327,6 +325,14 @@ def test_displayed_unit_properties_public_but_metrics_not_public(dj_conn):
     assert "displayed_unit_properties" in build_params
     assert "metrics" not in selection_params
     assert "metrics" not in build_params
+    assert (
+        "parent_curation_key"
+        in inspect.signature(FigPackCuration.save_curation_from_uri).parameters
+    )
+    assert (
+        "allow_empty"
+        in inspect.signature(FigPackCuration.save_curation_from_uri).parameters
+    )
 
 
 def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):

@@ -1072,8 +1072,8 @@ cross-referenced here, not duplicated.
   helpers are folded into `CurationEvaluation` while the stored per-pair
   `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
   the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
-  verification families. `FigURLCuration` remains v1-only until the FigPack
-  phase lands — see "Removed or replaced v1 features" below.
+  verification families. v2 uses `FigPackCuration` for browser curation views;
+  legacy `FigURLCuration` remains v1-only.
 
 **Schema-defaults flips (programmatic users only)**
 
@@ -1148,8 +1148,8 @@ cross-referenced here, not duplicated.
   ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
   Waveform re-extraction via a separate `WaveformParameters` row is not
   preserved; v2 reads waveforms from the `SortingAnalyzer`.
-- `FigURLCuration` chain remains v1-only while the v2 FigPack curation module
-  is pending
+- `FigURLCuration` chain remains v1-only for legacy v1 rows; v2 uses
+  `FigPackCuration` for offline/hosted browser curation views
   ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
 - `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
   per-pair quantitative metrics; use `CurationEvaluation` for the ported

@@ -647,7 +647,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
     definition = """
     -> FigPackCurationSelection
     ---
-    figpack_uri: varchar(512)
+    figpack_uri: varchar(1000)
     figpack_version: varchar(32)
     figpack_spike_sorting_version: varchar(32)
     spikeinterface_version: varchar(32)
@@ -781,4 +781,60 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         """
         return curation_annotations_to_labels_and_merges(
             _load_annotations_json(uri)
+        )
+
+    @classmethod
+    def save_curation_from_uri(
+        cls,
+        uri: str,
+        parent_curation_key: dict,
+        *,
+        merge_action: str = "preview",
+        description: str = "curated in FigPack",
+        reuse_existing: bool = False,
+        allow_empty: bool = False,
+        allow_unknown_unit_ids: bool = False,
+        allow_custom_labels: bool = False,
+        label_policy: str = "inherit",
+    ) -> dict:
+        """Import edited FigPack annotations as a child ``CurationV2`` row.
+
+        ``parent_curation_key`` is the curation the browser view was built from
+        (``{"sorting_id": ..., "curation_id": ...}``). Requiring that parent
+        key keeps the import path out of the root-curation default, so a team can
+        safely save several reviewers' edits as sibling child curations and
+        choose which one to commit or merge.
+
+        A figure with no edited labels or merge groups raises by default instead
+        of creating an empty child curation; pass ``allow_empty=True`` to record
+        an explicit "reviewed, no changes" child.
+        """
+        try:
+            sorting_id = parent_curation_key["sorting_id"]
+            parent_curation_id = parent_curation_key["curation_id"]
+        except KeyError as exc:
+            raise KeyError(
+                "FigPackCuration.save_curation_from_uri requires "
+                "parent_curation_key with 'sorting_id' and 'curation_id'."
+            ) from exc
+
+        labels, merge_groups = cls.fetch_curation_from_uri(uri)
+        if not labels and not merge_groups and not allow_empty:
+            raise ValueError(
+                "FigPackCuration.save_curation_from_uri found no edited "
+                "labels or merge groups. Pass allow_empty=True to record an "
+                "explicit no-change review."
+            )
+        return CurationV2.save_manual_curation(
+            {"sorting_id": sorting_id},
+            parent_curation_id=parent_curation_id,
+            labels=labels,
+            merge_groups=merge_groups,
+            merge_action=merge_action,
+            curation_source="figpack",
+            description=description,
+            reuse_existing=reuse_existing,
+            allow_unknown_unit_ids=allow_unknown_unit_ids,
+            allow_custom_labels=allow_custom_labels,
+            label_policy=label_policy,
         )

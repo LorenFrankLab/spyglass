@@ -652,8 +652,10 @@ child = CurationV2.save_manual_curation(
 
 This is the same labels / merge-groups payload that
 `FigPackCuration.fetch_curation_from_uri(uri)` extracts from a FigPack bundle
-edited in the browser, so a browser round-trip and a hand-built dict both reach
-`CurationV2` through this one entry point.
+edited in the browser. FigPack users normally call
+`FigPackCuration.save_curation_from_uri(uri, parent_curation_key)`, which wraps
+that extraction and writes the child `CurationV2` row with `curation_source`
+set to `"figpack"`.
 
 Notes:
 
@@ -1338,9 +1340,15 @@ default unit-table behavior, while explicit unavailable names raise instead of
 being silently dropped.
 Edits to a local bundle are not written back automatically —
 `FigPackCuration.fetch_curation_from_uri(uri)` reads the edited labels / merge
-groups out of it, and `CurationV2.save_manual_curation` ingests them into the
-next curation (see
+groups out of it, and `FigPackCuration.save_curation_from_uri(uri,
+parent_curation_key)` ingests them into a child curation (see
 [Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
+For team review, give each curator a bundle and import each edited URI as a
+sibling child of the same parent, using `description` for reviewer/round notes;
+then compare summaries and commit the chosen child or proposed merge. A
+never-edited bundle reads back empty and is not imported by default; pass
+`allow_empty=True` only when you intentionally want a "reviewed, no changes"
+child curation.
 The lower-level `FigPackCurationSelection.insert_selection(..., upload=True)`
 can instead publish a hosted figpack.org figure (needs `FIGPACK_API_KEY`, or
 `ephemeral=True` for a temporary one); hosted publish is for sharing a view of

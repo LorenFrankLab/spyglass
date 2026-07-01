@@ -179,10 +179,12 @@ CurationV2.summarize_curation(root_key)
 # Offline, the view is a self-contained static bundle on disk — open `index.html`
 # from `figpack_uri` in a browser to inspect the sort. Edits made to a static
 # bundle in the browser are **not** written back automatically. To bring labels
-# and merges from a FigPack figure into a Spyglass curation, read them with
-# `FigPackCuration.fetch_curation_from_uri(uri)` and commit them with
-# `CurationV2.save_manual_curation(...)` (the round-trip cell below). A
-# never-edited figure reads back empty. For custom unit-table columns, call
+# and merges from a FigPack figure into Spyglass, use
+# `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` (the
+# round-trip cell below). A never-edited figure reads back empty and is not
+# imported unless you pass `allow_empty=True`. For team review, import each
+# curator's edited URI as a sibling child curation and put reviewer/round notes
+# in `description`. For custom unit-table columns, call
 # `FigPackCuration.build_curation_view(root_key,
 # displayed_unit_properties=["x", "y"])`; explicit unavailable names raise.
 
@@ -209,9 +211,9 @@ else:
         "'spikesorting-v2-curation' extra to publish a browser curation view."
     )
 
-# Round-trip: read the figure's annotation state, then commit it as the next
-# curation. After labeling/merging in the browser, re-run this to import the
-# edits (here, on a fresh sort, the figure reads back empty).
+# Round-trip: after labeling/merging in the browser, re-run this to import the
+# edits as the next child curation (here, on a fresh sort, the figure reads
+# back empty).
 
 if figpack_summary is not None:
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
@@ -220,19 +222,18 @@ if figpack_summary is not None:
         figpack_summary["figpack_uri"]
     )
     print("from figure — labels:", labels, "| merge groups:", merge_groups)
-    # With real edits, commit them as a CHILD of the root curation (pass the
-    # root's root_curation_id as the parent — the default parent_curation_id=-1
-    # would try to re-create the root and raise). `merge_action="commit"`
-    # applies the browser's merges into the child's unit set; use `"preview"`
-    # instead to store them as proposals you review in section 3 first.
-    # CurationV2.save_manual_curation(
-    #     {"sorting_id": figpack_summary["sorting_id"]},
-    #     parent_curation_id=figpack_summary["root_curation_id"],
-    #     labels=labels,
-    #     merge_groups=merge_groups,
+    # With real edits, save them as a CHILD of the root curation. The explicit
+    # parent key avoids the root-curation default. `merge_action="commit"`
+    # applies browser merges into the child's unit set; use `"preview"` to store
+    # them as proposals you review in section 3 first.
+    # FigPackCuration.save_curation_from_uri(
+    #     figpack_summary["figpack_uri"],
+    #     {
+    #         "sorting_id": figpack_summary["sorting_id"],
+    #         "curation_id": figpack_summary["root_curation_id"],
+    #     },
     #     merge_action="commit",
-    #     curation_source="figpack",
-    #     description="curated in FigPack",
+    #     description="curator=alice; round=1",
     # )
 
 # ### 3a. Evaluate the root curation (pass 1)

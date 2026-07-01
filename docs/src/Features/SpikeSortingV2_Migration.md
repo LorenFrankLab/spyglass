@@ -238,7 +238,7 @@ surface that stays v1-only is the stored per-pair burst metrics
   and `FigPackCuration`, the v2 replacement for v1's FigURL curation views. The
   default path builds a self-contained **offline** bundle (label / merge units
   in a browser) whose edits round-trip back via
-  `FigPackCuration.fetch_curation_from_uri` → `CurationV2.save_manual_curation`;
+  `FigPackCuration.save_curation_from_uri`;
   `insert_selection(..., upload=True)` can instead publish a hosted figpack.org
   figure (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
   `spikesorting-v2-curation` extra. v1's `metrics_figurl` display option maps
