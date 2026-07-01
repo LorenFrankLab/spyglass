@@ -357,11 +357,30 @@ def test_detect_artifacts_raises_on_single_channel_zscore_only():
     group it is identically zero, so a z-score-only config would silently
     detect nothing. Raise instead of returning a misleadingly-clean window."""
     from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
-    from spyglass.spikesorting.v2.exceptions import SingleChannelZScoreError
+    from spyglass.spikesorting.v2.exceptions import (
+        InsufficientZScoreChannelsError,
+    )
 
     rec = _rec(np.zeros((3000, 1), dtype="float32"))
     params = _artifact_params(amplitude_threshold_uv=None, zscore_threshold=3.0)
-    with pytest.raises(SingleChannelZScoreError):
+    with pytest.raises(InsufficientZScoreChannelsError):
+        detect_artifacts(rec, params)
+
+
+def test_detect_artifacts_raises_on_two_channel_zscore_only():
+    """The across-channel z-score is also degenerate on TWO channels: for any
+    two distinct values it is identically +/-1 regardless of amplitude, so a
+    z-score-only config on a stereotrode flags every frame (threshold < 1) or
+    none (threshold > 1) -- never amplitude-sensitively. Raise, same as the
+    single-channel case."""
+    from spyglass.spikesorting.v2._artifact_intervals import detect_artifacts
+    from spyglass.spikesorting.v2.exceptions import (
+        InsufficientZScoreChannelsError,
+    )
+
+    rec = _rec(np.zeros((3000, 2), dtype="float32"))
+    params = _artifact_params(amplitude_threshold_uv=None, zscore_threshold=3.0)
+    with pytest.raises(InsufficientZScoreChannelsError):
         detect_artifacts(rec, params)
 
 

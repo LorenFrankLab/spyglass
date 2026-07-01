@@ -282,28 +282,32 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         f"min_length_s={validated.min_length_s}."
     )
 
-    # Degenerate-configuration guards. The z-score detector is
-    # cross-channel WITHIN a frame, so on a single-channel group it is
-    # identically zero -- a z-score-only config would silently flag nothing.
+    # Degenerate-configuration guards. The z-score detector standardizes
+    # ACROSS channels within a frame, so it is amplitude-sensitive only with
+    # >= 3 channels: on 1 channel it is identically zero, and on 2 channels it
+    # is a constant +/-1 for any two distinct values (independent of
+    # amplitude). Either way a z-score-only config flags every frame or none,
+    # never by amplitude.
     n_channels = recording.get_num_channels()
-    if validated.zscore_threshold is not None and n_channels < 2:
+    if validated.zscore_threshold is not None and n_channels < 3:
         if validated.amplitude_threshold_uv is None:
             from spyglass.spikesorting.v2.exceptions import (
-                SingleChannelZScoreError,
+                InsufficientZScoreChannelsError,
             )
 
-            raise SingleChannelZScoreError(
+            raise InsufficientZScoreChannelsError(
                 "ArtifactDetection: zscore_threshold is the only detector on a "
-                f"{n_channels}-channel recording{context}, but the z-score is "
-                "computed ACROSS channels within each frame -- with <2 "
-                "channels it is identically zero, so NO artifacts would be "
-                "detected. Use amplitude_threshold_uv for single-channel sort "
+                f"{n_channels}-channel recording{context}, but the cross-channel "
+                "z-score is amplitude-sensitive only with >= 3 channels (on 1 "
+                "channel it is identically zero; on 2 it is a constant +/-1 for "
+                "any two distinct values), so it would not detect artifacts by "
+                "amplitude. Use amplitude_threshold_uv for 1-2 channel sort "
                 "groups."
             )
         logger.warning(
             "ArtifactDetection: zscore_threshold is inert on a "
             f"{n_channels}-channel recording{context} (the cross-channel "
-            "z-score is identically zero on one channel); only "
+            "z-score is amplitude-insensitive with < 3 channels); only "
             "amplitude_threshold_uv will fire."
         )
     # proportion_above_threshold rounds UP (ceil) to a channel count, so on a

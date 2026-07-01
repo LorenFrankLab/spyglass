@@ -86,17 +86,19 @@ class ArtifactFractionExceededError(RuntimeError):
     """
 
 
-class SingleChannelZScoreError(ValueError):
-    """Raise when z-score artifact detection is configured on one channel.
+class InsufficientZScoreChannelsError(ValueError):
+    """Raise when z-score artifact detection has too few channels to be useful.
 
-    ``ArtifactDetection``'s z-score detector is computed ACROSS channels
-    within each frame, so on a single-channel sort group it is identically
-    zero and would silently flag nothing. Raised when ``zscore_threshold`` is
-    the only detector on a <2-channel recording (a guaranteed no-op). Message
-    names the channel count and points the caller at ``amplitude_threshold_uv``
-    for single-channel groups. When ``amplitude_threshold_uv`` is also set the
-    z-score is merely inert (the amplitude detector still fires), so that case
-    warns instead of raising.
+    ``ArtifactDetection``'s z-score detector standardizes ACROSS channels
+    within each frame, so it is amplitude-sensitive only with >= 3 channels:
+    on 1 channel it is identically zero, and on 2 channels it is a constant
+    +/-1 for any two distinct values (independent of amplitude). Raised when
+    ``zscore_threshold`` is the only detector on a <3-channel recording (a
+    guaranteed no-op or amplitude-blind detector). Message names the channel
+    count and points the caller at ``amplitude_threshold_uv`` for 1-2 channel
+    groups. When ``amplitude_threshold_uv`` is also set the z-score is merely
+    inert (the amplitude detector still fires), so that case warns instead of
+    raising.
     """
 
 
