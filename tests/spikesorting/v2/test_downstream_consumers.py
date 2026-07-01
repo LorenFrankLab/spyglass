@@ -569,6 +569,124 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_labeled_curation_fetch_keeps_accept_drops_noise(
+    planted_two_unit_sort, monkeypatch
+):
+    """The production label-filter path on a GENUINELY labeled curation.
+
+    A curation with one ``accept`` and one ``noise`` unit, exported downstream:
+    ``include_labels=['accept']`` keeps ONLY the accepted unit;
+    ``exclude_labels=['noise']`` drops the noise unit and keeps the rest. This
+    is the labeled complement to
+    ``test_all_unlabeled_curation_include_label_filters`` (which covers the
+    no-label-column path). Uses ``planted_two_unit_sort`` because the smoke sort
+    yields only one unit -- two distinctly-labeled units are needed to tell the
+    include/exclude filters apart.
+
+    ``fetch_spike_data``'s column-present filter is guarded off under pytest (the
+    load-bearing ``not test_mode`` at ``analysis/v1/group.py`` -- it exists so a
+    default-exclusion filter can't empty the SHARED base-env fixtures). This test
+    owns its group + curation, so it locally flips ``test_mode`` off to exercise
+    the real filter without touching those fixtures.
+    """
+    import spyglass.spikesorting.analysis.v1.group as group_mod
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    # Run the column-present label filter this test relies on (isolated to this
+    # test's own group, so it cannot empty another test's fixtures).
+    monkeypatch.setattr(group_mod, "test_mode", False)
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    assert len(unit_ids) >= 2, "planted sort must yield >=2 units"
+    accept_id, noise_id = unit_ids[0], unit_ids[1]
+
+    # Clear + root, then a labeled child (the production curate-the-root path).
+    root_pk, _ = _make_v2_root_curation(sorting_key)
+    child = CurationV2.save_manual_curation(
+        sorting_key,
+        parent_curation_id=root_pk["curation_id"],
+        labels={accept_id: ["accept"], noise_id: ["noise"]},
+        curation_source="figpack",
+    )
+    merge_id = (SpikeSortingOutput.CurationV2 & child).fetch1("merge_id")
+
+    UnitSelectionParams().insert_default()
+    UnitSelectionParams().insert1(
+        {
+            "unit_filter_params_name": "lbl_include_accept",
+            "include_labels": ["accept"],
+            "exclude_labels": [],
+        },
+        skip_duplicates=True,
+    )
+    UnitSelectionParams().insert1(
+        {
+            "unit_filter_params_name": "lbl_exclude_noise",
+            "include_labels": [],
+            "exclude_labels": ["noise"],
+        },
+        skip_duplicates=True,
+    )
+    recording_id = (SortingSelection.RecordingSource & sorting_key).fetch1(
+        "recording_id"
+    )
+    nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
+
+    def _n_units(filter_name):
+        gname = f"lbl_{filter_name}"
+        existing = SortedSpikesGroup & {
+            "sorted_spikes_group_name": gname,
+            "nwb_file_name": nwb,
+        }
+        if existing:
+            existing.super_delete(warn=False)
+        SortedSpikesGroup().create_group(
+            group_name=gname,
+            nwb_file_name=nwb,
+            unit_filter_params_name=filter_name,
+            keys=[{"spikesorting_merge_id": merge_id}],
+        )
+        return len(
+            SortedSpikesGroup.fetch_spike_data(
+                {"sorted_spikes_group_name": gname, "nwb_file_name": nwb}
+            )
+        )
+
+    try:
+        n_total = _n_units("all_units")
+        assert n_total >= 2, "baseline curation must contribute >=2 units"
+        # include=accept -> ONLY the accept-labeled unit.
+        assert _n_units("lbl_include_accept") == 1
+        # exclude=noise -> everything except the noise-labeled unit.
+        assert _n_units("lbl_exclude_noise") == n_total - 1
+    finally:
+        for filter_name in (
+            "all_units",
+            "lbl_include_accept",
+            "lbl_exclude_noise",
+        ):
+            grp = SortedSpikesGroup & {
+                "sorted_spikes_group_name": f"lbl_{filter_name}",
+                "nwb_file_name": nwb,
+            }
+            if grp:
+                grp.super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_downstream_consumer_reads_applied_merge_unit_set(
     planted_two_unit_sort,
 ):

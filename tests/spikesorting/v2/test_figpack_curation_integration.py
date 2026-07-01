@@ -103,6 +103,56 @@ def test_pristine_view_round_trips_to_empty(populated_sorting_with_curation):
     assert FigPackCuration.fetch_curation_from_uri(uri) == ({}, [])
 
 
+def test_fetch_from_uri_chains_into_save_manual_curation(
+    populated_sorting_with_curation,
+):
+    """The full FigPack return path: fetch a figure's edited annotations and
+    commit them as the next curation via ``save_manual_curation``.
+
+    Closes the loop between the two halves already tested separately
+    (``fetch_curation_from_uri`` reads annotations; ``save_manual_curation``
+    commits a payload): a browser edit becomes a committed child curation.
+    """
+    from spyglass.spikesorting.v2._figpack_curation import (
+        labels_and_merges_to_annotations,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    root = populated_sorting_with_curation
+    unit_ids = sorted(int(u) for u in (CurationV2.Unit & root).fetch("unit_id"))
+    if not unit_ids:
+        pytest.skip("need >=1 curated unit to label")
+    labeled = unit_ids[0]
+
+    uri = FigPackCuration.build_curation_view(root, upload=False)
+    # Simulate a curator labeling one unit 'noise' in the browser and saving.
+    edited_labels = {labeled: ["noise"]}
+    (Path(uri) / "annotations.json").write_text(
+        json.dumps(labels_and_merges_to_annotations(edited_labels, []))
+    )
+
+    # Return path: fetch the edited state, then commit it as the next curation.
+    labels, merge_groups = FigPackCuration.fetch_curation_from_uri(uri)
+    assert labels == edited_labels
+    child = CurationV2.save_manual_curation(
+        {"sorting_id": root["sorting_id"]},
+        parent_curation_id=root["curation_id"],
+        labels=labels,
+        merge_groups=merge_groups,
+        curation_source="figpack",
+        description="curated in FigPack",
+    )
+
+    assert child["curation_id"] != root["curation_id"]
+    assert (CurationV2 & child).fetch1("curation_source") == "figpack"
+    stored = {
+        (int(r["unit_id"]), r["curation_label"])
+        for r in (CurationV2.UnitLabel & child).fetch(as_dict=True)
+    }
+    assert stored == {(labeled, "noise")}
+
+
 def test_upload_without_api_key_raises(monkeypatch):
     """upload=True without FIGPACK_API_KEY raises a clear, typed error."""
     from spyglass.spikesorting.v2.exceptions import FigPackUploadError
