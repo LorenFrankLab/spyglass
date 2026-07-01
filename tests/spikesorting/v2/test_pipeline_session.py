@@ -582,13 +582,13 @@ def test_session_runner_preflight_false_skips_session_preflight(monkeypatch):
         team_name=_TEAM,
         pipeline_preset=_PRESET,
         preflight=False,
-        description="batch run",
+        curation_description="batch run",
         require_units=True,
     )
     assert [c["sort_group_id"] for c in calls] == [0, 1]
     assert all(c["preflight"] is False for c in calls)
     # Per-call kwargs are forwarded to each single-group run unchanged.
-    assert all(c["description"] == "batch run" for c in calls)
+    assert all(c["curation_description"] == "batch run" for c in calls)
     assert all(c["require_units"] is True for c in calls)
     assert all(c["interval_list_name"] == _INTERVAL for c in calls)
     assert all(c["pipeline_preset"] == _PRESET for c in calls)

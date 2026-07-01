@@ -168,7 +168,7 @@ def _run_ms5(session):
         interval_list_name="raw data valid times",
         team_name=_TEAM,
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
-        description="v2 waveform ms5",
+        curation_description="v2 waveform ms5",
     )
 
 

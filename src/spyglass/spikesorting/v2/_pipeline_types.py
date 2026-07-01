@@ -49,11 +49,11 @@ class RunV2PipelineInputs(TypedDict, total=False):
     concat_session_group_owner: str
     concat_session_group_name: str
     pipeline_preset: str
-    description: str
+    curation_description: str
     require_units: bool
     auto_curate: bool
     preflight: bool
-    figpack: bool
+    build_figpack_view: bool
     figpack_label_options: list[str] | None
 
 
@@ -72,7 +72,7 @@ class RunV2PipelineSessionInputs(
     """Keyword-argument bundle accepted by ``run_v2_pipeline_session``."""
 
     sort_group_ids: list[int]
-    description: str
+    curation_description: str
     require_units: bool
     auto_curate: bool
     preflight: bool
@@ -97,7 +97,7 @@ class PipelineStageSeconds(TypedDict):
     concat_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
-    # Present only when ``run_v2_pipeline(figpack=True)``.
+    # Present only when ``run_v2_pipeline(build_figpack_view=True)``.
     figpack: NotRequired[float]
 
 
@@ -140,10 +140,11 @@ class _RunV2SummaryBase(TypedDict):
     auto_curation_id: NotRequired[int]
     auto_merge_id: NotRequired[UUID]
     auto_curation_status: NotRequired[StageStatus]
-    # FigPack keys, present only when ``run_v2_pipeline(figpack=True)``: the
-    # published curation-view URI (a local bundle path offline) and its stage
-    # status. ``figpack_uri`` is absent and ``figpack_status`` is ``"skipped"``
-    # when the sort found zero units (no analyzer to summarize).
+    # FigPack keys, present only when
+    # ``run_v2_pipeline(build_figpack_view=True)``: the published curation-view
+    # URI (a local bundle path offline) and its stage status. ``figpack_uri`` is
+    # absent and ``figpack_status`` is ``"skipped"`` when the sort found zero
+    # units (no analyzer to summarize).
     figpack_uri: NotRequired[str]
     figpack_status: NotRequired[StageStatus]
 

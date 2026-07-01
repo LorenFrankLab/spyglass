@@ -76,7 +76,7 @@ def _run_pipeline(session, pipeline_preset):
         interval_list_name="raw data valid times",
         team_name=_TEAM,
         pipeline_preset=pipeline_preset,
-        description="v2 export test",
+        curation_description="v2 export test",
     )
 
 

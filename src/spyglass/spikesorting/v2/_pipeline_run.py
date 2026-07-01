@@ -100,14 +100,14 @@ def run_v2_pipeline(
     interval_list_name: "str | None" = None,
     team_name: "str | None" = None,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
-    description: str = "",
+    curation_description: str = "",
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
     *,
     concat_session_group_owner: "str | None" = None,
     concat_session_group_name: "str | None" = None,
-    figpack: bool = False,
+    build_figpack_view: bool = False,
     figpack_label_options: "list[str] | None" = None,
 ) -> RunV2PipelineSummary:
     """End-to-end sort in one call: select + populate every stage, then curate.
@@ -189,7 +189,7 @@ def run_v2_pipeline(
         Call ``describe_pipeline_presets()`` for a table of what each one does
         (sorter, parameter rows, intended use, and threshold units), or
         ``list_pipeline_presets()`` for just the names.
-    description
+    curation_description
         Free-text description passed to ``CurationV2.insert_curation``.
     require_units
         If False (default), a sort that finds zero units still produces
@@ -229,12 +229,12 @@ def run_v2_pipeline(
 
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
-    figpack
+    build_figpack_view
         If True, additionally publish an offline FigPack manual-curation view of
         the run's ROOT curation and add its local bundle URI to the summary
         (``figpack_uri``) along with a ``figpack`` stage. Default ``False``.
         Requires the optional FigPack packages (the ``spikesorting-v2-curation``
-        extra); ``figpack=True`` without them fails fast with
+        extra); ``build_figpack_view=True`` without them fails fast with
         ``PipelineInputError`` before any populate. A zero-unit sort has no
         analyzer to summarize, so the view is skipped (``figpack_status`` is
         ``"skipped"`` and ``figpack_uri`` is absent) rather than failing the run.
@@ -242,7 +242,8 @@ def run_v2_pipeline(
     figpack_label_options
         Curation label palette (in display order) for the FigPack view; passed
         through to ``FigPackCurationSelection``. ``None`` (default) uses
-        ``["accept", "mua", "noise"]``. Ignored when ``figpack=False``.
+        ``["accept", "mua", "noise"]``. Ignored when
+        ``build_figpack_view=False``.
 
     Returns
     -------
@@ -274,7 +275,7 @@ def run_v2_pipeline(
         Concat mode adds instead (no artifact stage):
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
-        ``figpack=True`` adds (unless the sort found zero units):
+        ``build_figpack_view=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
         For downstream science key off ``analysis_merge_id`` (the curated,
@@ -424,7 +425,7 @@ def run_v2_pipeline(
     # Fail fast (still DB-free, before the table imports) if a FigPack view was
     # requested without the optional packages installed -- otherwise the missing
     # install would surface only as an opaque import error after a full sort.
-    if figpack:
+    if build_figpack_view:
         import importlib.util
 
         from spyglass.spikesorting.v2._figpack_curation import (
@@ -436,8 +437,8 @@ def run_v2_pipeline(
             or importlib.util.find_spec("figpack_spike_sorting") is None
         ):
             raise PipelineInputError(
-                "run_v2_pipeline: figpack=True but the FigPack packages are not "
-                f"installed. {FIGPACK_INSTALL_HINT}"
+                "run_v2_pipeline: build_figpack_view=True but the FigPack "
+                f"packages are not installed. {FIGPACK_INSTALL_HINT}"
             )
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -721,7 +722,7 @@ def run_v2_pipeline(
             labels={},
             parent_curation_id=-1,
             description=(
-                description
+                curation_description
                 or f"run_v2_pipeline pipeline_preset={pipeline_preset}"
             ),
             reuse_existing=True,
@@ -825,15 +826,15 @@ def run_v2_pipeline(
     # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes
     # raw-namespace curations only -- an auto-curated child lives in the
     # curation_evaluation namespace) and surface its local URI. A zero-unit sort
-    # has no analyzer to summarize, so figpack is skipped with a warning rather
+    # has no analyzer to summarize, so the FigPack view is skipped with a warning rather
     # than failing an otherwise-successful empty sort. These keys are added only
     # when opted in (NotRequired), so a default run's summary is unchanged.
-    if figpack:
+    if build_figpack_view:
         if n_units == 0:
             figpack_skip_warning = (
-                "run_v2_pipeline: figpack=True but the sort found zero units "
-                f"(sorting_id={sorting_key['sorting_id']}); skipping the FigPack "
-                "view -- there is no analyzer to summarize."
+                "run_v2_pipeline: build_figpack_view=True but the sort found "
+                f"zero units (sorting_id={sorting_key['sorting_id']}); "
+                "skipping the FigPack view -- there is no analyzer to summarize."
             )
             logger.warning(figpack_skip_warning)
             warnings_list.append(figpack_skip_warning)
@@ -890,7 +891,7 @@ def run_v2_pipeline_session(
     team_name: str,
     pipeline_preset: "str | None" = None,
     sort_group_ids: "list[int] | None" = None,
-    description: str = "",
+    curation_description: str = "",
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
@@ -930,7 +931,7 @@ def run_v2_pipeline_session(
 
     Parameters
     ----------
-    nwb_file_name, interval_list_name, team_name, description, require_units, auto_curate
+    nwb_file_name, interval_list_name, team_name, curation_description, require_units, auto_curate
         As in :func:`run_v2_pipeline`; applied to every group.
     pipeline_preset
         Required pipeline-preset name (no default). See
@@ -1063,7 +1064,7 @@ def run_v2_pipeline_session(
                 interval_list_name=interval_list_name,
                 team_name=team_name,
                 pipeline_preset=pipeline_preset,
-                description=description,
+                curation_description=curation_description,
                 require_units=require_units,
                 auto_curate=auto_curate,
                 preflight=False,
@@ -1165,7 +1166,9 @@ def run_v2_pipeline_session(
 
 
 def run_v2_unit_match(
-    session_group_owner: "str | UnitMatchPlan",
+    plan: "UnitMatchPlan | None" = None,
+    *,
+    session_group_owner: "str | None" = None,
     session_group_name: "str | None" = None,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
@@ -1176,10 +1179,11 @@ def run_v2_unit_match(
 
     - ``run_v2_unit_match(plan)`` -- a :class:`UnitMatchPlan` from
       :func:`plan_v2_unit_match` (the recommended plan-then-run path; the plan
-      already pinned one curation per member via a strategy). A plan that could
-      not resolve every member (``plan.ok is False``) raises here.
-    - ``run_v2_unit_match(owner, name, matcher_params_name=..., curation_choices=
-      {...})`` -- the explicit form, for power users / back-compat.
+      already pinned one curation per member via a curation strategy). A plan
+      that could not resolve every member (``plan.ok is False``) raises here.
+    - ``run_v2_unit_match(session_group_owner=..., session_group_name=...,
+      matcher_params_name=..., curation_choices={...})`` -- the explicit form,
+      for power users.
 
     Chains the cross-session unit-matching stages into one call:
     ``UnitMatchSelection.insert_selection`` -> ``UnitMatch`` (pairwise matches)
@@ -1190,13 +1194,16 @@ def run_v2_unit_match(
     auto-picks a "latest" curation (which would make the match irreproducible
     the moment a source session gains a new curation). Build it from
     :func:`describe_unit_match_choices`, or use the plan form (recommended):
-    :func:`plan_v2_unit_match` pins the curations for you by a named strategy and
-    returns the ``UnitMatchPlan`` you pass here.
+    :func:`plan_v2_unit_match` pins the curations for you by a named curation
+    strategy and returns the ``UnitMatchPlan`` you pass here.
 
     Parameters
     ----------
-    session_group_owner, session_group_name : str
-        Identify the ``SessionGroup`` whose members are matched.
+    plan : UnitMatchPlan, optional
+        Reviewable plan returned by :func:`plan_v2_unit_match`. Recommended.
+    session_group_owner, session_group_name : str, optional
+        Identify the ``SessionGroup`` whose members are matched in the explicit
+        form.
     matcher_params_name : str
         ``MatcherParameters`` row to use. Default ``"unitmatch_default"`` (the
         ``UnitMatchPy`` backend; ``MatcherParameters.insert_default()`` seeds it).
@@ -1233,17 +1240,23 @@ def run_v2_unit_match(
     from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Accept a UnitMatchPlan (from plan_v2_unit_match) OR the explicit
-    # (owner, name, ..., curation_choices) form. Unwrap a plan into the explicit
-    # inputs; a plan that could not pin a curation for every member (not ok)
-    # raises here rather than running a partial match.
-    if isinstance(session_group_owner, UnitMatchPlan):
-        plan = session_group_owner
+    # Accept a UnitMatchPlan (from plan_v2_unit_match) OR the explicit keyword
+    # form. Unwrap a plan into the explicit inputs; a plan that could not pin a
+    # curation for every member (not ok) raises here rather than running a
+    # partial match.
+    if plan is not None:
+        if not isinstance(plan, UnitMatchPlan):
+            raise PipelineInputError(
+                "run_v2_unit_match: plan must be a UnitMatchPlan from "
+                "plan_v2_unit_match, or omit plan and pass "
+                "session_group_owner= and session_group_name=."
+            )
         # A plan already carries the group + matcher + choices, so the explicit
         # args must not ALSO be given -- otherwise one would be silently
         # overridden. (matcher_params_name at its default is treated as unset.)
         if (
-            session_group_name is not None
+            session_group_owner is not None
+            or session_group_name is not None
             or curation_choices is not None
             or matcher_params_name != "unitmatch_default"
         ):
@@ -1256,17 +1269,19 @@ def run_v2_unit_match(
         if not plan.ok:
             raise PipelineInputError(
                 "run_v2_unit_match: the plan could not pin a curation for "
-                "every member (strategy="
-                f"{plan.strategy!r}):\n  - " + "\n  - ".join(plan.errors)
+                "every member (curation_strategy="
+                f"{plan.curation_strategy!r}):\n  - "
+                + "\n  - ".join(plan.errors)
             )
         session_group_owner = plan.session_group_owner
         session_group_name = plan.session_group_name
         matcher_params_name = plan.matcher_params_name
         curation_choices = plan.curation_choices
-    elif session_group_name is None:
+    elif session_group_owner is None or session_group_name is None:
         raise PipelineInputError(
-            "run_v2_unit_match: session_group_name is required in the explicit "
-            "form (or pass a UnitMatchPlan from plan_v2_unit_match)."
+            "run_v2_unit_match: session_group_owner and session_group_name "
+            "are required in the explicit form (or pass a UnitMatchPlan "
+            "from plan_v2_unit_match)."
         )
 
     # curation_choices is REQUIRED and explicit: an implicit "latest curation"
@@ -1370,7 +1385,7 @@ def plan_v2_unit_match(
     session_group_owner: str,
     session_group_name: str,
     *,
-    strategy: str,
+    curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
 ) -> "UnitMatchPlan":
@@ -1378,11 +1393,13 @@ def plan_v2_unit_match(
 
     The recommended plan-then-run entry point for cross-session matching: it
     lists each member's committed curations (via
-    :func:`describe_unit_match_choices`) and applies the named ``strategy`` to
-    pin exactly one per member, returning a ``UnitMatchPlan`` you inspect BEFORE
-    the expensive match::
+    :func:`describe_unit_match_choices`) and applies the named
+    ``curation_strategy`` to pin exactly one per member, returning a
+    ``UnitMatchPlan`` you inspect BEFORE the expensive match::
 
-        plan = plan_v2_unit_match(owner, name, strategy="single_leaf_curated")
+        plan = plan_v2_unit_match(
+            owner, name, curation_strategy="single_leaf_curated"
+        )
         display(plan.as_dataframe())   # one row per member
         summary = run_v2_unit_match(plan)
 
@@ -1390,7 +1407,7 @@ def plan_v2_unit_match(
     ----------
     session_group_owner, session_group_name : str
         Identify the ``SessionGroup`` whose members are matched.
-    strategy : str
+    curation_strategy : str
         REQUIRED (no default -- your declaration of intent, so a match never
         silently pins a "latest" curation):
 
@@ -1400,13 +1417,13 @@ def plan_v2_unit_match(
           with ``run_v2_pipeline(auto_curate=True)`` first).
         - ``"root"`` -- each member's root curation (UNCURATED; warns loudly).
         - ``"manual"`` -- pin ``curation_choices`` explicitly (required with this
-          strategy), validated against each member's committed curations.
+          curation strategy), validated against each member's committed curations.
     matcher_params_name : str, optional
         ``MatcherParameters`` row carried onto the plan (default
         ``"unitmatch_default"``).
     curation_choices : dict, optional
-        Only for ``strategy="manual"``: ``{member_index: {"sorting_id": ...,
-        "curation_id": ...}}``.
+        Only for ``curation_strategy="manual"``:
+        ``{member_index: {"sorting_id": ..., "curation_id": ...}}``.
 
     Returns
     -------
@@ -1426,7 +1443,7 @@ def plan_v2_unit_match(
         session_group_owner=session_group_owner,
         session_group_name=session_group_name,
         matcher_params_name=matcher_params_name,
-        strategy=strategy,
+        curation_strategy=curation_strategy,
         members=members,
         manual_choices=curation_choices,
     )

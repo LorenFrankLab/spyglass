@@ -6,7 +6,7 @@ end-to-end single-session sort without writing the per-stage
 insert_selection / populate boilerplate. The same orchestrator also
 runs metric-driven auto-curation (``auto_curate=True``), same-day
 concatenated sorts (concat mode over a ``SessionGroup``), and a
-publishable browser curation view (``figpack=True``); cross-session
+publishable browser curation view (``build_figpack_view=True``); cross-session
 unit matching is its own helper, ``run_v2_unit_match``.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the

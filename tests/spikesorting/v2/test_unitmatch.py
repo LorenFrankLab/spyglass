@@ -1045,7 +1045,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
 ):
     """A ``CurationEvaluation`` preview child is not a UnitMatch input.
 
-    ``create_preview_curation`` records proposed merges without applying them;
+    ``preview_merges`` records proposed merges without applying them;
     matching that draft would feed oversplit units into the matcher. Both
     ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch`` must
     reject it. The fixture's planted sort yields a single unit, so plant a
@@ -1088,7 +1088,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
             }
         )
         CurationEvaluation.populate(eval_sel, reserve_jobs=False)
-        preview0 = CurationEvaluation().create_preview_curation(
+        preview0 = CurationEvaluation().preview_merges(
             eval_sel,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
             labels={},
@@ -2972,31 +2972,32 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             skip_duplicates=True,
         )
 
-        # Plan-then-run: the members' root curations are pinned by a strategy
-        # (each member has exactly one root), reviewed, then run -- exercising
-        # plan_v2_unit_match + the run_v2_unit_match(plan) overload end to end.
+        # Plan-then-run: the members' root curations are pinned by a curation
+        # curation strategy (each member has exactly one root), reviewed, then run --
+        # exercising plan_v2_unit_match + the run_v2_unit_match(plan) overload.
         plan = plan_v2_unit_match(
             grp["owner"],
             grp["group_name"],
-            strategy="root",
+            curation_strategy="root",
             matcher_params_name=matcher_name,
         )
         assert plan.ok, plan.errors
         assert set(plan.curation_choices) == set(grp["choices"])
         assert not plan.as_dataframe().empty
 
-        # describe_unit_match_choices surfaces curation_source (the auto_curated
-        # strategy keys off it). The fixture members are 'manual' roots, so
+        # describe_unit_match_choices surfaces curation_source (the
+        # auto_curated curation strategy keys off it). The fixture members are
+        # 'manual' roots, so
         # against real fetched data auto_curated resolves nothing -> not ok.
         described = describe_unit_match_choices(grp["owner"], grp["group_name"])
-        # every offered curation row carries curation_source (auto_curated
-        # keys off it); rows for a sortless member have a null sorting_id.
+        # every offered curation row carries curation_source (auto_curated keys
+        # off it); rows for a sortless member have a null sorting_id.
         offered = described[described["sorting_id"].notna()]
         assert offered["curation_source"].notna().all()
         auto_plan = plan_v2_unit_match(
             grp["owner"],
             grp["group_name"],
-            strategy="auto_curated",
+            curation_strategy="auto_curated",
             matcher_params_name=matcher_name,
         )
         assert not auto_plan.ok
@@ -3050,8 +3051,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
 
         # Idempotent: a rerun reuses both stages.
         rerun = run_v2_unit_match(
-            grp["owner"],
-            grp["group_name"],
+            session_group_owner=grp["owner"],
+            session_group_name=grp["group_name"],
             matcher_params_name=matcher_name,
             curation_choices=grp["choices"],
         )
@@ -3112,8 +3113,8 @@ def test_run_v2_unit_match_warning_survives_stage_failure(
     try:
         with pytest.raises(PipelineStageError) as exc:
             run_v2_unit_match(
-                grp["owner"],
-                grp["group_name"],
+                session_group_owner=grp["owner"],
+                session_group_name=grp["group_name"],
                 matcher_params_name="unitmatch_default",
                 curation_choices=grp["choices"],
             )

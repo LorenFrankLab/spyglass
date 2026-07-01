@@ -2,8 +2,9 @@
 
 ``build_unit_match_plan`` turns the per-member curation lists (from
 ``describe_unit_match_choices``) into a pinned ``curation_choices`` dict via a
-named STRATEGY, producing a reviewable ``UnitMatchPlan`` (with warnings /
-errors) BEFORE the expensive match. No database -- exercised directly.
+named curation strategy, producing a reviewable ``UnitMatchPlan`` (with
+warnings / errors) BEFORE the expensive match. No database -- exercised
+directly.
 """
 
 from __future__ import annotations
@@ -34,12 +35,12 @@ def _member(idx, nwb, choices):
     return {"member_index": idx, "nwb_file_name": nwb, "choices": choices}
 
 
-def _plan(members, strategy, **kw):
+def _plan(members, curation_strategy, **kw):
     return build_unit_match_plan(
         session_group_owner="owner",
         session_group_name="grp",
         matcher_params_name="unitmatch_default",
-        strategy=strategy,
+        curation_strategy=curation_strategy,
         members=members,
         **kw,
     )
@@ -109,7 +110,7 @@ def test_member_choices_to_dataframe_one_row_per_choice():
         assert str(df[col].dtype) == "Int64", (col, df[col].dtype)
 
 
-def test_root_strategy_picks_root_and_warns_loudly():
+def test_root_curation_strategy_picks_root_and_warns_loudly():
     members = [
         _member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)]),
         _member(1, "day2.nwb", [_cur(_S1, 0, -1)]),
@@ -242,11 +243,11 @@ def test_manual_rejects_extra_member_indices():
     assert any("[9]" in e for e in plan.errors)
 
 
-def test_curation_choices_rejected_with_a_non_manual_strategy():
-    # Explicit pins with an automatic strategy would be silently ignored -> the
-    # planner rejects the combination up front.
+def test_curation_choices_rejected_with_a_non_manual_curation_strategy():
+    # Explicit pins with an automatic curation strategy would be silently ignored
+    # -> the planner rejects the combination up front.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
-    with pytest.raises(ValueError, match="strategy='manual'"):
+    with pytest.raises(ValueError, match="curation_strategy='manual'"):
         _plan(
             members,
             "auto_curated",
@@ -268,8 +269,8 @@ def test_manual_requires_a_choice_for_every_member():
     assert any("member 1" in e for e in plan.errors)
 
 
-def test_unknown_strategy_raises():
-    with pytest.raises(ValueError, match="strategy"):
+def test_unknown_curation_strategy_raises():
+    with pytest.raises(ValueError, match="curation_strategy"):
         _plan([_member(0, "day1.nwb", [_cur(_S0, 0, -1)])], "latest")
 
 
@@ -304,7 +305,7 @@ def test_run_v2_unit_match_rejects_plan_plus_explicit_args():
         session_group_owner="owner",
         session_group_name="grp",
         matcher_params_name="unitmatch_default",
-        strategy="root",
+        curation_strategy="root",
         curation_choices={0: {"sorting_id": _S0, "curation_id": 0}},
         rows=[],
         warnings=[],
@@ -312,7 +313,7 @@ def test_run_v2_unit_match_rejects_plan_plus_explicit_args():
     )
     assert plan.ok
     with pytest.raises(PipelineInputError, match="not both"):
-        run_v2_unit_match(plan, "grp")  # explicit session_group_name too
+        run_v2_unit_match(plan, session_group_name="grp")
 
 
 def test_run_v2_unit_match_rejects_a_not_ok_plan():
@@ -325,11 +326,13 @@ def test_run_v2_unit_match_rejects_a_not_ok_plan():
         session_group_owner="owner",
         session_group_name="grp",
         matcher_params_name="unitmatch_default",
-        strategy="single_leaf_curated",
+        curation_strategy="single_leaf_curated",
         curation_choices={},
         rows=[],
         warnings=[],
-        errors=["member 0 (day1.nwb): strategy='single_leaf_curated' ..."],
+        errors=[
+            "member 0 (day1.nwb): curation_strategy='single_leaf_curated' ..."
+        ],
     )
     assert not plan.ok
     with pytest.raises(PipelineInputError, match="could not pin"):

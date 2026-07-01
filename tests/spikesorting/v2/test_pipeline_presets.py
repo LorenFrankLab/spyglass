@@ -996,8 +996,8 @@ def test_run_v2_pipeline_concat_fields_are_keyword_only():
         assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
 
 
-def test_run_v2_pipeline_figpack_params_are_keyword_only():
-    """figpack / figpack_label_options are keyword-only, like the concat fields.
+def test_run_v2_pipeline_figpack_view_params_are_keyword_only():
+    """FigPack view options are keyword-only, like the concat fields.
 
     New parameters go after ``*`` so they never shift the positional binding of
     an existing ``run_v2_pipeline(nwb, sort_group_id, interval_list_name,
@@ -1008,14 +1008,14 @@ def test_run_v2_pipeline_figpack_params_are_keyword_only():
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
     params = inspect.signature(run_v2_pipeline).parameters
-    for name in ("figpack", "figpack_label_options"):
+    for name in ("build_figpack_view", "figpack_label_options"):
         assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
-    assert params["figpack"].default is False
+    assert params["build_figpack_view"].default is False
     assert params["figpack_label_options"].default is None
 
 
 def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
-    """figpack=True without the optional packages fails fast, DB-free.
+    """build_figpack_view=True without optional packages fails fast, DB-free.
 
     The FigPack package availability is checked before any table import, so a
     missing install raises ``PipelineInputError`` (carrying the install hint)
@@ -1036,13 +1036,13 @@ def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 
-    with pytest.raises(PipelineInputError, match="figpack"):
+    with pytest.raises(PipelineInputError, match="build_figpack_view"):
         run_v2_pipeline(
             nwb_file_name="x.nwb",
             sort_group_id=0,
             interval_list_name="i",
             team_name="t",
-            figpack=True,
+            build_figpack_view=True,
         )
 
 
@@ -1057,8 +1057,12 @@ def test_run_v2_unit_match_signature_defaults():
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 
     params = inspect.signature(run_v2_unit_match).parameters
+    assert params["plan"].default is None
+    assert params["session_group_name"].default is None
     assert params["matcher_params_name"].default == "unitmatch_default"
     assert params["curation_choices"].default is None
+    assert params["session_group_owner"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["session_group_name"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_run_v2_unit_match_requires_explicit_curation_choices():
@@ -1072,7 +1076,9 @@ def test_run_v2_unit_match_requires_explicit_curation_choices():
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 
     with pytest.raises(PipelineInputError, match="curation_choices"):
-        run_v2_unit_match("owner", "group")  # curation_choices defaults to None
+        run_v2_unit_match(
+            session_group_owner="owner", session_group_name="group"
+        )
 
 
 def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
@@ -1091,8 +1097,8 @@ def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
 
     with pytest.raises(PipelineInputError, match="unknown matcher_params_name"):
         run_v2_unit_match(
-            "no_such_owner",
-            "no_such_group",
+            session_group_owner="no_such_owner",
+            session_group_name="no_such_group",
             matcher_params_name="definitely_not_a_matcher_2026",
             curation_choices={0: {"sorting_id": "x", "curation_id": 0}},
         )

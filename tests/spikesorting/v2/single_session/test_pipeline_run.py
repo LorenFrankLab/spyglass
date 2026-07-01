@@ -141,7 +141,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
-        description="pipeline e2e test",
+        curation_description="pipeline e2e test",
     )
     # The stable run_summary keys must always be present. The run also adds
     # additive observability keys (``*_status`` / ``stage_seconds`` /
@@ -1277,11 +1277,11 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
     _FIGPACK_MISSING, reason="optional FigPack packages not installed"
 )
 def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
-    """``run_v2_pipeline(figpack=True)`` publishes an offline FigPack view.
+    """``run_v2_pipeline(build_figpack_view=True)`` publishes an offline FigPack view.
 
     A single-session run that finds units additionally builds an offline FigPack
     manual-curation bundle of the root curation and surfaces its local URI; the
-    figpack stage is observable and reused on an idempotent rerun. If the local
+    FigPack stage is observable and reused on an idempotent rerun. If the local
     bundle is cleaned out from under a reused row, the rerun rebuilds it rather
     than returning a dead path.
     """
@@ -1298,7 +1298,7 @@ def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=team_name,
-        figpack=True,
+        build_figpack_view=True,
     )
     summary = run_v2_pipeline(**run_kwargs)
 
@@ -1328,7 +1328,7 @@ def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
     _FIGPACK_MISSING, reason="optional FigPack packages not installed"
 )
 def test_run_v2_pipeline_figpack_zero_units_skips_view(polymer_smoke_session):
-    """``figpack=True`` on a zero-unit sort skips the view instead of failing.
+    """``build_figpack_view=True`` on a zero-unit sort skips the view instead of failing.
 
     A zero-unit sort has no analyzer to summarize, so the FigPack stage is
     skipped (``figpack_status == "skipped"``, no ``figpack_uri``) and the run
@@ -1340,14 +1340,14 @@ def test_run_v2_pipeline_figpack_zero_units_skips_view(polymer_smoke_session):
         polymer_smoke_session
     )
     # The shipped clusterless default (100 uV) finds zero peaks on the smoke
-    # fixture -- the zero-unit path, here with figpack opted in.
+    # fixture -- the zero-unit path, here with FigPack opted in.
     summary = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=team_name,
         pipeline_preset="franklab_clusterless_2026_06",
-        figpack=True,
+        build_figpack_view=True,
     )
     assert summary["n_units"] == 0
     assert summary["figpack_status"] == "skipped"
