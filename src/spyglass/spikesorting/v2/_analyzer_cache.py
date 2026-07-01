@@ -236,6 +236,25 @@ def _publish_sibling(canonical_folder, kind: str) -> Path:
     )
 
 
+def _sorting_id_from_analyzer_folder(canonical_folder) -> str:
+    """Return the sorting id embedded in a canonical analyzer folder path."""
+    folder = Path(canonical_folder)
+    if not folder.name.endswith(".zarr") or "__" not in folder.name:
+        raise ValueError(
+            "publish_analyzer_atomically requires a canonical analyzer-cache "
+            "folder named '{sorting_id}__{waveform_params_name}.zarr'; got "
+            f"{folder.name!r}."
+        )
+    sorting_id, _, _recipe = folder.name[: -len(".zarr")].partition("__")
+    if not sorting_id or not _WAVEFORM_PARAMS_NAME_RE.match(_recipe):
+        raise ValueError(
+            "publish_analyzer_atomically requires a canonical analyzer-cache "
+            "folder named '{sorting_id}__{waveform_params_name}.zarr' with a "
+            f"path-safe waveform_params_name; got {folder.name!r}."
+        )
+    return sorting_id
+
+
 def publish_analyzer_atomically(canonical_folder, build_into):
     """Build an analyzer into a private temp folder, then move it into the slot.
 
@@ -263,8 +282,10 @@ def publish_analyzer_atomically(canonical_folder, build_into):
       but is recoverable.
 
     The brief window where the canonical slot is moved aside is reader-safe
-    **only because callers hold** ``analyzer_cache_lock(sorting_id)`` (the read
+    because this publisher acquires ``analyzer_cache_lock(sorting_id)`` (the read
     path takes the same lock); the directory replace is not itself atomic.
+    Callers that already hold the lock remain safe because the lock is
+    process-reentrant.
     ``build_into`` that writes no folder (a zero-unit sort short-circuits before
     building) leaves the slot untouched. The temp is always removed; the trash
     is removed only after a successful install (never on the failed-rollback
@@ -284,6 +305,16 @@ def publish_analyzer_atomically(canonical_folder, build_into):
     pathlib.Path
         ``canonical_folder``.
     """
+    canonical_folder = Path(canonical_folder)
+    sorting_id = _sorting_id_from_analyzer_folder(canonical_folder)
+    with analyzer_cache_lock(sorting_id):
+        return _publish_analyzer_atomically_unlocked(
+            canonical_folder, build_into
+        )
+
+
+def _publish_analyzer_atomically_unlocked(canonical_folder, build_into):
+    """Publish implementation; caller holds ``analyzer_cache_lock``."""
     canonical_folder.parent.mkdir(parents=True, exist_ok=True)
     temp_folder = _publish_sibling(canonical_folder, "build")
     # Clear any leftover from a crashed prior build before reusing the name.

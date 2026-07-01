@@ -303,9 +303,10 @@ class TestPublishAnalyzerAtomically:
     A directory rename is not a clean atomic swap (POSIX ``rename(2)`` needs an
     empty destination), so a rebuild over an existing ``.zarr`` is published by
     moving the existing folder aside, moving the temp in, and removing the
-    aside copy; a failed swap restores the original. Callers hold the per-sort
-    lock, so the brief move-aside window is reader-safe. These DB-free tests
-    drive the publisher with a trivial ``build_into`` that writes a marker file.
+    aside copy; a failed swap restores the original. The publisher holds the
+    per-sort lock, so the brief move-aside window is reader-safe. These DB-free
+    tests drive the publisher with a trivial ``build_into`` that writes a marker
+    file.
     """
 
     @staticmethod
@@ -337,6 +338,43 @@ class TestPublishAnalyzerAtomically:
         assert (canonical / "data.bin").read_text() == "v1"
         # No leftover temp under the hidden staging area after success.
         assert self._staging_is_empty(canonical)
+
+    def test_publish_holds_per_sort_lock(
+        self, tmp_path, monkeypatch, restore_custom_config
+    ):
+        """The publisher acquires the sort-level lock around build + swap."""
+        from spyglass.spikesorting.v2 import _analyzer_cache as cache_mod
+
+        self._configure_root(tmp_path)
+        canonical = analyzer_path("sidP", "rec")
+        seen = []
+
+        class _FakeLock:
+            held = False
+
+            def __enter__(self):
+                self.held = True
+
+            def __exit__(self, exc_type, exc, tb):
+                self.held = False
+
+        lock = _FakeLock()
+
+        def _fake_lock(sorting_id):
+            seen.append(sorting_id)
+            return lock
+
+        def _build_into(folder):
+            assert lock.held, "build must run while the analyzer lock is held"
+            folder.mkdir(parents=True)
+            (folder / "data.bin").write_text("v1")
+
+        monkeypatch.setattr(cache_mod, "analyzer_cache_lock", _fake_lock)
+        publish_analyzer_atomically(canonical, _build_into)
+
+        assert seen == ["sidP"]
+        assert lock.held is False
+        assert (canonical / "data.bin").read_text() == "v1"
 
     def test_existing_canonical_is_replaced(
         self, tmp_path, restore_custom_config
