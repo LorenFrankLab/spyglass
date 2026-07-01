@@ -1654,7 +1654,16 @@ class Sorting(SpyglassMixin, dj.Computed):
         # parallel computation that could drift.
         import spikeinterface as si
 
-        effective_random_seed = resolve_effective_seed(sorter_row["job_kwargs"])
+        # reject_ambient_seed: a stochastic clustering sort's seed MUST live in
+        # the SorterParameters row (part of sorter_params_name -> sorting_id),
+        # never the ambient dj.config layer, or a later ambient-seed change
+        # would silently reuse this sort under an unchanged id. The deterministic
+        # in-process clusterless thresholder is exempt: its output does not
+        # depend on the seed, so an ambient seed cannot alias a different result.
+        effective_random_seed = resolve_effective_seed(
+            sorter_row["job_kwargs"],
+            reject_ambient_seed=sorter not in SorterParameters._NON_SI_SORTERS,
+        )
         spikeinterface_version = si.__version__
         sorter_version = sorter_distribution_version(sorter)
 

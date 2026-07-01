@@ -807,7 +807,9 @@ def _warn_ambient_seed_once(seed: int) -> None:
     )
 
 
-def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
+def resolve_effective_seed(
+    *row_job_kwargs: dict | None, reject_ambient_seed: bool = False
+) -> int:
     """Return the ``random_seed`` actually used by a v2 compute stage.
 
     Resolves the seed through the same precedence the dispatch reads --
@@ -821,7 +823,10 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
     arrives via the ambient SI-global / ``dj.config`` layer rather than a
     per-row blob -- a process-global ambient seed already takes effect, but it
     is not pinned to a parameter row, so surfacing it keeps a non-reproducible
-    ambient seed visible rather than silent.
+    ambient seed visible rather than silent. At the sort-identity boundary
+    (``reject_ambient_seed=True``) the same ambient-only seed is a hard error
+    instead: a ``Sorting`` whose seed is not folded into its identity (via
+    ``sorter_params_name``) could be silently reused after a later seed change.
 
     Parameters
     ----------
@@ -829,6 +834,12 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
         The per-row ``job_kwargs`` blob(s) governing this stage, in increasing
         precedence order (a later argument wins). ``None`` / empty entries are
         skipped, matching :func:`_resolved_job_kwargs`.
+    reject_ambient_seed : bool, optional
+        When ``True``, an ambient-only ``random_seed`` (present in the SI-global
+        / ``dj.config`` layer but not in any per-row blob) raises ``ValueError``
+        instead of warning. The sorting stage passes this so a stochastic sort
+        cannot be created with a seed absent from ``sorting_id``. Default
+        ``False`` (warn), for stages where the seed is captured as provenance.
 
     Returns
     -------
@@ -870,6 +881,18 @@ def resolve_effective_seed(*row_job_kwargs: dict | None) -> int:
     if not per_row_has_seed:
         ambient = _ambient_job_kwargs()
         if "random_seed" in ambient:
+            if reject_ambient_seed:
+                raise ValueError(
+                    "spike sorting requires random_seed to live in the "
+                    "SorterParameters job_kwargs (where it is part of the "
+                    "sort's identity via sorter_params_name), not the ambient "
+                    "dj.config['custom']['spikesorting_v2_job_kwargs'] / "
+                    "SI-global layer. An ambient random_seed="
+                    f"{int(ambient['random_seed'])} changes the sort output "
+                    "WITHOUT changing sorting_id, so a later seed change would "
+                    "silently reuse this sort. Move random_seed into the "
+                    "SorterParameters row (or clear the ambient seed)."
+                )
             _warn_ambient_seed_once(int(ambient["random_seed"]))
     return effective
 

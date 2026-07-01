@@ -70,6 +70,28 @@ def test_resolve_effective_seed_ambient_seed_warns_once(
     assert len(ambient_warnings) == 1
 
 
+def test_resolve_effective_seed_rejects_ambient_when_flagged(
+    restore_custom_config,
+):
+    """With ``reject_ambient_seed=True`` (the sort-identity boundary), an
+    ambient-only seed RAISES instead of warning: a Sorting must never be created
+    with a seed that is absent from its identity (``sorter_params_name``), or a
+    later ambient-seed change would silently reuse it. A per-row seed (which IS
+    part of identity) is still accepted, and no ambient seed is a no-op."""
+    dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"random_seed": 7}
+    _warn_ambient_seed_once.cache_clear()
+    with pytest.raises(ValueError, match="SorterParameters"):
+        resolve_effective_seed(None, reject_ambient_seed=True)
+    with pytest.raises(ValueError, match="SorterParameters"):
+        resolve_effective_seed({"n_jobs": 2}, reject_ambient_seed=True)
+    assert (
+        resolve_effective_seed({"random_seed": 3}, reject_ambient_seed=True)
+        == 3
+    )
+    dj.config["custom"].pop("spikesorting_v2_job_kwargs", None)
+    assert resolve_effective_seed(None, reject_ambient_seed=True) == 0
+
+
 def test_resolve_effective_seed_matches_resolved_job_kwargs(
     restore_custom_config,
 ):
