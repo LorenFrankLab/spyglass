@@ -1886,15 +1886,21 @@ class Model(SpyglassMixin, dj.Computed):
             )
             fig.suptitle(source_text, fontsize=10, y=0.02)
 
+    # Raw elementary-stream formats DeepLabCut cannot read: they carry no
+    # frame count, so DLC's frame extraction raises "__len__() should return
+    # >= 0". These are converted to an mp4 container before use.
+    _RAW_VIDEO_SUFFIXES = (".h264", ".h265", ".hevc")
+
     @staticmethod
     def _ensure_mp4(video_paths, output_dir):
-        """Convert raw ``.h264`` videos to mp4 for DeepLabCut.
+        """Convert raw video streams (h264/h265/hevc) to mp4 for DeepLabCut.
 
-        DLC's frame extraction fails on raw h264 (``__len__() should return
-        >= 0``) because the stream carries no frame count. Position V1
-        converted such videos at project creation; this reuses the same shared
-        ``find_mp4`` converter so V2 does too. Container formats DLC already
-        reads (mp4, avi, mov, …) pass through unchanged.
+        Raw elementary streams carry no frame count, so DLC's frame extraction
+        raises ``__len__() should return >= 0``. Position V1 converted such
+        videos at project creation; this reuses the same shared ``find_mp4``
+        converter (idempotent — it returns an already-converted mp4 if one
+        exists). Container formats DLC already reads (mp4, avi, mov, …) pass
+        through unchanged.
 
         Parameters
         ----------
@@ -1906,14 +1912,14 @@ class Model(SpyglassMixin, dj.Computed):
         Returns
         -------
         list[str]
-            One path per input: the converted mp4 for ``.h264`` inputs, or the
+            One path per input: the converted mp4 for raw-stream inputs, or the
             original path otherwise.
         """
         from spyglass.position.utils.general import find_mp4
 
         result = []
         for path in map(Path, video_paths):
-            if path.suffix.lower() == ".h264":
+            if path.suffix.lower() in Model._RAW_VIDEO_SUFFIXES:
                 result.append(
                     str(
                         find_mp4(
@@ -1926,6 +1932,61 @@ class Model(SpyglassMixin, dj.Computed):
             else:
                 result.append(str(path))
         return result
+
+    @staticmethod
+    def _reconcile_video_sets(config_path, dlc_videos):
+        """Point an existing DLC project's ``video_sets`` at *dlc_videos*.
+
+        DeepLabCut's ``create_new_project`` returns an existing project's
+        ``config.yaml`` **unchanged** when the project folder already exists
+        (it prints "Project already exists!"). So a project first created from
+        raw h264 keeps referencing the h264 even after we convert to mp4, and
+        frame extraction keeps failing. This copies any converted video that is
+        missing from the project (via DLC's ``add_new_videos``, as V1 does) and
+        rewrites ``video_sets`` to reference exactly *dlc_videos*, dropping
+        stale entries (e.g. the raw h264). A no-op when the config already
+        matches (the fresh-project case).
+
+        Parameters
+        ----------
+        config_path : str or pathlib.Path
+            Path to the project ``config.yaml``.
+        dlc_videos : list[str]
+            The (converted) video paths DLC should use.
+        """
+        from deeplabcut import add_new_videos
+
+        from spyglass.position.utils.dlc_io import read_yaml, save_yaml
+
+        project_dir = Path(config_path).parent
+        videos_dir = project_dir / "videos"
+        want = {Path(v).name for v in dlc_videos}
+
+        _, cfg = read_yaml(project_dir)
+        have = {Path(k).name for k in cfg.get("video_sets", {})}
+
+        # Copy + register any converted video not already present on disk.
+        to_add = [
+            v
+            for v in dlc_videos
+            if Path(v).name not in have
+            or not (videos_dir / Path(v).name).exists()
+        ]
+        if to_add:
+            add_new_videos(
+                config=str(config_path), videos=to_add, copy_videos=True
+            )
+            _, cfg = read_yaml(project_dir)
+
+        # Drop stale video_sets entries (e.g. the raw h264) not in *dlc_videos*.
+        trimmed = {
+            k: v
+            for k, v in cfg.get("video_sets", {}).items()
+            if Path(k).name in want
+        }
+        if trimmed != cfg.get("video_sets", {}):
+            cfg["video_sets"] = trimmed
+            save_yaml(project_dir, cfg, filename="config")
 
     def create_project(
         self,
@@ -2066,10 +2127,10 @@ class Model(SpyglassMixin, dj.Computed):
                 + "\n".join(f"  {p}" for p in missing)
             )
 
-        # Convert any raw h264 videos to mp4 so DeepLabCut can read them —
-        # DLC's frame extraction fails on raw h264. V1 did this at project
-        # creation. The original paths (which map to VideoFile) are kept for
-        # the VidFileGroup below; DLC gets the (possibly converted) paths.
+        # Convert any raw video streams (h264/h265/hevc) to mp4 so DeepLabCut
+        # can read them — DLC's frame extraction fails on raw streams. V1 did
+        # this at project creation. The original paths (which map to VideoFile)
+        # are kept for the VidFileGroup below; DLC gets the converted paths.
         convert_dir = (
             pose_video_dir
             or pose_project_dir
@@ -2160,6 +2221,11 @@ class Model(SpyglassMixin, dj.Computed):
                 )
             ).resolve()
             self._info_msg(f"DLC project created: {config_path}")
+
+        # Reconcile video_sets with the converted videos. create_new_project
+        # returns an existing (possibly stale, h264) config unchanged when the
+        # folder already exists, so re-point it at the converted mp4s.
+        self._reconcile_video_sets(config_path, dlc_videos)
 
         # ── 3. Patch numframes2pick via dlc_io utilities ──────────────────────
         _, cfg = read_yaml(config_path.parent)

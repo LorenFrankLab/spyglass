@@ -19,30 +19,128 @@ class TestEnsureMp4:
     def _model(self, model):
         self.model = model  # pylint: disable=attribute-defined-outside-init
 
-    def test_only_h264_is_converted(self, monkeypatch, tmp_path):
+    def test_raw_streams_converted_containers_pass_through(
+        self, monkeypatch, tmp_path
+    ):
         from spyglass.position.utils import general
 
-        calls = []
+        converted = []
 
         def fake_find_mp4(video_path, output_path, video_filename):
-            calls.append((str(video_path), str(output_path), video_filename))
+            converted.append(video_filename)
             return Path(output_path) / (Path(video_filename).stem + ".mp4")
 
         monkeypatch.setattr(general, "find_mp4", fake_find_mp4)
 
         out = str(tmp_path)
         result = self.model._ensure_mp4(
-            ["/data/camA.mp4", "/data/camB.h264", "/data/camC.avi"], out
+            [
+                "/data/camA.mp4",  # container — untouched
+                "/data/camB.h264",  # raw — converted
+                "/data/camC.h265",  # raw — converted
+                "/data/camD.hevc",  # raw — converted
+                "/data/camE.avi",  # container — untouched
+            ],
+            out,
         )
 
-        assert result[0] == "/data/camA.mp4"  # mp4 untouched
-        assert result[1] == str(Path(out) / "camB.mp4")  # h264 converted
-        assert result[2] == "/data/camC.avi"  # avi (DLC-readable) untouched
-        assert calls == [("/data", out, "camB.h264")]  # only h264 routed
+        assert result[0] == "/data/camA.mp4"
+        assert result[1] == str(Path(out) / "camB.mp4")
+        assert result[2] == str(Path(out) / "camC.mp4")
+        assert result[3] == str(Path(out) / "camD.mp4")
+        assert result[4] == "/data/camE.avi"
+        # only the raw streams were routed through the converter
+        assert converted == ["camB.h264", "camC.h265", "camD.hevc"]
         # suffix match is case-insensitive
-        assert self.model._ensure_mp4(["/x/Y.H264"], out) == [
+        assert self.model._ensure_mp4(["/x/Y.H265"], out) == [
             str(Path(out) / "Y.mp4")
         ]
+
+
+class TestReconcileVideoSetsIntegration:
+    """Real DLC: reconcile a stale h264 project so extraction succeeds.
+
+    No DB session needed — drives ``create_new_project`` + ``extract_frames``
+    directly. Skipped if DLC is not installed or ``--no-pose`` is set.
+    """
+
+    model = None  # set by _setup fixture
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, model, skip_if_no_dlc):
+        _ = skip_if_no_dlc
+        self.model = model  # pylint: disable=attribute-defined-outside-init
+
+    def test_stale_h264_project_reconciled_then_extracts(self, tmp_path):
+        """A project first built from raw h264 is re-pointed at the mp4.
+
+        Reproduces the real bug: DLC's ``create_new_project`` returns an
+        existing project's config unchanged, so it keeps referencing the raw
+        h264 (uncountable frame count) and ``extract_frames`` raises
+        ``__len__() should return >= 0``. After ``_reconcile_video_sets`` the
+        config lists only the mp4 and extraction succeeds.
+        """
+        import subprocess
+
+        import yaml
+
+        from deeplabcut import create_new_project, extract_frames
+        from spyglass.position.utils.general import _convert_mp4
+
+        src = tmp_path / "src"
+        src.mkdir()
+        h264 = src / "clip.1.h264"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=128x128:rate=10",
+                "-c:v",
+                "libx264",
+                "-f",
+                "h264",
+                str(h264),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        # Stale project referencing the raw h264.
+        stale_cfg = create_new_project(
+            project="recon",
+            experimenter="recon",
+            videos=[str(h264)],
+            working_directory=str(tmp_path / "proj"),
+            copy_videos=True,
+        )
+        stale_sets = yaml.safe_load(Path(stale_cfg).read_text())["video_sets"]
+        assert {Path(v).suffix for v in stale_sets} == {".h264"}
+
+        # Convert (as _ensure_mp4 does) and reconcile.
+        conv = tmp_path / "conv"
+        conv.mkdir()
+        mp4 = _convert_mp4(
+            h264.name, str(src), str(conv), videotype="mp4", count_frames=False
+        )
+        self.model._reconcile_video_sets(stale_cfg, [str(mp4)])
+
+        sets = yaml.safe_load(Path(stale_cfg).read_text())["video_sets"]
+        suffixes = {Path(v).suffix for v in sets}
+        assert suffixes == {".mp4"}, f"expected mp4-only, got {suffixes}"
+
+        # Extraction now succeeds (previously raised the __len__ ValueError).
+        extract_frames(
+            str(stale_cfg),
+            mode="automatic",
+            algo="uniform",
+            userfeedback=False,
+            crop=False,
+        )
+        imgs = list((Path(stale_cfg).parent / "labeled-data").rglob("img*.png"))
+        assert imgs, "no frames extracted after reconcile"
 
 
 class TestCreateProjectUnit:
@@ -96,6 +194,97 @@ class TestCreateProjectUnit:
                     bodyparts=["whiteLED"],
                     video_list=[],
                 )
+
+    def test_converted_mp4_passed_to_dlc_not_raw_h264(
+        self, monkeypatch, tmp_path
+    ):
+        """create_new_project must receive the converted mp4, not raw h264."""
+        h264 = tmp_path / "clip.1.h264"
+        h264.touch()  # source must exist (missing-file check)
+        mp4 = tmp_path / "clip.mp4"
+
+        from spyglass.position.utils import general
+
+        monkeypatch.setattr(general, "find_mp4", lambda **kw: mp4)
+
+        cfg_path = self._make_fake_config(tmp_path)
+        fake_dlc = MagicMock()
+        fake_dlc.create_new_project.return_value = str(cfg_path)
+        fake_dlc.extract_frames.return_value = None
+
+        fake_vid_group = MagicMock()
+        fake_vid_group.create_from_files.return_value = {"vid_group_id": "vg"}
+        fake_skeleton = MagicMock()
+        fake_skeleton.return_value.insert1.return_value = {"skeleton_id": "sk"}
+        fake_vid_file = MagicMock()
+        fake_vid_file.get_abs_paths.return_value = [str(h264)]
+
+        with (
+            patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
+            patch("spyglass.position.v2.train.VidFileGroup", fake_vid_group),
+            patch("spyglass.position.v2.train.Skeleton", fake_skeleton),
+            patch("spyglass.position.v2.train.VideoFile", fake_vid_file),
+            patch(
+                "spyglass.position.utils.dlc_io.read_yaml",
+                return_value=("config.yaml", {"numframes2pick": 5}),
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.save_yaml",
+                return_value=str(cfg_path),
+            ),
+        ):
+            self.model.create_project(
+                project_name="wire_test",
+                bodyparts=["whiteLED"],
+                video_list=[{"nwb_file_name": "test.nwb", "epoch": 1}],
+                project_directory=str(tmp_path),
+            )
+
+        _, dlc_kwargs = fake_dlc.create_new_project.call_args
+        assert dlc_kwargs["videos"] == [str(mp4)]  # DLC gets the mp4
+        _, vg_kwargs = fake_vid_group.create_from_files.call_args
+        assert vg_kwargs["video_files"] == [str(h264)]  # VidFileGroup: original
+
+    def test_reconcile_replaces_stale_h264_video_sets(
+        self, monkeypatch, tmp_path
+    ):
+        """Reconcile adds the converted mp4 and drops stale h264 entries.
+
+        Guards the case where DLC's create_new_project returned an existing
+        project whose config still references the raw h264.
+        """
+        from spyglass.position.utils import dlc_io
+
+        (tmp_path / "videos").mkdir()
+        config_path = tmp_path / "config.yaml"
+        h264 = str(tmp_path / "videos" / "clip.1.h264")
+        mp4_in_proj = str(tmp_path / "videos" / "clip.mp4")
+        dlc_video = "/converted/clip.mp4"  # basename matches mp4_in_proj
+
+        stale = {"video_sets": {h264: {"crop": "0,1,0,1"}}}
+        after_add = {
+            "video_sets": {
+                h264: {"crop": "0,1,0,1"},
+                mp4_in_proj: {"crop": "0,2,0,2"},
+            }
+        }
+        reads = iter([("config.yaml", stale), ("config.yaml", after_add)])
+        monkeypatch.setattr(dlc_io, "read_yaml", lambda *a, **k: next(reads))
+        saved = {}
+        monkeypatch.setattr(
+            dlc_io,
+            "save_yaml",
+            lambda d, cfg, **k: saved.update(cfg) or str(config_path),
+        )
+        add_kwargs = {}
+        fake_dlc = MagicMock()
+        fake_dlc.add_new_videos.side_effect = lambda **k: add_kwargs.update(k)
+
+        with patch.dict("sys.modules", {"deeplabcut": fake_dlc}):
+            self.model._reconcile_video_sets(str(config_path), [dlc_video])
+
+        assert add_kwargs["videos"] == [dlc_video]  # mp4 copied into project
+        assert set(saved["video_sets"]) == {mp4_in_proj}  # h264 dropped
 
     def test_algo_default_is_uniform(self, tmp_path):
         """extract_frames is called with algo='uniform' by default."""
@@ -507,6 +696,64 @@ class TestCreateProjectIntegration:
         config_path = Path(result["config_path"])
         assert config_path.exists(), "config.yaml must exist on disk"
         assert config_path.name in ("config.yaml", "dj_dlc_config.yaml")
+
+    def test_h264_converted_and_dlc_config_lists_mp4(self):
+        """Real run: an h264 training video is converted and DLC uses the mp4.
+
+        Regression for the raw-h264 frame-extraction failure. Not mocked: this
+        drives real ``deeplabcut.create_new_project`` + ``extract_frames`` and
+        inspects the on-disk config, proving DLC receives the converted mp4
+        (not the raw stream) and that extraction completes without the
+        ``__len__() should return >= 0`` ValueError.
+        """
+        import subprocess
+        import sys
+
+        import yaml
+
+        # Generate a real raw h264 elementary stream.
+        h264 = self.tmp_path / "raw_train.h264"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=128x128:rate=10",
+                "-c:v",
+                "libx264",
+                "-f",
+                "h264",
+                str(h264),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        # Register it in the DB via the tutorial bootstrap helper.
+        sys.path.insert(0, str(Path(__file__).parent))
+        from make_example_dlc_project import bootstrap_from_video_paths
+
+        nwb_file_name, _ = bootstrap_from_video_paths(
+            [str(h264)], nwb_stem="h264conv"
+        )
+
+        result = self.model.create_project(
+            project_name="h264convtest",
+            bodyparts=["greenLED", "redLED_C"],
+            video_list=[{"nwb_file_name": nwb_file_name, "epoch": 1}],
+            frames_per_video=3,
+            project_directory=str(self.tmp_path),
+        )
+
+        cfg = yaml.safe_load(Path(result["config_path"]).read_text())
+        suffixes = {Path(v).suffix.lower() for v in cfg.get("video_sets", {})}
+        assert suffixes, "DLC config listed no videos"
+        assert (
+            ".h264" not in suffixes
+        ), f"raw h264 leaked into config: {suffixes}"
+        assert suffixes == {".mp4"}, f"expected only mp4, got {suffixes}"
 
     def test_create_project_config_has_numframes2pick(self, dlc_project_config):
         """config.yaml written by create_project has correct numframes2pick."""
