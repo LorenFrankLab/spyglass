@@ -116,7 +116,10 @@ def test_apply_artifact_mask_zeros_complement_frames():
     fs = 30000.0
     rec = _rec(np.ones((10, 2), dtype="float32"), fs=fs)
     # Keep [0, 3/fs) and [6/fs, end] -> the artifact complement is frames 3,4,5.
-    valid_times = np.array([[0.0, 3.0 / fs], [6.0 / fs, 1.0]])
+    # The second interval's end must stay within the recording envelope
+    # (last sample at 9/fs, +/- one sample-period of tolerance = 10/fs); an
+    # out-of-envelope end is rejected by apply_artifact_mask's boundary guard.
+    valid_times = np.array([[0.0, 3.0 / fs], [6.0 / fs, 10.0 / fs]])
     out = Sorting._apply_artifact_mask(rec, valid_times).get_traces()
     assert np.all(out[3:6] == 0.0), "artifact (complement) frames not zeroed"
     assert np.all(out[0:3] == 1.0), "kept frames before the artifact altered"
