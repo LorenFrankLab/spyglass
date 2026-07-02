@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import pynwb
 
@@ -12,26 +14,24 @@ from typing import List, Tuple
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
-from packaging import version
-
-from spyglass.common import LabMember
-
-if not LabMember().user_is_admin and version.parse(
-    si.__version__
-) < version.parse("0.99.1"):
-    # Allow admin to bypass version check for recompute purposes
-    raise ImportError(
-        "SpikeInterface version must updated. "
-        + "Please run `pip install spikeinterface==0.99.1` to update."
-    )
-
 import spikeinterface.preprocessing as sip
-import spikeinterface.qualitymetrics as sq
+
+# SI >= 0.10x split qualitymetrics into the ``metrics`` package; the parent
+# namespace re-exports both metrics v0/v1 use (``compute_isi_violations`` from
+# metrics.quality, ``compute_num_spikes`` from metrics.spiketrain), so import
+# it rather than the quality submodule (which lacks compute_num_spikes).
+try:
+    import spikeinterface.metrics as sq
+except ModuleNotFoundError:  # SI 0.99 (legacy v0/v1 runtime env)
+    import spikeinterface.qualitymetrics as sq
 
 from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveforms_dir
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -427,6 +427,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         2. Uses spikeinterface to extract waveforms
         3. Generates an analysis NWB file with the waveforms
         """
+        _require_legacy_si_environment("v0 Waveforms.make")
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         recording = si.load_extractor(recording_path)
@@ -493,6 +494,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         -------
         we : spikeinterface.WaveformExtractor
         """
+        _require_legacy_si_environment("v0 Waveforms.load_waveforms")
         we_path = self._get_waveform_path(key)
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we
@@ -674,6 +676,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             NN noise overlap, peak offset, peak channel, and number of spikes.
         3. Generates an analysis NWB file with the metrics.
         """
+        _require_legacy_si_environment("v0 QualityMetrics.make")
         # File name involves random string. Can't pass it through make_fetch.
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         waveform_extractor = si.WaveformExtractor.load_from_folder(wf_path)
@@ -841,11 +844,15 @@ def _get_num_spikes(
     return cluster_spikes
 
 
+# Quality-metric callables are resolved lazily so this module imports under
+# SpikeInterface 0.104, which renamed/removed some legacy entry points. v0
+# metric computation only runs under SI 0.99; any missing entries surface as a
+# clear error only when the metric is actually invoked.
 _metric_name_to_func = {
-    "snr": sq.compute_snrs,
+    "snr": getattr(sq, "compute_snrs", None),
     "isi_violation": _compute_isi_violation_fractions,
-    "nn_isolation": sq.nearest_neighbors_isolation,
-    "nn_noise_overlap": sq.nearest_neighbors_noise_overlap,
+    "nn_isolation": getattr(sq, "nearest_neighbors_isolation", None),
+    "nn_noise_overlap": getattr(sq, "nearest_neighbors_noise_overlap", None),
     "peak_offset": _get_peak_offset,
     "peak_channel": _get_peak_channel,
     "num_spikes": _get_num_spikes,

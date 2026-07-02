@@ -1,3 +1,8 @@
+# Deferred annotation evaluation keeps module import working across
+# SpikeInterface versions whose public API no longer exposes some names
+# (e.g. WaveformExtractor) used only in type hints here.
+from __future__ import annotations
+
 import os
 import random
 import string
@@ -20,7 +25,11 @@ from pynwb.core import ScratchData
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
-from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    assert_safe_nwb_file_name,
+    get_electrode_indices,
+    get_nwb_file,
+)
 
 # Only differs from the common AnalysisNwbfile in adding 'Custom' to heading
 ENFORCED_DEFINITION = """
@@ -226,6 +235,16 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
+        # Confine the caller-supplied source name to a bare basename at this
+        # acceptance boundary (it is used to locate the file to copy and as the
+        # base of the generated analysis name); a separator / ``..`` / absolute
+        # path must not slip through. ``recompute_file_name`` is confined the
+        # same way -- it is threaded straight into ``analysis_file_name`` and the
+        # path builder below, so an unsafe value would escape the managed
+        # analysis directory just as ``nwb_file_name`` would.
+        assert_safe_nwb_file_name(nwb_file_name)
+        if recompute_file_name is not None:
+            assert_safe_nwb_file_name(recompute_file_name)
         nwb_file_abspath = self._nwb_table.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(
@@ -303,14 +322,27 @@ class AnalysisMixin(BaseMixin):
         with h5py.File(nwb_file_path, "a") as f:
             f["/general/source_script"][()] = self._logged_env_info()
 
+    _ENV_CAPTURE_UNAVAILABLE = "environment capture unavailable (conda absent)"
+
     def _logged_env_info(self) -> str:
         """Get the environment information for logging."""
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        python_env = subprocess.check_output(
-            ["conda", "env", "export"], text=True
-        )
+        try:
+            python_env = subprocess.check_output(
+                ["conda", "env", "export"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as err:
+            # conda-less / uv-only environments cannot export a conda env;
+            # record a marker rather than aborting the NWB write.
+            self._logger.warning(
+                f"Could not capture conda environment ({err}); recording an "
+                "'environment capture unavailable' marker instead."
+            )
+            python_env = self._ENV_CAPTURE_UNAVAILABLE
         env_info += python_env
         return env_info
 

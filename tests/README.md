@@ -150,11 +150,19 @@ ______________________________________________________________________
 
 **File**: `.github/workflows/test-conda.yml`
 
-**Trigger Modes:**
+**Trigger Modes** (the `run-tests` job — the general suite):
 
 - `push`: Runs fast tests only (`-m "not slow and not very_slow"`)
 - `pull_request` (closed + merged): Runs full test suite
 - `workflow_dispatch`: Manual trigger with mode selection (fast/full)
+
+The `fast`/`full` selection applies **only to the general `run-tests` job**. The
+separate `pytest-v2` and `pytest-legacy` jobs ignore it and always run their full
+applicable suite; what they cover is keyed on the *event*, not the mode — `push`
+runs the smoke-fixture tier, `schedule` (nightly) adds the 60s fixture, and a
+manual `workflow_dispatch` additionally pulls the scenario fixtures
+(Neuropixels / tetrode) and requires them, so a manual dispatch is the most
+thorough v2 run regardless of the `fast`/`full` choice.
 
 **Optimizations:**
 
@@ -193,7 +201,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-pytest --no-teardown  # Avoid container restart overhead
+# --no-teardown requires an explicit --base-dir, since the default
+# temp-dir base is created fresh each session — preserving the DB
+# without a stable filesystem leaves orphaned rows (#1573).
+pytest --no-teardown --base-dir ./tests/_data/
 ```
 
 **Run specific test files:**
@@ -249,11 +260,24 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ### Data and Database Options
 
 ```bash
---base_dir PATH     # Where to store downloaded/created files
-# Default: ./tests/_data/
+--base-dir PATH     # Where to store downloaded/created files
+# Default: per-session temp directory (created by tempfile.mkdtemp).
+# SPYGLASS_BASE_DIR is IGNORED by default — pass --use-env-base-dir to
+# honor it. See issue #1573: a shell-exported SPYGLASS_BASE_DIR pointing
+# at shared/production storage would otherwise let destructive tests
+# (e.g. AnalysisNwbfile.cleanup) scan and delete real data.
+# Local developers who want reuse across runs should pass an explicit
+# --base-dir (e.g. --base-dir ./tests/_data/).
+
+--use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
+# when --base-dir is not supplied. Off by default. If the flag is
+# passed but SPYGLASS_BASE_DIR is unset, a warning is printed and the
+# default temp-dir fallback is used.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-# Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns.
+# Must be combined with --base-dir (or --use-env-base-dir) so the
+# preserved DB points at a stable filesystem path.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management

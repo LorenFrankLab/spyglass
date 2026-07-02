@@ -93,6 +93,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 f"Group {nwb_file_name}: {group_name} already exists "
                 + "please delete the group before creating a new one",
             )
+        # Consumer-boundary guard: refuse to build a group from v2 preview
+        # (apply_merge=False) curations or from multiple curations of one sort
+        # (which would double-count units in the decode). No-op for v0/v1.
+        # Runs AFTER the existing-group short-circuit -- an existing group is a
+        # no-op and never processes ``keys``, so they must not be validated here.
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys]
+        )
 
         parts_insert = [{**key, **group_key} for key in keys]
 
@@ -169,13 +177,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
-            (
-                SortedSpikesGroup.Units
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
-                }
-            )
+            SortedSpikesGroup.Units
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+            }
         ).fetch("spikesorting_merge_id")
 
         # get the filtering parameters
@@ -187,8 +193,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
+        # A group may span multiple SpikeSortingOutput source parts (e.g.
+        # CurationV1 + CurationV2); multi_source=True fetches across them with
+        # each merge_id aligned to its file.
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
-            return_merge_ids=True
+            return_merge_ids=True, multi_source=True
         )
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
@@ -203,7 +212,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             ].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
-                for unit_id in range(len(sorting_spike_times))
+                for unit_id in _get_nwb_unit_ids(nwb_file, nwb_field_name)
             ]
 
             # filter the spike times based on the labels if present
@@ -216,6 +225,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 next(group_col, None), None
             )
 
+            # NOTE: the ``not test_mode`` guard is load-bearing. The shared
+            # base-env test fixtures build ``default_exclusion`` groups
+            # (exclude ``noise``/``mua``) over curations whose units carry
+            # those labels, so running the filter under pytest would empty
+            # the group and break ``test_fetch_data`` / sorted-spikes
+            # decoding (np.concatenate on []). Filtering is exercised
+            # directly via ``test_filter_units`` instead. Removing this
+            # guard reproduces the PR #1209 regression it was added to fix.
             if group_labels is not None and not test_mode:
                 group_label_list = group_labels.to_list()
                 include_unit = SortedSpikesGroup.filter_units(
@@ -225,6 +242,32 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     compress(sorting_spike_times, include_unit)
                 )
                 file_unit_ids = list(compress(file_unit_ids, include_unit))
+            elif group_labels is None:
+                # An all-unlabeled curated NWB omits the label column,
+                # so the filter above is skipped and an include-only selection
+                # would wrongly return ALL units. Synthesize empty per-unit
+                # label lists so the filter still applies: include-only -> no
+                # units, exclude-only -> all units. This branch runs regardless
+                # of test_mode -- unlike the column-present path above, an
+                # exclude filter over empty labels keeps EVERY unit, so it
+                # cannot empty the shared default_exclusion fixtures (whose
+                # units carry labels in a present column, handled above).
+                include_filter = (
+                    list(include_labels) if include_labels is not None else []
+                )
+                exclude_filter = (
+                    list(exclude_labels) if exclude_labels is not None else []
+                )
+                if include_filter or exclude_filter:
+                    include_unit = SortedSpikesGroup.filter_units(
+                        [[] for _ in sorting_spike_times],
+                        include_filter,
+                        exclude_filter,
+                    )
+                    sorting_spike_times = list(
+                        compress(sorting_spike_times, include_unit)
+                    )
+                    file_unit_ids = list(compress(file_unit_ids, include_unit))
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
@@ -354,3 +397,17 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
     if nwb_field_name is None and not allow_empty:
         raise ValueError("NWB file does not have 'object_id' or 'units' field")
     return nwb_field_name
+
+
+def _get_nwb_unit_ids(nwb_file, nwb_field_name) -> list[int]:
+    """Return the NWB units table's unit_id list (true ids, not positional).
+
+    v2 merge-applied sortings produce sparse unit_id sets (the kept
+    unit retains the head id, contributors disappear from the keep
+    set); any caller mapping a positional index back to a unit_id
+    would mis-label them. The DataFrame returned by
+    ``SpyglassMixin.fetch_nwb`` is indexed by the NWB ``id``
+    column for both v1 and v2 writers, so this helper centralizes
+    the "read the true ids" idiom.
+    """
+    return [int(uid) for uid in nwb_file[nwb_field_name].index]

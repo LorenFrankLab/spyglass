@@ -69,8 +69,14 @@ class DataDownloader:
         self.file_paths = file_paths if download_dlc else file_paths[:NON_DLC]
         self.base_dir.mkdir(exist_ok=True)
 
-        # Start downloads
-        _ = self.file_downloads
+        # NOTE: downloads start lazily on first ``file_downloads`` access (i.e.
+        # the first ``wait_for`` / ``move_dlc_items``), NOT here. The root
+        # ``pytest_configure`` constructs this against a fresh empty temp base_dir
+        # every session, so eagerly resolving ``file_downloads`` would spawn a
+        # curl per absent file even for pure-helper runs that consume none of
+        # them. The ``cached_property`` still launches every download at once on
+        # first use, preserving the parallel-download behaviour for real
+        # consumers.
 
     @cached_property  # Only make list of processes once
     def file_downloads(self) -> Dict[str, Union[Popen, None]]:

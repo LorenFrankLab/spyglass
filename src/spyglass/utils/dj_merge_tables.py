@@ -88,6 +88,86 @@ class Merge(ExportMixin, dj.Manual):
             part = part.table_name
         return to_camel_case(part.split("__")[-1].strip("`"))
 
+    @staticmethod
+    def _restriction_attrs(restriction) -> set:
+        """Best-effort set of attribute names a restriction references.
+
+        Introspects ``dict`` and ``list``/``tuple``-of-dict restrictions; a
+        non-introspectable form (``str``/``True``/``None``) yields an empty
+        set, signalling the caller to fall back to a master-level lookup.
+        ``dj.AndList`` subclasses ``list``; a plain ``list``/``tuple`` is an OR
+        (DataJoint has no ``OrList`` type).
+
+        Parameters
+        ----------
+        restriction : dict, list, tuple, str, bool, or None
+            A DataJoint restriction.
+
+        Returns
+        -------
+        set
+            Attribute names referenced by the dict/list clauses; empty for
+            non-introspectable forms.
+        """
+        names = set()
+        if isinstance(restriction, dict):
+            names |= set(restriction)
+        elif isinstance(restriction, (list, tuple)):
+            for sub in restriction:
+                names |= Merge._restriction_attrs(sub)
+        return names
+
+    @staticmethod
+    def _applicable_restriction(restriction, valid_attrs: set):
+        """Restriction limited to the clauses valid for ``valid_attrs``.
+
+        Used per source to keep only the clauses whose attributes the source's
+        parent actually has, so an inapplicable clause is dropped rather than
+        silently matching all of the source's rows.
+
+        A ``dict`` (AND of keys) applies only if EVERY key is valid; a
+        ``dj.AndList`` only if every element applies; a plain ``list``/``tuple``
+        (OR) keeps the clauses that apply; ``str``/``True`` pass through (not
+        introspectable). A ``True`` or empty-dict (``{}``) clause is
+        non-discriminating and matches all rows -- inside an OR-list it makes
+        that source match everything (standard DataJoint ``OR True == True``
+        semantics, not a filtering defect).
+
+        Parameters
+        ----------
+        restriction : dict, list, tuple, dj.AndList, str, or bool
+            A DataJoint restriction.
+        valid_attrs : set
+            Attribute names available for this source (master columns plus the
+            parent's heading).
+
+        Returns
+        -------
+        dict, list, dj.AndList, str, bool, or None
+            The restriction limited to its applicable clauses, or ``None`` when
+            no clause can apply to ``valid_attrs`` (this source does not match).
+        """
+        if isinstance(restriction, dict):
+            return restriction if set(restriction) <= valid_attrs else None
+        if isinstance(restriction, dj.AndList):
+            applied = [
+                Merge._applicable_restriction(r, valid_attrs)
+                for r in restriction
+            ]
+            return (
+                dj.AndList(applied)
+                if all(a is not None for a in applied)
+                else None
+            )
+        if isinstance(restriction, (list, tuple)):
+            applied = [
+                Merge._applicable_restriction(r, valid_attrs)
+                for r in restriction
+            ]
+            applied = [a for a in applied if a is not None]
+            return applied or None
+        return restriction
+
     def get_source_from_key(self, key: dict) -> str:
         """Return the source of a given key"""
         return self._normalize_source(key)
@@ -523,8 +603,16 @@ class Merge(ExportMixin, dj.Manual):
         ----------
         restriction: str, optional
             Restriction to apply to parents before running fetch. Default True.
+            A restriction on a PARENT attribute (e.g. ``{"sort_group_id": 0}``)
+            must be passed HERE, as the argument -- ``(Merge & {parent_attr})``
+            silently drops it, because the attribute is not in the merge
+            master's heading, so ``.fetch_nwb()`` would then see no restriction
+            and return all files.
         multi_source: bool
-            Return from multiple parents. Default False.
+            Default False. Allow the restriction to span more than one source
+            part type. When False (the default), a multi-source restriction
+            raises; when True, files are fetched source-by-source and (with
+            ``return_merge_ids``) each merge_id aligns with its file.
         return_merge_ids: bool
             Default False. Return merge_ids with nwb files.
         log_export: bool
@@ -537,44 +625,148 @@ class Merge(ExportMixin, dj.Manual):
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
-        merge_restriction = self.extract_merge_id(restriction)
 
-        sources = set(
-            (self & merge_restriction).fetch(
-                self._reserved_sk, log_export=False
-            )
+        # Attributes the restriction references that are NOT master columns
+        # (merge_id / source). ``extract_merge_id`` collapses a parent-key
+        # restriction to a universal set, so source discovery on the master
+        # alone surfaces every source; ``merge_restrict_class`` narrows through
+        # the part and silently drops a parent's non-PK attributes from the
+        # fetch. Both are avoided below by routing parent-attribute
+        # restrictions through the ``part * parent`` join.
+        parent_attrs = self._restriction_attrs(restriction) - set(
+            self.heading.names
         )
+
         nwb_list = []
         merge_ids = []
-        for source in sources:
-            source_restr = (
-                self
-                & dj.AndList([{self._reserved_sk: source}, merge_restriction])
-            ).fetch("KEY", log_export=False)
-            nwb_list.extend(
-                (self & source_restr)
-                .merge_restrict_class(
-                    restriction,
+        if not parent_attrs:
+            # Pure master-column (merge_id / source) or un-introspectable
+            # (True / str) restriction: the per-source ``merge_restrict_class``
+            # fetch reproduces the single-source path every merge master uses
+            # today. (Source discovery here applies the full master-column
+            # ``restriction`` rather than only its ``merge_id`` component, so a
+            # ``{"source": X}`` restriction resolves to that one source instead
+            # of all of them.)
+            merge_restriction = self.extract_merge_id(restriction)
+            sources = set(
+                (self & restriction).fetch(self._reserved_sk, log_export=False)
+            )
+            if len(sources) > 1 and not multi_source:
+                self._warn_multi_source(sources)
+            for source in sources:
+                source_restr = (
+                    self
+                    & dj.AndList(
+                        [{self._reserved_sk: source}, merge_restriction]
+                    )
+                ).fetch("KEY", log_export=False)
+                # Scope the parent resolution to THIS source so
+                # ``merge_get_parent`` sees exactly one parent per iteration.
+                source_nwb = self.merge_restrict_class(
+                    dj.AndList([restriction, {self._reserved_sk: source}]),
                     permit_multiple_rows=True,
                     add_invalid_restrict=False,
-                )
-                .fetch_nwb()
-            )
-            if return_merge_ids:
-                merge_ids.extend(
-                    [
+                ).fetch_nwb()
+                nwb_list.extend(source_nwb)
+                if return_merge_ids:
+                    # Resolve each file's merge_id within THIS source's
+                    # restriction (``source_nwb``), not the cumulative
+                    # ``nwb_list`` (which would AND a prior source's file
+                    # against the current source and over-accumulate / raise).
+                    merge_ids.extend(
                         (
                             self
                             & dj.AndList(
-                                [self._merge_restrict_parts(file), source_restr]
+                                [
+                                    self._merge_restrict_parts(file),
+                                    source_restr,
+                                ]
                             )
                         ).fetch1(self._reserved_pk)
-                        for file in nwb_list
-                    ]
+                        for file in source_nwb
+                    )
+        else:
+            # Parent-attribute restriction (e.g. {"sort_group_id": 0},
+            # {"nwb_file_name": X}, or an OR across sources). Resolve through
+            # the ``master * part * parent`` join so master columns (source),
+            # the parent's PK, and the parent's non-PK attributes ALL apply to
+            # discovery and the fetch. Per source, keep only the restriction
+            # clauses valid for that source's parent (a clause naming an
+            # attribute the parent lacks would be silently dropped and the
+            # source would spuriously match all of its rows) -- this preserves
+            # OR structure so e.g. ``[{"leaf_a_id": 0}, {"leaf_b_id": 0}]``
+            # routes each branch to its own source.
+            master_attrs = set(self.heading.names)
+            matches = []  # (source_name, parent, matched join)
+            for part in self.parts(as_objects=True):
+                source_name = self._part_name(part)
+                parent = self.merge_get_parent_class(source_name)
+                if parent is None:
+                    continue
+                applicable = self._applicable_restriction(
+                    restriction, master_attrs | set(parent.heading.names)
                 )
+                if applicable is None:
+                    continue  # no restriction clause applies to this source
+                matched = (self * part * parent) & applicable
+                if matched:
+                    matches.append((source_name, parent, matched))
+            if not matches:
+                # The restriction named parent attributes, but no source's
+                # IMMEDIATE parent carries them (e.g. an attribute upstream of
+                # the parent, like nwb_file_name on a sorting). Warn rather
+                # than return a silent empty list -- a silent ``[]`` is
+                # indistinguishable from a legitimately empty match.
+                logger.warning(
+                    "Merge.fetch_nwb: restriction references attributes "
+                    f"{sorted(parent_attrs)} not found on any source's parent "
+                    "table; returning no files. If this is an upstream "
+                    "attribute, restrict through the source table directly."
+                )
+            sources = {m[0] for m in matches}
+            if len(sources) > 1 and not multi_source:
+                self._warn_multi_source(sources)
+            for _source_name, parent, matched in matches:
+                # ``matched`` already applied the restriction through the join.
+                # Restrict the parent to the matched rows by PRIMARY KEY (a
+                # direct ``parent & matched`` is rejected by DataJoint when
+                # they share a non-key secondary attribute).
+                parent_pk = parent.primary_key
+                parent_keys = matched.fetch(*parent_pk, as_dict=True)
+                source_nwb = (parent & parent_keys).fetch_nwb()
+                nwb_list.extend(source_nwb)
+                if return_merge_ids:
+                    # ``matched`` carries merge_id alongside the parent PK; map
+                    # each fetched file back to its merge_id by that PK. This
+                    # is 1:1 because ``Merge.insert`` derives merge_id as a hash
+                    # of (parent key, source), so a parent row has exactly one
+                    # merge_id; ``fetch1`` would raise (not mis-pick) if that
+                    # invariant were ever violated.
+                    merge_ids.extend(
+                        (matched & {k: file[k] for k in parent_pk}).fetch1(
+                            self._reserved_pk
+                        )
+                        for file in source_nwb
+                    )
         if return_merge_ids:
             return nwb_list, merge_ids
         return nwb_list
+
+    def _warn_multi_source(self, sources) -> None:
+        """Warn (do not raise) for a restriction spanning multiple sources.
+
+        Each source resolves to a different parent class, so fetching across
+        them mixes files/ids from unrelated tables -- usually unintended, but
+        valid: the per-source loop resolves each source correctly. Warn so the
+        breadth is visible rather than silent; pass ``multi_source=True`` to
+        silence, or restrict to a single source.
+        """
+        logger.warning(
+            f"Merge.fetch_nwb: restriction spans {len(sources)} sources "
+            f"({sorted(sources)}); fetching across all of them. Pass "
+            "multi_source=True to silence this warning, or restrict to a "
+            "single source."
+        )
 
     @classmethod
     def merge_get_part(
@@ -957,7 +1149,7 @@ def delete_downstream_merge(
 
     ActivityLog().deprecate_log(
         name="delete_downstream_merge",
-        alternate="Table.delete_downstream_merge",
+        alt="Table.delete_downstream_merge",
     )
 
     if not isinstance(table, SpyglassMixin):

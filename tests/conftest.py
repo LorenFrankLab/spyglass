@@ -36,7 +36,9 @@ if _rw_filter not in _existing:
 
 # ---------------------------------------------------------------------------
 
+import json
 import sys
+import tempfile
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
@@ -61,6 +63,17 @@ from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
+
+# Module-level default so `pytest_unconfigure` never references an unbound name.
+# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
+# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
+# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
+# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
+# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
+# defined`, a second traceback that buries the real configuration error. The
+# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
+# real error instead.
+SERVER = None
 
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
@@ -202,7 +215,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC, TMP_BASE_DIR
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -272,7 +286,10 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default None. Dir for local input files. When unset,
+        a fresh per-session temp dir is used (see #1573).
+    --use-env-base-dir (bool): Default False. Honor SPYGLASS_BASE_DIR env
+        var when --base-dir is not supplied. Off by default for safety.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
@@ -293,8 +310,22 @@ def pytest_addoption(parser):
         dest="base_dir",
         help=(
             "Directory for local input file. "
-            "Also reads SPYGLASS_BASE_DIR env var when unset. "
-            "Default: './tests/_data/'."
+            "When unset, a fresh temp directory is used per session to avoid "
+            "destructive actions against shared/production filesystems "
+            "(see issue #1573). Pass --use-env-base-dir to opt back in to "
+            "the SPYGLASS_BASE_DIR environment variable."
+        ),
+    )
+    parser.addoption(
+        "--use-env-base-dir",
+        action="store_true",
+        dest="use_env_base_dir",
+        default=False,
+        help=(
+            "Honor the SPYGLASS_BASE_DIR environment variable when "
+            "--base-dir is not supplied. Off by default so an exported "
+            "SPYGLASS_BASE_DIR pointing at shared storage cannot cause "
+            "tests to act on production files (issue #1573)."
         ),
     )
     parser.addoption(
@@ -332,10 +363,44 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # opt-in for the slow real-chronic memory/runtime gate
+        "--run-chronic",
+        action="store_true",
+        dest="run_chronic",
+        default=False,
+        help=(
+            "Run the slow real-chronic-dataset memory/runtime gate for "
+            "spike-sorting v2 concatenation. Requires a real dataset via the "
+            "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
+        ),
+    )
+
+
+def _derive_dir_env_vars():
+    """Return every `{PREFIX}_{KEY}_DIR` env var listed in directory_schema.json.
+
+    Kept in sync with ``SpyglassConfig.dir_to_var`` (settings.py) by reading the
+    same schema file. Used to scrub stale env vars before tests run, so a
+    shell-exported `DLC_VIDEO_DIR=/shared/prod/video` (or similar) cannot leak
+    into spyglass.settings after we override SPYGLASS_BASE_DIR.
+    """
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "spyglass"
+        / "directory_schema.json"
+    )
+    schema = json.loads(schema_path.read_text())["directory_schema"]
+    return [
+        f"{prefix.upper()}_{key.upper()}_DIR"
+        for prefix, dirs in schema.items()
+        for key in dirs
+    ]
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global NO_DLC, TMP_BASE_DIR
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -344,12 +409,74 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    _base_dir = config.option.base_dir or os.environ.get(
-        "SPYGLASS_BASE_DIR", "./tests/_data/"
-    )
+    # Resolve base_dir with safety-first precedence (issue #1573):
+    #   1. --base-dir CLI flag (explicit opt-in to a specific path)
+    #   2. SPYGLASS_BASE_DIR env var *only if* --use-env-base-dir is set
+    #   3. Fresh per-session temp dir (safe default)
+    # An exported SPYGLASS_BASE_DIR pointing at shared/production storage is
+    # no longer picked up silently; destructive tests (e.g.
+    # AnalysisNwbfile.cleanup) would otherwise scan and delete production
+    # files.
+    TMP_BASE_DIR = None
+    env_base = os.environ.get("SPYGLASS_BASE_DIR")
+    if config.option.base_dir:
+        _base_dir = config.option.base_dir
+    elif config.option.use_env_base_dir and env_base:
+        _base_dir = env_base
+    else:
+        # --no-teardown is meaningless with the temp-dir default: a fresh
+        # mkdtemp() is allocated each session, so DB rows from a previous
+        # run would point at a temp path that no longer exists on the next
+        # run. Require an explicit --base-dir (or --use-env-base-dir with
+        # SPYGLASS_BASE_DIR set) for persistent-state workflows.
+        if not TEARDOWN:
+            raise pytest.UsageError(
+                "--no-teardown requires an explicit --base-dir (or "
+                "--use-env-base-dir with SPYGLASS_BASE_DIR set). The "
+                "default temp-dir base is created fresh each session, so "
+                "the preserved database would point at files that no "
+                "longer exist. Try: pytest --no-teardown --base-dir "
+                "./tests/_data/"
+            )
+        if config.option.use_env_base_dir and not env_base:
+            print(
+                "[conftest] --use-env-base-dir was passed but "
+                "SPYGLASS_BASE_DIR is not set; falling back to a temp dir.",
+                file=sys.stderr,
+            )
+        elif env_base:
+            print(
+                f"[conftest] Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
+                "--use-env-base-dir to honor it, or --base-dir to set an "
+                "explicit path. See issue #1573.",
+                file=sys.stderr,
+            )
+        TMP_BASE_DIR = tempfile.mkdtemp(prefix="spyglass_test_")
+        _base_dir = TMP_BASE_DIR
+        print(
+            f"[conftest] Using temp base_dir for tests: {TMP_BASE_DIR}",
+            file=sys.stderr,
+        )
+
     BASE_DIR = Path(_base_dir).expanduser().absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
+
+    # Scrub every SPYGLASS_* / DLC_* / MOSEQ_* / KACHERY_* env var that
+    # spyglass.settings reads, so a user's shell can't mix stale subdir
+    # pointers into the resolved BASE_DIR. The list is derived from
+    # directory_schema.json (canonical source) plus the extras that
+    # settings.py reads by name (DLC_BASE_DIR, DLC_PROJECT_PATH,
+    # MOSEQ_BASE_DIR, KACHERY_ZONE).
+    _scrub_vars = set(_derive_dir_env_vars()) | {
+        "DLC_BASE_DIR",
+        "DLC_PROJECT_PATH",
+        "MOSEQ_BASE_DIR",
+        "KACHERY_ZONE",
+    }
+    for _stale in _scrub_vars:
+        os.environ.pop(_stale, None)
+
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
@@ -368,6 +495,19 @@ def pytest_configure(config):
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
 
+    # Scrub dj.config custom dir overrides from any globally saved config
+    # (e.g. ~/.datajoint_config.json or dj_local_conf.json in cwd). Without
+    # this, SpyglassConfig.load_config reads dj_custom.dlc_dirs / moseq_dirs
+    # / kachery_dirs before any env var and would pull in production paths
+    # saved by the user — defeating the BASE_DIR override (#1573, review
+    # finding). Reset spyglass_dirs to our resolved BASE_DIR too, so the
+    # dj.config path (line 177 in settings.py) agrees with the env-var
+    # fallback (line 178).
+    dj_custom = dj.config.setdefault("custom", {})
+    for _k in ("dlc_dirs", "moseq_dirs", "kachery_dirs"):
+        dj_custom.pop(_k, None)
+    dj_custom["spyglass_dirs"] = {"base": str(BASE_DIR)}
+
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
@@ -379,13 +519,30 @@ def pytest_unconfigure(config):
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
     close_nwb_files()
-    if TEARDOWN:
+    # `SERVER is not None` guards the case where pytest_configure raised before
+    # binding SERVER (e.g. Docker unavailable): teardown then skips the
+    # nonexistent server instead of masking the real error with a NameError.
+    if TEARDOWN and SERVER is not None:
         SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+        if TMP_BASE_DIR is None:
+            # Selective cleanup only for user-supplied base_dirs; a temp dir
+            # gets removed wholesale below, making per-subdir rmtree redundant.
+            analysis_dir = BASE_DIR / "analysis"
+            for file in analysis_dir.glob("*.nwb"):
+                file.unlink()
+            for subdir in [
+                "export",
+                "moseq",
+                "recording",
+                "spikesorting",
+                "tmp",
+            ]:
+                shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+
+    # Always remove a temp base_dir we allocated, even with --no-teardown.
+    # It's under $TMPDIR, was created by this run, and has no reuse value.
+    if TMP_BASE_DIR is not None:
+        shutil_rmtree(TMP_BASE_DIR, ignore_errors=True)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -521,8 +678,12 @@ def no_dlc(request):
     yield NO_DLC
 
 
+# String condition (evaluated lazily in pytest's namespace, where
+# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
+# truthy callable that ``skipif`` never calls, so every DLC test skipped
+# unconditionally regardless of ``--no-dlc``.
 skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
+    "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",
 )
 

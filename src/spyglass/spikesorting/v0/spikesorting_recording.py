@@ -21,6 +21,7 @@ from spyglass.settings import recording_dir
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
+    read_raw_nwb_recording,
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
@@ -576,7 +577,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if num_samples is None and key is not None:
             try:
                 nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-                recording = se.read_nwb_recording(
+                recording = read_raw_nwb_recording(
                     nwb_file_abs_path, load_time_vector=True
                 )
                 # Get the recording for the specific interval
@@ -644,7 +645,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if is_invalid(samp_rate) and key is not None:
             try:
                 nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-                recording = se.read_nwb_recording(
+                recording = read_raw_nwb_recording(
                     nwb_file_abs_path, load_time_vector=True
                 )
                 samp_rate = recording.get_sampling_frequency()
@@ -784,7 +785,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """
 
         nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
-        recording = se.read_nwb_recording(
+        recording = read_raw_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
 

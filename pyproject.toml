@@ -53,19 +53,31 @@ dependencies = [
   "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
   "ndx-pose",
+  "networkx",                       # imported by spikesorting v2 _matcher_graph
   "non-local-detector",
-  "numpy",
+  # Pinned to the numpy-2 line: the v2 SpikeInterface 0.104 stack + torch>=2
+  # resolve on numpy>=2, and elephant (validation extra) requires >=2.0.0. The
+  # legacy v0/v1 (SI 0.99) suite downgrades this to numpy<2 by sed-rewriting
+  # this exact line (see environment_spikesorting_legacy.yml + the pytest-legacy
+  # CI job); test_dependency_contract guards that the sed stays in sync.
+  "numpy>=2,<3",
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
-  "probeinterface<0.3",            # Bc some probes fail space checks
+  "probeinterface>=0.3.2",         # required by spikeinterface 0.104
   "pubnub<6.4",                    # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",
   "ripple-detection",
   "seaborn",
   "sortingview>=0.11",
-  "spikeinterface>=0.99.1,<0.100",
+  "spikeinterface==0.104.3",        # pinned: KS4/MS5/SC2/TDC2/Generic schemas
+                                    # use extra="allow", so a SI bump silently
+                                    # shifts untyped sorter defaults. Snapshot
+                                    # tests (test_*_si_defaults_unchanged) fail
+                                    # loudly on a bump; move the pin + audit the
+                                    # diff together. Loosen only after a
+                                    # deliberate SpikeInterface migration.
   "track-linearization>=2.3",
 ]
 
@@ -101,6 +113,58 @@ optional-dependencies.moseq-gpu = [
   "jax[cuda12]",
   "jax-moseq[cuda12]",
   "keypoint-moseq",
+]
+optional-dependencies.spikesorting-v2 = [
+  # Cross-process lock serializing concurrent AnalyzerCuration jobs that share a
+  # sort's analyzer-cache folder (see _analyzer_cache.analyzer_curation_lock).
+  # Pure-Python and tiny; declared explicitly rather than relied on transitively
+  # via torch.
+  "filelock",
+  # v1 production sorter. Installs the SI wrapper + isosplit5 (so it registers
+  # in installed_sorters()), but NOT ml_ms4alg -- MS4's actual algorithm backend
+  # is a numpy<2-era package that does not install under the v2 numpy>=2 baseline.
+  # So MS4 needs a numpy<2 env; preflight's sorter_runtime_available check gates
+  # this and the shipped run_v2_pipeline default is MS5 (which runs as-is).
+  "mountainsort4",
+  "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
+  # Drift/motion QC: DriftEstimate's default preset
+  # (compute_motion preset="dredge_fast") requires torch. Pinned >=2 because
+  # torch 2.x is the numpy>=2-compatible line -- this is NOT the UnitMatchPy
+  # numpy<2 conflict (that one is UnitMatchPy's own reactive pin, not torch's;
+  # see the spikesorting-v2-matching extra below). A modern standalone torch
+  # coexists with the v2 numpy>=2 baseline.
+  "torch>=2",
+]
+optional-dependencies.spikesorting-v2-matching = [
+  # cross-session unit tracking. Pinned to the 3.2.6/3.2.7 line, the last
+  # release that declares ``numpy<3.0,>=2.0`` so its METADATA coexists with the
+  # v2 numpy>=2 baseline (``uv pip check`` is clean against SI 0.104 + numpy 2).
+  # 3.2.8+ (incl. all 3.3.x) reactively repinned to ``numpy<2.0`` per upstream
+  # issue #134. CAVEAT: the metadata pin is necessary but not sufficient -- 3.2.7
+  # still has a numpy-2 RUNTIME break in its metric path (``np.arange`` on
+  # 1-element ``argwhere`` endpoints in ``param_functions``). The matcher backend
+  # MUST install the scoped ``param_functions`` arange shim (see
+  # tests/spikesorting/v2/resolver/unitmatch-resolver.md) or every run aborts.
+  # Revisit when UnitMatchPy restores numpy>=2 support upstream.
+  "UnitMatchPy>=3.2.6,<3.2.8",
+  "mat73",                     # UnitMatchPy reads MATLAB .mat exports
+]
+optional-dependencies.spikesorting-v2-curation = [
+  # FigPack web-based curation UI for v2 sorts. EXACT pins: figpack-spike-sorting
+  # is pre-1.0 (0.1.x) and its ``SortingCuration`` kwargs already drifted from
+  # SpikeInterface's figpack backend (SI passes ``label_choices=``, the extension
+  # expects ``default_label_options=``; figpack_curation builds the curation
+  # control directly to work around it). Verified combo: figpack 0.3.20 +
+  # figpack-spike-sorting 0.1.14 + spikeinterface 0.104.x (see
+  # tests/spikesorting/v2/resolver/figpack-runtime.md). Loosen only after
+  # re-verifying the API and curation round trip on a newer release.
+  "figpack==0.3.20",
+  "figpack-spike-sorting==0.1.14",
+]
+optional-dependencies.spikesorting-v2-validation = [
+  "MEArec>=1.9",       # ground-truth simulated recordings
+  "neuroconv[mearec]", # MEArec -> NWB conversion
+  "nwbinspector",      # NWBInspector validation of the generated fixture NWB
 ]
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
@@ -143,9 +207,10 @@ line-length = 80
 lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude,.claude/*'
+ignore-words-list = 'nevers,sortings,trough,sie'
 # Nevers - name in Citation
+# sie - import alias for spikeinterface.exporters (not a typo of "size")
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -164,6 +229,13 @@ addopts = [
   "--cov=spyglass",
   "--cov-report=term-missing",
   "--no-cov-on-fail",
+  # ``regenerate`` tests write large on-disk baseline bundles and
+  # MUST NOT run in the default suite -- a path-selected default
+  # run would silently overwrite committed baselines and any
+  # subsequent comparison gate would compare today's output to
+  # today's output (gate becomes a no-op). Opt in with
+  # ``-m regenerate`` to deliberately regenerate.
+  "-m", "not regenerate",
 ]
 testpaths = [ "tests" ]
 log_level = "INFO"
@@ -178,8 +250,13 @@ filterwarnings = [
   "ignore::DeprecationWarning:.*",
   "ignore::UserWarning:.*",
   "ignore::FutureWarning:.*",
-  "ignore::PerformanceWarning:.*",
-  "ignore::MissingRequiredBuildWarning:.*",
+  # Custom categories MUST be fully qualified: pytest resolves a bare name
+  # against ``builtins`` (AttributeError otherwise). With the default
+  # ``-p no:warnings`` the warnings plugin never parses this list, but a
+  # developer who drops that flag to see warnings would hit the unresolved
+  # category at collection time -- so spell the import paths out.
+  "ignore::pandas.errors.PerformanceWarning:.*",
+  "ignore::hdmf.build.warnings.MissingRequiredBuildWarning:.*",
   # DLC training ends by cancelling a TF enqueue thread; expected, not a bug
   "ignore::pytest.PytestUnhandledThreadExceptionWarning",
 ]
@@ -199,6 +276,23 @@ markers = [
 
   # Special markers
   "serial: Tests that must run serially (not parallel-safe)",
+  "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
+
+  # Test-tier markers for the spike-sorting v2 suite. Convention:
+  #   T1 unit          - <1s, no Docker
+  #   T2 db_unit       - <5s, Docker MySQL only (no populate)
+  #   T3 stage         - 10-60s, populate one Computed table
+  #   T4 pipeline      - 60-120s, full Recording -> Curation
+  #   T5 regression_gate - >2min, 60s fixture / memory / parallel
+  # New v2 tests should use these tier markers. The existing
+  # ``slow`` / ``integration`` marks above are not retired -- a
+  # bulk rename across the 75 marked v2 tests is out of scope for
+  # the audit-fix batch and was deferred to a separate marker-
+  # migration PR. CI runners can dispatch on either set.
+  "db_unit: DB-tier without populate (Docker MySQL connection only)",
+  "stage: Populate one Computed table (Recording / Artifact / Sorting)",
+  "pipeline: Full Recording -> Artifact -> Sort -> Curation pipeline",
+  "regression_gate: Heavy regression gate (60s fixture, memory, parallel)",
 ]
 
 [tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc

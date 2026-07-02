@@ -21,6 +21,84 @@ from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
+
+# v2 is an optional layer. Import the v2 module lazily and
+# wrap in try/except so v0/v1-only environments (which may lack the v2
+# dependencies) keep working unchanged; the v2 part table on
+# SpikeSortingOutput is only declared when v2 is importable in the current
+# environment, because DataJoint requires the FK target table to exist at
+# schema-compile time.
+#
+# When v2 is unavailable we keep the original import exception in
+# ``_v2_import_error`` and surface it (with traceback context) the
+# moment a v2-requiring helper is called — otherwise users see an
+# opaque "v2 not loaded" message and have to dig for the real cause
+# (missing pydantic, SI version skew, a v2 code error, etc).
+def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
+    """Import the v2 ``CurationV2`` part-table target for this merge table.
+
+    Returns ``(CurationV2_or_None, import_error_or_None)``.
+
+    The broad ``except Exception`` is deliberate and must NOT be narrowed to
+    ``ImportError``: the optional v2 layer can fail to import for reasons beyond
+    a missing dependency (e.g. a SpikeInterface / Pydantic version skew raising
+    at import), and v0/v1-only environments must still be able to load this
+    merge table when that happens. The captured error is logged (in addition to
+    being returned) so a genuinely unexpected v2 failure is surfaced rather than
+    silently swallowed.
+    """
+    try:
+        from spyglass.spikesorting.v2.curation import CurationV2
+    except Exception as err:  # noqa: BLE001 -- see docstring
+        logger.warning(
+            "spikesorting v2 is unavailable; SpikeSortingOutput will be "
+            "declared without its CurationV2 part in this process. "
+            f"Captured cause: {type(err).__name__}: {err}"
+        )
+        return None, err
+    return CurationV2, None
+
+
+CurationV2, _v2_import_error = _probe_v2_curation()
+
+
+def _raise_v2_unavailable(caller: str) -> None:
+    """Raise a clear RuntimeError when v2 is requested but didn't import.
+
+    Surfaces the original import exception (set at module load) so users
+    don't have to guess whether v2 failed because of a missing dependency,
+    a version skew, or a code-level error in the v2 module. Use this from
+    every v2-requiring helper instead of letting `_CurationV2 is None`
+    propagate as an `AttributeError` later.
+    """
+    cause = _v2_import_error
+    detail = (
+        f" Original import error: {type(cause).__name__}: {cause}"
+        if cause is not None
+        else ""
+    )
+    raise RuntimeError(
+        f"{caller}: spyglass.spikesorting.v2 is not importable in "
+        "this environment (e.g. a missing optional dependency or a "
+        f"version skew in the v2 stack).{detail}"
+    ) from cause
+
+
+def _available_merge_sources() -> list:
+    """Default ``sources`` for ``get_restricted_merge_ids``.
+
+    v0/v1 are always present; v2 is appended only when its module
+    imported. v2 is absent in v0/v1-only deployments (which may lack its
+    optional dependencies), so a literal ``["v0", "v1", "v2"]`` default
+    would make the no-argument path raise there even when the caller
+    never requested v2.
+    """
+    sources = ["v0", "v1"]
+    if CurationV2 is not None:
+        sources.append("v2")
+    return sources
+
+
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -28,6 +106,8 @@ source_class_dict = {
     "ImportedSpikeSorting": ImportedSpikeSorting,
     "CurationV1": CurationV1,
 }
+if CurationV2 is not None:
+    source_class_dict["CurationV2"] = CurationV2
 
 
 @schema
@@ -59,6 +139,82 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ---
         -> CuratedSpikeSorting
         """
+
+    if CurationV2 is not None:
+
+        class CurationV2(SpyglassMixin, dj.Part):  # noqa: F811
+            definition = """
+            -> master
+            ---
+            -> CurationV2
+            """
+
+    def _get_restricted_merge_ids_v2(
+        self,
+        key: dict,
+        restrict_by_artifact: bool = True,
+        as_dict: bool = False,
+        strict: bool = True,
+    ) -> Union[None, list, dict]:
+        """Resolve v2-source merge ids for a restriction key.
+
+        Thin merge-side wrapper: ``CurationV2.resolve_restriction`` owns
+        the v2 source-part join topology (so v2 schema knowledge lives in
+        v2, not in the merge master), and this maps the resolved
+        ``CurationV2`` rows to merge ids through
+        ``SpikeSortingOutput.CurationV2``, warning on multi-curation
+        fan-out. See ``CurationV2.resolve_restriction`` for the full
+        restriction surface, the unknown-key guard, and the
+        ``restrict_by_artifact`` / ``artifact_id`` handling. ``strict`` is
+        forwarded: ``False`` (the multi-source auto-default path) makes an
+        unknown key yield no v2 rows instead of raising.
+        """
+        if CurationV2 is None:
+            _raise_v2_unavailable(
+                "SpikeSortingOutput._get_restricted_merge_ids_v2"
+            )
+
+        # CurationV2 owns the v2 source-part join topology (see
+        # CurationV2.resolve_restriction); this wrapper only maps the
+        # resolved curations to merge ids and warns on multi-curation
+        # fan-out, so v2 schema knowledge stays in v2.
+        curation_table = CurationV2.resolve_restriction(
+            key, restrict_by_artifact=restrict_by_artifact, strict=strict
+        )
+        if curation_table is None:
+            # Lenient path: the key names no v2 column -> no v2 merge ids.
+            return []
+
+        # Multi-curation fan-out warning. When no ``curation_id`` is given and
+        # a sorting carries more than one CurationV2 curation (the v2-supported
+        # "multiple curations per sort" workflow), this returns one merge_id
+        # PER curation. Feeding all of them into e.g. SortedSpikesGroup /
+        # decoding would include the same physical units more than once. Warn
+        # so the caller restricts by curation_id rather than silently
+        # double-counting. (Only inspects when curation_id is unspecified.)
+        if "curation_id" not in key:
+            multi = sorted(
+                str(sid)
+                for sid in (
+                    dj.U("sorting_id").aggr(
+                        curation_table.proj(), n_curations="count(*)"
+                    )
+                    & "n_curations > 1"
+                ).fetch("sorting_id")
+            )
+            if multi:
+                logger.warning(
+                    "SpikeSortingOutput._get_restricted_merge_ids_v2: "
+                    f"{len(multi)} sorting(s) carry multiple CurationV2 "
+                    "curations and no curation_id was given, so the result "
+                    "includes one merge_id PER curation. Feeding all of them "
+                    "into SortedSpikesGroup / decoding would include the same "
+                    "units more than once -- pass curation_id to select one. "
+                    f"Affected sorting_id(s): {multi}."
+                )
+
+        joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
+        return joined.fetch("merge_id", as_dict=as_dict)
 
     def _get_restricted_merge_ids_v1(
         self,
@@ -111,7 +267,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_restricted_merge_ids(
         self,
         key: dict,
-        sources: list = ["v0", "v1"],
+        sources: list | None = None,
         restrict_by_artifact: bool = True,
         as_dict: bool = False,
     ) -> Union[None, list, dict]:
@@ -122,7 +278,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         key : dict
             restriction for any stage of the spikesorting pipeline
         sources : list, optional
-            list of sources to restrict to
+            list of sources to restrict to. Defaults to every AVAILABLE
+            source: ``["v0", "v1"]`` plus ``"v2"`` only when the v2 module
+            imported (v2 is absent in v0/v1-only deployments that lack its
+            optional dependencies). Pass an explicit list to
+            override; a list containing ``"v2"`` in an env where v2 did
+            not import raises a clear error.
         restrict_by_artifact : bool, optional
             whether to restrict by artifact rather than original interval name.
             Relevant to v1 pipeline, by default True
@@ -137,6 +298,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         if not isinstance(key, dict):
             raise TypeError("key must be a dictionary")
+
+        # When the caller did not name ``sources`` (auto-default to ALL
+        # available), the v2 resolver must be LENIENT: a key meant for v0/v1
+        # is not a v2 typo, so v2 contributes no rows rather than raising on
+        # it. An explicit ``sources`` list means a deliberate query -> keep
+        # v2 strict so a real typo still surfaces.
+        v2_strict = sources is not None
+        if sources is None:
+            sources = _available_merge_sources()
 
         merge_ids = []
 
@@ -163,6 +333,20 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 )
             )
 
+        if "v2" in sources:
+            if CurationV2 is None:
+                _raise_v2_unavailable(
+                    "SpikeSortingOutput.get_restricted_merge_ids"
+                )
+            merge_ids.extend(
+                self._get_restricted_merge_ids_v2(
+                    key.copy(),
+                    restrict_by_artifact=restrict_by_artifact,
+                    as_dict=as_dict,
+                    strict=v2_strict,
+                )
+            )
+
         return merge_ids
 
     @classmethod
@@ -173,6 +357,100 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ]
         query = source_table & cls.merge_get_part(key)
         return query.get_recording(query.fetch("KEY"))
+
+    @classmethod
+    def assert_decoding_merge_ids_ok(cls, merge_ids) -> None:
+        """Validate merge_ids destined for a decoding group/consumer.
+
+        Raises (rather than the softer warnings on ``get_restricted_merge_ids``
+        / ``CurationV2.get_sorting``) at the CONSUMER boundary -- where the
+        units actually enter a decode -- so the query helpers stay usable for
+        ad-hoc inspection while a dangerous set never reaches a decoder:
+
+        * a v2 ``CurationV2`` created with ``apply_merge=False`` whose proposed
+          merges are NOT applied -> decoding would run on oversplit units;
+        * two merge_ids resolving to the SAME sorting (different curations of
+          one sort) -> the same physical units counted more than once.
+
+        v0/v1 sources are skipped: the preview / multi-curation-per-sort
+        concepts are specific to v2 ``CurationV2``.
+
+        Parameters
+        ----------
+        merge_ids : iterable
+            ``merge_id`` values (or anything ``& {"merge_id": ...}`` accepts).
+        """
+        if CurationV2 is None:
+            return
+        sorting_to_merges: dict = {}
+        for mid in merge_ids:
+            part = cls.CurationV2 & {"merge_id": mid}
+            if not part:
+                continue  # v0/v1 source -- preview/multi-curation are v2 only
+            # The merge part's PK is ``merge_id``; the CurationV2 PK
+            # (sorting_id, curation_id) lives as secondary FK columns.
+            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            cur_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+            sorting_to_merges.setdefault(str(sorting_id), []).append(mid)
+            if CurationV2.has_unapplied_proposed_merges(cur_key):
+                raise ValueError(
+                    f"merge_id {mid} is a CurationV2 curation "
+                    f"(sorting_id={cur_key['sorting_id']}, "
+                    f"curation_id={cur_key['curation_id']}) created with "
+                    "apply_merge=False whose proposed merges are NOT applied; "
+                    "decoding would run on oversplit units. Re-curate with "
+                    "apply_merge=True (or pick a curation whose merges are "
+                    "applied) before adding it to a decoding group."
+                )
+        duplicated = {
+            sid: m for sid, m in sorting_to_merges.items() if len(m) > 1
+        }
+        if duplicated:
+            raise ValueError(
+                "Multiple merge_ids resolve to the same sorting (different "
+                "curations of one sort), so the same units would be counted "
+                f"more than once in decoding: {duplicated}. Restrict to one "
+                "curation per sorting (pass curation_id)."
+            )
+
+    @classmethod
+    def _warn_preview_merge_ids(cls, merge_ids) -> None:
+        """Warn for any CONSUMED merge_id that is a v2 preview curation.
+
+        A ``CurationV2`` created with ``apply_merge=False`` records proposed
+        merges in ``MergeGroup`` without applying them; the generic accessors
+        return the UNMERGED (oversplit) units for such a curation. Mirrors the
+        per-merge_id resolution in ``assert_decoding_merge_ids_ok`` but WARNS
+        instead of raising -- the strict raise stays on the decoding boundary,
+        while the generic accessors warn (non-breaking for v0/v1 consumers,
+        consistent with ``CurationV2.get_sorting``). v0/v1 sources are skipped
+        (preview semantics are v2-only).
+
+        Takes the EXPLICIT merge_ids the caller actually consumed (resolved by
+        ``fetch_nwb(return_merge_ids=True)``), so the warning mirrors exactly
+        what the accessor reads -- no restriction re-resolution, which would
+        miss a restriction stored on ``self`` and could not route (or would
+        crash on) a parent-attribute key the way ``fetch_nwb`` does.
+        """
+        if CurationV2 is None:
+            return
+        for mid in merge_ids:
+            part = cls.CurationV2 & {"merge_id": mid}
+            if not part:
+                continue  # v0/v1 source
+            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            if CurationV2.has_unapplied_proposed_merges(
+                {"sorting_id": sorting_id, "curation_id": curation_id}
+            ):
+                logger.warning(
+                    f"merge_id {mid} is a CurationV2 curation "
+                    f"(sorting_id={sorting_id}, curation_id={curation_id}) "
+                    "created with apply_merge=False whose proposed merges are "
+                    "NOT applied; the returned spike times are for the UNMERGED "
+                    "(oversplit) units. Re-curate with apply_merge=True (or pick "
+                    "a curation whose merges are applied) if you intended the "
+                    "merged units."
+                )
 
     @classmethod
     def get_sorting(cls, key):
@@ -206,11 +484,31 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     def get_spike_times(self, key):
         """Get spike times for the group"""
+        # Resolve the files AND their merge_ids in one fetch_nwb pass so the
+        # preview warning sees EXACTLY the merges consumed here -- fetch_nwb
+        # honors both this instance's restriction and ``key`` and routes
+        # parent-attribute restrictions, which a separate (cls & key) /
+        # merge_restrict resolution could not. Warn (don't raise) if a consumed
+        # merge is a v2 preview curation whose proposed merges are unapplied:
+        # the returned trains are the UNMERGED units. get_spike_times is the
+        # common sink (get_firing_rate -> get_spike_indicator ->
+        # get_spike_times), so warn here once; the strict raise stays on the
+        # decoding boundary.
+        nwb_files, merge_ids = self.fetch_nwb(key, return_merge_ids=True)
+        type(self)._warn_preview_merge_ids(merge_ids)
         spike_times = []
-        for nwb_file in self.fetch_nwb(key):
+        for nwb_file in nwb_files:
             # V1 uses 'object_id', V0 uses 'units'
             file_loc = "object_id" if "object_id" in nwb_file else "units"
-            spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())
+            units = nwb_file[file_loc]
+            # A zero-unit curation (v2 ``require_units=False`` path) writes an
+            # empty Units table with no ``spike_times`` column; indexing it
+            # would raise ``KeyError: 'spike_times'``. Such a row contributes
+            # no spike trains, so skip it. Populated v0/v1/v2 units tables
+            # always carry the column, so this never changes their behavior.
+            if "spike_times" not in units:
+                continue
+            spike_times.extend(units["spike_times"].to_list())
         return spike_times
 
     @classmethod
@@ -245,6 +543,66 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             spike_indicator = spike_indicator[:, np.newaxis]
 
         return spike_indicator
+
+    @classmethod
+    def get_unit_brain_regions(cls, key, *, allow_anchor_member=False):
+        """Per-unit brain regions for a merge_key.
+
+        Dispatches through ``source_class_dict`` to the source table's
+        ``get_unit_brain_regions`` accessor. v2's ``CurationV2`` defines
+        this method; v0's ``CuratedSpikeSorting`` and v1's ``CurationV1``
+        do not, and a clear ``AttributeError`` is raised on those
+        sources. This is intentional -- v0/v1 do not carry the per-unit
+        Electrode FK that the v2 Sorting.Unit contract requires.
+
+        This resolves a single curated sort's per-unit regions. For a
+        concat-backed v2 sort, the regions are ambiguous across members;
+        ``TrackedUnit.get_unit_brain_regions`` is the per-session resolver
+        for cross-session (matched) workflows.
+
+        Parameters
+        ----------
+        key : dict
+            A merge_key (or any restriction that resolves to one).
+        allow_anchor_member : bool, optional
+            Passed through to the v2 source accessor. A concat-backed v2 sort
+            raises ``ConcatBrainRegionAmbiguousError`` by default; pass ``True``
+            to return the anchor (first ``SessionGroup.Member``) regions
+            (labeled ``region_resolution="anchor_member"``). Only the v2
+            ``CurationV2`` source defines ``get_unit_brain_regions`` at all, so
+            this dispatch is effectively v2-only: v0/v1 sources raise the
+            ``AttributeError`` below before the kwarg is consumed.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per curated unit with ``unit_id``, ``electrode_id``,
+            ``region_name``, ``subregion_name``, ``subsubregion_name``,
+            and ``region_resolution``.
+        """
+        source_table = source_class_dict[
+            to_camel_case(cls.merge_get_parent(key).table_name)
+        ]
+        if not hasattr(source_table, "get_unit_brain_regions"):
+            raise AttributeError(
+                "SpikeSortingOutput.get_unit_brain_regions: source table "
+                f"{source_table.__name__} does not define "
+                "get_unit_brain_regions. Only v2's CurationV2 carries "
+                "the per-unit Electrode FK that this accessor needs."
+            )
+        # Fetch the FULL part row (not just KEY) so the dispatch
+        # target sees the upstream FK fields it needs -- e.g., the
+        # CurationV2 part's (sorting_id, curation_id) are non-PK
+        # FKs that ``fetch("KEY")`` would drop.
+        part_rows = cls.merge_get_part(key).fetch(as_dict=True)
+        if len(part_rows) != 1:
+            raise ValueError(
+                "SpikeSortingOutput.get_unit_brain_regions: merge_key "
+                f"matched {len(part_rows)} part rows; expected exactly one."
+            )
+        return source_table().get_unit_brain_regions(
+            part_rows[0], allow_anchor_member=allow_anchor_member
+        )
 
     @classmethod
     def get_firing_rate(

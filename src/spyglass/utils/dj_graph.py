@@ -481,7 +481,28 @@ class AbstractGraph(ABC):
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
-        ret = ft2 & (ft1.proj(**attr_map))
+        try:
+            projected = ft1.proj(**attr_map)
+        except dj.errors.DataJointError as err:
+            # A table carrying BOTH the FK source and target columns -- e.g. a
+            # merge group with two unit FKs (``unit_id`` AND
+            # ``contributor_unit_id``) -- cannot be projected onto the bridged
+            # table without renaming onto an already-present attribute, in
+            # either ``attr_map`` orientation (the reverse above only swaps when
+            # the sources are absent, which they are not here). Before #1610
+            # such an edge was skipped once its node had been visited; #1610
+            # removed that skip, so the edge is now re-bridged and the rename
+            # clash aborts the whole cascade. Restore the prior behavior for
+            # this irreconcilable case only: skip just this edge (other paths to
+            # the node still restrict it) instead of failing the export.
+            if "already exists" not in str(err):
+                raise
+            self._log_truncate(
+                f"Bridge Link: {path}: SKIPPED (irreconcilable rename "
+                f"{attr_map})"
+            )
+            return ["False"]
+        ret = ft2 & projected
 
         if self.verbose:  # For debugging. Not required for typical use.
             if not bool(ret):

@@ -73,4 +73,3 @@
 | spyglass.common.common_subject | Subject | Subject | self | species | species | False |
 | spyglass.common.common_subject | Subject | Subject | self | subject_id | subject_id | False |
 | spyglass.spikesorting.imported | ImportedSpikeSorting | Units | self | object_id | object_id | False |
-

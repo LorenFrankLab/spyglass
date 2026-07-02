@@ -51,6 +51,1177 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2: register schemas against any configured database host
+
+Importing `spyglass.spikesorting.v2` registers its schemas against whatever
+database host `dj.config` points at (previously restricted to `localhost`).
+
+#### Spike Sorting v2: pipeline orchestrator, preset tuning, FigPack curation, and canonical notebooks
+
+Adds the full pipeline-orchestrator, preset-tuning, and FigPack-curation surface
+to v2, with canonical notebooks for both single-session and cross-session
+workflows. v2 is the recommended pipeline for new sorts under SpikeInterface
+0.104; v0/v1 stay in-tree and queryable, with active v0/v1 runtime workflows on
+the legacy SI 0.99 environment. Additive only (FigPack tables + preset
+registrations); existing v2 table definitions are unchanged.
+
+- **`run_v2_pipeline` gains opt-in stages.** `auto_curate=True` runs metric
+  evaluation + auto-curation rules and commits the accepted labels into a child
+  `CurationV2` — the default stays initial-curation-only, so a convenience call
+  never silently commits labels or merges. `figpack=True` publishes an offline
+  FigPack curation bundle of the root curation and returns its URI. A
+  `concat_session_group_owner` / `concat_session_group_name` pair routes the run
+  through `ConcatenatedRecording` for same-day chronic sorting (mutually
+  exclusive with the single-session inputs; no artifact stage). `require_units`
+  keeps the graceful zero-unit default (an empty-but-real, merge-keyable row).
+- **`run_v2_unit_match(session_group_owner, session_group_name, ...)`** is the
+  match-and-track convenience function for the sort-then-match workflow (it does
+  not sort the members): it requires explicit per-member `curation_choices`
+  (never auto-picks "latest"), populates `UnitMatch` + `TrackedUnit` from
+  already-curated member sorts, and is idempotent. `describe_unit_match_choices`
+  lists each member's selectable curations.
+- **Preset tuning without editing source.** `register_pipeline_preset(name, preset)`
+  adds a lab preset; `clone_pipeline_preset(base, new, **overrides)` derives a
+  one-knob variant, validating every derived parameter row before insert and refusing
+  ambiguous or duplicate names. `describe_pipeline_presets` /
+  `describe_pipeline_preset` inspect the catalog.
+- **FigPack offline curation.** `FigPackCurationSelection` + `FigPackCuration`
+  build a self-contained local bundle (label / merge units in a browser);
+  `FigPackCuration.fetch_curation_from_uri` reads the edits back for
+  `CurationV2.save_manual_curation`. An optional hosted figpack.org publish
+  exists for an uncurated root curation. Needs the `spikesorting-v2-curation`
+  extra.
+- **Canonical notebooks.** The v2 walkthroughs are grouped under the `10_`
+  prefix: `10_Spike_SortingV2.ipynb` (the lean first-sort path),
+  `10_Spike_SortingV2_Curation.ipynb` (browser + step-by-step curation),
+  `10_Spike_SortingV2_Presets.ipynb` (preset customization + whole-session
+  sorting), and `10_Spike_SortingV2_CrossSession.ipynb` (concatenate-and-sort
+  plus cross-session unit matching).
+
+#### Spike Sorting v2: concat member-set identity, verify-on-read, and split conservation
+
+Brings the cross-session `ConcatenatedRecording` cache to parity with the
+single-session `Recording` lifecycle, and ties its identity to its actual
+ordered member set. Additive schema (a `MemberSnapshot` part table + two
+secondary columns, `member_set_hash` and `n_samples`) and a
+changed `concat_recording_id` payload; pre-production, no migration.
+
+- **The ordered member set is frozen into concat identity.** `concat_recording_id`
+  was content-addressed from the group + parameter *names* only, while the
+  materialization read the **live** `SessionGroup.Member` set — so editing a
+  group's members under a fixed name silently reused a stale concat over a
+  different member set. `ConcatenatedRecordingSelection.insert_selection` now
+  freezes each member's ordered logical identity and resolved `Recording`
+  (`recording_id` + `content_hash`) into a new
+  `ConcatenatedRecordingSelection.MemberSnapshot` part, stores a SHA-256 of the
+  ordered **logical** set (`member_set_hash`) on the master, and folds that hash
+  into `concat_recording_id`. A different ordered member set is now a different
+  concat; `_find_existing_pk` keys on `member_set_hash` so the same group name
+  over a different frozen set is a distinct selection, not a collision.
+- **Concat reads/materialization use the frozen snapshot, not the live group.**
+  `make_fetch`, `split_sorting_by_session`, and the `Sorting` concat anchor
+  helpers read `MemberSnapshot`, so a later `SessionGroup.Member` edit cannot
+  re-point or misalign an existing concat (the edit mints a new id on
+  re-selection). `make_fetch` re-checks each frozen member's `Recording` still
+  exists and its `content_hash` still matches, raising `ConcatMemberDriftError`
+  (or `MissingRecordingForConcatError`) rather than materializing from drifted
+  inputs.
+- **`ConcatenatedRecording.get_recording` checksum-validates reads and
+  content-verifies rebuilds.** It now mirrors `Recording.get_recording`: a
+  present cache file is read through `AnalysisNwbfile`'s `~external` byte-checksum
+  validation, and a missing cache file is rebuilt through a locked
+  (`concat_recording_artifact_lock`), atomic (`os.replace`),
+  content-`hash`-verified path, raising `RecordingContentDriftError` on a
+  fingerprint mismatch instead of installing drifted bytes.
+- **Split-back conserves every spike.** `split_unit_spike_trains` silently
+  dropped any concat-frame spike outside a member's `[start, end)` — including
+  frames below 0 or at/after the final boundary. It now enforces strictly-
+  increasing boundaries and per-spike conservation, and
+  `split_sorting_by_session` asserts exactly one boundary per frozen member,
+  raising `ConcatSplitError` rather than truncating the split.
+- **Deferred:** dedicated concat recompute/reclamation tables
+  (`ConcatenatedRecordingArtifact*`, the analogues of the recording recompute
+  trio) are **not** added in this change. Rebuild-on-missing + content
+  verification cover correctness; the audit/`delete_files` reclamation surface is
+  deferred until concat outputs are first retained, at which point it should
+  reuse the shared recompute
+  helpers rather than a bespoke table family.
+
+#### Spike Sorting v2: execution dispatch, dependency pins, and security hardening
+
+A batch of localized operational, dependency, and security fixes. No schema,
+identity, or `content_hash` change.
+
+- **Dependency contracts pinned and reconciled.** `numpy` is now pinned
+  `>=2,<3` in `pyproject.toml` (was bare), and the v2 conda env's SpikeInterface
+  spec matches the `pyproject` hard pin (`==0.104.3`) instead of a looser range.
+  No new runtime dependencies. The legacy (v0/v1, SpikeInterface 0.99) suite
+  downgrades to `numpy<2` by sed-rewriting the committed `numpy` line; that sed
+  (in the `pytest-legacy` CI job and the legacy env doc) was updated to match
+  the new pin, and `test_dependency_contract` now guards the two against drift.
+  *Migration:* re-resolve environments after pulling; the numpy-2 baseline is
+  unchanged in practice (the v2 env already resolved numpy 2), only the
+  declaration is now explicit.
+- **Sorter execution-dispatch mismatches fixed.** A clusterless (in-process)
+  `SorterParameters` row can no longer claim a container backend (rejected at
+  insert); the legacy SI seeder skips MATLAB sorters (a local `default` row for
+  them is rejected by the dispatcher); and the external-whitening interception
+  is allowlisted to MountainSort 4/5 so a generic sorter's `whiten` passes
+  through unchanged instead of being silently rewritten.
+- **Trusted-deployment security hardening.** Materialized analysis artifacts are
+  written `0o644` (not world-writable `0o666`); the sorter scratch is
+  `chmod 0o777` only for a container backend; caller-supplied NWB file names are
+  confined to a bare basename (separator / `..` / absolute rejected) before any
+  directory join. A new "Security & trust model" section documents the
+  trusted-operator assumptions (`execution_params` can run container images by
+  design; the DB is not internet-facing; `team_name` is a provenance tag).
+- **The eager v2 merge-table probe surfaces failures.** `spikesorting_merge`
+  logs the captured cause (`logger.warning`) while keeping the broad
+  `except Exception` — a v2 import failure is tolerated so v0/v1 environments
+  still load the merge table.
+- **Destructive footguns closed.** recompute `delete_files` rejects a negative
+  `days_since_creation`; the disk-side analyzer orphan sweep only considers
+  canonical `{sorting_id}__{recipe}.zarr` folders (a misconfigured root can't
+  delete unrelated directories); a failed in-place artifact rebuild refuses to
+  unlink the canonical artifact.
+- **conda-less environments can write analysis NWB.** `_logged_env_info` records
+  an "environment capture unavailable" marker instead of aborting when
+  `conda env export` is unavailable.
+- **`Export` overwrite removes superseded `Export.File` rows** (a duplicated
+  `Table` delete had leaked them), and the superseded-id set-precedence is
+  corrected.
+- **Cross-team overwrite visibility.** `SortGroupV2.preview_existing_entries`
+  enumerates, per team, the downstream rows an overwrite would cascade-delete.
+- **`TrackedUnit.get_unit_brain_regions` keeps chronic-identity disambiguators**
+  (`unitmatch_id` / `tracked_unit_id` / `member_index` / `nwb_file_name` /
+  `recording_date` / `curation_id`) instead of dropping them.
+
+#### Spike Sorting v2: analyzer-cache concurrency and concat hardening
+
+Operational hardening of the v2 SortingAnalyzer cache, concatenation
+compatibility, and compute-time integrity. No schema, identity, or
+`content_hash` change.
+
+- **Analyzer cache is lock-guarded + (dir-)atomic-published**, mirroring the
+  recording artifact. The per-sort `analyzer_cache_lock` (renamed from
+  `analyzer_curation_lock`, alias kept) now wraps every canonical-folder
+  read/rebuild/delete/extension-compute path and is process-reentrant
+  (memoized `FileLock`) so the read path can nest inside the
+  `CurationEvaluation` compute lock without self-deadlock. Builds publish via a
+  private `.publish` temp folder moved into the slot (move-aside + rollback for
+  a rebuild over an existing `.zarr`) instead of `create_sorting_analyzer(...,
+  overwrite=True)` into the live folder; a directory replace is not atomic, so
+  the brief move-aside window is reader-safe only because readers hold the same
+  lock.
+- **Concat compatibility checks what it claims.** `assert_concat_compatible`
+  now rejects members differing in sampling frequency, sample dtype, or
+  per-channel gains/offsets (in addition to channel ids + probe geometry), and
+  `ConcatenatedRecordingSelection.insert_selection` rejects members whose sort
+  groups map to a different electrode space (electrode-id/brain-region
+  signature) so a concat read in the anchor frame can't be silently
+  mis-attributed.
+- **Bypass-inserted rows are re-validated at compute.** A concat-source sort
+  carrying an `artifact_detection_id`, and a shared artifact group whose member
+  recordings disagree on session/fs/n_samples/dtype/timestamps, now raise
+  `SchemaBypassError` at compute instead of sorting unmasked / aggregating a
+  wrong union.
+- **UnitMatch bundle geometry is 2D-guarded** (probe projected to 2D, saved
+  `channel_positions.npy` asserted `(n_channels, 2)`); **scratch honors the
+  configured `temp_dir`** at the UnitMatch / analyzer-recompute /
+  clusterless-waveform-feature / merged-curation-temp sites; the analyzer
+  recipe name/row is validated before any filesystem load/delete; and the
+  full-folder analyzer-cache deletion policy (regeneratable scratch, all
+  extensions) is documented and logged.
+
+#### Spike Sorting v2: self-describing NWB artifacts
+
+Embeds provenance into every v2 analysis NWB so a shared file is interpretable
+without the DataJoint database. The provenance is written to NWB **scratch**
+under stable, name-addressed containers (retrieved with `get_scratch(name)`);
+no new DataJoint columns and no identity change. The large-array items store the
+producing **params**, not the array (the displacement field / templates stay
+DB-derivable). A shared `_nwb_provenance` helper owns the serialization
+(`key`/`value_json` scalar headers that survive HDF5 for nested params and
+nullable fields; typed long tables for relational data; every container carries
+`provenance_schema_version`).
+
+- **Recording** (`spyglass_v2_recording_provenance`): raw source `object_id`,
+  `recording_id`, preprocessing recipe, sort group, resolved reference mode,
+  bad-channel handling, SpikeInterface version. Written on both the fresh-write
+  and rebuild paths; scratch does not enter the `content_hash` fingerprint.
+- **Sorting** (`spyglass_v2_sorting_provenance` + per-unit columns): the
+  Units table gains `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` /
+  `brain_region` columns (the SAME rows used for `Sorting.Unit`, computed once
+  in `make_compute` and reused -- so the file and the DB cannot drift), plus a
+  source header (recording/concat id, sorter + params, `artifact_detection_id`,
+  display recipe, effective seed, SI + sorter versions).
+- **Curated units** (`spyglass_v2_curation_provenance` +
+  `spyglass_v2_curation_merge_lineage`): a curation header (sorting/curation id,
+  parent, source, `merges_applied`, description) and the kept->contributor merge
+  lineage mirroring `CurationV2.MergeGroup` (raw contributors; the
+  proposed-vs-applied state is the header's `merges_applied`).
+- **UnitMatch** (`spyglass_v2_unitmatch_provenance` /
+  `spyglass_v2_unitmatch_members`): the run/group/matcher header (re-emitting the
+  row's `matcher_backend` / `matcher_backend_version` / `spikeinterface_version`)
+  plus the per-member `(sorting_id, curation_id, session_start_time)` map.
+- **CurationEvaluation** (`spyglass_v2_curation_evaluation_provenance`): the
+  evaluation inputs (metric set + recipe names, auto-merge preset/rules, evaluated
+  curation) and the re-emitted source provenance (the `source_analyzer_hashes`
+  manifest, SI version, upstream recording/concat `content_hash`).
+- **ConcatenatedRecording** (`spyglass_v2_concat_provenance` +
+  `spyglass_v2_concat_members`): the resolved motion preset **+ kwargs** (not the
+  displacement field) and the ordered member map with per-member frame
+  boundaries, so `split_sorting_by_session` is reconstructable from the file.
+
+#### Spike Sorting v2: reproducibility provenance in computed rows
+
+Bakes the producer provenance into computed v2 rows while pre-production: the
+effective random seed, the producing library/sorter/matcher versions, and the
+UnitMatch waveform-bundle params. Provenance is **secondary, never identity** --
+a parity test pins `sorting_id` / `unitmatch_id` unchanged for a fixed input,
+and every new column is a secondary attribute.
+
+- **`Sorting` records the effective seed + producing versions.** New secondary
+  columns `effective_random_seed`, `spikeinterface_version`, and `sorter_version`
+  (the installed sorter distribution version, `NULL` for SI-internal sorters and
+  the in-process `clusterless_thresholder`). The effective seed is resolved with
+  the same precedence the sort consumes (`utils.resolve_effective_seed`), so the
+  stored seed equals the seed actually used. A `random_seed` supplied via the
+  ambient `dj.config['custom']['spikesorting_v2_job_kwargs']` layer already took
+  effect; it is now recorded and emits a one-time warning (it is process-global,
+  not pinned to a parameter row).
+- **`UnitMatch` records the producer provenance.** New secondary columns
+  `spikeinterface_version`, `matcher_backend` (the resolved backend module path),
+  and `matcher_backend_version` (the `unitmatchpy` distribution version).
+- **UnitMatch waveform-bundle params are now identity-bearing.**
+  `MatcherParameters` gains `ms_before` / `ms_after` / `max_spikes_per_unit` /
+  `seed` (defaults `1.5` / `1.5` / `100` / `0`, matching the prior
+  `extract_unitmatch_bundle` literals). They now flow from the named params blob
+  into the bundle extraction instead of being silent function defaults, so they
+  enter the `matcher_params_name` → `unitmatch_id` identity. The shipped
+  `unitmatch_default` row and its `unitmatch_id` are unchanged (the defaults
+  match and the id derives from the name, not the params content); only a NEW
+  named row with non-default bundle settings gets a distinct `unitmatch_id`. No
+  `params_schema_version` bump.
+- **Bundle seed is authoritative.** A `random_seed` in
+  `MatcherParameters.job_kwargs` is now rejected at insert (it duplicated the
+  identity-bearing `seed` field), and a stray `random_seed` in the resolved job
+  kwargs is stripped-and-ignored inside the bundle -- so the stored seed can
+  never disagree with the seed actually used.
+- **Matcher registry honesty.** `register_matcher` re-registers the SAME backend
+  class idempotently but rejects pointing a name at a DIFFERENT backend without
+  an explicit `replace=True` maintenance override; the built-in UnitMatch
+  registration no longer uses `replace=True`. UnitMatchPy is the single shipped
+  matcher backend.
+- **Unseeded base extensions are marked in the analyzer manifest.** The recompute
+  analyzer manifest now records a per-base-extension seed mode (`"unseeded"` for
+  `noise_levels`), so it no longer silently implies a pinned seed. `analyzer_hash`
+  is unchanged -- it is still derived from the extension content hashes only.
+- **`CurationEvaluation` records its source provenance.** New secondary columns
+  `spikeinterface_version` and `source_analyzer_hashes` -- a `role -> content_hash`
+  manifest of every canonical analyzer the metrics were computed over on the fast
+  path (`"display"` always, plus `"metric"` for a PC/NN eval); `NULL` for a
+  merged-curation evaluation (its temp analyzers are pinned by the committed
+  curation + recipe). A new `CurationEvaluation.detect_stale_source(key)` compares
+  the stored SI version and re-hashes each recorded analyzer to flag drift.
+- **Clusterless unit semantics are derived and honored.** A sort's units are
+  classified from its `sorter` (`CurationV2.get_unit_semantics`):
+  `"clusterless_threshold_crossings"` for the clusterless thresholder (its single
+  "unit" is a threshold-crossing event stream, not a sorted neuron) vs
+  `"sorted_units"`. `UnitMatchSelection.insert_selection` warns when a pinned
+  member is clusterless, since matching threshold crossings across sessions is
+  degenerate. Derived, not stored, so it cannot drift from `sorter`.
+
+#### Spike Sorting v2: identity & relational integrity hardening
+
+Closes a set of cheap-while-pre-production identity / schema gaps so a master
+row's content, a selection's matchable universe, and a shared group's membership
+cannot silently change under a fixed deterministic id.
+
+- **Master-row immutability.** Every deterministic-id selection master
+  (`RecordingSelection` / `ArtifactDetectionSelection` / `SortingSelection` /
+  `UnitMatchSelection` / `ConcatenatedRecordingSelection` /
+  `CurationEvaluationSelection`) now rejects an in-place `update1` (its columns
+  feed its id); `CurationV2` and `SessionGroup` reject BOTH a direct
+  `insert`/`insert1` and an `update1` (they are identity/provenance roots written
+  only through `insert_curation` / `create_group`). Pass `allow_master_mutation=True`
+  / `allow_direct_insert=True` for a deliberate maintenance edit of a row with no
+  live references. A new `audit_source_part_integrity` helper flags masters whose
+  recording-source-part count is not exactly one (0 = orphan, >1 = ambiguous).
+- **`UnitMatch.Pair` is constrained to the pinned curation universe.** A raw
+  `Pair.insert` now rejects an endpoint outside the selection's `MemberCuration`,
+  a same-member edge, a reversed/duplicate edge, or an out-of-range
+  `match_probability` (the canonical `make_insert` path is unaffected).
+- **Frozen matchable universe.** `UnitMatch` gains a `MatchableUnit` part that
+  snapshots the exact matchable `(sorting_id, curation_id, unit_id)` set the
+  matcher saw; `TrackedUnit.make` reads it instead of re-deriving from CURRENT
+  labels, so a relabel between `UnitMatch` and `TrackedUnit` populate cannot drop
+  a singleton. A geometry preflight in `UnitMatchSelection.insert_selection`
+  rejects a cross-probe channel-geometry mismatch before dense bundle extraction.
+- **Shared-artifact-group membership is frozen.**
+  `ArtifactDetectionSelection.SharedGroupSource` now stores a `member_set_hash`
+  snapshot of the group's ordered member `recording_id` set;
+  `ArtifactDetection.make_fetch` re-derives it from the live
+  `SharedArtifactGroup.Member` set and raises if it drifted.
+- **Resolved motion preset persisted.** `ConcatenatedRecording` stores the
+  RESOLVED motion preset (`"rigid_fast"` for an `"auto"` same-day request) in a
+  new `motion_preset` column, so each row records what motion correction ran.
+- **Schema-init upgrade safety.** The outer `params_schema_version` backfill from
+  the validated blob is generalized to every parameter Lookup that routes through
+  `validate_lookup_rows` (not just `SorterParameters`). A new
+  `verify_v2_default_catalog()` flags stored shipped-default rows whose content
+  diverged from the shipped content; `initialize_v2_defaults` runs it non-strict
+  and logs a warning (run `verify_v2_default_catalog(strict=True)` to fail hard).
+
+#### Spike Sorting v2 corrects raw-source selection and channel-name mapping
+
+Two correctness fixes to how `Recording` builds the preprocessed recording, so
+v2 reads the signal the `RecordingSelection` lineage actually points at:
+
+- **Raw source pinned to `Raw.raw_object_id`.** `Recording.make` now resolves
+  the raw acquisition `ElectricalSeries` by the exact NWB object id the common
+  `Raw` row was ingested from, threaded through `make_fetch` →
+  `make_compute`. It previously took the *first* acquisition `ElectricalSeries`,
+  so an NWB with more than one acquisition `ElectricalSeries` (or one whose
+  acquisition order changed under repacking/copying) could be preprocessed and
+  sorted from a different source than the database lineage implied.
+- **`channel_name` resolved by electrodes-table row, not by electrode id.**
+  Channel-id resolution now maps each Spyglass `electrode_id` to its
+  electrodes-table row before reading the positional `channel_name` column
+  (the same id→row mapping the write side already uses), and raises on a
+  missing or ambiguous id. The previous code indexed `channel_name` by the
+  electrode id as if it were a row position, so for NWBs whose electrode ids
+  are non-contiguous, non-zero-based, or reordered, v2 could slice one raw
+  channel and label it as another electrode.
+
+Both were silent failures: the resulting recording/sorting rows look valid but
+describe the wrong signal.
+
+#### Spike Sorting v2 silent-wrong-science correctness fixes
+
+A set of correctness fixes to v2 paths that silently produced or consumed wrong
+scientific values. Each was a silent failure (no error, plausible-looking
+output). **Outputs change** for the affected combinations noted below; re-run
+them if you computed results on a pre-fix build.
+
+- **Sample-aligned interval boundaries no longer drop an edge sample (TIME-1).**
+  The rate-based frame mapping snapped boundaries that land exactly on a sample
+  line, which float round-off in `(time - t_start) * fs` could otherwise push
+  off by `ceil`/`floor`; it now agrees with the searchsorted timestamp path.
+- **No-filter referencing no longer double-counts the DC offset (SIG-1).** On
+  the `no_filter` preprocessing preset, re-referencing left `channel_offsets` at
+  the parent value, so the persisted ElectricalSeries offset double-counted the
+  DC on readback. The offset is now zeroed after referencing (the default
+  bandpass preset is unchanged — the filter already zeroes it). *Affects sorts
+  run with `no_filter` + a reference mode.*
+- **SNR `peak_sign` follows the sorter's polarity (SIG-2).** SNR was hard-coded
+  `peak_sign="neg"`, so a positive/bidirectional sorter (clusterless
+  `peak_sign="pos"/"both"`, MountainSort `detect_sign=1/0`) measured SNR on the
+  most-negative channel instead of its true peak. SNR now uses the sorter's
+  resolved sign (matching per-unit attribution). Negative-going sorts (the
+  defaults) are numerically unchanged; *positive/bidirectional sorts change.*
+- **Curation metrics are scored in the curation's own unit namespace.**
+  Scoring a merged curation against the raw-sort unit-id namespace landed
+  metrics/labels on the wrong units. The curation-metric path
+  (`CurationEvaluation`, which superseded the interim `AnalyzerCuration` table)
+  now recomputes metrics over the committed curation's own units -- a merged
+  unit over its merged train -- and rejects preview/draft curations rather than
+  scoring their unmerged units.
+- **Sorter output survives temp-dir cleanup.** `run_si_sorter` now
+  materializes the sorter's file-backed output into an in-memory `NumpySorting`
+  before its temp dir is cleaned, so downstream analyzer/artifact staging no
+  longer read freed files.
+- **Preview (unapplied-merge) curations are guarded.** `UnitMatch` now
+  rejects a member curation with unapplied proposed merges (matching unmerged
+  units across sessions is wrong), and `SpikeSortingOutput.get_spike_times`
+  warns when a consumed merge is such a preview curation (the strict decoding
+  raise is unchanged).
+- **Curated-units NWBs carry `obs_intervals`.** The curated writer
+  dropped the per-unit observation window and the reader never read it back, so
+  NWB-only firing-rate / presence-ratio / duration denominators over a curated
+  export assumed the full session. Curated exports now carry `obs_intervals`
+  (a merged unit gets the conservative intersection of its contributors').
+- **Label filters apply to all-unlabeled curated exports.** An
+  all-unlabeled curated NWB omits the label column, so `include_labels=["accept"]`
+  returned every unit instead of none; the consumer now applies the filter
+  against synthesized empty labels (include-only → none, exclude-only → all).
+- **Artifact valid-time ownership + mask-boundary validation.**
+  `Sorting.make_fetch` resolves the artifact-removed intervals through the strict
+  ownership helper (rejecting a partially-deleted artifact or a hand-inserted
+  same-name `IntervalList`), and `apply_artifact_mask` now rejects non-finite or
+  out-of-recording-envelope intervals instead of silently under-masking.
+
+#### Spike Sorting v2: final quality metrics over committed curations
+
+`CurationEvaluation` adds the post-merge metric path that scoring raw sortings
+left missing:
+it scores an existing committed `CurationV2` row (root, label-only, or
+applied-merge) in **that curation's own unit namespace**. A merged unit's
+metrics (SNR / ISI-violation / PC-NN separation) are now **recomputed over the
+merged spike trains and templates**, not inherited from the highest-amplitude
+contributor.
+
+- `CurationEvaluationSelection.insert_selection` pairs a committed curation with
+  metric / auto-rule / metric-waveform params; it **rejects preview curations**
+  (`apply_merge=False` with an unapplied proposed merge) at insert and again at
+  the compute boundary.
+- `CurationEvaluation.populate` reuses the cached raw-sort analyzer for a
+  committed root/label-only curation (unit set unchanged) and builds a
+  curation-scoped temporary analyzer over the merged sorting for an applied-merge
+  curation (cleaned immediately, never published to the analyzer cache). The
+  metric index is asserted to equal the curation's `CurationV2.Unit` set before
+  any output is written. `get_metrics` / `get_labels` / `get_merge_groups`
+  read the proposals back; the `create_curation` / `use_evaluation_labels` /
+  `overlay_evaluation_labels` acceptance helpers (below) commit them into a child curation.
+
+#### Spike Sorting v2: parent-state curation composition and evaluation acceptance
+
+Child curations now edit their **parent's committed state**, and
+`CurationEvaluation` proposals are explicitly accepted into committed children;
+the interim `AnalyzerCuration` table is removed.
+
+- **Parent-state composition.** `CurationV2.insert_curation` sources a child's
+  unit rows, spike trains, labels, and merge namespace from the parent
+  `CurationV2` row (not raw `Sorting.Unit`), so a merged-parent unit id is a
+  valid input and absorbed raw units are not resurrected. Raw-contributor
+  provenance stays queryable on `CurationV2.MergeGroup` (expanded through the
+  parent's provenance); the immediate parent operation is recorded in the new
+  `CurationV2.ParentMergeGroup` part.
+- **Label inheritance.** `insert_curation` gains `label_policy`
+  (`"inherit"` default / `"replace"`): a child inherits its parent's labels by
+  default, and a committed merge inherits the union of its contributors' labels.
+- **Acceptance — intent-first action methods.** The normal workflow uses verb
+  methods on `CurationEvaluation` mapped to UI intent: `accept_merges` /
+  `accept_all_suggested_merges` (commit chosen / all suggested merges, inheriting
+  existing labels -- they do NOT apply the pre-merge evaluation labels),
+  `preview_merges` (draft an unapplied merge for review), and
+  `use_evaluation_labels` / `overlay_evaluation_labels` (write the evaluation's
+  label verdict -- clearing stale labels -- vs. keep current labels and add the
+  proposed ones). The lower-level `create_curation` (merges + labels combined)
+  and `create_preview_curation` (explicit draft) remain the expert API. All
+  acceptance writes a committed/preview child carrying
+  `curation_source='curation_evaluation'`, requires a POPULATED evaluation, and
+  never applies merges implicitly (every merge action needs a real >=2-member
+  group).
+- **Manual / FigURL payload API.** `CurationV2.save_manual_curation` ingests a
+  v1/FigURL payload (`labelsByUnit` / `mergeGroups`), a v2 payload, or unpacked
+  `labels=` / `merge_groups=` into the next curation, with an explicit
+  `merge_action` (`"preview"` / `"commit"`). v1 association maps are unioned
+  transitively. This is the same payload `FigPackCuration.fetch_curation_from_uri`
+  reads back from an edited FigPack curation bundle.
+- **`AnalyzerCuration` / `AnalyzerCurationSelection` removed.** v2 is
+  pre-production with no back-compat requirement, so the interim raw-sort
+  auto-curation tables are deleted outright in favor of `CurationEvaluation` and
+  the acceptance helpers. Their shared SI-compute / visualization helpers moved
+  onto `CurationEvaluation`.
+
+#### Spike Sorting v2 recording reclamation round-trips via a content fingerprint
+
+Reclaiming a preprocessed recording's disk
+(`RecordingArtifactRecompute.delete_files`) and rebuilding it on demand
+(`Recording.get_recording`) now round-trips correctly. The recording identity is
+a representation-blind **content fingerprint** (traces, timestamps, persisted
+probe geometry, scaling metadata) read back from the on-disk `ElectricalSeries`,
+reproducible across byte-different rebuilds — so a rebuild reconciles the
+DataJoint `~external` checksum and the next read succeeds.
+
+- The volatile whole-file `cache_hash` column is **retired** from the
+  `Recording` and `ConcatenatedRecording` schemas and replaced with
+  `content_hash` (pre-release; no migration). A whole-file `NwbfileHasher` digest
+  folds in volatile object ids / creation timestamps and so could never confirm
+  a content-identical rebuild.
+- `Recording.get_recording` rebuilds a missing cache under a per-recording lock,
+  installs the rebuilt file atomically (`os.replace`), and reconciles the byte
+  checksum. A rebuild that diverges from the stored `content_hash` raises the
+  new `RecordingContentDriftError` (with recovery guidance) instead of serving
+  drifted bytes or a cryptic checksum error.
+- `RecordingArtifactRecompute` deletion authority anchors on
+  `content_hash` (a fresh rebuild reproducing the row identity), holds the same
+  per-recording lock as the rebuild, and the per-attempt `rounding` knob is
+  removed from `RecordingArtifactRecomputeSelection` (the fingerprint precision
+  is fixed). Integrity scans are now presence-aware: a rebuilt-but-still-flagged
+  file is tracked rather than skipped.
+
+#### Spike Sorting v2 recording recompute gains v1-parity operational controls
+
+`RecordingArtifactRecomputeSelection.attempt_all` ports the proven planning
+controls from v1's `RecordingRecompute`, so retrospective recompute audits are
+practical at archive scale and don't waste work on attempts that can't succeed.
+
+- **Environment-compatibility gate (behavior change).** `attempt_all` now plans
+  only artifacts whose inventoried pynwb namespace versions are compatible with
+  the current environment, **skipping incompatible-env artifacts by default**.
+  Pass `force_attempt=True` to restore the previous behavior and plan every
+  artifact regardless of environment.
+- **`limit`.** `attempt_all(limit=k)` plans at most `k` artifacts, drawn at
+  random from the eligible set — for sampling large retrospective audits.
+- **Narrow known-xfail marking.** Each planned artifact is screened for known
+  *structural* impossibilities (missing probe info, PyNWB-API / NWB-spec
+  incompatibility) and the reason recorded in `xfail_reason`, so the recompute
+  short-circuits to `matched=0` rather than re-attempting a regen that cannot
+  succeed. This is intentionally narrow, not a general skip mechanism; pass
+  `check_xfail=False` to disable it. The `SortingAnalyzerRecomputeSelection`
+  recompute is unchanged.
+
+#### Spike Sorting v2 fixes a v1 artifact-detection unit-conversion bug
+
+Spike sorting v2 fixes an artifact-detection unit-conversion bug present
+in v1 since the `amplitude_thresh_uV` field was introduced. v1's
+`_compute_artifact_chunk` compared raw int16 NWB counts against the
+`amplitude_thresh_uV` field, ignoring the probe's gain. For Frank-lab
+Intan probes (0.195 µV/count) this meant v1's documented default of
+3000 was effectively ~585 µV; for Neuropixels at gain=500 (2.34 µV/count)
+v1's 3000 was effectively ~7020 µV. v2 correctly scales traces by
+channel gain before comparison.
+
+The v2 default of `amplitude_threshold_uv = 500.0` matches v1's effective
+Intan-probe behavior within ~15%. v1 users with custom thresholds
+should translate `v2_threshold_uV = v1_value * probe_gain_uV_per_count`
+to get the v2-equivalent uV value (e.g., on Intan at 0.195 µV/count,
+v1's nominal 3000 was effectively `3000 * 0.195 ≈ 585 µV` in v2 units).
+The Spyglass convention is `recording.get_channel_gains()` in µV/count,
+so no further unit conversion is needed. v2 also reverts
+`proportion_above_threshold` to v1's default of `1.0` ("all channels must
+exceed"); an earlier v2 development pass had silently shipped 0.5 without
+justification.
+
+Upstream issue filed on LorenFrankLab/spyglass to track v1's bug.
+
+#### Spike Sorting v2: analyzer-driven curation + recompute verification
+
+`CurationEvaluation` consolidates v1's `MetricCuration` + `BurstPair` into one
+computed table that walks a committed curation's `SortingAnalyzer` extensions to
+compute SpikeInterface 0.104 quality metrics, propose merges (via
+`compute_merge_unit_groups` presets), and propose auto-curation labels.
+Proposals are written to three NWB tables (`quality_metrics`,
+`merge_suggestions`, `proposed_labels`); `create_curation()` /
+`use_evaluation_labels()` / `overlay_evaluation_labels()` commit them into a child `CurationV2` row
+(`curation_source='curation_evaluation'`). (This subsumes the interim
+`AnalyzerCuration` table, which was removed -- see above.)
+
+- New parameter Lookups: `QualityMetricParameters` (validates metric names
+  against the installed SpikeInterface; `franklab_default` / `neuropixels_default`
+  / `minimal` rows) and `AutoCurationRules` (+ ordered `Rule` part), inserted via
+  `AutoCurationRules.insert_rules(master, rule_rows)`.
+- `isi_violation` reproduces Spyglass's bounded `count / (n_spikes - 1)`
+  fraction, not SI's unbounded `isi_violations_ratio`; the 0.99
+  `nn_isolation` / `nn_noise_overlap` metric names are replaced by the
+  `nn_advanced` PCA metric's two output columns.
+- Fetch/notebook parity: `get_metrics` / `get_labels` / `get_merge_groups` /
+  `get_waveforms`, the static `plot_units_qc` population QC plot, and the ported
+  BurstPair views (`plot_correlograms`, `investigate_pair_xcorrel`,
+  `investigate_pair_peaks`, `plot_peak_over_time`).
+- `Sorting.add_extensions()` adds analyzer extensions in place, idempotently.
+- The clusterless `spike_location` decoding mark is now supported for v2
+  (`CurationV2`) sources; the legacy `_get_spike_locations` body is repurposed
+  for the v2 analyzer accessor and raises clearly for unsupported legacy
+  `WaveformExtractor` sources.
+- New recompute-verification tables (`RecordingArtifact*`,
+  `SortingAnalyzer*` trios) regenerate and content-compare large artifacts so
+  `delete_files()` reclaims disk only after a current-environment match (stale
+  matches raise `StaleEnvMatchedError`). See
+  [SpikeSortingV2StorageManagement.md](./Features/SpikeSortingV2StorageManagement.md).
+
+#### Spike Sorting v2: same-day chronic concatenate-and-sort
+
+`SessionGroup` groups sorting members (a member is a
+`(nwb_file_name, sort_group_id, interval_list_name, team_name)` tuple, not a
+whole NWB), and `ConcatenatedRecording` materializes one motion-corrected,
+**unwhitened** concatenated recording cache by reusing each member's existing
+`Recording` artifact (never re-preprocessing raw NWB). A `SortingSelection` can
+then take a `concat_recording_id` source and sort the concatenation as one
+piece. See the
+[Chronic same-day recordings](./Features/SpikeSortingV2.md#chronic-same-day-recordings)
+guide.
+
+- **Same-day is the default; multi-day is an explicit opt-in.** `create_group`
+  derives recording dates from `Session.session_start_time` and rejects
+  multi-date members unless `allow_multi_day=True`; the motion preset `"auto"`
+  maps to `rigid_fast` for same-day groups and is rejected for multi-day ones
+  (no silent DREDge dispatch). For days/weeks-apart sessions the **recommended**
+  path is sort-then-match, not concatenation — multi-day concat is experimental.
+- `ConcatenatedRecording.MemberBoundary` records cumulative sample boundaries,
+  and `split_sorting_by_session()` back-maps a concatenated sort into per-member
+  sortings in each member's local sample frame (unit ids preserved).
+- A concat sort's analysis NWB and per-unit `Electrode` FK anchor to the first
+  member; `get_unit_brain_regions` raises `ConcatBrainRegionAmbiguousError`
+  unless `allow_anchor_member=True`. Concat sorts carry no artifact-detection
+  pass. `SpikeSortingOutput.get_restricted_merge_ids` resolves concat sorts by
+  `concat_recording_id` / `session_group_owner` / `session_group_name`.
+
+#### Spike Sorting v2: cross-session unit tracking via UnitMatch
+
+v2 cross-session unit tracking via UnitMatch. The 128-channel LLNL polymer probe
+is the validated path (Frank-lab standard). `TrackedUnit` derives
+biological-unit identities across sessions. See the
+[Cross-session unit tracking](./Features/SpikeSortingV2.md#cross-session-unit-tracking)
+guide.
+
+- **Pluggable matcher backend.** `MatcherProtocol` accepts swappable backends;
+  UnitMatch (`matcher="unitmatch"`, the optional `spikesorting-v2-matching`
+  extra: `UnitMatchPy` + `mat73`) ships first, with DeepUnitMatch as future work
+  through the same slot. `MatcherParameters.insert1` validates the matcher name
+  against the registry (`UnknownMatcherError`) and Pydantic-validates `params`.
+- **Explicit per-member curations.** `UnitMatchSelection` pins one
+  `(sorting_id, curation_id)` per `SessionGroup.Member` (no implicit "latest
+  curation"), with a SHA-256 `curation_set_hash` for idempotent
+  `insert_selection`. `UnitMatch.make()` re-validates member coverage + per-member
+  provenance (`UnitMatchSelectionIntegrityError`) so a schema-bypassing direct
+  insert cannot match the wrong units. The matcher consumes wrapper-built
+  waveform bundles only — never a recording, `SortingAnalyzer`, or table key.
+- **`TrackedUnit`** partitions curated units into biological identities via a
+  greedy maximal-clique cover of the `UnitMatch.Pair` graph (one identity per
+  unit; the strongest overlapping clique wins), bounded by `max_strict_nodes`
+  (`TrackedUnitBudgetExceededError`); singletons surface unmatched units.
+  `TrackedUnit.get_unit_brain_regions` is the per-session brain-region resolver
+  the concat-sort guard points to.
+
+#### Spike Sorting v2: streaming Recording write, parallel populate, and v1-parity restorations
+
+This is a focused fix-up between the initial v2 landing and the
+analyzer-curation stage. It addresses two runtime regressions and
+47 v1-parity divergences found across multiple audit passes.
+
+**Two runtime regressions fixed:**
+
+- `Recording.make` now **streams** the preprocessed
+  `ElectricalSeries` to NWB via HDMF's `GenericDataChunkIterator`
+  (`buffer_gb=5`, matching v1's production choice). Previously the
+  full `(n_samples, n_channels)` float64 array materialized in RAM
+  before the write — 30 kHz × 128 ch × 1 h ≈ 110 GB, which OOM'd
+  on any lab workstation.
+- `Recording`, `ArtifactDetection`, and `Sorting` are now **tri-part**
+  (`make_fetch` / `make_compute` / `make_insert`) with
+  `_parallel_make = True`. The compute step runs outside the DataJoint
+  framework transaction, so a 20-minute sort no longer blocks every
+  other user from declaring or modifying tables on the same database
+  (Spyglass #1030, DataJoint #1170).
+
+**v1-parity restorations (selected):** external float64 whitening
+restored on the sort path; disjoint sort intervals concatenated
+correctly instead of silently including inter-interval gaps;
+`min_segment_length` field restored; `min_length=1.0s` artifact
+sliver filter restored; tetrode_12.5 probe geometry patch ported for
+legacy Frank-lab NWBs; `channel_name` electrode column lookup
+restored; KS2.5 / KS3 / IronClust Singularity carve-out restored;
+sorter tempdir + analyzer folder cleanup; `obs_intervals` written on
+every unit; `curation_label="uncurated"` placeholder column; v1's
+permissive `labels=None` accepted again; `apply_merge` kwarg name
+restored; verbose artifact-detection logging restored; `is_filtered=True`
+annotation restored; `noise_levels=[1.0]` forwarded to
+`detect_peaks` so `detect_threshold` stays in microvolts (otherwise it
+would silently become a MAD multiplier); cross-channel z-score for
+artifact detection (common-mode events) restored; artifact-combine
+flipped back to OR semantics; job_kwargs resolution wired into all
+three compute stages; `content_hash` switched to `NwbfileHasher` per
+the documented contract; dead `common_reference.reference` field
+removed; v1's `Curation.get_recording` / `get_sort_group_info`
+methods added to `CurationV2` (without these, the merge dispatcher
+raised on every v2 `merge_id`); all four `CurationV2` accessors
+made `@classmethod` for surface symmetry with v1.
+
+**API additions:** `CurationV2.MergeGroup` part table records
+per-(kept-unit, contributor-unit) merge provenance with FK
+validation (user-authorized pre-production schema correction;
+chosen over v1's NWB-column pattern for queryability);
+`CurationV2.get_merge_groups(key)` and a `get_merged_sorting` that
+actually applies merges at fetch (matching v1 semantics);
+`Sorting.get_sorting(as_dataframe=True)` for pre-curation peek;
+`CurationV2.get_sorting(as_dataframe=True)` includes the
+`curation_label` column joined from `CurationV2.UnitLabel`;
+`get_spike_sorting_v2_merge_ids` notebook-discoverable helper
+mirroring v1's surface.
+
+**Cross-pipeline fixes:** sparse unit_id consumers in
+`decoding/v1/waveform_features.py` (added a v2-aware branch in the
+source-resolution chain), `spikesorting/analysis/v1/group.py`
+(index by NWB `.id` rather than positional range), and
+`spikesorting/analysis/v1/unit_annotation.py` (validator + lookup
+both use the actual unit_id set instead of `len(spikes)`). Without
+these, v2 merge-applied sortings would silently misindex
+downstream decoding and unit annotation.
+
+**Merge dispatch hardening:** `SpikeSortingOutput.get_restricted_merge_ids`
+now defaults to `sources=["v0", "v1", "v2"]` so v2 users copying
+v1 notebooks see v2 merge_ids without explicit `sources=` arg;
+unknown restriction keys raise `ValueError` instead of silently
+dropping; `restrict_by_artifact=True` now honors the v2
+`f"artifact_detection_{artifact_detection_id}"` IntervalList convention.
+
+**Migration notes for v1 users porting workflows to v2:**
+
+- **Default Lookup row names changed.** v1 shipped a single
+  `PreprocessingParameters` row named `"default"`; v2 ships `"default"`, the
+  production region recipes `"franklab_hippocampus_2026_06"` (600 Hz
+  high-pass) / `"franklab_cortex_2026_06"` (300 Hz), `"default_neuropixels"`,
+  and `"no_filter"`. v1's single `"franklab_tetrode_hippocampus_30KHz"`
+  (capital K) `SorterParameters` row is replaced by the rate-keyed
+  `"franklab_30khz_ms4_2026_06"` / `"franklab_20khz_ms4_2026_06"` MS4 rows,
+  with a `"franklab_30khz_ms5_2026_06"` MS5 sibling. v1 notebooks referencing
+  the old names by string must update.
+- **`PreprocessingParamsSchema` field renames + drops.** v1's
+  top-level `frequency_min` / `frequency_max` / `margin_ms` / `seed`
+  are now nested under `bandpass_filter.{freq_min, freq_max}` and the
+  `margin_ms` / `seed` knobs are dropped (whitening is deferred to
+  the sorter; `margin_ms` was unused in v1's preprocessing).
+  `extra="forbid"` rejects v1-shaped blobs at insert; users
+  porting custom parameter rows must re-shape them under v2's
+  schema.
+- **Artifact `IntervalList` naming convention changed** from v1's
+  raw-UUID `interval_list_name` to v2's
+  `f"artifact_detection_{artifact_detection_id}"`.
+  Notebook code that fetched IntervalList rows by raw UUID must
+  prepend `"artifact_detection_"`. The `restrict_by_artifact=True` path on
+  `SpikeSortingOutput.get_restricted_merge_ids` accepts either
+  shape.
+- **`_consolidate_intervals` off-by-one fix.** v1's helper used
+  `searchsorted(side="right") - 1` for the per-interval end frame,
+  silently dropping the last sample (~33 µs at 30 kHz) of every
+  disjoint interval. v2 corrects this (uses `side="right"` without
+  the subtraction). v1 and v2 caches for the same multi-interval
+  input are therefore not byte-equivalent at the per-interval
+  boundary; the trace arrays differ by one sample per interval.
+  `content_hash` will not match.
+- **`SortGroupV2` grouping helpers inherit the configured reference by
+  default + fail loud on ambiguity.** `set_group_by_shank` and
+  `set_group_by_electrode_table_column` now resolve referencing **per sort
+  group** from each group's members' `Electrode.original_reference_electrode`
+  (v1's useful default), mapped via the v1-compatible sentinels (`-1` /
+  `None` → `"none"`, `-2` → `"global_median"`, `>= 0` → `"specific"`),
+  replacing the earlier v2 default of no reference. `set_group_by_shank`
+  restores v1's per-group `references: dict` (keyed by `electrode_group_name`);
+  both helpers keep a call-wide `reference_mode` / `reference_electrode_id`
+  override (mutually exclusive with `references`). Cases that v1 silently
+  mishandled now raise at group creation: electrodes in one group with
+  **mixed** configured references (v1 constructed a `ValueError` but never
+  raised it); a `"specific"` reference that is itself a member of the sort
+  group it references (caught at group creation rather than deep in `make`) —
+  use `omit_ref_electrode_group=True` or a cross-group reference; and a
+  `"specific"` reference that names a nonexistent electrode or whose owning
+  electrode group is ambiguous (the same `electrode_id` under two electrode
+  groups), instead of failing later inside `Recording.populate`. No schema
+  change (the persisted `reference_mode` / `reference_electrode_id` columns and
+  their validator are unchanged); there is **no** stored `"auto"` mode — auto
+  is resolved in the helper to one of the three real modes.
+- **Preprocessing now bandpass-filters BEFORE referencing** (v1 referenced
+  first; `v1/recording.py:643-671`). `apply_pre_motion_preprocessing` applies
+  the temporal bandpass, then the spatial common reference, then drops a
+  `"specific"` reference channel — the signal-processing-preferred order and
+  an intentional divergence from v1. The two orders are non-commutative
+  **only** on the `global_median` common reference (the per-sample median is
+  non-linear), so preprocessed/sorted output differs from v1 only for
+  global-median sort groups; `specific` / `none` (and a global *average*
+  reference — `global_median` mode with `operator="average"`, where the mean
+  is linear) remain numerically identical to v1. The
+  `ElectricalSeries.filtering` provenance now lists `bandpass filter …; common
+  reference (…)` in apply order. The params blob shape is unchanged, so
+  `params_schema_version` stays at 3 (the schema-history docstring records the
+  order change at v3); dev rows are regenerated, not migrated.
+- **`global_median` reference on a single-channel (unitrode) sort group now
+  raises** instead of silently zeroing the signal (the median/mean across one
+  channel is that channel, so subtracting it yields all zeros — a recording
+  that sorts to nothing with no error). Use `reference_mode="none"` for
+  unitrodes, or `omit_unitrode=True` when creating sort groups.
+- **Tetrode probe `set_contact_ids`** now passes string ids
+  (`[str(c) for c in sort_group_channel_ids]`) instead of v1's raw
+  integers. probeinterface accepts both; flagged for users who
+  introspect contact_id types.
+- **Cortex-probe sorting ships via the region catalog.** v2's June 2026
+  catalog ships a `franklab_probe_cortex_30khz_ms4_2026_06` pipeline preset
+  (300 Hz high-pass `franklab_cortex_2026_06` preproc + the rate-keyed
+  `franklab_30khz_ms4_2026_06` MS4 row), replacing v1's single
+  `franklab_probe_ctx_30KHz` Lookup row. The region high-pass lives on the
+  preproc row because MS4 runs `filter=False`.
+- **`Sorting.get_sorting(as_dataframe=True)` and
+  `CurationV2.get_sorting(as_dataframe=True)` DataFrame shape.**
+  Like v1's `Curation.get_sorting(as_dataframe=True)`, v2 returns a
+  DataFrame **indexed by `unit_id`** (with a `spike_times` column in
+  absolute seconds; `CurationV2` adds a `curation_label` column), so
+  notebook code doing `df.loc[uid]` reads the right row on both v1 and
+  v2. (The SI-object form, `get_sorting()`, returns a frame-relative
+  `NumpySorting` with `t_start=0`, matching v1's
+  `NumpySorting.from_unit_dict` shape — absolute times live in the NWB /
+  the DataFrame.) v1 metric / `merge_groups` columns are NOT in v2's
+  DataFrame; consult `CurationV2.Unit` + `CurationV2.MergeGroup` part
+  tables for the equivalent data.
+- **Pre-curation NWB `curation_label` remains the v1 scalar
+  `"uncurated"`.** External NWB readers (FigURL, DANDI export tooling)
+  doing `nwb.units["curation_label"][i] == "uncurated"` continue to work
+  on v2 sort outputs. Post-curation NWBs use the curated label-list
+  representation when labels are present.
+- **`merge_groups` and per-metric unit columns no longer in the
+  curated-units NWB.** v1 wrote both at NWB-write time
+  (`v1/curation.py:404-428`). v2 stores merge provenance in the
+  `CurationV2.MergeGroup` part table (queryable via
+  `CurationV2.get_merge_groups(key)`) and defers metric columns to
+  the `CurationEvaluation` stage. Pure-NWB consumers (DANDI export,
+  external tools) lose these columns; DataJoint consumers gain the
+  queryable + FK-validated shape.
+- **`SharedArtifactGroup` cross-recording artifact detection
+  activated** (was gated to `NotImplementedError` in the initial v2 landing).
+  The v2 design required this; a code-review
+  followup activated it. `SharedArtifactGroup.insert_group(name,
+  members)` validates session consistency + Recording existence;
+  `ArtifactDetection.populate(...)` on a `SharedGroupSource`
+  loads each member's preprocessed recording, unions their
+  channels via `si.aggregate_channels`, runs the threshold scan
+  ONCE over the union, and writes one `IntervalList` row per
+  distinct member `nwb_file_name`. Use this for behavioral
+  artifacts visible on every probe (chewing, licking,
+  head-bumps) where per-recording detection would miss the
+  cross-channel signal.
+- **`clusterless_thresholder` zero-peak graceful path.**
+  `Sorting._build_analyzer` previously crashed on a zero-unit
+  sorting (SI's `random_spikes` extension can't sample from an
+  empty unit set); the shipped 100 µV `clusterless_thresholder`
+  default on the 4 s smoke fixture finds zero peaks. A
+  followup adds a zero-unit guard so the analyzer build short-
+  circuits and the Sorting row still commits with `n_units=0`.
+  `run_v2_pipeline` then writes an EMPTY (but real) curation + merge
+  row -- matching v1, which writes an empty Units table -- and returns
+  a full run summary with real `root_curation_id` / `root_merge_id` and
+  `n_units=0`, so downstream consumers treat it like any other
+  `SpikeSortingOutput` row instead of special-casing a `None` merge_id. Pass
+  `require_units=True` to raise `ZeroUnitSortError` instead. Users with
+  zero-unit sorts should lower `detect_threshold` or revisit artifact
+  masking before retrying.
+- **`mountainsort4` is now in the `spikesorting-v2` extra.**
+  The v2 SI runtime bump required MS4 runtime evidence before v2 shipped
+  the MS4 default Lookup rows; the runtime was previously a
+  manual install. The MS4 package is now pinned via
+  `pip install "spyglass-neuro[spikesorting-v2]"` and pulls
+  `ml_ms4alg` + `isosplit5` + `pybind11` + `spikeextractors`.
+  Linux-only legacy runtime; same non-determinism caveat as
+  MS5.
+- **`clusterless_thresholder` `threshold_unit="uv"` now means TRUE
+  microvolts (diverges from v1).** Previously the `"uv"` path forwarded
+  `noise_levels=[1.0]` to SI's `detect_peaks` against a recording that
+  v2's preprocessing leaves in raw ADC counts (bandpass +
+  common_reference at float64, no gain applied), so `detect_threshold=100`
+  was really "100 counts" -- only true microvolts if the recording was
+  already gain-scaled. v2 now scales the detection input to microvolts
+  (`scale_to_uV`, using the recording's stored NWB gain) before
+  `detect_peaks` whenever `threshold_unit="uv"`, so `detect_threshold=100`
+  is a genuine 100 uV threshold. **For Frank-lab data (gain == 1
+  uV/count) this is a no-op** (100 counts == 100 uV); for non-unity-gain
+  rigs (e.g. Intan ~0.195 uV/count) it corrects a previously misleading
+  threshold. This honors the microvolt label v1 used
+  (`v1/sorting.py:177`) but never enforced -- v1 thresholded in raw
+  counts, so v2 clusterless detection diverges from v1 on non-unity-gain
+  recordings. `threshold_unit="mad"` is unaffected (MAD is scale-relative;
+  the recording is not uV-scaled on that path). A `"uv"` request on a
+  recording with no channel gains now raises rather than silently
+  thresholding in counts.
+
+#### Clusterless waveform-feature extraction works for v2 sorts under SpikeInterface 0.104
+
+`UnitWaveformFeatures.make` (`decoding/v1/waveform_features.py`) — the
+clusterless-decoding input — previously raised on every source because it
+opened with the legacy-SI guard (`RuntimeError` under SpikeInterface ≥ 0.101)
+and extracted waveforms with the removed `si.extract_waveforms` /
+`WaveformExtractor`. The v2 dispatch branch was therefore
+unreachable, so clusterless decoding (a primary v2 consumer) could not compute
+features for a v2 `merge_id`.
+
+The source is now dispatched **before** any SpikeInterface call: the legacy-SI
+guard applies only to the v0/v1 branches (unchanged under the legacy SI 0.99
+environment), while a v2 (`CurationV2`) source builds a fresh in-memory
+`SortingAnalyzer` from the merge source's recording + sorting and reads
+per-spike amplitudes from its `waveforms` extension (`random_spikes`
+`method="all"` so every spike is covered, not a 500-spike subsample). Features
+are keyed by the true NWB unit_id (correct for sparse merge-applied ids), and a
+zero-unit v2 curation yields an empty-but-valid features row instead of
+crashing. No `si.extract_waveforms` on the v2 path. Supported v2 features at
+that checkpoint were `amplitude` (what clusterless decoding uses) and
+`full_waveform`; `spike_location` lands later in the analyzer-curation update
+above via the analyzer `spike_locations` extension.
+
+Note: v2 amplitudes are in microvolts (`return_in_uV=True`), whereas the
+legacy v0/v1 path read raw ADC counts. v2 and v1 feature magnitudes are
+therefore not directly comparable — retrain clusterless decoders per pipeline
+version rather than mixing v1 and v2 marks.
+
+#### Spike Sorting v2 — production parameter catalog matches the Frank Lab
+
+The shipped v2 parameter rows and pipeline presets now match what the Frank
+Lab actually runs, corrected from v2's earlier schema-default placeholders:
+
+- **Region-based preprocessing.** Two dated production preproc rows set the
+  high-pass band by target region — `franklab_hippocampus_2026_06` (600 Hz)
+  and `franklab_cortex_2026_06` (300 Hz), both 6000 Hz low-pass, 1.5 ms
+  min-segment. (Hippocampal spikes are denser/narrower than cortical
+  waveforms.) The generic schema default keeps the name `default`.
+- **MountainSort5 is the shipped default; MountainSort4 is the production
+  recipe (needs `numpy<2`).** `run_v2_pipeline` / `preflight_v2_pipeline`
+  default to `franklab_tetrode_hippocampus_30khz_ms5_2026_06` because it runs
+  under the v2 `numpy>=2` baseline. The MS4 family is rate-keyed
+  (`franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`,
+  `adjacency_radius=100`) and remains the Frank-lab production recipe, but its
+  `ml_ms4alg` backend is a numpy<2-era package that does not install under
+  `numpy>=2`, so it needs a `numpy<2` environment. `recommendation_status` is
+  unchanged (MS4 = `"production"`, MS5 = `"alternative"`); the function default
+  is a separate, runnability-driven choice. Preflight catches an unrunnable
+  MS4 with a new `sorter_runtime_available` check — `installed_sorters()`
+  reports the MS4 wrapper as present even when `ml_ms4alg` is absent, so a
+  green `sorter_installed` would otherwise precede a sort-time crash.
+- **Aggressive artifact thresholds.** Production artifact rows
+  `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06` (100 / 50 µV at
+  0.7 proportion-above-threshold). The 500 µV schema default keeps the name
+  `default`.
+- **Pipeline presets** (tetrode/probe × hippocampus/cortex × 30/20 kHz MS4,
+  an MS5 alternative, a clusterless preset, and an **experimental Neuropixels
+  Kilosort4** preset). Discover them with `describe_pipeline_presets()` (now
+  carrying `recommendation_status`, `target_region`, `sampling_rate_hz`,
+  `adjacency_radius_um`) and inspect the underlying rows — with content
+  fingerprints and preset usage — via `describe_parameter_rows()`.
+- **MountainSort4/5 `detect_threshold` is σ of the whitened signal** (~3 for
+  MS4, ~5.5 for MS5), not a MAD multiplier and not an absolute voltage — the
+  preset `threshold_units` / `notes` are corrected accordingly.
+- **Experimental Neuropixels Kilosort4 recipe** (`franklab_neuropixels_default`
+  sorter row + `franklab_neuropixels_ks4_2026_06` preset,
+  `recommendation_status="experimental"`). Matched to the AIND
+  [`aind-ephys-spikesort-kilosort4`](https://github.com/AllenNeuralDynamics/aind-ephys-spikesort-kilosort4)
+  `params.json` (and consistent with
+  [`int-brain-lab/ibl-sorter`](https://github.com/int-brain-lab/ibl-sorter)):
+  the only meaningful deviation from stock KS4 is non-rigid drift correction
+  (`nblocks=5` vs stock `1`). KS4 does its own high-pass + common-reference +
+  ZCA whitening internally (`skip_kilosort_preprocessing=False`,
+  `whitening_range=32`); the row carries **no `whiten` key**, so v2's external
+  float64 whitening stays off and the signal is whitened exactly once (by KS4).
+  Community-grounded, not yet Frank-lab-attested.
+
+#### Spike Sorting v2 — v1→v2 migration reference (breaking changes)
+
+A consolidated, click-through enumeration of every user-visible v1→v2
+break, grouped by category. The narrative migration guide lives at
+[docs/src/Features/SpikeSortingV2_Migration.md](./docs/src/Features/SpikeSortingV2_Migration.md);
+the bullets below are the terse, source-linked index. The
+artifact-detection unit-conversion fix and the default-threshold change
+are documented above (see the first v2 subsection); they are
+cross-referenced here, not duplicated.
+
+**API renames**
+
+- `SpikeSorterParameters.sorter_param_name` → `SorterParameters.sorter_params_name`
+  (column gained an `s`):
+  [sorting.py:108-115](./src/spyglass/spikesorting/v2/sorting.py#L108-L115).
+  v1 code restricting `{"sorter_param_name": "..."}` returns empty on v2.
+- `apply_merges` kwarg → `apply_merge` (singular) on
+  `CurationV2.insert_curation`:
+  [curation.py:220](./src/spyglass/spikesorting/v2/curation.py#L220).
+- **`insert_curation` raises on a re-passed root curation.** When a
+  root curation (`parent_curation_id=-1`) already exists for a sorting,
+  v2 still reuses it (idempotent, like v1), but if the caller ALSO
+  passes non-default `labels` / `merge_groups` / `description` those
+  would be silently ignored, so v2 raises `ValueError` instead of
+  returning the existing row (v1 silently returned)
+  ([curation.py:391-414](./src/spyglass/spikesorting/v2/curation.py#L391-L414)).
+  Pass `reuse_existing=True` to reuse the root anyway, or curate as a
+  child with `parent_curation_id=<existing root curation_id>`.
+- Preprocessing field renames `frequency_min`/`frequency_max` →
+  `freq_min`/`freq_max`:
+  [_params/preprocessing.py:22-23](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L22-L23).
+- Franklab MS4 `SorterParameters` rows are rate-keyed dated rows:
+  `franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`. MS4 runs
+  `filter=False`, so the row is region-agnostic — only the snippet window
+  (`clip_size` / `detect_interval`) rescales with sampling rate, and the
+  high-pass band lives on the preproc row. These supersede v1's
+  `franklab_tetrode_hippocampus_30KHz` / `franklab_probe_ctx_30KHz` and v2's
+  interim region-encoded `*_30kHz_ms4` rows; **no back-compat alias ships** —
+  update old strings to the dated names.
+- Other sorter default-row renames (NO alias row ships — update the
+  string): MS5 `franklab_tetrode_hippocampus_30kHz_ms5` →
+  `franklab_30khz_ms5_2026_06`; `clusterless_thresholder` row
+  `default_clusterless` → `default` (kept generic because the
+  `franklab_clusterless_2026_06` pipeline preset points at `"default"`);
+  `kilosort4` row `default` → `franklab_neuropixels_default`. Select rows by
+  the **(sorter, sorter_params_name)** pair, so `"default"` is unambiguous
+  per sorter.
+- `SorterParameters.insert_default()` ships fewer rows out of the box than
+  v1: it gates each default row on `spikeinterface.sorters.installed_sorters()`
+  ([sorting.py:266-321](./src/spyglass/spikesorting/v2/sorting.py#L266-L321))
+  rather than auto-inserting a `('<sorter>','default')` row for every
+  `available_sorters()` entry (v1) — uninstalled-wrapper rows would only
+  fail at populate. Use `insert_default_legacy_si_sorters()` (below) to
+  restore the v1 rows.
+
+**Dropped or relocated data**
+
+- The `IntervalList` row keyed by `recording_id` is no longer inserted;
+  the valid-times range lives on the `Recording` row instead
+  ([recording.py:781-782](./src/spyglass/spikesorting/v2/recording.py#L781-L782)).
+  Reconstruction recipe:
+  ```python
+  row = (Recording & {"recording_id": rid}).fetch1()
+  valid_times = np.asarray([[row["saved_start"], row["saved_end"]]])
+  ```
+- Artifact `IntervalList.interval_list_name` is now prefixed
+  `artifact_detection_{uuid}` (was a bare `str(uuid)`); use
+  `parse_artifact_detection_interval_list_name` for backward-compatible lookup
+  ([utils.py:576-611](./src/spyglass/spikesorting/v2/utils.py#L576-L611)).
+- `Sorting.time_of_sort` is a native `datetime`, not Unix int seconds
+  ([sorting.py:684](./src/spyglass/spikesorting/v2/sorting.py#L684)).
+  Consumers comparing against `int(time.time())` must cast.
+- Object-ID columns widened `varchar(40)` → `varchar(72)` on `Sorting`
+  ([sorting.py:681](./src/spyglass/spikesorting/v2/sorting.py#L681)) and
+  `CurationV2`
+  ([curation.py:109](./src/spyglass/spikesorting/v2/curation.py#L109)).
+- `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
+  ([curation.py:112](./src/spyglass/spikesorting/v2/curation.py#L112)).
+- `MetricCuration` is replaced by `CurationEvaluation`; v1 `BurstPair` plotting
+  helpers are folded into `CurationEvaluation` while the stored per-pair
+  `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
+  the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
+  verification families. v2 uses `FigPackCuration` for browser curation views;
+  legacy `FigURLCuration` remains v1-only.
+
+**Schema-defaults flips (programmatic users only)**
+
+- `ClusterlessThresholderSchema().noise_levels` default changed from
+  `[1.0]` to `None` ("let SI compute per-channel MAD")
+  ([_params/sorter.py:142-184](./src/spyglass/spikesorting/v2/_params/sorter.py#L142-L184)).
+  The shipped `default` Lookup row still carries `noise_levels=[1.0]`
+  for v1 production parity
+  ([sorting.py:249](./src/spyglass/spikesorting/v2/sorting.py#L249));
+  only the schema field default flipped. Programmatic users constructing
+  the schema without args now get MAD semantics — pass
+  `noise_levels=[1.0]` to preserve v1 microvolt semantics. Fixes a real
+  1400× clusterless divergence.
+- `MountainSort4Schema().freq_min`/`freq_max` defaults are `600.0`/`6000.0`
+  (Frank-lab tetrode preset), not SI's wrapper defaults
+  ([_params/sorter.py:68-69](./src/spyglass/spikesorting/v2/_params/sorter.py#L68-L69)).
+- `WhitenParams` default flipped from "on" to `None` to match the
+  runtime (whitening is deferred to the sorter)
+  ([_params/preprocessing.py:110](./src/spyglass/spikesorting/v2/_params/preprocessing.py#L110)).
+- `MountainSort5Schema` gains `filter=False` / `whiten=True` toggles,
+  mirroring `MountainSort4Schema`
+  ([_params/sorter.py:111-112](./src/spyglass/spikesorting/v2/_params/sorter.py#L111-L112)).
+  This makes MS5 handled identically to MS4 by the runtime: the
+  recording is already bandpass-filtered upstream, so `filter=False`
+  stops MS5 double-filtering it, and a truthy `whiten` routes the
+  external float64 whitening pin in `Sorting._run_si_sorter` (disabling
+  MS5's internal whitening so the recording is whitened once). Previously
+  MS5 carried neither field, so SI's wrapper defaults ran internal filter
+  **and** internal whitening — MS5 sort outputs shift accordingly. No MS5
+  ground-truth baseline is pinned, so no baseline test changes.
+
+**Boundary semantics — small spike-count delta near artifact edges**
+
+- v1's interval consolidation had an off-by-one bug (dropped the last
+  valid sample of each disjoint interval); v2 corrects it
+  ([utils.py:499-575](./src/spyglass/spikesorting/v2/utils.py#L499-L575)).
+  v1↔v2 spike counts can differ by a few spikes near artifact-mask
+  boundaries; a spike-by-spike comparison on the same input WILL differ
+  at those edges. This is correct behavior, not a regression.
+
+**Multi-channel clusterless `noise_levels` broadcast fix**
+
+- v1's `noise_levels=[1.0]` on a multi-channel recording silently
+  misread channels (singleton indexing in SI's `locally_exclusive` peak
+  detection); v2 broadcasts to `n_channels` at runtime
+  ([sorting.py:1605-1640](./src/spyglass/spikesorting/v2/sorting.py#L1605-L1640)).
+  v1↔v2 clusterless sorts on multi-channel recordings WILL show real,
+  correct differences — v2 is the right answer.
+
+**Determinism — random seeds pinned**
+
+- v2 explicitly pins SI's `seed` for `sip.whiten`
+  ([sorting.py:1733-1752](./src/spyglass/spikesorting/v2/sorting.py#L1733-L1752))
+  and for `get_noise_levels`
+  ([sorting.py:1605-1640](./src/spyglass/spikesorting/v2/sorting.py#L1605-L1640)),
+  after SI PR #3359 changed those defaults from `seed=0` to `seed=None`.
+  Per-row override via `SorterParameters.job_kwargs={'random_seed': N}`.
+
+**Default thresholds**
+
+- Artifact detection ships `amplitude_threshold_uv=500` (was `3000` in v1)
+  ([_params/artifact_detection.py:61](./src/spyglass/spikesorting/v2/_params/artifact_detection.py#L61));
+  see the artifact-detection unit-conversion subsection above for the
+  full rationale.
+
+**Removed or replaced v1 features**
+
+- `MetricCuration` chain (`MetricCuration`, `MetricCurationParameters`,
+  `WaveformParameters`, `MetricParameters`) is replaced for v2 rows by
+  `QualityMetricParameters`, `AutoCurationRules`,
+  `CurationEvaluationSelection`, and `CurationEvaluation`
+  ([metric_curation.py](./src/spyglass/spikesorting/v2/metric_curation.py)).
+  Waveform re-extraction via a separate `WaveformParameters` row is not
+  preserved; v2 reads waveforms from the `SortingAnalyzer`.
+- `FigURLCuration` chain remains v1-only for legacy v1 rows; v2 uses
+  `FigPackCuration` for offline/hosted browser curation views
+  ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
+- `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
+  per-pair quantitative metrics; use `CurationEvaluation` for the ported
+  correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
+  helpers.
+- `RecordingRecompute` chain is replaced by
+  `RecordingArtifactVersions` / `RecordingArtifactRecomputeSelection` /
+  `RecordingArtifactRecompute` and `SortingAnalyzerVersions` /
+  `SortingAnalyzerRecomputeSelection` / `SortingAnalyzerRecompute`
+  ([recompute.py](./src/spyglass/spikesorting/v2/recompute.py)).
+- `recording_id`-keyed `IntervalList` row — see "Dropped or relocated
+  data" above.
+
+**Tags**
+
+- Artifact `IntervalList.pipeline` tag `spikesorting_artifact_v1` →
+  `spikesorting_artifact_detection_v2`
+  ([artifact.py:918](./src/spyglass/spikesorting/v2/artifact.py#L918)).
+
+**Production-scale (chunking, version pin, disk-leak audit)**
+
+- Artifact detection runs a chunked `ChunkRecordingExecutor` pass
+  instead of a full in-memory `get_traces` scan
+  ([artifact.py:929](./src/spyglass/spikesorting/v2/artifact.py#L929),
+  [_compute_artifact_chunk](./src/spyglass/spikesorting/v2/artifact.py#L96)).
+  The `ArtifactDetectionParameters.job_kwargs` blob is now functional
+  (`n_jobs`/`chunk_duration`, default `chunk_duration='1s'`, `n_jobs=1`);
+  output is frame-identical to the old path.
+- SpikeInterface pinned to `==0.104.3`
+  ([pyproject.toml:69](./pyproject.toml#L69)); KS4/MS5/SC2/TDC2/Generic
+  schemas use `extra="allow"`, so SI-version drift is caught by the
+  snapshot tests rather than silently changing sorter defaults.
+- New ops helper `Sorting.find_orphaned_analyzer_folders(*, dry_run=True)`
+  ([sorting.py:1249-1354](./src/spyglass/spikesorting/v2/sorting.py#L1249-L1354))
+  surfaces 5–50 GB analyzer-folder disk leaks from delete-override
+  bypass.
+
+**Opt-in back-compat helper**
+
+- `SorterParameters.insert_default_legacy_si_sorters()`
+  ([sorting.py:323-393](./src/spyglass/spikesorting/v2/sorting.py#L323-L393))
+  inserts `('<sorter>', 'default')` rows for installed non-curated SI
+  sorters, replicating v1's auto-insert for ported workflows that name a
+  sorter via `('kilosort2_5', 'default')`. Opt-in — NOT called by
+  `initialize_v2_defaults()`.
+
+**Curation merge & label semantics**
+
+- **Merged units drop cross-unit double-detections (0.4 ms).** Both
+  `CurationV2.insert_curation(apply_merge=True)` (the stored curated NWB)
+  and `CurationV2.get_merged_sorting` (the lazy preview) apply
+  SpikeInterface's membership-aware 0.4 ms duplicate removal
+  ([utils.py `_dedup_merged_spike_times`](./src/spyglass/spikesorting/v2/utils.py)):
+  a sub-0.4 ms pair from two merged contributors is one physical spike
+  double-detected (a neuron's refractory period forbids genuine sub-0.4 ms
+  firing), so it is removed. v1's *lazy* `get_merged_sorting` did this
+  (SI default), but v1's *applied* path used a bare `np.concatenate` that
+  kept the duplicates — v2 makes both paths consistent and artifact-free,
+  so a v1↔v2 comparison of a merge with coincident contributor spikes
+  shows v2 with the (correct) lower count.
+- **Overlapping merge groups are rejected.** v1 silently coalesced
+  transitively-overlapping groups (`[[1,2],[2,3]]` → `[1,2,3]`) via
+  `_union_intersecting_lists`; v2 raises `ValueError`
+  ([curation.py:776](./src/spyglass/spikesorting/v2/curation.py#L776)) —
+  a unit may belong to at most one merge group. Pass pre-unioned,
+  disjoint groups.
+- **Curated NWB omits `curation_label` when no unit is labeled.** pynwb
+  cannot dtype-infer an all-empty ragged column, so a curation with zero
+  labels writes no `curation_label` column (v1 wrote an all-empty
+  column whenever a `labels` dict was passed). External readers should
+  use `nwb.units.get("curation_label", default)`, not direct
+  `nwb.units["curation_label"]`.
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
 `NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
@@ -151,6 +1322,10 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Add the single-session Spike Sorting v2 user notebook
+    (`notebooks/10_Spike_SortingV2.ipynb`) and a "Run your first single-session
+    sort" quickstart walking defaults → sort group → preflight → pipeline →
+    curation summary → downstream fetch, gated by an end-to-end UX smoke test
 
 ### Infrastructure
 
@@ -205,6 +1380,56 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
+- Tests default to a per-session temp `base_dir` and ignore an exported
+    `SPYGLASS_BASE_DIR` unless `--use-env-base-dir` is passed, preventing
+    destructive tests from acting on shared/production filesystems #1573
+- Add `spyglass.spikesorting.v2` module scaffolding: new module tree with
+    empty stubs and a dedicated test job; no runtime dependency pins changed
+    and v1 remains the production spike sorting path. Upgrading to
+    SpikeInterface 0.104 is a prerequisite checkpoint before any runtime v2
+    work lands
+- Add modern-spike-sorting validation tooling: a `spikesorting-v2-validation`
+    optional extra, a MEArec ground-truth fixture generator and MEArec-to-NWB
+    converter, an isolated test-environment bootstrap, and v1 baseline-capture
+    tooling. No v2 pipeline tables or user-facing sorting path have landed;
+    fixtures are regenerated locally or in CI and are not committed
+- **Move the Spyglass SpikeInterface pin to `>=0.104,<0.105`.** Forced
+    bump of `probeinterface` to `>=0.3.2` (SI 0.104 requires it; the legacy
+    "some probes fail space checks" caveat is empirically retired -- the
+    lab's tetrode, LLNL polymer, and Neuropixels probe geometries all
+    build, roundtrip, and ingest through Spyglass under probeinterface
+    0.3.2 + SI 0.104). Adds a `spikesorting-v2` optional extra
+    (`mountainsort5>=0.5`) and a
+    `spikesorting-v2-matching` optional extra (`UnitMatchPy>=3.2.6,<3.2.8`,
+    `mat73`). v0/v1 DataJoint schemas are unchanged and existing rows
+    remain queryable through `SpikeSortingOutput`, but **active v0/v1
+    spike-sorting workflows (Waveforms, MetricCuration, BurstPair,
+    ArtifactDetection, decoding waveform extraction) now require the
+    legacy SpikeInterface 0.99 Spyglass environment**: calling them under
+    SI 0.104 raises a clear `RuntimeError` pointing the caller at either
+    the v2 pipeline (for new SI 0.104+ processing) or the legacy
+    environment. The full audit + per-surface classification lives at
+    `tests/spikesorting/v2/resolver/si0104-audit.md`; resolver / runtime
+    evidence at `tests/spikesorting/v2/resolver/si0104-runtime.md`
+- **Restore the legacy (v0/v1) spike-sorting test environment.** The v0/v1
+    quality-metric imports now use a version shim
+    (`try: import spikeinterface.metrics except ModuleNotFoundError: import
+    spikeinterface.qualitymetrics`) so `spyglass.spikesorting.v1` imports
+    under both SpikeInterface 0.104 and the legacy 0.99 line. The 0.10x
+    `metrics` package is imported as a whole (not the `metrics.quality`
+    submodule) because the 0.10x reorg split the metrics v0/v1 call —
+    `compute_isi_violations` (metrics.quality) and `compute_num_spikes`
+    (metrics.spiketrain) — across submodules that the parent `metrics`
+    namespace re-exports; SI 0.99's `qualitymetrics` carries both. The
+    legacy conda env
+    (`environments/environment_spikesorting_legacy.yml`) builds the SI-0.99
+    stack by relaxing the `pyproject` SpikeInterface / probeinterface / numpy
+    pins FIRST (a `sed` edit of the ephemeral checkout), so `mamba env create`
+    resolves a coherent SI-0.99 stack in a single pass (relaxing first avoids
+    the inconsistent set a 0.104-then-downgrade pass left behind). The
+    `pytest-legacy` CI job runs that `sed` relax as its own step before
+    creating the env. The committed v2 `spikeinterface==0.104.3` pin in
+    `pyproject.toml` is never changed -- the relax is a build-time-only edit
 - Warn on no-operation restrictions #1586
 - Improved efficiency for writing multiple objects to analysis file #1594
 - Pin `scipy<1.13` for `spikeinterface==0.99.1` compatibility #1612
@@ -302,6 +1527,198 @@ for label, interval_data in results.groupby("interval_labels"):
     - Restrict `ImportedSpikeSorting.Annotations` to the current session in
         `make_df_from_annotations` so `fetch_nwb` works across multiple sessions
         with overlapping unit ids #1581, #1592
+    - Add `spyglass.spikesorting.v2` single-session pipeline on
+        SpikeInterface 0.104's `SortingAnalyzer` API: `SortGroupV2`,
+        `PreprocessingParameters` / `RecordingSelection` / `Recording`,
+        `ArtifactDetectionParameters` / `SharedArtifactGroup` /
+        `ArtifactDetectionSelection` / `ArtifactDetection`, `SorterParameters` /
+        `SortingSelection` / `Sorting`, and `CurationV2`. Adds a
+        `SpikeSortingOutput.CurationV2` part so v0, v1, imported, and v2
+        curations coexist on one merge surface (downstream consumers --
+        decoding, ripple detection, brain-region lookup -- continue to
+        key off `merge_id` unchanged). Ships a
+        `spyglass.spikesorting.v2.pipeline.run_v2_pipeline` orchestrator
+        with the franklab production pipeline presets (the region × rate
+        MountainSort4 family, an MS5 alternative, and a clusterless preset;
+        see the production-catalog subsection above); idempotent by design.
+        See [Spike Sorting v2](./Features/SpikeSortingV2.md). Active
+        v0/v1 workflows continue to require the legacy SI 0.99
+        environment
+    - Fix `SpikeSortingOutput.get_spike_times` raising
+        `KeyError: 'spike_times'` on a zero-unit v2 curation (the
+        `require_units=False` path writes an empty `Units` table with no
+        `spike_times` column); an empty curation now contributes no spike
+        trains instead of crashing. v0/v1 and populated v2 units tables are
+        unaffected.
+    - Verify v2 paper-export completeness: a `SpikeSortingOutput` export
+        over a v2 `merge_id` captures both the curated units NWB and the
+        upstream preprocessed-recording cache in `Export.File`, matching
+        v1. As in v1, the recording cache is captured by the
+        `Export.populate_paper` foreign-key cascade (not by per-fetch
+        accessor logging), so no change to the `get_recording` /
+        `get_sorting` accessors was needed. Covered by
+        `tests/spikesorting/v2/test_export_safety.py`.
+    - Name the raw acquisition `ElectricalSeries` when reading a source NWB
+        for sorting (v0/v1 `Recording` + recompute paths). SpikeInterface
+        >= 0.100 raises on a file that holds more than one `ElectricalSeries`
+        (e.g. raw + LFP) unless the series is named, where 0.99.x silently
+        picked the first. New `utils.read_raw_nwb_recording` helper selects
+        the acquisition series via `nwb_helper_fn.get_raw_eseries_path` and
+        passes the version-correct keyword (`electrical_series_name` on
+        0.99.x, `electrical_series_path` on >= 0.100). Covered by
+        `tests/utils/test_nwb_helper_fn.py`.
+    - Add an optional ADC phase-shift step to v2 preprocessing
+        (`PreprocessingParamsSchema.phase_shift`), compensating the
+        per-channel sample delays of multiplexed ADCs (Neuropixels). It runs
+        first (before the bandpass) and only when the recording carries an
+        `inter_sample_shift` property; otherwise it logs a skip and is a
+        no-op, so it never fails on non-multiplexed data. Off in the
+        `default` preproc row; **on in the `default_neuropixels` preset** (a
+        blessed Neuropixels recipe that stays a no-op until the property is
+        ingested). `apply_pre_motion_preprocessing` now returns an
+        applied-step report so the persisted `ElectricalSeries.filtering`
+        provenance names only the steps that actually ran (a
+        requested-but-skipped phase-shift is not claimed). The optional field
+        defaults to `None`, so existing rows validate unchanged with **no
+        `params_schema_version` bump**. The `default_neuropixels` preset
+        change is only picked up by a fresh `PreprocessingParameters.insert_default()`
+        — `skip_duplicates=True` will not overwrite an existing row, so a
+        populated database must re-insert the preset to pick it up.
+    - Add automated bad-channel detection to v2
+        (`spikesorting.v2._bad_channels.suggest_bad_channels`), a
+        suggest-then-confirm helper that loads a session's raw recording,
+        bandpass-filters it, and runs SpikeInterface's `detect_bad_channels`
+        (`coherence+psd`, the IBL method) **per full shank**. `write=False`
+        (the default) returns a report — one dict per flagged electrode with
+        its `dead`/`noise`/`out` label — and mutates nothing; `write=True`
+        sets `Electrode.bad_channel='True'` for `dead`/`noise` electrodes
+        only. `out` (outside-brain) channels are **report-only**, never
+        persisted (the boolean flag cannot carry the label and a persisted
+        `out` would be wrongly interpolated downstream), and the write is
+        **additive** — it never clears an existing curated flag. Pass the
+        reviewed report back (`write=True, report=report`) to persist exactly
+        what you reviewed without re-detecting (detection samples random chunks
+        with SpikeInterface's `seed=None`, so a fresh confirm call may differ).
+        Detection thresholds are SpikeInterface defaults (Neuropixels-derived)
+        and every threshold is overridable via `detection_params`. Run it
+        (and finalize
+        flags) **before** creating sort groups: `SortGroupV2.set_group_by_*`
+        excludes flagged channels at creation, so a flag added after a group
+        exists does not retroactively drop its members. This is a runtime
+        helper only — it makes no schema change, so there is **no
+        `params_schema_version` bump**.
+    - Add a `bad_channel_handling` v2 preprocessing parameter
+        (`PreprocessingParamsSchema.bad_channel_handling`, `"remove"` |
+        `"interpolate"`, default `"remove"`) controlling how curated
+        `Electrode.bad_channel='True'` flags are handled at materialization.
+        `"remove"` is **byte-identical to before** (the flagged channels were
+        already excluded at sort-group creation and stay excluded).
+        `"interpolate"` re-includes the group's **pitch-adjacent interior**
+        flagged channels and fills them from good neighbours
+        (`interpolate_bad_channels`) so geometry-aware sorters see a complete
+        probe; the handling runs between the bandpass and the reference, and
+        `ElectricalSeries.filtering` lists `interpolate N bad channels` only when
+        N > 0 (so `remove` provenance is unchanged). Only bad channels embedded
+        among the group's good channels are filled (pitch-anchored adjacency from
+        the probe `rel_x/rel_y/rel_z` geometry); interpolation raises a clear
+        error if the probe carries no positions (use `remove`). Detection is not
+        done here — the flags come from `suggest_bad_channels` or curation, and
+        `Electrode.bad_channel='True'` is quality-bad (dead/noise) by convention,
+        never an outside-brain channel. The `specific` reference electrode is
+        never a handling target. Because `"remove"` keeps existing rows valid and
+        output identical, there is **no `params_schema_version` bump**; dev rows
+        are regenerated.
+    - Add a `DriftEstimate` v2 table
+        (`spikesorting.v2.recording.DriftEstimate`): a per-`Recording`
+        probe-motion (drift) estimate stored as a queryable QC artifact. It runs
+        SpikeInterface's `compute_motion` (default preset `dredge_fast`, stored
+        on the row for provenance — there is deliberately no parameters Lookup)
+        on the cached preprocessed recording and stores the displacement field
+        plus a `max_abs_displacement_um` summary and `n_temporal_bins`, so
+        high-drift sessions can be flagged/queried. It is **computed, never
+        applied** — nothing corrects the traces or the sort with it (drift
+        correction stays deferred to the sorter); populating it leaves the
+        upstream `Recording`'s `content_hash` and `get_recording` traces unchanged.
+        It is a `dj.Computed` table populated **on demand**
+        (`DriftEstimate.populate(recording_key)`), never eagerly alongside
+        `Recording`, and uses the same tri-part `make_fetch`/`make_compute`/
+        `make_insert` split as `Recording` so `compute_motion` runs outside the
+        DB transaction. `get_motion(key)` rehydrates the stored blob into a
+        SpikeInterface `Motion`. Being a new Computed table, there is **no
+        `params_schema_version` bump**. The `dredge_fast` preset requires
+        `torch`, so the `spikesorting-v2` extra now installs it (a modern
+        standalone torch coexists with the v2 numpy >= 2 baseline — it does not
+        downgrade numpy).
+    - Add `describe_pipeline_presets()` to
+        `spyglass.spikesorting.v2.pipeline`, a companion to
+        `list_pipeline_presets()` that returns a `pandas.DataFrame` describing
+        each shipped pipeline preset (sorter, parameter rows, intended use,
+        and detection-threshold units -- "MAD multiplier" for the MountainSort
+        presets, "µV" for the clusterless thresholder, a known footgun). Pure
+        and database-free; `pandas` is imported lazily.
+    - Add `describe_sort_groups(nwb_file_name)` to
+        `spyglass.spikesorting.v2.pipeline`, a read-only
+        `pandas.DataFrame` summary of existing `SortGroupV2` rows with
+        electrode IDs, electrode groups, probe shanks, brain regions,
+        bad-channel counts, and reference fields. The user notebook and
+        feature docs now show this table before choosing a `sort_group_id`.
+    - Add `plot_sort_group_geometry(nwb_file_name)` to
+        `spyglass.spikesorting.v2.pipeline`, a DB-backed Matplotlib geometry
+        view that colors contacts by `sort_group_id` and overlays
+        bad-channel/reference markers before users commit compute to a group.
+        Multi-probe sessions are laid out side-by-side along x (per-probe
+        columns) since `Probe.Electrode` coordinates are per-probe.
+    - Add `preflight_v2_pipeline()` to `spyglass.spikesorting.v2.pipeline`
+        and run it by default from `run_v2_pipeline(..., preflight=True)`. It
+        is a read-only, ~1 s configuration check that the session, raw,
+        interval, team, sort-group, and preset parameter rows exist and the
+        sorter binary is installed, returning a structured `PreflightReport`
+        (`ok` / `errors` / `warnings` / `expected_ids`); `run_v2_pipeline`
+        raises the new `PreflightError` with each failed check's fix before
+        any populate, so a misconfigured run fails in seconds instead of
+        minutes into `populate()` with an opaque foreign-key error. Pass
+        `preflight=False` to bypass. Preflight reuses the same deterministic
+        identity payloads (now extracted to shared builders in
+        `_selection_identity`) and the same `installed_sorters()` sorter gate
+        the populate path uses, so its checks cannot drift from the real run.
+    - Add `run_v2_pipeline_session()` and `preflight_v2_pipeline_session()`
+        to `spyglass.spikesorting.v2.pipeline` for whole-session work: a
+        real session has one sort group per shank, so these loop the
+        single-group runner/preflight over every (or a selected subset of)
+        `SortGroupV2` row and return one entry per group. Both require an
+        explicit `pipeline_preset` (no default is inferred for a batch).
+        `run_v2_pipeline_session` runs the whole-session preflight once up
+        front, then runs each group; `continue_on_error=True` records a
+        per-group `outcome="failed"` entry (with its `error` and
+        `partial_run_summary`) and continues, while `continue_on_error=False`
+        (default) fails fast. It is resilient to per-group preflight/sort
+        failures only — an unexpected error still stops the batch. Returns a
+        `list[dict]` (wrap with `pd.DataFrame(results)`); reuses
+        `preflight_v2_pipeline` rather than duplicating its checks.
+    - Make the `run_v2_pipeline` run summary observable: each call now adds
+        per-stage `recording_status` / `artifact_detection_status` / `sorting_status` /
+        `curation_status` (`"computed"` vs `"reused"`), a `stage_seconds` dict
+        of monotonic wall-clock per stage **this call** (≈0 on an idempotent
+        re-run, not cumulative compute), and a `warnings` list (e.g. the
+        zero-unit advisory). The seven existing run-summary keys are
+        unchanged, and two identical runs still return equal run summaries
+        modulo
+        `stage_seconds`/`*_status` with no duplicate rows. A failed stage now
+        raises the new `PipelineStageError`, which names the stage and carries
+        the partial run summary of the stages that completed before it (the
+        underlying error is chained). `ZeroUnitSortError` is unchanged (a
+        graceful zero-unit result is not a stage failure).
+    - Add intent-first curation wrappers on `CurationV2`:
+        `create_initial_curation`, `propose_merge_curation` (records merges
+        without applying them), and `create_merged_curation` (commits the
+        merged unit set), plus a `summarize_curation(key)` read accessor that
+        returns a notebook-printable dict (`n_units` / `labels` /
+        `merge_groups` / `merges_applied` / `is_merge_preview` / `merge_id` /
+        ...) and accepts either a minimal curation key or a full
+        `run_v2_pipeline` run summary. The wrappers are thin pass-throughs that
+        pre-fill `parent_curation_id` / `apply_merge` by name; the expert
+        `insert_curation` (and its ≥2-member merge-group validation) is
+        unchanged.
     - Fix `NwbfileHasher` to include HDF5 Dataset content in
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600

@@ -3,7 +3,10 @@ from typing import Optional, Union
 import datajoint as dj
 import numpy as np
 
-from spyglass.spikesorting.analysis.v1.group import _get_spike_obj_name
+from spyglass.spikesorting.analysis.v1.group import (
+    _get_nwb_unit_ids,
+    _get_spike_obj_name,
+)
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
@@ -70,11 +73,15 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
             ).fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
-            spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
-            if key["unit_id"] > len(spikes) and not self._test_mode:
+            # Compare against the NWB's actual unit_id set, not the
+            # count -- v2 sparse-id sortings break the count-as-bound
+            # heuristic.
+            nwb_unit_ids = set(_get_nwb_unit_ids(nwb_file, nwb_field_name))
+            if int(key["unit_id"]) not in nwb_unit_ids and not self._test_mode:
                 raise ValueError(
-                    f"unit_id {key['unit_id']} is greater than ",
-                    f"the number of units in {key['spikesorting_merge_id']}",
+                    f"unit_id {key['unit_id']} is not present in "
+                    f"{key['spikesorting_merge_id']} "
+                    f"(valid ids: {sorted(nwb_unit_ids)})."
                 )
             self.insert1(unit_key)
         # add annotation
@@ -109,22 +116,46 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             {"merge_id": merge_id}
             for merge_id in list(set(self.fetch("spikesorting_merge_id")))
         ]
+        # Left on the default (no multi_source) unlike SortedSpikesGroup: an
+        # annotation set comes from one analysis and is unlikely to span
+        # SpikeSortingOutput source parts. If one ever does, fetch_nwb raises a
+        # clear "pass multi_source=True" error rather than silently mixing
+        # sources.
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True
         )
+
+        # Single DB query for every (merge_id, unit_id) selection up
+        # front, then group in memory. Per-merge-id ``self.fetch`` in
+        # the loop was an N+1 against ``UnitAnnotation``.
+        annotation_rows = (self).fetch(
+            "spikesorting_merge_id", "unit_id", as_dict=True
+        )
+        include_by_merge: dict = {}
+        for row in annotation_rows:
+            include_by_merge.setdefault(
+                row["spikesorting_merge_id"], []
+            ).append(int(row["unit_id"]))
 
         spikes = []
         unit_ids = []
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file)
-            sorting_spike_times = nwb_file[nwb_field_name][
-                "spike_times"
-            ].to_list()
-            include_unit = np.unique(
-                (self & {"spikesorting_merge_id": merge_id}).fetch("unit_id")
+            # Build an explicit ``unit_id -> spike_times`` map keyed
+            # by the NWB's actual unit ids -- v2 sparse-id sortings
+            # would mis-index a positional list-of-spike_times.
+            unit_id_to_spike_times = dict(
+                zip(
+                    _get_nwb_unit_ids(nwb_file, nwb_field_name),
+                    nwb_file[nwb_field_name]["spike_times"].to_list(),
+                )
             )
+            include_unit = sorted(set(include_by_merge.get(merge_id, [])))
             spikes.extend(
-                [sorting_spike_times[unit_id] for unit_id in include_unit]
+                [
+                    unit_id_to_spike_times[int(unit_id)]
+                    for unit_id in include_unit
+                ]
             )
             unit_ids.extend(
                 [

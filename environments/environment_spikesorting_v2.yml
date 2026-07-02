@@ -1,0 +1,59 @@
+# Isolated conda environment for the spikesorting v2 test suite.
+#
+# The v2 pipeline targets SpikeInterface 0.104 / Python 3.11, which is
+# incompatible with the SpikeInterface 0.99 baseline the rest of the repo
+# pins (see environments/environment.yml). CI keeps the two suites in
+# separate environments and runs v2 with `--ignore`d from the main suite
+# (.github/workflows/test-conda.yml: the `pytest-v2` job). This file is the
+# conda equivalent of that job's setup so the v2 suite can be reproduced
+# locally with conda.
+#
+# 1. Create:   `mamba env create -f environments/environment_spikesorting_v2.yml`
+#    (run from the repo root; the env file installs the package editable
+#    from the repo root via the `../` path in the pip section).
+# 2. Activate: `conda activate spyglass_spikesorting_v2`
+# 3. SpikeInterface is pinned to 0.104.3 by the pip section below. If you
+#    need to (re)install the package + extras by hand:
+#       pip install -e ".[test,spikesorting-v2,spikesorting-v2-validation]"
+#       pip install "spikeinterface==0.104.3"
+#    (The CI `pytest-v2` job creates this same env from this file, so it
+#    also installs `spikesorting-v2-validation` -- MEArec + neuroconv are
+#    needed for `_read_ground_truth`, `test_mearec_fixture_gain_required`,
+#    and generating the MEArec smoke fixture. MEArec (>=1.9) is uncapped on
+#    numpy and elephant (>=1.2) requires numpy>=2, so the validation extra
+#    resolves cleanly on the v2 numpy>=2 baseline.)
+#
+# torch is a direct `spikesorting-v2` dependency (drift/motion QC: the
+# DriftEstimate table's dredge preset needs it). A modern standalone
+# torch (2.x) coexists with the v2 numpy >= 2 baseline -- it does NOT
+# downgrade numpy.
+#
+# Do NOT install the `spikesorting-v2-matching` extra into this env -- it
+# is kept separate for dependency weight and the resolver-evidence
+# contract, NOT because the pinned extra breaks numpy. The pin
+# (UnitMatchPy >=3.2.6,<3.2.8) declares numpy>=2,<3 and coexists with the
+# v2 baseline; it is 3.2.8+/unpinned UnitMatchPy that reactively flips to
+# numpy<2 (upstream #134) and would force the downgrade
+# (`test_optional_matching_extra_resolution` guards that the pin stays on
+# a numpy>=2 release). CI exercises the extra in a throwaway env.
+#
+# 4. Run the suite (Docker MySQL for DataJoint, or --no-docker null_server):
+#       pytest tests/spikesorting/v2/ --no-docker --no-dlc
+name: spyglass_spikesorting_v2
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      # Editable install of the repo root (this file lives in
+      # environments/, so the package root is one level up). The extras
+      # bring in the test deps, the v2 sorters, and the MEArec/neuroconv
+      # validation deps; the explicit SpikeInterface pin overrides the
+      # base dependency to the 0.104 line the v2 pipeline targets.
+      - --editable "..[test,spikesorting-v2,spikesorting-v2-validation]"
+      # Match the pyproject hard pin exactly (==0.104.3) so the env and the
+      # package contract cannot drift; test_dependency_contract guards this.
+      - "spikeinterface==0.104.3"
