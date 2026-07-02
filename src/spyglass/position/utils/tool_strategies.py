@@ -581,6 +581,119 @@ class DLCStrategy(PoseToolStrategy):
             model_path=_to_stored_path(model_path),
         )
 
+    def ensure_project(
+        self,
+        *,
+        project_name: str,
+        project_directory: str,
+        videos: list,
+        bodyparts: list,
+        numframes2pick: int,
+        sanitize,
+        create_kwargs: dict = None,
+        model_instance=None,
+    ) -> Path:
+        """Create or update a DLC training project; return its config path.
+
+        Proactive **create-or-update**: finds an existing project by name,
+        creates one if absent, copies in any converted video DLC does not yet
+        reference, and rewrites ``video_sets`` / ``bodyparts`` /
+        ``numframes2pick`` to the requested values. This never relies on
+        DeepLabCut's ``create_new_project`` returning a fresh config for an
+        existing folder — it returns the existing (possibly stale) config
+        unchanged, which is why a project first built from raw h264 otherwise
+        keeps pointing at the h264 after conversion.
+
+        Parameters
+        ----------
+        project_name : str
+            DLC project name (folder prefix).
+        project_directory : str
+            Directory under which the ``{project_name}-*-*`` folder lives.
+        videos : list
+            The (converted) video paths the project should reference.
+        bodyparts : list
+            Body-part names to write into the config.
+        numframes2pick : int
+            Frames-per-video budget for extraction.
+        sanitize : callable
+            Function mapping *project_name* to a filesystem-safe experimenter
+            name (matches the folder naming used at creation time).
+        create_kwargs : dict, optional
+            Extra keyword args forwarded to ``create_new_project``.
+        model_instance : optional
+            Model table instance, used only for ``_info_msg`` logging.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to the reconciled ``config.yaml``.
+        """
+        from deeplabcut import add_new_videos, create_new_project
+
+        from spyglass.position.utils.dlc_config import DlcConfig
+
+        create_kwargs = create_kwargs or {}
+        want = {Path(v).name for v in videos}
+
+        def _log(msg):
+            if model_instance is not None:
+                model_instance._info_msg(msg)
+
+        # Reuse an existing project whose video_sets are a subset of the
+        # requested (converted) videos — DLC may silently drop invalid files,
+        # so a subset (not equality) avoids false negatives.
+        config_path = None
+        for candidate in sorted(
+            Path(project_directory).glob(f"{project_name}-*-*/config.yaml")
+        ):
+            try:
+                existing = DlcConfig.read(candidate.parent).video_names()
+            except Exception:
+                continue
+            if existing and existing.issubset(want):
+                config_path = candidate.resolve()
+                _log(f"Reusing existing DLC project: {config_path}")
+                break
+
+        if config_path is None:
+            config_path = Path(
+                create_new_project(
+                    project=project_name,
+                    experimenter=sanitize(project_name),
+                    videos=list(videos),
+                    working_directory=project_directory,
+                    copy_videos=True,
+                    multianimal=False,
+                    **create_kwargs,
+                )
+            ).resolve()
+            _log(f"DLC project created: {config_path}")
+
+        project_dir = config_path.parent
+        videos_dir = project_dir / "videos"
+        cfg = DlcConfig.read(project_dir)
+
+        # Copy in converted videos DLC does not already reference on disk.
+        have = cfg.video_names()
+        to_add = [
+            v
+            for v in videos
+            if Path(v).name not in have
+            or not (videos_dir / Path(v).name).exists()
+        ]
+        if to_add:
+            add_new_videos(
+                config=str(config_path), videos=to_add, copy_videos=True
+            )
+            cfg = DlcConfig.read(project_dir)
+
+        # Re-point video_sets at exactly the converted videos and set params.
+        cfg.keep_videos(want).set_bodyparts(bodyparts).set(
+            "numframes2pick", numframes2pick
+        )
+        return Path(cfg.write())
+
     def evaluate_model(
         self,
         model_entry: dict,

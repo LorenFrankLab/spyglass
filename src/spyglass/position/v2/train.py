@@ -22,7 +22,9 @@ from pynwb import NWBHDF5IO
 # Register NWB file in AnalysisNwbfile using any available parent file
 from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
 from spyglass.position.utils import suppress_print_from_package
-from spyglass.position.utils.path_helpers import resolve_model_path
+from spyglass.position.utils.path_helpers import (
+    resolve_model_path,
+)
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
@@ -935,6 +937,93 @@ class ModelSelection(SpyglassMixin, dj.Manual):
     training_labels_path=NULL   : varchar(255)  # SLEAP .slp labels file; NULL for DLC
     """
 
+    @classmethod
+    def _subjects(cls, key) -> set:
+        """Subjects (animals) behind a selection's training video group.
+
+        Parameters
+        ----------
+        key : dict
+            A selection key (or any dict carrying ``vid_group_id``).
+
+        Returns
+        -------
+        set of str
+            The ``Session.subject_id`` values in the group (Nones dropped).
+        """
+        from spyglass.common import Session
+        from spyglass.position.v2.video import VidFileGroup
+
+        vid_group_id = (
+            key["vid_group_id"]
+            if isinstance(key, dict) and "vid_group_id" in key
+            else (cls & key).fetch1("vid_group_id")
+        )
+        files = VidFileGroup.File & {"vid_group_id": vid_group_id}
+        subs = (Session & files).fetch("subject_id")
+        return {s for s in subs if s is not None}
+
+    def insert1(self, row, *, allow_redundant_model=False, **kwargs):
+        """Insert one selection, guarding against redundant model declaration.
+
+        Blocks declaring a new model whose skeleton already has trained models
+        (to promote reuse) unless it is a fine-tune (``parent_id`` set) or
+        ``allow_redundant_model=True``. See :meth:`Model.reusable_for`.
+        """
+        self._guard_redundant_model(row, allow_redundant_model)
+        super().insert1(row, **kwargs)
+
+    @staticmethod
+    def _skeleton_for_params(params_id):
+        """Skeleton id for a ModelParams row, or None if unset/missing."""
+        ids = (ModelParams & {"model_params_id": params_id}).fetch(
+            "skeleton_id"
+        )
+        return ids[0] if len(ids) and ids[0] else None
+
+    @classmethod
+    def _own_model_ids(cls, row):
+        """model_id(s) already belonging to this exact selection (re-run)."""
+        return list((Model & row).fetch("model_id"))
+
+    def _guard_redundant_model(self, row, allow_redundant_model):
+        """Raise if *row* would declare a model redundant with existing ones."""
+        if allow_redundant_model or not isinstance(row, dict):
+            return
+        if row.get("parent_id"):  # fine-tune lineage is intentional
+            return
+        params_id = row.get("model_params_id")
+        if not params_id:
+            return
+        skeleton_id = self._skeleton_for_params(params_id)
+        if not skeleton_id:  # no skeleton → nothing to match on
+            return
+        candidates = Model.reusable_for(
+            skeleton_id,
+            subjects=self._subjects(row),
+            exclude=self._own_model_ids(row),
+        )
+        if not candidates:
+            return
+        raise ValueError(self._redundant_model_msg(skeleton_id, candidates))
+
+    @staticmethod
+    def _redundant_model_msg(skeleton_id, candidates) -> str:
+        """Actionable message listing reusable models for a skeleton."""
+        lines = [
+            f"  model_id={c['model_id']} subjects={c['subjects']}"
+            + (f" (overlaps {c['overlap']})" if c["overlap"] else "")
+            for c in candidates
+        ]
+        return (
+            f"{len(candidates)} existing model(s) already use skeleton "
+            f"'{skeleton_id}'. Reuse one instead of declaring a new model:\n"
+            + "\n".join(lines)
+            + f"\n\nDiscover them with Model.reusable_for('{skeleton_id}'). "
+            "To declare a new model anyway (e.g. new body parts or a "
+            "deliberate retrain), pass allow_redundant_model=True."
+        )
+
 
 @schema
 class Model(SpyglassMixin, dj.Computed):
@@ -955,6 +1044,148 @@ class Model(SpyglassMixin, dj.Computed):
     """
 
     key_source = ModelSelection  # one entry per selection, ensures unique id
+
+    # ── Reuse discovery (promote reusing models over declaring new ones) ──
+    @classmethod
+    def with_skeleton(cls, skeleton_id: str):
+        """Models whose training selection uses *skeleton_id*.
+
+        Parameters
+        ----------
+        skeleton_id : str
+            Skeleton (body-part set) to match.
+
+        Returns
+        -------
+        datajoint expression
+            The ``Model`` rows sharing that skeleton.
+        """
+        return cls & (
+            ModelSelection & (ModelParams & {"skeleton_id": skeleton_id})
+        )
+
+    @classmethod
+    def for_subject(cls, subject_id: str):
+        """Models trained on a video group containing *subject_id* (an animal).
+
+        Parameters
+        ----------
+        subject_id : str
+            The ``Session.subject_id`` (animal) to match.
+
+        Returns
+        -------
+        datajoint expression
+            The ``Model`` rows trained on that subject.
+        """
+        from spyglass.common import Session
+        from spyglass.position.v2.video import VidFileGroup
+
+        groups = VidFileGroup.File & (Session & {"subject_id": subject_id})
+        return cls & (ModelSelection & groups)
+
+    @staticmethod
+    def _reuse_candidates(rows, subjects=None) -> list:
+        """Group ``(model_id, subject_id)`` rows into per-model candidates.
+
+        Pure helper (no DB): collapses join rows to one entry per model with
+        its training subjects and the overlap with *subjects*.
+        """
+        from collections import defaultdict
+
+        by_model = defaultdict(set)
+        for r in rows:
+            by_model.setdefault(r["model_id"], set())
+            sid = r.get("subject_id")
+            if sid is not None:
+                by_model[r["model_id"]].add(sid)
+        want = set(subjects or [])
+        return [
+            {
+                "model_id": mid,
+                "subjects": sorted(subs),
+                "overlap": sorted(subs & want),
+            }
+            for mid, subs in sorted(by_model.items())
+        ]
+
+    @classmethod
+    def reusable_for(
+        cls, skeleton_id: str, subjects=None, exclude=None
+    ) -> list:
+        """Existing models sharing *skeleton_id*, annotated with their subjects.
+
+        Uses one skeleton-restricted join (not a per-model loop), so the large
+        ``VideoFile``/``Session`` tables are only touched for the few
+        same-skeleton models.
+
+        Parameters
+        ----------
+        skeleton_id : str
+            Skeleton to match. Returns ``[]`` if falsy.
+        subjects : iterable of str, optional
+            Subjects of the prospective new model, for the ``overlap`` field.
+        exclude : iterable of str, optional
+            ``model_id`` values to omit (e.g. the selection's own model on a
+            re-run).
+
+        Returns
+        -------
+        list of dict
+            ``{"model_id", "subjects", "overlap"}`` per candidate model.
+        """
+        if not skeleton_id:
+            return []
+        from spyglass.common import Session
+        from spyglass.position.v2.video import VidFileGroup
+
+        same = cls * ModelSelection * ModelParams & {"skeleton_id": skeleton_id}
+        ids = set(same.fetch("model_id"))
+        rows = (same * VidFileGroup.File * Session).fetch(
+            "model_id", "subject_id", as_dict=True
+        )
+        # Keep models whose group has no resolvable subject.
+        for mid in ids:
+            rows.append({"model_id": mid, "subject_id": None})
+        excl = set(exclude or [])
+        return [
+            c
+            for c in cls._reuse_candidates(rows, subjects)
+            if c["model_id"] not in excl
+        ]
+
+    def _warn_existing_models_for_videos(self, video_list) -> None:
+        """Warn (never raise) if models already exist for these animals.
+
+        A best-effort early nudge for ``create_project``: resolves the
+        subjects behind *video_list* and, if any existing model was trained on
+        them, suggests reuse. Silent on any lookup failure.
+        """
+        try:
+            from spyglass.common import Session
+
+            subjects = set()
+            for item in video_list:
+                if isinstance(item, dict) and "nwb_file_name" in item:
+                    subjects |= set(
+                        (
+                            Session & {"nwb_file_name": item["nwb_file_name"]}
+                        ).fetch("subject_id")
+                    )
+            subjects = {s for s in subjects if s is not None}
+
+            existing = set()
+            for subject in subjects:
+                existing |= set(Model.for_subject(subject).fetch("model_id"))
+            if existing:
+                self._warn_msg(
+                    f"{len(existing)} existing model(s) were trained on the "
+                    f"same subject(s) {sorted(subjects)}: {sorted(existing)}. "
+                    "Consider reusing an existing model instead of training a "
+                    "new one (see Model.reusable_for / Model.for_subject)."
+                )
+        except Exception:
+            pass  # nudge is best-effort; never blocks project creation
 
     def make(self, key):
         """Train a new model based on ModelSelection entry.
@@ -1933,61 +2164,6 @@ class Model(SpyglassMixin, dj.Computed):
                 result.append(str(path))
         return result
 
-    @staticmethod
-    def _reconcile_video_sets(config_path, dlc_videos):
-        """Point an existing DLC project's ``video_sets`` at *dlc_videos*.
-
-        DeepLabCut's ``create_new_project`` returns an existing project's
-        ``config.yaml`` **unchanged** when the project folder already exists
-        (it prints "Project already exists!"). So a project first created from
-        raw h264 keeps referencing the h264 even after we convert to mp4, and
-        frame extraction keeps failing. This copies any converted video that is
-        missing from the project (via DLC's ``add_new_videos``, as V1 does) and
-        rewrites ``video_sets`` to reference exactly *dlc_videos*, dropping
-        stale entries (e.g. the raw h264). A no-op when the config already
-        matches (the fresh-project case).
-
-        Parameters
-        ----------
-        config_path : str or pathlib.Path
-            Path to the project ``config.yaml``.
-        dlc_videos : list[str]
-            The (converted) video paths DLC should use.
-        """
-        from deeplabcut import add_new_videos
-
-        from spyglass.position.utils.dlc_io import read_yaml, save_yaml
-
-        project_dir = Path(config_path).parent
-        videos_dir = project_dir / "videos"
-        want = {Path(v).name for v in dlc_videos}
-
-        _, cfg = read_yaml(project_dir)
-        have = {Path(k).name for k in cfg.get("video_sets", {})}
-
-        # Copy + register any converted video not already present on disk.
-        to_add = [
-            v
-            for v in dlc_videos
-            if Path(v).name not in have
-            or not (videos_dir / Path(v).name).exists()
-        ]
-        if to_add:
-            add_new_videos(
-                config=str(config_path), videos=to_add, copy_videos=True
-            )
-            _, cfg = read_yaml(project_dir)
-
-        # Drop stale video_sets entries (e.g. the raw h264) not in *dlc_videos*.
-        trimmed = {
-            k: v
-            for k, v in cfg.get("video_sets", {}).items()
-            if Path(k).name in want
-        }
-        if trimmed != cfg.get("video_sets", {}):
-            cfg["video_sets"] = trimmed
-            save_yaml(project_dir, cfg, filename="config")
-
     def create_project(
         self,
         project_name: str,
@@ -2084,7 +2260,6 @@ class Model(SpyglassMixin, dj.Computed):
             get_param_names,
             sanitize_filename,
         )
-        from spyglass.position.utils.dlc_io import read_yaml, save_yaml
         from spyglass.settings import pose_project_dir, pose_video_dir
 
         # Split kwargs by function signature so callers control both steps
@@ -2126,6 +2301,11 @@ class Model(SpyglassMixin, dj.Computed):
                 "(check that the relevant network mounts are accessible):\n"
                 + "\n".join(f"  {p}" for p in missing)
             )
+
+        # Early nudge: warn (don't block) if models already exist for these
+        # animals, before the user invests in labeling. The hard skeleton-based
+        # guard lives at model declaration (ModelSelection.insert1).
+        self._warn_existing_models_for_videos(video_list)
 
         # Convert any raw video streams (h264/h265/hevc) to mp4 so DeepLabCut
         # can read them — DLC's frame extraction fails on raw streams. V1 did
@@ -2175,67 +2355,33 @@ class Model(SpyglassMixin, dj.Computed):
             description=f"Training videos: {project_name}",
         )
 
-        # ── 2. Create or reuse the DLC project folder ─────────────────────────
-        # Idempotency: search for an existing project under project_directory
-        # whose config.yaml lists the same video basenames.  If found, skip
-        # creation and frame extraction and return the existing config.
+        # ── 2. Create or update the DLC project (proactive config mgmt) ───────
+        # DLCStrategy.ensure_project owns the create-or-update + config edits:
+        # it reuses a matching project, creates one if absent, copies in the
+        # converted videos, and re-points video_sets/bodyparts/numframes2pick —
+        # so we never depend on create_new_project returning a fresh config for
+        # an existing folder.
         project_directory = str(
             project_directory
             or pose_project_dir
             or Path.home() / "dlc_projects"
         )
-
-        resolved_video_basenames = {Path(v).name for v in dlc_videos}
-        config_path = None
-        for candidate in sorted(
-            Path(project_directory).glob(f"{project_name}-*-*/config.yaml")
-        ):
-            try:
-                _, existing_cfg = read_yaml(candidate.parent)
-            except Exception:
-                continue
-            existing_videos = {
-                Path(v).name for v in existing_cfg.get("video_sets", {}).keys()
-            }
-            # Match if existing config's videos are a non-empty subset of
-            # resolved_videos — DLC may silently drop some invalid files from
-            # video_sets even though it copies them, so strict equality would
-            # produce false negatives.
-            if existing_videos and existing_videos.issubset(
-                resolved_video_basenames
-            ):
-                config_path = candidate.resolve()
-                self._info_msg(f"Reusing existing DLC project: {config_path}")
-                break
-
-        if config_path is None:
-            config_path = Path(
-                create_new_project(
-                    project=project_name,
-                    experimenter=sanitize_filename(project_name),
-                    videos=dlc_videos,
-                    working_directory=project_directory,
-                    copy_videos=True,
-                    multianimal=False,
-                    **create_kwargs,
-                )
-            ).resolve()
-            self._info_msg(f"DLC project created: {config_path}")
-
-        # Reconcile video_sets with the converted videos. create_new_project
-        # returns an existing (possibly stale, h264) config unchanged when the
-        # folder already exists, so re-point it at the converted mp4s.
-        self._reconcile_video_sets(config_path, dlc_videos)
-
-        # ── 3. Patch numframes2pick via dlc_io utilities ──────────────────────
-        _, cfg = read_yaml(config_path.parent)
-        cfg["numframes2pick"] = effective_frames_per_video
-        cfg["bodyparts"] = bodyparts
-        config_path = Path(
-            save_yaml(config_path.parent, cfg, filename="config")
+        from spyglass.position.utils.tool_strategies import (
+            ToolStrategyFactory,
         )
 
-        # ── 4. Extract frames (skip if frames already exist) ──────────────────
+        config_path = ToolStrategyFactory.create_strategy("DLC").ensure_project(
+            project_name=project_name,
+            project_directory=project_directory,
+            videos=dlc_videos,
+            bodyparts=bodyparts,
+            numframes2pick=effective_frames_per_video,
+            sanitize=sanitize_filename,
+            create_kwargs=create_kwargs,
+            model_instance=self,
+        )
+
+        # ── 3. Extract frames (skip if frames already exist) ──────────────────
         labeled_data_dir = config_path.parent / "labeled-data"
         already_extracted = (
             any(
@@ -2269,7 +2415,7 @@ class Model(SpyglassMixin, dj.Computed):
                 raise
             self._info_msg("Frame extraction complete.")
 
-        # ── 5. Insert (or retrieve) Skeleton ──────────────────────────────────
+        # ── 4. Insert (or retrieve) Skeleton ──────────────────────────────────
         # BodyPart validation is deferred to Skeleton().insert1(): unknown
         # body parts cause PermissionError for non-admin users.
         sk_key = Skeleton().insert1(
@@ -2464,6 +2610,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_id: Union[str, None] = None,
         model_name: Union[str, None] = None,
         normalize_names: bool = False,
+        allow_redundant_model: bool = False,
         **kwargs,
     ):
         """Import an existing trained model into the database.
@@ -2493,6 +2640,12 @@ class Model(SpyglassMixin, dj.Computed):
             spelling before import (original copied to a timestamped
             ``config.yaml.<timestamp>.bak`` beside it). Default False. Offered
             as a backup when an import is blocked by variant-spelling names.
+        allow_redundant_model : bool, optional
+            When False (default), declaring a model whose skeleton already has
+            trained models raises with a list of reusable models (to curb model
+            proliferation). Set True to declare a new model anyway. Fine-tunes
+            (``parent_id`` set) are always exempt. See
+            :meth:`Model.reusable_for`.
         **kwargs
             Additional parameters for specific tools. Common parameters:
             - nwb_file_name: Parent NWB file name for linking
@@ -2525,6 +2678,7 @@ class Model(SpyglassMixin, dj.Computed):
                 model_id=model_id,
                 model_name=model_name,
                 normalize_names=normalize_names,
+                allow_redundant_model=allow_redundant_model,
             )
         )
 
@@ -2640,6 +2794,7 @@ class Model(SpyglassMixin, dj.Computed):
 
     def _import_dlc_model(self, model_path: Path, **kwargs):
         normalize_names = kwargs.pop("normalize_names", False)
+        allow_redundant_model = kwargs.pop("allow_redundant_model", False)
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
 
@@ -2699,7 +2854,11 @@ class Model(SpyglassMixin, dj.Computed):
                 "ms-dlc",
                 {"model_params_id": model_params_key["model_params_id"]},
             )
-        ModelSelection().insert1(sel_key, skip_duplicates=True)
+        ModelSelection().insert1(
+            sel_key,
+            skip_duplicates=True,
+            allow_redundant_model=allow_redundant_model,
+        )
 
         # Return the existing Model entry if one already exists for this path.
         # model_path is the most stable identifier; default_pk_name embeds

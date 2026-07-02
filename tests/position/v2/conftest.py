@@ -25,6 +25,22 @@ def pv2_train(position_v2):
     yield position_v2.train
 
 
+@pytest.fixture(autouse=True)
+def _neutralize_model_reuse_guard(monkeypatch, pv2_train):
+    """Disable the redundant-model guard by default across the v2 suite.
+
+    Most tests declare models as setup, not to exercise the guard (which is
+    unit-tested directly in ``test_model_reuse.py``). Patch the reuse lookup to
+    find no candidates so ``ModelSelection.insert1`` never blocks; tests that
+    verify the guard override ``Model.reusable_for`` within their own body.
+    """
+    monkeypatch.setattr(
+        pv2_train.Model,
+        "reusable_for",
+        classmethod(lambda cls, skeleton_id, subjects=None, exclude=None: []),
+    )
+
+
 @pytest.fixture(scope="session")
 def bodypart(pv2_train):
     """Fixture for BodyPart class."""
