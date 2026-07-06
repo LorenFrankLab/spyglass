@@ -222,7 +222,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
 - Drop the `ghostipy` dependency by vendoring the FIR filter design and
     out-of-core filtering it used (`scipy.fft` backend, no `pyfftw`); LFP filter
-    output is numerically unchanged #XXXX
+    output is numerically unchanged #1635
 
 ### Pipelines
 
