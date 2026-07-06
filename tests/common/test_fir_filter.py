@@ -275,58 +275,28 @@ class TestFilterCorrectness:
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
     @pytest.mark.parametrize("time_axis", [0, 1])
-    def test_electrode_restriction_and_input_bounds(
-        self, lfp_lowpass, rng, time_axis
+    @pytest.mark.parametrize(
+        "n_elec, N, electrodes, frm, to, ds",
+        [
+            (6, 40_000, [0, 2, 5], 1000, 30000, 5),  # single FFT block
+            (4, 200_000, [0, 3], 1500, 190_000, 15),  # spans several blocks
+        ],
+        ids=["single_block", "multiblock"],
+    )
+    def test_restriction_input_bounds_decimation(
+        self, lfp_lowpass, rng, time_axis, n_elec, N, electrodes, frm, to, ds
     ):
+        # Electrode restriction + input bounds + decimation. The multiblock case
+        # (N far exceeds the ~59k FFT block stride) exercises the
+        # first/middle/last-block branches and the decimation block_offset carry
+        # that the single-block case never reaches -- the out-of-core machinery
+        # the module exists for and that the pyfftw -> scipy.fft swap touched.
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
-        n_elec = 6
-        shape = (self.N, n_elec) if time_axis == 0 else (n_elec, self.N)
-        data = rng.standard_normal(shape)
-        electrodes = np.array([0, 2, 5])
-        frm, to = 1000, 30000
+        electrodes = np.array(electrodes)
         n = to - frm
-
-        idr = [None, None]
-        idr[1 - time_axis] = np.s_[electrodes]
-        out = fir.filter_data_fir(
-            data,
-            b,
-            axis=time_axis,
-            input_index_bounds=[frm, to],
-            output_index_bounds=[delay, delay + n],
-            ds=5,
-            input_dim_restrictions=idr,
-        )
-        ref = reference_filter(
-            data,
-            b,
-            axis=time_axis,
-            input_index_bounds=[frm, to],
-            output_index_bounds=[delay, delay + n],
-            ds=5,
-            electrodes=electrodes,
-        )
-        assert out.shape == ref.shape
-        np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
-
-    @pytest.mark.parametrize("time_axis", [0, 1])
-    def test_multiblock_with_decimation_and_bounds(
-        self, lfp_lowpass, rng, time_axis
-    ):
-        # N far exceeds the FFT block stride (~59k for this filter), so this
-        # spans several blocks -- exercising the first/middle/last-block branches
-        # and the decimation block_offset carry that every other test (all
-        # single-block) leaves unexecuted. This is the out-of-core machinery the
-        # module exists for and that the pyfftw -> scipy.fft swap touched.
-        b = lfp_lowpass
-        delay = (len(b) - 1) // 2
-        big_N = 200_000
-        shape = (big_N, 4) if time_axis == 0 else (4, big_N)
+        shape = (N, n_elec) if time_axis == 0 else (n_elec, N)
         data = rng.standard_normal(shape)
-        electrodes = np.array([0, 3])
-        frm, to = 1500, 190_000
-        n = to - frm
         idr = [None, None]
         idr[1 - time_axis] = np.s_[electrodes]
 
@@ -336,7 +306,7 @@ class TestFilterCorrectness:
             axis=time_axis,
             input_index_bounds=[frm, to],
             output_index_bounds=[delay, delay + n],
-            ds=15,
+            ds=ds,
             input_dim_restrictions=idr,
         )
         ref = reference_filter(
@@ -345,7 +315,7 @@ class TestFilterCorrectness:
             axis=time_axis,
             input_index_bounds=[frm, to],
             output_index_bounds=[delay, delay + n],
-            ds=15,
+            ds=ds,
             electrodes=electrodes,
         )
         assert out.shape == ref.shape
@@ -456,21 +426,20 @@ class TestStreaming:
             )
             assert ret is outarray  # writes into the caller's (on-disk) array
 
-        ref = np.concatenate(
-            [
-                reference_filter(
-                    data,
-                    b,
-                    axis=time_axis,
-                    input_index_bounds=[frm, to],
-                    output_index_bounds=[delay, delay + to - frm],
-                    ds=ds,
-                    electrodes=np.array(electrodes),
-                )
-                for frm, to in valid_times
-            ],
-            axis=time_axis,
-        )
+        # reference: convolve each selected electrode's full lane ONCE, then
+        # slice per interval (calling reference_filter per interval would redo
+        # the full-lane convolution for every interval).
+        lanes = np.moveaxis(data, time_axis, 1)[electrodes]  # (electrode, time)
+        full = [np.convolve(lane, b, "full") for lane in lanes]
+        pieces = [
+            np.moveaxis(
+                np.stack([fc[frm + delay : to + delay : ds] for fc in full]),
+                1,
+                time_axis,
+            )
+            for frm, to in valid_times
+        ]
+        ref = np.concatenate(pieces, axis=time_axis)
         assert outarray.shape == ref.shape
         np.testing.assert_allclose(outarray, ref, atol=1e-9, rtol=1e-9)
 

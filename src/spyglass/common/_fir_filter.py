@@ -309,11 +309,8 @@ def firdesign(
             "'band_edges' must be a monotonically increasing sequence"
         )
 
-    desired_pairs = np.vstack((desired[:-1], desired[1:])).T
-    band_pairs = np.vstack((band_edges[:-1], band_edges[1:])).T
-    for pair_ind, ((edge1, edge2), (v1, v2)) in enumerate(
-        zip(band_pairs, desired_pairs)
-    ):
+    for pair_ind, (v1, v2) in enumerate(zip(desired, desired[1:])):
+        edge1, edge2 = band_edges[pair_ind], band_edges[pair_ind + 1]
         if pair_ind % 2 == 0:
             if v1 == v2:
                 raise ValueError(
@@ -333,13 +330,14 @@ def firdesign(
     for ind, (f1, f2) in enumerate(critical_points):
         prototypes[ind] = _firspline(numtaps, f1, f2, fs=fs, p=p)
 
+    # center impulse (identity filter), used to invert a lowpass into a highpass
+    impulse = np.zeros(numtaps)
+    impulse[(numtaps - 1) // 2] = 1
+
     if prototypes.shape[0] == 1:  # single band
         b = prototypes[0]
         if desired[-1] == 1:  # high pass
-            cr = np.hstack(
-                (np.zeros((numtaps - 1) // 2), 1, np.zeros((numtaps - 1) // 2))
-            )
-            b = cr - prototypes[0]
+            b = impulse - prototypes[0]
     else:  # multi-band
         b = np.zeros(numtaps)
 
@@ -352,25 +350,11 @@ def firdesign(
 
             # high pass at 0 and Nyquist, so invert
             if desired[-1] == 1:
-                cr = np.hstack(
-                    (
-                        np.zeros((numtaps - 1) // 2),
-                        1,
-                        np.zeros((numtaps - 1) // 2),
-                    )
-                )
-                b = cr - b
+                b = impulse - b
         else:
             if desired[0] == 0:
                 tmp = prototypes[-1]
-                cr = np.hstack(
-                    (
-                        np.zeros((numtaps - 1) // 2),
-                        1,
-                        np.zeros((numtaps - 1) // 2),
-                    )
-                )
-                b_special = cr - tmp
+                b_special = impulse - tmp
                 prototypes = prototypes[:-1]
             else:
                 b_special = prototypes[0]
@@ -673,9 +657,7 @@ def _osconvolve(
     # heterogeneous index-tuple builders (hold ints and slices/arrays)
     y_slices: list = [0] * signal.ndim
     y_slices[axis] = np.s_[0:M]
-    y[tuple(y_slices)] = kernel
-    y_slices[axis] = np.s_[M:nfft]
-    y[tuple(y_slices)] = 0
+    y[tuple(y_slices)] = kernel  # remainder stays zero (y is np.zeros)
     if real_output:
         yf = scipy.fft.rfft(y, n=nfft, axis=axis, workers=threads)
     else:
@@ -685,10 +667,6 @@ def _osconvolve(
     start_offset = 0
     if input_index_bounds is not None:
         start_offset = input_index_bounds[0]
-    div, _ = divmod(tot_length, L)
-    bounds = np.arange(start_offset, start_offset + (div + 2) * L, L)
-    block_bounds = np.vstack((bounds[:-1], bounds[1:])).T
-    n_blocks = block_bounds.shape[0]
 
     signal_slices_1: list = [np.s_[:]] * signal.ndim
     signal_slices_2: list = [np.s_[:]] * signal.ndim
@@ -720,9 +698,9 @@ def _osconvolve(
         last_offset = L
 
     tot_samples = 0
-    for ii, (start, stop) in enumerate(block_bounds):
-        if ii < first_block_to_check or ii > last_block_to_check:
-            continue
+    for ii in range(first_block_to_check, last_block_to_check + 1):
+        start = start_offset + ii * L
+        stop = start + L
 
         # initialize entire block to 0, then fill with appropriate input data
         x[:] = 0
@@ -770,76 +748,30 @@ def _osconvolve(
                 workers=threads,
             )
 
-        if ii == first_block_to_check and ii == last_block_to_check:
-            if downsample:
-                conv_slices[axis] = np.s_[
-                    M - 1 + first_offset : M - 1 + last_offset : ds
-                ]
-                n_samples = conv[tuple(conv_slices)].shape[axis]
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-            else:
-                n_samples = last_offset - first_offset
-                conv_slices[axis] = np.s_[
-                    M - 1 + first_offset : M - 1 + last_offset
-                ]
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-        elif ii == first_block_to_check:
-            if downsample:
-                conv_slices[axis] = np.s_[M - 1 + first_offset :: ds]
-                max_samples = L - first_offset
-                n_samples, rem = divmod(max_samples, ds)
-                if rem != 0:
-                    n_samples += 1
-                    block_offset = ds - rem
-                else:
-                    block_offset = 0
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-            else:
-                n_samples = nfft - (M - 1 + first_offset)
-                conv_slices[axis] = np.s_[M - 1 + first_offset : nfft]
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-        elif ii == last_block_to_check:
-            if downsample:
-                conv_slices[axis] = np.s_[
-                    M - 1 + block_offset : M - 1 + last_offset : ds
-                ]
-                n_samples = conv[tuple(conv_slices)].shape[axis]
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-            else:
-                n_samples = last_offset
-                conv_slices[axis] = np.s_[M - 1 : M - 1 + n_samples]
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
+        # Every block writes conv[M-1+lo : M-1+hi : step]. The low offset is the
+        # first-block head, the decimation carry for later blocks, or 0; the high
+        # offset is the last-block tail or the full block length L (note
+        # M-1+L == nfft). This single form is equivalent to the four
+        # first/last/middle x ds/non-ds cases in upstream's osconvolve.
+        if ii == first_block_to_check:
+            lo = first_offset
+        elif downsample:
+            lo = block_offset
         else:
-            if downsample:
-                conv_slices[axis] = np.s_[M - 1 + block_offset : nfft : ds]
-                max_samples = L - block_offset
-                n_samples, rem = divmod(max_samples, ds)
-                if rem != 0:
-                    n_samples += 1
-                    block_offset = ds - rem
-                else:
-                    block_offset = 0
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-            else:
-                n_samples = stop - start
-                outarray_slices[axis] = np.s_[
-                    outarray_marker : outarray_marker + n_samples
-                ]
-                conv_slices[axis] = np.s_[M - 1 : nfft]
+            lo = 0
+        hi = last_offset if ii == last_block_to_check else L
+        step = ds if downsample else 1
+        conv_slices[axis] = np.s_[M - 1 + lo : M - 1 + hi : step]
+        if downsample:
+            n_samples = conv[tuple(conv_slices)].shape[axis]
+            if ii != last_block_to_check:
+                # phase of the next block's first retained sample
+                block_offset = lo + n_samples * ds - L
+        else:
+            n_samples = hi - lo
+        outarray_slices[axis] = np.s_[
+            outarray_marker : outarray_marker + n_samples
+        ]
 
         if real_output:
             outarray[tuple(outarray_slices)] = conv[tuple(conv_slices)].real
@@ -849,7 +781,7 @@ def _osconvolve(
         tot_samples += n_samples
 
         if verbose:
-            print(f"Computed block {ii} of {n_blocks - 1}")
+            print(f"Computed block {ii} of {last_block_to_check}")
 
     if not expected_shape[axis] == tot_samples:
         raise ValueError(
