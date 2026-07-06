@@ -9,23 +9,11 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
+from spyglass.common import _fir_filter as fir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
-
-
-def _import_ghostipy():
-    try:
-        import ghostipy as gsp
-
-        return gsp
-    except (ImportError, ModuleNotFoundError) as e:
-        raise ImportError(
-            "You must install ghostipy to use filtering methods. Please note "
-            "that to install ghostipy on an Mac M1, you must first install "
-            "pyfftw from conda-forge."
-        ) from e
 
 
 @schema
@@ -131,7 +119,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             return None
 
-        gsp = _import_ghostipy()
         TRANS_SPLINE = 2  # transition spline will be quadratic
 
         if filter_type != "bandpass":
@@ -144,7 +131,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 + (band_edges[3] - band_edges[2])
             ) / 2.0
 
-        numtaps = gsp.estimate_taps(fs, transition_width)
+        numtaps = fir.estimate_taps(fs, transition_width)
         filterdict = {
             "filter_type": filter_type,
             "filter_name": filter_name,
@@ -194,7 +181,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             {
                 **pass_stop_dict,
                 "filter_coeff": np.array(
-                    gsp.firdesign(
+                    fir.firdesign(
                         numtaps, band_edges, desired, fs=fs, p=TRANS_SPLINE
                     ),
                     ndmin=1,
@@ -278,8 +265,9 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         data_type: Union[None, str] = None,
     ):
         """
-        Filter data from an NWB electrical series using the ghostipy package,
-        and save the result as a new electrical series in the analysis NWB file.
+        Filter data from an NWB electrical series using the vendored FIR
+        filtering code, and save the result as a new electrical series in the
+        analysis NWB file.
 
         Parameters
         ----------
@@ -312,8 +300,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
         MEM_USE_LIMIT = 0.9  # % of RAM use permitted
 
-        gsp = _import_ghostipy()
-
         data_on_disk = eseries.data
         timestamps_on_disk = eseries.timestamps
 
@@ -345,7 +331,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
             indices.append((frm, to))
 
-            shape, _ = gsp.filter_data_fir(
+            shape, _ = fir.filter_data_fir(
                 data_on_disk,
                 filter_coeff,
                 axis=time_axis,
@@ -440,7 +426,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                     input_index_bounds = [start, stop]
 
                 # filter the data
-                gsp.filter_data_fir(
+                fir.filter_data_fir(
                     data,
                     filter_coeff,
                     axis=time_axis,
@@ -491,8 +477,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         filtered_data, timestamps
         """
 
-        gsp = _import_ghostipy()
-
         n_dim = len(data.shape)
         n_samples = len(timestamps)
         time_axis = 0 if data.shape[0] == n_samples else 1
@@ -514,7 +498,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 continue
             indices.append((frm, to))
 
-            shape, _ = gsp.filter_data_fir(
+            shape, _ = fir.filter_data_fir(
                 data,
                 filter_coeff,
                 axis=time_axis,
@@ -548,7 +532,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!
-            gsp.filter_data_fir(
+            fir.filter_data_fir(
                 data,
                 filter_coeff,
                 axis=time_axis,

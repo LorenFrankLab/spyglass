@@ -45,7 +45,6 @@ dependencies = [
   "bottleneck",
   "dask",
   "datajoint>=0.14.5,<2.0",
-  # "ghostipy", # removed from list bc M1 users need to install pyfftw first
   "hdmf>=3.4.6",
   "ipympl",
   "matplotlib",
@@ -105,7 +104,6 @@ optional-dependencies.moseq-gpu = [
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container
-  "ghostipy",
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
