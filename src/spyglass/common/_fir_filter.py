@@ -10,8 +10,9 @@ covering only the pieces spyglass uses in ``common_filter.py``:
   (possibly on-disk) preallocated output array, with decimation and
   per-dimension index restrictions.
 
-All public signatures are unchanged from upstream ghostipy, and numeric output
-matches it to floating-point round-off.
+All public call signatures (parameter names, order, and defaults) are unchanged
+from upstream ghostipy -- only type annotations have been added -- and numeric
+output matches it to floating-point round-off.
 
 Intentional divergences from upstream:
 
@@ -42,9 +43,14 @@ Intentional divergences from upstream:
 Design details (spline-transition FIR) follow Burrus et al., 1992.
 """
 
-import numpy as np
-import scipy.fft
+from __future__ import annotations
+
+from collections.abc import Sequence
 from multiprocessing import cpu_count
+
+import numpy as np
+import numpy.typing as npt
+import scipy.fft
 
 __all__ = [
     "estimate_taps",
@@ -54,18 +60,24 @@ __all__ = [
 ]
 
 
-def group_delay(b):
+def group_delay(b: np.ndarray) -> int:
     """Group delay of a linear-phase (Type I) FIR filter.
 
     Parameters
     ----------
-    b : np.ndarray, shape (N,)
-        The filter coefficients. N must be odd.
+    b : numpy.ndarray, shape (N,)
+        The filter coefficients. ``N`` must be odd.
 
     Returns
     -------
-    K : int
+    int
         The group delay in samples, ``(N - 1) // 2``.
+
+    Raises
+    ------
+    ValueError
+        If ``b`` has an even number of coefficients, for which the group delay
+        is not an integer.
     """
     L = len(b)
     if not L & 1:
@@ -76,7 +88,9 @@ def group_delay(b):
     return (L - 1) // 2
 
 
-def estimate_taps(fs, tw, *, d1=None, d2=None):
+def estimate_taps(
+    fs: float, tw: float, *, d1: float | None = None, d2: float | None = None
+) -> int:
     """Estimate the number of taps for a Type I FIR filter.
 
     Parameters
@@ -92,8 +106,15 @@ def estimate_taps(fs, tw, *, d1=None, d2=None):
 
     Returns
     -------
-    numtaps : int
+    int
         Number of taps (always odd).
+
+    Raises
+    ------
+    ValueError
+        If ``fs``, ``tw``, ``d1``, or ``d2`` is non-finite or non-positive, or
+        if the deviations are so loose that the estimated tap count is < 1
+        (i.e. ``10 * d1 * d2 >= 1``).
 
     References
     ----------
@@ -127,13 +148,20 @@ def estimate_taps(fs, tw, *, d1=None, d2=None):
     return numtaps
 
 
-def _firspline(numtaps, f1, f2, *, fs=None, p=None):
+def _firspline(
+    numtaps: int,
+    f1: float,
+    f2: float,
+    *,
+    fs: float | None = None,
+    p: float | None = None,
+) -> np.ndarray:
     """Design a Type I low-pass filter with a spline transition band.
 
     Parameters
     ----------
     numtaps : int
-        Number of coefficients (must be odd).
+        Number of coefficients (must be a positive odd integer).
     f1 : float
         Frequency where the amplitude response is 1, in Hz.
     f2 : float
@@ -145,8 +173,15 @@ def _firspline(numtaps, f1, f2, *, fs=None, p=None):
 
     Returns
     -------
-    b : np.ndarray
+    numpy.ndarray, shape (numtaps,)
         The filter coefficients.
+
+    Raises
+    ------
+    ValueError
+        If ``numtaps`` is not a positive odd integer, if ``fs`` is non-finite or
+        non-positive, if ``f1``/``f2`` exceed the Nyquist frequency or are not
+        strictly increasing, or if ``p`` is non-finite or non-positive.
     """
     if not isinstance(numtaps, (int, np.integer)):
         raise ValueError(f"numtaps must be an integer but got {numtaps}")
@@ -196,7 +231,14 @@ def _firspline(numtaps, f1, f2, *, fs=None, p=None):
     return b
 
 
-def firdesign(numtaps, band_edges, desired, *, fs=1, p=None):
+def firdesign(
+    numtaps: int,
+    band_edges: npt.ArrayLike,
+    desired: npt.ArrayLike,
+    *,
+    fs: float = 1,
+    p: float | None = None,
+) -> np.ndarray:
     """Design an arbitrary Type I FIR filter with spline transition bands.
 
     Optimized for an L2 error norm.
@@ -204,11 +246,15 @@ def firdesign(numtaps, band_edges, desired, *, fs=1, p=None):
     Parameters
     ----------
     numtaps : int
-        Number of filter coefficients (must be odd).
-    band_edges : array-like
-        Critical frequencies of the filter. Do not include 0 or Nyquist.
-    desired : array-like
-        Magnitude response at each band edge. Each value must be 0 or 1.
+        Number of filter coefficients (must be a positive odd integer).
+    band_edges : array_like, shape (2 * n_bands,)
+        Critical frequencies of the filter in Hz, an even-length,
+        strictly increasing sequence. Do not include 0 or the Nyquist
+        frequency.
+    desired : array_like, shape (2 * n_bands,)
+        Magnitude response at each band edge; each value must be 0 or 1. The
+        values must alternate between transition bands (the two edges of a
+        transition band differ) and flat bands (the two edges match).
     fs : float, optional
         Sampling rate in Hz. Default is 1 Hz.
     p : float, optional
@@ -217,8 +263,18 @@ def firdesign(numtaps, band_edges, desired, *, fs=1, p=None):
 
     Returns
     -------
-    b : np.ndarray
+    numpy.ndarray, shape (numtaps,)
         The filter coefficients.
+
+    Raises
+    ------
+    ValueError
+        If ``numtaps`` is not a positive odd integer; if ``fs`` is non-finite
+        or non-positive; if ``band_edges`` is empty, has an odd length, differs
+        in length from ``desired``, has a non-positive first edge, has a last
+        edge >= the Nyquist frequency, or is not strictly increasing; or if
+        ``desired`` contains values other than 0/1 or does not follow the
+        required transition/flat-band alternation.
     """
     band_edges = np.array(band_edges)
     desired = np.array(desired)
@@ -273,7 +329,7 @@ def firdesign(numtaps, band_edges, desired, *, fs=1, p=None):
 
     critical_points = band_edges.reshape((-1, 2))
     # low pass prototypes
-    prototypes = np.zeros((critical_points.shape[0], numtaps))
+    prototypes = np.zeros((len(critical_points), numtaps))
     for ind, (f1, f2) in enumerate(critical_points):
         prototypes[ind] = _firspline(numtaps, f1, f2, fs=fs, p=p)
 
@@ -331,32 +387,40 @@ def firdesign(numtaps, band_edges, desired, *, fs=1, p=None):
 
 
 def _osconvolve(
-    signal,
-    kernel,
+    signal: np.ndarray,
+    kernel: npt.ArrayLike,
     *,
-    mode="full",
-    nfft=None,
-    threads=cpu_count(),
-    axis=-1,
-    outarray=None,
-    input_index_bounds=None,
-    output_index_bounds=None,
-    describe_dims=False,
-    ds=None,
-    input_dim_restrictions=None,
-    output_offset=0,
-    verbose=False,
-):
+    mode: str = "full",
+    nfft: int | None = None,
+    threads: int = cpu_count(),
+    axis: int = -1,
+    outarray: np.ndarray | None = None,
+    input_index_bounds: Sequence[int] | None = None,
+    output_index_bounds: Sequence[int] | None = None,
+    describe_dims: bool = False,
+    ds: int | None = None,
+    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
+    output_offset: int = 0,
+    verbose: bool = False,
+) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Overlap-save FFT convolution, written to minimize memory usage.
 
     Streams the convolution block-by-block into ``outarray`` (which may be an
     on-disk array), supporting decimation (``ds``) and restricting which
     indices of the non-filtered axes are used (``input_dim_restrictions``).
+    ``mode`` selects ``'full'``, ``'same'``, or ``'valid'`` convolution.
 
     Ported from ghostipy's ``osconvolve``; the numeric output is identical to
     upstream to floating-point round-off. See the module header for the
     intentional divergences (scipy.fft backend, the exact-boundary block fold,
-    and the fail-loud input/read validation).
+    and the fail-loud input/read validation), and :func:`filter_data_fir` for
+    the meaning of the shared out-of-core parameters.
+
+    Returns
+    -------
+    tuple of (tuple of int, str), or numpy.ndarray
+        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
+        have; otherwise the filled ``outarray``.
     """
     # The kernel is small and always in memory, so normalize it to an array for
     # convenience. The signal is deliberately NOT converted: it may be an
@@ -606,7 +670,8 @@ def _osconvolve(
     y_dims = [1] * signal.ndim
     y_dims[axis] = nfft
     y = np.zeros(tuple(y_dims), dtype=buf_dtype)
-    y_slices = [0] * signal.ndim
+    # heterogeneous index-tuple builders (hold ints and slices/arrays)
+    y_slices: list = [0] * signal.ndim
     y_slices[axis] = np.s_[0:M]
     y[tuple(y_slices)] = kernel
     y_slices[axis] = np.s_[M:nfft]
@@ -625,8 +690,8 @@ def _osconvolve(
     block_bounds = np.vstack((bounds[:-1], bounds[1:])).T
     n_blocks = block_bounds.shape[0]
 
-    signal_slices_1 = [np.s_[:]] * signal.ndim
-    signal_slices_2 = [np.s_[:]] * signal.ndim
+    signal_slices_1: list = [np.s_[:]] * signal.ndim
+    signal_slices_2: list = [np.s_[:]] * signal.ndim
     for dim, sel, _ in restricted_dims:
         signal_slices_1[dim] = sel
         signal_slices_2[dim] = sel
@@ -796,53 +861,57 @@ def _osconvolve(
 
 
 def filter_data_fir(
-    data,
-    b,
+    data: np.ndarray,
+    b: npt.ArrayLike,
     *,
-    nfft=None,
-    threads=cpu_count(),
-    axis=-1,
-    outarray=None,
-    input_index_bounds=None,
-    output_index_bounds=None,
-    describe_dims=False,
-    ds=None,
-    input_dim_restrictions=None,
-    output_offset=0,
-    verbose=False,
-):
+    nfft: int | None = None,
+    threads: int = cpu_count(),
+    axis: int = -1,
+    outarray: np.ndarray | None = None,
+    input_index_bounds: Sequence[int] | None = None,
+    output_index_bounds: Sequence[int] | None = None,
+    describe_dims: bool = False,
+    ds: int | None = None,
+    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
+    output_offset: int = 0,
+    verbose: bool = False,
+) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Apply an FIR filter to data via overlap-save FFT convolution.
 
-    See :func:`_osconvolve` for the meaning of the streaming/out-of-core
-    parameters. Uses ``mode='full'``; combined with ``output_index_bounds``
-    set to ``[group_delay, group_delay + N]`` this yields the zero-phase,
+    Uses ``mode='full'``; combined with ``output_index_bounds`` set to
+    ``[group_delay, group_delay + N]`` this yields the zero-phase,
     delay-compensated output that spyglass relies on.
 
     Parameters
     ----------
-    data : ndarray-like
-        The data to be filtered. Must expose ``.ndim``/``.shape`` and support
-        slice + integer-array indexing (a NumPy array or an h5py Dataset). It is
-        NOT converted to an array, so an on-disk/lazy signal stays on disk.
-    b : array-like
-        Filter coefficients (1D). Converted to a NumPy array internally.
+    data : numpy.ndarray
+        The data to be filtered, shape ``(..., n_time, ...)`` with the filtered
+        axis given by ``axis``. Must expose ``.ndim``/``.shape`` and support
+        slice + integer-array indexing (a NumPy array or an h5py ``Dataset``).
+        It is NOT converted to an array, so an on-disk/lazy signal stays on
+        disk. Real input yields a real result; complex input a complex result.
+    b : array_like, shape (M,)
+        Filter coefficients (1-D). Converted to a NumPy array internally.
     nfft : int, optional
-        FFT length along the filtered axis. Default chosen automatically.
+        FFT length along the filtered axis; must be an integer >= ``M``.
+        Default chosen automatically.
     threads : int, optional
-        Number of FFT worker threads. Default is the CPU count.
+        Number of FFT worker threads (>= 1). Default is the CPU count.
     axis : int, optional
         Axis along which to filter. Default is -1.
-    outarray : np.ndarray, optional
-        Preallocated output (may be on disk). Default allocates in memory.
-    input_index_bounds : array-like of 2 ints, optional
-        [start, stop) indices of the input along ``axis`` (stop exclusive).
-    output_index_bounds : array-like of 2 ints, optional
-        [start, stop) indices of the full-convolution output to keep.
+    outarray : numpy.ndarray, optional
+        Preallocated output (may be on disk). Default allocates in memory. See
+        Notes for the dtype contract.
+    input_index_bounds : sequence of 2 int, optional
+        ``[start, stop)`` indices of the input along ``axis`` (stop exclusive).
+    output_index_bounds : sequence of 2 int, optional
+        ``[start, stop)`` indices of the full-convolution output to keep (stop
+        exclusive).
     describe_dims : bool, optional
-        If True, return ``(shape, dtype)`` without filtering.
+        If True, return ``(shape, dtype)`` without filtering. Default False.
     ds : int, optional
         Integer decimation factor (>= 1). Default None (no decimation).
-    input_dim_restrictions : list, optional
+    input_dim_restrictions : sequence, optional
         One entry per dimension of ``data``. The entry for ``axis`` must be
         None; at most one other entry may be set, and it must be a 1-D,
         in-range, strictly increasing array of unique integer indices selecting
@@ -850,18 +919,30 @@ def filter_data_fir(
         electrodes. Slices/masks and restricting more than one axis are not
         supported (they raise).
     output_offset : int, optional
-        Offset into ``outarray`` (along ``axis``) at which to start writing.
+        Offset (>= 0) into ``outarray`` along ``axis`` at which to start
+        writing. Default 0.
     verbose : bool, optional
         Print per-block progress. Default False.
 
     Returns
     -------
-    If ``describe_dims`` is True:
-        (shape, dtype) : the shape and dtype the output would have.
-    Otherwise:
-        outarray : the filtered (and optionally decimated) data. When an
+    tuple of (tuple of int, str), or numpy.ndarray
+        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
+        have. Otherwise the filtered (and optionally decimated) data: when an
         ``outarray`` was supplied, the SAME object is returned (written in
         place); otherwise a newly allocated array is returned.
+
+    Raises
+    ------
+    ValueError
+        On invalid arguments -- e.g. ``threads < 1``, a non-1-D kernel, an
+        out-of-range or non-integer ``nfft``/``ds``/``output_offset``, bounds
+        that are reversed or out of range, or unsupported
+        ``input_dim_restrictions``.
+    IndexError
+        If ``input_index_bounds`` or a restriction array is out of range.
+    TypeError
+        If the result is complex but a real-dtype ``outarray`` was supplied.
 
     Notes
     -----
