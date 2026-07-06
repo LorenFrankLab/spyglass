@@ -51,6 +51,7 @@ from multiprocessing import cpu_count
 import numpy as np
 import numpy.typing as npt
 import scipy.fft
+import scipy.signal
 
 __all__ = [
     "estimate_taps",
@@ -331,8 +332,7 @@ def firdesign(
         prototypes[ind] = _firspline(numtaps, f1, f2, fs=fs, p=p)
 
     # center impulse (identity filter), used to invert a lowpass into a highpass
-    impulse = np.zeros(numtaps)
-    impulse[(numtaps - 1) // 2] = 1
+    impulse = scipy.signal.unit_impulse(numtaps, "mid")
 
     if prototypes.shape[0] == 1:  # single band
         b = prototypes[0]
