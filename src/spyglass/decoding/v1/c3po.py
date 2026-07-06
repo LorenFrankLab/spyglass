@@ -595,7 +595,7 @@ class Model(SpyglassMixin, dj.Computed):
         self._make_insert(key, *results)
 
     def fetch_c3po_analysis(
-        self, key, checkpoint: int = None, load_embeddings=True
+        self, key: dict = {}, checkpoint: int = None, load_embeddings=True
     ) -> C3poAnalysis:
         """Fetch a C3POAnalysis object with the trained params and embedded results
 
@@ -652,7 +652,7 @@ class Model(SpyglassMixin, dj.Computed):
             # fetch the embedded latent states and context variables from the NWB file
             # store them in the analysis object and return it
             if checkpoint is None:
-                nwb = (self.fetch_nwb())[0]
+                nwb = ((self & model_key).fetch_nwb())[0]
             else:
                 if (
                     len(
