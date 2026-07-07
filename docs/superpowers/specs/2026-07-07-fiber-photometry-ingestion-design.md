@@ -173,8 +173,23 @@ key.
 ### Reusable device tables
 
 Keyed by device `name` (the PK — the only guaranteed-present field),
-`_expected_duplicates = True`, `_extension_requirements = {"ndx-ophys-devices":
-"0.3.1"}`. These are a **shared device/reagent catalog**, so they store only
+`_expected_duplicates = True`, `_extension_requirements = {"ndx-fiber-photometry":
+"0.2.3", "ndx-ophys-devices": "0.3.1"}`.
+
+**Photometry-scoped matching (not generic `ndx-ophys-devices`).** `ndx-ophys-devices`
+types (`OpticalFiber`, `Indicator`, …) are shared with other modalities
+(e.g. optogenetics), so matching every such object in `nwb_file.objects` would
+ingest non-photometry devices and break the clean-no-op guarantee. Instead each
+device table's `get_nwb_objects()` returns `[]` when the file has no
+`FiberPhotometry` container, and otherwise collects **only the objects
+referenced by the `FiberPhotometryTable`** column(s) it backs (`Indicator` ←
+`indicator`; `ExcitationSource` ← `excitation_source`; `Photodetector` ←
+`photodetector`; `OpticalFiber` ← `optical_fiber`; `DichroicMirror` ←
+`dichroic_mirror`; `OpticalFilter` ← `emission_filter` ∪ `excitation_filter`),
+deduped by `name`. So a pure-optogenetics or otherwise non-photometry file is a
+clean no-op for these tables.
+
+These are a **shared device/reagent catalog**, so they store only
 **reusable spec** — values stable for a given device name across sessions:
 identity (`name`, `label`), model-derived specs (folded from `.model` via
 callables like `lambda o: o.model.source_type`), and type discriminators.
@@ -189,44 +204,52 @@ Every field the extension marks optional is **nullable** so sparse-but-valid
 files never lose rows to `_key_has_required_attrs`; only the PK (and derived
 discriminators) are non-null.
 
-- **`Indicator`** ← `Indicator` (a single NWBContainer — all fields are reusable
+Each collects its objects from the `FiberPhotometryTable` reference column(s)
+above, so the referenced object's **subtype is taken as-is** — no `is_nwb_obj_type`
+class-name matching needed (the discriminator columns below are derived from the
+referenced object's class). `[2]`-vector specs are stored as **scalar min/max
+pairs**, not blobs — DataJoint duplicate validation compares with plain `!=`
+([ingestion.py:460](../../../src/spyglass/utils/mixins/ingestion.py)), which is
+ambiguous on numpy/list values in an `_expected_duplicates=True` table.
+
+- **`Indicator`** ← `indicator` refs (a single NWBContainer — all fields reusable
   reagent metadata): `indicator_name`←`name` (PK), `label` (spec-required),
   `description=null`, `manufacturer=null`.
-- **`ExcitationSource`** ← `ExcitationSource` **or** `PulsedExcitationSource`,
-  via a custom `get_nwb_objects()` matching both (exact-string `is_nwb_obj_type`
-  misses the subtype; `excitation_source` is a **required** config ref, so an
-  unmatched pulsed source would break the FK): `excitation_source_name`←`name`
-  (PK), `source_class` `enum('continuous','pulsed')` (derived, non-null), and
-  nullable model specs `source_type=null`, `excitation_mode=null`,
-  `manufacturer=null`, `wavelength_range_in_nm=null` (`[2]`-vector → blob).
-- **`Photodetector`** ← `Photodetector`: `photodetector_name`←`name` (PK), and
+- **`ExcitationSource`** ← `excitation_source` refs (may be `ExcitationSource` or
+  `PulsedExcitationSource` — collected via the ref, so both are handled):
+  `excitation_source_name`←`name` (PK), `source_class` `enum('continuous','pulsed')`
+  (from the referenced class, non-null), nullable model specs `source_type=null`,
+  `excitation_mode=null`, `wavelength_min_nm=null` / `wavelength_max_nm=null`.
+- **`Photodetector`** ← `photodetector` refs: `photodetector_name`←`name` (PK),
   nullable model specs `detector_type=null`, `gain=null`, `gain_unit=null`,
-  `manufacturer=null`, `wavelength_range_in_nm=null` (blob).
-- **`DichroicMirror`** ← `DichroicMirror` (default matcher): `dichroic_mirror_name`
-  ←`name` (PK), nullable model specs `manufacturer=null`,
-  `cut_on_wavelength_in_nm=null`, `cut_off_wavelength_in_nm=null`,
-  `reflection_band_in_nm=null` / `transmission_band_in_nm=null` (blobs),
-  `angle_of_incidence_in_degrees=null`.
-- **`OpticalFilter`** ← base `OpticalFilter`, `BandOpticalFilter`, **or**
-  `EdgeOpticalFilter`, via a custom `get_nwb_objects()` matching all three
-  (the config target type is base `OpticalFilter`, so a plain instance must match
-  too): `optical_filter_name`←`name` (PK), `filter_class` `enum('base','band',
-  'edge')` (derived, non-null), and nullable `filter_type=null`,
-  `manufacturer=null`, `center_wavelength_in_nm=null` / `bandwidth_in_nm=null`
-  (band), `cut_wavelength_in_nm=null`, `slope_in_percent_cut_wavelength=null`,
+  `wavelength_min_nm=null` / `wavelength_max_nm=null`.
+- **`DichroicMirror`** ← `dichroic_mirror` refs: `dichroic_mirror_name`←`name`
+  (PK), nullable model specs `cut_on_wavelength_in_nm=null`,
+  `cut_off_wavelength_in_nm=null`, `reflection_band_min_nm=null` /
+  `reflection_band_max_nm=null`, `transmission_band_min_nm=null` /
+  `transmission_band_max_nm=null`, `angle_of_incidence_in_degrees=null`.
+- **`OpticalFilter`** ← `emission_filter` ∪ `excitation_filter` refs (base
+  `OpticalFilter`, `BandOpticalFilter`, or `EdgeOpticalFilter` — via the ref):
+  `optical_filter_name`←`name` (PK), `filter_class` `enum('base','band','edge')`
+  (from the referenced class, non-null), nullable `filter_type=null`,
+  `center_wavelength_in_nm=null` / `bandwidth_in_nm=null` (band),
+  `cut_wavelength_in_nm=null`, `slope_in_percent_cut_wavelength=null`,
   `slope_starting_transmission_in_percent=null`,
   `slope_ending_transmission_in_percent=null` (edge). Untested against real data
   (no sample file populates filters) — exercised by a synthetic fixture only.
-- **`OpticalFiber`** ← `OpticalFiber` (default matcher): `optical_fiber_name`
-  ←`name` (PK), and nullable **model** specs `numerical_aperture=null`,
-  `core_diameter_in_um=null`, `active_length_in_mm=null`, `ferrule_name=null`,
-  `ferrule_model=null`, `ferrule_diameter_in_mm=null`, `manufacturer=null`.
-  Holds only the fiber's **reusable** device specs; the **session-specific**
-  insertion (`fiber_insertion.*`) lives on `FiberPhotometryConfig`, not here (a
-  shared table keyed by name must not carry per-implant coordinates). This is a
-  photometry-owned table (**not** `common_optogenetics.OpticalFiberDevice`) and
-  all-nullable, so the sample data's null `active_length`/`ferrule_*` ingest
-  cleanly (the exact NOT-NULL problem that made reuse fail).
+- **`OpticalFiber`** ← `optical_fiber` refs: `optical_fiber_name`←`name` (PK),
+  nullable **model** specs `numerical_aperture=null`, `core_diameter_in_um=null`,
+  `active_length_in_mm=null`, `ferrule_name=null`, `ferrule_model=null`,
+  `ferrule_diameter_in_mm=null`. Holds only the fiber's **reusable** specs; the
+  **session-specific** insertion (`fiber_insertion.*`) lives on
+  `FiberPhotometryConfig`, not here. Photometry-owned (**not**
+  `common_optogenetics.OpticalFiberDevice`) and all-nullable, so the sample
+  data's null `active_length`/`ferrule_*` ingest cleanly.
+
+The five model-backed tables (all but `Indicator`) also store the reusable core
+`DeviceModel` fields `manufacturer=null`, `model_number=null`, and
+`model_description=null` (distinct from any per-instance description, which is
+excluded/warned).
 
 ### Session-specific config — `FiberPhotometryConfig`
 
@@ -475,8 +498,9 @@ Exhaustive audit of **every** `neurodata_type` and field in `ndx-fiber-photometr
 | `Indicator.label` (req) | ✅ `Indicator.label` |
 | `Indicator.description`/`manufacturer` (opt) | ◐ `Indicator` |
 | `Indicator.viral_vector_injection` (opt link) | ⚠️ warn |
-| core `Device`/`DeviceModel` `manufacturer` | ◐ device tables; `name` → PK |
-| core `Device` `model_number`/`serial_number`/instance `description` | ⛔ not modeled (instance/identity) |
+| core `DeviceModel` `manufacturer`/`model_number`/`description` (reusable) | ◐ device tables; `name` → PK |
+| core `Device` instance `model_number`/`serial_number`/`description` | ⛔ not modeled (per-instance identity) |
+| `[2]`-vector specs (`wavelength_range`, `reflection_band`, `transmission_band`) | ◐ stored as scalar **min/max pairs** (blob-safe under duplicate validation) |
 | `OpticalLens*` / `LensPositioning` / `ObjectiveLens*` / `Effector` / `ViralVector*` | ⛔ out of scope (imaging/optogenetics, not fiber photometry) |
 
 ## Testing
@@ -503,10 +527,13 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    stored (null where the NWB source is null); the `.Fiber` part maps the region row.
 3. **Retrieval**: `fetch_nwb()` / `fetch1_dataframe()` returns the trace with the
    expected length and time axis derived from `rate` + `starting_time`.
-4. **Gating contract**: (a) a non-photometry file (no matching objects) is a
-   **clean no-op — no rows, no exception, no warning** (the mixin early-returns
-   before the namespace check); (b) a file that *does* contain photometry objects
-   but carries `ndx-fiber-photometry` **below** the `_extension_requirements` min
+4. **Gating contract**: (a) a non-photometry file is a **clean no-op — no rows,
+   no exception, no warning**; this **includes a file that contains
+   `ndx-ophys-devices` objects (`OpticalFiber`, `Indicator`, …) but no
+   `FiberPhotometry` container** (e.g. a pure-optogenetics file) — the
+   reference-scoped `get_nwb_objects()` returns `[]`, so the device tables never
+   ingest foreign devices; (b) a file that *does* contain photometry objects but
+   carries `ndx-fiber-photometry` **below** the `_extension_requirements` min
    version is skipped **with a warning** and no rows. (Distinct from the config
    override's own unmodeled-column warning.)
 5. **Re-ingestion semantics** (per-table, matching existing Spyglass behavior):
