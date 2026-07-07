@@ -123,10 +123,11 @@ Phase-1 ships the metadata layer (query the setup); phase-2 adds signal retrieva
 1. **Optogenetics cross-processing** — **RESOLVED: gate.** The optogenetics fiber
    tables error on some photometry fibers, which makes `populate_all_common`
    report failure and (with `rollback_on_fail=True`) destroy the photometry
-   inserts. Owner chose to gate: both `OpticalFiberDevice` and
-   `OpticalFiberImplant` get a `get_nwb_objects()` override excluding
-   photometry-referenced fibers (phase-1). Backward-compatible; the only
-   behavioral change to `common_optogenetics`.
+   inserts. Owner chose to gate: `OpticalFiberImplant` drops photometry fiber
+   instances and `OpticalFiberDevice` drops only models not needed by a remaining
+   non-photometry fiber (exact rule:
+   [shared-contracts.md#opto-gate](shared-contracts.md#opto-gate)) — phase-1.
+   Backward-compatible; the only behavioral change to `common_optogenetics`.
 
 ## Estimated Effort
 

@@ -48,7 +48,8 @@ recorded fluorescence as a time-indexed DataFrame with per-fiber columns.
 - **Custom `generate_entries_from_nwb_object()` override on the master**: returns
   an `IngestionEntries` dict with **both** the master row **and** its `.Fiber`
   rows (parent before child, per the mixin contract). Master row:
-  name/description/comments/num_samples/unit + `object_id`. `.Fiber` rows: for
+  `response_series_object_id ← series.object_id` (the PK column takes the NWB
+  object's id) + name/description/comments/num_samples/unit. `.Fiber` rows: for
   each positional index in `series.fiber_photometry_table_region.data`, translate
   to the config row `id` (per
   [shared-contracts.md#config-schema](shared-contracts.md#config-schema)) and
@@ -94,7 +95,7 @@ recorded fluorescence as a time-indexed DataFrame with per-fiber columns.
 
 | Test | Asserts |
 | --- | --- |
-| `test_response_series_ingest` | one master row per `FiberPhotometryResponseSeries`; `object_id`/`num_samples`/`unit` correct; `.Fiber` maps the region's positional index → the right config `fiber_id` |
+| `test_response_series_ingest` | one master row per `FiberPhotometryResponseSeries`; `response_series_object_id == series.object_id`, `num_samples`/`unit` correct; `.Fiber` maps the region's positional index → the right config `fiber_id` |
 | `test_fetch1_dataframe_roundtrip` | `fetch1_dataframe()` returns a time-indexed frame; length == `num_samples`; time axis from `rate`+`starting_time`; values match `fetch_nwb()` data; column labeled by `location`+wavelength |
 | `test_optional_region_none` | a series with no `fiber_photometry_table_region` → master row inserted, **no `.Fiber` rows**, warning (not skip/raise); `fetch1_dataframe()` returns generic `f"{series.name}_col{i}"` labels |
 | `test_nwb_table_set` | `fetch_nwb()` succeeds (regression guard that `_nwb_table = Nwbfile` is set — without it the mixin raises `NotImplementedError`) |
