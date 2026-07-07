@@ -28,6 +28,8 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
   invariants; **do not weaken**.
 - [Ref-scoped `get_nwb_objects()`](shared-contracts.md#ref-scoped-get_nwb_objects)
   — the photometry-scoping invariant for all six device tables.
+- [Optogenetics fiber-table gate](shared-contracts.md#opto-gate) — the
+  behavioral change to `common_optogenetics` (Open Question 1, resolved).
 - [Null-safe `.model`](shared-contracts.md#null-safe-model),
   [Duplicate-validation safety](shared-contracts.md#dup-safety).
 
@@ -66,6 +68,15 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
   Matches **all** `FiberPhotometryTable` objects and takes
   `fiber_photometry_name` from each table's parent container.
 
+- **Optogenetics fiber-table gate** — per
+  [shared-contracts.md#opto-gate](shared-contracts.md#opto-gate), add a
+  `get_nwb_objects()` override to `common_optogenetics.OpticalFiberDevice`
+  (`common_optogenetics.py:313`) and `OpticalFiberImplant` (`:346`) that excludes
+  photometry-referenced fibers/models. Factor the "fibers referenced by any
+  `FiberPhotometryTable`" collection into a shared helper (importable by both
+  modules) rather than duplicating it. Behavioral only — **no schema change** to
+  `common_optogenetics`. This is the resolution of Open Question 1.
+
 - **`populate_all_common` wiring** — `populate_all_common.py`: add the import
   (near `:33-38`); add the six device tables to the parent-node list (near
   `:205-206`); add `FiberPhotometryConfig` to the Session-dependent list (near
@@ -100,7 +111,8 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
 - **`FiberPhotometryResponseSeries`, `.Fiber`, `fetch1_dataframe`, signal
   retrieval** — phase-2. The config PK is frozen here for phase-2 to FK into.
 - **Any analysis/dF/F** — future PR (overview → Non-Goals).
-- **Gating `common_optogenetics`** — not unless Open Question 1 flips to "gate".
+- **Schema changes to `common_optogenetics`** — the gate is a `get_nwb_objects()`
+  override only; **no** new/altered columns.
 - **pynwb/hdmf bump** — out of scope.
 
 ## Validation slice
@@ -116,7 +128,8 @@ Maps to the design doc "Testing" items. All run on the current floor with the
 | `test_below_min_version_warns` | photometry objects present but `ndx-fiber-photometry` below min → warning + no rows; and `get_nwb_objects()` on a missing-column table returns `[]` (no raise) |
 | `test_device_reingest_and_cross_session` | second file reusing a device `name` with same reusable spec → clean skip, no `DuplicateError`; blob-free vector columns don't raise "truth value ambiguous" |
 | `test_null_fiber_metadata` | model-less fiber → `OpticalFiber` row with null model cols (no `AttributeError`); null `pitch`/`roll`/`yaw`/`description` stored null; required `location` present |
-| `test_populate_all_common_no_propagated_error` | full `populate_all_common()` (default `raise_err=False`) on sample-like, model-less, and sparse-model+complete-insertion fixtures → no propagated error; photometry rows correct regardless of optogenetics-table logging |
+| `test_populate_all_common_gate` | full `populate_all_common()` on **all** photometry fixtures — sample-like, **model-less**, and **sparse-model+complete-insertion** — returns **no new `InsertError` keys** (the gate excludes photometry fibers from the optogenetics tables); photometry rows present. Run with `rollback_on_fail=True` too and assert the Nwbfile + photometry rows **survive** (no `super_delete`) |
+| `test_opto_gate_noop_on_non_photometry` | a **pure-optogenetics** file (`OpticalFiber` with complete fields, no `FiberPhotometry` container) → the gated `OpticalFiberDevice`/`OpticalFiberImplant` still ingest it exactly as before (gate returns the default set); regression guard that the gate is a no-op without a `FiberPhotometry` container |
 | `test_package_absent_import_safety` | ingest the pre-built fixture with `ndx_fiber_photometry` uninstalled → rows present; `"ndx_fiber_photometry" not in sys.modules` after ingest (build fixture in a separate step) — *marked slow/subprocess* |
 | `test_subtype_and_optional_roundtrip` | `PulsedExcitationSource` → `source_class='pulsed'`; base/`Band`/`Edge` filters → correct `filter_class`; the full model-spec set (`wavelength_min/max`, `reflection_band_*`, `slope_*`, fiber `numerical_aperture`/`ferrule_*`) round-trips; `notes` stored |
 | `test_unmodeled_warns` | populated `commanded_voltage_series` column, `ExcitationSource.power_in_W`, or `Indicator.viral_vector_injection` → warning naming it; ingest still succeeds |
@@ -136,7 +149,8 @@ Confirm:
 - Every task implemented as specified; the six device tables are ref-scoped (no
   generic `nwb_file.objects` matching) and store reusable spec only.
 - "Deliberately not in this phase" honored — no `FiberPhotometryResponseSeries`,
-  no dF/F, no `common_optogenetics` edits.
+  no dF/F; the only `common_optogenetics` change is the `get_nwb_objects()` gate
+  (no schema change), and it is a no-op for non-photometry files.
 - Validation-slice tests pass; slow/subprocess tests marked.
 - Tests exercise behavior, not tautologies; shared fixture setup is in
   `conftest`, not copy-pasted (`testing-anti-patterns`).

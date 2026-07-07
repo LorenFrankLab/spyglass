@@ -28,28 +28,34 @@ recorded fluorescence as a time-indexed DataFrame with per-fiber columns.
 
 ## Tasks
 
-- **`FiberPhotometryResponseSeries`** in `common_photometry.py`
+- **`FiberPhotometryResponseSeries`** (the **master**) in `common_photometry.py`
   (`SpyglassIngestion, dj.Imported`, following `Raw`). PK
   `(nwb_file_name, response_series_object_id)`; secondary `name`, `description`,
   `comments` (nullable), `num_samples` (`bigint`), `unit`. **Set
   `_nwb_table = Nwbfile`** (required — the table FKs `-> Session`; see
   [appendix.md](appendix.md) `fetch.py:72-84`) and
   `_extension_requirements = {"ndx-fiber-photometry": "0.2.3"}`. Add a
-  `nwb_object()` accessor mirroring `Raw:377`.
+  `nwb_object()` accessor mirroring `Raw:377`. **The master owns object
+  discovery**: override `get_nwb_objects()` to be photometry-ref-scoped like
+  phase-1 (return `[]` without a `FiberPhotometry` container; collect the
+  `FiberPhotometryResponseSeries` objects), so non-photometry files no-op.
+
+- **Custom `generate_entries_from_nwb_object()` override on the master**: returns
+  an `IngestionEntries` dict with **both** the master row **and** its `.Fiber`
+  rows (parent before child, per the mixin contract). Master row:
+  name/description/comments/num_samples/unit + `object_id`. `.Fiber` rows: for
+  each positional index in `series.fiber_photometry_table_region.data`, translate
+  to the config row `id` (per
+  [shared-contracts.md#config-schema](shared-contracts.md#config-schema)) and
+  emit one `.Fiber` entry. **If `fiber_photometry_table_region is None`**
+  (optional in the schema): emit the master row and **no `.Fiber` rows**, and
+  **warn** — do not skip or raise.
 
 - **`FiberPhotometryResponseSeries.Fiber` part** — PK `(-> master, region_index)`;
-  secondary `-> FiberPhotometryConfig`. Ref-scoped `get_nwb_objects()` collects
-  `FiberPhotometryResponseSeries` objects the same photometry-scoped way as
-  phase-1's device tables (empty on non-photometry files).
-
-- **Custom `generate_entries_from_nwb_object()` override** for the response
-  series: insert the master row (name/description/comments/num_samples/unit +
-  `object_id`); for each positional index in
-  `series.fiber_photometry_table_region.data`, translate to the config row `id`
-  (per [shared-contracts.md#config-schema](shared-contracts.md#config-schema))
-  and emit a `.Fiber` row. **If `fiber_photometry_table_region is None`**
-  (optional in the schema): insert the master row, emit **no `.Fiber` rows**, and
-  **warn** — do not skip or raise.
+  secondary `-> FiberPhotometryConfig`. **Populated only by the master override
+  above — it has no independent ingestion.** Do **not** give the part its own
+  `get_nwb_objects()`; the mixin fetches objects from the table being inserted,
+  so a part-level discovery would ingest response-series objects out of context.
 
 - **`fetch1_dataframe()` retrieval helper** — returns a time-indexed
   `pandas.DataFrame` from `fetch_nwb()`, time axis from `starting_time` +

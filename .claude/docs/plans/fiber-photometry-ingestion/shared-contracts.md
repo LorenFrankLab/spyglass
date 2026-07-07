@@ -63,6 +63,32 @@ discriminators are derived from the referenced object's class.
 A shared helper (e.g. `_referenced_devices(nwb_file, column_names, class_filter=None)`)
 implements 1–3 once; each device table calls it with its column name(s).
 
+## Optogenetics fiber-table gate {#opto-gate}
+
+**Invariant — backward-compatible.** `common_optogenetics.OpticalFiberDevice`
+(`:313`) and `OpticalFiberImplant` (`:346`) each gain a `get_nwb_objects()`
+override that **excludes fibers/models referenced by any `FiberPhotometryTable`**:
+
+- Collect the `OpticalFiber` instances referenced by every `FiberPhotometryTable`'s
+  `optical_fiber` column in the file (reuse the same photometry-scoping logic as
+  the device tables — factor it into a shared helper importable by both modules,
+  e.g. in `common_photometry` or a small util, so `common_optogenetics` doesn't
+  duplicate it).
+- `OpticalFiberImplant`: from the default `OpticalFiber` matches, **drop** those
+  photometry-referenced instances.
+- `OpticalFiberDevice`: from the default `OpticalFiberModel` matches, **drop**
+  the `.model` of any photometry-referenced fiber.
+- **If the file has no `FiberPhotometry` container, change nothing** — the
+  override returns exactly the default set. This makes the gate a no-op for
+  non-photometry files (pure-optogenetics behavior is unchanged).
+
+Why: without the gate, a photometry fiber with complete insertion + sparse model
+(or a model-less fiber) makes these tables raise/insert-fail; the caught error is
+logged to `InsertError`, so `populate_all_common` returns a failure state, and
+`rollback_on_fail=True` `super_delete`s the whole Nwbfile — destroying the
+photometry inserts. The gate removes the entire failure path. **No schema change**
+to `common_optogenetics` (behavioral only).
+
 ## Null-safe `.model` extraction {#null-safe-model}
 
 `Device.model` is **optional** in core NWB. Model-derived device columns must be

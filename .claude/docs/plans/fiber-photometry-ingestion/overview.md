@@ -13,9 +13,10 @@ integration points, and validation.
 ## Current codebase integration points
 
 New module `src/spyglass/common/common_photometry.py` (schema `common_photometry`)
-is added; the only edits to existing files are additive registrations. Nothing
-in `common_optogenetics` is modified (see Risks — the reused-in-place idea was
-abandoned; photometry is self-contained).
+is added. Existing files get additive registrations, **plus one behavioral gate
+in `common_optogenetics`** (Open Question 1, resolved to "gate"): the optogenetics
+fiber tables must skip photometry-referenced fibers so they don't error on
+photometry files (see the optogenetics-cross-processing risk).
 
 - `src/spyglass/common/__init__.py:51-53` — optogenetics import block; **add** a
   parallel `from spyglass.common.common_photometry import (...)` block after it.
@@ -33,6 +34,11 @@ abandoned; photometry is self-contained).
 - `pyproject.toml:105-118` — `optional-dependencies.test`; **add**
   `"ndx-fiber-photometry==0.2.3",` (fixture-build dependency only — ingestion
   never imports it; see design doc "Optional-dependency guarantee").
+- `src/spyglass/common/common_optogenetics.py:313` (`OpticalFiberDevice`) and
+  `:346` (`OpticalFiberImplant`) — **add a `get_nwb_objects()` override to each**
+  that excludes fibers/models referenced by any `FiberPhotometryTable` (the gate,
+  phase-1). Backward-compatible: a file with no `FiberPhotometry` container is
+  unaffected. This is the only *behavioral* change to existing code.
 - `src/spyglass/common/common_ephys.py:286-389` — `Raw` is the template for the
   signal-reference table (`SpyglassIngestion, dj.Imported`, `raw_object_id`,
   `_nwb_table = Nwbfile` at :297, `nwb_object()` at :377). Untouched — read only.
@@ -55,9 +61,10 @@ abandoned; photometry is self-contained).
 - **No analysis / derived-signal pipeline** (dF/F, ratiometric isosbestic
   correction, motion correction, downsampling, merge tables). That is a separate
   future PR — do not add it while "in here."
-- **No changes to `common_optogenetics`** — not even a nullable column. The
-  design decoupled from it deliberately (design doc, Decisions → "Optogenetics
-  coupling").
+- **No schema changes to `common_optogenetics`** — no new columns, no altered
+  types. The design decoupled from it (photometry has its own tables). The **one
+  allowed** change is behavioral: a `get_nwb_objects()` gate on the two
+  optogenetics fiber tables so they skip photometry fibers (Open Question 1).
 - **No pynwb/hdmf floor bump** — the 2.10.0 read path is blocked upstream and is
   out of scope (see Dependency policy + Risks).
 - `CommandedVoltageSeries`, viral-vector/injection linkage, and excitation-source
@@ -93,7 +100,7 @@ abandoned; photometry is self-contained).
 
 | Risk | Mitigation |
 | --- | --- |
-| Existing `common_optogenetics` fiber tables also run on photometry files and may log errors on model-less / sparse-model+complete-insertion fibers | Documented behavior; phase-1 test asserts `populate_all_common()` (default `raise_err=False`) doesn't propagate and photometry rows are correct regardless. Do **not** gate optogenetics unless Open Question 1 is resolved to "gate". Design doc, Risks → "Optogenetics tables still process photometry fibers". |
+| Existing `common_optogenetics` fiber tables run on photometry files and can **error** on model-less / sparse-model+complete-insertion fibers → `populate_all_common` returns an `InsertError` failure state, and `rollback_on_fail=True` `super_delete`s the whole Nwbfile (destroying photometry inserts) | **Gate** (Open Question 1, resolved): both optogenetics fiber tables get a `get_nwb_objects()` override excluding photometry-referenced fibers, so they produce zero `InsertError` on photometry files. Phase-1 test asserts `populate_all_common()` returns **no new** `InsertError` for **all** photometry fixtures (incl. model-less and complete-insertion), under both `rollback_on_fail` values. |
 | Device tables matching generic `ndx-ophys-devices` objects would ingest non-photometry devices | Device `get_nwb_objects()` is photometry-ref-scoped (returns `[]` without a `FiberPhotometry` container; collects only `FiberPhotometryTable`-referenced objects). See [shared-contracts.md](shared-contracts.md#ref-scoped-get_nwb_objects). |
 | `_expected_duplicates=True` duplicate validation crashes on blob/array values | `[2]`-vector specs stored as scalar min/max pairs, not blobs. [shared-contracts.md](shared-contracts.md). |
 | `Device.model` is optional → `AttributeError` folding model specs | Null-safe `.model` extraction. [shared-contracts.md](shared-contracts.md#null-safe-model). |
@@ -108,12 +115,13 @@ Phase-1 ships the metadata layer (query the setup); phase-2 adds signal retrieva
 
 ## Open Questions
 
-1. **Optogenetics cross-processing** — accept (photometry ingestion is
-   unaffected; only the optogenetics tables may log on certain fibers) vs. gate
-   the optogenetics fiber tables (touches `common_optogenetics`). **Current
-   best-answer: accept + document** (honors the owner's standing "don't touch
-   optogenetics"). Revisit only if the log noise is judged unacceptable. Design
-   doc, Risks.
+1. **Optogenetics cross-processing** — **RESOLVED: gate.** The optogenetics fiber
+   tables error on some photometry fibers, which makes `populate_all_common`
+   report failure and (with `rollback_on_fail=True`) destroy the photometry
+   inserts. Owner chose to gate: both `OpticalFiberDevice` and
+   `OpticalFiberImplant` get a `get_nwb_objects()` override excluding
+   photometry-referenced fibers (phase-1). Backward-compatible; the only
+   behavioral change to `common_optogenetics`.
 
 ## Estimated Effort
 
