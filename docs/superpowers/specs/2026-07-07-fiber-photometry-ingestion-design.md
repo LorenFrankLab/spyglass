@@ -57,6 +57,13 @@ that `ndx-fiber-photometry` also builds on.
   modulated-excitation rigs; absent in the sample data. When a file provides it,
   the graceful-degradation safeguard warns that the `commanded_voltage_series`
   column is unmodeled. Add as an additive signal table when needed.
+- **Excitation-source operational fields** (`power_in_W`, `intensity_in_W_per_m2`,
+  `exposure_time_in_s`; pulsed `pulse_rate_in_Hz`/`peak_power_in_W`/
+  `peak_pulse_energy_in_J`). Per-use scalars, all `None` in the sample data;
+  excluded from the reusable device tables (would break `_expected_duplicates`)
+  and not modeled on the config yet. The override **warns** if a file populates
+  them (see the safeguard). Add as nullable config columns when a real file needs
+  them.
 - Viral-vector / injection linkage for indicators — absent in the sample data
   (`Indicator.viral_vector_injection == None`; no `FiberPhotometryViruses`). The
   `ndx-ophys-devices` `Indicator` has an optional `viral_vector_injection` link;
@@ -227,8 +234,9 @@ FiberPhotometryConfig
   -> [nullable] DichroicMirror                                       # optional ref
   -> [nullable] OpticalFilter.proj(emission_filter_name='optical_filter_name')   # optional
   -> [nullable] OpticalFilter.proj(excitation_filter_name='optical_filter_name') # optional
+  location: varchar(255)             # the FiberPhotometryTable row's `location` (spec-required)
   optical_fiber_name: varchar(80)    # the OpticalFiber instance name (local, no FK)
-  location=null: varchar(255)        # OpticalFiber.description (nullable in source)
+  optical_fiber_description=null: varchar(255)  # OpticalFiber.description (optional in source)
   hemisphere=null: enum('left','right')  # insertion metadata (all nullable per spec)
   ap_location=null: float
   ml_location=null: float
@@ -242,10 +250,12 @@ FiberPhotometryConfig
 ```
 
 Ingestion is a custom `generate_entries_from_nwb_object()` override (per the
-Architecture note). Device FK values come from the resolved object-refs
-(`row.indicator.name`, `row.excitation_source.name`, `row.photodetector.name`).
-The **fiber is stored locally, not FK-ed**: `optical_fiber_name ←
-row.optical_fiber.name`, `location ← row.optical_fiber.description`, and the
+Architecture note). `location ← row.location` (the table's own **required**
+column — the per-row site, e.g. `'DLS'`; **not** the fiber's description).
+Device FK values come from the resolved object-refs (`row.indicator.name`,
+`row.excitation_source.name`, `row.photodetector.name`). The **fiber is stored
+locally, not FK-ed**: `optical_fiber_name ← row.optical_fiber.name`,
+`optical_fiber_description ← row.optical_fiber.description` (optional), and the
 insertion fields from `row.optical_fiber.fiber_insertion.*`
 (`insertion_position_ap/ml/dv_in_mm`, `hemisphere`, `insertion_angle_pitch/roll/
 yaw_in_deg`) — each nullable, since the extension marks them optional and the
@@ -258,6 +268,16 @@ real data leaves several null. The device tables must ingest before this table
 mapped as a separate object key, which would raise). **Any other column** the
 override does not recognize triggers a one-time warning naming it (the
 graceful-degradation safeguard) so no metadata is silently dropped.
+
+The safeguard also covers **unmodeled object attributes**, not just columns:
+because the excitation-source operational fields (`power_in_W`,
+`intensity_in_W_per_m2`, `exposure_time_in_s`, and the pulsed
+`pulse_rate_in_Hz`/`peak_power_in_W`/`peak_pulse_energy_in_J`) are attributes of
+the referenced device object rather than table columns, the override checks the
+referenced `excitation_source` for any populated-but-unmodeled operational attr
+and warns naming it. These are **out of scope** for this PR (all `None` in the
+sample data, like `CommandedVoltageSeries`); the warning ensures a file that
+*does* populate them is visible, not silently lossy.
 
 **Re-ingestion.** `FiberPhotometryConfig` and `FiberPhotometryResponseSeries`
 are session-specific, so — like `Raw`, `VirusInjection`, and `OpticalFiberImplant`
@@ -316,9 +336,11 @@ part row. In the sample data each series references exactly one config row (one
 
 Retrieval helper `fetch1_dataframe()` returns a `pandas.DataFrame` indexed by
 time — computed from `starting_time` + `arange(num_samples) / rate` (the sample
-data uses `rate`; the helper also handles explicit `timestamps`) — with the
-fluorescence column(s) labeled by the `.Fiber` → config `location` /
-wavelength, assembled from `fetch_nwb()`.
+data uses `rate`; the helper also handles explicit `timestamps`) — assembled from
+`fetch_nwb()`. Columns are labeled by the `.Fiber` → config row with a
+**deterministic fallback**: `f"{location or optical_fiber_name}_{int(excitation_wavelength_in_nm)}nm"`,
+disambiguated by `fiber_id` if two rows still collide — so sparse files (even an
+empty `location`) always produce usable, unique column names.
 
 ## Optional-dependency guarantee (verified)
 
@@ -412,10 +434,11 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    hold only stable spec, and that per-session differences (which live on
    `FiberPhotometryConfig`) never trigger divergence.
 6. **Null fiber metadata** (the exact real-data shape decoupling fixes): a fiber
-   whose `description` (→ `location`), `pitch`/`roll`/`yaw`, and model
-   `active_length`/`ferrule_*` are `None` ingests cleanly, with every one of
-   those config columns stored null (not dropped by `_key_has_required_attrs`).
-   `common_optogenetics` is untouched, so there is no optogenetics change to regress.
+   whose `description` (→ nullable `optical_fiber_description`), `pitch`/`roll`/`yaw`,
+   and model `active_length`/`ferrule_*` are `None` ingests cleanly, with every one
+   of those config columns stored null (not dropped by `_key_has_required_attrs`).
+   The required `location` (`row.location`) is still populated. `common_optogenetics`
+   is untouched, so there is no optogenetics change to regress.
 7. **Package-absent import safety** (the core "don't require the extension"
    guarantee — a normal test-extra run has the package installed, so it cannot
    prove this on its own): assert `"ndx_fiber_photometry" not in sys.modules`
@@ -433,10 +456,12 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    `ExcitationSource` with `source_class='pulsed'` (no instance-operational fields
    stored); the config's `dichroic_mirror` / `emission_filter` / `excitation_filter`
    FKs resolve and `coordinates` is stored.
-9. **Graceful-degradation safeguard**: a fixture whose `FiberPhotometryTable`
-   carries an **unmodeled** column (e.g. a `commanded_voltage_series` ref)
-   ingests the core row and **logs a warning naming that column**; no exception,
-   no silent drop.
+9. **Graceful-degradation safeguard**: (a) a fixture whose `FiberPhotometryTable`
+   carries an **unmodeled column** (e.g. a `commanded_voltage_series` ref) ingests
+   the core row and **logs a warning naming that column**; (b) a fixture whose
+   `ExcitationSource` has a populated **operational attribute** (e.g.
+   `power_in_W`) ingests and **logs a warning naming that attribute** — neither
+   raises, neither silently drops.
 10. **Edge cases** (explicit): (a) 1-D single-row-region response series (the
     sample-data shape); (b) **non-consecutive** `FiberPhotometryTable` row `id`s
     → region positional-index translation is correct; (c) **two optical fibers
