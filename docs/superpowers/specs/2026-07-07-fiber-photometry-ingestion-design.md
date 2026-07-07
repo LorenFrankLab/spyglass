@@ -320,11 +320,16 @@ the real files** (read succeeded with the package uninstalled):
   `nwb_object.__class__.__name__ == "FiberPhotometryResponseSeries"`. pynwb
   reconstructs typed containers from the spec **embedded in the NWB file**, so
   matching (and spec-field access) works without the extension installed.
-- **Gating is by file-embedded namespace.**
-  [`check_extension_requirements`](../../../src/spyglass/utils/mixins/ingestion.py)
-  reads namespace versions (`get_file_namespaces` → `load_namespaces`) and
-  compares against `_extension_requirements`. A file lacking the namespace (or
-  below min version) is **skipped with a warning, not an error**.
+- **Gating is by matching objects, then embedded namespace.** `insert_from_nwbfile`
+  first calls `get_nwb_objects()`; if **no** objects of the target type are found
+  (the usual non-photometry case) it returns immediately — a **clean no-op, no
+  warning** ([ingestion.py:248-251](../../../src/spyglass/utils/mixins/ingestion.py)).
+  Only when matching objects **are** present does it call
+  `check_extension_requirements`, which warns and skips **iff the extension
+  namespace is below `_extension_requirements` min version**. Because our tables
+  match by class name, "objects present" implies "namespace present", so the
+  warning path is effectively "photometry file, but `ndx-fiber-photometry`
+  older than the required version" — not "file without the namespace".
 
 Consequences:
 - `ndx-fiber-photometry==0.2.3` goes in `optional-dependencies.test` only —
@@ -377,8 +382,12 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    (via `optical_fiber_object_id`); the `.Fiber` part maps the region row.
 3. **Retrieval**: `fetch_nwb()` / `fetch1_dataframe()` returns the trace with the
    expected length and time axis derived from `rate` + `starting_time`.
-4. **Gating contract**: ingesting a file **without** the namespace is skipped
-   cleanly (warning, no rows, no exception).
+4. **Gating contract**: (a) a non-photometry file (no matching objects) is a
+   **clean no-op — no rows, no exception, no warning** (the mixin early-returns
+   before the namespace check); (b) a file that *does* contain photometry objects
+   but carries `ndx-fiber-photometry` **below** the `_extension_requirements` min
+   version is skipped **with a warning** and no rows. (Distinct from the config
+   override's own unmodeled-column warning.)
 5. **Re-ingestion semantics** (per-table, matching existing Spyglass behavior):
    the shared **device** tables (`_expected_duplicates=True`) skip consistent
    pre-existing rows on a second `insert_from_nwbfile` (and validate divergence);
@@ -418,7 +427,7 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     right implant; (d) a config table **lacking** the optional filter/dichroic
     columns (the sample-data shape) ingests with those FKs left null.
 
-## Risks / open implementation details
+## Dependencies
 
 - **Data-production constraint: files must be `core` 2.9.0 (verified, no bump
   needed).** `ndx-fiber-photometry` data does **not** inherently require `core`
@@ -448,6 +457,9 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     release an `hdmf`-6-compatible version, then bump `pynwb>=4.0.0` /
     `hdmf>=6.1.0` (and `ndx-optogenetics` `==0.3.0`→`0.4.0`), enabling direct
     2.10.0 reads.
+
+## Risks / open implementation details
+
 - **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
   resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
   being populated first — enforced by `populate_all_common` ordering and a guard
