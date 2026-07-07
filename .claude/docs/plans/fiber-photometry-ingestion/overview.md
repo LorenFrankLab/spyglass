@@ -36,8 +36,11 @@ photometry files (see the optogenetics-cross-processing risk).
   never imports it; see design doc "Optional-dependency guarantee").
 - `src/spyglass/common/common_optogenetics.py:313` (`OpticalFiberDevice`) and
   `:346` (`OpticalFiberImplant`) — **add a `get_nwb_objects()` override to each**
-  that excludes fibers/models referenced by any `FiberPhotometryTable` (the gate,
-  phase-1). Backward-compatible: a file with no `FiberPhotometry` container is
+  (the gate, phase-1): `OpticalFiberImplant` drops photometry-referenced fiber
+  *instances*; `OpticalFiberDevice` drops only *models not needed by a remaining
+  (non-photometry) fiber* — see the exact rule in
+  [shared-contracts.md#opto-gate](shared-contracts.md#opto-gate).
+  Backward-compatible: a file with no `FiberPhotometry` container is
   unaffected. This is the only *behavioral* change to existing code.
 - `src/spyglass/common/common_ephys.py:286-389` — `Raw` is the template for the
   signal-reference table (`SpyglassIngestion, dj.Imported`, `raw_object_id`,

@@ -457,8 +457,10 @@ Consequences:
   `FiberPhotometryConfig` after the six device tables (no `OpticalFiberImplant`
   data dependency); `FiberPhotometryResponseSeries` after `FiberPhotometryConfig`.
 - **`common_optogenetics.py`**: add a `get_nwb_objects()` gate to
-  `OpticalFiberDevice` and `OpticalFiberImplant` excluding photometry-referenced
-  fibers (behavioral, no schema change — see Risks).
+  `OpticalFiberDevice` and `OpticalFiberImplant` — `OpticalFiberImplant` drops
+  photometry-referenced fiber instances; `OpticalFiberDevice` drops only models
+  **not** needed by a remaining (non-photometry) fiber (behavioral, no schema
+  change — see Risks for the exact rule).
 - **`common/__init__.py`**: export the new tables.
 - **`pyproject.toml`**: `ndx-fiber-photometry==0.2.3` in the `test` extra.
   Optionally bump the existing core dep `ndx-ophys-devices` →
@@ -676,9 +678,13 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
   — destroying the photometry inserts. (Sample-shaped fibers, sparse in both, are
   cleanly dropped and don't error — but real files with full stereotax would
   trip it.) **Resolution (owner call): gate.** Both tables get a
-  `get_nwb_objects()` override excluding fibers/models referenced by any
-  `FiberPhotometryTable`; backward-compatible (a file with no `FiberPhotometry`
-  container is unchanged). This is a *behavioral* change to `common_optogenetics`
+  `get_nwb_objects()` override: `OpticalFiberImplant` drops photometry-referenced
+  fiber instances, and `OpticalFiberDevice` drops only `OpticalFiberModel`s **not
+  needed by a remaining (non-photometry) fiber** — dropping a model still needed
+  by a surviving fiber (e.g. a shared model in a mixed-modality file) would
+  recreate the very FK error; backward-compatible (a file with no
+  `FiberPhotometry` container is unchanged). This is a *behavioral* change to
+  `common_optogenetics`
   — no schema change — and removes the entire failure path.
 - **Multiple excitation sources sharing a model**: 4 instances / ≤3 models; the
   collapsed device table keys by instance name and denormalizes model specs —

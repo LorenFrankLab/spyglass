@@ -35,9 +35,14 @@ recorded fluorescence as a time-indexed DataFrame with per-fiber columns.
   `_nwb_table = Nwbfile`** (required — the table FKs `-> Session`; see
   [appendix.md](appendix.md) `fetch.py:72-84`) and
   `_extension_requirements = {"ndx-fiber-photometry": "0.2.3"}`. Add a
-  `nwb_object()` accessor mirroring `Raw:377`. **The master owns object
-  discovery**: override `get_nwb_objects()` to be photometry-ref-scoped like
-  phase-1 (return `[]` without a `FiberPhotometry` container; collect the
+  `nwb_object(key)` accessor — **use the full key**, `(self & key).fetch1(
+  "response_series_object_id")` (or `key["response_series_object_id"]` directly),
+  **not** `Raw`'s `nwb_file_name`-only fetch. `Raw` gets away with the latter
+  because it is one row per file; photometry files have **many** response series
+  per file, so a `nwb_file_name`-only fetch would `fetch1()` multiple rows / return
+  the wrong object. **The master owns object discovery**: override
+  `get_nwb_objects()` to be photometry-ref-scoped like phase-1 (return `[]`
+  without a `FiberPhotometry` container; collect the
   `FiberPhotometryResponseSeries` objects), so non-photometry files no-op.
 
 - **Custom `generate_entries_from_nwb_object()` override on the master**: returns
@@ -93,6 +98,7 @@ recorded fluorescence as a time-indexed DataFrame with per-fiber columns.
 | `test_fetch1_dataframe_roundtrip` | `fetch1_dataframe()` returns a time-indexed frame; length == `num_samples`; time axis from `rate`+`starting_time`; values match `fetch_nwb()` data; column labeled by `location`+wavelength |
 | `test_optional_region_none` | a series with no `fiber_photometry_table_region` → master row inserted, **no `.Fiber` rows**, warning (not skip/raise); `fetch1_dataframe()` returns generic `f"{series.name}_col{i}"` labels |
 | `test_nwb_table_set` | `fetch_nwb()` succeeds (regression guard that `_nwb_table = Nwbfile` is set — without it the mixin raises `NotImplementedError`) |
+| `test_multiple_series_per_file` | a file with **several** `FiberPhotometryResponseSeries` (the sample shape — 8 per file): each row's `nwb_object(key)` / `fetch1_dataframe()` resolves the **correct** series (guards the `Raw`-style `nwb_file_name`-only fetch, which would `fetch1()` multiple rows) |
 | `test_multi_row_region` | a 2-D `[time, n_fibers]` series with a multi-row region → one `.Fiber` row per referenced config row; columns labeled per fiber — *marked if it needs a bespoke fixture* |
 
 ## Fixtures
