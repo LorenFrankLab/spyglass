@@ -1,7 +1,8 @@
 # Fiber-Photometry Ingestion — Design
 
 **Date:** 2026-07-07
-**Status:** Approved design, validated against real NWB files, pending implementation plan
+**Status:** Design validated against real NWB files; **open prerequisite** — a
+pynwb/hdmf floor bump (`pynwb>=4.0.0`) is required to read the files (see Risks)
 **Branch:** `feature/fiber-photometry-ingestion` (off `master`)
 
 ## Goal
@@ -82,12 +83,20 @@ Two example files (`sub-400_ses-119247.nwb`, `sub-400_ses-119974.nwb`, 1.3 GB
 each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
 **with the extension package NOT installed**. Findings:
 
-- **No-import claim proven.** With `ndx_fiber_photometry` uninstalled, pynwb
-  reconstructed every typed object from the file-embedded spec; `__class__.__name__`
-  matched (`FiberPhotometryResponseSeries`, `Indicator`, `OpticalFiber`, …) and
-  all spec fields (`source_type`, `numerical_aperture`,
-  `fiber_insertion.insertion_position_ap_in_mm`, `Indicator.label`, …) were
-  accessible. This is exactly the surface Spyglass ingestion uses.
+- **No-import claim proven (on pynwb 4.0.0).** With `ndx_fiber_photometry`
+  uninstalled, pynwb reconstructed every typed object from the file-embedded
+  spec; `__class__.__name__` matched (`FiberPhotometryResponseSeries`,
+  `Indicator`, `OpticalFiber`, …) and all spec fields (`source_type`,
+  `numerical_aperture`, `fiber_insertion.insertion_position_ap_in_mm`,
+  `Indicator.label`, …) were accessible. This is exactly the surface Spyglass
+  ingestion uses.
+- **Dependency-floor blocker (measured).** The files embed the `core` 2.10.0
+  schema. Spyglass's current floor `pynwb>=3.1.3` / `hdmf>=3.4.6` **cannot read
+  them**: `pynwb 3.1.3` (the highest 3.x, pulling `hdmf 4.3.1`) fails with
+  `TypeError: DatasetBuilder ... incorrect type for 'data' (got 'uint64')`,
+  before any type matching. Only `pynwb>=4.0.0` / `hdmf>=6.x` read the files.
+  So ingestion requires a **major pynwb/hdmf floor bump** (see Risks) — the
+  "stock install ingests correctly" claim below holds only on the bumped floor.
 - **Object-ref resolution works.** `FiberPhotometryTable.to_dataframe()` returns
   the referenced device containers as cell values, so `row.indicator.name` etc.
   yield the FK values. (Previously the design's main unknown — now resolved.)
@@ -112,11 +121,11 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
 | --- | --- | --- |
 | Depth | Metadata + signal **reference** | Makes fluorescence retrievable via object-id; one focused PR. ~1.7 GB/session confirms not copying arrays into DataJoint. |
 | Shared devices | **Reuse `common_optogenetics` tables in place** | Already ingest the shared `ndx-ophys-devices` types. No duplication, no migration. |
-| Device tables | **Five** (`Indicator`, `ExcitationSource`, `Photodetector`, `DichroicMirror`, `OpticalFilter`) | First three are exercised by the sample data. `DichroicMirror`/`OpticalFilter` cover the extension's optional filter/dichroic refs — **front-loaded** so future files with them need no `alter()`; validated only against a synthetic fixture (no real data populates them). `OpticalFilter` needs a custom multi-class matcher (`BandOpticalFilter` + `EdgeOpticalFilter`). |
+| Device tables | **Five** (`Indicator`, `ExcitationSource`, `Photodetector`, `DichroicMirror`, `OpticalFilter`) | First three are exercised by the sample data. `DichroicMirror`/`OpticalFilter` cover the extension's optional filter/dichroic refs — **front-loaded** so future files with them need no `alter()`; validated only against a synthetic fixture (no real data populates them). Two tables need custom multi-class matchers: `ExcitationSource` (+ `PulsedExcitationSource`) and `OpticalFilter` (base + `Band` + `Edge`), since `is_nwb_obj_type` is exact-match and would silently miss subtypes. |
 | Unmodeled columns | **Ignore + warn** | Even with the optional refs front-loaded, a truly novel column (e.g. `commanded_voltage_series`) must not silently vanish; the override logs it. |
 | Model/instance | **Collapse** to one reusable table per type | Spec fields folded from `.model` via object-ref mapping (verified accessible); leaner than a model+instance split. |
 | Fiber link | `FiberPhotometryConfig` **FKs into `OpticalFiberImplant`** | Single source of truth for the implanted fiber + its stereotactic coordinates. |
-| Implant resolution | **Add nullable `optical_fiber_object_id` to `OpticalFiberImplant`** | Additive (no PK change, no migration — alpha module). Lets the config resolve the implant by the fiber instance's `object_id`, robustly. |
+| Implant resolution | **Add nullable `optical_fiber_object_id` to `OpticalFiberImplant`** | Additive **schema migration** (DataJoint `alter()`, no PK change / no data copy); pre-existing rows are `NULL` and need re-ingest/backfill to cross-link. Lets the config resolve the implant by the fiber instance's `object_id`, robustly. |
 | Extension dep | `ndx-fiber-photometry==0.2.3` in the **`test` extra only** | Ingestion never imports it (verified); needed only to build the test fixture. |
 | Config PK | `(Session, fiber_photometry_name, fiber_id)` | `fiber_photometry_name` disambiguates multiple `FiberPhotometry` containers per file (rare) so two tables' row `id`s can't collide; degenerates to one constant name in the common case. |
 | Re-ingestion | Device tables `_expected_duplicates=True`; config/response `False` | Matches existing Spyglass session-specific tables (`Raw`, `VirusInjection`); idempotency via file-level `reinsert`, not per-row skip. |
@@ -125,11 +134,14 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
 
 New module `src/spyglass/common/common_photometry.py`, schema
 `common_photometry`, built on the `SpyglassIngestion` mixin like
-`common_optogenetics`. **Not** a pure declarative reuse: four device tables use
-only the declarative `table_key_to_obj_attr` mapping; `OpticalFilter` also
-overrides `get_nwb_objects()` to match two class names (`BandOpticalFilter`,
-`EdgeOpticalFilter`), since `is_nwb_obj_type` does exact string equality;
-and `FiberPhotometryConfig` and `FiberPhotometryResponseSeries` require custom
+`common_optogenetics`. **Not** a pure declarative reuse: three device tables use
+only the declarative `table_key_to_obj_attr` mapping; `ExcitationSource` and
+`OpticalFilter` override `get_nwb_objects()` to match their **subtype** class
+names, since `is_nwb_obj_type` does exact string equality and would silently miss
+subtypes (`ExcitationSource` must also catch `PulsedExcitationSource`;
+`OpticalFilter` must catch base `OpticalFilter`, `BandOpticalFilter`, and
+`EdgeOpticalFilter`); and `FiberPhotometryConfig` and
+`FiberPhotometryResponseSeries` require custom
 `generate_entries_from_nwb_object()` overrides, because they need work the
 declarative mapping cannot express — a DB lookup to resolve the
 `OpticalFiberImplant` FK, the optional per-row filter/dichroic refs, and the
@@ -154,22 +166,27 @@ the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
 
 - **`Indicator`** ← `Indicator`: `indicator_name`←`name`, `label`, `description`,
   `manufacturer`.
-- **`ExcitationSource`** ← `ExcitationSource` (+ model): `excitation_source_name`
+- **`ExcitationSource`** ← `ExcitationSource` **or** `PulsedExcitationSource`
+  (+ model), via a custom `get_nwb_objects()` matching both: `excitation_source_name`
   ←`name`, `description` (instance, per-channel), `manufacturer`, `source_type`,
-  `excitation_mode` (from model).
+  `excitation_mode` (from model), a `source_class` `enum('continuous','pulsed')`
+  discriminator, and nullable pulsed-only fields `pulse_rate_in_Hz`,
+  `peak_power_in_W`, `peak_pulse_energy_in_J`. Matters because `excitation_source`
+  is a **required** config ref — an unmatched pulsed source would break the FK.
 - **`Photodetector`** ← `Photodetector` (+ model): `photodetector_name`←`name`,
   `description`, `manufacturer`, `detector_type`, `gain` (from model, nullable).
 - **`DichroicMirror`** ← `DichroicMirror` (+ model): `dichroic_mirror_name`
   ←`name`, `manufacturer`, `cut_on_wavelength_in_nm`, `cut_off_wavelength_in_nm`
   (from model, all nullable). Default class-name matcher.
-- **`OpticalFilter`** ← `BandOpticalFilter` **or** `EdgeOpticalFilter` (+ model),
-  via a custom `get_nwb_objects()` matching both class names:
-  `optical_filter_name`←`name`, `filter_class` `enum('band','edge')` (from the
-  matched class), `filter_type` (from `OpticalFilterModel`), `manufacturer`, and
-  the subtype-specific nullable fields `center_wavelength_in_nm` /
-  `bandwidth_in_nm` (band) and `cut_wavelength_in_nm` (edge). Specs live on the
-  model; folded via callables. Untested against real data (no sample file
-  populates filters) — exercised by a synthetic fixture only.
+- **`OpticalFilter`** ← base `OpticalFilter`, `BandOpticalFilter`, **or**
+  `EdgeOpticalFilter` (+ model), via a custom `get_nwb_objects()` matching all
+  three class names (the config target type is the base `OpticalFilter`, so a
+  plain instance must match too): `optical_filter_name`←`name`, `filter_class`
+  `enum('base','band','edge')` (from the matched class), `filter_type` (from
+  `OpticalFilterModel`), `manufacturer`, and the subtype-specific nullable fields
+  `center_wavelength_in_nm` / `bandwidth_in_nm` (band) and `cut_wavelength_in_nm`
+  (edge). Specs live on the model; folded via callables. Untested against real
+  data (no sample file populates filters) — exercised by a synthetic fixture only.
 
 ### Optogenetics enhancement (additive)
 
@@ -310,8 +327,11 @@ Consequences:
 - `ndx-fiber-photometry==0.2.3` goes in `optional-dependencies.test` only —
   needed solely to *write* the fixture NWB. Not a core dependency.
   (`ndx-ophys-devices` is already a core dependency; unchanged.)
-- A stock Spyglass install ingests a photometry NWB correctly; ingesting a
-  non-photometry file is a clean no-op for these tables.
+- A stock Spyglass install **on the bumped pynwb/hdmf floor** (see the
+  dependency-floor blocker above and Risks) ingests a photometry NWB correctly
+  without the extension package; ingesting a non-photometry file is a clean no-op
+  for these tables. Note the two guarantees are distinct: *not importing the
+  extension* is proven; *reading the file at all* needs `pynwb>=4.0.0`.
 
 ## Integration
 
@@ -327,6 +347,10 @@ Consequences:
   we reference. (Not strictly required: ingestion never imports the package, and
   gating reads the *file's* embedded namespace, not the installed version — so
   this is a consistency change only.)
+- **`pyproject.toml` floor bump (load-bearing, not cosmetic)**: `pynwb>=4.0.0`
+  and `hdmf>=6.x` are **required** to read `core` 2.10.0 photometry files (see the
+  dependency-floor risk). This is the one dependency change that gates the feature
+  working at all, and it must be validated suite-wide.
 
 ## Testing
 
@@ -365,14 +389,17 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    immediately after running the ingestion path on a pre-built fixture (build
    the fixture in a separate step/subprocess so its import doesn't pollute
    `sys.modules`). Complement with a CI job that installs Spyglass **without**
-   the photometry package and ingests a committed fixture file. (Validated
-   manually during design: the real files read fully with `ndx_fiber_photometry`
-   uninstalled.)
-8. **Front-loaded optional path**: with the full fixture, `DichroicMirror` and
-   `OpticalFilter` rows ingest (matcher captures **both** `BandOpticalFilter` and
-   `EdgeOpticalFilter`, `filter_class` set correctly); the config's
-   `dichroic_mirror` / `emission_filter` / `excitation_filter` FKs resolve and
-   `coordinates` is stored.
+   the photometry package **on the bumped pynwb/hdmf floor** (`pynwb>=4.0.0`) and
+   ingests a committed fixture file. (Validated manually during design on
+   `pynwb 4.0.0`: the real files read fully with `ndx_fiber_photometry`
+   uninstalled; `pynwb 3.1.3` cannot read them — see the dependency-floor risk.)
+8. **Front-loaded optional path + subtype matching**: with the full fixture,
+   `DichroicMirror` and `OpticalFilter` rows ingest (matcher captures base
+   `OpticalFilter`, `BandOpticalFilter`, **and** `EdgeOpticalFilter`;
+   `filter_class` set correctly); a `PulsedExcitationSource` ingests into
+   `ExcitationSource` with `source_class='pulsed'` and pulsed fields populated;
+   the config's `dichroic_mirror` / `emission_filter` / `excitation_filter` FKs
+   resolve and `coordinates` is stored.
 9. **Graceful-degradation safeguard**: a fixture whose `FiberPhotometryTable`
    carries an **unmodeled** column (e.g. a `commanded_voltage_series` ref)
    ingests the core row and **logs a warning naming that column**; no exception,
@@ -387,6 +414,15 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
+- **pynwb/hdmf floor bump (cross-cutting, possibly blocking)**: reading these
+  `core` 2.10.0 files requires `pynwb>=4.0.0` / `hdmf>=6.x` (measured — the
+  current floor `pynwb>=3.1.3` cannot read them). Raising the floor is a major
+  dependency change that ripples across Spyglass (SpikeInterface, the other
+  `ndx-*` packages, DataJoint interplay) and must be validated **suite-wide**,
+  not just for photometry. This may be a prerequisite/coordinated upgrade rather
+  than something bundled into the photometry PR. The implementation plan must
+  decide: bump-in-this-PR vs. depend-on-a-separate-upgrade. Until resolved, the
+  feature does not work on a stock current-floor install.
 - **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
   resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
   being populated first — enforced by `populate_all_common` ordering and a guard
