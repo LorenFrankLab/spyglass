@@ -196,21 +196,25 @@ discriminators) are non-null.
   unmatched pulsed source would break the FK): `excitation_source_name`←`name`
   (PK), `source_class` `enum('continuous','pulsed')` (derived, non-null), and
   nullable model specs `source_type=null`, `excitation_mode=null`,
-  `manufacturer=null`.
+  `manufacturer=null`, `wavelength_range_in_nm=null` (`[2]`-vector → blob).
 - **`Photodetector`** ← `Photodetector`: `photodetector_name`←`name` (PK), and
   nullable model specs `detector_type=null`, `gain=null`, `gain_unit=null`,
-  `manufacturer=null`.
+  `manufacturer=null`, `wavelength_range_in_nm=null` (blob).
 - **`DichroicMirror`** ← `DichroicMirror` (default matcher): `dichroic_mirror_name`
   ←`name` (PK), nullable model specs `manufacturer=null`,
-  `cut_on_wavelength_in_nm=null`, `cut_off_wavelength_in_nm=null`.
+  `cut_on_wavelength_in_nm=null`, `cut_off_wavelength_in_nm=null`,
+  `reflection_band_in_nm=null` / `transmission_band_in_nm=null` (blobs),
+  `angle_of_incidence_in_degrees=null`.
 - **`OpticalFilter`** ← base `OpticalFilter`, `BandOpticalFilter`, **or**
   `EdgeOpticalFilter`, via a custom `get_nwb_objects()` matching all three
   (the config target type is base `OpticalFilter`, so a plain instance must match
   too): `optical_filter_name`←`name` (PK), `filter_class` `enum('base','band',
   'edge')` (derived, non-null), and nullable `filter_type=null`,
   `manufacturer=null`, `center_wavelength_in_nm=null` / `bandwidth_in_nm=null`
-  (band), `cut_wavelength_in_nm=null` (edge). Untested against real data (no
-  sample file populates filters) — exercised by a synthetic fixture only.
+  (band), `cut_wavelength_in_nm=null`, `slope_in_percent_cut_wavelength=null`,
+  `slope_starting_transmission_in_percent=null`,
+  `slope_ending_transmission_in_percent=null` (edge). Untested against real data
+  (no sample file populates filters) — exercised by a synthetic fixture only.
 
 ### Session-specific config — `FiberPhotometryConfig`
 
@@ -270,14 +274,15 @@ FK/attr is left null (never mapped as a separate object key, which would raise).
 override does not recognize triggers a one-time warning naming it (the
 graceful-degradation safeguard) so no metadata is silently dropped.
 
-The safeguard also covers **unmodeled object attributes**, not just columns:
-because the excitation-source operational fields (`power_in_W`,
+The safeguard also covers **unmodeled object attributes**, not just columns.
+Some out-of-scope metadata lives on the referenced objects rather than in table
+columns: the excitation-source operational fields (`power_in_W`,
 `intensity_in_W_per_m2`, `exposure_time_in_s`, and the pulsed
-`pulse_rate_in_Hz`/`peak_power_in_W`/`peak_pulse_energy_in_J`) are attributes of
-the referenced device object rather than table columns, the override checks the
-referenced `excitation_source` for any populated-but-unmodeled operational attr
-and warns naming it. These are **out of scope** for this PR (all `None` in the
-sample data, like `CommandedVoltageSeries`); the warning ensures a file that
+`pulse_rate_in_Hz`/`peak_power_in_W`/`peak_pulse_energy_in_J`), and
+`Indicator.viral_vector_injection` (the deferred virus link). The override checks
+each referenced object for any populated-but-unmodeled attribute in a known list
+and warns naming it. These are **out of scope** for this PR (all `None`/absent in
+the sample data, like `CommandedVoltageSeries`); the warning ensures a file that
 *does* populate them is visible, not silently lossy.
 
 **Re-ingestion.** `FiberPhotometryConfig` and `FiberPhotometryResponseSeries`
@@ -352,7 +357,12 @@ data uses `rate`; the helper also handles explicit `timestamps`) — assembled f
 `fetch_nwb()`. Columns are labeled by the `.Fiber` → config row with a
 **deterministic fallback**: `f"{location or optical_fiber_name}_{int(excitation_wavelength_in_nm)}nm"`,
 disambiguated by `fiber_id` if two rows still collide — so sparse files (even an
-empty `location`) always produce usable, unique column names.
+empty `location`) always produce usable, unique column names. **When `.Fiber` is
+empty** (a series ingested without a `fiber_photometry_table_region`), the helper
+cannot map columns to fibers, so it falls back to generic labels
+`f"{series.name}_col{i}"` (still returning the data) rather than raising — a
+`ValueError` pointing at `fetch_nwb()` is the alternative only if the un-mapped
+data is judged unusable.
 
 ## Optional-dependency guarantee (verified)
 
@@ -472,8 +482,9 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    carries an **unmodeled column** (e.g. a `commanded_voltage_series` ref) ingests
    the core row and **logs a warning naming that column**; (b) a fixture whose
    `ExcitationSource` has a populated **operational attribute** (e.g.
-   `power_in_W`) ingests and **logs a warning naming that attribute** — neither
-   raises, neither silently drops.
+   `power_in_W`), or whose `Indicator` has a populated `viral_vector_injection`,
+   ingests and **logs a warning naming that attribute** — neither raises, neither
+   silently drops.
 10. **Edge cases** (explicit): (a) 1-D single-row-region response series (the
     sample-data shape); (b) **non-consecutive** `FiberPhotometryTable` row `id`s
     → region positional-index translation is correct; (c) **two optical fibers
@@ -483,8 +494,12 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     optional filter/dichroic columns (the sample-data shape) ingests with those
     FKs left null; (e) a `FiberPhotometryResponseSeries` **without** a
     `fiber_photometry_table_region` (optional in the schema) inserts the master
-    row with **no `.Fiber` rows** and a warning, not a skip or raise; (f) a
-    populated `notes` column is stored (not warned as unmodeled).
+    row with **no `.Fiber` rows** and a warning, not a skip or raise — and
+    `fetch1_dataframe()` on it returns generic `f"{series.name}_col{i}"` labels;
+    (f) a populated `notes` column is stored (not warned as unmodeled); (g) the
+    full model-spec field set (source/detector `wavelength_range_in_nm`, dichroic
+    `reflection_band`/`transmission_band`/`angle_of_incidence`, edge `slope_*`)
+    round-trips when the synthetic fixture populates it.
 
 ## Dependencies
 
