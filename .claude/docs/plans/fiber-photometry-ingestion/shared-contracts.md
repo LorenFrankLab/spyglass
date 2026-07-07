@@ -67,7 +67,8 @@ implements 1–3 once; each device table calls it with its column name(s).
 
 **Invariant — backward-compatible.** `common_optogenetics.OpticalFiberDevice`
 (`:313`) and `OpticalFiberImplant` (`:346`) each gain a `get_nwb_objects()`
-override that **excludes fibers/models referenced by any `FiberPhotometryTable`**:
+override that **skips photometry fibers — but keeps any model a remaining
+(non-photometry) fiber still needs**:
 
 - Collect the `OpticalFiber` instances referenced by every `FiberPhotometryTable`'s
   `optical_fiber` column in the file (reuse the same photometry-scoping logic as
