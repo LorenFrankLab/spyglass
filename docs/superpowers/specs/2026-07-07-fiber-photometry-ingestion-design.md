@@ -1,8 +1,11 @@
 # Fiber-Photometry Ingestion — Design
 
 **Date:** 2026-07-07
-**Status:** Design validated against real NWB files; **open prerequisite** — a
-pynwb/hdmf floor bump (`pynwb>=4.0.0`) is required to read the files (see Risks)
+**Status:** Design validated against real NWB files and review-converged, but
+**BLOCKED** — reading the files needs `pynwb>=4.0.0`/`hdmf>=6.1.0`, which is
+currently unsatisfiable because the mandatory core dep `ndx-franklab-novela`
+pins `hdmf<5` (see the ⛔ blocker in Risks). Implementable in code; not
+integrable until upstream unblocks.
 **Branch:** `feature/fiber-photometry-ingestion` (off `master`)
 
 ## Goal
@@ -414,22 +417,32 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
-- **pynwb/hdmf floor bump (cross-cutting prerequisite)**: reading these `core`
-  2.10.0 files requires `pynwb>=4.0.0` / `hdmf>=6.1.0` (measured — the current
-  floor `pynwb>=3.1.3` cannot read them). Until resolved, the feature does not
-  work on a stock current-floor install.
-  - *Spyglass-code impact of pynwb 4.0: negligible* (changelog + `src/` scan):
-    Python 3.10+ already required; the removed `ProcessingModule.get_data_interface`
-    is **not** used (Spyglass's same-named helper uses `.data_interfaces.get()`);
-    `NWBHDF5IO(extensions=)` / `ic_electrodes` / `add_container` unused;
-    `pynwb.validate(paths=)` hits are `dandi.validate`, not pynwb; `add_scratch`/
-    `ScratchData` still exist (only removed args, not used); `BehavioralEvents`
-    (DIO/sensors) is deprecated-not-removed and still **reads** fine.
-  - *The actual unknown is transitive*: `hdmf>=6.1.0` pulls pandas-3.0-era
-    constraints; whether SpikeInterface / DataJoint / the other `ndx-*` pins
-    co-resolve needs a **resolve-and-run spike** (plan phase 0). Given the
-    negligible code impact, if the spike is clean the bump is small enough to be
-    its own quick prerequisite PR that photometry builds on.
+- **⛔ BLOCKER — upstream dependency conflict (measured, spike-confirmed)**:
+  reading these `core` 2.10.0 files requires `pynwb>=4.0.0` (the floor `pynwb
+  3.1.3` cannot read them — tested), and `pynwb 4.0.0` requires `hdmf>=6.1.0`.
+  But **`ndx-franklab-novela` — every release including the latest 0.2.4
+  (2026-01-16) — pins `hdmf>=4.0.0,<5`**, and it is a **mandatory core Spyglass
+  dependency** (Probe/Shank/HeaderDevice, imported at `import spyglass`). `hdmf<5`
+  and `hdmf>=6.1` are mutually exclusive, so **no valid dependency set supports
+  this feature today.** A dry-run "resolution" only succeeds by silently
+  downgrading `ndx-franklab-novela` to the ancient `0.0.2` (missing the types
+  Spyglass needs) or by `--override` violating the cap — neither is viable.
+  - *This is not a Spyglass-code problem.* pynwb 4.0's code impact on Spyglass is
+    negligible (changelog + `src/` scan: the removed `ProcessingModule.get_data_interface`
+    is unused — the same-named helper uses `.data_interfaces.get()`;
+    `extensions=`/`ic_electrodes`/`add_container` unused; `validate(paths=)` hits
+    are `dandi`; `BehavioralEvents` deprecated-not-removed and still reads). The
+    blocker is purely the transitive `hdmf<5` cap.
+  - *Also needs bumping (secondary, not the blocker)*: `ndx-optogenetics` is
+    pinned `==0.3.0`; `0.4.0` is the hdmf-6-compatible release.
+  - *Path to unblock (any one)*: (1) upstream `ndx-franklab-novela` releases an
+    `hdmf>=5`/`6`-compatible version (out of Spyglass's direct control — likely
+    tracks the broader NWB ecosystem's hdmf 5→6 migration); (2) the data are
+    (re)written with `core` 2.9.0 so Spyglass's current floor can read them
+    (producer-side, unverified — the sample files are 2.10.0); (3) contribute the
+    hdmf-6 bump to `ndx-franklab-novela` upstream. Until one lands, the code can
+    be written/unit-tested in an isolated pynwb-4 env but **cannot integrate into
+    the main Spyglass environment.**
 - **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
   resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
   being populated first — enforced by `populate_all_common` ordering and a guard
