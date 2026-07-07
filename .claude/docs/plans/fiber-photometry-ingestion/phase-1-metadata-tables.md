@@ -57,7 +57,11 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
 
 - **`FiberPhotometryConfig`** (`SpyglassIngestion, dj.Manual`). PK and columns
   per [shared-contracts.md#config-schema](shared-contracts.md#config-schema) and
-  the design doc. Implement a custom `generate_entries_from_nwb_object()` that,
+  the design doc. Set `_extension_requirements = {"ndx-fiber-photometry": "0.2.3",
+  "ndx-ophys-devices": "0.3.1"}` (it reads the ndx-fiber-photometry table and
+  ndx-ophys-devices object refs) — required so the mixin's post-`get_nwb_objects()`
+  version check gates below-min files (`test_below_min_version_warns`).
+  Implement a custom `generate_entries_from_nwb_object()` that,
   for each `FiberPhotometryTable` and each row: sets `location ← row.location`
   (required), resolves device FKs from the referenced objects' `.name`, stores
   the session-local fiber fields (`optical_fiber_description`, insertion incl.
@@ -71,8 +75,12 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
 - **Optogenetics fiber-table gate** — per
   [shared-contracts.md#opto-gate](shared-contracts.md#opto-gate), add a
   `get_nwb_objects()` override to `common_optogenetics.OpticalFiberDevice`
-  (`common_optogenetics.py:313`) and `OpticalFiberImplant` (`:346`) that excludes
-  photometry-referenced fibers/models. Factor the "fibers referenced by any
+  (`common_optogenetics.py:313`) and `OpticalFiberImplant` (`:346`):
+  `OpticalFiberImplant` drops photometry-referenced fiber **instances**;
+  `OpticalFiberDevice` drops only `OpticalFiberModel`s **not needed by a remaining
+  (non-photometry) fiber** (keep a model if any surviving fiber still references
+  it — do **not** drop every photometry-referenced model, which would break a
+  shared-model mixed-modality file). Factor the "fibers referenced by any
   `FiberPhotometryTable`" collection into a shared helper (importable by both
   modules) rather than duplicating it. Behavioral only — **no schema change** to
   `common_optogenetics`. This is the resolution of Open Question 1.
