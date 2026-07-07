@@ -18,6 +18,7 @@ try:
     from c3po.model.bidirectional_model import BidirectionalC3PO
     from c3po.analysis.analysis import C3poAnalysis
     import jax
+    import jax.numpy as jnp
     from flax import serialization
 
     TRAINING_FUNCTIONS = {
@@ -643,6 +644,11 @@ class Model(SpyglassMixin, dj.Computed):
             ]
             params = serialization.from_bytes(null_params, checkpoint_params)
 
+        params = jax.tree_util.tree_map(
+            lambda value: jnp.asarray(value) if isinstance(value, np.ndarray) else value,
+            params,
+        )
+
         # build analysis object
         analysis = C3poAnalysis(
             model=model, model_args=model_args, params=params
@@ -665,7 +671,7 @@ class Model(SpyglassMixin, dj.Computed):
                         f"No checkpoint {checkpoint} found for model {model_key}."
                         + "Inserting a new checkpoint."
                     )
-                    self.insert_checkpoint(checkpoint=checkpoint)
+                    self.insert_checkpoint(model_key, checkpoint=checkpoint)
                     checkpoint_query = self.ModelCheckpoint() & {
                         **model_key,
                         "checkpoint": checkpoint,
