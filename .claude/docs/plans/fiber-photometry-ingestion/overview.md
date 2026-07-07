@@ -53,8 +53,10 @@ photometry files (see the optogenetics-cross-processing risk).
 - Ingest `ndx-fiber-photometry` metadata (devices, indicators, per-fiber config)
   into queryable DataJoint tables, and expose the recorded fluorescence via
   `fetch_nwb()` / `fetch1_dataframe()` without copying arrays into the database.
-- Ship self-contained in `common_photometry` on the **current** dependency floor
-  for `core` 2.9.0 files (no pynwb/hdmf bump).
+- Ship in a new `common_photometry` module on the **current** dependency floor
+  for `core` 2.9.0 files (no pynwb/hdmf bump). The only edit outside the new
+  module is the optogenetics `get_nwb_objects()` gate (behavioral, no schema
+  change).
 
 ### Non-Goals
 
