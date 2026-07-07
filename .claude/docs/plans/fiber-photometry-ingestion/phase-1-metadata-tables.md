@@ -97,14 +97,17 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
   extended to cover: two fibers, a `DichroicMirror`, a `BandOpticalFilter`, an
   `EdgeOpticalFilter` (with the optional config filter/dichroic columns
   populated), a `PulsedExcitationSource`, a `notes` column, a model-less
-  referenced device, and a "sparse model + complete insertion" fiber. Parametrize
-  so tests can request the sub-fixtures they need.
+  referenced device, a "sparse model + complete insertion" fiber, and a
+  **mixed-modality** file (a photometry fiber plus a separate non-photometry
+  `OpticalFiber` sharing the same `OpticalFiberModel`, for the gate over-prune
+  test). Parametrize so tests can request the sub-fixtures they need.
 
 - **Docs** — add a short "Fiber photometry" subsection to the relevant common-
   tables doc (and a CHANGELOG entry) covering: what gets ingested, the `core`
-  2.9.0 data-production constraint (design doc "Dependencies"), and that
-  `common_optogenetics` is untouched. No notebook yet (retrieval example lands in
-  phase-2 where `fetch1_dataframe` exists).
+  2.9.0 data-production constraint (design doc "Dependencies"), and that the only
+  `common_optogenetics` change is the behavioral `get_nwb_objects()` gate (no
+  schema change). No notebook yet (retrieval example lands in phase-2 where
+  `fetch1_dataframe` exists).
 
 ## Deliberately not in this phase
 
@@ -130,6 +133,7 @@ Maps to the design doc "Testing" items. All run on the current floor with the
 | `test_null_fiber_metadata` | model-less fiber → `OpticalFiber` row with null model cols (no `AttributeError`); null `pitch`/`roll`/`yaw`/`description` stored null; required `location` present |
 | `test_populate_all_common_gate` | full `populate_all_common()` on **all** photometry fixtures — sample-like, **model-less**, and **sparse-model+complete-insertion** — returns **no new `InsertError` keys** (the gate excludes photometry fibers from the optogenetics tables); photometry rows present. Run with `rollback_on_fail=True` too and assert the Nwbfile + photometry rows **survive** (no `super_delete`) |
 | `test_opto_gate_noop_on_non_photometry` | a **pure-optogenetics** file (`OpticalFiber` with complete fields, no `FiberPhotometry` container) → the gated `OpticalFiberDevice`/`OpticalFiberImplant` still ingest it exactly as before (gate returns the default set); regression guard that the gate is a no-op without a `FiberPhotometry` container |
+| `test_opto_gate_mixed_modality_shared_model` | a **mixed** file with a photometry fiber **and** a separate non-photometry (optogenetics) fiber that **shares the same `OpticalFiberModel`** → the shared model is **kept** (a remaining fiber needs it), the optogenetics fiber ingests into `OpticalFiberImplant` with a resolvable `-> OpticalFiberDevice` FK, and `populate_all_common` returns **no new `InsertError`**. Guards the over-prune bug in [shared-contracts.md#opto-gate](shared-contracts.md#opto-gate) |
 | `test_package_absent_import_safety` | ingest the pre-built fixture with `ndx_fiber_photometry` uninstalled → rows present; `"ndx_fiber_photometry" not in sys.modules` after ingest (build fixture in a separate step) — *marked slow/subprocess* |
 | `test_subtype_and_optional_roundtrip` | `PulsedExcitationSource` → `source_class='pulsed'`; base/`Band`/`Edge` filters → correct `filter_class`; the full model-spec set (`wavelength_min/max`, `reflection_band_*`, `slope_*`, fiber `numerical_aperture`/`ferrule_*`) round-trips; `notes` stored |
 | `test_unmodeled_warns` | populated `commanded_voltage_series` column, `ExcitationSource.power_in_W`, or `Indicator.viral_vector_injection` → warning naming it; ingest still succeeds |

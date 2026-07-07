@@ -74,10 +74,18 @@ override that **excludes fibers/models referenced by any `FiberPhotometryTable`*
   the device tables — factor it into a shared helper importable by both modules,
   e.g. in `common_photometry` or a small util, so `common_optogenetics` doesn't
   duplicate it).
-- `OpticalFiberImplant`: from the default `OpticalFiber` matches, **drop** those
-  photometry-referenced instances.
-- `OpticalFiberDevice`: from the default `OpticalFiberModel` matches, **drop**
-  the `.model` of any photometry-referenced fiber.
+- `OpticalFiberImplant`: from the default `OpticalFiber` matches, **drop** the
+  photometry-referenced instances; call the survivors the **remaining fibers**.
+- `OpticalFiberDevice`: **compute the remaining fibers first, then keep every
+  model a remaining fiber needs.** Concretely, `keep = {f.model for f in
+  remaining_fibers if f.model is not None}`; from the default `OpticalFiberModel`
+  matches, drop only models **not** in `keep`. **Do not** drop a model just
+  because *some* photometry fiber references it — a non-photometry fiber may
+  share the same `OpticalFiberModel` object, and its `OpticalFiberImplant` row
+  still FKs to `OpticalFiberDevice` (`common_optogenetics.py:352`). Dropping a
+  still-needed model recreates the unresolved-FK `InsertError`/rollback the gate
+  exists to prevent. (`OpticalFiberImplant` FKs by model *name*, so equivalently:
+  keep models whose name is referenced by any remaining fiber.)
 - **If the file has no `FiberPhotometry` container, change nothing** — the
   override returns exactly the default set. This makes the gate a no-op for
   non-photometry files (pure-optogenetics behavior is unchanged).

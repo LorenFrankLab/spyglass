@@ -7,7 +7,9 @@ self-contained `common_photometry` module that stores the experimental setup
 (devices, indicators, per-fiber configuration) as queryable DataJoint tables and
 exposes the recorded fluorescence traces via `fetch_nwb()` / `fetch1_dataframe()`
 without copying arrays into the database. Ships on the current dependency floor
-for `core` 2.9.0 files; touches no `common_optogenetics` table.
+for `core` 2.9.0 files. Adds no `common_optogenetics` schema — the only change
+there is a behavioral `get_nwb_objects()` gate so its fiber tables skip
+photometry fibers.
 
 The full design (schema, field mappings, exhaustive schema-coverage table, and
 the rationale from 13 review passes) lives in

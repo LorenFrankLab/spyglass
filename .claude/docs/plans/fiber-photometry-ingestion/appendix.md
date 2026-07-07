@@ -53,10 +53,13 @@ The base the device + config + response tables build on.
   `nwb_object(key)` accessor at `:377`. Copy this shape for
   `FiberPhotometryResponseSeries` (phase-2).
 
-## Optogenetics pattern (read-only reference) — `src/spyglass/common/common_optogenetics.py`
+## Optogenetics pattern + the gate — `src/spyglass/common/common_optogenetics.py`
 
-Not modified. Useful as the closest existing example of `SpyglassIngestion`
-tables and a custom `generate_entries_from_nwb_object` override.
+No schema change; phase-1 adds a behavioral `get_nwb_objects()` **gate** to
+`OpticalFiberDevice`/`OpticalFiberImplant` (see
+[shared-contracts.md#opto-gate](shared-contracts.md#opto-gate)). Otherwise this
+module is the closest existing example of `SpyglassIngestion` tables and a custom
+`generate_entries_from_nwb_object` override.
 
 - `OpticalFiberImplant` — `:346`; its `generate_entries_from_nwb_object`
   override (assigns a per-file index) — `:391`. `OpticalFiberDevice` — `:313`
