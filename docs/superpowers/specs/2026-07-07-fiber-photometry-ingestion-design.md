@@ -31,8 +31,9 @@ that `ndx-fiber-photometry` also builds on.
   last two cover the extension's *optional* filter/dichroic references — modeled
   now (front-loaded) so files that populate them need no future schema change.
 - A per-fiber configuration table (the NWB `FiberPhotometryTable`) capturing the
-  required columns, FKs to the device tables, the optical fiber's **name +
-  insertion metadata stored locally** (all nullable), plus nullable FKs for the
+  required columns, FKs to the device tables, the optical fiber's **name (non-null,
+  NWB names always exist) + insertion metadata stored locally** (insertion fields
+  nullable), plus nullable FKs for the
   optional `dichroic_mirror`, `emission_filter`, `excitation_filter` references
   and the optional `coordinates`.
 - A signal-reference table for `FiberPhotometryResponseSeries` — stores the NWB
@@ -130,7 +131,7 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
 | Optogenetics coupling | **None — self-contained** | Reusing `OpticalFiberImplant` repeatedly forced optogenetics changes (positional-id, then required-vs-optional fields), so the fiber link was decoupled; `common_photometry` touches no optogenetics table. |
 | Device tables | **Five** (`Indicator`, `ExcitationSource`, `Photodetector`, `DichroicMirror`, `OpticalFilter`) | First three are exercised by the sample data. `DichroicMirror`/`OpticalFilter` cover the extension's optional filter/dichroic refs — **front-loaded** so future files with them need no `alter()`; validated only against a synthetic fixture (no real data populates them). Two tables need custom multi-class matchers: `ExcitationSource` (+ `PulsedExcitationSource`) and `OpticalFilter` (base + `Band` + `Edge`), since `is_nwb_obj_type` is exact-match and would silently miss subtypes. |
 | Unmodeled columns | **Ignore + warn** | Even with the optional refs front-loaded, a truly novel column (e.g. `commanded_voltage_series`) must not silently vanish; the override logs it. |
-| Model/instance | **Collapse** to one reusable table per type | Spec fields folded from `.model` via object-ref mapping (verified accessible); leaner than a model+instance split. |
+| Model/instance | **Collapse** to one reusable table per type, **reusable spec only** | Spec fields folded from `.model` via object-ref mapping (verified accessible); leaner than a model+instance split. Instance/session-specific fields (per-channel description, power/intensity/exposure, pulsed params) are **excluded** — with `_expected_duplicates=True` they'd trip divergence across sessions; per-session values live on `FiberPhotometryConfig`. |
 | Fiber link | **Store fiber name + insertion metadata locally** on `FiberPhotometryConfig` (all nullable), no FK to `OpticalFiberImplant` | The extension marks all `FiberInsertion` fields optional and the real data leaves pitch/roll/yaw (and fiber `active_length`/ferrule) null, which the optogenetics tables reject; local nullable storage ingests the real data and keeps the PR self-contained. Small duplication if a fiber is also used by optogenetics (rare, content-consistent). |
 | Extension dep | `ndx-fiber-photometry==0.2.3` in the **`test` extra only** | Ingestion never imports it (verified); needed only to build the test fixture. |
 | Config PK | `(Session, fiber_photometry_name, fiber_id)` | `fiber_photometry_name` disambiguates multiple `FiberPhotometry` containers per file (rare) so two tables' row `id`s can't collide; degenerates to one constant name in the common case. |
@@ -162,40 +163,47 @@ key.
 
 ### Reusable device tables
 
-Keyed by device `name`, `_expected_duplicates = True`,
-`_extension_requirements = {"ndx-ophys-devices": "0.3.1"}`. Each reads the
-`ndx-ophys-devices` **instance** and folds in useful `.model` spec fields via
-the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
-`model.name`). Model-carried fields use callables
-(`lambda o: o.model.source_type`); optional fields use the mixin's
-`(attr, default)` tuple form so missing values null cleanly.
+Keyed by device `name` (the PK — the only guaranteed-present field),
+`_expected_duplicates = True`, `_extension_requirements = {"ndx-ophys-devices":
+"0.3.1"}`. These are a **shared device/reagent catalog**, so they store only
+**reusable spec** — values stable for a given device name across sessions:
+identity (`name`, `label`), model-derived specs (folded from `.model` via
+callables like `lambda o: o.model.source_type`), and type discriminators.
+**Instance/session-specific fields are deliberately NOT stored here** — the
+per-channel `description`, `power_in_W`, `intensity_in_W_per_m2`,
+`exposure_time_in_s`, and pulsed operational params. With
+`_expected_duplicates=True`, a second file reusing a device name with a
+different per-session value would trip divergence validation and raise rather
+than ingest; keeping only stable spec avoids that. (The per-channel excitation/
+emission wavelengths that *do* vary live on `FiberPhotometryConfig`, not here.)
+Every field the extension marks optional is **nullable** so sparse-but-valid
+files never lose rows to `_key_has_required_attrs`; only the PK (and derived
+discriminators) are non-null.
 
-- **`Indicator`** ← `Indicator`: `indicator_name`←`name`, `label`, `description`,
-  `manufacturer`.
-- **`ExcitationSource`** ← `ExcitationSource` **or** `PulsedExcitationSource`
-  (+ model), via a custom `get_nwb_objects()` matching both: `excitation_source_name`
-  ←`name`, `description` (instance, per-channel), `manufacturer`, `source_type`,
-  `excitation_mode` (from model), the nullable instance field `power_in_W` (and
-  similarly `intensity_in_W_per_m2` / `exposure_time_in_s` if present), a
-  `source_class` `enum('continuous','pulsed')` discriminator, and nullable
-  pulsed-only fields `pulse_rate_in_Hz`, `peak_power_in_W`, `peak_pulse_energy_in_J`.
-  Matters because `excitation_source` is a **required** config ref — an unmatched
-  pulsed source would break the FK.
-- **`Photodetector`** ← `Photodetector` (+ model): `photodetector_name`←`name`,
-  `description`, `manufacturer`, `detector_type`, `gain`, `gain_unit` (from
-  model, `gain`/`gain_unit` nullable — keep the unit whenever `gain` is stored).
-- **`DichroicMirror`** ← `DichroicMirror` (+ model): `dichroic_mirror_name`
-  ←`name`, `manufacturer`, `cut_on_wavelength_in_nm`, `cut_off_wavelength_in_nm`
-  (from model, all nullable). Default class-name matcher.
+- **`Indicator`** ← `Indicator` (a single NWBContainer — all fields are reusable
+  reagent metadata): `indicator_name`←`name` (PK), `label` (spec-required),
+  `description=null`, `manufacturer=null`.
+- **`ExcitationSource`** ← `ExcitationSource` **or** `PulsedExcitationSource`,
+  via a custom `get_nwb_objects()` matching both (exact-string `is_nwb_obj_type`
+  misses the subtype; `excitation_source` is a **required** config ref, so an
+  unmatched pulsed source would break the FK): `excitation_source_name`←`name`
+  (PK), `source_class` `enum('continuous','pulsed')` (derived, non-null), and
+  nullable model specs `source_type=null`, `excitation_mode=null`,
+  `manufacturer=null`.
+- **`Photodetector`** ← `Photodetector`: `photodetector_name`←`name` (PK), and
+  nullable model specs `detector_type=null`, `gain=null`, `gain_unit=null`,
+  `manufacturer=null`.
+- **`DichroicMirror`** ← `DichroicMirror` (default matcher): `dichroic_mirror_name`
+  ←`name` (PK), nullable model specs `manufacturer=null`,
+  `cut_on_wavelength_in_nm=null`, `cut_off_wavelength_in_nm=null`.
 - **`OpticalFilter`** ← base `OpticalFilter`, `BandOpticalFilter`, **or**
-  `EdgeOpticalFilter` (+ model), via a custom `get_nwb_objects()` matching all
-  three class names (the config target type is the base `OpticalFilter`, so a
-  plain instance must match too): `optical_filter_name`←`name`, `filter_class`
-  `enum('base','band','edge')` (from the matched class), `filter_type` (from
-  `OpticalFilterModel`), `manufacturer`, and the subtype-specific nullable fields
-  `center_wavelength_in_nm` / `bandwidth_in_nm` (band) and `cut_wavelength_in_nm`
-  (edge). Specs live on the model; folded via callables. Untested against real
-  data (no sample file populates filters) — exercised by a synthetic fixture only.
+  `EdgeOpticalFilter`, via a custom `get_nwb_objects()` matching all three
+  (the config target type is base `OpticalFilter`, so a plain instance must match
+  too): `optical_filter_name`←`name` (PK), `filter_class` `enum('base','band',
+  'edge')` (derived, non-null), and nullable `filter_type=null`,
+  `manufacturer=null`, `center_wavelength_in_nm=null` / `bandwidth_in_nm=null`
+  (band), `cut_wavelength_in_nm=null` (edge). Untested against real data (no
+  sample file populates filters) — exercised by a synthetic fixture only.
 
 ### Session-specific config — `FiberPhotometryConfig`
 
@@ -398,7 +406,11 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    like `Raw`/`VirusInjection`) are governed by the file-level `reinsert` flow —
    a naive re-`insert_from_nwbfile` raises `DuplicateError`. Test both: device
    re-ingest is a clean no-op; session-table re-ingest matches the established
-   `reinsert` path.
+   `reinsert` path. **Cross-session catalog**: a *second session's* file that
+   reuses a device `name` with the **same reusable spec** ingests cleanly
+   (validates consistent, no `DuplicateError`) — confirming the device tables
+   hold only stable spec, and that per-session differences (which live on
+   `FiberPhotometryConfig`) never trigger divergence.
 6. **Null fiber metadata** (the exact real-data shape decoupling fixes): a fiber
    whose `description` (→ `location`), `pitch`/`roll`/`yaw`, and model
    `active_length`/`ferrule_*` are `None` ingests cleanly, with every one of
@@ -418,9 +430,9 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    `DichroicMirror` and `OpticalFilter` rows ingest (matcher captures base
    `OpticalFilter`, `BandOpticalFilter`, **and** `EdgeOpticalFilter`;
    `filter_class` set correctly); a `PulsedExcitationSource` ingests into
-   `ExcitationSource` with `source_class='pulsed'` and pulsed fields populated;
-   the config's `dichroic_mirror` / `emission_filter` / `excitation_filter` FKs
-   resolve and `coordinates` is stored.
+   `ExcitationSource` with `source_class='pulsed'` (no instance-operational fields
+   stored); the config's `dichroic_mirror` / `emission_filter` / `excitation_filter`
+   FKs resolve and `coordinates` is stored.
 9. **Graceful-degradation safeguard**: a fixture whose `FiberPhotometryTable`
    carries an **unmodeled** column (e.g. a `commanded_voltage_series` ref)
    ingests the core row and **logs a warning naming that column**; no exception,
