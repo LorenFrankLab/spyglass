@@ -187,12 +187,21 @@ referenced by the `FiberPhotometryTable`** column(s) it backs (`Indicator` ←
 `photodetector`; `OpticalFiber` ← `optical_fiber`; `DichroicMirror` ←
 `dichroic_mirror`; `OpticalFilter` ← `emission_filter` ∪ `excitation_filter`),
 deduped by `name`. So a pure-optogenetics or otherwise non-photometry file is a
-clean no-op for these tables.
+clean no-op for these tables. The traversal is **defensive** — `get_nwb_objects()`
+runs *before* `check_extension_requirements()` in the mixin
+([ingestion.py:248](../../../src/spyglass/utils/mixins/ingestion.py)), so a file
+whose `FiberPhotometry`/`FiberPhotometryTable` predates the expected 0.2.3 shape
+(missing columns/attrs) must return `[]` rather than raise, letting the version
+gate on `FiberPhotometryConfig`/`FiberPhotometryResponseSeries` emit the
+below-min-version warning instead of a traceback.
 
 These are a **shared device/reagent catalog**, so they store only
 **reusable spec** — values stable for a given device name across sessions:
-identity (`name`, `label`), model-derived specs (folded from `.model` via
-callables like `lambda o: o.model.source_type`), and type discriminators.
+identity (`name`, `label`), model-derived specs, and type discriminators.
+Model specs are folded via **null-safe** callables — `Device.model` is optional
+in core NWB, so the mapping is `lambda o: getattr(o.model, "source_type", None)
+if o.model is not None else None`; a model-less referenced device stores nulls
+rather than raising `AttributeError`.
 **Instance/session-specific fields are deliberately NOT stored here** — the
 per-channel `description`, `power_in_W`, `intensity_in_W_per_m2`,
 `exposure_time_in_s`, and pulsed operational params. With
@@ -595,6 +604,17 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     `reflection_band`/`transmission_band`/`angle_of_incidence`, edge `slope_*`,
     fiber `numerical_aperture`/`core_diameter_in_um`/`ferrule_*`) round-trips when
     the synthetic fixture populates it.
+11. **Full `populate_all_common()` on the photometry fixture** raises **no
+    `InsertError`** — including from the existing `common_optogenetics` fiber
+    tables, which drop the sparse photometry fibers (missing NOT-NULL fields)
+    with log noise but no error (see the optogenetics-cross-processing risk).
+12. **Model-less referenced device**: a fixture whose referenced device has
+    `model is None` ingests into its device table with the model-derived columns
+    null — the null-safe `.model` extraction does not raise `AttributeError`.
+13. **Below-min-version defensiveness**: a file whose `FiberPhotometryTable`
+    predates the 0.2.3 shape (missing a referenced column) does **not** raise in
+    the device `get_nwb_objects()` traversal; it returns `[]`, and the version
+    gate on the config/response tables emits the below-min warning.
 
 ## Dependencies
 
@@ -629,6 +649,21 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
+- **Optogenetics tables still process photometry fibers (benign, documented)**:
+  `common_optogenetics.OpticalFiberDevice`/`OpticalFiberImplant` are already in
+  `populate_all_common` and match any `ndx-ophys-devices` `OpticalFiber`/
+  `OpticalFiberModel`, so they *also* run on a photometry file. "Self-contained"
+  means photometry's own tables neither modify nor depend on optogenetics — not
+  that optogenetics ignores the shared fibers. Behavior: because those tables
+  declare fiber fields `NOT NULL` and the sample fibers leave
+  `pitch`/`active_length`/`ferrule_*` null, `_key_has_required_attrs` **drops**
+  them (log noise, **no `InsertError`**); a *fully-populated* photometry fiber
+  would additionally land in `OpticalFiberImplant` (benign duplication — it is,
+  after all, an implanted optical fiber). Verified by a test that full
+  `populate_all_common()` on the photometry fixture raises no `InsertError`.
+  **Open call for the owner**: accept this (honors "don't touch optogenetics"),
+  or gate the optogenetics fiber tables to optogenetics-context fibers (touches
+  `common_optogenetics`). Default: accept + document.
 - **Multiple excitation sources sharing a model**: 4 instances / ≤3 models; the
   collapsed device table keys by instance name and denormalizes model specs —
   acceptable, but re-ingest validation (`_expected_duplicates`) must compare
