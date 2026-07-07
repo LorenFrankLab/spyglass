@@ -414,15 +414,22 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
-- **pynwb/hdmf floor bump (cross-cutting, possibly blocking)**: reading these
-  `core` 2.10.0 files requires `pynwb>=4.0.0` / `hdmf>=6.x` (measured — the
-  current floor `pynwb>=3.1.3` cannot read them). Raising the floor is a major
-  dependency change that ripples across Spyglass (SpikeInterface, the other
-  `ndx-*` packages, DataJoint interplay) and must be validated **suite-wide**,
-  not just for photometry. This may be a prerequisite/coordinated upgrade rather
-  than something bundled into the photometry PR. The implementation plan must
-  decide: bump-in-this-PR vs. depend-on-a-separate-upgrade. Until resolved, the
-  feature does not work on a stock current-floor install.
+- **pynwb/hdmf floor bump (cross-cutting prerequisite)**: reading these `core`
+  2.10.0 files requires `pynwb>=4.0.0` / `hdmf>=6.1.0` (measured — the current
+  floor `pynwb>=3.1.3` cannot read them). Until resolved, the feature does not
+  work on a stock current-floor install.
+  - *Spyglass-code impact of pynwb 4.0: negligible* (changelog + `src/` scan):
+    Python 3.10+ already required; the removed `ProcessingModule.get_data_interface`
+    is **not** used (Spyglass's same-named helper uses `.data_interfaces.get()`);
+    `NWBHDF5IO(extensions=)` / `ic_electrodes` / `add_container` unused;
+    `pynwb.validate(paths=)` hits are `dandi.validate`, not pynwb; `add_scratch`/
+    `ScratchData` still exist (only removed args, not used); `BehavioralEvents`
+    (DIO/sensors) is deprecated-not-removed and still **reads** fine.
+  - *The actual unknown is transitive*: `hdmf>=6.1.0` pulls pandas-3.0-era
+    constraints; whether SpikeInterface / DataJoint / the other `ndx-*` pins
+    co-resolve needs a **resolve-and-run spike** (plan phase 0). Given the
+    negligible code impact, if the spike is clean the bump is small enough to be
+    its own quick prerequisite PR that photometry builds on.
 - **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
   resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
   being populated first — enforced by `populate_all_common` ordering and a guard
