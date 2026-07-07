@@ -1,11 +1,13 @@
 # Fiber-Photometry Ingestion — Design
 
 **Date:** 2026-07-07
-**Status:** Design validated against real NWB files and review-converged, but
-**BLOCKED** — reading the files needs `pynwb>=4.0.0`/`hdmf>=6.1.0`, which is
-currently unsatisfiable because the mandatory core dep `ndx-franklab-novela`
-pins `hdmf<5` (see the ⛔ blocker in Risks). Implementable in code; not
-integrable until upstream unblocks.
+**Status:** Design validated against real NWB files, review-converged, and
+**viable on Spyglass's current dependency floor** — with one data-production
+constraint: files must embed NWB `core` 2.9.0 (written with pynwb 3.1.x), not
+`core` 2.10.0. Verified end-to-end (write + read, with and without the extension
+installed) on pynwb 3.1.3. The sample files happen to be `core` 2.10.0 (pynwb-4
+toolchain); reading *those* needs a pynwb/hdmf bump that is currently blocked
+upstream — but the data doesn't inherently require 2.10.0. See Dependencies.
 **Branch:** `feature/fiber-photometry-ingestion` (off `master`)
 
 ## Goal
@@ -93,13 +95,11 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
   `numerical_aperture`, `fiber_insertion.insertion_position_ap_in_mm`,
   `Indicator.label`, …) were accessible. This is exactly the surface Spyglass
   ingestion uses.
-- **Dependency-floor blocker (measured).** The files embed the `core` 2.10.0
-  schema. Spyglass's current floor `pynwb>=3.1.3` / `hdmf>=3.4.6` **cannot read
-  them**: `pynwb 3.1.3` (the highest 3.x, pulling `hdmf 4.3.1`) fails with
-  `TypeError: DatasetBuilder ... incorrect type for 'data' (got 'uint64')`,
-  before any type matching. Only `pynwb>=4.0.0` / `hdmf>=6.x` read the files.
-  So ingestion requires a **major pynwb/hdmf floor bump** (see Risks) — the
-  "stock install ingests correctly" claim below holds only on the bumped floor.
+- **Core-schema version matters (measured).** The *sample* files embed `core`
+  2.10.0 and the floor `pynwb 3.1.3` cannot read them (fails with `TypeError:
+  DatasetBuilder ... 'uint64'`). But an equivalent FP file written as `core`
+  2.9.0 (pynwb 3.1.x) **does** read on the floor — verified. See Dependencies:
+  the fix is a data-production constraint (produce `core` 2.9.0), not a bump.
 - **Object-ref resolution works.** `FiberPhotometryTable.to_dataframe()` returns
   the referenced device containers as cell values, so `row.indicator.name` etc.
   yield the FK values. (Previously the design's main unknown — now resolved.)
@@ -330,11 +330,11 @@ Consequences:
 - `ndx-fiber-photometry==0.2.3` goes in `optional-dependencies.test` only —
   needed solely to *write* the fixture NWB. Not a core dependency.
   (`ndx-ophys-devices` is already a core dependency; unchanged.)
-- A stock Spyglass install **on the bumped pynwb/hdmf floor** (see the
-  dependency-floor blocker above and Risks) ingests a photometry NWB correctly
-  without the extension package; ingesting a non-photometry file is a clean no-op
-  for these tables. Note the two guarantees are distinct: *not importing the
-  extension* is proven; *reading the file at all* needs `pynwb>=4.0.0`.
+- A stock Spyglass install ingests a **`core` 2.9.0** photometry NWB correctly
+  without the extension package (verified on the floor pynwb 3.1.3); ingesting a
+  non-photometry file is a clean no-op for these tables. The two guarantees are
+  distinct: *not importing the extension* is proven on both 3.1.3 and 4.0; a
+  `core` **2.10.0** file additionally needs `pynwb>=4.0.0` (see Dependencies).
 
 ## Integration
 
@@ -350,10 +350,10 @@ Consequences:
   we reference. (Not strictly required: ingestion never imports the package, and
   gating reads the *file's* embedded namespace, not the installed version — so
   this is a consistency change only.)
-- **`pyproject.toml` floor bump (load-bearing, not cosmetic)**: `pynwb>=4.0.0`
-  and `hdmf>=6.x` are **required** to read `core` 2.10.0 photometry files (see the
-  dependency-floor risk). This is the one dependency change that gates the feature
-  working at all, and it must be validated suite-wide.
+- **`pyproject.toml`: no floor bump required** for the supported (`core` 2.9.0)
+  path — the feature works on the current `pynwb>=3.1.3` / `hdmf>=3.4.6` floor.
+  (A `pynwb>=4.0.0` / `hdmf>=6.1.0` bump would only be needed to read `core`
+  2.10.0 files directly, and is currently blocked upstream — see Dependencies.)
 
 ## Testing
 
@@ -361,7 +361,8 @@ Fixture-driven, in `tests/common/` (fixture builder uses the `test` extra and
 mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 `rate`-based series):
 
-1. **Fixture builder** writes a minimal photometry NWB: excitation-source /
+1. **Fixture builder** writes a minimal photometry NWB **with pynwb 3.1.x so it
+   embeds `core` 2.9.0** (matching the supported floor): excitation-source /
    photodetector / optical-fiber models + instances (with `fiber_insertion`),
    an `Indicator`, **plus** a `DichroicMirror`, a `BandOpticalFilter`, and an
    `EdgeOpticalFilter` (with models) to exercise the front-loaded optional path
@@ -369,6 +370,8 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    `FiberPhotometryTable` whose optional `dichroic_mirror` / `emission_filter` /
    `excitation_filter` / `coordinates` columns are populated; and 1-D
    `FiberPhotometryResponseSeries` with a single-row `fiber_photometry_table_region`.
+   (A minimal version of this builder is already prototyped and round-trips on
+   pynwb 3.1.3 — see the design spike.)
 2. **Ingestion**: device, config, and signal rows appear; `FiberPhotometryConfig`
    FKs resolve to the right devices and to the correct `OpticalFiberImplant`
    (via `optical_fiber_object_id`); the `.Fiber` part maps the region row.
@@ -392,10 +395,10 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    immediately after running the ingestion path on a pre-built fixture (build
    the fixture in a separate step/subprocess so its import doesn't pollute
    `sys.modules`). Complement with a CI job that installs Spyglass **without**
-   the photometry package **on the bumped pynwb/hdmf floor** (`pynwb>=4.0.0`) and
-   ingests a committed fixture file. (Validated manually during design on
-   `pynwb 4.0.0`: the real files read fully with `ndx_fiber_photometry`
-   uninstalled; `pynwb 3.1.3` cannot read them — see the dependency-floor risk.)
+   the photometry package **on the current floor** (`pynwb 3.1.3`) and ingests a
+   committed **`core` 2.9.0** fixture file. (Verified during design: a `core`
+   2.9.0 FP file reads on pynwb 3.1.3 with `ndx_fiber_photometry` uninstalled —
+   class-name match and object-refs intact.)
 8. **Front-loaded optional path + subtype matching**: with the full fixture,
    `DichroicMirror` and `OpticalFilter` rows ingest (matcher captures base
    `OpticalFilter`, `BandOpticalFilter`, **and** `EdgeOpticalFilter`;
@@ -417,32 +420,34 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
-- **⛔ BLOCKER — upstream dependency conflict (measured, spike-confirmed)**:
-  reading these `core` 2.10.0 files requires `pynwb>=4.0.0` (the floor `pynwb
-  3.1.3` cannot read them — tested), and `pynwb 4.0.0` requires `hdmf>=6.1.0`.
-  But **`ndx-franklab-novela` — every release including the latest 0.2.4
-  (2026-01-16) — pins `hdmf>=4.0.0,<5`**, and it is a **mandatory core Spyglass
-  dependency** (Probe/Shank/HeaderDevice, imported at `import spyglass`). `hdmf<5`
-  and `hdmf>=6.1` are mutually exclusive, so **no valid dependency set supports
-  this feature today.** A dry-run "resolution" only succeeds by silently
-  downgrading `ndx-franklab-novela` to the ancient `0.0.2` (missing the types
-  Spyglass needs) or by `--override` violating the cap — neither is viable.
-  - *This is not a Spyglass-code problem.* pynwb 4.0's code impact on Spyglass is
-    negligible (changelog + `src/` scan: the removed `ProcessingModule.get_data_interface`
-    is unused — the same-named helper uses `.data_interfaces.get()`;
-    `extensions=`/`ic_electrodes`/`add_container` unused; `validate(paths=)` hits
-    are `dandi`; `BehavioralEvents` deprecated-not-removed and still reads). The
-    blocker is purely the transitive `hdmf<5` cap.
-  - *Also needs bumping (secondary, not the blocker)*: `ndx-optogenetics` is
-    pinned `==0.3.0`; `0.4.0` is the hdmf-6-compatible release.
-  - *Path to unblock (any one)*: (1) upstream `ndx-franklab-novela` releases an
-    `hdmf>=5`/`6`-compatible version (out of Spyglass's direct control — likely
-    tracks the broader NWB ecosystem's hdmf 5→6 migration); (2) the data are
-    (re)written with `core` 2.9.0 so Spyglass's current floor can read them
-    (producer-side, unverified — the sample files are 2.10.0); (3) contribute the
-    hdmf-6 bump to `ndx-franklab-novela` upstream. Until one lands, the code can
-    be written/unit-tested in an isolated pynwb-4 env but **cannot integrate into
-    the main Spyglass environment.**
+- **Data-production constraint: files must be `core` 2.9.0 (verified, no bump
+  needed).** `ndx-fiber-photometry` data does **not** inherently require `core`
+  2.10.0 — it uses only `TimeSeries` + `DynamicTable` (+ `DeviceModel`, which
+  exists in `core` 2.9.0). Verified end-to-end on **pynwb 3.1.3** (Spyglass's
+  floor): a minimal FP file written with pynwb 3.1.x embeds `core` 2.9.0 and
+  reads back correctly — response series, all 7 config columns, and object-ref
+  resolution — **and** the no-import guarantee holds (the same file reads with
+  the extension package *uninstalled*, class-name match and refs intact). So the
+  feature ships on the **current** dependency floor, provided producers write
+  with pynwb 3.1.x. The design's `_extension_requirements` gate on the *extension*
+  namespaces (present in 2.9.0 files), never on the core version.
+- **Why the sample files don't read today (and the 2.10.0 path is blocked).** The
+  provided example files were written with a pynwb-4 toolchain, so they embed
+  `core` 2.10.0, which needs `pynwb>=4.0.0` → `hdmf>=6.1.0`. But
+  **`ndx-franklab-novela` (all releases incl. latest 0.2.4, a mandatory core
+  Spyglass dep) pins `hdmf<5`**, so pynwb 4 is currently unsatisfiable in
+  Spyglass — a hard upstream conflict, not a Spyglass-code problem (pynwb 4.0's
+  code impact is negligible: `get_data_interface` is a local helper using
+  `.data_interfaces.get()`, `extensions=`/`ic_electrodes` unused,
+  `validate(paths=)` hits are `dandi`, `BehavioralEvents` still reads). So:
+  - *Preferred path*: produce/convert photometry data with pynwb 3.1.x (`core`
+    2.9.0). Works today. **Existing 2.10.0 files must be regenerated from source**
+    with a pynwb-3.1.x toolchain (you cannot down-convert 2.10.0→2.9.0 in one env,
+    since pynwb 4 and 3.1.x can't coexist).
+  - *Alternative (out of Spyglass's control)*: wait for `ndx-franklab-novela` to
+    release an `hdmf`-6-compatible version, then bump `pynwb>=4.0.0` /
+    `hdmf>=6.1.0` (and `ndx-optogenetics` `==0.3.0`→`0.4.0`), enabling direct
+    2.10.0 reads.
 - **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
   resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
   being populated first — enforced by `populate_all_common` ordering and a guard
