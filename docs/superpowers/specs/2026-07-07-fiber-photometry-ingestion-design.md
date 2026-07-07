@@ -118,6 +118,8 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
 | Fiber link | `FiberPhotometryConfig` **FKs into `OpticalFiberImplant`** | Single source of truth for the implanted fiber + its stereotactic coordinates. |
 | Implant resolution | **Add nullable `optical_fiber_object_id` to `OpticalFiberImplant`** | Additive (no PK change, no migration — alpha module). Lets the config resolve the implant by the fiber instance's `object_id`, robustly. |
 | Extension dep | `ndx-fiber-photometry==0.2.3` in the **`test` extra only** | Ingestion never imports it (verified); needed only to build the test fixture. |
+| Config PK | `(Session, fiber_photometry_name, fiber_id)` | `fiber_photometry_name` disambiguates multiple `FiberPhotometry` containers per file (rare) so two tables' row `id`s can't collide; degenerates to one constant name in the common case. |
+| Re-ingestion | Device tables `_expected_duplicates=True`; config/response `False` | Matches existing Spyglass session-specific tables (`Raw`, `VirusInjection`); idempotency via file-level `reinsert`, not per-row skip. |
 
 ## Architecture
 
@@ -177,17 +179,25 @@ the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
 optical_fiber_object_id=null: varchar(40)   # NWB object id of the OpticalFiber instance
 ```
 
-mapped in `table_key_to_obj_attr["self"]` from the instance `object_id`. No PK
-change, no existing-row migration. Enables robust cross-table resolution.
+mapped in `table_key_to_obj_attr["self"]` from the instance `object_id`. This is
+no PK change and no data copy, but it **is** an additive schema migration
+(DataJoint `alter()`). Pre-existing `OpticalFiberImplant` rows get `NULL` for the
+new column, so cross-linking a file whose implants were ingested **before** this
+change requires re-ingesting/backfilling those rows. Within a single
+`populate_all_common` run the value is populated as the implant ingests (before
+the config reads it), so freshly-ingested files resolve fine.
 
 ### Session-specific config — `FiberPhotometryConfig`
 
-The NWB `FiberPhotometryTable`, one row per fiber/channel. Because it is a
-`DynamicTable`, the mixin's `to_dataframe()` path yields one entry per row.
+The NWB `FiberPhotometryTable`, one row per fiber/channel. The custom override
+iterates `FiberPhotometryTable.to_dataframe()` rows itself — it does **not** rely
+on the mixin's default `DynamicTable` recursion (which cannot do the FK lookups
+and optional-ref handling below).
 
 ```text
 FiberPhotometryConfig
   -> Session
+  fiber_photometry_name: varchar(64) # lab-meta container name (usually one/file)
   fiber_id: int                      # the FiberPhotometryTable row `id` (see note)
   ---
   -> OpticalFiberImplant             # common_optogenetics (reused); resolved via
@@ -220,11 +230,29 @@ mapped as a separate object key, which would raise). **Any other column** the
 override does not recognize triggers a one-time warning naming it (the
 graceful-degradation safeguard) so no metadata is silently dropped.
 
+**Re-ingestion.** `FiberPhotometryConfig` and `FiberPhotometryResponseSeries`
+are session-specific, so — like `Raw`, `VirusInjection`, and `OpticalFiberImplant`
+— they leave `_expected_duplicates = False` (the flag means "shared across
+sessions"; the reusable device tables set it `True`). Idempotency for these is
+therefore governed by the standard file-level flow (`insert_sessions` skips
+already-ingested files; `reinsert=True` re-runs), **not** by per-row duplicate
+validation; a naive second `insert_from_nwbfile` on the same file would
+`DuplicateError` (caught and logged by `populate_all_common`), exactly as for the
+existing session-specific tables.
+
 **`fiber_id`** is the `FiberPhotometryTable`'s row `id` (the `DynamicTable`
 identifier), which may be **non-consecutive** — not a positional 0..n counter.
 This matters because the response-series `DynamicTableRegion` stores **positional
 row indices**, so the region → config mapping must translate positional index →
 row `id` via the table's id ordering.
+
+**`fiber_photometry_name`** disambiguates the (rare) case of multiple
+`FiberPhotometry` lab-meta containers in one file: without it, two tables' row
+`id` 0 would collide on `(Session, fiber_id)`. The config table matches **all**
+`FiberPhotometryTable` objects (`get_nwb_objects` over the file) and takes the
+name from each table's parent container; the response-series `.Fiber` FK carries
+the same name (resolved from the region's target table). Usually there is exactly
+one container, so this degenerates to a single constant name.
 
 ### Signal reference — `FiberPhotometryResponseSeries`
 
@@ -321,8 +349,14 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    expected length and time axis derived from `rate` + `starting_time`.
 4. **Gating contract**: ingesting a file **without** the namespace is skipped
    cleanly (warning, no rows, no exception).
-5. **Idempotency**: re-ingesting inserts nothing new and does not trip
-   `_expected_duplicates` validation.
+5. **Re-ingestion semantics** (per-table, matching existing Spyglass behavior):
+   the shared **device** tables (`_expected_duplicates=True`) skip consistent
+   pre-existing rows on a second `insert_from_nwbfile` (and validate divergence);
+   the **session-specific** config/response tables (`_expected_duplicates=False`,
+   like `Raw`/`VirusInjection`) are governed by the file-level `reinsert` flow —
+   a naive re-`insert_from_nwbfile` raises `DuplicateError`. Test both: device
+   re-ingest is a clean no-op; session-table re-ingest matches the established
+   `reinsert` path.
 6. **Optogenetics regression**: `OpticalFiberImplant` still ingests unchanged
    (new column nullable/defaulted); existing optogenetics tests pass.
 7. **Package-absent import safety** (the core "don't require the extension"
