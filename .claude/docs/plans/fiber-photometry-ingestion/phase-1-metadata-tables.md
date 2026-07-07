@@ -57,7 +57,12 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
 
 - **`FiberPhotometryConfig`** (`SpyglassIngestion, dj.Manual`). PK and columns
   per [shared-contracts.md#config-schema](shared-contracts.md#config-schema) and
-  the design doc. Set `_extension_requirements = {"ndx-fiber-photometry": "0.2.3",
+  the design doc. **Object discovery**: set `_source_nwb_object_type =
+  "FiberPhotometryTable"` so the mixin's default `get_nwb_objects()` collects all
+  `FiberPhotometryTable` objects (and returns `[]` — a clean no-op — for a file
+  with none); `_source_nwb_object_type` is otherwise a mixin property that
+  **raises `NotImplementedError`** if unset ([ingestion.py:79](../../../src/spyglass/utils/mixins/ingestion.py)).
+  Set `_extension_requirements = {"ndx-fiber-photometry": "0.2.3",
   "ndx-ophys-devices": "0.3.1"}` (it reads the ndx-fiber-photometry table and
   ndx-ophys-devices object refs) — required so the mixin's post-`get_nwb_objects()`
   version check gates below-min files (`test_below_min_version_warns`).
