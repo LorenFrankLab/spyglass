@@ -246,6 +246,7 @@ FiberPhotometryConfig
   yaw=null: float
   excitation_wavelength_in_nm: float
   emission_wavelength_in_nm: float
+  notes=null: varchar(2000)          # optional FiberPhotometryTable `notes` column
   coordinates=null: blob             # optional 3-vector for multi-fiber arrays
 ```
 
@@ -262,10 +263,10 @@ yaw_in_deg`) — each nullable, since the extension marks them optional and the
 real data leaves several null. The device tables must ingest before this table
 (`populate_all_common` ordering), guarded in the override.
 
-**Optional refs** (`dichroic_mirror`, `emission_filter`, `excitation_filter`,
-`coordinates`) are read only when the column exists on the `FiberPhotometryTable`
-**and** the per-row value is non-null; otherwise the FK/attr is left null (never
-mapped as a separate object key, which would raise). **Any other column** the
+**Optional columns/refs** (`dichroic_mirror`, `emission_filter`,
+`excitation_filter`, `notes`, `coordinates`) are read only when the column exists
+on the `FiberPhotometryTable` **and** the per-row value is non-null; otherwise the
+FK/attr is left null (never mapped as a separate object key, which would raise). **Any other column** the
 override does not recognize triggers a one-time warning naming it (the
 graceful-degradation safeguard) so no metadata is silently dropped.
 
@@ -308,7 +309,11 @@ one container, so this degenerates to a single constant name.
 `dj.Imported`, following [`Raw`](../../../src/spyglass/common/common_ephys.py)
 (`raw_object_id: varchar(40)` + `nwb_object()` accessor). Sets
 `_extension_requirements = {"ndx-fiber-photometry": "0.2.3"}` (it matches the
-`FiberPhotometryResponseSeries` type).
+`FiberPhotometryResponseSeries` type). **Must set `_nwb_table = Nwbfile`
+explicitly**: the table FKs `-> Session`, not `-> Nwbfile`, and the fetch mixin
+resolves `fetch_nwb()` via `_nwb_table` or a literal `-> Nwbfile` in the
+definition ([fetch.py:72-84](../../../src/spyglass/utils/mixins/fetch.py)),
+raising `NotImplementedError` otherwise — exactly as `Raw` sets it.
 
 ```text
 FiberPhotometryResponseSeries
@@ -333,6 +338,13 @@ the config row `id` (per the non-consecutive-id note above) and emit a `.Fiber`
 part row. In the sample data each series references exactly one config row (one
 `.Fiber` part row); the part table generalizes to the extension's optional 2-D
 `[time, n_fibers]` case (multiple part rows) without schema change.
+
+**`fiber_photometry_table_region` is optional** in the ndx-fiber-photometry
+0.2.3 schema. When it is `None`, the override still inserts the **master row**
+(the signal stays retrievable via `fetch_nwb()`) but emits **no `.Fiber` rows**
+and **warns** that the column→fiber mapping is unavailable — it does not skip the
+series or raise. The `.Fiber` part's `region_index` provides a stable positional
+key so a series lacking the region is simply a master with an empty part.
 
 Retrieval helper `fetch1_dataframe()` returns a `pandas.DataFrame` indexed by
 time — computed from `starting_time` + `arange(num_samples) / rate` (the sample
@@ -469,7 +481,10 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     → each config row stores its own `optical_fiber_name` + insertion, so a
     shared model never conflates fibers; (d) a config table **lacking** the
     optional filter/dichroic columns (the sample-data shape) ingests with those
-    FKs left null.
+    FKs left null; (e) a `FiberPhotometryResponseSeries` **without** a
+    `fiber_photometry_table_region` (optional in the schema) inserts the master
+    row with **no `.Fiber` rows** and a warning, not a skip or raise; (f) a
+    populated `notes` column is stored (not warned as unmodeled).
 
 ## Dependencies
 
