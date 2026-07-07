@@ -31,14 +31,15 @@ that `ndx-fiber-photometry` also builds on.
   last two cover the extension's *optional* filter/dichroic references — modeled
   now (front-loaded) so files that populate them need no future schema change.
 - A per-fiber configuration table (the NWB `FiberPhotometryTable`) capturing the
-  required columns plus nullable FKs for the optional `dichroic_mirror`,
-  `emission_filter`, `excitation_filter` references and the optional
-  `coordinates`.
+  required columns, FKs to the device tables, the optical fiber's **name +
+  insertion metadata stored locally** (all nullable), plus nullable FKs for the
+  optional `dichroic_mirror`, `emission_filter`, `excitation_filter` references
+  and the optional `coordinates`.
 - A signal-reference table for `FiberPhotometryResponseSeries` — stores the NWB
   `object_id`, not the array, retrievable via `fetch_nwb()`.
-- A small **additive** enhancement to `common_optogenetics.OpticalFiberImplant`:
-  a nullable `optical_fiber_object_id` column so the photometry config can
-  resolve the implant FK (see Decisions).
+- **No changes to `common_optogenetics`.** The config stores the fiber identity
+  and insertion metadata itself rather than FK-ing into `OpticalFiberImplant`
+  (see Decisions) — so this PR is self-contained in `common_photometry`.
 - **Graceful-degradation safeguard:** the config override ignores any
   `FiberPhotometryTable` column it does not model and **logs a warning naming
   those columns**, so a genuinely novel/unmodeled column is visible rather than
@@ -59,10 +60,12 @@ that `ndx-fiber-photometry` also builds on.
   (`Indicator.viral_vector_injection == None`; no `FiberPhotometryViruses`). The
   `ndx-ophys-devices` `Indicator` has an optional `viral_vector_injection` link;
   when a file provides it, this becomes an additive nullable FK from `Indicator`
-  to the reused `common_optogenetics.VirusInjection`. Deferred, not designed
-  away.
-- Relocating the shared `ndx-ophys-devices` tables into a neutral module. We
-  reuse `common_optogenetics`' tables **in place**.
+  to `common_optogenetics.VirusInjection`. Deferred, not designed away.
+- Reusing/relocating `common_optogenetics` tables. Earlier drafts FK-ed the
+  config into `OpticalFiberImplant`; that reuse repeatedly forced changes to the
+  optogenetics tables (positional-id resolution, then relaxing required fields
+  the extension marks optional), so the design was **decoupled** — photometry is
+  self-contained and touches no optogenetics table.
 
 ## Background: the `ndx-fiber-photometry` data model
 
@@ -112,23 +115,23 @@ each) were inspected in an isolated `uv` venv (`pynwb` 4.0.0 / `hdmf` 6.1.0)
   `FiberPhotometryResponseSeries`, each ~26.7 M samples `float64`, `unit='V'`,
   `rate≈6024.1 Hz` + `starting_time` (no `timestamps`), each region referencing
   a **single** config row.
-- **`OpticalFiber.fiber_insertion`** is populated (bregma-referenced AP/ML/DV,
-  hemisphere) → optogenetics' `OpticalFiberImplant` mapping will ingest it.
-- **Implant identity gap** (see Decisions): `OpticalFiberImplant`'s `implant_id`
-  is a positional counter and it stores only the *model* name (shared by all 4
-  fibers), so the config table needs another key to resolve the correct implant.
+- **`OpticalFiber.fiber_insertion`** is partly populated: bregma-referenced
+  AP/ML/DV and hemisphere present, but **`pitch`/`roll`/`yaw` are `None`** (and
+  the fiber model's `active_length`/`ferrule_*` are `None`). `common_optogenetics`
+  declares those `NOT NULL` and would drop the fiber — the reason the config
+  stores fiber identity + insertion **locally as nullable fields** rather than
+  FK-ing into `OpticalFiberImplant` (see Decisions).
 
 ## Decisions (resolved during brainstorming + validation)
 
 | Decision | Choice | Rationale |
 | --- | --- | --- |
 | Depth | Metadata + signal **reference** | Makes fluorescence retrievable via object-id; one focused PR. ~1.7 GB/session confirms not copying arrays into DataJoint. |
-| Shared devices | **Reuse `common_optogenetics` tables in place** | Already ingest the shared `ndx-ophys-devices` types. No duplication, no migration. |
+| Optogenetics coupling | **None — self-contained** | Reusing `OpticalFiberImplant` repeatedly forced optogenetics changes (positional-id, then required-vs-optional fields), so the fiber link was decoupled; `common_photometry` touches no optogenetics table. |
 | Device tables | **Five** (`Indicator`, `ExcitationSource`, `Photodetector`, `DichroicMirror`, `OpticalFilter`) | First three are exercised by the sample data. `DichroicMirror`/`OpticalFilter` cover the extension's optional filter/dichroic refs — **front-loaded** so future files with them need no `alter()`; validated only against a synthetic fixture (no real data populates them). Two tables need custom multi-class matchers: `ExcitationSource` (+ `PulsedExcitationSource`) and `OpticalFilter` (base + `Band` + `Edge`), since `is_nwb_obj_type` is exact-match and would silently miss subtypes. |
 | Unmodeled columns | **Ignore + warn** | Even with the optional refs front-loaded, a truly novel column (e.g. `commanded_voltage_series`) must not silently vanish; the override logs it. |
 | Model/instance | **Collapse** to one reusable table per type | Spec fields folded from `.model` via object-ref mapping (verified accessible); leaner than a model+instance split. |
-| Fiber link | `FiberPhotometryConfig` **FKs into `OpticalFiberImplant`** | Single source of truth for the implanted fiber + its stereotactic coordinates. |
-| Implant resolution | **Add nullable `optical_fiber_object_id` to `OpticalFiberImplant`** | Additive **schema migration** (DataJoint `alter()`, no PK change / no data copy); pre-existing rows are `NULL` and need re-ingest/backfill to cross-link. Lets the config resolve the implant by the fiber instance's `object_id`, robustly. |
+| Fiber link | **Store fiber name + insertion metadata locally** on `FiberPhotometryConfig` (all nullable), no FK to `OpticalFiberImplant` | The extension marks all `FiberInsertion` fields optional and the real data leaves pitch/roll/yaw (and fiber `active_length`/ferrule) null, which the optogenetics tables reject; local nullable storage ingests the real data and keeps the PR self-contained. Small duplication if a fiber is also used by optogenetics (rare, content-consistent). |
 | Extension dep | `ndx-fiber-photometry==0.2.3` in the **`test` extra only** | Ingestion never imports it (verified); needed only to build the test fixture. |
 | Config PK | `(Session, fiber_photometry_name, fiber_id)` | `fiber_photometry_name` disambiguates multiple `FiberPhotometry` containers per file (rare) so two tables' row `id`s can't collide; degenerates to one constant name in the common case. |
 | Re-ingestion | Device tables `_expected_duplicates=True`; config/response `False` | Matches existing Spyglass session-specific tables (`Raw`, `VirusInjection`); idempotency via file-level `reinsert`, not per-row skip. |
@@ -146,8 +149,8 @@ subtypes (`ExcitationSource` must also catch `PulsedExcitationSource`;
 `EdgeOpticalFilter`); and `FiberPhotometryConfig` and
 `FiberPhotometryResponseSeries` require custom
 `generate_entries_from_nwb_object()` overrides, because they need work the
-declarative mapping cannot express — a DB lookup to resolve the
-`OpticalFiberImplant` FK, the optional per-row filter/dichroic refs, and the
+declarative mapping cannot express — extracting the fiber's name + nested
+`fiber_insertion.*` fields, the optional per-row filter/dichroic refs, and the
 `DynamicTableRegion` → config-row mapping.
 Precedent exists in the same base:
 [`OpticalFiberImplant.generate_entries_from_nwb_object`](../../../src/spyglass/common/common_optogenetics.py)
@@ -191,22 +194,6 @@ the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
   (edge). Specs live on the model; folded via callables. Untested against real
   data (no sample file populates filters) — exercised by a synthetic fixture only.
 
-### Optogenetics enhancement (additive)
-
-`common_optogenetics.OpticalFiberImplant` gains one nullable secondary column:
-
-```text
-optical_fiber_object_id=null: varchar(40)   # NWB object id of the OpticalFiber instance
-```
-
-mapped in `table_key_to_obj_attr["self"]` from the instance `object_id`. This is
-no PK change and no data copy, but it **is** an additive schema migration
-(DataJoint `alter()`). Pre-existing `OpticalFiberImplant` rows get `NULL` for the
-new column, so cross-linking a file whose implants were ingested **before** this
-change requires re-ingesting/backfilling those rows. Within a single
-`populate_all_common` run the value is populated as the implant ingests (before
-the config reads it), so freshly-ingested files resolve fine.
-
 ### Session-specific config — `FiberPhotometryConfig`
 
 The NWB `FiberPhotometryTable`, one row per fiber/channel. The custom override
@@ -220,28 +207,36 @@ FiberPhotometryConfig
   fiber_photometry_name: varchar(64) # lab-meta container name (usually one/file)
   fiber_id: int                      # the FiberPhotometryTable row `id` (see note)
   ---
-  -> OpticalFiberImplant             # common_optogenetics (reused); resolved via
-                                     #   row.optical_fiber.object_id
   -> Indicator
   -> ExcitationSource
   -> Photodetector
   -> [nullable] DichroicMirror                                       # optional ref
   -> [nullable] OpticalFilter.proj(emission_filter_name='optical_filter_name')   # optional
   -> [nullable] OpticalFilter.proj(excitation_filter_name='optical_filter_name') # optional
-  location: varchar(255)
+  optical_fiber_name: varchar(80)    # the OpticalFiber instance name (local, no FK)
+  location: varchar(255)             # OpticalFiber.description (nullable in source)
+  hemisphere=null: enum('left','right')  # insertion metadata (all nullable per spec)
+  ap_location=null: float
+  ml_location=null: float
+  dv_location=null: float
+  pitch=null: float
+  roll=null: float
+  yaw=null: float
   excitation_wavelength_in_nm: float
   emission_wavelength_in_nm: float
   coordinates=null: blob             # optional 3-vector for multi-fiber arrays
 ```
 
 Ingestion is a custom `generate_entries_from_nwb_object()` override (per the
-Architecture note). Required FK values come from the resolved object-refs
-(`row.indicator.name`, `row.excitation_source.name`, `row.photodetector.name`);
-the `OpticalFiberImplant` FK is resolved with a DB lookup on
-`(nwb_file_name, optical_fiber_object_id = row.optical_fiber.object_id)` — hence
-the additive column above. The device tables and `OpticalFiberImplant` must
-ingest before this table (`populate_all_common` ordering), guarded in the
-override.
+Architecture note). Device FK values come from the resolved object-refs
+(`row.indicator.name`, `row.excitation_source.name`, `row.photodetector.name`).
+The **fiber is stored locally, not FK-ed**: `optical_fiber_name ←
+row.optical_fiber.name`, `location ← row.optical_fiber.description`, and the
+insertion fields from `row.optical_fiber.fiber_insertion.*`
+(`insertion_position_ap/ml/dv_in_mm`, `hemisphere`, `insertion_angle_pitch/roll/
+yaw_in_deg`) — each nullable, since the extension marks them optional and the
+real data leaves several null. The device tables must ingest before this table
+(`populate_all_common` ordering), guarded in the override.
 
 **Optional refs** (`dichroic_mirror`, `emission_filter`, `excitation_filter`,
 `coordinates`) are read only when the column exists on the `FiberPhotometryTable`
@@ -344,10 +339,9 @@ Consequences:
 ## Integration
 
 - **`populate_all_common.py`**: `Indicator`, `ExcitationSource`, `Photodetector`,
-  `DichroicMirror`, `OpticalFilter` as parent nodes (alongside
-  `OpticalFiberDevice`, `Virus`); `FiberPhotometryConfig` after
-  `OpticalFiberImplant` **and** the device tables; `FiberPhotometryResponseSeries`
-  after `FiberPhotometryConfig`.
+  `DichroicMirror`, `OpticalFilter` as parent nodes; `FiberPhotometryConfig`
+  after the five device tables (no `OpticalFiberImplant` dependency —
+  self-contained); `FiberPhotometryResponseSeries` after `FiberPhotometryConfig`.
 - **`common/__init__.py`**: export the new tables.
 - **`pyproject.toml`**: `ndx-fiber-photometry==0.2.3` in the `test` extra.
   Optionally bump the existing core dep `ndx-ophys-devices` →
@@ -378,8 +372,9 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    (A minimal version of this builder is already prototyped and round-trips on
    pynwb 3.1.3 — see the design spike.)
 2. **Ingestion**: device, config, and signal rows appear; `FiberPhotometryConfig`
-   FKs resolve to the right devices and to the correct `OpticalFiberImplant`
-   (via `optical_fiber_object_id`); the `.Fiber` part maps the region row.
+   device FKs resolve to the right devices, `optical_fiber_name` + insertion
+   fields are stored locally (null where the NWB source is null), and the
+   `.Fiber` part maps the region row.
 3. **Retrieval**: `fetch_nwb()` / `fetch1_dataframe()` returns the trace with the
    expected length and time axis derived from `rate` + `starting_time`.
 4. **Gating contract**: (a) a non-photometry file (no matching objects) is a
@@ -396,8 +391,10 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    a naive re-`insert_from_nwbfile` raises `DuplicateError`. Test both: device
    re-ingest is a clean no-op; session-table re-ingest matches the established
    `reinsert` path.
-6. **Optogenetics regression**: `OpticalFiberImplant` still ingests unchanged
-   (new column nullable/defaulted); existing optogenetics tests pass.
+6. **Null insertion metadata** (the exact real-data shape decoupling fixes): a
+   fiber whose `pitch`/`roll`/`yaw` (and model `active_length`/`ferrule_*`) are
+   `None` ingests cleanly, with those config columns stored null. `common_optogenetics`
+   is untouched, so there is no optogenetics change to regress.
 7. **Package-absent import safety** (the core "don't require the extension"
    guarantee — a normal test-extra run has the package installed, so it cannot
    prove this on its own): assert `"ndx_fiber_photometry" not in sys.modules`
@@ -423,9 +420,10 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
     sample-data shape); (b) **non-consecutive** `FiberPhotometryTable` row `id`s
     → region positional-index translation is correct; (c) **two optical fibers
     sharing one model** (the sample data — all four share `DoricFlatFiber400um`)
-    → `OpticalFiberImplant` resolution by `optical_fiber_object_id` picks the
-    right implant; (d) a config table **lacking** the optional filter/dichroic
-    columns (the sample-data shape) ingests with those FKs left null.
+    → each config row stores its own `optical_fiber_name` + insertion, so a
+    shared model never conflates fibers; (d) a config table **lacking** the
+    optional filter/dichroic columns (the sample-data shape) ingests with those
+    FKs left null.
 
 ## Dependencies
 
@@ -460,10 +458,6 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
 
 ## Risks / open implementation details
 
-- **`OpticalFiberImplant` ordering vs `FiberPhotometryConfig`**: the config FK
-  resolution depends on `OpticalFiberImplant` (and its new `object_id` column)
-  being populated first — enforced by `populate_all_common` ordering and a guard
-  in the config `make`.
 - **Multiple excitation sources sharing a model**: 4 instances / ≤3 models; the
   collapsed device table keys by instance name and denormalizes model specs —
   acceptable, but re-ingest validation (`_expected_duplicates`) must compare
