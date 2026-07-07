@@ -175,12 +175,15 @@ the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
 - **`ExcitationSource`** ← `ExcitationSource` **or** `PulsedExcitationSource`
   (+ model), via a custom `get_nwb_objects()` matching both: `excitation_source_name`
   ←`name`, `description` (instance, per-channel), `manufacturer`, `source_type`,
-  `excitation_mode` (from model), a `source_class` `enum('continuous','pulsed')`
-  discriminator, and nullable pulsed-only fields `pulse_rate_in_Hz`,
-  `peak_power_in_W`, `peak_pulse_energy_in_J`. Matters because `excitation_source`
-  is a **required** config ref — an unmatched pulsed source would break the FK.
+  `excitation_mode` (from model), the nullable instance field `power_in_W` (and
+  similarly `intensity_in_W_per_m2` / `exposure_time_in_s` if present), a
+  `source_class` `enum('continuous','pulsed')` discriminator, and nullable
+  pulsed-only fields `pulse_rate_in_Hz`, `peak_power_in_W`, `peak_pulse_energy_in_J`.
+  Matters because `excitation_source` is a **required** config ref — an unmatched
+  pulsed source would break the FK.
 - **`Photodetector`** ← `Photodetector` (+ model): `photodetector_name`←`name`,
-  `description`, `manufacturer`, `detector_type`, `gain` (from model, nullable).
+  `description`, `manufacturer`, `detector_type`, `gain`, `gain_unit` (from
+  model, `gain`/`gain_unit` nullable — keep the unit whenever `gain` is stored).
 - **`DichroicMirror`** ← `DichroicMirror` (+ model): `dichroic_mirror_name`
   ←`name`, `manufacturer`, `cut_on_wavelength_in_nm`, `cut_off_wavelength_in_nm`
   (from model, all nullable). Default class-name matcher.
@@ -196,7 +199,10 @@ the `table_key_to_obj_attr` object-ref mapping (as `OpticalFiberImplant` reads
 
 ### Session-specific config — `FiberPhotometryConfig`
 
-The NWB `FiberPhotometryTable`, one row per fiber/channel. The custom override
+The NWB `FiberPhotometryTable`, one row per fiber/channel. It sets
+`_extension_requirements = {"ndx-fiber-photometry": "0.2.3", "ndx-ophys-devices":
+"0.3.1"}` (it reads the ndx-fiber-photometry table and ndx-ophys-devices object
+refs), so a below-min file is gated per the gating contract. The custom override
 iterates `FiberPhotometryTable.to_dataframe()` rows itself — it does **not** rely
 on the mixin's default `DynamicTable` recursion (which cannot do the FK lookups
 and optional-ref handling below).
@@ -214,7 +220,7 @@ FiberPhotometryConfig
   -> [nullable] OpticalFilter.proj(emission_filter_name='optical_filter_name')   # optional
   -> [nullable] OpticalFilter.proj(excitation_filter_name='optical_filter_name') # optional
   optical_fiber_name: varchar(80)    # the OpticalFiber instance name (local, no FK)
-  location: varchar(255)             # OpticalFiber.description (nullable in source)
+  location=null: varchar(255)        # OpticalFiber.description (nullable in source)
   hemisphere=null: enum('left','right')  # insertion metadata (all nullable per spec)
   ap_location=null: float
   ml_location=null: float
@@ -272,7 +278,9 @@ one container, so this degenerates to a single constant name.
 ### Signal reference — `FiberPhotometryResponseSeries`
 
 `dj.Imported`, following [`Raw`](../../../src/spyglass/common/common_ephys.py)
-(`raw_object_id: varchar(40)` + `nwb_object()` accessor).
+(`raw_object_id: varchar(40)` + `nwb_object()` accessor). Sets
+`_extension_requirements = {"ndx-fiber-photometry": "0.2.3"}` (it matches the
+`FiberPhotometryResponseSeries` type).
 
 ```text
 FiberPhotometryResponseSeries
@@ -391,10 +399,11 @@ mirrors the real files at reduced size — e.g. 2 fibers × 2 wavelengths, short
    a naive re-`insert_from_nwbfile` raises `DuplicateError`. Test both: device
    re-ingest is a clean no-op; session-table re-ingest matches the established
    `reinsert` path.
-6. **Null insertion metadata** (the exact real-data shape decoupling fixes): a
-   fiber whose `pitch`/`roll`/`yaw` (and model `active_length`/`ferrule_*`) are
-   `None` ingests cleanly, with those config columns stored null. `common_optogenetics`
-   is untouched, so there is no optogenetics change to regress.
+6. **Null fiber metadata** (the exact real-data shape decoupling fixes): a fiber
+   whose `description` (→ `location`), `pitch`/`roll`/`yaw`, and model
+   `active_length`/`ferrule_*` are `None` ingests cleanly, with every one of
+   those config columns stored null (not dropped by `_key_has_required_attrs`).
+   `common_optogenetics` is untouched, so there is no optogenetics change to regress.
 7. **Package-absent import safety** (the core "don't require the extension"
    guarantee — a normal test-extra run has the package installed, so it cannot
    prove this on its own): assert `"ndx_fiber_photometry" not in sys.modules`
