@@ -451,12 +451,14 @@ def test_unmodeled_attr_warns(insert_photometry, common, monkeypatch):
 
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
 # start, so pynwb must reconstruct the typed objects from the file-embedded spec
-# (the genuine stock-install case — no cached type-map registration). Exercises
-# the whole import-risk surface: NWB read, class-name matching (get_nwb_objects
-# via referenced_devices), and the embedded-namespace version gate
-# (get_file_namespaces). Needs no database, so it runs standalone.
+# (the genuine stock-install case — no cached type-map registration). Imports the
+# REAL ingestion module (spyglass.common -> common_photometry) and runs the
+# ingest path under the block, so an accidental extension import in the ingestion
+# code — at module load OR at runtime — raises ImportError and fails the child.
+# DB credentials come in via env vars (the child connects to the same test
+# container to activate schemas and read the file).
 _IMPORT_SAFETY_SUBPROCESS = """
-import importlib.util, sys
+import os, sys
 
 class _Block:
     def find_spec(self, name, path=None, target=None):
@@ -466,27 +468,22 @@ class _Block:
 
 sys.meta_path.insert(0, _Block())
 
-# load the DB-free helper by file path so importing spyglass.common (which would
-# open a DB connection) is avoided; its own imports (utils) never touch the DB
-spec = importlib.util.spec_from_file_location("_ph", {helper_path!r})
-hp = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(hp)
+import datajoint as dj
+dj.config["database.host"] = os.environ["_DJ_HOST"]
+dj.config["database.port"] = int(os.environ["_DJ_PORT"])
+dj.config["database.user"] = os.environ["_DJ_USER"]
+dj.config["database.password"] = os.environ["_DJ_PASS"]
 
-from pynwb import NWBHDF5IO
-from spyglass.utils.nwb_hash import get_file_namespaces
+import spyglass.common as sgc  # imports common_photometry under the block
 
-path = {file_path!r}
-with NWBHDF5IO(path, "r") as io:
-    nwb = io.read()
-    assert hp.is_photometry_file(nwb), "FiberPhotometryTable not matched by name"
-    fibers = hp.referenced_devices(nwb, "optical_fiber")
-    assert fibers and fibers[0].__class__.__name__ == "OpticalFiber", fibers
-    indicators = hp.referenced_devices(nwb, "indicator")
-    assert indicators and indicators[0].label == "dLight3.8"
-
-# the version gate reads the file-embedded namespaces (no import either)
-assert "ndx-fiber-photometry" in get_file_namespaces(path)
-assert "ndx_fiber_photometry" not in sys.modules, sorted(sys.modules)
+name = os.environ["_NWB_NAME"]
+# dry_run exercises read + class-name match + version gate, without inserting
+entries = sgc.FiberPhotometryConfig().insert_from_nwbfile(name, dry_run=True)
+assert entries, "no config entries produced from the file-embedded spec"
+sgc.OpticalFiber().insert_from_nwbfile(name, dry_run=True)
+assert "ndx_fiber_photometry" not in sys.modules, sorted(
+    m for m in sys.modules if "ndx" in m
+)
 print("IMPORT_SAFETY_OK")
 """
 
@@ -496,15 +493,16 @@ def test_package_absent_import_safety(insert_photometry, common):
     """Ingestion must not import ndx-fiber-photometry: NWB types are matched by
     class-name string and gated on the file-embedded namespace version.
 
-    Build the fixture (which imports the extension), then read + match + gate it
-    in a fresh subprocess where the extension's import is blocked from the start,
-    so any import attempt raises ``ImportError`` and fails the child.
+    Build the fixture (which imports the extension), then import the real
+    ingestion module and run its ingest path in a fresh subprocess where the
+    extension's import is blocked from the start — so any import attempt (module
+    load or runtime) raises ``ImportError`` and fails the child.
     """
+    import os
     import subprocess
     import sys
-    from pathlib import Path
 
-    from spyglass.common import Nwbfile
+    import datajoint as dj
 
     key, _ = insert_photometry(
         "mock_photometry_absent.nwb",
@@ -512,13 +510,19 @@ def test_package_absent_import_safety(insert_photometry, common):
     )
     assert len(common.FiberPhotometryConfig & key) == 1
 
-    repo = Path(__file__).resolve().parents[2]
-    script = _IMPORT_SAFETY_SUBPROCESS.format(
-        helper_path=str(repo / "src/spyglass/common/_photometry_nwb.py"),
-        file_path=Nwbfile().get_abs_path(key["nwb_file_name"]),
-    )
+    env = {
+        **os.environ,
+        "_DJ_HOST": str(dj.config["database.host"]),
+        "_DJ_PORT": str(dj.config["database.port"]),
+        "_DJ_USER": str(dj.config["database.user"]),
+        "_DJ_PASS": str(dj.config["database.password"]),
+        "_NWB_NAME": key["nwb_file_name"],
+    }
     result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True
+        [sys.executable, "-c", _IMPORT_SAFETY_SUBPROCESS],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert result.returncode == 0, result.stderr
     assert "IMPORT_SAFETY_OK" in result.stdout
