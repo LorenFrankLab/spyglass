@@ -487,9 +487,12 @@ def build_mixed_modality(nwb: NWBFile, suffix: str = "_mixed") -> NWBFile:
 def build_two_containers(nwb: NWBFile, suffix: str = "_2c") -> NWBFile:
     """Two ``FiberPhotometry`` lab-meta containers, each with a one-row table
     whose row ``id`` is 0 — only the config PK's ``fiber_photometry_name``
-    disambiguates the two ``fiber_id=0`` rows."""
+    disambiguates the two ``fiber_id=0`` rows. Each container also carries a
+    response series (region ``[0]``) so the ``.Fiber`` FK's container-name
+    derivation is exercised against the *correct* one of two containers."""
     import ndx_fiber_photometry as fp
     import ndx_ophys_devices as od
+    from hdmf.common import DynamicTableRegion
 
     fiber_model = _fiber_model(od, "full", suffix)
     exc_model = od.ExcitationSourceModel(
@@ -537,6 +540,21 @@ def build_two_containers(nwb: NWBFile, suffix: str = "_2c") -> NWBFile:
                 fiber_photometry_table=table,
                 fiber_photometry_indicators=fp.FiberPhotometryIndicators(
                     indicators=[indicator]
+                ),
+            )
+        )
+        nwb.add_acquisition(
+            fp.FiberPhotometryResponseSeries(
+                name=f"FPResponseSeries_{site}",
+                data=np.arange(100, dtype="float64"),
+                unit="V",
+                rate=100.0,
+                starting_time=0.0,
+                fiber_photometry_table_region=DynamicTableRegion(
+                    name="fiber_photometry_table_region",
+                    data=[0],
+                    description="row 0",
+                    table=table,
                 ),
             )
         )
@@ -721,6 +739,69 @@ def build_bad_region(nwb: NWBFile, suffix: str = "_bad", *, kind) -> NWBFile:
                 name="fiber_photometry_table_region",
                 data=region_data,
                 description="inconsistent region",
+                table=table,
+            ),
+        )
+    )
+    return nwb
+
+
+def build_colliding_columns(nwb: NWBFile, suffix: str = "_collide") -> NWBFile:
+    """Two fibers sharing the **same** location and excitation wavelength,
+    recorded by one 2-D series (region ``[0, 1]``). Both columns produce the same
+    base label, so ``fetch1_dataframe`` must disambiguate them by ``fiber_id``.
+    """
+    import ndx_fiber_photometry as fp
+    import ndx_ophys_devices as od
+    from hdmf.common import DynamicTableRegion
+
+    fiber_model = _fiber_model(od, "full", suffix)
+    exc_model = _excitation_source_model(od, suffix)
+    det_model = _photodetector_model(od, suffix)
+    for m in (fiber_model, exc_model, det_model):
+        nwb.add_device_model(m)
+    fiber_a = od.OpticalFiber(
+        name="OpticalFiber_a" + suffix,
+        model=fiber_model,
+        description="a",
+        fiber_insertion=_fiber_insertion(od, complete=True),
+    )
+    fiber_b = od.OpticalFiber(
+        name="OpticalFiber_b" + suffix,
+        model=fiber_model,
+        description="b",
+        fiber_insertion=_fiber_insertion(od, complete=False),
+    )
+    exc = od.ExcitationSource(name=EXC_SOURCE_CONT + suffix, model=exc_model)
+    det = od.Photodetector(name=PHOTODETECTOR_NAME + suffix, model=det_model)
+    for d in (fiber_a, fiber_b, exc, det):
+        nwb.add_device(d)
+    indicator = od.Indicator(name=INDICATOR_NAME + suffix, label="dLight3.8")
+    table = fp.FiberPhotometryTable(
+        name="fiber_photometry_table", description="per-fiber config"
+    )
+    for fiber in (fiber_a, fiber_b):
+        table.add_row(
+            location="DLS",  # same site ...
+            excitation_wavelength_in_nm=470.0,  # ... and wavelength -> collision
+            emission_wavelength_in_nm=525.0,
+            indicator=indicator,
+            optical_fiber=fiber,
+            excitation_source=exc,
+            photodetector=det,
+        )
+    nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
+    nwb.add_acquisition(
+        fp.FiberPhotometryResponseSeries(
+            name="FPResponseSeries_collide",
+            data=np.arange(200, dtype="float64").reshape(100, 2),
+            unit="V",
+            rate=100.0,
+            starting_time=0.0,
+            fiber_photometry_table_region=DynamicTableRegion(
+                name="fiber_photometry_table_region",
+                data=[0, 1],
+                description="both rows",
                 table=table,
             ),
         )

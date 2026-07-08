@@ -114,7 +114,13 @@ def class_discriminator(subclass_to_value: dict, default: str) -> Callable:
     """Discriminator getter: the value for the first ``subclass_to_value`` class
     name the object matches (checked in dict order), else ``default``. Because the
     referenced object *is* the concrete subtype, this derives the enum without any
-    installed ``ndx_*`` types."""
+    installed ``ndx_*`` types.
+
+    Matching is by **exact** class name (``is_nwb_obj_type``), not ``isinstance``:
+    an unmapped subtype introduced by a future ``ndx-ophys-devices`` version falls
+    through to ``default``. That is correct for the base type today; if a new
+    subtype must be distinguished, add it to ``subclass_to_value`` (and widen the
+    corresponding ``enum`` column)."""
 
     def _get(obj):
         for subclass_name, value in subclass_to_value.items():

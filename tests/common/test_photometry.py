@@ -27,14 +27,19 @@ class _WarnRecorder:
 
 
 def test_fixture_embeds_core_2_9_0(raw_dir, common):
-    """The synthetic fixture must embed NWB core 2.9.0 (the supported floor)."""
+    """The synthetic fixture must embed NWB core 2.9.0 (the supported floor) and
+    ndx-* namespaces at/above the ingest gate minimums — otherwise the whole
+    suite would silently no-op (gate skip) instead of exercising ingestion."""
+    from packaging.version import Version
+
     from spyglass.utils.nwb_hash import get_file_namespaces
 
     path = raw_dir / "mock_photometry_coreversion.nwb"
     fx.write(path, fx.build_minimal, identifier="coreversion")
     namespaces = get_file_namespaces(str(path))
     assert namespaces.get("core") == "2.9.0"
-    assert "ndx-fiber-photometry" in namespaces
+    assert Version(namespaces["ndx-fiber-photometry"]) >= Version("0.2.3")
+    assert Version(namespaces["ndx-ophys-devices"]) >= Version("0.3.1")
 
 
 def test_device_catalog_no_blob_columns(common):
@@ -691,6 +696,8 @@ def test_response_series_ophys_below_min_skips(
     """
     from spyglass.utils.mixins import ingestion
 
+    rec = _WarnRecorder()
+    monkeypatch.setattr(ingestion, "logger", rec)
     monkeypatch.setattr(
         ingestion,
         "get_file_namespaces",
@@ -708,6 +715,8 @@ def test_response_series_ophys_below_min_skips(
     assert len(common.FiberPhotometryConfig & key) == 0
     assert len(common.FiberPhotometryResponseSeries & key) == 0
     assert len(common.FiberPhotometryResponseSeries.Fiber & key) == 0
+    # the skip is diagnostic, not silent
+    assert any("ndx-ophys-devices" in m for m in rec.messages)
 
 
 @pytest.mark.slow
@@ -726,6 +735,46 @@ def test_make_repopulates(insert_photometry, common):
     assert len(tbl & key) == 0
     tbl().make(key)  # the make() shim
     assert len(tbl & key) == 1 and len(tbl.Fiber & key) == 1
+
+
+@pytest.mark.slow
+def test_column_label_collision_disambiguation(insert_photometry, common):
+    """Two columns of one series whose config rows share location+wavelength get
+    the same base label; ``fetch1_dataframe`` disambiguates them by ``fiber_id``
+    (unique, usable column names — pandas silently mangles duplicate labels)."""
+    key, result = insert_photometry(
+        "mock_photometry_collide.nwb", fx.build_colliding_columns
+    )
+    assert not result
+    df = (common.FiberPhotometryResponseSeries & key).fetch1_dataframe()
+    assert df.shape == (100, 2)
+    assert list(df.columns) == ["DLS_470nm_id0", "DLS_470nm_id1"]
+    assert len(set(df.columns)) == 2  # unique
+
+
+@pytest.mark.slow
+def test_multi_container_response_fiber_derivation(insert_photometry, common):
+    """With two FiberPhotometry containers, each response series' ``.Fiber`` FK
+    resolves to its **own** container's config (the region-side container-name
+    derivation picks the right one of two, not always ``"fiber_photometry"``).
+    """
+    key, result = insert_photometry(
+        "mock_photometry_2c_resp.nwb", fx.build_two_containers
+    )
+    assert not result
+    resp = common.FiberPhotometryResponseSeries & key
+    assert len(resp) == 2
+    # each series' .Fiber row carries the container name matching its series
+    for name, container in (
+        ("FPResponseSeries_A", "fiber_photometry_A"),
+        ("FPResponseSeries_B", "fiber_photometry_B"),
+    ):
+        series_key = (resp & {"name": name}).fetch1("KEY")
+        fiber = (
+            common.FiberPhotometryResponseSeries.Fiber & series_key
+        ).fetch1()
+        assert fiber["fiber_photometry_name"] == container
+        assert fiber["fiber_id"] == 0
 
 
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
