@@ -296,6 +296,7 @@ def build_minimal(
     excitation_power=False,
     row_id=None,
     response_region=True,
+    timestamps=None,
 ) -> NWBFile:
     """A single-fiber photometry file, tunable for the null/gate/warn cases.
 
@@ -305,6 +306,9 @@ def build_minimal(
     ``row_id``: explicit (possibly non-consecutive) FiberPhotometryTable row id.
     ``response_region``: if False, the response series carries no
     ``fiber_photometry_table_region`` (the optional-region case).
+    ``timestamps``: if given, the response series uses explicit (possibly
+    irregular) ``timestamps`` instead of ``rate``/``starting_time``; the trace
+    length follows the timestamp count.
     """
     import ndx_fiber_photometry as fp
     import ndx_ophys_devices as od
@@ -375,13 +379,22 @@ def build_minimal(
     table.add_row(**row)
     nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
 
-    series_kwargs = dict(
-        name="FPResponseSeries_DLS_490nm",
-        data=np.arange(500, dtype="float64"),
-        unit="V",
-        rate=6024.096,
-        starting_time=0.0,
-    )
+    if timestamps is not None:
+        ts = np.asarray(timestamps, dtype="float64")
+        series_kwargs = dict(
+            name="FPResponseSeries_DLS_490nm",
+            data=np.arange(len(ts), dtype="float64"),
+            unit="V",
+            timestamps=ts,
+        )
+    else:
+        series_kwargs = dict(
+            name="FPResponseSeries_DLS_490nm",
+            data=np.arange(500, dtype="float64"),
+            unit="V",
+            rate=6024.096,
+            starting_time=0.0,
+        )
     if response_region:
         series_kwargs["fiber_photometry_table_region"] = DynamicTableRegion(
             name="fiber_photometry_table_region",
@@ -631,6 +644,84 @@ def build_multi_series(nwb: NWBFile, suffix: str = "_multi") -> NWBFile:
             starting_time=0.0,
             fiber_photometry_table_region=_region(
                 "fiber_photometry_table_region", [0, 1], "rows 0 and 1"
+            ),
+        )
+    )
+    return nwb
+
+
+def _single_fiber_scene(nwb: NWBFile, suffix: str):
+    """One fiber + source + detector + indicator and a 1-row FiberPhotometryTable
+    (row id 0) with its FiberPhotometry container. Returns the table so callers
+    can attach their own response series."""
+    import ndx_fiber_photometry as fp
+    import ndx_ophys_devices as od
+
+    fiber_model = _fiber_model(od, "full", suffix)
+    exc_model = _excitation_source_model(od, suffix)
+    det_model = _photodetector_model(od, suffix)
+    for m in (fiber_model, exc_model, det_model):
+        nwb.add_device_model(m)
+    fiber = od.OpticalFiber(
+        name="OpticalFiber_DLS" + suffix,
+        model=fiber_model,
+        description="400um fiber in DLS",
+        fiber_insertion=_fiber_insertion(od, complete=True),
+    )
+    exc = od.ExcitationSource(name=EXC_SOURCE_CONT + suffix, model=exc_model)
+    det = od.Photodetector(name=PHOTODETECTOR_NAME + suffix, model=det_model)
+    for d in (fiber, exc, det):
+        nwb.add_device(d)
+    indicator = od.Indicator(name=INDICATOR_NAME + suffix, label="dLight3.8")
+    table = fp.FiberPhotometryTable(
+        name="fiber_photometry_table", description="per-fiber config"
+    )
+    table.add_row(
+        location="DLS",
+        excitation_wavelength_in_nm=470.0,
+        emission_wavelength_in_nm=525.0,
+        indicator=indicator,
+        optical_fiber=fiber,
+        excitation_source=exc,
+        photodetector=det,
+    )
+    nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
+    return table
+
+
+def build_bad_region(nwb: NWBFile, suffix: str = "_bad", *, kind) -> NWBFile:
+    """A response series whose region is inconsistent with the trace, for the
+    ingest guards:
+
+    ``kind='out_of_range'``: the region references a table position that does not
+    exist (a 1-row table, region ``[5]``) — must raise, not silently mis-map.
+    ``kind='width_mismatch'``: a 2-D ``[time, 2]`` trace whose region lists only
+    one fiber — must warn (some columns end up unlabeled), not silently proceed.
+    """
+    import ndx_fiber_photometry as fp
+    from hdmf.common import DynamicTableRegion
+
+    table = _single_fiber_scene(nwb, suffix)
+    if kind == "out_of_range":
+        data = np.arange(100, dtype="float64")
+        region_data = [5]  # no such position in a 1-row table
+    elif kind == "width_mismatch":
+        data = np.arange(200, dtype="float64").reshape(100, 2)  # 2 columns
+        region_data = [0]  # only one fiber referenced
+    else:  # pragma: no cover - guards against a typo in the test
+        raise ValueError(f"unknown kind {kind!r}")
+    nwb.add_acquisition(
+        fp.FiberPhotometryResponseSeries(
+            name="FPResponseSeries_bad",
+            data=data,
+            unit="V",
+            rate=100.0,
+            starting_time=0.0,
+            fiber_photometry_table_region=DynamicTableRegion(
+                name="fiber_photometry_table_region",
+                data=region_data,
+                description="inconsistent region",
+                table=table,
             ),
         )
     )

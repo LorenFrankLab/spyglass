@@ -518,20 +518,42 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         else:
             table = region.table
             container = getattr(table, "parent", None)
+            # Mirror FiberPhotometryConfig's container-name derivation so the
+            # .Fiber -> config FK resolves (one container per file is the norm).
             fiber_photometry_name = (
                 getattr(container, "name", None) or "fiber_photometry"
             )
+            region_positions = list(region.data)
+            # The region should reference one table row per trace column; a
+            # mismatch means some columns can't be mapped to a fiber (or extra
+            # rows go unused). Warn rather than guess.
+            n_columns = series.data.shape[1] if series.data.ndim == 2 else 1
+            if len(region_positions) != n_columns:
+                logger.warning(
+                    f"FiberPhotometryResponseSeries {series.name!r}: region "
+                    f"maps {len(region_positions)} fiber(s) but the trace has "
+                    f"{n_columns} column(s); some columns will be unlabeled."
+                )
             # region.data holds positional indices; the row id ordering (which
             # may be non-consecutive) maps a position to the config fiber_id.
             row_ids = list(table.to_dataframe().index)
-            for region_index, positional in enumerate(list(region.data)):
+            for region_index, positional in enumerate(region_positions):
+                position = int(positional)
+                # A negative index would silently wrap to the wrong row; an
+                # out-of-range one would mis-map. Fail loud and named instead.
+                if not 0 <= position < len(row_ids):
+                    raise ValueError(
+                        f"FiberPhotometryResponseSeries {series.name!r}: region "
+                        f"position {positional} is out of range for the "
+                        f"{len(row_ids)}-row FiberPhotometryTable."
+                    )
                 fiber_rows.append(
                     dict(
                         base_key,
                         response_series_object_id=object_id,
                         region_index=region_index,
                         fiber_photometry_name=fiber_photometry_name,
-                        fiber_id=int(row_ids[int(positional)]),
+                        fiber_id=int(row_ids[position]),
                     )
                 )
 

@@ -596,6 +596,91 @@ def test_multi_row_region(insert_photometry, common):
     assert np.allclose(df["DMS_490nm"].to_numpy(), expected[:, 1])
 
 
+@pytest.mark.slow
+def test_response_series_nonconsecutive_fiber_id(insert_photometry, common):
+    """The ``.Fiber`` row maps the region's positional index to the table row
+    ``id``, not to the position itself: a 1-row table with ``id`` 7 and region
+    ``[0]`` must yield ``fiber_id`` 7 — a guard that would fail an implementation
+    that used ``fiber_id = positional``."""
+    key, result = insert_photometry(
+        "mock_photometry_ncfiber.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_ncfiber", row_id=7),
+    )
+    assert not result
+    fiber = (common.FiberPhotometryResponseSeries.Fiber & key).fetch1()
+    assert fiber["region_index"] == 0
+    assert fiber["fiber_id"] == 7
+
+
+@pytest.mark.slow
+def test_fetch1_dataframe_timestamps(insert_photometry, common):
+    """A series with explicit (irregular) ``timestamps`` and no ``rate`` yields a
+    dataframe indexed by those timestamps, not a rate-derived axis."""
+    ts = [0.0, 0.5, 1.5, 3.0]
+    key, result = insert_photometry(
+        "mock_photometry_ts.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_ts", timestamps=ts),
+    )
+    assert not result
+    df = (common.FiberPhotometryResponseSeries & key).fetch1_dataframe()
+    assert len(df) == len(ts)
+    assert np.allclose(df.index.to_numpy(), ts)
+
+
+def _first_response_series(nwb):
+    from spyglass.common._photometry_nwb import response_series
+
+    return response_series(nwb)[0]
+
+
+def test_region_absent_emits_empty_fiber_key(common):
+    """A region-absent series still returns the ``.Fiber`` part key (empty), so
+    the mixin's multi-object insert loop can extend it across series in one file
+    regardless of order — otherwise a later region-present series would
+    ``KeyError``. Exercises the override directly (no ingest)."""
+    tbl = common.FiberPhotometryResponseSeries()
+    nwb = fx.build_minimal(
+        fx._new_nwb("noreg"), suffix="_noreg", response_region=False
+    )
+    entries = tbl.generate_entries_from_nwb_object(
+        _first_response_series(nwb), base_key={"nwb_file_name": "x"}
+    )
+    assert tbl.Fiber in entries and entries[tbl.Fiber] == []
+    assert len(entries[tbl]) == 1  # master row still emitted
+
+
+def test_region_index_out_of_range_raises(common):
+    """A region position with no matching table row raises a named ``ValueError``
+    rather than silently mis-mapping (a negative index would otherwise wrap to the
+    wrong row)."""
+    tbl = common.FiberPhotometryResponseSeries()
+    nwb = fx.build_bad_region(
+        fx._new_nwb("oor"), suffix="_oor", kind="out_of_range"
+    )
+    with pytest.raises(ValueError, match="out of range"):
+        tbl.generate_entries_from_nwb_object(
+            _first_response_series(nwb), base_key={"nwb_file_name": "x"}
+        )
+
+
+def test_region_width_mismatch_warns(common, monkeypatch):
+    """A 2-D trace whose region lists fewer fibers than columns warns (some
+    columns cannot be labeled) but still maps the referenced fiber."""
+    from spyglass.common import common_photometry
+
+    rec = _WarnRecorder()
+    monkeypatch.setattr(common_photometry, "logger", rec)
+    tbl = common.FiberPhotometryResponseSeries()
+    nwb = fx.build_bad_region(
+        fx._new_nwb("wm"), suffix="_wm", kind="width_mismatch"
+    )
+    entries = tbl.generate_entries_from_nwb_object(
+        _first_response_series(nwb), base_key={"nwb_file_name": "x"}
+    )
+    assert len(entries[tbl.Fiber]) == 1  # only the one referenced fiber
+    assert any("column" in m for m in rec.messages)
+
+
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
 # start, so pynwb must reconstruct the typed objects from the file-embedded spec
 # (the genuine stock-install case — no cached type-map registration). Imports the
