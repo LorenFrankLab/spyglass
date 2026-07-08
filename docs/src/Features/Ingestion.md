@@ -81,10 +81,13 @@ NWB extension into the `common_photometry` schema. `insert_sessions` populates:
     references, so a file without a `FiberPhotometry` container is a clean no-op.
 - `FiberPhotometryConfig` — one row per `FiberPhotometryTable` row, with foreign
     keys to the device tables plus the fiber's session-specific insertion
-    metadata and per-channel excitation/emission wavelengths. When the fiber's
-    indicator carries a viral injection, the row also links (nullably) to the
-    shared, session-scoped `common_optogenetics.VirusInjection` — the same table
-    optogenetic effectors use — rather than duplicating injection modeling.
+    metadata and per-channel excitation/emission wavelengths. The implant site
+    (the row's `location`) is normalized into the shared `BrainRegion` lookup —
+    the same table electrodes use — so photometry sites are queryable alongside
+    ephys regions. When the fiber's indicator carries a viral injection, the row
+    also links (nullably) to the shared, session-scoped
+    `common_optogenetics.VirusInjection` — the same table optogenetic effectors
+    use — rather than duplicating injection modeling.
 - `FiberPhotometryResponseSeries` — one row per recorded
     `FiberPhotometryResponseSeries`, storing the NWB object id (not the array) so
     the trace is retrievable via `fetch_nwb()`. Its `.Fiber` part maps each data

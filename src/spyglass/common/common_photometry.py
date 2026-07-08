@@ -29,6 +29,7 @@ from spyglass.common._photometry_nwb import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_optogenetics import VirusInjection
+from spyglass.common.common_region import BrainRegion
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassIngestion
@@ -337,7 +338,7 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
     -> [nullable] OpticalFilter.proj(excitation_filter_name='optical_filter_name')
     -> OpticalFiber
     -> [nullable] VirusInjection        # viral injection delivering this indicator (if any)
-    location: varchar(255)              # the FiberPhotometryTable row site, e.g. 'DLS'
+    -> BrainRegion                      # implant site, normalized (row `location`, e.g. 'DLS')
     optical_fiber_description=null: varchar(255)  # per-channel fiber description
     hemisphere=null: enum('left', 'right')
     ap_location=null: float
@@ -411,7 +412,15 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
                 dichroic_mirror_name=_ref_name(record, "dichroic_mirror"),
                 emission_filter_name=_ref_name(record, "emission_filter"),
                 excitation_filter_name=_ref_name(record, "excitation_filter"),
-                location=record["location"],
+                # Normalize the row's site into the shared BrainRegion lookup
+                # (fetch-or-add), as ElectrodeGroup does with its NWB location.
+                # fetch_add writes during entry generation, so a never-seen
+                # region is added to the lookup even under dry_run=True (which
+                # only gates the main insert). Accepted: it mirrors the electrode
+                # path and keeps region_id insertable, and BrainRegion is a
+                # shared, idempotent controlled vocabulary (no session data, no
+                # dangling FK).
+                region_id=BrainRegion.fetch_add(region_name=record["location"]),
                 optical_fiber_description=getattr(fiber, "description", None),
                 excitation_wavelength_in_nm=float(
                     record["excitation_wavelength_in_nm"]
@@ -461,9 +470,9 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
         One row per config row that carries an injection (rows without one are
         omitted). Resolves via the ``injection_object_id`` FK rather than a
         natural join: ``FiberPhotometryConfig`` and ``VirusInjection`` share
-        eight incidental secondary names (``location``/``hemisphere``/
-        ``ap_location``/``ml_location``/``dv_location``/``pitch``/``roll``/``yaw``
-        — fiber-insertion here, injection-site there), and ``VirusInjection`` and
+        seven incidental secondary names (``hemisphere``/``ap_location``/
+        ``ml_location``/``dv_location``/``pitch``/``roll``/``yaw`` —
+        fiber-insertion here, injection-site there), and ``VirusInjection`` and
         ``Virus`` both carry ``description``; a bare ``*`` would silently join on
         those and drop rows.
         """
@@ -706,17 +715,18 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
     def _column_labels(self, key, series, n_cols):
         """Deterministic per-column labels from the ``.Fiber`` -> config rows.
 
-        ``f"{location or optical_fiber_name}_{excitation_wavelength}nm"``,
+        ``f"{region_name or optical_fiber_name}_{excitation_wavelength}nm"``,
         disambiguated by ``fiber_id`` if two columns still collide. Columns with
-        no ``.Fiber`` mapping (e.g. a series ingested without a region) fall back
-        to ``f"{series.name}_col{i}"``.
+        no ``.Fiber`` mapping (a series ingested without a
+        ``fiber_photometry_table_region``) fall back to
+        ``f"{series.name}_col{i}"``.
         """
         from collections import Counter
 
-        joined = (self.Fiber & key) * FiberPhotometryConfig
+        joined = (self.Fiber & key) * FiberPhotometryConfig * BrainRegion
         rows = joined.fetch(
             "region_index",
-            "location",
+            "region_name",
             "optical_fiber_name",
             "excitation_wavelength_in_nm",
             "fiber_id",
@@ -724,7 +734,7 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         )
         base_by_index = {}
         for row in rows:
-            site = row["location"] or row["optical_fiber_name"]
+            site = row["region_name"] or row["optical_fiber_name"]
             base = f"{site}_{int(row['excitation_wavelength_in_nm'])}nm"
             base_by_index[row["region_index"]] = (base, row["fiber_id"])
 

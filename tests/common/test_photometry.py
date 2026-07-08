@@ -109,10 +109,35 @@ def test_device_and_config_ingest(photometry_full, common):
 
 @pytest.mark.slow
 def test_location_from_row(photometry_full, common):
-    """``location`` is the FiberPhotometryTable row's site, not the fiber desc."""
-    config = common.FiberPhotometryConfig & photometry_full
-    assert (config & {"fiber_id": 0}).fetch1("location") == "DLS"
-    assert (config & {"fiber_id": 1}).fetch1("location") == "DMS"
+    """The row's site is normalized into BrainRegion (not the fiber desc)."""
+    config = (
+        common.FiberPhotometryConfig & photometry_full
+    ) * common.BrainRegion
+    assert (config & {"fiber_id": 0}).fetch1("region_name") == "DLS"
+    assert (config & {"fiber_id": 1}).fetch1("region_name") == "DMS"
+
+
+@pytest.mark.slow
+def test_same_location_shares_one_brain_region(insert_photometry, common):
+    """Two fibers at the same site normalize to a single, shared BrainRegion row
+    (the fetch_add dedup invariant), not one region row per config row. A site
+    unique to this test proves ingestion creates the row (rather than reusing one
+    another fixture pre-seeded) and that a second config row reuses it."""
+    site = "PhotomDedupSite"
+    assert len(common.BrainRegion & {"region_name": site}) == 0
+
+    key, result = insert_photometry(
+        "mock_photometry_dedup.nwb",
+        lambda nwb: fx.build_colliding_columns(nwb, location=site),
+    )
+    assert not result
+
+    # exactly one BrainRegion row was created for the shared site
+    assert len(common.BrainRegion & {"region_name": site}) == 1
+    # ...and both config rows resolve to that same region_id
+    region_ids = (common.FiberPhotometryConfig & key).fetch("region_id")
+    assert len(region_ids) == 2
+    assert len(set(region_ids)) == 1
 
 
 @pytest.mark.slow
@@ -321,8 +346,11 @@ def test_null_fiber_metadata(insert_photometry, common):
     assert fiber["model_number"] is None
 
     cfg = (common.FiberPhotometryConfig & key).fetch1()
-    assert cfg["location"] == "DLS"
     assert cfg["pitch"] is None and cfg["roll"] is None and cfg["yaw"] is None
+    region = ((common.FiberPhotometryConfig & key) * common.BrainRegion).fetch1(
+        "region_name"
+    )
+    assert region == "DLS"
 
 
 @pytest.mark.slow
@@ -865,7 +893,9 @@ def test_config_injection_link(insert_photometry, common):
     rows = cfg.fetch_injection(as_dict=True)
     assert len(rows) == 1  # the collision-free accessor keeps the row
     row = rows[0]
-    assert row["location"] == "NAcc"  # injection site (not the fiber's 'DLS')
+    assert (
+        row["location"] == "NAcc"
+    )  # injection site (VirusInjection, free text)
     assert row["titer"] == pytest.approx(1.5e13, rel=1e-3)
     assert row["construct_name"] == "AAV-dLight3.8"
 

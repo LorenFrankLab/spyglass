@@ -819,7 +819,9 @@ def build_bad_region(nwb: NWBFile, suffix: str = "_bad", *, kind) -> NWBFile:
     return nwb
 
 
-def build_colliding_columns(nwb: NWBFile, suffix: str = "_collide") -> NWBFile:
+def build_colliding_columns(
+    nwb: NWBFile, suffix: str = "_collide", location: str = "DLS"
+) -> NWBFile:
     """Two fibers sharing the **same** location and excitation wavelength,
     recorded by one 2-D series (region ``[0, 1]``). Both columns produce the same
     base label, so ``fetch1_dataframe`` must disambiguate them by ``fiber_id``.
@@ -855,7 +857,7 @@ def build_colliding_columns(nwb: NWBFile, suffix: str = "_collide") -> NWBFile:
     )
     for fiber in (fiber_a, fiber_b):
         table.add_row(
-            location="DLS",  # same site ...
+            location=location,  # same site ...
             excitation_wavelength_in_nm=470.0,  # ... and wavelength -> collision
             emission_wavelength_in_nm=525.0,
             indicator=indicator,
