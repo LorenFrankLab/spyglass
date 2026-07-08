@@ -232,6 +232,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Common
 
     - Add tables for storing optogenetic experiment information #1312
+    - Add `common_photometry` tables for ingesting `ndx-fiber-photometry`
+        metadata (device catalog + `FiberPhotometryConfig`); gate the
+        `common_optogenetics` fiber tables off photometry fibers (no schema change)
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
     - Change `IntervalList.insert` to `cautious_insert` #1423
     - Allow email send on space check success, clean up maintenance logging #1381

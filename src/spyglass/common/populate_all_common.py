@@ -37,6 +37,15 @@ from spyglass.common.common_optogenetics import (
     Virus,
     VirusInjection,
 )
+from spyglass.common.common_photometry import (
+    DichroicMirror,
+    ExcitationSource,
+    FiberPhotometryConfig,
+    Indicator,
+    OpticalFiber,
+    OpticalFilter,
+    Photodetector,
+)
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
@@ -204,6 +213,12 @@ def populate_all_common(
             DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
             OpticalFiberDevice,  # Parent node
             Virus,  # Parent node
+            Indicator,  # Parent node (photometry device catalog)
+            ExcitationSource,  # Parent node
+            Photodetector,  # Parent node
+            DichroicMirror,  # Parent node
+            OpticalFilter,  # Parent node
+            OpticalFiber,  # Parent node (photometry-owned fiber catalog)
         ],
         [
             Probe,  # Depends on ProbeType, DataAcquisitionDevice
@@ -233,6 +248,7 @@ def populate_all_common(
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
+            FiberPhotometryConfig,  # Depends on Session and photometry devices
         ],
         [
             RawPosition,  # Depends on PositionSource

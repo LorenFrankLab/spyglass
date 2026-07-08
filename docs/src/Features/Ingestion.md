@@ -67,3 +67,35 @@ table entries to the source nwb objects and attributes.
 
 For entries not yet contained in the updated format, a complete list of this
 mappings can also be found [here](../ForDevelopers/UsingNWB.md).
+
+## Fiber photometry
+
+Spyglass ingests fiber-photometry setups recorded with the
+[`ndx-fiber-photometry`](https://github.com/catalystneuro/ndx-fiber-photometry)
+NWB extension into the `common_photometry` schema. `insert_sessions` populates:
+
+- Six reusable device/reagent tables — `Indicator`, `ExcitationSource`,
+    `Photodetector`, `DichroicMirror`, `OpticalFilter`, and `OpticalFiber` — a
+    shared catalog keyed by device name and storing only reusable model specs.
+    Each is reference-scoped: it ingests only the objects a `FiberPhotometryTable`
+    references, so a file without a `FiberPhotometry` container is a clean no-op.
+- `FiberPhotometryConfig` — one row per `FiberPhotometryTable` row, with foreign
+    keys to the device tables plus the fiber's session-specific insertion
+    metadata and per-channel excitation/emission wavelengths.
+
+The recorded fluorescence traces are **not** copied into the database in this
+release (metadata + retrieval by object id land as a follow-up); an unmodeled
+`FiberPhotometryTable` column or device attribute is ignored with a warning
+naming it, rather than dropped silently.
+
+Data-production constraint: files must embed NWB **`core` 2.9.0** — write them
+with pynwb 3.1.x. This lets the feature ship on the current dependency floor with
+no `pynwb`/`hdmf` bump; the `ndx-fiber-photometry` package is only needed to
+*build* test fixtures and is never imported at ingest time (NWB types are matched
+by class name and gated on the file-embedded namespace version).
+
+Ingesting a photometry file also touches `common_optogenetics`, whose optical
+fiber tables (`OpticalFiberDevice`/`OpticalFiberImplant`) share the underlying
+`ndx-ophys-devices` types. Those tables now skip photometry-referenced fibers via
+a `get_nwb_objects()` gate — a behavioral change only, with **no schema change**;
+a non-photometry file is unaffected.
