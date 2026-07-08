@@ -7,7 +7,7 @@ without a database and safe to import from any schema module. Shared by
 ``common_optogenetics`` (the fiber-table gate).
 """
 
-from typing import Callable, List, Set
+from typing import Callable, List, Sequence, Set, Union
 
 from pynwb import NWBFile
 
@@ -28,12 +28,14 @@ def is_photometry_file(nwb_file: NWBFile) -> bool:
     return len(photometry_tables(nwb_file)) > 0
 
 
-def referenced_devices(nwb_file: NWBFile, column_names) -> List:
+def referenced_devices(
+    nwb_file: NWBFile, column_names: Union[str, Sequence[str]]
+) -> List:
     """Distinct device objects referenced by the given ``FiberPhotometryTable``
     column(s), deduped by ``name`` in first-seen order.
 
-    Returns ``[]`` when the file has no ``FiberPhotometry`` container (a clean
-    no-op for non-photometry files). Defensive: a column absent from a table
+    Returns ``[]`` when the file has no ``FiberPhotometryTable`` (a clean no-op
+    for non-photometry files). Defensive: a column absent from a table
     (e.g. a file predating the 0.2.3 shape) is skipped rather than raising, and a
     per-row null reference is ignored.
     """
@@ -68,7 +70,7 @@ def photometry_fiber_names(nwb_file: NWBFile) -> Set[str]:
 
 
 def model_attr(name: str) -> Callable:
-    """Null-safe folder reading ``obj.model.<name>`` (``None`` if no model)."""
+    """Null-safe getter reading ``obj.model.<name>`` (``None`` if no model)."""
 
     def _get(obj):
         model = getattr(obj, "model", None)
@@ -78,7 +80,7 @@ def model_attr(name: str) -> Callable:
 
 
 def model_range(name: str, index: int) -> Callable:
-    """Null-safe folder for a ``[2]``-vector model spec, returning one endpoint
+    """Null-safe getter for a ``[2]``-vector model spec, returning one endpoint
     as a scalar float (``None`` if the model or vector is absent)."""
 
     def _get(obj):
@@ -92,7 +94,7 @@ def model_range(name: str, index: int) -> Callable:
 
 
 def class_discriminator(subclass_to_value: dict, default: str) -> Callable:
-    """Discriminator folder: the value for the first ``subclass_to_value`` class
+    """Discriminator getter: the value for the first ``subclass_to_value`` class
     name the object matches (checked in dict order), else ``default``. Because the
     referenced object *is* the concrete subtype, this derives the enum without any
     installed ``ndx_*`` types."""
@@ -106,7 +108,7 @@ def class_discriminator(subclass_to_value: dict, default: str) -> Callable:
     return _get
 
 
-def populated_attrs(obj, candidate_names) -> List[str]:
+def populated_attrs(obj, candidate_names: Sequence[str]) -> List[str]:
     """Of ``candidate_names``, those set to a non-``None`` value on ``obj``."""
     found = []
     for name in candidate_names:

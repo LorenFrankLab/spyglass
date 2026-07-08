@@ -299,8 +299,8 @@ _INSERTION_MAP = {
     "yaw": "insertion_angle_yaw_in_deg",
 }
 
-# Populated-but-unmodeled object attributes to surface via a warning (deferred
-# metadata; see design doc "Schema coverage").
+# Populated-but-unmodeled object attributes surfaced via a warning (metadata
+# deferred to a follow-up; not stored yet).
 _UNMODELED_ATTRS = {
     "excitation_source": (
         "power_in_W",
@@ -370,28 +370,33 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
 
         entries = []
         warned_attrs = set()
-        for row in df.itertuples():
-            fiber = row.optical_fiber
+        # Read values by column name (df.index gives the row `id`); reading off
+        # itertuples() namedtuples would risk pandas mangling a column name and
+        # silently dropping a modeled column.
+        for row_id, record in zip(df.index, df.to_dict("records")):
+            fiber = record["optical_fiber"]
             insertion = getattr(fiber, "fiber_insertion", None)
             entry = dict(
                 base_key,
                 fiber_photometry_name=fiber_photometry_name,
-                fiber_id=int(row.Index),
-                indicator_name=row.indicator.name,
-                excitation_source_name=row.excitation_source.name,
-                photodetector_name=row.photodetector.name,
+                fiber_id=int(row_id),
+                indicator_name=record["indicator"].name,
+                excitation_source_name=record["excitation_source"].name,
+                photodetector_name=record["photodetector"].name,
                 optical_fiber_name=fiber.name,
-                dichroic_mirror_name=_ref_name(row, "dichroic_mirror"),
-                emission_filter_name=_ref_name(row, "emission_filter"),
-                excitation_filter_name=_ref_name(row, "excitation_filter"),
-                location=row.location,
+                dichroic_mirror_name=_ref_name(record, "dichroic_mirror"),
+                emission_filter_name=_ref_name(record, "emission_filter"),
+                excitation_filter_name=_ref_name(record, "excitation_filter"),
+                location=record["location"],
                 optical_fiber_description=getattr(fiber, "description", None),
                 excitation_wavelength_in_nm=float(
-                    row.excitation_wavelength_in_nm
+                    record["excitation_wavelength_in_nm"]
                 ),
-                emission_wavelength_in_nm=float(row.emission_wavelength_in_nm),
-                notes=getattr(row, "notes", None),
-                coordinates=_optional_value(row, "coordinates"),
+                emission_wavelength_in_nm=float(
+                    record["emission_wavelength_in_nm"]
+                ),
+                notes=record.get("notes"),
+                coordinates=record.get("coordinates"),
             )
             for col, attr in _INSERTION_MAP.items():
                 entry[col] = (
@@ -399,7 +404,7 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
                     if insertion is not None
                     else None
                 )
-            self._collect_unmodeled_attrs(row, warned_attrs)
+            self._collect_unmodeled_attrs(record, warned_attrs)
             entries.append(entry)
 
         if warned_attrs:
@@ -418,21 +423,17 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
             )
 
     @staticmethod
-    def _collect_unmodeled_attrs(row, warned_attrs):
+    def _collect_unmodeled_attrs(record, warned_attrs):
         for column, attrs in _UNMODELED_ATTRS.items():
-            obj = getattr(row, column, None)
+            obj = record.get(column)
             if obj is None:
                 continue
             for name in populated_attrs(obj, attrs):
                 warned_attrs.add(f"{column}.{name}")
 
 
-def _ref_name(row, column):
-    """The ``name`` of an optional per-row object reference, or ``None``."""
-    obj = getattr(row, column, None)
+def _ref_name(record, column):
+    """The ``name`` of an optional per-row object reference (absent column or
+    null value both yield ``None``)."""
+    obj = record.get(column)
     return getattr(obj, "name", None)
-
-
-def _optional_value(row, column):
-    """A per-row optional scalar/array value, or ``None`` if absent."""
-    return getattr(row, column, None)

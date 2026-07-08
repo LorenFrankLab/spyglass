@@ -37,6 +37,29 @@ def test_fixture_embeds_core_2_9_0(raw_dir, common):
     assert "ndx-fiber-photometry" in namespaces
 
 
+def test_device_catalog_no_blob_columns(common):
+    """The `_expected_duplicates=True` device tables must hold no blob/json
+    column: re-ingest divergence validation compares with `!=`, which raises
+    "truth value ambiguous" on an array. Locks the duplicate-safety invariant.
+    """
+    device_tables = [
+        common.Indicator,
+        common.ExcitationSource,
+        common.Photodetector,
+        common.DichroicMirror,
+        common.OpticalFilter,
+        common.OpticalFiber,
+    ]
+    for table in device_tables:
+        assert table._expected_duplicates is True
+        for name, attr in table().heading.attributes.items():
+            sql_type = attr.type.lower()
+            assert "blob" not in sql_type and "json" not in sql_type, (
+                f"{table.__name__}.{name} is {attr.type}; array/blob columns "
+                "are unsafe in an `_expected_duplicates` table"
+            )
+
+
 @pytest.mark.slow
 def test_device_and_config_ingest(photometry_full, common):
     key = photometry_full
@@ -90,7 +113,7 @@ def test_location_from_row(photometry_full, common):
 @pytest.mark.slow
 def test_non_consecutive_fiber_id(insert_photometry, common):
     """``fiber_id`` is the FiberPhotometryTable row ``id`` (which may be
-    non-consecutive), not a positional counter — the invariant phase-2's
+    non-consecutive), not a positional counter — the invariant the response-series
     region->config mapping relies on."""
     key, result = insert_photometry(
         "mock_photometry_nonconsec.nwb",
@@ -98,6 +121,24 @@ def test_non_consecutive_fiber_id(insert_photometry, common):
     )
     assert not result
     assert (common.FiberPhotometryConfig & key).fetch1("fiber_id") == 7
+
+
+@pytest.mark.slow
+def test_multi_container_pk_disambiguation(insert_photometry, common):
+    """Two FiberPhotometry containers, each with a row `id` 0, ingest as two
+    distinct config rows — the PK's `fiber_photometry_name` disambiguates them
+    (without it the two `fiber_id=0` rows would collide)."""
+    key, result = insert_photometry(
+        "mock_photometry_2c.nwb", fx.build_two_containers
+    )
+    assert not result
+    config = common.FiberPhotometryConfig & key
+    assert len(config) == 2
+    assert set(config.fetch("fiber_photometry_name")) == {
+        "fiber_photometry_A",
+        "fiber_photometry_B",
+    }
+    assert set(config.fetch("fiber_id")) == {0}  # both are row id 0
 
 
 @pytest.mark.slow
@@ -145,6 +186,10 @@ def test_subtype_and_optional_roundtrip(photometry_full, common):
     assert fiber["core_diameter_in_um"] == pytest.approx(400.0, abs=1e-2)
     assert fiber["ferrule_name"] == "LC ferrule"
     assert fiber["ferrule_model"] == "FER-LC"
+    # core DeviceModel identity fields (shared by all 5 model-backed tables)
+    assert fiber["manufacturer"] == "Doric"
+    assert fiber["model_number"] == "FF-400"
+    assert fiber["model_description"] == "flat-tip 400um fiber"
 
     # photodetector model specs
     det = (common.Photodetector & {"photodetector_name": "Det01_full"}).fetch1()
@@ -230,6 +275,22 @@ def test_device_reingest_and_cross_session(insert_photometry, common):
     assert len(common.Indicator & {"indicator_name": "dLight38_xsession"}) == 1
     assert len(common.FiberPhotometryConfig & key_a) == 2
     assert len(common.FiberPhotometryConfig & key_b) == 2
+
+
+@pytest.mark.slow
+def test_same_file_config_reingest_raises(insert_photometry, common):
+    """The session-specific config table is not `_expected_duplicates`, so a
+    naive re-ingest of the same file raises `DuplicateError` (idempotency is
+    file-level, via the `reinsert` flow, not per-row skipping)."""
+    import datajoint as dj
+
+    key, _ = insert_photometry(
+        "mock_photometry_reingest.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_reingest"),
+    )
+    assert len(common.FiberPhotometryConfig & key) == 1
+    with pytest.raises(dj.errors.DuplicateError):
+        common.FiberPhotometryConfig().insert_from_nwbfile(key["nwb_file_name"])
 
 
 @pytest.mark.slow
@@ -362,7 +423,10 @@ def test_unmodeled_column_warns(insert_photometry, common, monkeypatch):
     )
     assert not result
     assert len(common.FiberPhotometryConfig & key) == 1
-    assert any("commanded_voltage_series" in m for m in rec.messages)
+    # warned exactly once (batched per ingest), naming the column
+    assert (
+        len([m for m in rec.messages if "commanded_voltage_series" in m]) == 1
+    )
 
 
 @pytest.mark.slow
@@ -381,14 +445,66 @@ def test_unmodeled_attr_warns(insert_photometry, common, monkeypatch):
     )
     assert not result
     assert len(common.FiberPhotometryConfig & key) == 1
-    assert any("power_in_W" in m for m in rec.messages)
+    # warned exactly once (batched per ingest), naming the attribute
+    assert len([m for m in rec.messages if "power_in_W" in m]) == 1
+
+
+# Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
+# start, so pynwb must reconstruct the typed objects from the file-embedded spec
+# (the genuine stock-install case — no cached type-map registration). Exercises
+# the whole import-risk surface: NWB read, class-name matching (get_nwb_objects
+# via referenced_devices), and the embedded-namespace version gate
+# (get_file_namespaces). Needs no database, so it runs standalone.
+_IMPORT_SAFETY_SUBPROCESS = """
+import importlib.util, sys
+
+class _Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] == "ndx_fiber_photometry":
+            raise ImportError(name + " blocked (import-safety test)")
+        return None
+
+sys.meta_path.insert(0, _Block())
+
+# load the DB-free helper by file path so importing spyglass.common (which would
+# open a DB connection) is avoided; its own imports (utils) never touch the DB
+spec = importlib.util.spec_from_file_location("_ph", {helper_path!r})
+hp = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hp)
+
+from pynwb import NWBHDF5IO
+from spyglass.utils.nwb_hash import get_file_namespaces
+
+path = {file_path!r}
+with NWBHDF5IO(path, "r") as io:
+    nwb = io.read()
+    assert hp.is_photometry_file(nwb), "FiberPhotometryTable not matched by name"
+    fibers = hp.referenced_devices(nwb, "optical_fiber")
+    assert fibers and fibers[0].__class__.__name__ == "OpticalFiber", fibers
+    indicators = hp.referenced_devices(nwb, "indicator")
+    assert indicators and indicators[0].label == "dLight3.8"
+
+# the version gate reads the file-embedded namespaces (no import either)
+assert "ndx-fiber-photometry" in get_file_namespaces(path)
+assert "ndx_fiber_photometry" not in sys.modules, sorted(sys.modules)
+print("IMPORT_SAFETY_OK")
+"""
 
 
 @pytest.mark.slow
 def test_package_absent_import_safety(insert_photometry, common):
-    """After ingesting a pre-built fixture, re-running the ingest path with
-    ndx_fiber_photometry removed from sys.modules does not re-import it."""
+    """Ingestion must not import ndx-fiber-photometry: NWB types are matched by
+    class-name string and gated on the file-embedded namespace version.
+
+    Build the fixture (which imports the extension), then read + match + gate it
+    in a fresh subprocess where the extension's import is blocked from the start,
+    so any import attempt raises ``ImportError`` and fails the child.
+    """
+    import subprocess
     import sys
+    from pathlib import Path
+
+    from spyglass.common import Nwbfile
 
     key, _ = insert_photometry(
         "mock_photometry_absent.nwb",
@@ -396,13 +512,13 @@ def test_package_absent_import_safety(insert_photometry, common):
     )
     assert len(common.FiberPhotometryConfig & key) == 1
 
-    # building the fixture imported the extension; remove it and confirm the
-    # ingest path (read + class-name match + embedded-namespace gate) is import-free
-    sys.modules.pop("ndx_fiber_photometry", None)
-    common.FiberPhotometryConfig().insert_from_nwbfile(
-        key["nwb_file_name"], dry_run=True
+    repo = Path(__file__).resolve().parents[2]
+    script = _IMPORT_SAFETY_SUBPROCESS.format(
+        helper_path=str(repo / "src/spyglass/common/_photometry_nwb.py"),
+        file_path=Nwbfile().get_abs_path(key["nwb_file_name"]),
     )
-    common.OpticalFiber().insert_from_nwbfile(
-        key["nwb_file_name"], dry_run=True
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True
     )
-    assert "ndx_fiber_photometry" not in sys.modules
+    assert result.returncode == 0, result.stderr
+    assert "IMPORT_SAFETY_OK" in result.stdout

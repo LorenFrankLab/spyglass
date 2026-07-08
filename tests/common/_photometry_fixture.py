@@ -469,6 +469,65 @@ def build_mixed_modality(nwb: NWBFile, suffix: str = "_mixed") -> NWBFile:
     return nwb
 
 
+def build_two_containers(nwb: NWBFile, suffix: str = "_2c") -> NWBFile:
+    """Two ``FiberPhotometry`` lab-meta containers, each with a one-row table
+    whose row ``id`` is 0 — only the config PK's ``fiber_photometry_name``
+    disambiguates the two ``fiber_id=0`` rows."""
+    import ndx_fiber_photometry as fp
+    import ndx_ophys_devices as od
+
+    fiber_model = _fiber_model(od, "full", suffix)
+    exc_model = od.ExcitationSourceModel(
+        name="LEDmodel" + suffix,
+        manufacturer="Doric",
+        source_type="LED",
+        excitation_mode="one-photon",
+    )
+    det_model = od.PhotodetectorModel(
+        name="PMTmodel" + suffix, manufacturer="Doric", detector_type="PMT"
+    )
+    for m in (fiber_model, exc_model, det_model):
+        nwb.add_device_model(m)
+    exc = od.ExcitationSource(name=EXC_SOURCE_CONT + suffix, model=exc_model)
+    det = od.Photodetector(name=PHOTODETECTOR_NAME + suffix, model=det_model)
+    for d in (exc, det):
+        nwb.add_device(d)
+
+    for site in ("A", "B"):
+        indicator = od.Indicator(
+            name=f"{INDICATOR_NAME}{suffix}_{site}", label="dLight3.8"
+        )
+        fiber = od.OpticalFiber(
+            name=f"OpticalFiber_{site}{suffix}",
+            model=fiber_model,
+            description=site,
+            fiber_insertion=_fiber_insertion(od, complete=False),
+        )
+        nwb.add_device(fiber)
+        table = fp.FiberPhotometryTable(
+            name=f"fpt_{site}", description="per-fiber config"
+        )
+        table.add_row(  # row id defaults to 0 in each independent table
+            location=site,
+            excitation_wavelength_in_nm=490.0,
+            emission_wavelength_in_nm=525.0,
+            indicator=indicator,
+            optical_fiber=fiber,
+            excitation_source=exc,
+            photodetector=det,
+        )
+        nwb.add_lab_meta_data(
+            fp.FiberPhotometry(
+                name=f"fiber_photometry_{site}",
+                fiber_photometry_table=table,
+                fiber_photometry_indicators=fp.FiberPhotometryIndicators(
+                    indicators=[indicator]
+                ),
+            )
+        )
+    return nwb
+
+
 def write(path, builder, identifier=None) -> str:
     """Build via ``builder(nwb)`` and write to ``path``; returns the file name."""
     path = Path(path)
