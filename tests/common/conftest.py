@@ -529,3 +529,53 @@ def opto_only_nwb(
     (common.Nwbfile & {"nwb_file_name": "mock_optogenetics_.nwb"}).delete(
         safemode=False
     )
+
+
+# --- fiber photometry -------------------------------------------------------
+
+
+@pytest.fixture
+def insert_photometry(raw_dir, common, data_import):
+    """Factory to build + write + ingest a photometry NWB, with auto-cleanup.
+
+    Returns ``insert(filename, builder, **insert_kwargs) -> (key, result)`` where
+    ``key`` restricts to the ingested copy's ``nwb_file_name`` and ``result`` is
+    ``populate_all_common``'s return value (an ``InsertError`` KEY list, or None
+    on success). ``raise_err`` defaults to True.
+    """
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    from tests.common import _photometry_fixture as fx
+
+    inserted = []
+
+    def _insert(filename, builder, **insert_kwargs):
+        insert_kwargs.setdefault("raise_err", True)
+        # record the key before inserting so teardown cleans up even if the
+        # insert raises partway through (the copy Nwbfile row may already exist)
+        key = {"nwb_file_name": get_nwb_copy_filename(filename)}
+        inserted.append(key)
+        fx.write(Path(raw_dir) / filename, builder)
+        result = data_import.insert_sessions(filename, **insert_kwargs)
+        return key, result
+
+    yield _insert
+
+    for key in inserted:
+        (common.Nwbfile & key).delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def photometry_full(raw_dir, common, data_import):
+    """Session-scoped ingest of the comprehensive photometry fixture; yields the
+    ingested ``nwb_file_name`` key for the read-only positive tests."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    from tests.common import _photometry_fixture as fx
+
+    filename = "mock_photometry_full.nwb"
+    fx.write(Path(raw_dir) / filename, fx.build_full)
+    data_import.insert_sessions(filename, raise_err=True)
+    key = {"nwb_file_name": get_nwb_copy_filename(filename)}
+    yield key
+    (common.Nwbfile & key).delete(safemode=False)

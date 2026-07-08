@@ -55,6 +55,15 @@ from spyglass.common.common_optogenetics import (
     Virus,
     VirusInjection,
 )
+from spyglass.common.common_photometry import (
+    DichroicMirror,
+    ExcitationSource,
+    FiberPhotometryConfig,
+    Indicator,
+    OpticalFiber,
+    OpticalFilter,
+    Photodetector,
+)
 from spyglass.common.common_position import (
     IntervalLinearizationSelection,
     IntervalLinearizedPosition,
@@ -87,12 +96,19 @@ from spyglass.utils.nwb_helper_fn import (
 __all__ = [
     "AnalysisFileIssues",
     "AnalysisRegistry",
+    "DichroicMirror",
+    "ExcitationSource",
+    "FiberPhotometryConfig",
+    "Indicator",
     "LabTeam",
     "LinearizationParameters",
     "Nwbfile",
+    "OpticalFiber",
     "OpticalFiberDevice",
     "OpticalFiberImplant",
+    "OpticalFilter",
     "OptogeneticProtocol",
+    "Photodetector",
     "Virus",
     "VirusInjection",
     "PositionInfoParameters",
