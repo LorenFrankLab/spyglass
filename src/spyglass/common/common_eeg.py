@@ -55,8 +55,8 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
     class Electrode(SpyglassIngestion, dj.Part):
         definition = """
         # One column of the series -> the common_ephys.Electrode it records.
-        # Reuses the already-ingested electrode rows, so the EEG/EMG group split,
-        # region, and hemisphere ride along without duplicated metadata.
+        # Reuses the already-ingested electrode rows, so the EEG/EMG group split
+        # and brain region ride along without duplicated metadata.
         -> master
         region_index: int               # 0-based column within the series
         ---
@@ -89,12 +89,22 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
             self.sanitize_nwb_object_name(n)
             for n in Raw._source_nwb_object_name
         }
-        return [
+        selected = [
             obj
             for obj in nwb_file.acquisition.values()
             if isinstance(obj, pynwb.ecephys.ElectricalSeries)
             and self.sanitize_nwb_object_name(obj.name) not in raw_names
         ]
+        # Make the heuristic's action discoverable: a stray/second acquisition
+        # series is claimed as EEG silently otherwise (this runs on every file).
+        if selected:
+            logger.warning(
+                "ImportedEEG: selecting acquisition ElectricalSeries "
+                f"{[o.name for o in selected]} as EEG by name-exclusion "
+                "heuristic; verify these are EEG/telemetry, not a second "
+                "raw/analog series."
+            )
+        return selected
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Emit the ``IntervalList`` + master + ``.Electrode`` rows for one series.
@@ -104,14 +114,20 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
         Each series column becomes an ``.Electrode`` row mapping the 0-based
         ``region_index`` to the ``common_ephys.Electrode`` it records, translated
         from the ``.electrodes`` region's positional index to the electrode's
-        ``(group_name, id)``. A series without an ``.electrodes`` region inserts
-        the master row only, with a warning.
+        ``(group_name, id)``.
         """
         base_key = (base_key or {}).copy()
         series = nwb_obj
         object_id = series.object_id
-        rate = series.rate or estimate_sampling_rate(
-            np.asarray(series.get_timestamps()[: int(1e6)])
+        # Read series.timestamps directly (not get_timestamps()) to match
+        # _valid_times, and use `is not None` so an explicit rate of 0.0 is
+        # preserved rather than silently re-estimated (mirrors Raw._rate_fallback).
+        rate = (
+            series.rate
+            if series.rate is not None
+            else estimate_sampling_rate(
+                np.asarray(series.timestamps[: int(1e6)])
+            )
         )
         interval_list_name = f"{series.name} valid times"
 
@@ -132,36 +148,46 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
             unit=series.unit,
         )
 
-        elec_rows = []
-        region = getattr(series, "electrodes", None)
-        if region is None:
+        # An ElectricalSeries always carries an .electrodes region (required by
+        # NWB), so map each series column to the common_ephys.Electrode it records.
+        region = series.electrodes
+        table = region.table
+        electrode_ids = np.asarray(table.id.data)
+        group_names = table["group_name"].data
+
+        # The region should list one electrode per trace column; a mismatch means
+        # some columns can't be mapped (or extra rows go unused), so region_index
+        # would no longer track the trace column. Warn rather than silently
+        # mis-map (mirrors the photometry response-series ingestion).
+        n_columns = series.data.shape[1] if series.data.ndim == 2 else 1
+        if len(region.data) != n_columns:
             logger.warning(
-                f"ImportedEEG {series.name!r}: no .electrodes region; storing the "
-                "signal reference without per-channel Electrode links."
+                f"ImportedEEG {series.name!r}: .electrodes region maps "
+                f"{len(region.data)} channel(s) but the trace has {n_columns} "
+                "column(s); the region_index -> Electrode mapping may be wrong."
             )
-        else:
-            table = region.table
-            electrode_ids = np.asarray(table.id.data)
-            group_names = table["group_name"].data
-            for region_index, positional in enumerate(region.data):
-                position = int(positional)
-                # A negative index would silently wrap; an out-of-range one would
-                # mis-map. Fail loud and named instead.
-                if not 0 <= position < len(electrode_ids):
-                    raise ValueError(
-                        f"ImportedEEG {series.name!r}: region position "
-                        f"{positional} is out of range for the "
-                        f"{len(electrode_ids)}-row electrodes table."
-                    )
-                elec_rows.append(
-                    dict(
-                        base_key,
-                        eeg_object_id=object_id,
-                        region_index=region_index,
-                        electrode_group_name=str(group_names[position]),
-                        electrode_id=int(electrode_ids[position]),
-                    )
+
+        elec_rows = []
+        for region_index, positional in enumerate(region.data):
+            position = int(positional)
+            # A negative index would silently wrap to the wrong electrode; an
+            # out-of-range one would raise a cryptic IndexError. Fail loud and
+            # named for both.
+            if not 0 <= position < len(electrode_ids):
+                raise ValueError(
+                    f"ImportedEEG {series.name!r}: region position "
+                    f"{positional} is out of range for the "
+                    f"{len(electrode_ids)}-row electrodes table."
                 )
+            elec_rows.append(
+                dict(
+                    base_key,
+                    eeg_object_id=object_id,
+                    region_index=region_index,
+                    electrode_group_name=str(group_names[position]),
+                    electrode_id=int(electrode_ids[position]),
+                )
+            )
 
         # IntervalList before the master (the master FKs it); .Electrode last and
         # always present (possibly empty) so the multi-object insert loop can

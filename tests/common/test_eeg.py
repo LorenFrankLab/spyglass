@@ -14,6 +14,19 @@ import pytest
 from tests.common import _eeg_fixture as fx
 
 
+class _WarnRecorder:
+    """Stand-in ``logger`` that records ``warning`` messages, no-ops the rest."""
+
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, msg, *args, **kwargs):
+        self.messages.append(str(msg))
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
 @pytest.fixture
 def insert_eeg(raw_dir, common, data_import):
     """Factory: build + write + ingest an EEG NWB, with auto-cleanup.
@@ -58,7 +71,7 @@ def test_imported_eeg_ingests_acquisition_series(insert_eeg, common):
     assert len(rows) == 1
     row = rows[0]
     assert row["name"] == fx.EEG_SERIES_NAME
-    assert row["num_samples"] == 500
+    assert row["num_samples"] == fx.N_TIME
     assert row["unit"] == "volts"
     assert row["eeg_sampling_rate"] == pytest.approx(fx.EEG_RATE)
 
@@ -102,3 +115,88 @@ def test_imported_eeg_noop_on_non_eeg_file(mini_insert, common, mini_copy_name):
     key = {"nwb_file_name": mini_copy_name}
     common.ImportedEEG().populate(key)
     assert len(common.ImportedEEG & key) == 0
+
+
+def test_imported_eeg_timestamps_series(insert_eeg, common):
+    """An explicit-``timestamps`` series (no ``rate``) ingests without crashing;
+    the rate is estimated and valid_times spans the first/last timestamp."""
+    key = insert_eeg("mock_eeg_ts.nwb", builder=fx.build_eeg_timestamps)
+    common.ImportedEEG().populate(key)
+
+    row = (common.ImportedEEG & key).fetch1()
+    assert row["num_samples"] == fx.N_TIME
+    # rate is estimated from the timestamps (estimate_sampling_rate rounds), so
+    # only assert it lands near the nominal rate, not exactly.
+    assert row["eeg_sampling_rate"] == pytest.approx(fx.EEG_RATE, rel=1e-2)
+
+    valid_times = (
+        common.IntervalList
+        & key
+        & {"interval_list_name": row["interval_list_name"]}
+    ).fetch1("valid_times")
+    assert valid_times[0][0] == pytest.approx(0.0)
+    assert valid_times[0][-1] == pytest.approx(
+        (fx.N_TIME - 1) / fx.EEG_RATE, rel=1e-6
+    )
+
+
+def test_noncontiguous_ids_map_correctly(insert_eeg, common):
+    """With non-consecutive electrode ids and a permuted/subset region, each
+    region_index maps to the correct electrode -- the position->id translation
+    (not a coincidental identity) is what recovers the mapping."""
+    key = insert_eeg(
+        "mock_eeg_noncontig.nwb", builder=fx.build_eeg_noncontiguous
+    )
+    common.ImportedEEG().populate(key)
+
+    part = (common.ImportedEEG.Electrode & key).fetch(
+        "region_index", "electrode_group_name", "electrode_id", as_dict=True
+    )
+    got = {
+        r["region_index"]: (r["electrode_group_name"], r["electrode_id"])
+        for r in part
+    }
+    # region [2, 0, 4] over ids [10..14]: pos2->id12 (EEG), pos0->id10 (EEG),
+    # pos4->id14 (EMG).
+    assert got == {
+        0: ("EEGArray", 12),
+        1: ("EEGArray", 10),
+        2: ("EMGArray", 14),
+    }
+
+
+def test_region_column_mismatch_warns(insert_eeg, common, monkeypatch):
+    """A region whose length disagrees with the trace's column count is warned
+    about (mis-mapping risk), not silently ingested."""
+    rec = _WarnRecorder()
+    monkeypatch.setattr(common.common_eeg, "logger", rec)
+    insert_eeg("mock_eeg_mismatch.nwb", builder=fx.build_eeg_col_mismatch)
+    assert any(
+        "region" in m and "column" in m for m in rec.messages
+    ), rec.messages
+
+
+def test_selection_logs_warning(insert_eeg, common, monkeypatch):
+    """get_nwb_objects logs which acquisition series it claimed as EEG, so the
+    name-exclusion heuristic's action is discoverable."""
+    rec = _WarnRecorder()
+    monkeypatch.setattr(common.common_eeg, "logger", rec)
+    insert_eeg("mock_eeg_sel.nwb")
+    assert any(
+        fx.EEG_SERIES_NAME in m and "EEG" in m for m in rec.messages
+    ), rec.messages
+
+
+def test_nwb_object_round_trip(insert_eeg, common):
+    """nwb_object() re-fetches the referenced ElectricalSeries by object_id --
+    the core "trace stays in the NWB file, this row indexes it" contract."""
+    import pynwb
+
+    key = insert_eeg("mock_eeg_roundtrip.nwb")
+    common.ImportedEEG().populate(key)
+
+    row_key = (common.ImportedEEG & key).fetch1("KEY")
+    series = common.ImportedEEG().nwb_object(row_key)
+    assert isinstance(series, pynwb.ecephys.ElectricalSeries)
+    assert series.object_id == row_key["eeg_object_id"]
+    assert series.data.shape[0] == fx.N_TIME
