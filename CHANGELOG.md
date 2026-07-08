@@ -239,6 +239,9 @@ for label, interval_data in results.groupby("interval_labels"):
         for retrieving recorded fluorescence traces by NWB object id, with a
         `fetch1_dataframe()` helper (arrays stay in the file) and an `IntervalList`
         of each series' valid times
+    - Link `FiberPhotometryConfig` to the shared `common_optogenetics.VirusInjection`
+        for a fiber's viral-injection provenance (nullable FK + `fetch_injection()`
+        accessor; single source of truth, no new injection table)
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
     - Change `IntervalList.insert` to `cautious_insert` #1423
     - Allow email send on space check success, clean up maintenance logging #1381

@@ -823,6 +823,113 @@ def test_valid_times_from_timestamps(insert_photometry, common):
     assert np.asarray(interval["valid_times"]).tolist() == [[0.0, 3.0]]
 
 
+# --- injection metadata (link to the shared VirusInjection) ------------------
+
+
+@pytest.mark.slow
+def test_injection_populates_shared_tables(insert_photometry, common):
+    """A photometry file carrying a viral injection populates the shared,
+    session-scoped ``VirusInjection`` (site fields) and its parent ``Virus``
+    (construct) — the single-source-of-truth outcome, no new photometry table.
+    """
+    key, result = insert_photometry(
+        "mock_photometry_inj.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_inj", injection="complete"),
+    )
+    assert not result
+    vi = (common.VirusInjection & key).fetch1()
+    assert vi["location"] == "NAcc"
+    assert vi["hemisphere"] == "left"
+    assert vi["titer"] == pytest.approx(1.5e13, rel=1e-3)
+    assert vi["volume"] == pytest.approx(0.4, abs=1e-4)
+    virus = (common.Virus & {"virus_name": vi["virus_name"]}).fetch1()
+    assert virus["construct_name"] == "AAV-dLight3.8"
+
+
+@pytest.mark.slow
+def test_config_injection_link(insert_photometry, common):
+    """A config row whose indicator has an injection carries the FK; the
+    ``fetch_injection()`` accessor returns the joined injection+virus row (and
+    does **not** silently drop it via the config/injection column-name collision
+    a bare natural join would hit)."""
+    key, result = insert_photometry(
+        "mock_photometry_injlink.nwb",
+        lambda nwb: fx.build_minimal(
+            nwb, suffix="_injlink", injection="complete"
+        ),
+    )
+    assert not result
+    cfg = common.FiberPhotometryConfig & key
+    assert cfg.fetch1("injection_object_id")  # non-null FK set
+
+    rows = cfg.fetch_injection(as_dict=True)
+    assert len(rows) == 1  # the collision-free accessor keeps the row
+    row = rows[0]
+    assert row["location"] == "NAcc"  # injection site (not the fiber's 'DLS')
+    assert row["titer"] == pytest.approx(1.5e13, rel=1e-3)
+    assert row["construct_name"] == "AAV-dLight3.8"
+
+
+@pytest.mark.slow
+def test_no_injection_frank_shape(insert_photometry, common):
+    """A file with no injection (the real Frank shape) ingests cleanly; every
+    config row's ``injection_object_id`` is null and ``fetch_injection()`` is
+    empty."""
+    key, result = insert_photometry(
+        "mock_photometry_noinj.nwb",
+        lambda nwb: fx.build_full(nwb, suffix="_noinj"),
+    )
+    assert not result
+    cfg = common.FiberPhotometryConfig & key
+    assert len(cfg) == 2
+    assert all(v is None for v in cfg.fetch("injection_object_id"))
+    assert len(cfg.fetch_injection(as_dict=True)) == 0
+
+
+@pytest.mark.slow
+def test_sparse_injection_no_dangling_fk(insert_photometry, common):
+    """An injection missing a ``VirusInjection`` NOT-NULL field (optional in ndx)
+    is dropped by ``VirusInjection``; the config link is left null — no dangling
+    FK, no ``InsertError``."""
+    key, result = insert_photometry(
+        "mock_photometry_sparseinj.nwb",
+        lambda nwb: fx.build_minimal(
+            nwb, suffix="_sparseinj", injection="sparse_injection"
+        ),
+    )
+    assert not result
+    assert len(common.VirusInjection & key) == 0  # dropped
+    cfg = common.FiberPhotometryConfig & key
+    assert len(cfg) == 1
+    assert cfg.fetch1("injection_object_id") is None
+
+
+@pytest.mark.slow
+def test_sparse_parent_virus_photometry_survives(insert_photometry, common):
+    """A complete injection with a sparse parent ``ViralVector`` (no
+    ``description``): ``Virus`` drops the parent, so ``VirusInjection``'s
+    ``-> Virus`` FK fails (a logged, pre-existing opto ``InsertError``) — but with
+    ``rollback_on_fail=False`` the photometry rows survive and the config link is
+    null. Pins the document-and-defer behavior; the fixture must override
+    ``raise_err`` (it defaults ``True``, which would propagate the error)."""
+    key, result = insert_photometry(
+        "mock_photometry_sparsevirus.nwb",
+        lambda nwb: fx.build_minimal(
+            nwb, suffix="_sparsevirus", injection="sparse_virus"
+        ),
+        raise_err=False,
+        rollback_on_fail=False,
+    )
+    assert result  # the VirusInjection -> Virus FK failure was recorded
+    assert len(common.Virus & {"virus_name": "ViralVector_sparsevirus"}) == 0
+    assert len(common.VirusInjection & key) == 0
+    # photometry survives, link null
+    cfg = common.FiberPhotometryConfig & key
+    assert len(cfg) == 1
+    assert cfg.fetch1("injection_object_id") is None
+    assert len(common.FiberPhotometryResponseSeries & key) == 1
+
+
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
 # start, so pynwb must reconstruct the typed objects from the file-embedded spec
 # (the genuine stock-install case — no cached type-map registration). Imports the

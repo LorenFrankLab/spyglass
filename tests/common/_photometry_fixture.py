@@ -115,14 +115,65 @@ def _photodetector_model(od, suffix):
     )
 
 
-def _fiber_photometry(fp, table, indicator):
-    return fp.FiberPhotometry(
+def _fiber_photometry(fp, table, indicator, viral_vector=None, injection=None):
+    kwargs = dict(
         name="fiber_photometry",
         fiber_photometry_table=table,
         fiber_photometry_indicators=fp.FiberPhotometryIndicators(
             indicators=[indicator]
         ),
     )
+    if injection is not None:
+        kwargs["fiber_photometry_viruses"] = fp.FiberPhotometryViruses(
+            viral_vectors=[viral_vector]
+        )
+        kwargs["fiber_photometry_virus_injections"] = (
+            fp.FiberPhotometryVirusInjections(
+                viral_vector_injections=[injection]
+            )
+        )
+    return fp.FiberPhotometry(**kwargs)
+
+
+def _viral_injection(od, suffix, *, sparse_virus=False, sparse_injection=False):
+    """A (ViralVector, ViralVectorInjection) pair for a photometry file.
+
+    Both flags omit fields that are *optional* in the ndx types but NOT-NULL in the
+    Spyglass tables, so the corresponding row is dropped by ``_key_has_required_attrs``:
+    - ``sparse_virus`` omits ``description`` on the vector -> ``Virus`` drops the parent
+      (the sparse-parent case; the injection is otherwise complete).
+    - ``sparse_injection`` omits ``description`` + ``pitch/roll/yaw_in_deg`` on the
+      injection -> ``VirusInjection`` drops the injection.
+    """
+    vv_kwargs = dict(
+        name="ViralVector" + suffix,
+        construct_name="AAV-dLight3.8",
+        manufacturer="Addgene",
+        titer_in_vg_per_ml=1.5e13,
+    )
+    if not sparse_virus:
+        vv_kwargs["description"] = "dLight3.8 AAV"
+    vv = od.ViralVector(**vv_kwargs)
+    inj_kwargs = dict(
+        name="ViralVectorInjection" + suffix,
+        location="NAcc",
+        hemisphere="left",
+        reference="bregma",
+        ap_in_mm=1.7,
+        ml_in_mm=1.7,
+        dv_in_mm=-6.0,
+        volume_in_uL=0.4,
+        viral_vector=vv,
+    )
+    if not sparse_injection:  # optional in ndx, NOT-NULL in VirusInjection
+        inj_kwargs.update(
+            description="NAcc injection",
+            pitch_in_deg=0.0,
+            roll_in_deg=0.0,
+            yaw_in_deg=0.0,
+        )
+    inj = od.ViralVectorInjection(**inj_kwargs)
+    return vv, inj
 
 
 def build_full(nwb: NWBFile, suffix: str = "_full") -> NWBFile:
@@ -297,6 +348,7 @@ def build_minimal(
     row_id=None,
     response_region=True,
     timestamps=None,
+    injection=None,
 ) -> NWBFile:
     """A single-fiber photometry file, tunable for the null/gate/warn cases.
 
@@ -309,6 +361,10 @@ def build_minimal(
     ``timestamps``: if given, the response series uses explicit (possibly
     irregular) ``timestamps`` instead of ``rate``/``starting_time``; the trace
     length follows the timestamp count.
+    ``injection``: None | 'complete' | 'sparse_virus' | 'sparse_injection' —
+    attach a viral-injection to the indicator (stored in the FiberPhotometry
+    virus/injection containers). The sparse modes omit ndx-optional-but-Spyglass-
+    NOT-NULL fields so ``Virus`` / ``VirusInjection`` drop that row.
     """
     import ndx_fiber_photometry as fp
     import ndx_ophys_devices as od
@@ -346,10 +402,19 @@ def build_minimal(
     for d in (fiber, exc, det):
         nwb.add_device(d)
 
+    viral_vector, viral_injection = None, None
+    if injection is not None:
+        viral_vector, viral_injection = _viral_injection(
+            od,
+            suffix,
+            sparse_virus=(injection == "sparse_virus"),
+            sparse_injection=(injection == "sparse_injection"),
+        )
     indicator = od.Indicator(
         name=INDICATOR_NAME + suffix,
         label="dLight3.8",
         description="dopamine indicator",
+        viral_vector_injection=viral_injection,
     )
 
     table = fp.FiberPhotometryTable(
@@ -377,7 +442,15 @@ def build_minimal(
     if row_id is not None:
         row["id"] = row_id
     table.add_row(**row)
-    nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
+    nwb.add_lab_meta_data(
+        _fiber_photometry(
+            fp,
+            table,
+            indicator,
+            viral_vector=viral_vector,
+            injection=viral_injection,
+        )
+    )
 
     if timestamps is not None:
         ts = np.asarray(timestamps, dtype="float64")
