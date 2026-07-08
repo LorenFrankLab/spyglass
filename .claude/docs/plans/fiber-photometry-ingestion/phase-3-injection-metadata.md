@@ -105,12 +105,15 @@ shared virus tables (single source of truth).
   `_fiber_photometry` and `build_minimal`:
 
   ```python
-  def _viral_injection(od, fp, suffix, *, sparse_virus=False):
+  def _viral_injection(od, fp, suffix, *, sparse_virus=False, sparse_injection=False):
       """A (ViralVector, ViralVectorInjection) pair for a photometry file.
 
-      ``sparse_virus`` omits ``description`` on the vector — spec-valid (optional in
-      ndx) but NOT-NULL in Spyglass's ``Virus``, i.e. the sparse-parent case that
-      makes ``Virus`` drop the parent.
+      Both flags omit fields that are *optional* in the ndx types but NOT-NULL in the
+      Spyglass tables, so the corresponding row is dropped by ``_key_has_required_attrs``:
+      - ``sparse_virus`` omits ``description`` on the vector -> ``Virus`` drops the
+        parent (the sparse-parent case; the injection is otherwise complete).
+      - ``sparse_injection`` omits ``description`` + ``pitch/roll/yaw_in_deg`` on the
+        injection -> ``VirusInjection`` drops the injection (the sparse-injection case).
       """
       vv_kwargs = dict(
           name="ViralVector" + suffix, construct_name="AAV-dLight3.8",
@@ -119,13 +122,18 @@ shared virus tables (single source of truth).
       if not sparse_virus:
           vv_kwargs["description"] = "dLight3.8 AAV"
       vv = od.ViralVector(**vv_kwargs)
-      inj = od.ViralVectorInjection(
-          name="ViralVectorInjection" + suffix, description="NAcc injection",
+      inj_kwargs = dict(
+          name="ViralVectorInjection" + suffix,
           location="NAcc", hemisphere="left", reference="bregma",
           ap_in_mm=1.7, ml_in_mm=1.7, dv_in_mm=-6.0,
-          pitch_in_deg=0.0, roll_in_deg=0.0, yaw_in_deg=0.0,
           volume_in_uL=0.4, viral_vector=vv,
       )
+      if not sparse_injection:  # fields optional in ndx, NOT-NULL in VirusInjection
+          inj_kwargs.update(
+              description="NAcc injection",
+              pitch_in_deg=0.0, roll_in_deg=0.0, yaw_in_deg=0.0,
+          )
+      inj = od.ViralVectorInjection(**inj_kwargs)
       return vv, inj
   ```
 
@@ -149,22 +157,45 @@ shared virus tables (single source of truth).
   ```
 
   Add an `injection` param to `build_minimal` (`:289`): `injection=None` |
-  `"complete"` | `"sparse_virus"`. When set, build the pair via `_viral_injection`,
-  pass `viral_vector_injection=injection` to the `Indicator`, and pass
+  `"complete"` | `"sparse_virus"` | `"sparse_injection"`. When set, build the pair via
+  `_viral_injection` (with `sparse_virus=`/`sparse_injection=` for those modes), pass
+  `viral_vector_injection=injection` to the `Indicator`, and pass
   `viral_vector`/`injection` into `_fiber_photometry`. (The `Indicator` is created in
   `build_minimal` around `:345`; add the link there.)
 
+- **`fetch_injection()` accessor (required — a bare join is a footgun).** Add this
+  method to `FiberPhotometryConfig`. A natural `FiberPhotometryConfig * VirusInjection`
+  collides on **eight** incidentally-shared secondary names (`location`, `hemisphere`,
+  `ap_location`, `ml_location`, `dv_location`, `pitch`, `roll`, `yaw` — fiber-insertion
+  vs injection-site), and `VirusInjection * Virus` collides on `description`; a bare join
+  would silently return no/accidental rows. Resolve via the FK with projections instead:
+
+  ```python
+  def fetch_injection(self, *attrs, **kwargs):
+      """Injection + parent-virus metadata for these config rows' fibers, one row per
+      linked config row (rows with no injection omitted)."""
+      from spyglass.common.common_optogenetics import Virus, VirusInjection
+
+      linked = (self & "injection_object_id is not null").proj("injection_object_id")
+      joined = (
+          linked * VirusInjection
+          * Virus.proj("construct_name", "manufacturer", virus_description="description")
+      )
+      return joined.fetch(*attrs, **kwargs)
+  ```
+
+  `.proj("injection_object_id")` drops the eight clashing config columns so `linked *
+  VirusInjection` joins only on `(nwb_file_name, injection_object_id)`; renaming
+  `Virus.description → virus_description` clears the last clash.
+
 - **Docs.** Extend the `common_photometry` docs subsection (`docs/src/Features/Ingestion.md`,
   the Fiber-photometry section) noting `FiberPhotometryConfig` links a fiber's indicator
-  to its viral injection in the shared `VirusInjection`, with the retrieval join:
-  `FiberPhotometryConfig * VirusInjection` (site: titer/location/coords) and
-  `FiberPhotometryConfig * VirusInjection * Virus` (construct). Add a CHANGELOG entry
-  under the existing photometry bullets.
+  to its viral injection in the shared `VirusInjection`, and show retrieval via
+  **`fetch_injection()`** (not a bare join — see the accessor task for why). Add a
+  CHANGELOG entry under the existing photometry bullets.
 
 ## Deliberately not in this phase
 
-- **A thin `fetch_injection()` accessor on `FiberPhotometryConfig`** — optional sugar
-  over the documented join; skip unless a consumer needs it.
 - **Any change to `Virus`/`VirusInjection` definitions** — reused unchanged (mitigation
   options 2/3 for the sparse-parent case are deferred; see the design doc).
 - **The old flat `ndx-fiber-photometry` device schema** — out of scope (community
@@ -176,7 +207,7 @@ shared virus tables (single source of truth).
 | Test | Asserts |
 | --- | --- |
 | `test_injection_populates_shared_tables` | a photometry file with an injection populates `VirusInjection` (titer/location correct) and its parent `Virus` (`construct_name` correct) from the `FiberPhotometryVirusInjections` / `FiberPhotometryViruses` containers |
-| `test_config_injection_link` | a config row whose indicator has an injection has `injection_object_id` set; `(FiberPhotometryConfig * VirusInjection)` yields the right titer/location and `(… * Virus)` the right `construct_name` |
+| `test_config_injection_link` | a config row whose indicator has an injection has `injection_object_id` set; `fetch_injection()` returns exactly one row with the right `titer`/`location`/`construct_name` — and does **not** silently drop it via the insertion/site name collision (the regression the accessor exists to prevent) |
 | `test_no_injection_frank_shape` | a file with **no** injection (e.g. `build_full`) ingests cleanly; `injection_object_id` is `None`; no `InsertError` |
 | `test_sparse_injection_no_dangling_fk` | an injection missing a `VirusInjection` NOT-NULL field is dropped by `VirusInjection`; the config link is left `None`; no `InsertError` |
 | `test_sparse_parent_virus_photometry_survives` | a **complete** injection with a sparse parent `ViralVector` (no `description`), ingested with **`raise_err=False`** + `rollback_on_fail=False`: `Virus`/`VirusInjection` get no row (the pre-existing opto `-> Virus` `InsertError`, logged), **but the photometry config/response rows survive** and `injection_object_id` is `None`. Pins the document-and-defer behavior |
@@ -187,7 +218,8 @@ All are `@pytest.mark.slow` (they ingest via `insert_photometry` / `populate_all
 
 Extend `tests/common/_photometry_fixture.py` per the Tasks above: the `_viral_injection`
 helper, virus/injection slots on `_fiber_photometry`, and the `injection` param on
-`build_minimal` (`None` | `"complete"` | `"sparse_virus"`). Synthetic-but-spec-conformant
+`build_minimal` (`None` | `"complete"` | `"sparse_virus"` | `"sparse_injection"`).
+Synthetic-but-spec-conformant
 (the `FiberPhotometry.fiber_photometry_viruses` / `…_virus_injections` slots are defined
 by ndx-fiber-photometry 0.2.3) — the same rigor as the existing photometry fixtures; no
 real new-schema file carries injection yet.
@@ -202,6 +234,10 @@ the diff. Confirm:
   excitation-source warnings still fire.
 - `Virus`/`VirusInjection` definitions are untouched; `populate_all_common` ordering is
   unchanged.
+- Retrieval uses `fetch_injection()` (FK + projected joins), **not** a bare
+  `FiberPhotometryConfig * VirusInjection` natural join — which collides on the eight
+  shared insertion/site names (and `description` vs `Virus`); `test_config_injection_link`
+  must fail against a bare join.
 - The sparse-parent-virus test uses `raise_err=False` **and** `rollback_on_fail=False`
   and asserts photometry survival (not the destructive rollback path).
 - Validation-slice tests pass; all marked `slow`.

@@ -137,12 +137,35 @@ new on this (undeployed) feature branch — so it is a plain definition edit, wi
 
 ## Retrieval
 
-Injection *site* details (`titer`, `location`, `ap`/`ml`/`dv`, `volume`) are on
-`VirusInjection`: `FiberPhotometryConfig * VirusInjection`. The **`construct_name`** lives
-on `Virus` (which `VirusInjection` FKs), so add `* Virus` when construct metadata is
-needed: `FiberPhotometryConfig * VirusInjection * Virus`. Optionally add a thin
-`FiberPhotometryConfig` accessor returning that joined row for a key; otherwise document
-the join. No array data is copied; this is low-cardinality reference metadata.
+**A bare natural join is wrong here — do not document one.** `FiberPhotometryConfig` and
+`VirusInjection` share **eight** incidental secondary names (`location`, `hemisphere`,
+`ap_location`, `ml_location`, `dv_location`, `pitch`, `roll`, `yaw`) that mean
+*fiber-insertion* on the config and *injection-site* on the injection — so
+`FiberPhotometryConfig * VirusInjection` would silently add spurious equality constraints
+and return no/accidental rows. `VirusInjection` and `Virus` additionally both carry
+`description`. Retrieval must resolve via the `injection_object_id` FK, projecting away the
+clashes — so this phase ships a **`FiberPhotometryConfig.fetch_injection()` accessor** (the
+recommended interface; not optional) rather than a documented join:
+
+```python
+def fetch_injection(self, *attrs, **kwargs):
+    """Injection + parent-virus metadata for these config rows' fibers, one row per
+    linked config row (rows with no injection omitted). Resolves via the
+    injection_object_id FK — a bare natural join would collide on the shared
+    insertion/site names and on description."""
+    from spyglass.common.common_optogenetics import Virus, VirusInjection
+    linked = (self & "injection_object_id is not null").proj("injection_object_id")
+    joined = (
+        linked * VirusInjection
+        * Virus.proj("construct_name", "manufacturer", virus_description="description")
+    )
+    return joined.fetch(*attrs, **kwargs)
+```
+
+`.proj("injection_object_id")` drops the eight clashing config columns so `linked *
+VirusInjection` joins only on `(nwb_file_name, injection_object_id)`; renaming
+`Virus.description → virus_description` clears the last clash. No array data is copied;
+this is low-cardinality reference metadata.
 
 ## `populate_all_common` ordering (already correct)
 
@@ -160,7 +183,7 @@ existing photometry fixture — no real new-schema file with injection exists ye
 | Test | Asserts |
 | --- | --- |
 | Injection populates the shared tables | `VirusInjection` gets a row (titer/location correct) and `Virus` gets the parent (construct correct) from the photometry file's `FiberPhotometryVirusInjections` / `FiberPhotometryViruses` |
-| Config link resolves | a config row whose indicator has an injection has `injection_object_id` set; `(config * VirusInjection)` yields the right titer/location and `(config * VirusInjection * Virus)` the right `construct_name` |
+| Config link resolves | a config row whose indicator has an injection has `injection_object_id` set; `fetch_injection()` returns one row with the right `titer`/`location`/`construct_name` (and does **not** spuriously drop rows via the insertion/site name collision — the whole reason for the accessor) |
 | No-injection (Frank shape) | a file with no injection ingests cleanly; `injection_object_id` is `None`; no `InsertError` |
 | Sparse injection → no dangling FK | an injection missing a NOT-NULL field is dropped by `VirusInjection`; the config link is left `None`; no `InsertError` |
 | Sparse parent virus (photometry stays safe) | a **complete** injection whose parent `ViralVector` lacks a NOT-NULL field (e.g. `description`), ingested with **`raise_err=False`** and `rollback_on_fail=False` (the `insert_photometry` fixture defaults `raise_err=True`, which would *propagate* the error instead of logging it — the test must override both): pins that `VirusInjection` fails to insert it (the pre-existing opto `-> Virus` `InsertError`, logged) **but the photometry rows survive** — config/response ingest and the config `injection_object_id` is `None`. Documents the contained behavior; robust handling deferred |
