@@ -131,11 +131,15 @@ warning naming it, rather than dropped silently. Analysis (dF/F, isosbestic
 correction, downsampling) is left to a follow-up; this layer stops at retrieving
 the raw trace.
 
-Data-production constraint: files must embed NWB **`core` 2.9.0** — write them
-with pynwb 3.1.x. This lets the feature ship on the current dependency floor with
-no `pynwb`/`hdmf` bump; the `ndx-fiber-photometry` package is only needed to
-*build* test fixtures and is never imported at ingest time (NWB types are matched
-by class name and gated on the file-embedded namespace version).
+Dependency-floor constraint (not a schema limitation): this feature ships on
+Spyglass's current floor (`pynwb` 3.1.x / NWB **`core` 2.9.0**) with no
+`pynwb`/`hdmf` bump, so on that floor a file must embed `core` 2.9.0 to be
+read — write such files with pynwb 3.1.x. Files embedding the newer `core`
+2.10.0 (as recent Frank-lab photometry files do) are ingestable by the same
+`common_photometry` code once the floor moves to `pynwb` >= 4.0; the schema
+itself is version-agnostic. The `ndx-fiber-photometry` package is only needed
+to *build* test fixtures and is never imported at ingest time (NWB types are
+matched by class name and gated on the file-embedded namespace version).
 
 Ingesting a photometry file also touches `common_optogenetics`, whose optical
 fiber tables (`OpticalFiberDevice`/`OpticalFiberImplant`) share the underlying
