@@ -41,6 +41,7 @@ from spyglass.common.common_photometry import (
     DichroicMirror,
     ExcitationSource,
     FiberPhotometryConfig,
+    FiberPhotometryResponseSeries,
     Indicator,
     OpticalFiber,
     OpticalFilter,
@@ -249,6 +250,7 @@ def populate_all_common(
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
             FiberPhotometryConfig,  # Depends on Session and photometry devices
+            FiberPhotometryResponseSeries,  # Depends on FiberPhotometryConfig
         ],
         [
             RawPosition,  # Depends on PositionSource

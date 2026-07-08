@@ -28,6 +28,23 @@ def is_photometry_file(nwb_file: NWBFile) -> bool:
     return len(photometry_tables(nwb_file)) > 0
 
 
+def response_series(nwb_file: NWBFile) -> List:
+    """Every ``FiberPhotometryResponseSeries`` in a photometry file.
+
+    Returns ``[]`` when the file has no ``FiberPhotometry`` container, so a
+    non-photometry file is a clean no-op (matching the reference-scoped device
+    collection): the signal table never ingests a stray response series from a
+    file that carries no photometry setup.
+    """
+    if not is_photometry_file(nwb_file):
+        return []
+    return [
+        obj
+        for obj in nwb_file.objects.values()
+        if is_nwb_obj_type(obj, "FiberPhotometryResponseSeries")
+    ]
+
+
 def referenced_devices(
     nwb_file: NWBFile, column_names: Union[str, Sequence[str]]
 ) -> List:

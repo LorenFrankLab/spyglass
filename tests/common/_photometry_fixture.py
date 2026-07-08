@@ -295,6 +295,7 @@ def build_minimal(
     unmodeled_column=False,
     excitation_power=False,
     row_id=None,
+    response_region=True,
 ) -> NWBFile:
     """A single-fiber photometry file, tunable for the null/gate/warn cases.
 
@@ -302,6 +303,8 @@ def build_minimal(
     ``unmodeled_column``: add a ``commanded_voltage_series`` column (warn path).
     ``excitation_power``: populate ``ExcitationSource.power_in_W`` (warn path).
     ``row_id``: explicit (possibly non-consecutive) FiberPhotometryTable row id.
+    ``response_region``: if False, the response series carries no
+    ``fiber_photometry_table_region`` (the optional-region case).
     """
     import ndx_fiber_photometry as fp
     import ndx_ophys_devices as od
@@ -372,22 +375,21 @@ def build_minimal(
     table.add_row(**row)
     nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
 
-    region = DynamicTableRegion(
-        name="fiber_photometry_table_region",
-        data=[0],
-        description="row 0",
-        table=table,
+    series_kwargs = dict(
+        name="FPResponseSeries_DLS_490nm",
+        data=np.arange(500, dtype="float64"),
+        unit="V",
+        rate=6024.096,
+        starting_time=0.0,
     )
-    nwb.add_acquisition(
-        fp.FiberPhotometryResponseSeries(
-            name="FPResponseSeries_DLS_490nm",
-            data=np.arange(500, dtype="float64"),
-            unit="V",
-            rate=6024.096,
-            starting_time=0.0,
-            fiber_photometry_table_region=region,
+    if response_region:
+        series_kwargs["fiber_photometry_table_region"] = DynamicTableRegion(
+            name="fiber_photometry_table_region",
+            data=[0],
+            description="row 0",
+            table=table,
         )
-    )
+    nwb.add_acquisition(fp.FiberPhotometryResponseSeries(**series_kwargs))
     return nwb
 
 
@@ -525,6 +527,113 @@ def build_two_containers(nwb: NWBFile, suffix: str = "_2c") -> NWBFile:
                 ),
             )
         )
+    return nwb
+
+
+def build_multi_series(nwb: NWBFile, suffix: str = "_multi") -> NWBFile:
+    """Two fibers (DLS row id 0 @ 470nm, DMS row id 1 @ 490nm) and **three**
+    response series in one file: two 1-D series each referencing a single fiber
+    and one 2-D ``[time, 2]`` series referencing both via a multi-row region.
+
+    Exercises many-series-per-file resolution (each master must resolve its own
+    object) and the multi-row-region -> one ``.Fiber`` row per column mapping.
+    """
+    import ndx_fiber_photometry as fp
+    import ndx_ophys_devices as od
+    from hdmf.common import DynamicTableRegion
+
+    fiber_model = _fiber_model(od, "full", suffix)
+    exc_model = _excitation_source_model(od, suffix)
+    det_model = _photodetector_model(od, suffix)
+    for m in (fiber_model, exc_model, det_model):
+        nwb.add_device_model(m)
+
+    fiber_dls = od.OpticalFiber(
+        name="OpticalFiber_DLS" + suffix,
+        model=fiber_model,
+        description="400um fiber in DLS",
+        fiber_insertion=_fiber_insertion(od, complete=True),
+    )
+    fiber_dms = od.OpticalFiber(
+        name="OpticalFiber_DMS" + suffix,
+        model=fiber_model,  # shared model
+        description="400um fiber in DMS",
+        fiber_insertion=_fiber_insertion(od, complete=False),
+    )
+    exc = od.ExcitationSource(
+        name=EXC_SOURCE_CONT + suffix, model=exc_model, description="cont"
+    )
+    det = od.Photodetector(name=PHOTODETECTOR_NAME + suffix, model=det_model)
+    for d in (fiber_dls, fiber_dms, exc, det):
+        nwb.add_device(d)
+
+    indicator = od.Indicator(name=INDICATOR_NAME + suffix, label="dLight3.8")
+    table = fp.FiberPhotometryTable(
+        name="fiber_photometry_table", description="per-fiber config"
+    )
+    table.add_row(
+        location="DLS",
+        excitation_wavelength_in_nm=470.0,
+        emission_wavelength_in_nm=525.0,
+        indicator=indicator,
+        optical_fiber=fiber_dls,
+        excitation_source=exc,
+        photodetector=det,
+    )
+    table.add_row(
+        location="DMS",
+        excitation_wavelength_in_nm=490.0,
+        emission_wavelength_in_nm=525.0,
+        indicator=indicator,
+        optical_fiber=fiber_dms,
+        excitation_source=exc,
+        photodetector=det,
+    )
+    nwb.add_lab_meta_data(_fiber_photometry(fp, table, indicator))
+
+    def _region(name, data, description):
+        return DynamicTableRegion(
+            name=name, data=data, description=description, table=table
+        )
+
+    # Two single-fiber 1-D series (distinct lengths so each master resolves the
+    # correct object) plus one two-fiber 2-D series.
+    nwb.add_acquisition(
+        fp.FiberPhotometryResponseSeries(
+            name="FPResponseSeries_DLS_470nm",
+            data=np.arange(1000, dtype="float64"),
+            unit="V",
+            rate=6024.096,
+            starting_time=0.0,
+            fiber_photometry_table_region=_region(
+                "fiber_photometry_table_region", [0], "row 0"
+            ),
+        )
+    )
+    nwb.add_acquisition(
+        fp.FiberPhotometryResponseSeries(
+            name="FPResponseSeries_DMS_490nm",
+            data=np.arange(500, dtype="float64"),
+            unit="V",
+            rate=6024.096,
+            starting_time=0.0,
+            fiber_photometry_table_region=_region(
+                "fiber_photometry_table_region", [1], "row 1"
+            ),
+        )
+    )
+    nwb.add_acquisition(
+        fp.FiberPhotometryResponseSeries(
+            name="FPResponseSeries_both_2d",
+            data=np.arange(600, dtype="float64").reshape(300, 2),
+            unit="V",
+            rate=6024.096,
+            starting_time=0.0,
+            fiber_photometry_table_region=_region(
+                "fiber_photometry_table_region", [0, 1], "rows 0 and 1"
+            ),
+        )
+    )
     return nwb
 
 

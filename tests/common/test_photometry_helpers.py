@@ -132,3 +132,19 @@ def test_populated_attrs(common):
         "power_in_W"
     ]
     assert hp.populated_attrs(exc, ["exposure_time_in_s"]) == []
+
+
+def test_response_series_scoped(common):
+    hp = _hp(common)
+    # a photometry file: the response series is discoverable
+    full = fx.build_full(fx._new_nwb("h9"))
+    names = [s.name for s in hp.response_series(full)]
+    assert names == ["FPResponseSeries_DLS_470nm"]
+
+    # several series in one file are all returned
+    multi = fx.build_multi_series(fx._new_nwb("h10"))
+    assert len(hp.response_series(multi)) == 3
+
+    # a non-photometry file (no FiberPhotometry container) is a clean no-op
+    pure = fx.build_pure_devices(fx._new_nwb("h11"))
+    assert hp.response_series(pure) == []
