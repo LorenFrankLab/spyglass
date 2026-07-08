@@ -114,7 +114,8 @@ Viral-injection provenance (construct, titer, site) for a fiber's indicator is
 retrieved with `FiberPhotometryConfig.fetch_injection()`, which resolves the link
 through the shared `VirusInjection`/`Virus` tables. Use it rather than a bare join:
 `FiberPhotometryConfig` and `VirusInjection` share several column names (fiber
-*insertion* vs injection *site*), so a natural join would silently mis-match.
+*insertion* vs injection *site*), so a natural join would silently match on them
+and drop rows.
 
 ```python
 from spyglass.common import FiberPhotometryConfig
