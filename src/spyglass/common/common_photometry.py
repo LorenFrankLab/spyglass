@@ -26,6 +26,7 @@ from spyglass.common._photometry_nwb import (
     referenced_devices,
     response_series,
 )
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import logger
@@ -455,6 +456,7 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
     -> Session
     response_series_object_id: varchar(40)  # NWB object id, for fetch_nwb()
     ---
+    -> IntervalList                         # the series' valid (recorded) times
     name: varchar(80)
     description: varchar(2000)
     comments=null: varchar(2000)            # TimeSeries.comments (optional)
@@ -499,22 +501,33 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         return response_series(nwb_file)
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
-        """Emit the master row plus its ``.Fiber`` rows for one response series.
+        """Emit the ``IntervalList`` + master + ``.Fiber`` rows for one series.
 
         Custom override (not the declarative path): the master row stores the
-        object id + trace metadata, and each ``fiber_photometry_table_region``
-        entry becomes a ``.Fiber`` row. The region stores **positional** row
-        indices into the ``FiberPhotometryTable``; these are translated to the
-        table row ``id`` (the config ``fiber_id``, which may be non-consecutive).
-        A series without a region inserts the master row only, with no ``.Fiber``
-        rows and a warning — the signal stays retrievable via ``fetch_nwb()``.
+        object id + trace metadata and references an ``IntervalList`` of the
+        series' valid (recorded) times (as ``Raw`` does), so the trace can be
+        time-restricted against the rest of Spyglass. Each
+        ``fiber_photometry_table_region`` entry becomes a ``.Fiber`` row; the
+        region stores **positional** row indices into the ``FiberPhotometryTable``,
+        translated to the table row ``id`` (the config ``fiber_id``, which may be
+        non-consecutive). A series without a region inserts the master row only,
+        with no ``.Fiber`` rows and a warning — still retrievable via
+        ``fetch_nwb()``.
         """
         base_key = (base_key or {}).copy()
         series = nwb_obj
         object_id = series.object_id
+        interval_list_name = f"{series.name} valid times"
+        interval_entry = dict(
+            base_key,
+            interval_list_name=interval_list_name,
+            valid_times=self._valid_times(series),
+            pipeline="fiber_photometry",
+        )
         master_row = dict(
             base_key,
             response_series_object_id=object_id,
+            interval_list_name=interval_list_name,
             name=series.name,
             description=getattr(series, "description", None),
             comments=getattr(series, "comments", None),
@@ -549,9 +562,11 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
                     f"maps {len(region_positions)} fiber(s) but the trace has "
                     f"{n_columns} column(s); some columns will be unlabeled."
                 )
-            # region.data holds positional indices; the row id ordering (which
-            # may be non-consecutive) maps a position to the config fiber_id.
-            row_ids = list(table.to_dataframe().index)
+            # region.data holds positional indices; the DynamicTable row ids
+            # (which may be non-consecutive) map a position to the config
+            # fiber_id. Index ``table.id`` directly rather than materializing the
+            # whole table via to_dataframe() just for the id ordering.
+            row_ids = table.id
             for region_index, positional in enumerate(region_positions):
                 position = int(positional)
                 # A negative index would silently wrap to the wrong row; an
@@ -572,9 +587,31 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
                     )
                 )
 
-        # Parent before child; .Fiber is always present (possibly empty) so the
-        # multi-object insert loop can extend it across series.
-        return {self: [master_row], self.Fiber: fiber_rows}
+        # IntervalList before the master (the master FKs it); .Fiber last and
+        # always present (possibly empty) so the multi-object insert loop can
+        # extend every key across series.
+        return {
+            IntervalList: [interval_entry],
+            self: [master_row],
+            self.Fiber: fiber_rows,
+        }
+
+    @staticmethod
+    def _valid_times(series):
+        """The series' recorded-time span as a single contiguous ``[start, end]``
+        interval (photometry acquisition is continuous).
+
+        A rate-based series computes its endpoints in O(1) from
+        ``starting_time``/``rate`` (matching ``get_timestamps()[0]``/``[-1]``)
+        rather than materializing the full time axis; an explicit-``timestamps``
+        series uses its first/last timestamp.
+        """
+        if series.timestamps is not None:
+            timestamps = np.asarray(series.timestamps)
+            return np.array([[timestamps[0], timestamps[-1]]])
+        start = series.starting_time
+        end = start + (int(series.data.shape[0]) - 1) / series.rate
+        return np.array([[start, end]])
 
     def nwb_object(self, key):
         """Return the ``FiberPhotometryResponseSeries`` NWB object for one row.
@@ -592,9 +629,9 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         """Return the recorded trace as a time-indexed ``pandas.DataFrame``.
 
         The time axis comes from explicit ``timestamps`` when present, else from
-        ``starting_time`` + ``arange(num_samples) / rate``. Columns are labeled
-        from the ``.Fiber`` -> config mapping; a series ingested without a region
-        (empty ``.Fiber``) falls back to generic ``f"{name}_col{i}"`` labels.
+        the series' ``rate``/``starting_time`` via ``get_timestamps()``. Columns
+        are labeled from the ``.Fiber`` -> config mapping; a series ingested
+        without a region (empty ``.Fiber``) falls back to ``f"{name}_col{i}"``.
         """
         import pandas as pd
 
@@ -605,14 +642,16 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         data = np.asarray(series.data)
         if data.ndim == 1:
             data = data[:, np.newaxis]
-        n_samples, n_cols = data.shape
+        n_cols = data.shape[1]
 
-        timestamps = getattr(series, "timestamps", None)
-        if timestamps is not None:
-            index = np.asarray(timestamps)
+        # get_timestamps() computes starting_time + arange(n)/rate for a
+        # rate-based series, but on pynwb 3.1.3 it raises on an explicit-
+        # timestamps series (array-truthiness bug), so read series.timestamps
+        # directly there.
+        if series.timestamps is not None:
+            index = np.asarray(series.timestamps)
         else:
-            starting_time = series.starting_time or 0.0
-            index = starting_time + np.arange(n_samples) / series.rate
+            index = np.asarray(series.get_timestamps())
 
         columns = self._column_labels(key, series, n_cols)
         return pd.DataFrame(

@@ -85,7 +85,9 @@ NWB extension into the `common_photometry` schema. `insert_sessions` populates:
 - `FiberPhotometryResponseSeries` — one row per recorded
     `FiberPhotometryResponseSeries`, storing the NWB object id (not the array) so
     the trace is retrievable via `fetch_nwb()`. Its `.Fiber` part maps each data
-    column to the `FiberPhotometryConfig` row it records.
+    column to the `FiberPhotometryConfig` row it records, and it references an
+    `IntervalList` of the series' valid (recorded) times so the trace can be
+    time-restricted against the rest of Spyglass (as `Raw` does).
 
 The recorded fluorescence traces are **not** copied into the database — the table
 stores only the NWB object id and the trace stays in the file. A file typically

@@ -777,6 +777,52 @@ def test_multi_container_response_fiber_derivation(insert_photometry, common):
         assert fiber["fiber_id"] == 0
 
 
+@pytest.mark.slow
+def test_valid_times_interval_list(insert_photometry, common):
+    """Each response series links to an ``IntervalList`` of its valid (recorded)
+    times, so the trace can be time-restricted against the rest of Spyglass (as
+    ``Raw`` does). A rate-based series spans ``[starting_time, start+(n-1)/rate]``.
+    """
+    key, result = insert_photometry(
+        "mock_photometry_intervals.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_intervals"),
+    )
+    assert not result
+    resp = (common.FiberPhotometryResponseSeries & key).fetch1()
+    interval_name = resp["interval_list_name"]
+    assert interval_name == "FPResponseSeries_DLS_490nm valid times"
+
+    interval = (
+        common.IntervalList & key & {"interval_list_name": interval_name}
+    ).fetch1()
+    assert interval["pipeline"] == "fiber_photometry"
+    valid_times = np.asarray(interval["valid_times"])
+    assert valid_times.shape == (
+        1,
+        2,
+    )  # build_minimal: 500 samples @ 6024.096 Hz
+    assert valid_times[0, 0] == pytest.approx(0.0, abs=1e-9)
+    assert valid_times[0, 1] == pytest.approx(499 / 6024.096, abs=1e-9)
+
+
+@pytest.mark.slow
+def test_valid_times_from_timestamps(insert_photometry, common):
+    """A timestamps-based series' valid interval spans its first/last timestamp."""
+    ts = [0.0, 0.5, 1.5, 3.0]
+    key, result = insert_photometry(
+        "mock_photometry_ts_interval.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_tsiv", timestamps=ts),
+    )
+    assert not result
+    resp = (common.FiberPhotometryResponseSeries & key).fetch1()
+    interval = (
+        common.IntervalList
+        & key
+        & {"interval_list_name": resp["interval_list_name"]}
+    ).fetch1()
+    assert np.asarray(interval["valid_times"]).tolist() == [[0.0, 3.0]]
+
+
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
 # start, so pynwb must reconstruct the typed objects from the file-embedded spec
 # (the genuine stock-install case — no cached type-map registration). Imports the
