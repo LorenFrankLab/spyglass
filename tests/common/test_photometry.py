@@ -681,6 +681,53 @@ def test_region_width_mismatch_warns(common, monkeypatch):
     assert any("column" in m for m in rec.messages)
 
 
+@pytest.mark.slow
+def test_response_series_ophys_below_min_skips(
+    insert_photometry, common, monkeypatch
+):
+    """When ndx-ophys-devices is below the minimum, config/device ingestion is
+    skipped; the response series must skip **too** (it shares the config gate),
+    rather than inserting .Fiber rows whose FK into the now-empty config fails.
+    """
+    from spyglass.utils.mixins import ingestion
+
+    monkeypatch.setattr(
+        ingestion,
+        "get_file_namespaces",
+        lambda path: {
+            "ndx-fiber-photometry": "0.2.3",  # at/above its minimum
+            "ndx-ophys-devices": "0.2.0",  # below the 0.3.1 minimum
+        },
+    )
+    key, result = insert_photometry(
+        "mock_photometry_ophysbelow.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_ophysbelow"),
+        raise_err=False,
+    )
+    assert not result  # no InsertError from a dangling .Fiber FK
+    assert len(common.FiberPhotometryConfig & key) == 0
+    assert len(common.FiberPhotometryResponseSeries & key) == 0
+    assert len(common.FiberPhotometryResponseSeries.Fiber & key) == 0
+
+
+@pytest.mark.slow
+def test_make_repopulates(insert_photometry, common):
+    """The ``dj.Imported`` entry point works: ``make()`` delegates to
+    ``insert_from_nwbfile`` (so ``populate()`` is not a ``NotImplementedError``
+    footgun)."""
+    key, result = insert_photometry(
+        "mock_photometry_make.nwb",
+        lambda nwb: fx.build_minimal(nwb, suffix="_make"),
+    )
+    assert not result
+    tbl = common.FiberPhotometryResponseSeries
+    assert len(tbl & key) == 1
+    (tbl & key).delete(safemode=False)  # cascades to .Fiber
+    assert len(tbl & key) == 0
+    tbl().make(key)  # the make() shim
+    assert len(tbl & key) == 1 and len(tbl.Fiber & key) == 1
+
+
 # Runs in a fresh subprocess where ndx_fiber_photometry is blocked from the very
 # start, so pynwb must reconstruct the typed objects from the file-embedded spec
 # (the genuine stock-install case — no cached type-map registration). Imports the
@@ -713,6 +760,10 @@ name = os.environ["_NWB_NAME"]
 entries = sgc.FiberPhotometryConfig().insert_from_nwbfile(name, dry_run=True)
 assert entries, "no config entries produced from the file-embedded spec"
 sgc.OpticalFiber().insert_from_nwbfile(name, dry_run=True)
+# also exercise the response-series runtime path (object discovery, region ->
+# fiber_id translation) under the block, so an extension import there is caught
+resp = sgc.FiberPhotometryResponseSeries().insert_from_nwbfile(name, dry_run=True)
+assert resp, "no response-series entries produced from the file-embedded spec"
 assert "ndx_fiber_photometry" not in sys.modules, sorted(
     m for m in sys.modules if "ndx" in m
 )

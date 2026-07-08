@@ -463,7 +463,11 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
     # The table FKs -> Session (not -> Nwbfile), so fetch_nwb() cannot resolve the
     # source file from the definition; point it at Nwbfile explicitly (as Raw does).
     _nwb_table = Nwbfile
-    _extension_requirements = {"ndx-fiber-photometry": "0.2.3"}
+    # Gate on both namespaces (like FiberPhotometryConfig): the .Fiber rows FK into
+    # FiberPhotometryConfig, so if the ndx-ophys-devices schema is too old the config
+    # rows are skipped and a fiber-photometry-only gate here would leave the .Fiber
+    # insert with an unresolvable FK. Skip the whole file together instead.
+    _extension_requirements = _EXT_REQ
 
     class Fiber(SpyglassIngestion, dj.Part):
         definition = """
@@ -473,6 +477,15 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         ---
         -> FiberPhotometryConfig
         """
+
+    def make(self, key):
+        """Ingest the file's response series (standard Imported entry point).
+
+        ``populate_all_common`` drives ingestion through ``insert_from_nwbfile``,
+        but ``dj.Imported`` tables are also expected to support ``populate()``;
+        delegate to the same path (as ``Raw`` does) so both work.
+        """
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """The FiberPhotometryResponseSeries objects to ingest.
