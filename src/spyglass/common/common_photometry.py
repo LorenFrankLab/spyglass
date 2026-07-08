@@ -28,6 +28,7 @@ from spyglass.common._photometry_nwb import (
 )
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_optogenetics import VirusInjection
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassIngestion
@@ -317,7 +318,6 @@ _UNMODELED_ATTRS = {
         "peak_power_in_W",
         "peak_pulse_energy_in_J",
     ),
-    "indicator": ("viral_vector_injection",),
 }
 
 
@@ -336,6 +336,7 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
     -> [nullable] OpticalFilter.proj(emission_filter_name='optical_filter_name')
     -> [nullable] OpticalFilter.proj(excitation_filter_name='optical_filter_name')
     -> OpticalFiber
+    -> [nullable] VirusInjection        # viral injection delivering this indicator (if any)
     location: varchar(255)              # the FiberPhotometryTable row site, e.g. 'DLS'
     optical_fiber_description=null: varchar(255)  # per-channel fiber description
     hemisphere=null: enum('left', 'right')
@@ -383,10 +384,26 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
         for row_id, record in zip(df.index, df.to_dict("records")):
             fiber = record["optical_fiber"]
             insertion = getattr(fiber, "fiber_insertion", None)
+            # Optional viral injection (0/1 per indicator) lives in the shared
+            # VirusInjection table. Link only if that row actually ingested: a
+            # sparse injection/virus is dropped upstream, and an unconditional FK
+            # would then dangle.
+            injection = getattr(
+                record["indicator"], "viral_vector_injection", None
+            )
+            injection_object_id = None
+            if injection is not None:
+                injection_key = {
+                    **base_key,
+                    "injection_object_id": injection.object_id,
+                }
+                if VirusInjection & injection_key:
+                    injection_object_id = injection.object_id
             entry = dict(
                 base_key,
                 fiber_photometry_name=fiber_photometry_name,
                 fiber_id=int(row_id),
+                injection_object_id=injection_object_id,
                 indicator_name=record["indicator"].name,
                 excitation_source_name=record["excitation_source"].name,
                 photodetector_name=record["photodetector"].name,
@@ -437,6 +454,34 @@ class FiberPhotometryConfig(SpyglassIngestion, dj.Manual):
                 continue
             for name in populated_attrs(obj, attrs):
                 warned_attrs.add(f"{column}.{name}")
+
+    def fetch_injection(self, *attrs, **kwargs):
+        """Viral-injection + parent-virus metadata for these config rows' fibers.
+
+        One row per config row that carries an injection (rows without one are
+        omitted). Resolves via the ``injection_object_id`` FK rather than a
+        natural join: ``FiberPhotometryConfig`` and ``VirusInjection`` share
+        eight incidental secondary names (``location``/``hemisphere``/
+        ``ap_location``/``ml_location``/``dv_location``/``pitch``/``roll``/``yaw``
+        — fiber-insertion here, injection-site there), and ``VirusInjection`` and
+        ``Virus`` both carry ``description``; a bare ``*`` would silently join on
+        those and drop rows.
+        """
+        from spyglass.common.common_optogenetics import Virus
+
+        linked = (self & "injection_object_id is not null").proj(
+            "injection_object_id"
+        )
+        joined = (
+            linked
+            * VirusInjection
+            * Virus.proj(
+                "construct_name",
+                "manufacturer",
+                virus_description="description",
+            )
+        )
+        return joined.fetch(*attrs, **kwargs)
 
 
 def _ref_name(record, column):
