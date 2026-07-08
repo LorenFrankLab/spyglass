@@ -42,6 +42,10 @@ For agent invocation, **load only the slice you need**:
     + `FiberPhotometryConfig` + fixture + wiring; ingest & query the setup.
   - [phase-2-signal-reference.md](phase-2-signal-reference.md) —
     `FiberPhotometryResponseSeries` + `.Fiber` + `fetch1_dataframe`; get the traces.
+  - [phase-3-injection-metadata.md](phase-3-injection-metadata.md) — nullable
+    `FiberPhotometryConfig -> VirusInjection` link (reuse the shared, session-scoped
+    `common_optogenetics.VirusInjection`; no new table); injection provenance.
+    Design: `docs/superpowers/specs/2026-07-08-fiber-photometry-injection-metadata-design.md`.
 
 ## Deliberately not in this plan
 
