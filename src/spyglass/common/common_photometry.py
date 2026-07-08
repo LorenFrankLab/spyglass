@@ -14,6 +14,7 @@ class-name string and the object references resolve from the file-embedded spec.
 """
 
 import datajoint as dj
+import numpy as np
 
 from spyglass.common._photometry_nwb import (
     class_discriminator,
@@ -21,10 +22,13 @@ from spyglass.common._photometry_nwb import (
     model_range,
     populated_attrs,
     referenced_devices,
+    response_series,
 )
+from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassIngestion
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_photometry")
 
@@ -437,3 +441,202 @@ def _ref_name(record, column):
     null value both yield ``None``)."""
     obj = record.get(column)
     return getattr(obj, "name", None)
+
+
+# --- FiberPhotometryResponseSeries -------------------------------------------
+
+
+@schema
+class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
+    definition = """
+    # Reference to a FiberPhotometryResponseSeries; the trace stays in the NWB file
+    -> Session
+    response_series_object_id: varchar(40)  # NWB object id, for fetch_nwb()
+    ---
+    name: varchar(80)
+    description: varchar(2000)
+    comments=null: varchar(2000)            # TimeSeries.comments (optional)
+    num_samples: bigint                     # length of the recorded trace
+    unit: varchar(16)
+    """
+
+    # The table FKs -> Session (not -> Nwbfile), so fetch_nwb() cannot resolve the
+    # source file from the definition; point it at Nwbfile explicitly (as Raw does).
+    _nwb_table = Nwbfile
+    _extension_requirements = {"ndx-fiber-photometry": "0.2.3"}
+
+    class Fiber(SpyglassIngestion, dj.Part):
+        definition = """
+        # One column of the response series -> the FiberPhotometryConfig row it records
+        -> master
+        region_index: int                   # 0-based position within the table region
+        ---
+        -> FiberPhotometryConfig
+        """
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The FiberPhotometryResponseSeries objects to ingest.
+
+        Reference-scoped like the device tables: a file with no
+        ``FiberPhotometry`` container yields ``[]`` (a clean no-op), so a
+        non-photometry file never ingests a stray response series.
+        """
+        return response_series(nwb_file)
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Emit the master row plus its ``.Fiber`` rows for one response series.
+
+        Custom override (not the declarative path): the master row stores the
+        object id + trace metadata, and each ``fiber_photometry_table_region``
+        entry becomes a ``.Fiber`` row. The region stores **positional** row
+        indices into the ``FiberPhotometryTable``; these are translated to the
+        table row ``id`` (the config ``fiber_id``, which may be non-consecutive).
+        A series without a region inserts the master row only, with no ``.Fiber``
+        rows and a warning — the signal stays retrievable via ``fetch_nwb()``.
+        """
+        base_key = (base_key or {}).copy()
+        series = nwb_obj
+        object_id = series.object_id
+        master_row = dict(
+            base_key,
+            response_series_object_id=object_id,
+            name=series.name,
+            description=getattr(series, "description", None),
+            comments=getattr(series, "comments", None),
+            num_samples=int(series.data.shape[0]),
+            unit=series.unit,
+        )
+
+        fiber_rows = []
+        region = getattr(series, "fiber_photometry_table_region", None)
+        if region is None:
+            logger.warning(
+                f"FiberPhotometryResponseSeries {series.name!r}: no "
+                "fiber_photometry_table_region; storing the signal reference "
+                "without a per-column fiber mapping (no .Fiber rows)."
+            )
+        else:
+            table = region.table
+            container = getattr(table, "parent", None)
+            # Mirror FiberPhotometryConfig's container-name derivation so the
+            # .Fiber -> config FK resolves (one container per file is the norm).
+            fiber_photometry_name = (
+                getattr(container, "name", None) or "fiber_photometry"
+            )
+            region_positions = list(region.data)
+            # The region should reference one table row per trace column; a
+            # mismatch means some columns can't be mapped to a fiber (or extra
+            # rows go unused). Warn rather than guess.
+            n_columns = series.data.shape[1] if series.data.ndim == 2 else 1
+            if len(region_positions) != n_columns:
+                logger.warning(
+                    f"FiberPhotometryResponseSeries {series.name!r}: region "
+                    f"maps {len(region_positions)} fiber(s) but the trace has "
+                    f"{n_columns} column(s); some columns will be unlabeled."
+                )
+            # region.data holds positional indices; the row id ordering (which
+            # may be non-consecutive) maps a position to the config fiber_id.
+            row_ids = list(table.to_dataframe().index)
+            for region_index, positional in enumerate(region_positions):
+                position = int(positional)
+                # A negative index would silently wrap to the wrong row; an
+                # out-of-range one would mis-map. Fail loud and named instead.
+                if not 0 <= position < len(row_ids):
+                    raise ValueError(
+                        f"FiberPhotometryResponseSeries {series.name!r}: region "
+                        f"position {positional} is out of range for the "
+                        f"{len(row_ids)}-row FiberPhotometryTable."
+                    )
+                fiber_rows.append(
+                    dict(
+                        base_key,
+                        response_series_object_id=object_id,
+                        region_index=region_index,
+                        fiber_photometry_name=fiber_photometry_name,
+                        fiber_id=int(row_ids[position]),
+                    )
+                )
+
+        # Parent before child; .Fiber is always present (possibly empty) so the
+        # multi-object insert loop can extend it across series.
+        return {self: [master_row], self.Fiber: fiber_rows}
+
+    def nwb_object(self, key):
+        """Return the ``FiberPhotometryResponseSeries`` NWB object for one row.
+
+        Uses the full key (``response_series_object_id``): a photometry file has
+        many response series, so a ``nwb_file_name``-only fetch would be
+        ambiguous.
+        """
+        nwb_file_name = key["nwb_file_name"]
+        object_id = (self & key).fetch1("response_series_object_id")
+        nwbf = get_nwb_file(Nwbfile.get_abs_path(nwb_file_name))
+        return nwbf.objects[object_id]
+
+    def fetch1_dataframe(self):
+        """Return the recorded trace as a time-indexed ``pandas.DataFrame``.
+
+        The time axis comes from explicit ``timestamps`` when present, else from
+        ``starting_time`` + ``arange(num_samples) / rate``. Columns are labeled
+        from the ``.Fiber`` -> config mapping; a series ingested without a region
+        (empty ``.Fiber``) falls back to generic ``f"{name}_col{i}"`` labels.
+        """
+        import pandas as pd
+
+        key = self.fetch1("KEY")  # enforce exactly one row
+        record = (self & key).fetch_nwb()[0]
+        series = record["response_series"]
+
+        data = np.asarray(series.data)
+        if data.ndim == 1:
+            data = data[:, np.newaxis]
+        n_samples, n_cols = data.shape
+
+        timestamps = getattr(series, "timestamps", None)
+        if timestamps is not None:
+            index = np.asarray(timestamps)
+        else:
+            starting_time = series.starting_time or 0.0
+            index = starting_time + np.arange(n_samples) / series.rate
+
+        columns = self._column_labels(key, series, n_cols)
+        return pd.DataFrame(
+            data, index=pd.Index(index, name="time"), columns=columns
+        )
+
+    def _column_labels(self, key, series, n_cols):
+        """Deterministic per-column labels from the ``.Fiber`` -> config rows.
+
+        ``f"{location or optical_fiber_name}_{excitation_wavelength}nm"``,
+        disambiguated by ``fiber_id`` if two columns still collide. Columns with
+        no ``.Fiber`` mapping (e.g. a series ingested without a region) fall back
+        to ``f"{series.name}_col{i}"``.
+        """
+        from collections import Counter
+
+        joined = (self.Fiber & key) * FiberPhotometryConfig
+        rows = joined.fetch(
+            "region_index",
+            "location",
+            "optical_fiber_name",
+            "excitation_wavelength_in_nm",
+            "fiber_id",
+            as_dict=True,
+        )
+        base_by_index = {}
+        for row in rows:
+            site = row["location"] or row["optical_fiber_name"]
+            base = f"{site}_{int(row['excitation_wavelength_in_nm'])}nm"
+            base_by_index[row["region_index"]] = (base, row["fiber_id"])
+
+        base_counts = Counter(base for base, _ in base_by_index.values())
+        labels = []
+        for i in range(n_cols):
+            if i in base_by_index:
+                base, fiber_id = base_by_index[i]
+                labels.append(
+                    base if base_counts[base] == 1 else f"{base}_id{fiber_id}"
+                )
+            else:
+                labels.append(f"{series.name}_col{i}")
+        return labels

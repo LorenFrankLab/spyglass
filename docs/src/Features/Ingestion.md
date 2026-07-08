@@ -82,11 +82,33 @@ NWB extension into the `common_photometry` schema. `insert_sessions` populates:
 - `FiberPhotometryConfig` — one row per `FiberPhotometryTable` row, with foreign
     keys to the device tables plus the fiber's session-specific insertion
     metadata and per-channel excitation/emission wavelengths.
+- `FiberPhotometryResponseSeries` — one row per recorded
+    `FiberPhotometryResponseSeries`, storing the NWB object id (not the array) so
+    the trace is retrievable via `fetch_nwb()`. Its `.Fiber` part maps each data
+    column to the `FiberPhotometryConfig` row it records.
 
-The recorded fluorescence traces are **not** copied into the database in this
-release (metadata + retrieval by object id land as a follow-up); an unmodeled
-`FiberPhotometryTable` column or device attribute is ignored with a warning
-naming it, rather than dropped silently.
+The recorded fluorescence traces are **not** copied into the database — the table
+stores only the NWB object id and the trace stays in the file. A file typically
+holds several response series, so restrict to a single one (e.g. by `name`) and
+retrieve it as a time-indexed `pandas.DataFrame` (per-fiber columns, time axis
+from the series' `rate`/`starting_time` or explicit `timestamps`):
+
+```python
+from spyglass.common import FiberPhotometryResponseSeries
+
+file_key = {"nwb_file_name": "my_session_.nwb"}
+# inspect the available series for this file
+(FiberPhotometryResponseSeries & file_key).fetch("name")
+
+# retrieve one series' trace
+series = FiberPhotometryResponseSeries & file_key & {"name": "green_DLS"}
+df = series.fetch1_dataframe()
+```
+
+An unmodeled `FiberPhotometryTable` column or device attribute is ignored with a
+warning naming it, rather than dropped silently. Analysis (dF/F, isosbestic
+correction, downsampling) is left to a follow-up; this layer stops at retrieving
+the raw trace.
 
 Data-production constraint: files must embed NWB **`core` 2.9.0** — write them
 with pynwb 3.1.x. This lets the feature ship on the current dependency floor with
