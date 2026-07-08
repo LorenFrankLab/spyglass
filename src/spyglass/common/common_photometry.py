@@ -3,7 +3,9 @@
 Six reusable device/indicator tables plus a per-fiber ``FiberPhotometryConfig``
 capture the experimental setup (which fiber, indicator, excitation source,
 detector, filters, wavelengths, insertion). Recorded fluorescence traces stay in
-the NWB file; a signal-reference table and retrieval land in a follow-up.
+the NWB file: ``FiberPhotometryResponseSeries`` stores each series' NWB
+``object_id`` (not the array) and its ``fetch1_dataframe()`` retrieves the trace
+on demand.
 
 The tables are photometry-reference-scoped: each device table's
 ``get_nwb_objects()`` collects only the objects a ``FiberPhotometryTable``
