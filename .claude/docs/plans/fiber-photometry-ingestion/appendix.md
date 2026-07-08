@@ -50,8 +50,13 @@ The base the device + config + response tables build on.
 
 - `class Raw(SpyglassIngestion, dj.Imported)` — `:286`. `_nwb_table = Nwbfile`
   at `:297`. `table_key_to_obj_attr` (declarative, incl. callables) at `:311`.
-  `nwb_object(key)` accessor at `:377`. Copy this shape for
-  `FiberPhotometryResponseSeries` (phase-2).
+  `nwb_object(key)` accessor at `:377`. Copy the **class shape**
+  (`SpyglassIngestion, dj.Imported` + `_nwb_table = Nwbfile`) for
+  `FiberPhotometryResponseSeries` (phase-2) — **but not** `nwb_object`'s body:
+  `Raw` fetches `raw_object_id` by `nwb_file_name` only (`:386`) because it is
+  one row per file; the response series is many-per-file, so its `nwb_object(key)`
+  must fetch by the full key (`response_series_object_id`). See
+  [phase-2-signal-reference.md](phase-2-signal-reference.md).
 
 ## Optogenetics pattern + the gate — `src/spyglass/common/common_optogenetics.py`
 

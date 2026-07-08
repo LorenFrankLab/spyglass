@@ -18,7 +18,8 @@ detector, filters, wavelengths, insertion). No signal retrieval yet (phase-2).
   `generate_entries_from_nwb_object`, `_key_has_required_attrs`,
   `_extension_requirements`, `_unequal_vals`) and the fixture prototype.
 - `src/spyglass/common/common_optogenetics.py` — closest existing
-  `SpyglassIngestion` example (read-only).
+  `SpyglassIngestion` example; also **edited** this phase (the `get_nwb_objects()`
+  gate on `OpticalFiberDevice`/`OpticalFiberImplant` — see the gate task below).
 - `docs/superpowers/specs/2026-07-07-fiber-photometry-fixture-prototype.py` —
   the verified starting point for the fixture builder.
 
