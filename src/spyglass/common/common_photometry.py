@@ -661,8 +661,11 @@ class FiberPhotometryResponseSeries(SpyglassIngestion, dj.Imported):
         series uses its first/last timestamp.
         """
         if series.timestamps is not None:
-            timestamps = np.asarray(series.timestamps)
-            return np.array([[timestamps[0], timestamps[-1]]])
+            # Read only the endpoints from the (possibly h5py-backed) dataset;
+            # materializing the full axis would be O(n) for a many-sample series.
+            ts = series.timestamps
+            n = len(ts)
+            return np.array([[ts[0], ts[n - 1]]])
         start = series.starting_time
         end = start + (int(series.data.shape[0]) - 1) / series.rate
         return np.array([[start, end]])
