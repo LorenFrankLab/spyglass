@@ -134,9 +134,12 @@ def test_imported_eeg_timestamps_series(insert_eeg, common):
         & key
         & {"interval_list_name": row["interval_list_name"]}
     ).fetch1("valid_times")
-    assert valid_times[0][0] == pytest.approx(0.0)
+    # Gapless -> one interval spanning [first, last] (get_valid_intervals pads
+    # the edges by a fraction of a sample, so assert with an absolute tolerance).
+    assert len(valid_times) == 1
+    assert valid_times[0][0] == pytest.approx(0.0, abs=1e-3)
     assert valid_times[0][-1] == pytest.approx(
-        (fx.N_TIME - 1) / fx.EEG_RATE, rel=1e-6
+        (fx.N_TIME - 1) / fx.EEG_RATE, abs=1e-3
     )
 
 
@@ -176,15 +179,27 @@ def test_region_column_mismatch_warns(insert_eeg, common, monkeypatch):
     ), rec.messages
 
 
-def test_selection_logs_warning(insert_eeg, common, monkeypatch):
-    """get_nwb_objects logs which acquisition series it claimed as EEG, so the
-    name-exclusion heuristic's action is discoverable."""
-    rec = _WarnRecorder()
-    monkeypatch.setattr(common.common_eeg, "logger", rec)
-    insert_eeg("mock_eeg_sel.nwb")
-    assert any(
-        fx.EEG_SERIES_NAME in m and "EEG" in m for m in rec.messages
-    ), rec.messages
+def test_excludes_non_eeg_group_series(insert_eeg, common):
+    """An acquisition ElectricalSeries whose electrodes are in a non-EEG group
+    (analog/aux) is NOT ingested -- the group-name gate keeps ImportedEEG from
+    claiming a stray acquisition series when wired into populate_all_common."""
+    key = insert_eeg("mock_eeg_analog.nwb", builder=fx.build_non_eeg_series)
+    assert len(common.ImportedEEG & key) == 0
+
+
+def test_gappy_timestamps_split_valid_times(insert_eeg, common):
+    """A dropped-packet gap in a timestamps series splits valid_times into two
+    intervals (the gap is excluded, not marked as valid recording time)."""
+    key = insert_eeg("mock_eeg_gappy.nwb", builder=fx.build_eeg_gappy)
+    common.ImportedEEG().populate(key)
+
+    row = (common.ImportedEEG & key).fetch1()
+    valid_times = (
+        common.IntervalList
+        & key
+        & {"interval_list_name": row["interval_list_name"]}
+    ).fetch1("valid_times")
+    assert len(valid_times) == 2
 
 
 def test_nwb_object_round_trip(insert_eeg, common):

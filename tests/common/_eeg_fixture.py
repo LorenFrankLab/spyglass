@@ -92,12 +92,23 @@ def _add_channels(nwb: NWBFile, electrode_ids=None) -> None:
         nwb.add_electrode(**kwargs)
 
 
-def _add_series(nwb, region, n_cols, *, use_timestamps=False, n_time=N_TIME):
-    """Add one EEG ``ElectricalSeries`` to ``acquisition``.
+def _add_series(
+    nwb,
+    region,
+    n_cols,
+    *,
+    name=EEG_SERIES_NAME,
+    use_timestamps=False,
+    timestamps=None,
+    n_time=N_TIME,
+):
+    """Add one ``ElectricalSeries`` to ``acquisition``.
 
     ``region``: positional indices for the ``.electrodes`` region. ``n_cols``:
     number of trace columns (equals ``len(region)`` for a well-formed file;
-    differ to exercise the mismatch guard). Deterministic content (fixed seed).
+    differ to exercise the mismatch guard). ``timestamps``: explicit time axis
+    (else ``use_timestamps`` synthesizes a gapless one, else a fixed ``rate``).
+    Deterministic content (fixed seed).
     """
     data = (
         np.random.RandomState(0)
@@ -105,10 +116,12 @@ def _add_series(nwb, region, n_cols, *, use_timestamps=False, n_time=N_TIME):
         .astype("float32")
     )
     reg = nwb.create_electrode_table_region(
-        region=list(region), description="EEG/EMG channels"
+        region=list(region), description="channels"
     )
-    kwargs = dict(name=EEG_SERIES_NAME, data=data, electrodes=reg)
-    if use_timestamps:
+    kwargs = dict(name=name, data=data, electrodes=reg)
+    if timestamps is not None:
+        kwargs["timestamps"] = np.asarray(timestamps, dtype="float64")
+    elif use_timestamps:
         kwargs["timestamps"] = (np.arange(n_time) / EEG_RATE).astype("float64")
     else:
         kwargs["starting_time"] = 0.0
@@ -151,6 +164,33 @@ def build_eeg_col_mismatch(nwb: NWBFile, n_time: int = N_TIME) -> NWBFile:
     """
     _add_channels(nwb)
     _add_series(nwb, range(N_CHANNELS), N_CHANNELS + 1, n_time=n_time)
+    return nwb
+
+
+def build_eeg_gappy(nwb: NWBFile, n_time: int = N_TIME) -> NWBFile:
+    """Explicit-``timestamps`` series with a 1 s acquisition gap mid-recording
+    (a dropped-packet burst), so valid_times must split into two intervals."""
+    _add_channels(nwb)
+    timestamps = np.arange(n_time) / EEG_RATE
+    timestamps[n_time // 2 :] += 1.0  # 1 s gap after the first half
+    _add_series(nwb, range(N_CHANNELS), N_CHANNELS, timestamps=timestamps)
+    return nwb
+
+
+def build_non_eeg_series(nwb: NWBFile, n_time: int = N_TIME) -> NWBFile:
+    """An acquisition ElectricalSeries whose electrodes are in a non-EEG group
+    (an analog/aux montage), which the EEG-group gate must exclude."""
+    device = Device(name="AnalogBox", description="analog acquisition")
+    nwb.add_device(device)
+    group = nwb.create_electrode_group(
+        name="AnalogArray",
+        description="analog/aux channels",
+        location="n/a",
+        device=device,
+    )
+    for _ in range(2):
+        nwb.add_electrode(group=group, location="n/a")
+    _add_series(nwb, range(2), 2, name="AnalogSignal", n_time=n_time)
     return nwb
 
 

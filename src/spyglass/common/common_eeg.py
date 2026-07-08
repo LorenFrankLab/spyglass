@@ -25,9 +25,19 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, logger
-from spyglass.utils.nwb_helper_fn import estimate_sampling_rate, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    estimate_sampling_rate,
+    get_nwb_file,
+    get_valid_intervals,
+)
 
 schema = dj.schema("common_eeg")
+
+# An acquisition ElectricalSeries is treated as EEG when its channels sit in an
+# ElectrodeGroup whose name carries one of these tokens. Selection keys on the
+# *group* name, not the series name: real files name the series opaquely (e.g.
+# "ElectricalSeries_BL2") while the montage lives in "EEGArray"/"EMGArray".
+_EEG_GROUP_TOKENS = ("eeg", "emg")
 
 
 @schema
@@ -73,38 +83,33 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
         self.insert_from_nwbfile(key["nwb_file_name"])
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
-        """Acquisition ElectricalSeries that ``Raw`` does not claim.
+        """Acquisition ElectricalSeries whose channels are EEG/EMG electrodes.
 
-        There is no NWB-native "this is EEG" marker, so selection is by exclusion:
-        an ``acquisition`` ``ElectricalSeries`` whose (sanitized) name is not in
-        ``Raw``'s wideband-ephys allowlist. This is safe on standard Frank-lab
-        files (whose only acquisition series is the Raw-named wideband) and picks
-        up dedicated EEG telemetry series. It remains a heuristic: a file with a
-        second genuine raw series would be miscaught -- prefer a naming convention
-        or ingestion config when the producer can provide one.
+        Selection keys on the referenced ``ElectrodeGroup`` name (matching
+        ``eeg``/``emg``, case-insensitive), not the series name: in real files
+        the series may be named opaquely (e.g. ``ElectricalSeries_BL2``) while
+        the montage lives in ``EEGArray``/``EMGArray`` groups. Probe-ephys and
+        analog/aux series (non-EEG group names) are excluded, so wiring this into
+        ``populate_all_common`` does not claim a stray acquisition series -- but
+        it does require the producer to name EEG/EMG groups accordingly.
         """
-        from spyglass.common.common_ephys import Raw
-
-        raw_names = {
-            self.sanitize_nwb_object_name(n)
-            for n in Raw._source_nwb_object_name
-        }
-        selected = [
+        return [
             obj
             for obj in nwb_file.acquisition.values()
             if isinstance(obj, pynwb.ecephys.ElectricalSeries)
-            and self.sanitize_nwb_object_name(obj.name) not in raw_names
+            and self._references_eeg_group(obj)
         ]
-        # Make the heuristic's action discoverable: a stray/second acquisition
-        # series is claimed as EEG silently otherwise (this runs on every file).
-        if selected:
-            logger.warning(
-                "ImportedEEG: selecting acquisition ElectricalSeries "
-                f"{[o.name for o in selected]} as EEG by name-exclusion "
-                "heuristic; verify these are EEG/telemetry, not a second "
-                "raw/analog series."
-            )
-        return selected
+
+    @staticmethod
+    def _references_eeg_group(series):
+        """Whether any electrode the series records is in an EEG/EMG group."""
+        region = series.electrodes
+        group_names = region.table["group_name"].data
+        return any(
+            token in str(group_names[int(position)]).lower()
+            for position in region.data
+            for token in _EEG_GROUP_TOKENS
+        )
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Emit the ``IntervalList`` + master + ``.Electrode`` rows for one series.
@@ -198,18 +203,24 @@ class ImportedEEG(SpyglassIngestion, dj.Imported):
             self.Electrode: elec_rows,
         }
 
-    @staticmethod
-    def _valid_times(series, rate):
-        """The series' recorded-time span as a single contiguous ``[start, end]``
-        interval (EEG acquisition is continuous).
+    def _valid_times(self, series, rate):
+        """The series' recorded-time intervals, shape ``(n_intervals, 2)``.
 
-        A rate-based series computes its endpoints in O(1) from
-        ``starting_time``/``rate``; an explicit-``timestamps`` series uses its
-        first/last timestamp.
+        A rate-based series is uniformly sampled, so it is one contiguous
+        ``[start, end]`` interval computed in O(1) from ``starting_time``/``rate``.
+        An explicit-``timestamps`` series may have acquisition gaps (wireless EEG
+        telemetry drops packets), so its valid times come from
+        ``get_valid_intervals`` -- gaps are excluded rather than spanned (as
+        ``Raw`` does).
         """
         if series.timestamps is not None:
-            timestamps = np.asarray(series.timestamps)
-            return np.array([[timestamps[0], timestamps[-1]]])
+            return get_valid_intervals(
+                timestamps=np.asarray(series.timestamps),
+                sampling_rate=rate,
+                gap_proportion=1.75,
+                min_valid_len=0,
+                warn=not self._test_mode,
+            )
         start = series.starting_time or 0.0
         end = start + (int(series.data.shape[0]) - 1) / rate
         return np.array([[start, end]])
