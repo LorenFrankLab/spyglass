@@ -19,6 +19,7 @@ from spyglass.common.common_device import (
     ProbeType,
 )
 from spyglass.common.common_dio import DIOEvents
+from spyglass.common.common_eeg import ImportedEEG
 from spyglass.common.common_ephys import (
     LFP,
     Electrode,
@@ -87,6 +88,7 @@ from spyglass.utils.nwb_helper_fn import (
 __all__ = [
     "AnalysisFileIssues",
     "AnalysisRegistry",
+    "ImportedEEG",
     "LabTeam",
     "LinearizationParameters",
     "Nwbfile",
