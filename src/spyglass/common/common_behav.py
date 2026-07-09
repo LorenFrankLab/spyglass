@@ -1006,7 +1006,7 @@ def convert_epoch_interval_name_to_position_interval_name(
 
     if populate_missing and (no_entries or null_entry):
         if null_entry:
-            pos_query.delete(safemode=False)  # no prompt
+            pos_query.delete(force_permission=True, safemode=False)  # no prompt
         PositionIntervalMap()._no_transaction_make(key)
         pos_query = PositionIntervalMap & key
 
