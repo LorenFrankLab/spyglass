@@ -361,6 +361,12 @@ def pytest_configure(config):
         null_server=config.option.no_docker,
         verbose=VERBOSE,
     )
+    # Apply credentials now so that dj.config["custom"]["test_mode"] = True
+    # is visible when spyglass is first imported (triggered by fixtures such as
+    # verbose_context). settings.py reads dj.config at import time to populate
+    # the module-level `config` dict; if credentials arrive later the dict is
+    # frozen with test_mode=False.
+    dj.config.update(SERVER.credentials)
 
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,

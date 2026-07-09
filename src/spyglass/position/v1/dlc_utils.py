@@ -6,6 +6,7 @@ import os
 import pwd
 import subprocess
 import sys
+import matplotlib.path
 from collections.abc import Sequence
 from functools import reduce
 from itertools import combinations, groupby
@@ -587,6 +588,18 @@ def get_span_start_stop(indices):
         group = list(map(itemgetter(1), g))
         span_inds.append((group[0], group[-1]))
     return span_inds
+
+
+def check_bounds_all_bodyparts(df, bounds):
+    """Checks if (x,y) position of each labeled body part in ROI"""
+    df_copy = df.copy()
+
+    xy_loc = df_copy[["x", "y"]].to_numpy()
+    inside = matplotlib.path.Path(bounds).contains_points(xy_loc)
+    logger.debug(f"Inside bounds mask: {inside.sum()}/{len(inside)}")
+    outside = ~inside
+    df_copy.loc[outside, ["x", "y"]] = np.nan
+    return df_copy
 
 
 def interp_pos(dlc_df, spans_to_interp, **kwargs):

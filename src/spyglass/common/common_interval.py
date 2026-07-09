@@ -17,6 +17,10 @@ from spyglass.utils.dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_interval")
 
+_INTERVAL_DOC = (
+    "https://lorenfranklab.github.io/spyglass/latest/Features/Intervals/"
+)
+
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 
 
@@ -128,7 +132,9 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if len(interval_lists_df["nwb_file_name"].unique()) > 1:
             raise ValueError(
-                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+                ">1 nwb_file_name found in IntervalList. "
+                + "the intended use of plot_intervals is to compare intervals "
+                + "within a single nwb_file_name."
             )
 
         interval_list_names = interval_lists_df["interval_list_name"].values
@@ -137,7 +143,8 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if n_compare > 100:
             warnings.warn(
-                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                f"plot_intervals is plotting {n_compare} intervals. "
+                + "if this is unintended, please pass in a smaller IntervalList.",
                 UserWarning,
             )
 
@@ -410,10 +417,10 @@ class Interval:
     def __len__(self) -> int:
         return len(self.times)
 
-    def __getitem__(self, item) -> T:
+    def __getitem__(self, item: Union[int, slice, tuple]) -> np.ndarray:
         """Get item from the interval list."""
         if isinstance(item, (slice, int, tuple)):
-            return Interval(self.times[item], **self.kwargs)
+            return self.times[item]
         else:
             raise ValueError(
                 f"Unrecognized item type: {type(item)}. Must be int, slice, or tuple."
@@ -467,23 +474,39 @@ class Interval:
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
-        """Extract interval_list from a given object."""
+        times = None
+
+        # extract times from interval_list based on type
         if from_inds:
-            return self.from_inds(interval_list)
+            times = self.from_inds(interval_list)
         elif hasattr(interval_list, "times"):
-            return interval_list.times
+            times = interval_list.times
         elif isinstance(interval_list, dict):
-            return self._import_from_table(interval_list)
+            times = self._import_from_table(interval_list)
         elif isinstance(
             interval_list, (np.generic, np.ndarray, list, int, float, tuple)
         ):
-            return interval_list
+            times = interval_list
         elif interval_list is None:
             return np.array([])
-        else:
+
+        # validate times format
+        if times is None:
             raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
+
+        times = self._expand_1d(np.asarray(times))
+        if len(times) and not np.all(np.diff(times, axis=1) >= 0):
+            raise ValueError(
+                "All intervals must be in the form [start, stop] with start <= stop."
+            )
+        if len(times) and times.shape[1] != 2:
+            raise ValueError(
+                f"Intervals must have shape (N, 2). Got shape {times.shape}."
+            )
+
+        return np.asarray(times)
 
     @staticmethod
     def from_inds(list_frames) -> List[List[int]]:
@@ -587,7 +610,7 @@ class Interval:
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
         """Expand a 1D interval list to 2D."""
-        if interval_list.ndim == 1:
+        if interval_list.ndim == 1 and interval_list.size > 0:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
@@ -775,16 +798,40 @@ class Interval:
         # Concatenate the two lists so we can resort the intervals and apply the
         # same sorting to the start-end arrays
         combined_intervals = np.concatenate((il1, il2))
+        if len(combined_intervals) == 0:
+            return Interval(np.array([]), **self.kwargs)
         ss = np.concatenate((il1_start_end, il2_start_end))
-        sort_ind = np.argsort(combined_intervals)
+        sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
+        ss_cumsum = np.cumsum(ss[sort_ind])
+        if np.any(ss_cumsum < 0):
+            raise ValueError(
+                "Negative cumulative sum found in union. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
 
-        # a cumulative sum of 1 indicates the beginning of a joint interval; a
-        # cumulative sum of 0 indicates the end
-        union_starts = np.ravel(
-            np.array(np.where(np.cumsum(ss[sort_ind]) == 1))
+        # a switch of cumulative sum from 0 to 1 indicates the beginning of a
+        # joint interval; a cumulative sum of 0 indicates the end
+        cumsum_flip = np.logical_and(
+            ss_cumsum[1:] == 1,
+            ss_cumsum[:-1] == 0,
         )
-        union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+        union_starts = np.ravel(np.array(np.where(cumsum_flip)[0] + 1))
+        union_starts = (
+            np.insert(union_starts, 0, 0)
+            if ss[sort_ind][0] == 1
+            else union_starts
+        )
+        union_stops = np.ravel(np.array(np.where(ss_cumsum == 0)))
+        if union_starts.size != union_stops.size:
+            raise ValueError(
+                "Mismatched number of union starts and stops. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
         union = [
             [combined_intervals[start], combined_intervals[stop]]
             for start, stop in zip(union_starts, union_stops)
@@ -974,7 +1021,11 @@ def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("intervals_by_length", alt="Interval.by_length")
+    ActivityLog().deprecate_log(
+        "intervals_by_length",
+        alt="Interval(interval_list).by_length(min_length, max_length).times",
+        doc=_INTERVAL_DOC,
+    )
 
     return Interval(interval_list).by_length(min_length, max_length).times
 
@@ -991,7 +1042,9 @@ def interval_list_contains_ind(interval_list, timestamps):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_list_contains_ind", alt="Interval.contains"
+        "interval_list_contains_ind",
+        alt="Interval(interval_list).contains(timestamps, as_indices=True)",
+        doc=_INTERVAL_DOC,
     )
 
     return Interval(interval_list).contains(timestamps, as_indices=True)
@@ -1009,7 +1062,9 @@ def interval_list_contains(interval_list, timestamps):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_list_contains", alt="Interval.contains"
+        "interval_list_contains",
+        alt="Interval(interval_list).contains(timestamps)",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval_list).contains(timestamps)
 
@@ -1027,7 +1082,8 @@ def interval_list_excludes_ind(interval_list, timestamps):
 
     ActivityLog().deprecate_log(
         "interval_list_excludes_ind",
-        alt="Interval.excludes(timestamps, as_indices=True)",
+        alt="Interval(interval_list).excludes(timestamps, as_indices=True)",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval_list).excludes(timestamps, as_indices=True)
 
@@ -1044,7 +1100,9 @@ def interval_list_excludes(interval_list, timestamps):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_list_excludes", alt="Interval.excludes"
+        "interval_list_excludes",
+        alt="Interval(interval_list).excludes(timestamps)",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval_list).excludes(timestamps)
 
@@ -1054,7 +1112,9 @@ def consolidate_intervals(interval_list):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "consolidate_intervals", alt="Interval.consolidate"
+        "consolidate_intervals",
+        alt="Interval(interval_list).consolidate().times",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval_list).consolidate().times
 
@@ -1078,7 +1138,9 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_list_intersect", alt="Interval.intersect"
+        "interval_list_intersect",
+        alt="Interval(interval_list1).intersect(interval_list2, min_length).times",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval_list1).intersect(interval_list2, min_length).times
 
@@ -1096,7 +1158,9 @@ def union_adjacent_index(interval1, interval2):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "union_adjacent_index", alt="Interval.union_adjacent_index"
+        "union_adjacent_index",
+        alt="Interval(interval1).union_adjacent_index(interval2).times",
+        doc=_INTERVAL_DOC,
     )
     return Interval(interval1).union_adjacent_index(interval2).times
 
@@ -1127,7 +1191,14 @@ def interval_list_union(
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("interval_list_union", alt="Interval.union")
+    ActivityLog().deprecate_log(
+        "interval_list_union",
+        alt=(
+            "Interval(interval_list1)"
+            ".union(interval_list2, min_length, max_length).times"
+        ),
+        doc=_INTERVAL_DOC,
+    )
 
     return (
         Interval(interval_list1)
@@ -1151,7 +1222,11 @@ def interval_list_censor(interval_list, timestamps):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("interval_list_censor", alt="Interval.censor")
+    ActivityLog().deprecate_log(
+        "interval_list_censor",
+        alt="Interval(interval_list).censor(timestamps).times",
+        doc=_INTERVAL_DOC,
+    )
     return Interval(interval_list).censor(timestamps).times
 
 
@@ -1167,7 +1242,9 @@ def interval_from_inds(list_frames):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_from_inds", alt="Interval(list_frames, from_inds=True)"
+        "interval_from_inds",
+        alt="Interval(list_frames, from_inds=True).times",
+        doc=_INTERVAL_DOC,
     )
     return Interval(list_frames, from_inds=True).times
 
@@ -1192,7 +1269,9 @@ def interval_set_difference_inds(intervals1, intervals2):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log(
-        "interval_set_difference_inds", alt="Interval.subtract"
+        "interval_set_difference_inds",
+        alt="Interval(intervals1).subtract(intervals2).times",
+        doc=_INTERVAL_DOC,
     )
     return Interval(intervals1).subtract(intervals2).times
 
@@ -1210,7 +1289,8 @@ def interval_list_complement(intervals1, intervals2, min_length=0.0):
 
     ActivityLog().deprecate_log(
         "interval_list_complement",
-        alt="Interval(one).subtract(two, min_length=min_length)",
+        alt="Interval(intervals1).subtract(intervals2, min_length=min_length).times",
+        doc=_INTERVAL_DOC,
     )
     return (
         Interval(intervals1).subtract(intervals2, min_length=min_length).times

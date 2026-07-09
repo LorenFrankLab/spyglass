@@ -72,7 +72,7 @@ def test_nwb_hasher(nwb_hasher):
     assert hash is not None
     assert isinstance(hash, str)
     assert len(hash) == 32
-    assert hash.startswith("4e0c"), "Unexpected NWB file hash"
+    assert hash.startswith("1d393"), "Unexpected NWB file hash"
 
     # Check that individual object hashes are present
     cache = nwb_hasher.objs
@@ -88,3 +88,18 @@ def test_nwb_hasher(nwb_hasher):
 
     skipped_obj = SimpleNamespace(name="version")
     assert nwb_hasher.hash_dataset(skipped_obj) is None
+
+
+@pytest.fixture
+def nwb_legacy_hasher(mini_path):
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    yield NwbfileHasher(
+        mini_path, precision_lookup=5, keep_obj_hash=True, legacy_mode=True
+    )
+
+
+@pytest.mark.slow
+def test_nwb_legacy_hasher(nwb_legacy_hasher):
+    hash = nwb_legacy_hasher.hash
+    assert hash.startswith("4e0c"), "Unexpected NWB file hash"

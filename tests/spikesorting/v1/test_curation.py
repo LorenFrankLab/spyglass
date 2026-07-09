@@ -271,3 +271,76 @@ def test_empty_units_nwb_readable(empty_units_nwb):
         assert nwbf.units is not None
         units_df = nwbf.units.to_dataframe()
         assert len(units_df) == 0
+
+
+# ============================================================================
+# Excess Spike Removal Tests (invalid spike_times from float precision)
+# ============================================================================
+
+
+def test_spike_times_to_valid_samples_drops_out_of_bounds():
+    """The shared helper used by CurationV1.get_sorting() and
+    SpikeSorting.get_sorting() must drop spike sample indices >= n_samples.
+
+    Reproduces the floating-point round-trip scenario where
+    np.searchsorted returns an index equal to n_samples for a spike just
+    beyond the last recording timestamp, which would otherwise cause
+    SpikeInterface to raise ValueError on the resulting sorting.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v1.sorting import (
+        spike_times_to_valid_samples,
+    )
+
+    sampling_frequency = 30000.0
+    n_samples = 300  # 10 ms recording
+    recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
+
+    # 10 valid spikes, plus one just beyond the last timestamp
+    spike_times = np.append(
+        recording_times[:10].copy(), recording_times[-1] + 1e-9
+    )
+
+    # Precondition: searchsorted does produce an out-of-bounds index here
+    raw = np.searchsorted(recording_times, spike_times)
+    assert (raw >= n_samples).any(), (
+        "Test precondition failed: expected at least one out-of-bounds "
+        "index from np.searchsorted"
+    )
+
+    valid = spike_times_to_valid_samples(
+        recording_times, spike_times, n_samples, unit_id=0
+    )
+
+    assert valid.shape == (10,), (
+        f"Expected 10 valid samples after dropping 1 excess, "
+        f"got {valid.shape[0]}"
+    )
+    assert (valid < n_samples).all()
+
+    # Resulting NumpySorting must be accepted by SpikeInterface
+    sorting = si.NumpySorting.from_unit_dict(
+        [{0: valid}], sampling_frequency=sampling_frequency
+    )
+    assert isinstance(sorting, si.BaseSorting)
+
+
+def test_spike_times_to_valid_samples_passthrough():
+    """When all spike times are in bounds, the helper returns sample indices
+    identical to ``np.searchsorted`` and drops nothing."""
+    from spyglass.spikesorting.v1.sorting import (
+        spike_times_to_valid_samples,
+    )
+
+    sampling_frequency = 30000.0
+    n_samples = 300
+    recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
+    spike_times = recording_times[[0, 5, 100, 299]]
+
+    valid = spike_times_to_valid_samples(
+        recording_times, spike_times, n_samples, unit_id=42
+    )
+    expected = np.searchsorted(recording_times, spike_times)
+    np.testing.assert_array_equal(valid, expected)
+    assert (valid < n_samples).all()

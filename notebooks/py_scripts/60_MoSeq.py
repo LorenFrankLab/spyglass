@@ -102,13 +102,18 @@ PoseGroup() & group_key
 
 # ## Defining the Moseq Model
 #
-# Next, we make an entry intpo the `MoseqModelParams` table.  The information in this
+# Next, we make an entry into the `MoseqModelParams` table.  The information in this
 # is used to initialize the moseq model and includes hyperparameters for model training
 # as well as allows you to begin training from an existing model in the database
 # (discussed more below). Relevant parameters can be found in the [Moseq documentation](
 # https://keypoint-moseq.readthedocs.io/en/latest/modeling.html#model-fitting)
 #
 # ** Note: All bodyparts in the `PoseGroup` entry will be used in the model
+#
+# ** Note: When training on multiple animals of different sizes (e.g. male and female rats),
+# The [Moseq documentation](https://keypoint-moseq.readthedocs.io/en/latest/FAQs.html)
+# suggests scaling keypoint distances by each animal's size. This can be done here using
+# the optional parameter `normalize=True`.
 
 # +
 from spyglass.behavior.v1.moseq import (
@@ -134,11 +139,13 @@ params["kappa"] = 1e4
 params["num_ar_iters"] = 50
 # num_epochs is the number of epochs to train the model
 params["num_epochs"] = 50
-# anteror and posterior bodyparts are used to define the orientation of the animal
+# anterior and posterior bodyparts are used to define the orientation of the animal
 params["anterior_bodyparts"] = ["nose"]
 params["posterior_bodyparts"] = ["tailBase"]
 # Optional: set number of PCs to use; based on number needed to explain target_variance in data
 params["target_variance"] = 0.9
+# Optional: scale the keypoint distances by animal size
+params["normalize"] = False
 
 MoseqModelParams().insert1(
     {"model_params_name": model_params_name, "model_params": params},

@@ -1,5 +1,8 @@
+from unittest.mock import patch
+
 import datajoint as dj
 import pytest
+from datajoint.condition import AndList
 
 from tests.conftest import TEARDOWN, VERBOSE
 
@@ -194,3 +197,45 @@ def test_test_mode_property_uses_settings(schema_test, Mixin):
     assert (
         test_mode_value is True
     ), "_test_mode should be True in test environment"
+
+
+@pytest.mark.parametrize(
+    "restriction, expect_warn",
+    [
+        ("id > 0", False),
+        ({"id": 0}, False),
+        (True, False),
+        (False, False),
+        ([], False),
+        ({"fake_field": 123}, True),
+        ({}, True),
+        (AndList(), True),
+    ],
+    ids=[
+        "valid_string",
+        "valid_dict",
+        "bool_True",
+        "bool_False",
+        "empty_list",
+        "dict_no_shared_attrs",
+        "empty_dict",
+        "empty_AndList",
+    ],
+)
+def test_restrict_no_op_warns(schema_test, Mixin, restriction, expect_warn):
+    """BaseMixin.restrict warns when a restriction has no effect.
+
+    DataJoint signals a no-op by returning the *same object* from restrict().
+    _warn_msg routes to debug in test_mode, so we patch it directly rather
+    than relying on log capture.
+    """
+    from spyglass.utils.mixins.base import BaseMixin
+
+    schema_test(Mixin)
+    with patch.object(BaseMixin, "_warn_msg") as mock_warn:
+        Mixin() & restriction
+
+    if expect_warn:
+        assert mock_warn.called, f"Expected no-op warning for {restriction!r}"
+    else:
+        mock_warn.assert_not_called()

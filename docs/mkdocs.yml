@@ -84,6 +84,8 @@ nav:
     - Centralized Code: Features/Mixin.md
     - Recompute: Features/Recompute.md
     - Ingestion: Features/Ingestion.md
+    - Interval: Features/Intervals.md
+    - Populate: Features/Populate.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md
@@ -95,6 +97,9 @@ nav:
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
     - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
+  - Fixing Bugs:
+    - Overview: FixingBugs/index.md
+    - Label Repair (#1513): FixingBugs/LabelRepair.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - Change Log: CHANGELOG.md
   - Copyright: LICENSE.md

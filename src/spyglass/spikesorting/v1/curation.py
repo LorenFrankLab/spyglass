@@ -14,7 +14,11 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.spikesorting.v1.sorting import (
+    SpikeSorting,
+    SpikeSortingSelection,
+    spike_times_to_valid_samples,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -165,18 +169,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-
-        analysis_file_name = (
+        recording_id = (
             SpikeSortingRecording * SpikeSortingSelection & key
-        ).fetch1("analysis_file_name")
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
-        )
-        recording = se.read_nwb_recording(
-            analysis_file_abs_path, load_time_vector=True
+        ).fetch1("recording_id")
+        recording = SpikeSortingRecording.get_recording(
+            {"recording_id": recording_id}
         )
         recording.annotate(is_filtered=True)
-
         return recording
 
     @classmethod
@@ -213,8 +212,11 @@ class CurationV1(SpyglassMixin, dj.Manual):
         sampling_frequency = recording.get_sampling_frequency()
 
         recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
         units_dict = {
-            unit.Index: np.searchsorted(recording_times, unit.spike_times)
+            unit.Index: spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
+            )
             for unit in units.itertuples()
         }
 
