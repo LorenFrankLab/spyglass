@@ -324,11 +324,18 @@ def convert_classes_to_dict(params: dict) -> dict:
             vars(obs) for obs in params["observation_models"]
         ]
 
-    try:
-        params["clusterless_algorithm_params"] = _convert_algorithm_params(
-            params["clusterless_algorithm_params"]
-        )
-    except KeyError:
-        pass
+    # A given detector carries only one of these keys; the other raises
+    # KeyError and is skipped. Both are handled the same way so sorted-spikes
+    # algorithm params are serialized identically to clusterless ones.
+    for algorithm_params_key in (
+        "clusterless_algorithm_params",
+        "sorted_spikes_algorithm_params",
+    ):
+        try:
+            params[algorithm_params_key] = _convert_algorithm_params(
+                params[algorithm_params_key]
+            )
+        except KeyError:
+            pass
 
     return params

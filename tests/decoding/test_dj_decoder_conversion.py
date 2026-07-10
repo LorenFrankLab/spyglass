@@ -189,6 +189,34 @@ def test_restore_classes_legacy_nonlocal_upgrades_to_concrete_class(class_name):
         assert restored_params[name] == value
 
 
+def test_convert_classes_to_dict_stringifies_sorted_algorithm_model():
+    """Sorted-spikes algorithm params get the same model->name conversion.
+
+    ``convert_classes_to_dict`` routes both ``clusterless_algorithm_params`` and
+    ``sorted_spikes_algorithm_params`` through ``_convert_algorithm_params``, so a
+    class stored under ``model`` becomes its name for datajoint storage
+    symmetrically across modalities (previously only clusterless was routed).
+    """
+    from non_local_detector import ContFragSortedSpikesClassifier
+
+    from spyglass.decoding.v1.dj_decoder_conversion import (
+        convert_classes_to_dict,
+    )
+
+    class _DummyAlgorithmModel:
+        pass
+
+    params = dict(vars(ContFragSortedSpikesClassifier()))
+    params["sorted_spikes_algorithm_params"] = {"model": _DummyAlgorithmModel}
+
+    converted = convert_classes_to_dict(params)
+
+    assert (
+        converted["sorted_spikes_algorithm_params"]["model"]
+        == "_DummyAlgorithmModel"
+    )
+
+
 def test_restore_classes_unknown_class_raises():
     """An unrecognized ``class_name`` fails loudly, listing known classes."""
     from non_local_detector import ContFragClusterlessClassifier
