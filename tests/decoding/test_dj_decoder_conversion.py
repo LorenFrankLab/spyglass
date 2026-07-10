@@ -111,6 +111,39 @@ def test_restore_classes_legacy_dict_returns_dict():
     assert isinstance(restored["environments"][0], Environment)
 
 
+def test_restore_classes_legacy_dict_strips_derived_attrs():
+    """Legacy rows with a derived ``_``-prefixed attr rebuild via the base detector.
+
+    Rows serialized via ``vars(model)`` before the ``get_params()`` switch could
+    persist detector internals that are not constructor parameters -- notably
+    ``_frozen_discrete_transition_rows_mask_``, a mask computed in ``__init__`` on
+    some non_local_detector versions. Such rows carry no ``class_name``, so they
+    take the dict fallback and are rebuilt with the base detector; without
+    stripping, ``ClusterlessDetector(**restored)`` raises ``TypeError``. The
+    attribute is injected explicitly so the test reproduces a poisoned legacy row
+    regardless of whether the installed version still writes it in ``vars()``.
+    """
+    from non_local_detector import ContFragClusterlessClassifier
+    from non_local_detector.models.base import ClusterlessDetector
+
+    from spyglass.decoding.v1.dj_decoder_conversion import (
+        convert_classes_to_dict,
+        restore_classes,
+    )
+
+    model = ContFragClusterlessClassifier()
+    # Legacy vars()-style serialization: no class_name, plus a derived internal.
+    legacy = convert_classes_to_dict(dict(vars(model)))
+    legacy["_frozen_discrete_transition_rows_mask_"] = None
+
+    restored = restore_classes(legacy)
+
+    assert isinstance(restored, dict)
+    assert "_frozen_discrete_transition_rows_mask_" not in restored
+    # The point of the strip: base-detector reconstruction no longer raises.
+    assert isinstance(ClusterlessDetector(**restored), ClusterlessDetector)
+
+
 def test_restore_classes_unknown_class_raises():
     """An unrecognized ``class_name`` fails loudly, listing known classes."""
     from non_local_detector import ContFragClusterlessClassifier

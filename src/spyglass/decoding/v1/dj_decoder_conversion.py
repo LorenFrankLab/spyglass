@@ -127,8 +127,9 @@ def restore_classes(params: dict) -> dict:
     model : object or dict
         A reconstructed detector/classifier instance when the stored params
         carry a ``"class_name"`` (the current format). For legacy rows stored
-        without a class name, the converted parameter ``dict`` is returned
-        unchanged for backward compatibility.
+        without a class name, the converted parameter ``dict`` is returned (with
+        derived, non-constructor ``_``-prefixed attributes stripped) for
+        backward compatibility.
     """
 
     params = copy.deepcopy(params)
@@ -169,7 +170,17 @@ def restore_classes(params: dict) -> dict:
     # a class name fall back to the param dict for backward compatibility.
     model_class_name = params.pop("class_name", None)
     if model_class_name is None:
-        return params
+        # Legacy rows serialized via ``vars(model)`` (before this change) may
+        # carry derived internal attributes that are not constructor
+        # parameters -- e.g. ``_frozen_discrete_transition_rows_mask_``, a mask
+        # computed in the detector's ``__init__``. Passing them back into the
+        # base detector raises ``TypeError``, so strip leading-underscore keys;
+        # constructor parameters never start with an underscore.
+        return {
+            key: value
+            for key, value in params.items()
+            if not key.startswith("_")
+        }
 
     model_classes = _model_class_registry()
     if model_class_name not in model_classes:
