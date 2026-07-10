@@ -144,15 +144,21 @@ def test_restore_classes_legacy_dict_strips_derived_attrs():
     assert isinstance(ClusterlessDetector(**restored), ClusterlessDetector)
 
 
-def test_restore_classes_legacy_nonlocal_upgrades_to_concrete_class():
+@pytest.mark.parametrize(
+    "class_name",
+    ["NonLocalClusterlessDetector", "NonLocalSortedSpikesDetector"],
+)
+def test_restore_classes_legacy_nonlocal_upgrades_to_concrete_class(class_name):
     """Legacy NonLocal rows rebuild via the concrete class, preserving penalties.
 
     NonLocal* detectors accept ``non_local_position_penalty`` /
     ``non_local_penalty_std`` that the base detector rejects. A legacy row (no
     ``class_name``) carrying them must be rebuilt as the concrete NonLocal class
-    rather than the base detector, or those parameters are lost / raise. Gated
-    on the installed non_local_detector actually exposing the params (added
-    after 0.6.9), mirroring ``test_decoding_params_roundtrip``.
+    rather than the base detector, or those parameters are lost / raise.
+    Parametrized over both modalities (clusterless and sorted spikes) since each
+    infers its family from a different marker key. Gated on the installed
+    non_local_detector actually exposing the params (added after 0.6.9),
+    mirroring ``test_decoding_params_roundtrip``.
     """
     import non_local_detector as nld
 
@@ -161,7 +167,7 @@ def test_restore_classes_legacy_nonlocal_upgrades_to_concrete_class():
         restore_classes,
     )
 
-    cls = nld.NonLocalClusterlessDetector
+    cls = getattr(nld, class_name)
     available = set(cls().get_params(deep=False))
     overrides = {
         name: value
