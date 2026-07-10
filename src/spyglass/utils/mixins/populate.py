@@ -66,8 +66,9 @@ class PopulateMixin(BaseMixin):
         )
         if use_transact is False:
             raise NotImplementedError(
-                "Non-transaction populate no longer supported. Please use "
-                + "tri-part make. See DataJoint documentation for details."
+                "Non-transaction populate no longer supported. Please remove "
+                + "_use_transaction = False from the class and use tri-part "
+                + "make instead. See DataJoint documentation for details."
             )
 
         # Get keys, needed for no-transact or multi-process w/_parallel_make

@@ -30,7 +30,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_interval import IntervalList, Interval
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
@@ -77,6 +77,29 @@ from spyglass.utils.nwb_helper_fn import (
 __all__ = [
     "AnalysisFileIssues",
     "AnalysisRegistry",
+    "AnalysisNwbfile",
+    "BrainRegion",
+    "CameraDevice",
+    "DataAcquisitionDevice",
+    "DataAcquisitionDeviceAmplifier",
+    "DataAcquisitionDeviceSystem",
+    "DIOEvents",
+    "Electrode",
+    "ElectrodeGroup",
+    "FirFilterParameters",
+    "LFP",
+    "LFPBand",
+    "LFPBandSelection",
+    "LFPSelection",
+    "Interval",
+    "IntervalList",
+    "IntervalLinearizationSelection",
+    "IntervalLinearizedPosition",
+    "IntervalPositionInfo",
+    "IntervalPositionInfoSelection",
+    "Institution",
+    "Lab",
+    "LabMember",
     "LabTeam",
     "LinearizationParameters",
     "Nwbfile",
