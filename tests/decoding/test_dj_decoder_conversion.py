@@ -144,6 +144,45 @@ def test_restore_classes_legacy_dict_strips_derived_attrs():
     assert isinstance(ClusterlessDetector(**restored), ClusterlessDetector)
 
 
+def test_restore_classes_legacy_nonlocal_upgrades_to_concrete_class():
+    """Legacy NonLocal rows rebuild via the concrete class, preserving penalties.
+
+    NonLocal* detectors accept ``non_local_position_penalty`` /
+    ``non_local_penalty_std`` that the base detector rejects. A legacy row (no
+    ``class_name``) carrying them must be rebuilt as the concrete NonLocal class
+    rather than the base detector, or those parameters are lost / raise. Gated
+    on the installed non_local_detector actually exposing the params (added
+    after 0.6.9), mirroring ``test_decoding_params_roundtrip``.
+    """
+    import non_local_detector as nld
+
+    from spyglass.decoding.v1.dj_decoder_conversion import (
+        convert_classes_to_dict,
+        restore_classes,
+    )
+
+    cls = nld.NonLocalClusterlessDetector
+    available = set(cls().get_params(deep=False))
+    overrides = {
+        name: value
+        for name, value in NONLOCAL_PARAM_OVERRIDES.items()
+        if name in available
+    }
+    if not overrides:
+        pytest.skip("installed non_local_detector has no NonLocal-only params")
+
+    model = cls(**overrides)
+    # Legacy vars()-style serialization carries no top-level class_name.
+    legacy = convert_classes_to_dict(dict(vars(model)))
+
+    restored = restore_classes(legacy)
+
+    assert isinstance(restored, cls)
+    restored_params = restored.get_params(deep=False)
+    for name, value in overrides.items():
+        assert restored_params[name] == value
+
+
 def test_restore_classes_unknown_class_raises():
     """An unrecognized ``class_name`` fails loudly, listing known classes."""
     from non_local_detector import ContFragClusterlessClassifier
