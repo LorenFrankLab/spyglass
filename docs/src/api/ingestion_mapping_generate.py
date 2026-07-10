@@ -119,7 +119,7 @@ def iter_modules(package_name: str) -> Iterable[types.ModuleType]:
     dj.Table.user_is_admin = property(lambda self: True)
 
     for modinfo in pkgutil.walk_packages(
-        pkg.__path__, prefix=pkg.__name__ + "."
+        pkg.__path__, prefix=pkg.__name__ + ".", onerror=lambda _: None
     ):
         name = modinfo.name
         try:
