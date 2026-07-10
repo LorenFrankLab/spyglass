@@ -420,7 +420,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params["tempdir"] = sorter_temp_dir.name
             os.chmod(sorter_params["tempdir"], 0o777)
 
-            if sorter == "mountainsort5":
+            # mountainsort5 and the spikeinterface-native sorters below never
+            # declared a `tempdir` param, so the injected value above must be
+            # removed before their own parameter validation rejects it.
+            if sorter in ("mountainsort5", "spykingcircus2", "tridesclous2"):
                 _ = sorter_params.pop("tempdir", None)
 
             # if whitening is specified in sorter params, apply whitening separately
