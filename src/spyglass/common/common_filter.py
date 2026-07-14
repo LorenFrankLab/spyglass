@@ -182,7 +182,11 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 **pass_stop_dict,
                 "filter_coeff": np.array(
                     fir.firdesign(
-                        numtaps, band_edges, desired, fs=fs, p=TRANS_SPLINE
+                        numtaps,
+                        band_edges,
+                        desired,
+                        fs=fs,
+                        spline_power=TRANS_SPLINE,
                     ),
                     ndmin=1,
                 ),

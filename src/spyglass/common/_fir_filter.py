@@ -10,9 +10,10 @@ covering only the pieces spyglass uses in ``common_filter.py``:
   (possibly on-disk) preallocated output array, with decimation and
   per-dimension index restrictions.
 
-All public call signatures (parameter names, order, and defaults) are unchanged
-from upstream ghostipy -- only type annotations have been added -- and numeric
-output matches it to floating-point round-off.
+Call signatures keep upstream ghostipy's parameter order and defaults, with
+clearer parameter names (e.g. ``tw`` -> ``transition_width``, ``p`` ->
+``spline_power``) and added type annotations; numeric output matches upstream to
+floating-point round-off.
 
 Intentional divergences from upstream:
 
@@ -32,10 +33,12 @@ Intentional divergences from upstream:
   longer swallows exceptions and silently zero-fills; ``input_index_bounds`` /
   ``output_index_bounds`` treat the stop as exclusive and validate by range
   rather than probing the array; ``estimate_taps`` rejects non-positive
-  ``fs``/``tw``/``d1``/``d2`` and deviations so loose the tap estimate would be
-  < 1; ``firdesign``/``_firspline`` require an integer ``numtaps`` >= 1 and at
-  least two ordered ``band_edges``; the spline power ``p`` must be > 0; ``ds``
-  must be an integer >= 1; ``nfft`` must be an integer >= the kernel length;
+  ``fs``/``transition_width``/``d1``/``d2`` and deviations so loose the tap
+  estimate would be < 1; ``firdesign``/``_firspline`` require an integer
+  ``numtaps`` >= 1 and at
+  least two ordered ``band_edges``; the spline power ``spline_power`` must be
+  > 0; ``ds`` must be an integer >= 1; ``nfft`` must be an integer >= the
+  kernel length;
   ``input_dim_restrictions`` entries must be 1-D integer index arrays restricting
   at most one non-filtered axis; ``output_offset`` must be an integer >= 0 that
   fits within ``outarray``; complex input no longer raises ``UnboundLocalError``.
@@ -90,7 +93,11 @@ def group_delay(b: np.ndarray) -> int:
 
 
 def estimate_taps(
-    fs: float, tw: float, *, d1: float | None = None, d2: float | None = None
+    fs: float,
+    transition_width: float,
+    *,
+    d1: float | None = None,
+    d2: float | None = None,
 ) -> int:
     """Estimate the number of taps for a Type I FIR filter.
 
@@ -98,7 +105,7 @@ def estimate_taps(
     ----------
     fs : float
         Sampling rate in Hz.
-    tw : float
+    transition_width : float
         Transition bandwidth in Hz.
     d1 : float, optional
         Passband deviation. Default is 0.1% (1e-3).
@@ -113,9 +120,9 @@ def estimate_taps(
     Raises
     ------
     ValueError
-        If ``fs``, ``tw``, ``d1``, or ``d2`` is non-finite or non-positive, or
-        if the deviations are so loose that the estimated tap count is < 1
-        (i.e. ``10 * d1 * d2 >= 1``).
+        If ``fs``, ``transition_width``, ``d1``, or ``d2`` is non-finite or
+        non-positive, or if the deviations are so loose that the estimated tap
+        count is < 1 (i.e. ``10 * d1 * d2 >= 1``).
 
     References
     ----------
@@ -123,9 +130,10 @@ def estimate_taps(
     """
     if not np.isfinite(fs) or fs <= 0:
         raise ValueError(f"'fs' must be finite and positive but got {fs}")
-    if not np.isfinite(tw) or tw <= 0:
+    if not np.isfinite(transition_width) or transition_width <= 0:
         raise ValueError(
-            f"'tw' (transition bandwidth) must be finite and positive but got {tw}"
+            "'transition_width' must be finite and positive but got "
+            f"{transition_width}"
         )
 
     if d1 is None:
@@ -138,7 +146,9 @@ def estimate_taps(
             f"d1={d1}, d2={d2}"
         )
 
-    numtaps = int(np.ceil(2 / 3 * np.log10(1 / (10 * d1 * d2)) * fs / tw))
+    numtaps = int(
+        np.ceil(2 / 3 * np.log10(1 / (10 * d1 * d2)) * fs / transition_width)
+    )
     if numtaps < 1:
         raise ValueError(
             f"computed numtaps={numtaps} < 1; the deviations d1={d1}, d2={d2} are "
@@ -151,11 +161,11 @@ def estimate_taps(
 
 def _firspline(
     numtaps: int,
-    f1: float,
-    f2: float,
+    pass_freq: float,
+    stop_freq: float,
     *,
     fs: float | None = None,
-    p: float | None = None,
+    spline_power: float | None = None,
 ) -> np.ndarray:
     """Design a Type I low-pass filter with a spline transition band.
 
@@ -163,13 +173,13 @@ def _firspline(
     ----------
     numtaps : int
         Number of coefficients (must be a positive odd integer).
-    f1 : float
+    pass_freq : float
         Frequency where the amplitude response is 1, in Hz.
-    f2 : float
+    stop_freq : float
         Frequency where the amplitude response is 0, in Hz.
     fs : float, optional
         Sampling rate in Hz. Default is 2 Hz.
-    p : float, optional
+    spline_power : float, optional
         Spline power. Default follows Burrus et al., 1992.
 
     Returns
@@ -181,8 +191,9 @@ def _firspline(
     ------
     ValueError
         If ``numtaps`` is not a positive odd integer, if ``fs`` is non-finite or
-        non-positive, if ``f1``/``f2`` exceed the Nyquist frequency or are not
-        strictly increasing, or if ``p`` is non-finite or non-positive.
+        non-positive, if ``pass_freq``/``stop_freq`` exceed the Nyquist frequency
+        or are not strictly increasing, or if ``spline_power`` is non-finite or
+        non-positive.
     """
     if not isinstance(numtaps, (int, np.integer)):
         raise ValueError(f"numtaps must be an integer but got {numtaps}")
@@ -199,33 +210,37 @@ def _firspline(
         raise ValueError(f"'fs' must be finite and positive but got {fs}")
     nyquist = fs / 2
 
-    if f1 > nyquist or f2 > nyquist:
+    if pass_freq > nyquist or stop_freq > nyquist:
         raise ValueError(
-            f"Got critical frequencies {f1} and {f2} but they must both be less "
-            f"than the Nyquist frequency of {nyquist}"
+            f"Got critical frequencies {pass_freq} and {stop_freq} but they "
+            f"must both be less than the Nyquist frequency of {nyquist}"
         )
-    if f1 >= f2:
-        raise ValueError(f"f1 must be <{f2} but got {f1}")
+    if pass_freq >= stop_freq:
+        raise ValueError(
+            f"pass_freq must be <{stop_freq} but got {pass_freq}"
+        )
 
-    if p is None:
-        p = 0.312 * numtaps * (f2 - f1) / nyquist
-    # Must be strictly positive: p appears in the denominator below, and p == 0
-    # silently collapses the spline transition to a rectangular truncation
-    # (nan ** 0 == 1) rather than raising.
-    if not np.isfinite(p) or p <= 0:
-        raise ValueError(f"p must be positive but got {p}")
+    if spline_power is None:
+        spline_power = 0.312 * numtaps * (stop_freq - pass_freq) / nyquist
+    # Must be strictly positive: spline_power appears in the denominator below,
+    # and spline_power == 0 silently collapses the spline transition to a
+    # rectangular truncation (nan ** 0 == 1) rather than raising.
+    if not np.isfinite(spline_power) or spline_power <= 0:
+        raise ValueError(
+            f"spline_power must be positive but got {spline_power}"
+        )
 
     # Convert to normalized frequency in radians
-    center_rad = (f1 + f2) / 2 * (1 / nyquist * np.pi)
-    half_width_rad = (f2 - f1) / 2 * (1 / nyquist * np.pi)
+    center_rad = (pass_freq + stop_freq) / 2 * (1 / nyquist * np.pi)
+    half_width_rad = (stop_freq - pass_freq) / 2 * (1 / nyquist * np.pi)
 
     tap_indices = np.arange(1, (numtaps - 1) // 2 + 1)
 
     # Optimal L2 solution to the ideal lowpass filter
     half_taps = np.sin(center_rad * tap_indices) / (np.pi * tap_indices)
 
-    spline_arg = half_width_rad * tap_indices / p
-    spline = (np.sin(spline_arg) / spline_arg) ** p
+    spline_arg = half_width_rad * tap_indices / spline_power
+    spline = (np.sin(spline_arg) / spline_arg) ** spline_power
     half_taps *= spline  # connect transition band with spline
 
     # make linear phase
@@ -239,7 +254,7 @@ def firdesign(
     desired: npt.ArrayLike,
     *,
     fs: float = 1,
-    p: float | None = None,
+    spline_power: float | None = None,
 ) -> np.ndarray:
     """Design an arbitrary Type I FIR filter with spline transition bands.
 
@@ -259,7 +274,7 @@ def firdesign(
         transition band differ) and flat bands (the two edges match).
     fs : float, optional
         Sampling rate in Hz. Default is 1 Hz.
-    p : float, optional
+    spline_power : float, optional
         Power for the spline transition-band functions. Default follows
         Burrus et al., 1992.
 
@@ -334,8 +349,10 @@ def firdesign(
     critical_points = band_edges.reshape((-1, 2))
     # low pass prototypes
     prototypes = np.zeros((len(critical_points), numtaps))
-    for ind, (f1, f2) in enumerate(critical_points):
-        prototypes[ind] = _firspline(numtaps, f1, f2, fs=fs, p=p)
+    for ind, (pass_freq, stop_freq) in enumerate(critical_points):
+        prototypes[ind] = _firspline(
+            numtaps, pass_freq, stop_freq, fs=fs, spline_power=spline_power
+        )
 
     # center impulse (identity filter), used to invert a lowpass into a highpass
     impulse = scipy.signal.unit_impulse(numtaps, "mid")
