@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from multiprocessing import cpu_count
 
 import numpy as np
@@ -399,46 +400,46 @@ def firdesign(
     return coeffs
 
 
-def _osconvolve(
-    signal: np.ndarray,
-    kernel: npt.ArrayLike,
-    *,
-    mode: str = "full",
-    nfft: int | None = None,
-    threads: int = cpu_count(),
-    axis: int = -1,
-    outarray: np.ndarray | None = None,
-    input_index_bounds: Sequence[int] | None = None,
-    output_index_bounds: Sequence[int] | None = None,
-    describe_dims: bool = False,
-    ds: int | None = None,
-    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
-    output_offset: int = 0,
-) -> tuple[tuple[int, ...], str] | np.ndarray:
-    """Overlap-save FFT convolution, written to minimize memory usage.
+@dataclass
+class _OsPlan:
+    """Validated arguments and output plan for one overlap-save convolution.
 
-    Streams the convolution block-by-block into ``outarray`` (which may be an
-    on-disk array), supporting decimation (``ds``) and restricting which
-    indices of the non-filtered axes are used (``input_dim_restrictions``).
-    ``mode`` selects ``'full'``, ``'same'``, or ``'valid'`` convolution.
-
-    Ported from ghostipy's ``osconvolve``; the numeric output is identical to
-    upstream to floating-point round-off. See the module header for the
-    intentional divergences (scipy.fft backend, the exact-boundary block fold,
-    and the fail-loud input/read validation), and :func:`filter_data_fir` for
-    the meaning of the shared out-of-core parameters.
-
-    Returns
-    -------
-    tuple of (tuple of int, str), or numpy.ndarray
-        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
-        have; otherwise the filled ``outarray``.
+    Produced by :func:`_plan_osconvolve` and consumed by :func:`_osconvolve`, it
+    carries everything the block loop (and a ``describe_dims`` query) needs, so
+    no argument is re-validated once execution starts.
     """
-    # The kernel is small and always in memory, so normalize it to an array for
-    # convenience. The signal is deliberately NOT converted: it may be an
-    # on-disk / lazy array, and np.asarray would force it fully into memory.
-    kernel = np.asarray(kernel)
 
+    real_output: bool
+    kernel_len: int
+    first_ind: int
+    last_ind: int
+    downsample: bool
+    ds: int | None
+    restricted_dims: list
+    expected_shape: tuple[int, ...]
+    dtype: str
+
+
+def _plan_osconvolve(
+    signal: np.ndarray,
+    kernel: np.ndarray,
+    *,
+    mode: str,
+    nfft: int | None,
+    threads: int,
+    axis: int,
+    input_index_bounds: Sequence[int] | None,
+    output_index_bounds: Sequence[int] | None,
+    ds: int | None,
+    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None,
+) -> _OsPlan:
+    """Validate arguments and plan the output shape for :func:`_osconvolve`.
+
+    Pure validation and shape planning: raises on any invalid argument and
+    returns the :class:`_OsPlan` the block loop (and ``describe_dims``) needs.
+    No FFT runs and no output array is allocated here; ``kernel`` must already
+    be a NumPy array.
+    """
     real_output = np.isrealobj(signal) and np.isrealobj(kernel)
 
     if threads < 1:
@@ -536,7 +537,6 @@ def _osconvolve(
                 f"'ds' factor must be an integer >= 1 but got {ds!r}"
             )
         ds = int(ds)
-        block_offset = 0
         downsample = True
 
     ###############################################################
@@ -549,8 +549,8 @@ def _osconvolve(
 
     # ... and override the appropriate part if input_dim_restrictions were passed
     # in. The restricted (dim, selection, length) triples are recorded once here
-    # and reused for the block-buffer sizing and signal slices below, instead of
-    # re-scanning every dimension each time.
+    # and reused by the _osconvolve block loop for buffer sizing and signal
+    # slices, instead of re-scanning every dimension each time.
     restricted_dims = []
     if input_dim_restrictions is not None:
         if len(input_dim_restrictions) != signal.ndim:
@@ -617,6 +617,87 @@ def _osconvolve(
             raise ValueError(
                 f"'nfft' must be at least the kernel size of {kernel_len}"
             )
+
+    return _OsPlan(
+        real_output=real_output,
+        kernel_len=kernel_len,
+        first_ind=first_ind,
+        last_ind=last_ind,
+        downsample=downsample,
+        ds=ds,
+        restricted_dims=restricted_dims,
+        expected_shape=expected_shape,
+        dtype=dtype,
+    )
+
+
+def _osconvolve(
+    signal: np.ndarray,
+    kernel: npt.ArrayLike,
+    *,
+    mode: str = "full",
+    nfft: int | None = None,
+    threads: int = cpu_count(),
+    axis: int = -1,
+    outarray: np.ndarray | None = None,
+    input_index_bounds: Sequence[int] | None = None,
+    output_index_bounds: Sequence[int] | None = None,
+    describe_dims: bool = False,
+    ds: int | None = None,
+    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
+    output_offset: int = 0,
+) -> tuple[tuple[int, ...], str] | np.ndarray:
+    """Overlap-save FFT convolution, written to minimize memory usage.
+
+    Streams the convolution block-by-block into ``outarray`` (which may be an
+    on-disk array), supporting decimation (``ds``) and restricting which
+    indices of the non-filtered axes are used (``input_dim_restrictions``).
+    ``mode`` selects ``'full'``, ``'same'``, or ``'valid'`` convolution.
+
+    Ported from ghostipy's ``osconvolve``; the numeric output is identical to
+    upstream to floating-point round-off. Argument validation and output-shape
+    planning live in :func:`_plan_osconvolve`; this function allocates the output
+    (with the ``output_offset``/``outarray`` fit check that needs the array) and
+    runs the block loop. It is the general convolution engine (any
+    ``mode``), of which :func:`filter_data_fir` is the ``mode='full'`` wrapper
+    that spyglass calls. See the module header for the intentional divergences
+    (scipy.fft backend, the exact-boundary block fold, and the fail-loud
+    input/read validation), and :func:`filter_data_fir` for the meaning of the
+    shared out-of-core parameters.
+
+    Returns
+    -------
+    tuple of (tuple of int, str), or numpy.ndarray
+        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
+        have; otherwise the filled ``outarray``.
+    """
+    # The kernel is small and always in memory, so normalize it to an array for
+    # convenience. The signal is deliberately NOT converted: it may be an
+    # on-disk / lazy array, and np.asarray would force it fully into memory.
+    kernel = np.asarray(kernel)
+
+    plan = _plan_osconvolve(
+        signal,
+        kernel,
+        mode=mode,
+        nfft=nfft,
+        threads=threads,
+        axis=axis,
+        input_index_bounds=input_index_bounds,
+        output_index_bounds=output_index_bounds,
+        ds=ds,
+        input_dim_restrictions=input_dim_restrictions,
+    )
+    real_output = plan.real_output
+    kernel_len = plan.kernel_len
+    first_ind = plan.first_ind
+    last_ind = plan.last_ind
+    downsample = plan.downsample
+    ds = plan.ds
+    restricted_dims = plan.restricted_dims
+    expected_shape = plan.expected_shape
+    dtype = plan.dtype
+    block_offset = 0
 
     if describe_dims:
         logger.debug(
@@ -849,9 +930,11 @@ def filter_data_fir(
 ) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Apply an FIR filter to data via overlap-save FFT convolution.
 
-    Uses ``mode='full'``; combined with ``output_index_bounds`` set to
-    ``[group_delay, group_delay + N]`` this yields the zero-phase,
-    delay-compensated output that spyglass relies on.
+    This is the public entry point spyglass uses: a thin ``mode='full'`` wrapper
+    over the general :func:`_osconvolve` engine, exposing only the parameters
+    spyglass needs. Combined with ``output_index_bounds`` set to
+    ``[group_delay, group_delay + N]`` the full-mode convolution yields the
+    zero-phase, delay-compensated output that spyglass relies on.
 
     Parameters
     ----------
