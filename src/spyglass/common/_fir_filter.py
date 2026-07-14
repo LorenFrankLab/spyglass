@@ -11,9 +11,10 @@ covering only the pieces spyglass uses in ``common_filter.py``:
   per-dimension index restrictions.
 
 Call signatures keep upstream ghostipy's parameter order and defaults, with
-clearer parameter names (e.g. ``tw`` -> ``transition_width``, ``p`` ->
-``spline_power``) and added type annotations; numeric output matches upstream to
-floating-point round-off.
+clearer parameter names (e.g. ``fs`` -> ``sampling_freq``, ``tw`` ->
+``transition_width``, ``p`` -> ``spline_power``, ``b`` -> ``filter_coeffs``)
+and added type annotations; numeric output matches upstream to floating-point
+round-off.
 
 Intentional divergences from upstream:
 
@@ -32,9 +33,9 @@ Intentional divergences from upstream:
   errors (never the valid path spyglass exercises): the M-1 overlap read no
   longer swallows exceptions and silently zero-fills; ``input_index_bounds`` /
   ``output_index_bounds`` treat the stop as exclusive and validate by range
-  rather than probing the array; ``estimate_taps`` rejects non-positive ``fs``,
-  ``transition_width``, ``passband_deviation``, and ``stopband_deviation``, and
-  deviations so loose the tap estimate would be < 1;
+  rather than probing the array; ``estimate_taps`` rejects non-positive
+  ``sampling_freq``, ``transition_width``, ``passband_deviation``, and
+  ``stopband_deviation``, and deviations so loose the tap estimate would be < 1;
   ``firdesign``/``_firspline`` require an integer ``numtaps`` >= 1 and at
   least two ordered ``band_edges``; the spline power ``spline_power`` must be
   > 0; ``ds`` must be an integer >= 1; ``nfft`` must be an integer >= the
@@ -76,12 +77,12 @@ def _assert_finite_positive(value: float, name: str) -> None:
         )
 
 
-def group_delay(b: np.ndarray) -> int:
+def group_delay(filter_coeffs: np.ndarray) -> int:
     """Group delay of a linear-phase (Type I) FIR filter.
 
     Parameters
     ----------
-    b : numpy.ndarray, shape (N,)
+    filter_coeffs : numpy.ndarray, shape (N,)
         The filter coefficients. ``N`` must be odd.
 
     Returns
@@ -92,20 +93,20 @@ def group_delay(b: np.ndarray) -> int:
     Raises
     ------
     ValueError
-        If ``b`` has an even number of coefficients, for which the group delay
-        is not an integer.
+        If ``filter_coeffs`` has an even number of coefficients, for which the
+        group delay is not an integer.
     """
-    n_taps = len(b)
-    if not n_taps & 1:
+    numtaps = len(filter_coeffs)
+    if not numtaps & 1:
         raise ValueError(
-            f"There are {n_taps} filter coefficients (an even number), so the "
+            f"There are {numtaps} filter coefficients (an even number), so the "
             "group delay cannot be converted to an integer value"
         )
-    return (n_taps - 1) // 2
+    return (numtaps - 1) // 2
 
 
 def estimate_taps(
-    fs: float,
+    sampling_freq: float,
     transition_width: float,
     *,
     passband_deviation: float = 1e-3,
@@ -115,7 +116,7 @@ def estimate_taps(
 
     Parameters
     ----------
-    fs : float
+    sampling_freq : float
         Sampling rate in Hz.
     transition_width : float
         Transition bandwidth in Hz.
@@ -132,7 +133,7 @@ def estimate_taps(
     Raises
     ------
     ValueError
-        If ``fs``, ``transition_width``, ``passband_deviation``, or
+        If ``sampling_freq``, ``transition_width``, ``passband_deviation``, or
         ``stopband_deviation`` is non-finite or non-positive, or if the
         deviations are so loose that the estimated tap count is < 1 (i.e.
         ``10 * passband_deviation * stopband_deviation >= 1``).
@@ -141,7 +142,7 @@ def estimate_taps(
     ----------
     https://dsp.stackexchange.com/questions/31066
     """
-    _assert_finite_positive(fs, "fs")
+    _assert_finite_positive(sampling_freq, "sampling_freq")
     _assert_finite_positive(transition_width, "transition_width")
     if (
         not np.isfinite(passband_deviation)
@@ -157,7 +158,13 @@ def estimate_taps(
 
     deviation_product = 10 * passband_deviation * stopband_deviation
     numtaps = int(
-        np.ceil(2 / 3 * np.log10(1 / deviation_product) * fs / transition_width)
+        np.ceil(
+            2
+            / 3
+            * np.log10(1 / deviation_product)
+            * sampling_freq
+            / transition_width
+        )
     )
     if numtaps < 1:
         raise ValueError(
@@ -176,7 +183,7 @@ def _firspline(
     pass_freq: float,
     stop_freq: float,
     *,
-    fs: float | None = None,
+    sampling_freq: float | None = None,
     spline_power: float | None = None,
 ) -> np.ndarray:
     """Design a Type I low-pass filter with a spline transition band.
@@ -189,7 +196,7 @@ def _firspline(
         Frequency where the amplitude response is 1, in Hz.
     stop_freq : float
         Frequency where the amplitude response is 0, in Hz.
-    fs : float, optional
+    sampling_freq : float, optional
         Sampling rate in Hz. Default is 2 Hz.
     spline_power : float, optional
         Spline power. Default follows Burrus et al., 1992.
@@ -202,10 +209,10 @@ def _firspline(
     Raises
     ------
     ValueError
-        If ``numtaps`` is not a positive odd integer, if ``fs`` is non-finite or
-        non-positive, if ``pass_freq``/``stop_freq`` exceed the Nyquist frequency
-        or are not strictly increasing, or if ``spline_power`` is non-finite or
-        non-positive.
+        If ``numtaps`` is not a positive odd integer, if ``sampling_freq`` is
+        non-finite or non-positive, if ``pass_freq``/``stop_freq`` exceed the
+        Nyquist frequency or are not strictly increasing, or if
+        ``spline_power`` is non-finite or non-positive.
     """
     if not isinstance(numtaps, (int, np.integer)):
         raise ValueError(f"numtaps must be an integer but got {numtaps}")
@@ -216,10 +223,10 @@ def _firspline(
     if not numtaps & 1:
         raise ValueError(f"numtaps must be odd but got {numtaps}")
 
-    if fs is None:
-        fs = 2
-    _assert_finite_positive(fs, "fs")
-    nyquist = fs / 2
+    if sampling_freq is None:
+        sampling_freq = 2
+    _assert_finite_positive(sampling_freq, "sampling_freq")
+    nyquist = sampling_freq / 2
 
     if pass_freq > nyquist or stop_freq > nyquist:
         raise ValueError(
@@ -262,7 +269,7 @@ def firdesign(
     band_edges: npt.ArrayLike,
     desired: npt.ArrayLike,
     *,
-    fs: float = 1,
+    sampling_freq: float = 1,
     spline_power: float | None = None,
 ) -> np.ndarray:
     """Design an arbitrary Type I FIR filter with spline transition bands.
@@ -281,7 +288,7 @@ def firdesign(
         Magnitude response at each band edge; each value must be 0 or 1. The
         values must alternate between transition bands (the two edges of a
         transition band differ) and flat bands (the two edges match).
-    fs : float, optional
+    sampling_freq : float, optional
         Sampling rate in Hz. Default is 1 Hz.
     spline_power : float, optional
         Power for the spline transition-band functions. Default follows
@@ -295,9 +302,10 @@ def firdesign(
     Raises
     ------
     ValueError
-        If ``numtaps`` is not a positive odd integer; if ``fs`` is non-finite
-        or non-positive; if ``band_edges`` is empty, has an odd length, differs
-        in length from ``desired``, has a non-positive first edge, has a last
+        If ``numtaps`` is not a positive odd integer; if ``sampling_freq`` is
+        non-finite or non-positive; if ``band_edges`` is empty, has an odd
+        length, differs in length from ``desired``, has a non-positive first
+        edge, has a last
         edge >= the Nyquist frequency, or is not strictly increasing; or if
         ``desired`` contains values other than 0/1 or does not follow the
         required transition/flat-band alternation.
@@ -316,7 +324,7 @@ def firdesign(
         raise ValueError(
             f"Got {numtaps} for 'numtaps' but must be an odd value"
         )
-    _assert_finite_positive(fs, "fs")
+    _assert_finite_positive(sampling_freq, "sampling_freq")
     if len(band_edges) == 0:
         raise ValueError("Must have at least two band edges")
     if len(band_edges) % 2 != 0:
@@ -327,8 +335,10 @@ def firdesign(
         raise ValueError("All values must be either 0 or 1")
     if not band_edges[0] > 0:
         raise ValueError("First band edge must be greater than 0")
-    if not band_edges[-1] < fs / 2:
-        raise ValueError(f"Last band edge must be less than {fs / 2}")
+    if not band_edges[-1] < sampling_freq / 2:
+        raise ValueError(
+            f"Last band edge must be less than {sampling_freq / 2}"
+        )
     if not np.all(band_edges[:-1] < band_edges[1:]):
         raise ValueError(
             "'band_edges' must be a monotonically increasing sequence"
@@ -359,7 +369,11 @@ def firdesign(
     prototypes = np.zeros((len(critical_points), numtaps))
     for ind, (pass_freq, stop_freq) in enumerate(critical_points):
         prototypes[ind] = _firspline(
-            numtaps, pass_freq, stop_freq, fs=fs, spline_power=spline_power
+            numtaps,
+            pass_freq,
+            stop_freq,
+            sampling_freq=sampling_freq,
+            spline_power=spline_power,
         )
 
     # center impulse (identity filter), used to invert a lowpass into a highpass
@@ -915,7 +929,7 @@ def _osconvolve(
 
 def filter_data_fir(
     data: np.ndarray,
-    b: npt.ArrayLike,
+    filter_coeffs: npt.ArrayLike,
     *,
     nfft: int | None = None,
     threads: int = cpu_count(),
@@ -944,7 +958,7 @@ def filter_data_fir(
         slice + integer-array indexing (a NumPy array or an h5py ``Dataset``).
         It is NOT converted to an array, so an on-disk/lazy signal stays on
         disk. Real input yields a real result; complex input a complex result.
-    b : array_like, shape (M,)
+    filter_coeffs : array_like, shape (M,)
         Filter coefficients (1-D). Converted to a NumPy array internally.
     nfft : int, optional
         FFT length along the filtered axis; must be an integer >= ``M``.
@@ -1015,7 +1029,7 @@ def filter_data_fir(
     """
     return _osconvolve(
         data,
-        b,
+        filter_coeffs,
         mode="full",
         nfft=nfft,
         threads=threads,

@@ -69,7 +69,9 @@ def reference_filter(
 def lfp_lowpass():
     """0-400 Hz lowpass spyglass uses (transition 400->425), spline_power=2."""
     numtaps = fir.estimate_taps(FS, 25)
-    return fir.firdesign(numtaps, [400, 425], [1, 0], fs=FS, spline_power=2)
+    return fir.firdesign(
+        numtaps, [400, 425], [1, 0], sampling_freq=FS, spline_power=2
+    )
 
 
 @pytest.fixture
@@ -104,7 +106,7 @@ class TestFirDesign:
             numtaps,
             [1000, 2000, 3000, 4000, 5000, 6000],
             [0, 1, 1, 0, 0, 1],
-            fs=FS,
+            sampling_freq=FS,
             spline_power=2,
         )
         assert len(b) == numtaps
@@ -133,7 +135,9 @@ class TestFirDesign:
         # bands -- symmetry alone would pass for a filter that passes the wrong
         # band, and spyglass designs bandpass filters, not just the lowpass.
         numtaps = fir.estimate_taps(FS, tw)
-        b = fir.firdesign(numtaps, band_edges, desired, fs=FS, spline_power=2)
+        b = fir.firdesign(
+            numtaps, band_edges, desired, sampling_freq=FS, spline_power=2
+        )
         assert len(b) == numtaps
         np.testing.assert_allclose(b, b[::-1], atol=0)  # Type I linear phase
         w, h = freqz(b, worN=16384, fs=FS)
@@ -145,8 +149,12 @@ class TestFirDesign:
 
     def test_firdesign_is_deterministic(self):
         numtaps = fir.estimate_taps(FS, 25)
-        b1 = fir.firdesign(numtaps, [400, 425], [1, 0], fs=FS, spline_power=2)
-        b2 = fir.firdesign(numtaps, [400, 425], [1, 0], fs=FS, spline_power=2)
+        b1 = fir.firdesign(
+            numtaps, [400, 425], [1, 0], sampling_freq=FS, spline_power=2
+        )
+        b2 = fir.firdesign(
+            numtaps, [400, 425], [1, 0], sampling_freq=FS, spline_power=2
+        )
         np.testing.assert_array_equal(b1, b2)
 
     @pytest.mark.parametrize(
@@ -193,7 +201,9 @@ class TestFirDesign:
         # match= ensures each case fails for the INTENDED reason, so a future
         # reorder of the validation checks can't let one pass on the wrong branch.
         with pytest.raises(ValueError, match=match):
-            fir.firdesign(numtaps, band_edges, desired, fs=FS, spline_power=2)
+            fir.firdesign(
+                numtaps, band_edges, desired, sampling_freq=FS, spline_power=2
+            )
 
     @pytest.mark.parametrize("bad_tw", [0, -5])
     def test_estimate_taps_rejects_nonpositive_tw(self, bad_tw):
@@ -202,7 +212,7 @@ class TestFirDesign:
             fir.estimate_taps(FS, bad_tw)
 
     def test_estimate_taps_rejects_nonpositive_fs(self):
-        with pytest.raises(ValueError, match="fs"):
+        with pytest.raises(ValueError, match="sampling_freq"):
             fir.estimate_taps(0, 25)
 
     @pytest.mark.parametrize(
@@ -244,7 +254,9 @@ class TestFirDesign:
         # p <= 0 previously "succeeded", silently collapsing the spline
         # transition to a rectangular truncation (nan ** 0 == 1).
         with pytest.raises(ValueError, match="spline_power must be positive"):
-            fir.firdesign(101, [400, 425], [1, 0], fs=FS, spline_power=bad_p)
+            fir.firdesign(
+                101, [400, 425], [1, 0], sampling_freq=FS, spline_power=bad_p
+            )
 
 
 # --------------------------------------------------------------------------- #

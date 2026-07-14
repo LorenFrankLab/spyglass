@@ -185,7 +185,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                         numtaps,
                         band_edges,
                         desired,
-                        fs=fs,
+                        sampling_freq=fs,
                         spline_power=TRANS_SPLINE,
                     ),
                     ndmin=1,
