@@ -48,6 +48,7 @@ Design details (spline-transition FIR) follow Burrus et al., 1992.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from multiprocessing import cpu_count
 
@@ -55,6 +56,8 @@ import numpy as np
 import numpy.typing as npt
 import scipy.fft
 import scipy.signal
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "estimate_taps",
@@ -411,7 +414,6 @@ def _osconvolve(
     ds: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-    verbose: bool = False,
 ) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Overlap-save FFT convolution, written to minimize memory usage.
 
@@ -617,25 +619,24 @@ def _osconvolve(
             )
 
     if describe_dims:
-        if verbose:
-            print(
-                f"Output array should have shape {expected_shape} and "
-                f"dtype {dtype}"
-            )
+        logger.debug(
+            "Output array should have shape %s and dtype %s",
+            expected_shape,
+            dtype,
+        )
         return expected_shape, dtype
 
     if outarray is None:
         outarray = np.zeros(expected_shape, dtype=dtype)
-        if verbose:
-            print(
-                f"Allocated array of shape {outarray.shape} with dtype {dtype}"
-            )
+        logger.debug(
+            "Allocated array of shape %s with dtype %s", outarray.shape, dtype
+        )
     else:
-        if verbose:
-            print(
-                "Checking output array shape is disabled, make sure portion of "
-                f"output array has shape {expected_shape}"
-            )
+        logger.debug(
+            "Output array shape not checked; ensure its written portion has "
+            "shape %s",
+            expected_shape,
+        )
         if not real_output and np.isrealobj(outarray):
             raise TypeError(
                 "Output array is real but expected one of a complex dtype"
@@ -820,8 +821,7 @@ def _osconvolve(
         write_pos += n_samples
         samples_written += n_samples
 
-        if verbose:
-            print(f"Computed block {ii} of {last_block_to_check}")
+        logger.debug("Computed block %d of %d", ii, last_block_to_check)
 
     if not expected_shape[axis] == samples_written:
         raise ValueError(
@@ -846,7 +846,6 @@ def filter_data_fir(
     ds: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-    verbose: bool = False,
 ) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Apply an FIR filter to data via overlap-save FFT convolution.
 
@@ -893,8 +892,6 @@ def filter_data_fir(
     output_offset : int, optional
         Offset (>= 0) into ``outarray`` along ``axis`` at which to start
         writing. Default 0.
-    verbose : bool, optional
-        Print per-block progress. Default False.
 
     Returns
     -------
@@ -947,5 +944,4 @@ def filter_data_fir(
         ds=ds,
         input_dim_restrictions=input_dim_restrictions,
         output_offset=output_offset,
-        verbose=verbose,
     )
