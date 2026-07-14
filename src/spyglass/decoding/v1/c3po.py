@@ -33,6 +33,91 @@ except ImportError:
 schema = dj.schema("decoding_c3po_v1")
 
 
+
+def norm_by_channel_max(marks):
+    """Normalize marks by the maximum absolute value across channels for each mark.
+
+    Parameters
+    ----------
+    marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the marks to normalize.
+
+    Returns
+    -------
+    normalized_marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the normalized marks.
+    """
+    max_abs = np.max(np.abs(marks), axis=1, keepdims=True)
+    max_abs[max_abs == 0] = 1  # avoid division by zero
+    m = marks / max_abs
+    m = m - np.mean(m, axis=1, keepdims=True)  # zero-center features
+    return m
+
+def norm_by_const(marks, const):
+    """Normalize marks by a constant value.
+
+    Parameters
+    ----------
+    marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the marks to normalize.
+    const : float
+        Constant value to normalize by.
+
+    Returns
+    -------
+    normalized_marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the normalized marks.
+    """
+    m = marks - np.mean(marks, axis=1, keepdims=True)  # zero-center features
+    m = m / const
+    return m
+
+def norm_by_event(marks):
+    """ Normalize marks by the maximum absolute value across per event and zero-center them.
+
+    Parameters
+    ----------
+    marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the marks to normalize.
+
+    Returns
+    -------
+    normalized_marks : np.ndarray
+        Array of shape (n_marks, n_channels) containing the normalized marks.
+    """
+    marks = marks / np.max(np.abs(marks), axis=1, keepdims=True)
+    marks = marks - np.mean(marks, axis=1, keepdims=True)
+    return marks
+
+def get_normalization_function(norm_method):
+    """Get the normalization function based on the specified method.
+
+    Parameters
+    ----------
+    norm_method : str
+        Normalization method. Options are:
+        - "by_channel_max": Normalize by the maximum absolute value across channels for each mark.
+        - "by_const=<const>": Normalize by a constant value (e.g., "by_const=0.5").
+        - "by_event": Normalize by the maximum absolute value across per event and zero-center them.
+
+    Returns
+    -------
+    normalization_function : function
+        Function that takes in marks and returns normalized marks.
+    """
+    if norm_method == "by_channel_max":
+        return norm_by_channel_max
+    elif norm_method.startswith("by_const="):
+        const = float(norm_method.split("=")[1])
+        return lambda marks: norm_by_const(marks, const)
+    elif norm_method == "by_event":
+        return norm_by_event
+    else:
+        raise ValueError(
+            f"Invalid normalization method: {norm_method}. "
+            + 'Options are "by_channel_max", "by_const=<const>", or "by_event".'
+        )
+
 @schema
 class MarksGroup(SpyglassMixin, dj.Manual):
     """
@@ -42,6 +127,9 @@ class MarksGroup(SpyglassMixin, dj.Manual):
     definition = """
     -> Session
     marks_group_name: varchar(32)  # name of the marks group
+    ---
+    norm_method = "": varchar(32)  # method for normalizing marks, options: "by_channel_max", "by_const=<const>", "by_event"
+
     """
     from typing import List
 
@@ -51,6 +139,7 @@ class MarksGroup(SpyglassMixin, dj.Manual):
         marks_group_name: str,
         waveforms_keys: List[dict],
         sorted_spikes_keys: List[dict],
+        norm_method: str = "by_channel_max"
     ):
         """
         Insert a new marks group
@@ -67,6 +156,9 @@ class MarksGroup(SpyglassMixin, dj.Manual):
         sorted_spikes_keys : List[dict]
             List of dictionaries containing the primary keys of the
             SortedSpikesGroup entries to include in this group.
+        norm_method : str, optional
+            Method for normalizing marks. Options are "by_channel_max",
+            "by_const=<const>", or "by_event" for clusterless data. Use "" for sorted.
         """
         group_key = {
             "nwb_file_name": nwb_file_name,
@@ -82,11 +174,16 @@ class MarksGroup(SpyglassMixin, dj.Manual):
                 "At least one of waveforms_keys or sorted_spikes_keys must be provided."
             )
 
-        if waveforms_keys and sorted_spikes_keys:
-            raise ValueError(
-                "Cannot have both waveforms_keys and sorted_spikes_keys for the same"
-                " MarksGroup. Please choose one type of marks to include."
-            )
+        if sorted_spikes_keys and not waveforms_keys:
+            norm_method = ""  # no normalization for sorted spikes
+        else:
+            if not any([norm_method in ["by_channel_max", "by_event"] or norm_method.startswith("by_const=")]):
+                raise ValueError(
+                    f"Invalid normalization method: {norm_method}. "
+                    + 'Options are "by_channel_max", "by_const=<const>", or "by_event".'
+                )
+        group_key["norm_method"] = norm_method
+
         waveforms_keys = [
             {
                 **key,
@@ -152,6 +249,8 @@ class MarksGroup(SpyglassMixin, dj.Manual):
                 f"Max shank features: {max_shank_features}, number of shanks: {n_shanks}"
             )
 
+            norm_method = (MarksGroup & key).fetch1("norm_method")
+            normalization_function = get_normalization_function(norm_method)
             for shank, (t, m) in enumerate(
                 zip(spike_times, spike_waveform_features)
             ):
@@ -161,9 +260,10 @@ class MarksGroup(SpyglassMixin, dj.Manual):
                 #     np.abs(m)
                 # )  # normalize features by mean absolute value across all marks on shank
 
-                m = m / np.max(np.abs(m), axis=0)
-                m = m - np.mean(m, axis=1)[:, None]  # zero-center features
-                mark[:, : m.shape[1]] = m
+                # m = m / np.max(np.abs(m), axis=0)
+                # m = m - np.mean(m, axis=1)[:, None]  # zero-center features
+
+                mark[:, : m.shape[1]] = normalization_function(m)  # normalize features based on specified method
 
                 mark[:, -1] = shank
                 marks.extend(mark)
@@ -232,10 +332,27 @@ class MarksGroup(SpyglassMixin, dj.Manual):
         wave_query = self.WaveformFeatures() & key
         spike_query = self.SortedSpikes() & key
         if wave_query and spike_query:
-            raise ValueError(
-                f"Both waveform features and sorted spikes found for {key}."
-                + "Please ensure only one type of marks is present."
-            )
+            # Assume hybrid model
+            sorted_ids, sorted_times = (self.SortedSpikes & key).fetch_sorted_marks(key)
+            clusterless_marks, clusterless_times = (self.WaveformFeatures & key).fetch_feature_marks(key)
+
+            # get indices of clusterless times that are not in sorted times
+            # This approach prioritizes sorted spikes over clusterless marks,
+            # ensuring that any overlapping times are only represented by
+            # the sorted spikes.
+            unique_clusterless_indices = np.isin(clusterless_times, sorted_times, invert=True)
+            unique_clusterless_marks = clusterless_marks[unique_clusterless_indices]
+            unique_clusterless_times = clusterless_times[unique_clusterless_indices]
+
+            # Combine all marks and times, sorting by time
+            all_marks = np.zeros((len(sorted_times) + len(unique_clusterless_times), unique_clusterless_marks.shape[1]+1),)
+            all_marks[:,-1] = -1  # Initialize the last column to -1 for clusterless marks
+            all_marks[:len(sorted_times), -1] = sorted_ids.flatten()  # Fill the last column with sorted spike IDs
+            all_marks[len(sorted_times):, :-1] = unique_clusterless_marks  # Fill the first columns with clusterless marks
+            all_times = np.concatenate([sorted_times, unique_clusterless_times], axis=0)
+            sorted_indices = np.argsort(all_times)
+            return all_marks[sorted_indices], all_times[sorted_indices]
+
         if not (spike_query or wave_query):
             logger.warning(
                 f"No entries for MarksGroup {key['marks_group_name']}"
@@ -428,7 +545,7 @@ class Model(SpyglassMixin, dj.Computed):
         training_interval,
     ):
         print(jax.devices())
-        # remove simultaneous marks by jittering them slightly
+        # remove simultaneous marks by jittering them slightly (NA)
         delta_t = np.diff(mark_times)
         # ind_simultaneous = np.where(delta_t == 0)[0]
         # np.random.seed(0)  # for reproducibility
