@@ -42,7 +42,7 @@ def reference_filter(
     ``out_lane = conv(full_lane, b)[frm + k1 : frm + k2 : ds]``.
     """
     assert data.ndim == 2
-    time_axis = axis % 2
+    time_axis = axis
     # normalize to (electrode, time)
     d = np.moveaxis(data, time_axis, 1)
     if electrodes is not None:
