@@ -223,9 +223,7 @@ def _firspline(
             f"must both be less than the Nyquist frequency of {nyquist}"
         )
     if pass_freq >= stop_freq:
-        raise ValueError(
-            f"pass_freq must be <{stop_freq} but got {pass_freq}"
-        )
+        raise ValueError(f"pass_freq must be <{stop_freq} but got {pass_freq}")
 
     if spline_power is None:
         spline_power = 0.312 * numtaps * (stop_freq - pass_freq) / nyquist
@@ -461,10 +459,11 @@ def _osconvolve(
                 f"'input_index_bounds' {input_index_bounds} is not strictly "
                 "increasing"
             )
-        # The stop bound is exclusive (N is computed as stop - start below), so
-        # it may legitimately equal the axis length. Upstream ghostipy probed
-        # signal[stop] here, which wrongly rejected a full-length [0, N] range;
-        # this range check keeps the exclusive-stop semantics consistent.
+        # The stop bound is exclusive (n_input is computed as stop - start
+        # below), so it may legitimately equal the axis length. Upstream
+        # ghostipy probed signal[stop] here, which wrongly rejected a
+        # full-length [0, n_input] range; this range check keeps the
+        # exclusive-stop semantics consistent.
         if (
             input_index_bounds[0] < 0
             or input_index_bounds[1] > signal.shape[axis]
@@ -474,24 +473,24 @@ def _osconvolve(
                 f"for axis {axis} of length {signal.shape[axis]} "
                 "(stop is exclusive, so it may equal the axis length)"
             )
-        N = input_index_bounds[1] - input_index_bounds[0]
+        n_input = input_index_bounds[1] - input_index_bounds[0]
     else:
-        N = signal.shape[axis]
+        n_input = signal.shape[axis]
 
-    M = kernel.shape[0]
-    tot_length = N + M - 1
+    kernel_len = kernel.shape[0]
+    tot_length = n_input + kernel_len - 1
 
     if mode == "full":
         outsize = tot_length
     elif mode == "same":
-        outsize = N
+        outsize = n_input
     elif mode == "valid":
-        if N < M:
+        if n_input < kernel_len:
             raise ValueError(
                 "Cannot do a 'valid' convolution because the input is shorter "
                 "than the kernel"
             )
-        outsize = N - M + 1
+        outsize = n_input - kernel_len + 1
     else:
         raise ValueError(f"Got invalid value {mode} for 'mode'")
 
@@ -612,8 +611,10 @@ def _osconvolve(
     if nfft is not None:
         if not isinstance(nfft, (int, np.integer)):
             raise ValueError(f"'nfft' must be an integer but got {nfft!r}")
-        if nfft < M:
-            raise ValueError(f"'nfft' must be at least the kernel size of {M}")
+        if nfft < kernel_len:
+            raise ValueError(
+                f"'nfft' must be at least the kernel size of {kernel_len}"
+            )
 
     if describe_dims:
         if verbose:
@@ -661,35 +662,38 @@ def _osconvolve(
     ######################################################################
     if nfft is None:  # Choose good default fft_length
         nfft = 65536
-        while nfft < 10 * M:
+        while nfft < 10 * kernel_len:
             nfft *= 4
 
-    L = nfft - (M - 1)
+    block_step = nfft - (kernel_len - 1)
 
     #############################################################################
     # Signal block buffer (reused each iteration for the fill logic)
-    x_dims = list(signal.shape)
-    x_dims[axis] = nfft
+    block_shape = list(signal.shape)
+    block_shape[axis] = nfft
     for dim, _, length in restricted_dims:
-        x_dims[dim] = length
+        block_shape[dim] = length
     # Real input (the common case) uses a real FFT: half the buffer memory and
     # ~2x faster than a full complex FFT. Complex input keeps the full transform.
     buf_dtype = np.float64 if real_output else np.complex128
-    x = np.zeros(tuple(x_dims), dtype=buf_dtype)
+    block_buffer = np.zeros(tuple(block_shape), dtype=buf_dtype)
 
     ##############################################################################
     # FFT of the kernel, computed once and reused for every block.
-    y_dims = [1] * signal.ndim
-    y_dims[axis] = nfft
-    y = np.zeros(tuple(y_dims), dtype=buf_dtype)
+    kernel_shape = [1] * signal.ndim
+    kernel_shape[axis] = nfft
+    kernel_buffer = np.zeros(tuple(kernel_shape), dtype=buf_dtype)
     # heterogeneous index-tuple builders (hold ints and slices/arrays)
-    y_slices: list = [0] * signal.ndim
-    y_slices[axis] = np.s_[0:M]
-    y[tuple(y_slices)] = kernel  # remainder stays zero (y is np.zeros)
+    kernel_slices: list = [0] * signal.ndim
+    kernel_slices[axis] = np.s_[0:kernel_len]
+    # remainder stays zero (kernel_buffer was allocated with np.zeros)
+    kernel_buffer[tuple(kernel_slices)] = kernel
     if real_output:
-        yf = scipy.fft.rfft(y, n=nfft, axis=axis, workers=threads)
+        kernel_fft = scipy.fft.rfft(
+            kernel_buffer, n=nfft, axis=axis, workers=threads
+        )
     else:
-        yf = scipy.fft.fft(y, axis=axis, workers=threads)
+        kernel_fft = scipy.fft.fft(kernel_buffer, axis=axis, workers=threads)
 
     ####################################################################
     start_offset = 0
@@ -702,119 +706,127 @@ def _osconvolve(
         signal_slices_1[dim] = sel
         signal_slices_2[dim] = sel
 
-    x_slices_1 = [np.s_[:]] * x.ndim
-    x_slices_2 = [np.s_[:]] * x.ndim
+    block_slices_1 = [np.s_[:]] * block_buffer.ndim
+    block_slices_2 = [np.s_[:]] * block_buffer.ndim
 
     outarray_slices = [np.s_[:]] * outarray.ndim
-    conv_slices = [np.s_[:]] * x.ndim
+    conv_slices = [np.s_[:]] * block_buffer.ndim
 
-    outarray_marker = output_offset
+    write_pos = output_offset
 
     # note that first_ind and last_ind are used to index into the output of the
     # convolution. They are not used to determine where in this function's
-    # output array the convolution results are written. outarray_marker does that.
-    first_block_to_check, first_offset = divmod(first_ind, L)
-    last_block_to_check, last_offset = divmod(last_ind, L)
+    # output array the convolution results are written. write_pos does that.
+    first_block_to_check, first_offset = divmod(first_ind, block_step)
+    last_block_to_check, last_offset = divmod(last_ind, block_step)
     # last_ind is an exclusive stop. When it lands exactly on a block boundary
     # (last_offset == 0) the naive divmod points at the *next* block, which then
     # contributes zero samples but is still read -- a wasted FFT, and a read one
     # block past the needed region that can fail on a strict lazy/on-disk input.
     # Fold it into the previous block instead (output is identical: that block's
-    # tail slice [..:M-1+L] == [..:nfft] is the same valid region either way).
+    # tail slice [..:kernel_len-1+block_step] == [..:nfft] is the same valid
+    # region either way).
     if last_offset == 0:
         last_block_to_check -= 1
-        last_offset = L
+        last_offset = block_step
 
-    tot_samples = 0
+    samples_written = 0
     for ii in range(first_block_to_check, last_block_to_check + 1):
-        start = start_offset + ii * L
-        stop = start + L
+        start = start_offset + ii * block_step
+        stop = start + block_step
 
         # initialize entire block to 0, then fill with appropriate input data
-        x[:] = 0
-        ind1 = start - (M - 1)
-        # fill M - 1 overlap portion of the block. It may extend past the start
-        # of the data; if so, place the valid part at the END of the segment.
-        if ind1 < 0:
-            ind1 = 0
-            signal_slices_1[axis] = np.s_[ind1:start]
+        block_buffer[:] = 0
+        overlap_start = start - (kernel_len - 1)
+        # fill the kernel_len - 1 overlap portion of the block. It may extend
+        # past the start of the data; if so, place the valid part at the END of
+        # the segment.
+        if overlap_start < 0:
+            overlap_start = 0
+            signal_slices_1[axis] = np.s_[overlap_start:start]
             signal_chunk = signal[tuple(signal_slices_1)]
             length = signal_chunk.shape[axis]
-            diff = M - 1 - length
-            x_slices_1[axis] = np.s_[diff : M - 1]
-            x[tuple(x_slices_1)] = signal_chunk
+            pad_len = kernel_len - 1 - length
+            block_slices_1[axis] = np.s_[pad_len : kernel_len - 1]
+            block_buffer[tuple(block_slices_1)] = signal_chunk
         else:
             # A slice read clips at the array bounds rather than raising, so a
             # genuine failure here (e.g. an h5py I/O error on an on-disk signal)
             # must propagate -- upstream swallowed it and silently zero-filled
             # the overlap, corrupting the result without any error.
-            signal_slices_1[axis] = np.s_[ind1:start]
+            signal_slices_1[axis] = np.s_[overlap_start:start]
             signal_chunk = signal[tuple(signal_slices_1)]
             length = signal_chunk.shape[axis]
-            x_slices_1[axis] = np.s_[:length]
-            x[tuple(x_slices_1)] = signal_chunk
+            block_slices_1[axis] = np.s_[:length]
+            block_buffer[tuple(block_slices_1)] = signal_chunk
 
-        # fill L segment of the block
+        # fill block_step segment of the block
         signal_slices_2[axis] = np.s_[start:stop]
         signal_chunk = signal[tuple(signal_slices_2)]
         length = signal_chunk.shape[axis]
-        x_slices_2[axis] = np.s_[M - 1 : M - 1 + length]
-        x[tuple(x_slices_2)] = signal_chunk
+        block_slices_2[axis] = np.s_[kernel_len - 1 : kernel_len - 1 + length]
+        block_buffer[tuple(block_slices_2)] = signal_chunk
 
         # circular convolution of this block via the convolution theorem
         if real_output:
-            conv = scipy.fft.irfft(
-                scipy.fft.rfft(x, n=nfft, axis=axis, workers=threads) * yf,
+            conv_block = scipy.fft.irfft(
+                scipy.fft.rfft(block_buffer, n=nfft, axis=axis, workers=threads)
+                * kernel_fft,
                 n=nfft,
                 axis=axis,
                 workers=threads,
             )
         else:
-            conv = scipy.fft.ifft(
-                scipy.fft.fft(x, axis=axis, workers=threads) * yf,
+            conv_block = scipy.fft.ifft(
+                scipy.fft.fft(block_buffer, axis=axis, workers=threads)
+                * kernel_fft,
                 axis=axis,
                 workers=threads,
             )
 
-        # Every block writes conv[M-1+lo : M-1+hi : step]. The low offset is the
-        # first-block head, the decimation carry for later blocks, or 0; the high
-        # offset is the last-block tail or the full block length L (note
-        # M-1+L == nfft). This single form is equivalent to the four
-        # first/last/middle x ds/non-ds cases in upstream's osconvolve.
+        # Every block writes
+        # conv_block[kernel_len-1+low_offset : kernel_len-1+high_offset : step].
+        # The low offset is the first-block head, the decimation carry for later
+        # blocks, or 0; the high offset is the last-block tail or the full block
+        # length block_step (note kernel_len-1+block_step == nfft). This single
+        # form is equivalent to upstream osconvolve's separate first/last/middle
+        # and ds/non-ds cases.
         if ii == first_block_to_check:
-            lo = first_offset
+            low_offset = first_offset
         elif downsample:
-            lo = block_offset
+            low_offset = block_offset
         else:
-            lo = 0
-        hi = last_offset if ii == last_block_to_check else L
+            low_offset = 0
+        high_offset = last_offset if ii == last_block_to_check else block_step
         step = ds if downsample else 1
-        conv_slices[axis] = np.s_[M - 1 + lo : M - 1 + hi : step]
+        conv_slices[axis] = np.s_[
+            kernel_len - 1 + low_offset : kernel_len - 1 + high_offset : step
+        ]
         if downsample:
-            n_samples = conv[tuple(conv_slices)].shape[axis]
+            n_samples = conv_block[tuple(conv_slices)].shape[axis]
             if ii != last_block_to_check:
                 # phase of the next block's first retained sample
-                block_offset = lo + n_samples * ds - L
+                block_offset = low_offset + n_samples * ds - block_step
         else:
-            n_samples = hi - lo
-        outarray_slices[axis] = np.s_[
-            outarray_marker : outarray_marker + n_samples
-        ]
+            n_samples = high_offset - low_offset
+        outarray_slices[axis] = np.s_[write_pos : write_pos + n_samples]
 
         if real_output:
-            outarray[tuple(outarray_slices)] = conv[tuple(conv_slices)].real
+            outarray[tuple(outarray_slices)] = conv_block[
+                tuple(conv_slices)
+            ].real
         else:
-            outarray[tuple(outarray_slices)] = conv[tuple(conv_slices)]
-        outarray_marker += n_samples
-        tot_samples += n_samples
+            outarray[tuple(outarray_slices)] = conv_block[tuple(conv_slices)]
+        write_pos += n_samples
+        samples_written += n_samples
 
         if verbose:
             print(f"Computed block {ii} of {last_block_to_check}")
 
-    if not expected_shape[axis] == tot_samples:
+    if not expected_shape[axis] == samples_written:
         raise ValueError(
             f"Expected to write {expected_shape[axis]} samples for axis {axis} "
-            f"but actually wrote {tot_samples}"
+            f"but actually wrote {samples_written}"
         )
 
     return outarray
