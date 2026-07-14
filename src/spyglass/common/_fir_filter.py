@@ -32,10 +32,10 @@ Intentional divergences from upstream:
   errors (never the valid path spyglass exercises): the M-1 overlap read no
   longer swallows exceptions and silently zero-fills; ``input_index_bounds`` /
   ``output_index_bounds`` treat the stop as exclusive and validate by range
-  rather than probing the array; ``estimate_taps`` rejects non-positive
-  ``fs``/``transition_width``/``d1``/``d2`` and deviations so loose the tap
-  estimate would be < 1; ``firdesign``/``_firspline`` require an integer
-  ``numtaps`` >= 1 and at
+  rather than probing the array; ``estimate_taps`` rejects non-positive ``fs``,
+  ``transition_width``, ``passband_deviation``, and ``stopband_deviation``, and
+  deviations so loose the tap estimate would be < 1;
+  ``firdesign``/``_firspline`` require an integer ``numtaps`` >= 1 and at
   least two ordered ``band_edges``; the spline power ``spline_power`` must be
   > 0; ``ds`` must be an integer >= 1; ``nfft`` must be an integer >= the
   kernel length;
@@ -62,6 +62,14 @@ __all__ = [
     "firdesign",
     "filter_data_fir",
 ]
+
+
+def _assert_finite_positive(value: float, name: str) -> None:
+    """Raise ``ValueError`` unless ``value`` is finite and strictly positive."""
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(
+            f"'{name}' must be finite and positive but got {value}"
+        )
 
 
 def group_delay(b: np.ndarray) -> int:
@@ -96,8 +104,8 @@ def estimate_taps(
     fs: float,
     transition_width: float,
     *,
-    d1: float | None = None,
-    d2: float | None = None,
+    passband_deviation: float = 1e-3,
+    stopband_deviation: float = 1e-6,
 ) -> int:
     """Estimate the number of taps for a Type I FIR filter.
 
@@ -107,9 +115,9 @@ def estimate_taps(
         Sampling rate in Hz.
     transition_width : float
         Transition bandwidth in Hz.
-    d1 : float, optional
+    passband_deviation : float, optional
         Passband deviation. Default is 0.1% (1e-3).
-    d2 : float, optional
+    stopband_deviation : float, optional
         Minimum stopband attenuation. Default is 120 dB (1e-6).
 
     Returns
@@ -120,39 +128,39 @@ def estimate_taps(
     Raises
     ------
     ValueError
-        If ``fs``, ``transition_width``, ``d1``, or ``d2`` is non-finite or
-        non-positive, or if the deviations are so loose that the estimated tap
-        count is < 1 (i.e. ``10 * d1 * d2 >= 1``).
+        If ``fs``, ``transition_width``, ``passband_deviation``, or
+        ``stopband_deviation`` is non-finite or non-positive, or if the
+        deviations are so loose that the estimated tap count is < 1 (i.e.
+        ``10 * passband_deviation * stopband_deviation >= 1``).
 
     References
     ----------
     https://dsp.stackexchange.com/questions/31066
     """
-    if not np.isfinite(fs) or fs <= 0:
-        raise ValueError(f"'fs' must be finite and positive but got {fs}")
-    if not np.isfinite(transition_width) or transition_width <= 0:
-        raise ValueError(
-            "'transition_width' must be finite and positive but got "
-            f"{transition_width}"
-        )
-
-    if d1 is None:
-        d1 = 1e-3
-    if d2 is None:
-        d2 = 1e-6
-    if not np.isfinite(d1) or not np.isfinite(d2) or d1 <= 0 or d2 <= 0:
+    _assert_finite_positive(fs, "fs")
+    _assert_finite_positive(transition_width, "transition_width")
+    if (
+        not np.isfinite(passband_deviation)
+        or not np.isfinite(stopband_deviation)
+        or passband_deviation <= 0
+        or stopband_deviation <= 0
+    ):
         raise ValueError(
             "passband/stopband deviations must be finite and positive but got "
-            f"d1={d1}, d2={d2}"
+            f"passband_deviation={passband_deviation}, "
+            f"stopband_deviation={stopband_deviation}"
         )
 
+    deviation_product = 10 * passband_deviation * stopband_deviation
     numtaps = int(
-        np.ceil(2 / 3 * np.log10(1 / (10 * d1 * d2)) * fs / transition_width)
+        np.ceil(2 / 3 * np.log10(1 / deviation_product) * fs / transition_width)
     )
     if numtaps < 1:
         raise ValueError(
-            f"computed numtaps={numtaps} < 1; the deviations d1={d1}, d2={d2} are "
-            "too loose (10 * d1 * d2 must be < 1)"
+            f"computed numtaps={numtaps} < 1; the deviations "
+            f"passband_deviation={passband_deviation}, "
+            f"stopband_deviation={stopband_deviation} are too loose "
+            "(10 * passband_deviation * stopband_deviation must be < 1)"
         )
     if not numtaps & 1:
         numtaps += 1
@@ -206,8 +214,7 @@ def _firspline(
 
     if fs is None:
         fs = 2
-    if not np.isfinite(fs) or fs <= 0:
-        raise ValueError(f"'fs' must be finite and positive but got {fs}")
+    _assert_finite_positive(fs, "fs")
     nyquist = fs / 2
 
     if pass_freq > nyquist or stop_freq > nyquist:
@@ -307,8 +314,7 @@ def firdesign(
         raise ValueError(
             f"Got {numtaps} for 'numtaps' but must be an odd value"
         )
-    if not np.isfinite(fs) or fs <= 0:
-        raise ValueError(f"'fs' must be finite and positive but got {fs}")
+    _assert_finite_positive(fs, "fs")
     if len(band_edges) == 0:
         raise ValueError("Must have at least two band edges")
     if len(band_edges) % 2 != 0:

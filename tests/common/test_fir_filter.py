@@ -220,18 +220,24 @@ class TestFirDesign:
     )
     def test_estimate_taps_rejects_nonfinite_values(self, fs, tw, d1, d2):
         with pytest.raises(ValueError, match="finite"):
-            fir.estimate_taps(fs, tw, d1=d1, d2=d2)
+            fir.estimate_taps(
+                fs, tw, passband_deviation=d1, stopband_deviation=d2
+            )
 
     @pytest.mark.parametrize("d1, d2", [(0, 1e-6), (1e-3, 0), (-1e-3, 1e-6)])
     def test_estimate_taps_rejects_nonpositive_deviations(self, d1, d2):
         # d1/d2 <= 0 previously escaped as ZeroDivisionError / NaN-conversion.
         with pytest.raises(ValueError, match="deviations"):
-            fir.estimate_taps(FS, 25, d1=d1, d2=d2)
+            fir.estimate_taps(
+                FS, 25, passband_deviation=d1, stopband_deviation=d2
+            )
 
     def test_estimate_taps_rejects_too_loose_deviations(self):
         # 10 * d1 * d2 >= 1 -> log10 <= 0 -> a nonsensical numtaps < 1.
         with pytest.raises(ValueError, match="too loose"):
-            fir.estimate_taps(FS, 25, d1=0.5, d2=0.5)
+            fir.estimate_taps(
+                FS, 25, passband_deviation=0.5, stopband_deviation=0.5
+            )
 
     @pytest.mark.parametrize("bad_p", [0, -1])
     def test_firdesign_rejects_nonpositive_p(self, bad_p):
