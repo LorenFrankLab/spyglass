@@ -80,13 +80,13 @@ def group_delay(b: np.ndarray) -> int:
         If ``b`` has an even number of coefficients, for which the group delay
         is not an integer.
     """
-    L = len(b)
-    if not L & 1:
+    n_taps = len(b)
+    if not n_taps & 1:
         raise ValueError(
-            f"There are {L} filter coefficients (an even number), so the group "
-            "delay cannot be converted to an integer value"
+            f"There are {n_taps} filter coefficients (an even number), so the "
+            "group delay cannot be converted to an integer value"
         )
-    return (L - 1) // 2
+    return (n_taps - 1) // 2
 
 
 def estimate_taps(
@@ -197,18 +197,18 @@ def _firspline(
         fs = 2
     if not np.isfinite(fs) or fs <= 0:
         raise ValueError(f"'fs' must be finite and positive but got {fs}")
-    nyq = fs / 2
+    nyquist = fs / 2
 
-    if f1 > nyq or f2 > nyq:
+    if f1 > nyquist or f2 > nyquist:
         raise ValueError(
             f"Got critical frequencies {f1} and {f2} but they must both be less "
-            f"than the Nyquist frequency of {nyq}"
+            f"than the Nyquist frequency of {nyquist}"
         )
     if f1 >= f2:
         raise ValueError(f"f1 must be <{f2} but got {f1}")
 
     if p is None:
-        p = 0.312 * numtaps * (f2 - f1) / nyq
+        p = 0.312 * numtaps * (f2 - f1) / nyquist
     # Must be strictly positive: p appears in the denominator below, and p == 0
     # silently collapses the spline transition to a rectangular truncation
     # (nan ** 0 == 1) rather than raising.
@@ -216,20 +216,21 @@ def _firspline(
         raise ValueError(f"p must be positive but got {p}")
 
     # Convert to normalized frequency in radians
-    wo = (f1 + f2) / 2 * (1 / nyq * np.pi)
-    dw = (f2 - f1) / 2 * (1 / nyq * np.pi)
+    center_rad = (f1 + f2) / 2 * (1 / nyquist * np.pi)
+    half_width_rad = (f2 - f1) / 2 * (1 / nyquist * np.pi)
 
-    nvec = np.arange(1, (numtaps - 1) // 2 + 1)
+    tap_indices = np.arange(1, (numtaps - 1) // 2 + 1)
 
     # Optimal L2 solution to the ideal lowpass filter
-    h = np.sin(wo * nvec) / (np.pi * nvec)
+    half_taps = np.sin(center_rad * tap_indices) / (np.pi * tap_indices)
 
-    x = dw * nvec / p
-    spline = (np.sin(x) / x) ** p
-    h *= spline  # connect transition band with spline
+    spline_arg = half_width_rad * tap_indices / p
+    spline = (np.sin(spline_arg) / spline_arg) ** p
+    half_taps *= spline  # connect transition band with spline
 
-    b = np.hstack((np.flip(h), wo / np.pi, h))  # make linear phase
-    return b
+    # make linear phase
+    coeffs = np.hstack((np.flip(half_taps), center_rad / np.pi, half_taps))
+    return coeffs
 
 
 def firdesign(
@@ -310,19 +311,24 @@ def firdesign(
             "'band_edges' must be a monotonically increasing sequence"
         )
 
-    for pair_ind, (v1, v2) in enumerate(zip(desired, desired[1:])):
-        edge1, edge2 = band_edges[pair_ind], band_edges[pair_ind + 1]
-        if pair_ind % 2 == 0:
-            if v1 == v2:
+    for edge_index, (desired_left, desired_right) in enumerate(
+        zip(desired, desired[1:])
+    ):
+        edge_left = band_edges[edge_index]
+        edge_right = band_edges[edge_index + 1]
+        if edge_index % 2 == 0:
+            if desired_left == desired_right:
                 raise ValueError(
-                    f"Got {v1} for band edge {edge1} Hz and {v2} for band edge "
-                    f"{edge2} Hz but must be different values"
+                    f"Got {desired_left} for band edge {edge_left} Hz and "
+                    f"{desired_right} for band edge {edge_right} Hz but must be "
+                    "different values"
                 )
         else:
-            if v1 != v2:
+            if desired_left != desired_right:
                 raise ValueError(
-                    f"Got {v1} for band edge {edge1} Hz and {v2} for band edge "
-                    f"{edge2} Hz but must be the same values"
+                    f"Got {desired_left} for band edge {edge_left} Hz and "
+                    f"{desired_right} for band edge {edge_right} Hz but must be "
+                    "the same values"
                 )
 
     critical_points = band_edges.reshape((-1, 2))
@@ -335,39 +341,38 @@ def firdesign(
     impulse = scipy.signal.unit_impulse(numtaps, "mid")
 
     if prototypes.shape[0] == 1:  # single band
-        b = prototypes[0]
+        coeffs = prototypes[0]
         if desired[-1] == 1:  # high pass
-            b = impulse - prototypes[0]
+            coeffs = impulse - prototypes[0]
     else:  # multi-band
-        b = np.zeros(numtaps)
+        coeffs = np.zeros(numtaps)
 
         # Magnitude at 0 and Nyquist is the same
         if desired[0] == desired[-1]:
             for ii in range(0, prototypes.shape[0], 2):
-                bl = prototypes[ii]
-                bh = prototypes[ii + 1]
-                b += bh - bl
+                lowpass_low = prototypes[ii]
+                lowpass_high = prototypes[ii + 1]
+                coeffs += lowpass_high - lowpass_low
 
             # high pass at 0 and Nyquist, so invert
             if desired[-1] == 1:
-                b = impulse - b
+                coeffs = impulse - coeffs
         else:
             if desired[0] == 0:
-                tmp = prototypes[-1]
-                b_special = impulse - tmp
+                special_band = impulse - prototypes[-1]
                 prototypes = prototypes[:-1]
             else:
-                b_special = prototypes[0]
+                special_band = prototypes[0]
                 prototypes = prototypes[1:]
 
             for ii in range(0, prototypes.shape[0] - 1, 2):
-                bl = prototypes[ii]
-                bh = prototypes[ii + 1]
-                b += bh - bl
+                lowpass_low = prototypes[ii]
+                lowpass_high = prototypes[ii + 1]
+                coeffs += lowpass_high - lowpass_low
 
-            b += b_special
+            coeffs += special_band
 
-    return b
+    return coeffs
 
 
 def _osconvolve(
