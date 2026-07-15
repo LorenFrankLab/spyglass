@@ -325,3 +325,6 @@ class TestCreateDecodingView1D:
         linear_position = mock_1d.call_args.kwargs["linear_position"]
         assert np.ndim(linear_position) == 1
         assert getattr(linear_position, "name", None) == "linear_position"
+        # 1D posterior is normalized over the "position" dim per time bin.
+        posterior = mock_1d.call_args.kwargs["posterior"]
+        assert np.allclose(posterior.sum("position").values, 1.0)

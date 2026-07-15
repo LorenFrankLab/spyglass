@@ -124,7 +124,9 @@ class DecodingOutput(_Merge, SpyglassMixin):
         head_direction_name : str, optional
             Name of the head direction column for 2D views, by default
             "head_orientation". If the column is absent (e.g. v1 Trodes/DLC
-            position uses "orientation"), it is auto-detected.
+            position uses "orientation"), it is auto-detected; if no
+            orientation column is present, head direction is omitted from
+            the view.
         interval_idx : int, optional
             If specified, only visualize this interval (0-indexed).
             If None (default), visualize all intervals together.
