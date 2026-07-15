@@ -546,6 +546,75 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     plt.close(fig)
 
 
+def test_plot_sort_group_geometry_legibility(monkeypatch):
+    """Dense columns shrink markers, multi-probe shades bands, and the specific
+    reference is labeled with its electrode_id.
+
+    Locks in the legibility fixes: a linear polymer column packs many contacts
+    into a narrow band (markers must shrink below the sparse-tetrode default so
+    they don't overlap), multiple probes get separating background bands, and
+    the reference star names its channel so 'which channel is the reference' is
+    answerable from the plot alone.
+    """
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    reference_id = 4242
+
+    def _fake_rows(nwb_file_name):
+        rows = []
+        for probe_id, sort_group_id in (("probeA", 0), ("probeB", 1)):
+            for k in range(20):  # dense column -> markers must shrink
+                is_ref = sort_group_id == 0 and k == 0
+                rows.append(
+                    {
+                        "sort_group_id": sort_group_id,
+                        "electrode_id": (
+                            reference_id if is_ref else sort_group_id * 100 + k
+                        ),
+                        "probe_id": probe_id,
+                        "bad_channel": "False",
+                        "is_reference": is_ref,
+                        "coordinate_source": "probe",
+                        "plot_x": 0.0,
+                        "plot_y": -20.0 * k,
+                    }
+                )
+        return rows
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_geometry."
+        "_sort_group_geometry_rows",
+        _fake_rows,
+    )
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="probes present"):
+        pl.plot_sort_group_geometry("any_.nwb", ax=ax)
+
+    # Reference labeled with its electrode_id (independent of label_electrodes).
+    assert any(
+        f"elec {reference_id} (ref)" in text.get_text() for text in ax.texts
+    )
+
+    # Dense columns -> markers smaller than the sparse-tetrode default (50).
+    group_collections = [
+        collection
+        for collection in ax.collections
+        if str(collection.get_label()).startswith("sort_group_id ")
+    ]
+    sizes = [size for c in group_collections for size in c.get_sizes()]
+    assert sizes and max(sizes) < 50.0
+
+    # Multiple probes -> at least one shaded band patch behind the contacts
+    # (axvspan; nothing else adds patches to these axes).
+    assert ax.patches
+    plt.close(fig)
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sort_group_geometry_specific_reference_star_row(ux_session):

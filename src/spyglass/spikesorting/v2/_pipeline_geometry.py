@@ -340,6 +340,14 @@ def plot_sort_group_geometry(
     helper reads Spyglass metadata only -- it does not open the raw recording or
     create SpikeInterface objects.
 
+    Contact marker size auto-shrinks as a sort group gets dense (a linear
+    polymer shank stacks many contacts in a narrow band) so contacts stay
+    separable; a sparse tetrode keeps large markers. Each specific reference
+    electrode is labeled with its ``electrode_id`` (``elec <id> (ref)``) so the
+    reference channel is identifiable at a glance -- see ``show_reference`` for
+    where that reference comes from. Pass ``label_electrodes=True`` to print the
+    ``electrode_id`` (the channel number) on every contact.
+
     When the session spans **more than one probe**, ``Probe.Electrode``
     rel_x/rel_y are each probe's own coordinate frame (all near the origin), so
     the probes are laid out **side-by-side** along x -- each probe's contacts
@@ -358,14 +366,21 @@ def plot_sort_group_geometry(
         Subset of sort-group ids to display. All sort groups are shown
         when omitted (the default).
     label_electrodes : bool, optional
-        If ``True``, annotate each plotted contact with its
-        ``electrode_id``. Defaults to ``False``.
+        If ``True``, annotate each plotted contact with its ``electrode_id``
+        (the channel number). Defaults to ``False``. Specific reference
+        electrodes are always labeled regardless of this flag.
     show_bad_channels : bool, optional
         If ``True``, overlay bad-channel members with red ``x`` markers.
         Defaults to ``True``.
     show_reference : bool, optional
         If ``True``, overlay ``reference_mode='specific'`` electrodes with a
-        black star marker. Defaults to ``True``.
+        black star marker labeled ``elec <id> (ref)``. Defaults to ``True``.
+        This reference is the one each sort group inherited from
+        ``Electrode.original_reference_electrode`` (ultimately the
+        ``trodes_to_nwb`` ``ref_elect_id`` metadata), unless it was overridden
+        via ``set_group_by_shank(references=...)`` or ``reference_mode=...``
+        when the sort group was created. Groups with ``reference_mode`` of
+        ``'none'`` or ``'global_median'`` have no star.
     title : str, optional
         Axes title. A default title naming the session is used when
         omitted.
@@ -386,7 +401,7 @@ def plot_sort_group_geometry(
     import matplotlib.pyplot as plt
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+        _, ax = plt.subplots(figsize=(9, 5), constrained_layout=True)
 
     rows = _sort_group_geometry_rows(nwb_file_name)
     if sort_group_ids is not None:
@@ -472,6 +487,34 @@ def plot_sort_group_geometry(
         for row in plottable:
             row["display_x"] = row["plot_x"]
 
+    # Marker size shrinks as a column gets dense so stacked contacts don't
+    # overlap: a linear polymer shank packs many contacts into a narrow y band,
+    # while the base size is tuned for a ~4-contact tetrode. Bounded so sparse
+    # groups stay large/readable and dense ones stay separable.
+    from collections import Counter
+
+    contacts_per_column = Counter(row["sort_group_id"] for row in plottable)
+    max_per_column = max(contacts_per_column.values())
+    marker_s = max(8.0, min(50.0, 500.0 / max_per_column))
+    bad_s = max(45.0, marker_s * 1.8)
+    reference_s = max(90.0, marker_s * 3.0)
+
+    # Shade alternating probe blocks so the side-by-side layout reads as
+    # per-probe groups rather than one undifferentiated row of columns.
+    if multi_probe:
+        band_pad = gap * 0.45
+        for probe_index, probe_id in enumerate(probe_ids):
+            if probe_index % 2:
+                continue
+            probe_xs = [row["display_x"] for row in by_probe[probe_id]]
+            ax.axvspan(
+                min(probe_xs) - band_pad,
+                max(probe_xs) + band_pad,
+                color="0.9",
+                alpha=0.5,
+                zorder=0,
+            )
+
     cmap = plt.get_cmap("tab10")
     sort_group_ids = sorted({row["sort_group_id"] for row in plottable})
     for color_index, sort_group_id in enumerate(sort_group_ids):
@@ -484,7 +527,7 @@ def plot_sort_group_geometry(
         ax.scatter(
             [row["display_x"] for row in group_rows],
             [row["plot_y"] for row in group_rows],
-            s=50,
+            s=marker_s,
             color=color,
             edgecolors="black",
             linewidths=0.35,
@@ -500,29 +543,49 @@ def plot_sort_group_geometry(
             ax.scatter(
                 [row["display_x"] for row in bad_rows],
                 [row["plot_y"] for row in bad_rows],
-                s=90,
+                s=bad_s,
                 marker="x",
                 color="red",
                 linewidths=1.2,
                 label="bad channel",
             )
 
+    reference_rows = []
     if show_reference:
         reference_rows = [row for row in plottable if row["is_reference"]]
         if reference_rows:
             ax.scatter(
                 [row["display_x"] for row in reference_rows],
                 [row["plot_y"] for row in reference_rows],
-                s=150,
+                s=reference_s,
                 marker="*",
                 facecolors="none",
                 edgecolors="black",
                 linewidths=1.2,
                 label="specific reference",
             )
+            # Always name the reference electrode (its electrode_id) so the
+            # user can see WHICH channel each star is, independent of
+            # ``label_electrodes``. This is the reference inherited from
+            # ``Electrode.original_reference_electrode`` (ultimately the
+            # trodes_to_nwb ``ref_elect_id``) unless overridden when the sort
+            # group was created.
+            for row in reference_rows:
+                ax.annotate(
+                    f"elec {row['electrode_id']} (ref)",
+                    (row["display_x"], row["plot_y"]),
+                    xytext=(5, 4),
+                    textcoords="offset points",
+                    fontsize=7,
+                    fontweight="bold",
+                )
 
     if label_electrodes:
+        # Skip reference rows already annotated above to avoid double labels.
+        reference_ids = {id(row) for row in reference_rows}
         for row in plottable:
+            if id(row) in reference_ids:
+                continue
             ax.annotate(
                 str(row["electrode_id"]),
                 (row["display_x"], row["plot_y"]),
@@ -573,5 +636,16 @@ def plot_sort_group_geometry(
     ax.set_aspect("equal", adjustable="datalim")
     ax.grid(True, alpha=0.25)
 
-    ax.legend(fontsize="small", loc="best")
+    # With many sort groups the in-axes legend covers the contacts; move it
+    # outside to the right. A handful of groups (the tetrode case) reads fine
+    # inside at "best".
+    if len(sort_group_ids) > 6:
+        ax.legend(
+            fontsize="small",
+            loc="upper left",
+            bbox_to_anchor=(1.01, 1.0),
+            borderaxespad=0.0,
+        )
+    else:
+        ax.legend(fontsize="small", loc="best")
     return ax
