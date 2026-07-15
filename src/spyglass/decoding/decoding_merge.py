@@ -5,6 +5,7 @@ import numpy as np
 from non_local_detector.visualization.figurl_1D import create_1D_decode_view
 from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
+from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
 from spyglass.decoding.v1.sorted_spikes import (
     SortedSpikesDecodingV1,
@@ -169,16 +170,11 @@ class DecodingOutput(_Merge, SpyglassMixin):
             # otherwise auto-detect, falling back to None (head_dir is
             # optional). Warn so a silent substitution/drop (e.g. from a typo)
             # is visible.
-            if head_direction_name not in position_info.columns:
-                requested = head_direction_name
-                head_direction_name = next(
-                    (
-                        col
-                        for col in ("orientation", "head_orientation")
-                        if col in position_info.columns
-                    ),
-                    None,
-                )
+            requested = head_direction_name
+            head_direction_name = resolve_orientation_col(
+                position_info, orientation_name=head_direction_name
+            )
+            if requested not in position_info.columns:
                 if head_direction_name is not None:
                     logger.warning(
                         f"head_direction_name='{requested}' not found in "
