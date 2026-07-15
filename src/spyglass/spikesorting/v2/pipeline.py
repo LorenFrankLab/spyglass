@@ -50,6 +50,7 @@ from spyglass.spikesorting.v2._pipeline_presets import (
     clone_pipeline_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
+    describe_recommendation_status,
     list_pipeline_presets,
     register_pipeline_preset,
 )

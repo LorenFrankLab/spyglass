@@ -423,6 +423,24 @@ presets
 presets[presets["sorter_family"] == "kilosort4"]
 ```
 
+#### Reading `recommendation_status`
+
+Each preset carries a `recommendation_status` telling you how much to trust it:
+
+- **`production`** -- Frank Lab validated and recommended for real science; the
+  default choice for its probe / target region / sampling rate (e.g. the dated
+  MountainSort4 hippocampus recipes).
+- **`alternative`** -- a sound, working substitute for when the production
+  recipe does not fit. For example MountainSort5 is the `alternative` to the
+  `production` MountainSort4 because MS4's `ml_ms4alg` backend needs `numpy<2`,
+  and Kilosort is the Neuropixels-density alternative. Fine to use; just not the
+  lab's first pick for that probe/region.
+- **`experimental`** -- not yet validated on Frank Lab data. It runs, but
+  inspect the output before relying on it (e.g. multi-day concatenation,
+  Neuropixels Kilosort4).
+
+`describe_recommendation_status()` returns this legend as a table.
+
 ### Parameter names and fingerprints
 
 Shipped parameter-row names are **stable provenance**, not just labels. The

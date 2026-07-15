@@ -87,6 +87,29 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
 }
 
 
+# The three-value ``recommendation_status`` taxonomy, defined in ONE place so
+# ``describe_pipeline_presets``, ``describe_recommendation_status`` and the docs
+# agree on what each label means.
+RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
+    "production": (
+        "Frank-lab validated and recommended for real science -- the default "
+        "choice for its probe / target region / sampling rate."
+    ),
+    "alternative": (
+        "A sound, working substitute for when the production recipe does not "
+        "fit -- e.g. MountainSort5 stands in for the production MountainSort4 "
+        "where MS4's ml_ms4alg numpy<2 pin is unavailable, and Kilosort is the "
+        "Neuropixels-density alternative. Fine to use; just not the lab's first "
+        "pick for that probe/region."
+    ),
+    "experimental": (
+        "Not yet validated on Frank-lab data. It runs, but inspect the output "
+        "before relying on it (e.g. multi-day concatenation, Neuropixels "
+        "Kilosort4)."
+    ),
+}
+
+
 def list_pipeline_presets() -> list[str]:
     """Return the sorted pipeline-preset names accepted by ``run_v2_pipeline``.
 
@@ -112,6 +135,13 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     database-free: it reads only the in-module preset metadata and
     queries/inserts nothing. ``pandas`` is imported lazily so
     ``import spyglass.spikesorting.v2.pipeline`` stays cheap.
+
+    The ``recommendation_status`` column is one of ``production`` (Frank-lab
+    validated -- the recommended default for its probe/region/rate),
+    ``alternative`` (a sound substitute for when production does not fit, e.g.
+    MountainSort5 for MountainSort4 under ``numpy>=2``), or ``experimental``
+    (runs but not yet validated -- verify the output before relying on it).
+    Call :func:`describe_recommendation_status` for the full definitions.
 
     Returns
     -------
@@ -178,6 +208,41 @@ def describe_pipeline_presets() -> "pd.DataFrame":
         for name, preset in sorted(_PIPELINE_PRESETS.items())
     ]
     return pd.DataFrame(rows, columns=columns)
+
+
+def describe_recommendation_status() -> "pd.DataFrame":
+    """Explain the ``recommendation_status`` values from describe_pipeline_presets.
+
+    :func:`describe_pipeline_presets` tags each preset ``production`` /
+    ``alternative`` / ``experimental``; this returns what those labels mean so
+    the column is interpretable without reading module source. Pure and
+    database-free.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per status (columns ``recommendation_status``, ``meaning``),
+        ordered ``production`` -> ``alternative`` -> ``experimental``.
+
+    Examples
+    --------
+    >>> from spyglass.spikesorting.v2.pipeline import (
+    ...     describe_recommendation_status,
+    ... )
+    >>> set(describe_recommendation_status()["recommendation_status"]) == {
+    ...     "production", "alternative", "experimental"
+    ... }
+    True
+    """
+    import pandas as pd
+
+    return pd.DataFrame(
+        [
+            {"recommendation_status": status, "meaning": meaning}
+            for status, meaning in RECOMMENDATION_STATUS_MEANINGS.items()
+        ],
+        columns=["recommendation_status", "meaning"],
+    )
 
 
 _PRESET_DETAIL_COLUMNS = [

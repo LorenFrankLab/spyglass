@@ -23,6 +23,7 @@ from spyglass.spikesorting.v2.pipeline import (
     clone_pipeline_preset,
     describe_pipeline_preset,
     describe_pipeline_presets,
+    describe_recommendation_status,
     list_pipeline_presets,
     register_pipeline_preset,
 )
@@ -90,6 +91,31 @@ def test_describe_pipeline_presets_columns():
     """Columns match the specified set, in order."""
     df = describe_pipeline_presets()
     assert list(df.columns) == _COLUMNS
+
+
+def test_describe_recommendation_status_defines_every_used_status():
+    """The legend explains exactly the statuses the presets actually use.
+
+    Guards the user-facing taxonomy: every ``recommendation_status`` value that
+    appears in ``describe_pipeline_presets`` must have a non-empty definition in
+    ``describe_recommendation_status`` (and vice-versa -- no stale legend rows).
+    """
+    legend = describe_recommendation_status()
+    assert list(legend.columns) == ["recommendation_status", "meaning"]
+    assert all(meaning.strip() for meaning in legend["meaning"])
+
+    legend_statuses = set(legend["recommendation_status"])
+    used_statuses = {
+        status
+        for status in describe_pipeline_presets()["recommendation_status"]
+        if status
+    }
+    assert used_statuses  # presets actually carry statuses
+    assert used_statuses <= legend_statuses, (
+        "preset statuses missing a definition: "
+        f"{used_statuses - legend_statuses}"
+    )
+    assert legend_statuses == {"production", "alternative", "experimental"}
 
 
 def test_describe_pipeline_presets_threshold_units_clusterless():

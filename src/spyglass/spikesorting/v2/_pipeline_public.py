@@ -9,6 +9,7 @@ PIPELINE_FACADE_EXPORTS = (
     "list_pipeline_presets",
     "describe_pipeline_presets",
     "describe_pipeline_preset",
+    "describe_recommendation_status",
     "register_pipeline_preset",
     "clone_pipeline_preset",
     # geometry
@@ -65,6 +66,7 @@ PACKAGE_ROOT_REEXPORTS = (
     "describe_sort_groups",
     "describe_pipeline_presets",
     "describe_pipeline_preset",
+    "describe_recommendation_status",
     "list_pipeline_presets",
     "register_pipeline_preset",
     "clone_pipeline_preset",
