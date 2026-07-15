@@ -87,6 +87,22 @@ def apply_artifact_mask(
         EmptyArtifactValidTimesError,
     )
 
+    # Single-segment precondition. The complement walk and the single-segment
+    # ``list_periods=[frame_ranges]`` call below both assume ``segment_index=0``
+    # only; the v2 sort recording is always a mono-segment concatenated timeline
+    # (``concatenate_recordings``). A multi-segment recording signals an upstream
+    # construction error -- fail with a clear message instead of the cryptic
+    # ``IndexError`` SpikeInterface's ``silence_periods`` raises when
+    # ``list_periods`` is shorter than the segment count.
+    n_segments = recording.get_num_segments()
+    if n_segments != 1:
+        raise ValueError(
+            "apply_artifact_mask: expected a single-segment recording; got "
+            f"{n_segments} segments. The v2 sort recording is a mono-segment "
+            "concatenated timeline; a multi-segment recording signals an "
+            "upstream construction error."
+        )
+
     valid_times = np.asarray(valid_times, dtype=float)
     if valid_times.size == 0:
         raise EmptyArtifactValidTimesError(

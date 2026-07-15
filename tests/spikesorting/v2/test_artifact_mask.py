@@ -74,6 +74,34 @@ def test_mask_rejects_out_of_envelope(valid_times):
         apply_artifact_mask(_recording(), np.array(valid_times, dtype=float))
 
 
+def test_mask_rejects_multi_segment():
+    """A multi-segment recording is a caller error, rejected with a clear message.
+
+    ``apply_artifact_mask`` reads ``segment_index=0`` and passes a
+    single-segment ``list_periods`` to ``silence_periods``. The v2 sort
+    recording is always a mono-segment concatenated timeline
+    (``concatenate_recordings``), so >1 segment signals an upstream construction
+    error -- fail loudly here instead of with a cryptic ``IndexError`` from deep
+    in SpikeInterface.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+
+    two_seg = si.NumpyRecording(
+        [
+            np.zeros((30_000, 4), dtype=np.float32),
+            np.zeros((30_000, 4), dtype=np.float32),
+        ],
+        sampling_frequency=30_000.0,
+    )
+    assert two_seg.get_num_segments() == 2
+    with pytest.raises(ValueError, match="single-segment"):
+        apply_artifact_mask(two_seg, np.array([[0.0, 0.5]], dtype=float))
+
+
 def test_mask_accepts_in_envelope_finite_times():
     """A finite, in-envelope mask still works (the guards don't over-reject)."""
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
