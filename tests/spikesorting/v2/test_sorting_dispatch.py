@@ -394,47 +394,66 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
 
 
 @pytest.mark.medium
-def test_v2_recording_chain_is_container_serializable():
-    """The v2 recording wrappers stay (json|pickle)-serializable for containers.
+def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
+    """The v2 recording wrappers survive ``run_sorter``'s serialize + reload.
 
-    SI's container runner requires the recording passed to ``run_sorter`` to be
-    JSON- or pickle-serializable so it can re-materialize it inside the
-    container. The v2 sort-time chain wraps the preprocessed recording in an
-    artifact mask (``apply_artifact_mask``) and, for a whitening sorter, the
-    external float64 whitening (``pinned_whiten``). Assert each wrapper -- and
-    their composition -- preserves container-serializability, without Docker or
-    a real sort. A regression (e.g. a wrapper holding an unpicklable closure)
-    would otherwise only surface deep in a real container populate.
+    SI's sorter/container runner dumps the recording passed to ``run_sorter``
+    to ``spikeinterface_recording.json`` when ``check_serializability("json")``
+    is truthy (else pickle), then reloads it inside the sorter/container. The
+    v2 sort-time chain wraps the preprocessed recording in an artifact mask
+    (``apply_artifact_mask``) and, for a whitening sorter, external float64
+    whitening (``pinned_whiten``).
+
+    This asserts a real dump -> reload for each wrapper and their composition,
+    NOT merely that ``check_serializability`` returns truthy: a wrapper can
+    report json-serializable yet fail to reload (SI's
+    ``SilencedPeriodsRecording`` stores its ``periods`` as a structured numpy
+    array that cannot survive a JSON round-trip -- the flag-only check missed
+    exactly that). Without Docker or a real sort.
     """
     import numpy as np
     import spikeinterface as si
+    from spikeinterface.core import load
 
     from spyglass.spikesorting.v2._sorting_artifact_mask import (
         apply_artifact_mask,
     )
     from spyglass.spikesorting.v2._sorting_dispatch import pinned_whiten
 
-    def _container_serializable(recording) -> bool:
-        return recording.check_serializability(
-            "json"
-        ) or recording.check_serializability("pickle")
+    def _assert_roundtrips(recording, name):
+        # Mirror SI basesorter.setup_recording: JSON when the recording claims
+        # json-serializability, else pickle -- then reload. ``load`` raises if
+        # the dumped form cannot be reconstructed.
+        folder = tmp_path / name
+        folder.mkdir()
+        if recording.check_serializability("json"):
+            rec_file = folder / "spikeinterface_recording.json"
+            recording.dump_to_json(rec_file)
+        elif recording.check_serializability("pickle"):
+            rec_file = folder / "spikeinterface_recording.pickle"
+            recording.dump_to_pickle(rec_file)
+        else:
+            raise AssertionError(
+                f"{name}: neither json- nor pickle-serializable"
+            )
+        load(rec_file, base_folder=folder)
 
     rec = si.generate_recording(
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
-    assert _container_serializable(rec), "base recording not serializable"
+    _assert_roundtrips(rec, "base")
 
     # Artifact-masked recording (keep the first half-second).
     masked = apply_artifact_mask(rec, np.array([[0.0, 0.5]]))
-    assert _container_serializable(masked), "artifact-masked not serializable"
+    _assert_roundtrips(masked, "masked")
 
     # Whitened wrapper (the external float64 whitening path).
     whitened = pinned_whiten(rec)
-    assert _container_serializable(whitened), "whitened not serializable"
+    _assert_roundtrips(whitened, "whitened")
 
     # The full sort-time composition: whiten(artifact-mask(recording)).
     composed = pinned_whiten(masked)
-    assert _container_serializable(composed), "composed chain not serializable"
+    _assert_roundtrips(composed, "composed")
 
 
 @pytest.mark.slow
