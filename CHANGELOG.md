@@ -255,8 +255,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
-    - Remove admin requirement in `convert_epoch_interval_name_to_position_interval_name`
-      #1640
+    - Bypass delete permission check when removing null `PositionIntervalMap` entries in `convert_epoch_interval_name_to_position_interval_name` #1640
 
 - Decoding
 
