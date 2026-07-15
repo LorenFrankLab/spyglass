@@ -279,8 +279,24 @@ def apply_artifact_mask(
     # (single-sample triggers left the first frame of a contiguous run unmasked
     # under ``ms_before/ms_after=0``); ``silence_periods`` zeros the slice
     # directly, so no run edge is dropped.
-    return sip.silence_periods(
+    masked = sip.silence_periods(
         recording,
         list_periods=[frame_ranges],
         mode="zeros",
     )
+
+    # Force the pickle serialization path for the masked recording.
+    # ``SilencedPeriodsRecording`` stores its artifact intervals in
+    # ``_kwargs["periods"]`` as a *structured* numpy array, which cannot survive
+    # a JSON round-trip (JSON has no structured-array type: the reload receives a
+    # plain nested list and ``__init__`` raises "periods must be a np.array with
+    # dtype ..."). SpikeInterface nonetheless reports this recording as
+    # JSON-serializable, so ``run_sorter`` dumps it to
+    # ``spikeinterface_recording.json`` and dies on reload -- but only when
+    # artifact detection actually flags intervals (so this object is built at
+    # all). Marking it non-JSON-serializable makes ``run_sorter`` fall back to
+    # pickle, which round-trips correctly. (No public setter exists; the private
+    # ``_serializability`` flag is the supported mechanism. The proper fix is
+    # upstream in SpikeInterface.)
+    masked._serializability["json"] = False
+    return masked
