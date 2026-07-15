@@ -11,56 +11,15 @@ class PopulateMixin(BaseMixin):
 
     # -------------------------------- populate --------------------------------
 
-    def _hash_upstream(self, keys):
-        """Hash upstream table keys for no transaction populate.
-
-        Uses a RestrGraph to capture all upstream tables, restrict them to
-        relevant entries, and hash the results. This is used to check if
-        upstream tables have changed during a no-transaction populate and avoid
-        the following data-integrity error:
-
-        1. User A starts no-transaction populate.
-        2. User B deletes and repopulates an upstream table, changing contents.
-        3. User A finishes populate, inserting data that is now invalid.
-
-        Parameters
-        ----------
-        keys : list
-            List of keys for populating table.
-        """
-        RestrGraph = self._graph_deps[1]
-        if not (parents := self.parents(as_objects=True, primary=True)):
-            # Should not happen, as this is only called from populated tables
-            raise RuntimeError("No upstream tables found for upstream hash.")
-
-        if isinstance(keys, dict):
-            keys = [keys]  # case for single population key
-        leaves = {  # Restriction on each primary parent
-            p.full_table_name: [
-                {k: v for k, v in key.items() if k in p.heading.names}
-                for key in keys
-            ]
-            for p in parents
-        }
-
-        return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
-
     def populate(self, *restrictions, **kwargs):
-        """Populate table in parallel, with or without transaction protection.
+        """Populate table in parallel, using transaction protection.
 
-        Supersedes datajoint.table.Table.populate for classes with that
-        spawn processes in their make function and always use transactions.
-
-        `_use_transaction` class attribute can be set to False to disable
-        transaction protection for a table. This is not recommended for tables
-        with short processing times. A before-and-after hash check is performed
-        to ensure upstream tables have not changed during populate, and may
-        be a more time-consuming process. To permit the `make` to insert without
-        populate, set `_allow_insert` to True.
+        Supersedes datajoint.table.Table.populate for classes that spawn
+        processes in their make function and always use transactions.
         """
         processes = kwargs.pop("processes", 1)
 
-        # Decide if using transaction protection
+        # Non-transaction populate is no longer supported.
         use_transact = kwargs.pop("use_transaction", None)
         if use_transact is None:
             use_transact = getattr(self, "_use_transaction", None)
