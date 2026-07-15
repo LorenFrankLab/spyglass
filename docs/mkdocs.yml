@@ -97,6 +97,9 @@ nav:
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
     - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
+  - Fixing Bugs:
+    - Overview: FixingBugs/index.md
+    - Label Repair (#1513): FixingBugs/LabelRepair.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - Change Log: CHANGELOG.md
   - Copyright: LICENSE.md
