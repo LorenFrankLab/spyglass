@@ -34,7 +34,6 @@
 #
 
 # +
-import os
 import copy
 import datajoint as dj
 import numpy as np
@@ -210,6 +209,109 @@ lfp.LFPOutput & lfp_key
 
 lfp_df = (lfp.LFPOutput & lfp_key).fetch1_dataframe()
 lfp_df
+
+# ## Artifact Detection
+#
+
+# Large transients — from stimulation, chewing, or cable movement — can
+# dominate a band-pass filter's output. We therefore typically detect artifacts
+# _before_ filtering for a band of interest, like theta or ripple (see LFP
+# Band, below). Detection stores the artifact times, and saves their complement
+# as a new interval list we can then filter over.
+#
+# Spyglass ships a few parameter sets, including `default_difference` and
+# `default_mad`.
+#
+
+lfp.v1.LFPArtifactDetectionParameters().insert_default()
+lfp.v1.LFPArtifactDetectionParameters()
+
+# To use our own, we insert a named set. The name must be unique per distinct
+# set of values: reusing a name with different values will _not_ overwrite the
+# existing entry, so it helps to encode the values in the name.
+#
+# The `difference` algorithm works in two passes. It first finds times where
+# the summed change in signal crosses `amplitude_thresh_1st` on at least
+# `proportion_above_thresh_1st` of the electrodes. Of those candidates, it
+# keeps the ones whose local range — measured across `local_window_ms`, half on
+# each side — also crosses `amplitude_thresh_2nd` on
+# `proportion_above_thresh_2nd` of the electrodes. Each survivor is then masked
+# by `removal_window_ms`, half on each side.
+#
+
+# +
+artifact_params_name = "difference_1000_frac_10_10_frac_10_30ms_80"
+
+lfp.v1.LFPArtifactDetectionParameters().insert1(
+    {
+        "artifact_params_name": artifact_params_name,
+        "artifact_params": {
+            "artifact_detection_algorithm": "difference",
+            "artifact_detection_algorithm_params": {
+                "amplitude_thresh_1st": 1000,  # ad units, None or >= 0
+                "proportion_above_thresh_1st": 0.1,  # frac electrodes, 0-1
+                "amplitude_thresh_2nd": 10,  # ad units, None or >= 0
+                "proportion_above_thresh_2nd": 0.1,  # frac electrodes, 0-1
+                "removal_window_ms": 30,  # masked per artifact, half per side
+                "local_window_ms": 80,  # 2x the window used on either side
+            },
+        },
+    },
+    skip_duplicates=True,
+)
+# -
+
+# With more than one electrode, we can reference each against another before
+# detection by adding a `referencing` key. `electrode_list` holds the
+# electrodes to be referenced and `reference_list` the electrode each is
+# referenced against, one per entry — so the two must be the same length. A
+# reference of `-1` leaves that electrode unreferenced. Our example data has a
+# single electrode, so we skip this.
+#
+# ```python
+# "referencing": {
+#     "ref_on": 1,
+#     "electrode_list": [388, 389, 390, 391],
+#     "reference_list": [480, 480, 480, 480],
+# },
+# ```
+#
+
+# `LFPArtifactDetectionSelection` pairs these parameters with the LFP we
+# populated above. We fetch the key from `LFPV1` rather than reusing
+# `lfp_s_key`, which carries a `target_sampling_rate` this table doesn't have.
+#
+
+# +
+artifact_key = {
+    **(lfp.v1.LFPV1 & lfp_s_key).fetch1("KEY"),
+    "artifact_params_name": artifact_params_name,
+}
+
+lfp.v1.LFPArtifactDetectionSelection().insert1(
+    artifact_key, skip_duplicates=True
+)
+
+lfp.v1.LFPArtifactDetection().populate(artifact_key)
+# -
+
+lfp.v1.LFPArtifactDetection() & artifact_key
+
+# The artifact-free times are saved to `IntervalList` under a generated name,
+# which we can pass to the band filtering below as `interval_list_name` to
+# filter only over times without artifacts.
+#
+
+# +
+artifact_removed_interval_list_name = (
+    lfp.v1.LFPArtifactDetection & artifact_key
+).fetch1("artifact_removed_interval_list_name")
+
+sgc.IntervalList & {
+    "nwb_file_name": nwb_file_name,
+    "interval_list_name": artifact_removed_interval_list_name,
+}
+# -
 
 # ## LFP Band
 #
