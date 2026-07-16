@@ -320,3 +320,62 @@ def test_curation_stage_wraps_missing_merge_registration(first_run):
         # valid, reusable curation regardless of test order.
         clear_curations_for(sort_pk)
         run_v2_pipeline(**inputs)
+
+
+@pytest.mark.unit
+def test_populate_tolerating_concurrent_duplicate():
+    """A benign concurrent duplicate (row committed by an overlapping run) is
+    reused, not raised; a real duplicate/other error still propagates.
+
+    run_v2_pipeline populates with reserve_jobs=False, so an overlapping
+    populate of the same content-addressed key can commit the row mid-compute
+    and make this call's insert raise DuplicateError. Because the id is
+    content-addressed the row is the identical result: adopt it. A duplicate
+    with the row STILL absent, or any non-duplicate error, is a genuine failure.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._pipeline_run import (
+        _populate_tolerating_concurrent_duplicate,
+    )
+
+    class _FakeTable:
+        def __init__(self, error, exists):
+            self._error = error
+            self._exists = exists
+            self.populated_with = None
+
+        def populate(self, key, reserve_jobs=False):
+            self.populated_with = key
+            if self._error is not None:
+                raise self._error
+
+        def __and__(self, key):
+            return [key] if self._exists else []
+
+    key = {"sorting_id": "abc"}
+    duplicate = dj.errors.DuplicateError(
+        "Duplicate entry '...' for key 'PRIMARY'"
+    )
+
+    # Benign race: DuplicateError, but the row exists afterward -> swallowed.
+    tolerated = _FakeTable(error=duplicate, exists=True)
+    _populate_tolerating_concurrent_duplicate(tolerated, key)
+    assert tolerated.populated_with == key
+
+    # DuplicateError but the row is STILL absent -> genuine failure, re-raised.
+    with pytest.raises(dj.errors.DuplicateError):
+        _populate_tolerating_concurrent_duplicate(
+            _FakeTable(error=duplicate, exists=False), key
+        )
+
+    # A non-duplicate error always propagates, even if the row happens to exist.
+    with pytest.raises(ValueError):
+        _populate_tolerating_concurrent_duplicate(
+            _FakeTable(error=ValueError("boom"), exists=True), key
+        )
+
+    # No error -> normal populate, no raise.
+    _populate_tolerating_concurrent_duplicate(
+        _FakeTable(error=None, exists=False), key
+    )

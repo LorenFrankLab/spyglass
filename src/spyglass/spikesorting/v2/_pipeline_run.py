@@ -94,6 +94,34 @@ def _run_stage(
     return result, status, time.perf_counter() - start
 
 
+def _populate_tolerating_concurrent_duplicate(table, key) -> None:
+    """Populate ``key``, tolerating a benign concurrent duplicate.
+
+    The pipeline populates with ``reserve_jobs=False`` (no DataJoint ``~jobs``
+    reservation), so an overlapping populate of the same *content-addressed* key
+    -- another kernel, a lab populate worker, or a re-run of a long stage -- can
+    commit the row while this call is still in ``make_compute``, making this
+    call's insert raise ``DuplicateError``. Because the id is content-addressed,
+    that committed row IS the identical result, so adopt it (the stage is
+    effectively "reused") rather than failing the whole pipeline.
+
+    A duplicate error with the row STILL absent afterward, or any non-duplicate
+    error, is a genuine failure and is re-raised unchanged.
+    """
+    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+
+    try:
+        table.populate(key, reserve_jobs=False)
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 -- narrowed to the benign race below
+        # Only swallow a duplicate-PK violation whose row is now present; every
+        # other error (including a duplicate with no row -- a real integrity
+        # failure) propagates.
+        if not (_is_duplicate_key_error(exc) and (table & key)):
+            raise
+
+
 def run_v2_pipeline(
     nwb_file_name: "str | None" = None,
     sort_group_id: "int | None" = None,
@@ -529,7 +557,9 @@ def run_v2_pipeline(
         ) = _run_stage(
             "recording",
             bool(Recording & recording_key),
-            lambda: Recording.populate(recording_key, reserve_jobs=False),
+            lambda: _populate_tolerating_concurrent_duplicate(
+                Recording, recording_key
+            ),
             run_summary,
         )
         run_summary["recording_id"] = recording_key["recording_id"]
@@ -555,8 +585,8 @@ def run_v2_pipeline(
             ) = _run_stage(
                 "artifact_detection",
                 bool(ArtifactDetection & artifact_detection_key),
-                lambda: ArtifactDetection.populate(
-                    artifact_detection_key, reserve_jobs=False
+                lambda: _populate_tolerating_concurrent_duplicate(
+                    ArtifactDetection, artifact_detection_key
                 ),
                 run_summary,
             )
@@ -615,7 +645,7 @@ def run_v2_pipeline(
         def _populate_member_recordings():
             for key in member_recording_keys:
                 if not (Recording & key):
-                    Recording.populate(key, reserve_jobs=False)
+                    _populate_tolerating_concurrent_duplicate(Recording, key)
 
         (
             _,
@@ -648,8 +678,8 @@ def run_v2_pipeline(
         ) = _run_stage(
             "concat_recording",
             bool(ConcatenatedRecording & concat_key),
-            lambda: ConcatenatedRecording.populate(
-                concat_key, reserve_jobs=False
+            lambda: _populate_tolerating_concurrent_duplicate(
+                ConcatenatedRecording, concat_key
             ),
             run_summary,
         )
@@ -665,7 +695,7 @@ def run_v2_pipeline(
     _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(
         "sorting",
         bool(Sorting & sorting_key),
-        lambda: Sorting.populate(sorting_key, reserve_jobs=False),
+        lambda: _populate_tolerating_concurrent_duplicate(Sorting, sorting_key),
         run_summary,
     )
     run_summary["sorting_id"] = sorting_key["sorting_id"]
@@ -788,7 +818,9 @@ def run_v2_pipeline(
         sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
         auto_start = time.perf_counter()
         try:
-            CurationEvaluation.populate(eval_key, reserve_jobs=False)
+            _populate_tolerating_concurrent_duplicate(
+                CurationEvaluation, eval_key
+            )
             children_before = set(
                 (CurationV2 & sorting_restriction).fetch("curation_id")
             )
@@ -1361,7 +1393,7 @@ def run_v2_unit_match(
     ) = _run_stage(
         "unit_match",
         bool(UnitMatch & selection),
-        lambda: UnitMatch.populate(selection, reserve_jobs=False),
+        lambda: _populate_tolerating_concurrent_duplicate(UnitMatch, selection),
         run_summary,
     )
     run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
@@ -1376,7 +1408,9 @@ def run_v2_unit_match(
     ) = _run_stage(
         "tracked_unit",
         bool(TrackedUnit & selection),
-        lambda: TrackedUnit.populate(selection, reserve_jobs=False),
+        lambda: _populate_tolerating_concurrent_duplicate(
+            TrackedUnit, selection
+        ),
         run_summary,
     )
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
