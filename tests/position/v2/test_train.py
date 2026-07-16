@@ -33,6 +33,22 @@ class TestHelperFunctions:
         )
         assert len(short_name) <= 10
 
+    def test_model_id_single_date_segment(self):
+        """A generated model_id carries exactly one YYYYMMDD segment.
+
+        Regression guard: the ``mdl`` prefix must be date-free because
+        ``default_pk_name`` already appends the date, otherwise the id
+        (and its ``*_model.nwb`` file) doubles the date as
+        ``mdl-YYYYMMDD-YYYYMMDD-<hash>``.
+        """
+        import re
+
+        from spyglass.position.v2.train import default_pk_name
+
+        model_id = default_pk_name("mdl")
+        assert re.fullmatch(r"mdl-\d{8}-[0-9a-f]{8}", model_id), model_id
+        assert len(re.findall(r"\d{8}", model_id)) == 1
+
     def test_resolve_model_path(self):
         """Test resolve_model_path function."""
         from spyglass.position.v2.train import resolve_model_path

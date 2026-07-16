@@ -602,6 +602,64 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
     return str(output_filepath)
 
 
+def route_gputouse_to_device(
+    source: dict, target: dict, warn, context: str
+) -> None:
+    """Route a legacy ``gputouse`` request to the modern ``device`` selector.
+
+    Position V2 targets DeepLabCut >= 3 (PyTorch engine), which selects the GPU
+    via ``device`` (e.g. ``"cuda:0"``). ``gputouse`` is a V1/TensorFlow
+    parameter that the PyTorch ``analyze_videos``/``train_network`` paths
+    ignore, so a stray ``gputouse`` would otherwise silently have no effect.
+    When *source* carries ``gputouse``, warn, drop it from *target* so the
+    ignored parameter is never forwarded, and set ``target["device"]`` to the
+    best available option -- unless *target* already specifies ``device``, in
+    which case the explicit choice wins.
+
+    The ``gputouse`` -> ``device`` mapping mirrors DeepLabCut's own
+    ``_gpu_to_use_to_device`` (integer ``N`` -> ``"cuda:N"``).
+
+    Parameters
+    ----------
+    source : dict
+        Parameter dict that may contain ``gputouse`` (call kwargs or stored
+        params).
+    target : dict
+        The kwargs dict actually passed to the DLC function; mutated in place.
+    warn : callable
+        One-argument logging callable used to emit the warning.
+    context : str
+        Short label for the message, e.g. ``"inference"`` or ``"training"``.
+    """
+    if source.get("gputouse") is None:
+        return  # nothing requested (absent or explicit None)
+    gpu = source["gputouse"]
+    target.pop("gputouse", None)  # never forward the ignored legacy parameter
+    if target.get("device"):
+        warn(
+            "Ignoring `gputouse` (a v1/TensorFlow parameter) on the v2 "
+            f"{context} path; using the provided device={target['device']!r} "
+            "instead."
+        )
+        return
+    try:
+        device = f"cuda:{int(gpu)}"
+    except (TypeError, ValueError):
+        warn(
+            f"`gputouse={gpu!r}` could not be mapped to a device and is "
+            f"ignored on the v2 {context} path; DLC will select a GPU "
+            "automatically. Set `device` directly to control selection."
+        )
+        return
+    warn(
+        "`gputouse` is a v1/TensorFlow parameter and is not used by the v2 "
+        f"PyTorch {context} path; routing gputouse={gpu!r} to "
+        f"device={device!r}. Set `device` directly (e.g. 'cuda:0') to control "
+        "GPU selection in v2."
+    )
+    target["device"] = device
+
+
 def do_pose_estimation(
     video_filepaths,
     dlc_model,

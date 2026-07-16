@@ -1045,6 +1045,18 @@ class DLCStrategy(PoseToolStrategy):
                 train_network_kwargs.setdefault("epochs", 1)
                 train_network_kwargs.setdefault("save_epochs", 1)
 
+        # GPU selection: route a legacy `gputouse` to the v2 `device` selector.
+        # `train_network` accepts `gputouse` in its signature but the PyTorch
+        # engine ignores it, so forward `device` instead.
+        from spyglass.position.utils.dlc_io import route_gputouse_to_device
+
+        route_gputouse_to_device(
+            params,
+            train_network_kwargs,
+            model_instance._warn_msg,
+            context="training",
+        )
+
         model_instance._info_msg("Starting DLC model training...")
 
         try:
@@ -1067,8 +1079,6 @@ class DLCStrategy(PoseToolStrategy):
         self, config: dict, model_instance
     ) -> tuple[Path, str]:
         """Localize the trained model and generate model ID."""
-        from datetime import datetime
-
         from deeplabcut.utils import get_model_folder
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
@@ -1132,9 +1142,9 @@ class DLCStrategy(PoseToolStrategy):
                     latest_snapshot = int(_m.group(1)) if _m else 0
                     max_modified_time = modified_time
 
-        # Generate model ID
-        timestamp = datetime.now().strftime("%Y%m%d")
-        model_id = default_pk_name(f"mdl-{timestamp}")
+        # Generate model ID. ``default_pk_name`` supplies the date segment,
+        # so the prefix must stay date-free to avoid a doubled date.
+        model_id = default_pk_name("mdl")
 
         model_instance._info_msg(
             f"Located trained model - snapshot: {latest_snapshot}, "

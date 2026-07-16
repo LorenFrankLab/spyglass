@@ -181,6 +181,12 @@ def test_dlc_strategy_localize_model(pv2_train, tmp_path, skip_if_no_dlc):
         assert "snapshot: 200" in info_call
         assert result_config == project_path / "config.yaml"
         assert model_id.startswith("mdl-")
+        # id must carry exactly one YYYYMMDD date segment (no doubled
+        # date such as ``mdl-YYYYMMDD-YYYYMMDD-<hash>``).
+        import re
+
+        assert re.fullmatch(r"mdl-\d{8}-[0-9a-f]{8}", model_id), model_id
+        assert len(re.findall(r"\d{8}", model_id)) == 1
 
 
 def test_dlc_strategy_localize_model_no_snapshots(
@@ -530,11 +536,11 @@ def test_pose_estim_fetch1_dataframe_uses_real_timestamps():
     compute_pose_outputs derives sampling_rate=1 Hz and velocity in cm/frame
     instead of cm/s.  The fix reads timestamps from PoseEstimationSeries.
     """
-    import numpy as np
-    import pandas as pd
     from unittest.mock import MagicMock, patch
 
     import ndx_pose
+    import numpy as np
+    import pandas as pd
 
     from spyglass.position.v2.estim import PoseEstim
 
