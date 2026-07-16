@@ -379,3 +379,90 @@ def test_populate_tolerating_concurrent_duplicate():
     _populate_tolerating_concurrent_duplicate(
         _FakeTable(error=None, exists=False), key
     )
+
+
+@pytest.mark.unit
+def test_populate_once_populates_within_lock(monkeypatch):
+    """``_populate_once`` invokes populate while holding the key's advisory lock.
+
+    No-duplicated-compute comes from serialization + DataJoint's own no-op (a
+    waiter that acquires the lock after the winner commits finds the row done),
+    NOT from short-circuiting here -- populate is always invoked so a genuine
+    stage failure still surfaces. This asserts the ordering: populate happens
+    strictly between lock-enter and lock-exit.
+    """
+    import contextlib
+
+    from spyglass.spikesorting.v2 import _pipeline_run
+
+    events = []
+
+    @contextlib.contextmanager
+    def _fake_lock(table, key, **kwargs):
+        events.append("lock-enter")
+        try:
+            yield True
+        finally:
+            events.append("lock-exit")
+
+    class _FakeTable:
+        def populate(self, key, reserve_jobs=False):
+            events.append("populate")
+
+        def __and__(self, key):
+            return []  # row absent -> tolerant helper won't swallow anything
+
+    monkeypatch.setattr(_pipeline_run, "_advisory_key_lock", _fake_lock)
+    _pipeline_run._populate_once(_FakeTable(), {"sorting_id": "x"})
+    assert events == ["lock-enter", "populate", "lock-exit"]
+
+
+@pytest.mark.database
+def test_advisory_key_lock_acquires_and_releases(dj_conn):
+    """The MySQL advisory lock is held while inside the context, freed after."""
+    import datajoint as dj
+    from datajoint.hash import key_hash
+
+    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+
+    connection = dj.conn()
+
+    class _FakeTable:
+        pass
+
+    table = _FakeTable()
+    table.connection = connection
+    table.full_table_name = "`sgv2test`.`lock_roundtrip`"
+
+    key = {"id": "abc123"}
+    lock_name = "sgv2pop:" + key_hash(
+        {"__table__": table.full_table_name, **key}
+    )
+
+    def _is_free():
+        return connection.query(
+            "SELECT IS_FREE_LOCK(%s)", args=(lock_name,)
+        ).fetchone()[0]
+
+    assert _is_free() == 1
+    with _advisory_key_lock(table, key) as acquired:
+        assert acquired is True
+        assert _is_free() == 0  # held on this session
+    assert _is_free() == 1  # released on context exit
+
+
+@pytest.mark.unit
+def test_advisory_key_lock_acquire_error_is_non_fatal():
+    """A GET_LOCK failure yields False and never raises (lock is best-effort)."""
+    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+
+    class _BadConnection:
+        def query(self, *args, **kwargs):
+            raise RuntimeError("simulated GET_LOCK failure")
+
+    class _FakeTable:
+        connection = _BadConnection()
+        full_table_name = "`sgv2test`.`bad`"
+
+    with _advisory_key_lock(_FakeTable(), {"id": "z"}) as acquired:
+        assert acquired is False

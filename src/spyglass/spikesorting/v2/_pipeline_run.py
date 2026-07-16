@@ -11,7 +11,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
+
+# Upper bound on how long a racing run waits for the run holding a stage's
+# advisory lock to finish before falling through to compute itself (a MySQL
+# GET_LOCK timeout, in seconds). Longer than any realistic single stage so the
+# waiter almost always skips a completed row; finite so a pathologically stuck
+# (but not crashed) holder can never wedge the waiter forever.
+_POPULATE_LOCK_TIMEOUT_S = 8 * 3600
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -120,6 +128,71 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
         # failure) propagates.
         if not (_is_duplicate_key_error(exc) and (table & key)):
             raise
+
+
+@contextmanager
+def _advisory_key_lock(
+    table, key, *, timeout_s: int = _POPULATE_LOCK_TIMEOUT_S
+):
+    """Serialize populate of one content-addressed ``key`` via a MySQL lock.
+
+    Yields ``True`` if the lock was acquired, ``False`` on timeout/error.
+
+    Uses a MySQL *named* (advisory) lock -- ``GET_LOCK`` / ``RELEASE_LOCK`` --
+    keyed on a hash of the table + key, so it serializes ONLY runs computing the
+    same key (different keys populate in parallel). Unlike DataJoint's
+    ``reserve_jobs`` ``~jobs`` table, a named lock is bound to the DB *session*
+    and is released automatically when that session ends, so a crashed or
+    killed run leaves NO stale reservation to clean up. It lives on the shared
+    server, so it coordinates across processes AND hosts (a local ``FileLock``
+    would not). Acquisition failure is non-fatal: the caller falls through to
+    populate and the duplicate-tolerance keeps a residual race from failing.
+    """
+    from datajoint.hash import key_hash
+
+    # MySQL lock names are capped at 64 chars; "sgv2pop:" + a 32-char hash fits.
+    lock_name = "sgv2pop:" + key_hash(
+        {"__table__": table.full_table_name, **key}
+    )
+    connection = table.connection
+    acquired = False
+    try:
+        try:
+            result = connection.query(
+                "SELECT GET_LOCK(%s, %s)", args=(lock_name, int(timeout_s))
+            ).fetchone()
+            acquired = bool(result and result[0] == 1)
+        except Exception:  # noqa: BLE001 - lock is best-effort; fall through
+            # The lock is an optimization, not a correctness requirement (the
+            # duplicate-tolerance is the net). A GET_LOCK failure must never
+            # fail the pipeline -- proceed as if unacquired; any real DB problem
+            # resurfaces on the populate below.
+            acquired = False
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                connection.query("SELECT RELEASE_LOCK(%s)", args=(lock_name,))
+            except Exception:  # noqa: BLE001 - session close frees it anyway
+                pass
+
+
+def _populate_once(table, key) -> None:
+    """Populate ``key`` exactly once, even under concurrent/overlapping runs.
+
+    Serializes same-key populate with a self-releasing MySQL advisory lock so
+    the expensive compute (e.g. a 70-minute sort) runs once, not once per racing
+    run -- WITHOUT ``reserve_jobs=True`` and its stale-``~jobs`` bookkeeping. A
+    second run/worker BLOCKS on the lock until the run holding it commits, then
+    -- because the row now exists -- DataJoint's own ``key_source - target``
+    diff makes its ``populate`` a no-op (no re-compute). ``populate`` is always
+    invoked (never short-circuited here), so a genuine stage failure still
+    surfaces; and if the lock cannot be taken (timeout / a non-transactional
+    server), :func:`_populate_tolerating_concurrent_duplicate` keeps the
+    residual insert race from failing the pipeline.
+    """
+    with _advisory_key_lock(table, key):
+        _populate_tolerating_concurrent_duplicate(table, key)
 
 
 def run_v2_pipeline(
@@ -557,9 +630,7 @@ def run_v2_pipeline(
         ) = _run_stage(
             "recording",
             bool(Recording & recording_key),
-            lambda: _populate_tolerating_concurrent_duplicate(
-                Recording, recording_key
-            ),
+            lambda: _populate_once(Recording, recording_key),
             run_summary,
         )
         run_summary["recording_id"] = recording_key["recording_id"]
@@ -585,7 +656,7 @@ def run_v2_pipeline(
             ) = _run_stage(
                 "artifact_detection",
                 bool(ArtifactDetection & artifact_detection_key),
-                lambda: _populate_tolerating_concurrent_duplicate(
+                lambda: _populate_once(
                     ArtifactDetection, artifact_detection_key
                 ),
                 run_summary,
@@ -645,7 +716,7 @@ def run_v2_pipeline(
         def _populate_member_recordings():
             for key in member_recording_keys:
                 if not (Recording & key):
-                    _populate_tolerating_concurrent_duplicate(Recording, key)
+                    _populate_once(Recording, key)
 
         (
             _,
@@ -678,9 +749,7 @@ def run_v2_pipeline(
         ) = _run_stage(
             "concat_recording",
             bool(ConcatenatedRecording & concat_key),
-            lambda: _populate_tolerating_concurrent_duplicate(
-                ConcatenatedRecording, concat_key
-            ),
+            lambda: _populate_once(ConcatenatedRecording, concat_key),
             run_summary,
         )
         run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
@@ -695,7 +764,7 @@ def run_v2_pipeline(
     _, run_summary["sorting_status"], stage_seconds["sorting"] = _run_stage(
         "sorting",
         bool(Sorting & sorting_key),
-        lambda: _populate_tolerating_concurrent_duplicate(Sorting, sorting_key),
+        lambda: _populate_once(Sorting, sorting_key),
         run_summary,
     )
     run_summary["sorting_id"] = sorting_key["sorting_id"]
@@ -818,9 +887,7 @@ def run_v2_pipeline(
         sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
         auto_start = time.perf_counter()
         try:
-            _populate_tolerating_concurrent_duplicate(
-                CurationEvaluation, eval_key
-            )
+            _populate_once(CurationEvaluation, eval_key)
             children_before = set(
                 (CurationV2 & sorting_restriction).fetch("curation_id")
             )
@@ -1393,7 +1460,7 @@ def run_v2_unit_match(
     ) = _run_stage(
         "unit_match",
         bool(UnitMatch & selection),
-        lambda: _populate_tolerating_concurrent_duplicate(UnitMatch, selection),
+        lambda: _populate_once(UnitMatch, selection),
         run_summary,
     )
     run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
@@ -1408,9 +1475,7 @@ def run_v2_unit_match(
     ) = _run_stage(
         "tracked_unit",
         bool(TrackedUnit & selection),
-        lambda: _populate_tolerating_concurrent_duplicate(
-            TrackedUnit, selection
-        ),
+        lambda: _populate_once(TrackedUnit, selection),
         run_summary,
     )
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
