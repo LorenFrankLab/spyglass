@@ -546,15 +546,57 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     plt.close(fig)
 
 
+def _dense_multi_probe_rows(nwb_file_name):
+    """Two probes, 20 contacts per column (dense) with a specific reference."""
+    rows = []
+    for probe_id, sort_group_id in (("probeA", 0), ("probeB", 1)):
+        for k in range(20):
+            is_ref = sort_group_id == 0 and k == 0
+            rows.append(
+                {
+                    "sort_group_id": sort_group_id,
+                    "electrode_id": (
+                        4242 if is_ref else sort_group_id * 100 + k
+                    ),
+                    "probe_id": probe_id,
+                    "bad_channel": "False",
+                    "is_reference": is_ref,
+                    "coordinate_source": "probe",
+                    "plot_x": 0.0,
+                    "plot_y": -20.0 * k,
+                }
+            )
+    return rows
+
+
+def _sparse_tetrode_rows(nwb_file_name):
+    """One probe, two 4-contact tetrode-like sort groups (sparse columns)."""
+    rows = []
+    for sort_group_id in (0, 1):
+        for k in range(4):
+            rows.append(
+                {
+                    "sort_group_id": sort_group_id,
+                    "electrode_id": sort_group_id * 10 + k,
+                    "probe_id": "tet",
+                    "bad_channel": "False",
+                    "is_reference": False,
+                    "coordinate_source": "probe",
+                    "plot_x": 20.0 * sort_group_id,
+                    "plot_y": -20.0 * k,
+                }
+            )
+    return rows
+
+
 def test_plot_sort_group_geometry_legibility(monkeypatch):
-    """Dense columns shrink markers, multi-probe shades bands, and the specific
-    reference is labeled with its electrode_id.
+    """Dense columns shrink markers and multi-probe shades separating bands.
 
     Locks in the legibility fixes: a linear polymer column packs many contacts
     into a narrow band (markers must shrink below the sparse-tetrode default so
-    they don't overlap), multiple probes get separating background bands, and
-    the reference star names its channel so 'which channel is the reference' is
-    answerable from the plot alone.
+    they don't overlap), multiple probes get separating background bands, the
+    specific reference is a star, and dense columns auto-suppress the
+    per-contact electrode-id labels (they would be a wall of text).
     """
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -563,42 +605,14 @@ def test_plot_sort_group_geometry_legibility(monkeypatch):
 
     from spyglass.spikesorting.v2 import pipeline as pl
 
-    reference_id = 4242
-
-    def _fake_rows(nwb_file_name):
-        rows = []
-        for probe_id, sort_group_id in (("probeA", 0), ("probeB", 1)):
-            for k in range(20):  # dense column -> markers must shrink
-                is_ref = sort_group_id == 0 and k == 0
-                rows.append(
-                    {
-                        "sort_group_id": sort_group_id,
-                        "electrode_id": (
-                            reference_id if is_ref else sort_group_id * 100 + k
-                        ),
-                        "probe_id": probe_id,
-                        "bad_channel": "False",
-                        "is_reference": is_ref,
-                        "coordinate_source": "probe",
-                        "plot_x": 0.0,
-                        "plot_y": -20.0 * k,
-                    }
-                )
-        return rows
-
     monkeypatch.setattr(
         "spyglass.spikesorting.v2._pipeline_geometry."
         "_sort_group_geometry_rows",
-        _fake_rows,
+        _dense_multi_probe_rows,
     )
     fig, ax = plt.subplots()
     with pytest.warns(UserWarning, match="probes present"):
         pl.plot_sort_group_geometry("any_.nwb", ax=ax)
-
-    # Reference labeled with its electrode_id (independent of label_electrodes).
-    assert any(
-        f"elec {reference_id} (ref)" in text.get_text() for text in ax.texts
-    )
 
     # Dense columns -> markers smaller than the sparse-tetrode default (50).
     group_collections = [
@@ -609,9 +623,58 @@ def test_plot_sort_group_geometry_legibility(monkeypatch):
     sizes = [size for c in group_collections for size in c.get_sizes()]
     assert sizes and max(sizes) < 50.0
 
+    # The specific reference is drawn as a star overlay.
+    assert any(c.get_label() == "specific reference" for c in ax.collections)
+
+    # Dense -> auto-labels OFF: no bare electrode-id (digit) annotations. Probe
+    # labels ("probeA"/"probeB") are the only annotations, and are not digits.
+    assert not any(text.get_text().isdigit() for text in ax.texts)
+
     # Multiple probes -> at least one shaded band patch behind the contacts
     # (axvspan; nothing else adds patches to these axes).
     assert ax.patches
+    plt.close(fig)
+
+
+def test_plot_sort_group_geometry_auto_labels(monkeypatch):
+    """Electrode-id labels auto-show for sparse groups; explicit flag overrides."""
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    def _labels(ax):
+        return [t.get_text() for t in ax.texts if t.get_text().isdigit()]
+
+    # Sparse (4 per column) + default (None) -> labels auto-ON.
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_geometry."
+        "_sort_group_geometry_rows",
+        _sparse_tetrode_rows,
+    )
+    fig, ax = plt.subplots()
+    pl.plot_sort_group_geometry("any_.nwb", ax=ax)
+    assert _labels(ax), "sparse tetrodes should auto-label electrode ids"
+    plt.close(fig)
+
+    # Sparse + explicit False -> labels forced OFF.
+    fig, ax = plt.subplots()
+    pl.plot_sort_group_geometry("any_.nwb", ax=ax, label_electrodes=False)
+    assert not _labels(ax)
+    plt.close(fig)
+
+    # Dense (20 per column) + explicit True -> labels forced ON.
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_geometry."
+        "_sort_group_geometry_rows",
+        _dense_multi_probe_rows,
+    )
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="probes present"):
+        pl.plot_sort_group_geometry("any_.nwb", ax=ax, label_electrodes=True)
+    assert _labels(ax)
     plt.close(fig)
 
 

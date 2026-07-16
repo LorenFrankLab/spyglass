@@ -15,6 +15,12 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
+# Auto-label electrode ids only when each sort group has at most this many
+# contacts (tetrode = 4, stereotrode = 2): sparse groups stay legible, while a
+# dense polymer / Neuropixels column (>= ~16 per group) would be a wall of text.
+_AUTO_LABEL_MAX_PER_COLUMN = 8
+
+
 _SORT_GROUP_COLUMNS = [
     "nwb_file_name",
     "sort_group_id",
@@ -327,7 +333,7 @@ def plot_sort_group_geometry(
     *,
     ax=None,
     sort_group_ids: list[int] | tuple[int, ...] | set[int] | None = None,
-    label_electrodes: bool = False,
+    label_electrodes: bool | None = None,
     show_bad_channels: bool = True,
     show_reference: bool = True,
     title: str | None = None,
@@ -342,11 +348,12 @@ def plot_sort_group_geometry(
 
     Contact marker size auto-shrinks as a sort group gets dense (a linear
     polymer shank stacks many contacts in a narrow band) so contacts stay
-    separable; a sparse tetrode keeps large markers. Each specific reference
-    electrode is labeled with its ``electrode_id`` (``elec <id> (ref)``) so the
-    reference channel is identifiable at a glance -- see ``show_reference`` for
-    where that reference comes from. Pass ``label_electrodes=True`` to print the
-    ``electrode_id`` (the channel number) on every contact.
+    separable; a sparse tetrode keeps large markers. Electrode-id labels (the
+    channel numbers) are shown automatically for sparse sort groups (tetrodes /
+    stereotrodes) and hidden for dense probes where they would overlap into a
+    wall of text; ``label_electrodes`` overrides this. Specific reference
+    electrodes are marked with a star -- see ``show_reference`` for where that
+    reference comes from; its channel id is in ``describe_sort_groups``.
 
     When the session spans **more than one probe**, ``Probe.Electrode``
     rel_x/rel_y are each probe's own coordinate frame (all near the origin), so
@@ -365,22 +372,25 @@ def plot_sort_group_geometry(
     sort_group_ids : list of int or tuple of int or set of int, optional
         Subset of sort-group ids to display. All sort groups are shown
         when omitted (the default).
-    label_electrodes : bool, optional
-        If ``True``, annotate each plotted contact with its ``electrode_id``
-        (the channel number). Defaults to ``False``. Specific reference
-        electrodes are always labeled regardless of this flag.
+    label_electrodes : bool or None, optional
+        Whether to annotate each plotted contact with its ``electrode_id`` (the
+        channel number). ``None`` (the default) auto-decides on column density:
+        labels are shown when every sort group has at most
+        ``_AUTO_LABEL_MAX_PER_COLUMN`` contacts (tetrodes / stereotrodes) and
+        hidden for denser probes where they would overlap. ``True`` / ``False``
+        force labels on / off.
     show_bad_channels : bool, optional
         If ``True``, overlay bad-channel members with red ``x`` markers.
         Defaults to ``True``.
     show_reference : bool, optional
         If ``True``, overlay ``reference_mode='specific'`` electrodes with a
-        black star marker labeled ``elec <id> (ref)``. Defaults to ``True``.
-        This reference is the one each sort group inherited from
-        ``Electrode.original_reference_electrode`` (ultimately the
-        ``trodes_to_nwb`` ``ref_elect_id`` metadata), unless it was overridden
-        via ``set_group_by_shank(references=...)`` or ``reference_mode=...``
-        when the sort group was created. Groups with ``reference_mode`` of
-        ``'none'`` or ``'global_median'`` have no star.
+        black star marker. Defaults to ``True``. This reference is the one each
+        sort group inherited from ``Electrode.original_reference_electrode``
+        (ultimately the ``trodes_to_nwb`` ``ref_elect_id`` metadata), unless it
+        was overridden via ``set_group_by_shank(references=...)`` or
+        ``reference_mode=...`` when the sort group was created. Groups with
+        ``reference_mode`` of ``'none'`` or ``'global_median'`` have no star.
+        The reference's channel id is available in ``describe_sort_groups``.
     title : str, optional
         Axes title. A default title naming the session is used when
         omitted.
@@ -464,7 +474,7 @@ def plot_sort_group_geometry(
             max(all_y) - min(all_y),
             1.0,
         )
-        gap = 0.15 * scale
+        gap = 0.45 * scale
         cursor = 0.0
         for probe_id in probe_ids:
             probe_rows = by_probe[probe_id]
@@ -502,7 +512,7 @@ def plot_sort_group_geometry(
     # Shade alternating probe blocks so the side-by-side layout reads as
     # per-probe groups rather than one undifferentiated row of columns.
     if multi_probe:
-        band_pad = gap * 0.45
+        band_pad = gap * 0.2
         for probe_index, probe_id in enumerate(probe_ids):
             if probe_index % 2:
                 continue
@@ -550,7 +560,6 @@ def plot_sort_group_geometry(
                 label="bad channel",
             )
 
-    reference_rows = []
     if show_reference:
         reference_rows = [row for row in plottable if row["is_reference"]]
         if reference_rows:
@@ -564,28 +573,20 @@ def plot_sort_group_geometry(
                 linewidths=1.2,
                 label="specific reference",
             )
-            # Always name the reference electrode (its electrode_id) so the
-            # user can see WHICH channel each star is, independent of
-            # ``label_electrodes``. This is the reference inherited from
-            # ``Electrode.original_reference_electrode`` (ultimately the
-            # trodes_to_nwb ``ref_elect_id``) unless overridden when the sort
-            # group was created.
-            for row in reference_rows:
-                ax.annotate(
-                    f"elec {row['electrode_id']} (ref)",
-                    (row["display_x"], row["plot_y"]),
-                    xytext=(5, 4),
-                    textcoords="offset points",
-                    fontsize=7,
-                    fontweight="bold",
-                )
 
-    if label_electrodes:
-        # Skip reference rows already annotated above to avoid double labels.
-        reference_ids = {id(row) for row in reference_rows}
+    # Electrode-id labels: shown automatically only when each sort group is
+    # sparse enough to stay legible (tetrodes / stereotrodes) -- a dense polymer
+    # or Neuropixels column would be a wall of overlapping text.
+    # ``label_electrodes`` True/False forces the choice; ``None`` (default)
+    # auto-decides on column density. When shown, the specific reference gets its
+    # electrode_id like any other contact (the star already marks it), so no
+    # separate reference label is needed.
+    if label_electrodes is None:
+        do_label = max_per_column <= _AUTO_LABEL_MAX_PER_COLUMN
+    else:
+        do_label = bool(label_electrodes)
+    if do_label:
         for row in plottable:
-            if id(row) in reference_ids:
-                continue
             ax.annotate(
                 str(row["electrode_id"]),
                 (row["display_x"], row["plot_y"]),
@@ -605,7 +606,9 @@ def plot_sort_group_geometry(
             ax.annotate(
                 str(probe_id),
                 (center_x, top_y),
-                xytext=(0, 8),
+                # Lifted clear of the per-electrode reference annotation
+                # ("elec <id> (ref)"), which sits ~4 pt above the top contact.
+                xytext=(0, 22),
                 textcoords="offset points",
                 ha="center",
                 fontsize=8,
