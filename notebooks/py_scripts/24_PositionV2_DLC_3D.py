@@ -68,6 +68,7 @@
 # - [Register videos](#Videos) — clip with DLC, pair with the calibration
 # - [3D pose estimation](#Pose) — triangulate via `PoseEstim`
 # - [Visualize](#Viz) — fetch and plot the 3D trajectory
+# - [Video](#Video) — reproject the 3D pose onto the camera videos
 # - [Cleanup](#Cleanup) — remove the tutorial entries
 
 # %% [markdown]
@@ -711,6 +712,91 @@ print(
     f"V2 vs Anipose 3D: {alld.size} points, "
     f"median {np.median(alld):.4f} mm, p95 {np.percentile(alld, 95):.4f} mm"
 )
+
+# %% [markdown]
+# ## Video: reproject the 3D pose onto the cameras <a id="Video"></a>
+#
+# Plots confirm the numbers; a video confirms the *result*. The most direct
+# end-user validation is to **reproject** the triangulated 3D points back into
+# each camera image (through the same calibration) and overlay them on the real
+# video. If the reprojected markers stay on the animal, the 3D reconstruction
+# and the calibration are both sound — this closes the 2D → 3D → 2D loop.
+#
+# We render with DeepLabCut's built-in `create_video`, feeding it a small h5 of
+# reprojected points. DLC's native (OpenCV-backed) writer is faster and lighter
+# to maintain than a per-frame matplotlib renderer.
+
+# %%
+from deeplabcut.utils.make_labeled_video import create_video
+
+from spyglass.position.v2.utils.triangulation import build_projection_matrix
+
+LABELED_DIR = SESSION_DIR / "tutorial_labeled"
+LABELED_DIR.mkdir(exist_ok=True)
+
+
+def reproject_to_dlc_h5(pose_3d, cam, out_h5):
+    """Reproject a cm-scale 3D pose into one camera; write a DLC-style h5.
+
+    ``build_projection_matrix`` maps rig-frame metres to pixels, so the 3D
+    coordinates (stored in centimetres) are divided by 100 first. Each marker's
+    confidence carries over from the triangulation likelihood.
+    """
+    proj_mat = build_projection_matrix(cam["intrinsics"], cam["extrinsics"])
+    scorer = "reprojected3d"
+    cols, data = [], {}
+    for bp in BODYPARTS:
+        xyz_m = pose_3d["triangulated"][bp][["x", "y", "z"]].to_numpy() / 100.0
+        conf = pose_3d["triangulated"][bp]["likelihood"].to_numpy()
+        hom = np.column_stack([xyz_m, np.ones(len(xyz_m))])
+        px = (proj_mat @ hom.T).T
+        with np.errstate(invalid="ignore", divide="ignore"):
+            u, v = px[:, 0] / px[:, 2], px[:, 1] / px[:, 2]
+        conf = np.where(np.isnan(u), 0.0, np.nan_to_num(conf, nan=0.0))
+        for coord, val in (("x", u), ("y", v), ("likelihood", conf)):
+            cols.append((scorer, bp, coord))
+            data[(scorer, bp, coord)] = val
+    out = pd.DataFrame(data)
+    out.columns = pd.MultiIndex.from_tuples(
+        cols, names=["scorer", "bodyparts", "coords"]
+    )
+    out.to_hdf(str(out_h5), key="df_with_missing", mode="w")
+    return out_h5
+
+
+labeled_videos = {}
+for ci, clip in clip_paths.items():
+    reproj_h5 = reproject_to_dlc_h5(
+        df, calib[ci], LABELED_DIR / f"{clip.stem}_reproj.h5"
+    )
+    out_mp4 = LABELED_DIR / f"{clip.stem}_reproj3d.mp4"
+    out_mp4.unlink(missing_ok=True)
+    create_video(
+        str(clip),
+        str(reproj_h5),
+        pcutoff=0.5,
+        dotsize=7,
+        skeleton_edges=EDGES,
+        output_path=str(out_mp4),
+    )
+    labeled_videos[ci] = out_mp4
+    print(f"camera_index {ci}: {out_mp4.name}")
+
+# %% [markdown]
+# Show one overlaid frame inline so the reprojected 3D pose is visible without
+# opening the video file:
+
+# %%
+cap = cv2.VideoCapture(str(labeled_videos[min(labeled_videos)]))
+cap.set(cv2.CAP_PROP_POS_FRAMES, int(cap.get(cv2.CAP_PROP_FRAME_COUNT) * 0.5))
+ok, frame = cap.read()
+cap.release()
+if ok:
+    plt.figure(figsize=(8, 6))
+    plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    plt.title("Reprojected 3D pose overlaid on camera 0 (mid-clip frame)")
+    plt.axis("off")
+    plt.show()
 
 # %% [markdown]
 # ## Cleanup <a id="Cleanup"></a>
