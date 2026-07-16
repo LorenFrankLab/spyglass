@@ -44,7 +44,7 @@ the root notebooks directory may not be reflected when rebuilding.
 
 Use a browser to navigate to `localhost:8000/` to inspect the site. For
 auto-reload of markdown files during development, use
-`mkdocs serve -f ./docs/mkdosc.yaml`. The `mike` package used in the build
+`mkdocs serve -f ./docs/mkdocs.yml`. The `mike` package used in the build
 script manages versioning, but does not support dynamic reloading.
 
 The following items can be commented out in `mkdocs.yml` to reduce build time:

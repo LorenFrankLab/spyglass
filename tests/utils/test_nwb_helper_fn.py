@@ -4,7 +4,94 @@ import numpy as np
 import pynwb
 import pytest
 
-from spyglass.utils.nwb_helper_fn import _get_epoch_groups, _get_pos_dict
+from spyglass.utils.nwb_helper_fn import (
+    _get_epoch_groups,
+    _get_pos_dict,
+    get_raw_eseries_path,
+)
+
+
+def _nwbfile_with_optional_lfp(with_lfp):
+    """NWBFile with a raw acquisition ElectricalSeries (+ optional LFP).
+
+    The raw series ``e-series`` lives under ``acquisition``; when ``with_lfp``
+    is True a second ElectricalSeries is added under
+    ``processing/ecephys/LFP``, mirroring a real raw NWB that also stores LFP.
+    """
+    nwbfile = pynwb.NWBFile(
+        session_description="d",
+        identifier="id",
+        session_start_time=datetime.datetime.now(datetime.timezone.utc),
+    )
+    dev = nwbfile.create_device(name="device")
+    grp = nwbfile.create_electrode_group(
+        name="electrodes", description="d", location="loc", device=dev
+    )
+    for i in range(4):
+        nwbfile.add_electrode(
+            id=i,
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            imp=-1.0,
+            location="loc",
+            filtering="f",
+            group=grp,
+        )
+    raw_region = nwbfile.electrodes.create_region(
+        name="electrodes", region=[0, 1, 2, 3], description="d"
+    )
+    nwbfile.add_acquisition(
+        pynwb.ecephys.ElectricalSeries(
+            name="e-series",
+            data=np.zeros((10, 4)),
+            timestamps=np.arange(10.0),
+            electrodes=raw_region,
+        )
+    )
+    if with_lfp:
+        # An ElectricalSeries requires its region to be named "electrodes", so
+        # the derived LFP series reuses the same region as the raw series.
+        lfp = pynwb.ecephys.LFP(
+            electrical_series=pynwb.ecephys.ElectricalSeries(
+                name="lfp-series",
+                data=np.zeros((10, 4)),
+                timestamps=np.arange(10.0),
+                electrodes=raw_region,
+            )
+        )
+        nwbfile.create_processing_module(name="ecephys", description="d").add(
+            lfp
+        )
+    return nwbfile
+
+
+@pytest.mark.parametrize("with_lfp", [False, True])
+def test_get_raw_eseries_path_selects_acquisition(tmp_path, with_lfp):
+    """Resolves the raw acquisition series even when an LFP series is present.
+
+    This is the path threaded to ``read_nwb_recording`` so spike sorting reads
+    the wideband recording. SpikeInterface >= 0.100 raises on a multi-series
+    file unless the series is named, so the LFP case is the regression guard.
+    """
+    path = tmp_path / "rec.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(_nwbfile_with_optional_lfp(with_lfp=with_lfp))
+    assert get_raw_eseries_path(str(path)) == "acquisition/e-series"
+
+
+def test_get_raw_eseries_path_no_acquisition_raises(tmp_path):
+    """A file with no acquisition ElectricalSeries raises a clear error."""
+    nwbfile = pynwb.NWBFile(
+        session_description="d",
+        identifier="id",
+        session_start_time=datetime.datetime.now(datetime.timezone.utc),
+    )
+    path = tmp_path / "empty.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+    with pytest.raises(ValueError, match="No acquisition ElectricalSeries"):
+        get_raw_eseries_path(str(path))
 
 
 @pytest.fixture(scope="module")

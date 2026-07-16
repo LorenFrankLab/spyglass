@@ -1,3 +1,8 @@
+# Deferred annotation evaluation keeps module import working across
+# SpikeInterface versions whose public API no longer exposes some names
+# (e.g. WaveformExtractor) used only in type hints here.
+from __future__ import annotations
+
 import numpy as np
 import spikeinterface as si
 

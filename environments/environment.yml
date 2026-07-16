@@ -23,21 +23,25 @@ dependencies:
   # - libgcc # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy
+  - numpy>=2,<3
   - pip
-  - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
-  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
+  - pyfftw  # ghostipy req; unpinned so it resolves against numpy>=2 (the old <=0.12.0 cap requires numpy 1.23 and blocked the numpy>=2 solve)
   - python>=3.10,<3.13
-  - pytorch<1.12.0
   - ripple_detection
+  - scipy>=1.13  # numpy>=2 (the v2 SI 0.104 stack) needs scipy>=1.13; the legacy SI 0.99 env is environments/environment_spikesorting_legacy.yml
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
+      # torch is installed via pip, not conda: conda ``pytorch>=2`` does not
+      # solve against ``numpy>=2`` on the enabled channels (conda-forge/franklab/
+      # edeno) -- it drags in a numpy<2 pin -- whereas the pip ``torch>=2``
+      # wheels are numpy>=2-compatible. The v2 SI 0.104 stack needs torch>=2.
+      - torch>=2
       - ghostipy # for common_filter
       - mountainsort4
       - ..

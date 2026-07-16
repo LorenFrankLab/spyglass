@@ -16,3 +16,9 @@ Spyglass.
     functions.
 - [Populate](./Populate.md) - Tri-part make pattern for long-running
     computations. Includes migration from deprecated `_use_transaction = False`.
+- [Spike Sorting v2](./SpikeSortingV2.md) - Modern SpikeInterface 0.104-based
+    spike sorting pipeline (`spyglass.spikesorting.v2`).
+- [Spike Sorting v1→v2 Migration](./SpikeSortingV2_Migration.md) - Task-oriented
+    guide for porting a v1 notebook workflow to v2.
+- [Spike Sorting v2 Storage Management](./SpikeSortingV2StorageManagement.md) -
+    Reclaiming analyzer / recording disk space safely via verified recompute.

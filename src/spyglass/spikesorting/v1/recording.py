@@ -23,6 +23,7 @@ from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
+    read_raw_nwb_recording,
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -596,7 +597,10 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - apply referencing depending on the option chosen by the user
         # - apply bandpass filter
         # - set probe to recording
-        recording = se.read_nwb_recording(
+        # Read the raw acquisition series explicitly: the source NWB may also
+        # hold derived ElectricalSeries (e.g. LFP), which SpikeInterface >=
+        # 0.100 refuses to disambiguate on its own.
+        recording = read_raw_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
         all_timestamps = recording.get_times()

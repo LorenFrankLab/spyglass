@@ -22,6 +22,36 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
+def assert_safe_nwb_file_name(nwb_file_name: str) -> None:
+    """Reject a caller-supplied NWB file name that is not a bare basename.
+
+    NWB file names are joined onto a base directory by naive string concat in
+    several places, so a name with a path separator, a ``..`` component, or an
+    absolute path could escape the intended directory. This is accident
+    prevention under the trusted-operator model -- it guards the filename
+    *acceptance* boundary, not the internal random-name generator -- so it must
+    not reject a legitimate basename.
+
+    Raises
+    ------
+    ValueError
+        If ``nwb_file_name`` is empty, ``.``/``..``, contains a path separator,
+        or is an absolute path.
+    """
+    name = str(nwb_file_name)
+    if (
+        not name
+        or name in (".", "..")
+        or name != os.path.basename(name)
+        or os.path.isabs(name)
+    ):
+        raise ValueError(
+            f"nwb_file_name {nwb_file_name!r} is not a bare file name; it must "
+            "not contain a path separator, a '..' component, or an absolute "
+            "path (the name is joined onto a managed directory)."
+        )
+
+
 def _open_nwb_file(nwb_file_path, source="local"):
     """Open an NWB file, add to cache, return contents. Does not close file."""
     if source == "local":
@@ -306,6 +336,57 @@ def get_raw_eseries(nwbfile):
         elif isinstance(nwb_object, pynwb.ecephys.LFP):
             ret.extend(nwb_object.electrical_series.values())
     return ret
+
+
+def get_raw_eseries_path(nwb_file_path):
+    """Return the in-file path of the raw acquisition ElectricalSeries.
+
+    The returned path (e.g. ``"acquisition/e-series"``) names the wideband
+    ``ElectricalSeries`` stored directly under ``acquisition`` -- the raw
+    recording that spike sorting operates on. Naming it lets SpikeInterface
+    disambiguate files that also store derived ``ElectricalSeries`` such as
+    LFP under ``processing`` (SpikeInterface >= 0.100 refuses to guess and
+    raises when more than one ``ElectricalSeries`` is present).
+
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+
+    Returns
+    -------
+    str
+        In-file path of the raw acquisition ElectricalSeries.
+
+    Raises
+    ------
+    ValueError
+        If the acquisition group contains no ElectricalSeries.
+    """
+    # Read the file layout directly with h5py rather than ``get_nwb_file``: this
+    # stays a pure file inspection (no database, no pynwb namespace load), and
+    # the returned ``group/name`` path is exactly the backend path SpikeInterface
+    # matches ``electrical_series_path`` against.
+    import h5py
+
+    names = []
+    with h5py.File(nwb_file_path, "r") as f:
+        acquisition = f.get("acquisition")
+        if acquisition is not None:
+            for name, obj in acquisition.items():
+                neurodata_type = obj.attrs.get("neurodata_type", b"")
+                if isinstance(neurodata_type, bytes):
+                    neurodata_type = neurodata_type.decode()
+                if neurodata_type == "ElectricalSeries":
+                    names.append(name)
+    if not names:
+        raise ValueError(
+            f"No acquisition ElectricalSeries found in {nwb_file_path}."
+        )
+    # Standard Spyglass raw files carry a single acquisition ElectricalSeries.
+    # If more than one is present, the first matches what Raw ingests (Raw sets
+    # ``_only_ingest_first`` and records the first acquisition ElectricalSeries).
+    return f"acquisition/{names[0]}"
 
 
 def estimate_sampling_rate(

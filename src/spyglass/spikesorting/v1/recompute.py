@@ -114,12 +114,23 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         return bool(self & key)
 
     def _has_matching_env(self, key: dict, show_err=False) -> bool:
-        """Check current env for matching pynwb versions."""
+        """Check current env for matching pynwb versions.
+
+        Compares only the ``_required_matches`` namespaces (core, hdmf-common,
+        hdmf-experimental, ndx-franklab-novela) -- the ones a spike-sorting
+        recording actually embeds -- rather than requiring the live global
+        catalog to equal the file's namespaces exactly. A full ``==`` spuriously
+        fails whenever an OPTIONAL extension (e.g. ``ndx-pose``) is registered
+        in the session but unused by the recording: such a namespace appears in
+        the live ``get_manager()`` catalog but never in the file's
+        ``/specifications``, so the recording could never be recomputed. This
+        matches the lenient comparison ``this_env`` already uses.
+        """
         if not self._has_key(key):
             return False  # # pragma: no cover
 
         need = sort_dict(self.key_env(key))
-        ret = self.nwb_deps == need
+        ret = self._dicts_match(self.nwb_deps, need)
 
         if not ret and show_err:
             logger.warning(  # pragma: no cover

@@ -16,7 +16,7 @@ To export data with the current implementation, you must do the following:
 - Only one export can be active at a time for a given Python instance.
 - Start the export process with `ExportSelection.start_export()`, run all
     functions associated with a given analysis, and end the export process with
-    `ExportSelection.end_export()`.
+    `ExportSelection.stop_export()`.
 
 ## How
 
@@ -120,18 +120,18 @@ The `ExportSelection` is where users should interact with this process.
 from spyglass.common.common_usage import ExportSelection
 from spyglass.common.common_usage import Export
 
-export_key = {paper_id: "my_paper_id", analysis_id: "my_analysis_id"}
+export_key = {"paper_id": "my_paper_id", "analysis_id": "my_analysis_id"}
 ExportSelection().start_export(**export_key)
 analysis_data = (MyTable & my_restr).fetch()
 analysis_nwb = (MyTable & my_restr).fetch_nwb()
-ExportSelection().end_export()
+ExportSelection().stop_export()
 
 # Visual inspection
-touched_files = ExportSelection.list_file_paths(**export_key)
-restricted_leaves = ExportSelection.preview_tables(**export_key)
+touched_files = ExportSelection().list_file_paths(export_key)
+restricted_leaves = ExportSelection().preview_tables(**export_key)
 
 # Export
-Export().populate_paper(**export_key)
+Export().populate_paper(export_key)
 ```
 
 `Export`'s populate will invoke the `write_export` method to collect cascaded

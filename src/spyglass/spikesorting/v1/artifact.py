@@ -9,6 +9,9 @@ from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
 from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.utils import (
     _check_artifact_thresholds,
     _compute_artifact_chunk,
@@ -146,6 +149,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         4. Insert result into IntervalList with `artifact_id` as
             `interval_list_name`
         """
+        _require_legacy_si_environment("v1 ArtifactDetection.make")
         # FETCH:
         # - artifact parameters
         # - recording analysis nwb file
