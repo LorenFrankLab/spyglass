@@ -1596,13 +1596,19 @@ class SLEAPStrategy(PoseToolStrategy):
     ) -> dict:
         """Train a SLEAP model via the sleap-train CLI.
 
+        Thin wrapper over :meth:`_run_training` (a fresh train wires no base
+        checkpoint). SLEAP reads its training length from the ``initial_config``
+        file, not from ``params``; ``epochs``/``max_epochs`` baked into
+        ``params`` are inert here (they only take effect on the continuation
+        path via :meth:`continue_training`, which rewrites a config copy).
+
         Parameters
         ----------
         key : dict
             ModelSelection key
         params : dict
             Training parameters from ModelParams. Must include
-            ``initial_config`` (path to SLEAP training config JSON).
+            ``initial_config`` (path to SLEAP training config JSON/YAML).
             Optional: ``run_name``, ``output_dir``, ``batch_size``,
             ``peak_threshold``, ``integral_patch_size``.
         skeleton_id : str
@@ -1629,6 +1635,104 @@ class SLEAPStrategy(PoseToolStrategy):
         subprocess.CalledProcessError
             If ``sleap-train`` exits with a non-zero status.
         """
+        return self._run_training(key, params, sel_entry, model_instance)
+
+    @staticmethod
+    def _build_train_cmd(
+        config_path,
+        labels_path,
+        run_name: str,
+        output_dir: str = "",
+        base_checkpoint=None,
+    ) -> list:
+        """Assemble the ``sleap-train`` command line.
+
+        Shared by :meth:`train_model` (fresh) and :meth:`continue_training`
+        (weight-resume) so the two never drift. Passing *base_checkpoint* adds
+        ``--base_checkpoint <file>``, which sleap-train wires into
+        ``model_config.pretrained_backbone_weights``/``pretrained_head_weights``
+        to initialise from those weights.
+
+        Parameters
+        ----------
+        config_path : str, Path, or None
+            SLEAP training config (JSON/YAML). Omitted from the command if
+            falsy.
+        labels_path : str or Path
+            Path to the ``.slp`` training labels file.
+        run_name : str
+            Value for ``--run_name``.
+        output_dir : str, optional
+            Value for ``--output_dir`` (omitted if empty).
+        base_checkpoint : str, Path, or None, optional
+            Path to the parent checkpoint **file** (``best.ckpt`` or, for
+            legacy SLEAP <=1.4, ``best_model.h5``) to resume from. Despite the
+            CLI help wording ("directory containing best_model.h5"), the modern
+            sleap-nn trainer requires a checkpoint *file* whose extension is
+            ``.ckpt`` or ``.h5`` — a directory is rejected — so this must be the
+            file path, not its parent directory.
+
+        Returns
+        -------
+        list of str
+            The command argument vector for ``subprocess.run``.
+        """
+        cmd = ["sleap-train"]
+        if config_path:
+            cmd.append(str(config_path))
+        cmd.extend([str(labels_path), "--run_name", run_name])
+        if output_dir:
+            cmd.extend(["--output_dir", str(output_dir)])
+        if base_checkpoint:
+            cmd.extend(["--base_checkpoint", str(base_checkpoint)])
+        return cmd
+
+    def _run_training(
+        self,
+        key: dict,
+        params: dict,
+        sel_entry: dict,
+        model_instance,
+        *,
+        base_checkpoint=None,
+        config_override=None,
+    ) -> dict:
+        """Run ``sleap-train`` and register the resulting model.
+
+        The single implementation behind both fresh training and continuation.
+        *base_checkpoint* and *config_override* are the only continuation knobs;
+        when both are ``None`` this is a plain fresh train.
+
+        Parameters
+        ----------
+        key : dict
+            ModelSelection key (seeds the generated ``model_id``).
+        params : dict
+            Training parameters from ModelParams.
+        sel_entry : dict
+            Full ModelSelection entry; must carry ``training_labels_path``.
+        model_instance
+            Model table instance for logging.
+        base_checkpoint : str, Path, or None, optional
+            Parent checkpoint file to resume from (see :meth:`_build_train_cmd`).
+        config_override : str, Path, or None, optional
+            Config to pass instead of ``params['initial_config']`` (used to
+            inject an ``epochs`` budget on the continuation path).
+
+        Returns
+        -------
+        dict
+            Model table entry with model_id, analysis_file_name, model_path.
+
+        Raises
+        ------
+        ValueError
+            If ``sel_entry['training_labels_path']`` is None or empty.
+        FileNotFoundError
+            If the labels file or config file does not exist.
+        subprocess.CalledProcessError
+            If ``sleap-train`` exits with a non-zero status.
+        """
         import subprocess
 
         from spyglass.position.utils.protocols import default_pk_name
@@ -1646,7 +1750,7 @@ class SLEAPStrategy(PoseToolStrategy):
                 f"SLEAP labels file not found: {labels_path}"
             )
 
-        config_path = params.get("initial_config")
+        config_path = config_override or params.get("initial_config")
         if config_path:
             config_path = Path(config_path)
             if not config_path.exists():
@@ -1659,12 +1763,13 @@ class SLEAPStrategy(PoseToolStrategy):
         )
         output_dir = params.get("output_dir", "")
 
-        cmd = ["sleap-train"]
-        if config_path:
-            cmd.append(str(config_path))
-        cmd.extend([str(labels_path), "--run_name", run_name])
-        if output_dir:
-            cmd.extend(["--output_dir", str(output_dir)])
+        cmd = self._build_train_cmd(
+            config_path,
+            labels_path,
+            run_name,
+            output_dir,
+            base_checkpoint=base_checkpoint,
+        )
 
         model_instance._info_msg(f"Running SLEAP training: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
@@ -1682,6 +1787,215 @@ class SLEAPStrategy(PoseToolStrategy):
             model_id=model_id,
             analysis_file_name=None,
             model_path=str(model_dir),
+        )
+
+    def _resolve_parent_model_dir(self, sel_entry: dict, model_instance):
+        """Resolve the parent model's on-disk directory from the DB.
+
+        Reads ``model_path`` from the parent ``Model`` row identified by
+        ``sel_entry['parent_id']``. SLEAP stores an absolute model directory as
+        ``model_path`` (unlike DLC's stored-relative config path), so it is used
+        as-is.
+
+        Parameters
+        ----------
+        sel_entry : dict
+            ModelSelection entry carrying ``parent_id``.
+        model_instance
+            Child ``Model`` table instance; its class is queried for the parent
+            row.
+
+        Returns
+        -------
+        pathlib.Path or None
+            The parent model directory, or ``None`` if no parent is set or the
+            row/path cannot be resolved.
+        """
+        parent_id = sel_entry.get("parent_id")
+        if not parent_id:
+            return None
+        try:
+            model_path = (
+                model_instance.__class__ & {"model_id": parent_id}
+            ).fetch1("model_path")
+        except Exception:  # missing row / no DB — caller degrades to fresh
+            return None
+        return Path(model_path) if model_path else None
+
+    def _resolve_parent_checkpoint(self, parent_dir):
+        """Find the resumable checkpoint file in a parent model directory.
+
+        The modern sleap-nn trainer writes ``<model_dir>/best.ckpt``; legacy
+        SLEAP (<=1.4) wrote ``best_model.h5``. Either is a valid base checkpoint
+        (the loader dispatches on the ``.ckpt``/``.h5`` extension), so both are
+        accepted, ``best.ckpt`` preferred. Also searches one directory level
+        down, since a stored ``model_path`` may point at the run's parent.
+
+        Parameters
+        ----------
+        parent_dir : str, Path, or None
+            The parent model directory.
+
+        Returns
+        -------
+        pathlib.Path or None
+            Path to the checkpoint file, or ``None`` when none is present (the
+            caller then degrades to a fresh, parent-linked train).
+        """
+        if parent_dir is None:
+            return None
+        parent_dir = Path(parent_dir)
+        if not self._fs.exists(parent_dir):
+            return None
+        for name in ("best.ckpt", "best_model.h5"):
+            cand = parent_dir / name
+            if self._fs.exists(cand):
+                return cand
+        for name in ("best.ckpt", "best_model.h5"):
+            matches = sorted(self._fs.glob(str(parent_dir / "*" / name)))
+            if matches:
+                return Path(matches[0])
+        return None
+
+    def _write_epochs_config(self, config_path, epochs: int, model_instance):
+        """Write a config copy with the training length set to *epochs*.
+
+        SLEAP's trainer reads its length from the config file, not the CLI or
+        ``params`` — so honouring an ``epochs`` budget means editing a copy of
+        the config and pointing ``sleap-train`` at it (the user's original file
+        is never touched). The epoch field differs by format: modern sleap-nn
+        YAML uses ``trainer_config.max_epochs``; legacy SLEAP JSON uses
+        ``optimization.epochs``.
+
+        Parameters
+        ----------
+        config_path : str, Path, or None
+            The ``initial_config`` to base the copy on. If falsy, no config is
+            available to carry the budget and a warning is emitted.
+        epochs : int
+            Training length to write.
+        model_instance
+            Model table instance for logging.
+
+        Returns
+        -------
+        pathlib.Path or None
+            Path to the rewritten config copy, or ``None`` if the budget could
+            not be applied (no/invalid config) — in which case the caller falls
+            back to the original config and the length baked into it.
+        """
+        import json
+        import tempfile
+
+        if not config_path:
+            model_instance._warn_msg(
+                "SLEAP continuation received an epochs budget but no "
+                "'initial_config' to write it into. sleap-train reads training "
+                "length from the config, not from params, so the epochs value "
+                "cannot be applied — set max_epochs in a SLEAP training config. "
+                "Ignoring epochs."
+            )
+            return None
+
+        config_path = Path(config_path)
+        try:
+            suffix = config_path.suffix.lower()
+            if suffix in (".yaml", ".yml"):
+                import yaml
+
+                data = yaml.safe_load(config_path.read_text()) or {}
+                data.setdefault("trainer_config", {})["max_epochs"] = epochs
+                payload = yaml.safe_dump(data)
+                out_suffix = suffix
+            else:  # treat anything else as legacy SLEAP JSON
+                data = json.loads(config_path.read_text())
+                data.setdefault("optimization", {})["epochs"] = epochs
+                payload = json.dumps(data, indent=2)
+                out_suffix = ".json"
+        except Exception as err:  # malformed config — don't break the resume
+            model_instance._warn_msg(
+                f"Could not rewrite SLEAP config for epochs={epochs} "
+                f"({config_path}): {err}. Falling back to the config's own "
+                "training length."
+            )
+            return None
+
+        out = tempfile.NamedTemporaryFile(
+            prefix="sleap_cont_", suffix=out_suffix, delete=False
+        )
+        out.write(payload.encode())
+        out.close()
+        new_path = Path(out.name)
+        model_instance._info_msg(
+            f"Wrote SLEAP continuation config with epochs={epochs}: {new_path}"
+        )
+        return new_path
+
+    def continue_training(
+        self,
+        key: dict,
+        params: dict,
+        skeleton_id: str,
+        vid_group: dict,
+        sel_entry: dict,
+        model_instance,
+        *,
+        epochs=None,
+    ) -> dict:
+        """Resume SLEAP training from the parent model's weights.
+
+        Locates the parent model's checkpoint (``best.ckpt`` or legacy
+        ``best_model.h5``) and passes it to ``sleap-train --base_checkpoint`` so
+        the backbone and head layers initialise from those weights instead of
+        random init. When no checkpoint is found this degrades to a fresh — but
+        still ``parent_id`` linked — train (mirroring :class:`DLCStrategy`),
+        keeping the lineage while starting from scratch; the caller never has to
+        decide this.
+
+        Training length ("more epochs") is honoured by writing a copy of the
+        ``initial_config`` with the epoch field set and pointing the trainer at
+        it, because ``sleap-train`` reads length from the config rather than
+        params/CLI. The epochs value is taken from the explicit *epochs* kwarg
+        when given, otherwise from ``params['max_epochs']`` (where
+        :meth:`Model.train`'s ``epochs=`` lands after ``apply_epochs``). If no
+        config is available the epochs value is warned about, never silently
+        dropped.
+
+        See :meth:`PoseToolStrategy.continue_training` for parameters.
+        """
+        parent_dir = self._resolve_parent_model_dir(sel_entry, model_instance)
+        checkpoint = self._resolve_parent_checkpoint(parent_dir)
+
+        if checkpoint is None:
+            model_instance._warn_msg(
+                "No resumable SLEAP checkpoint (best.ckpt / best_model.h5) "
+                f"found under parent model dir {parent_dir}; training fresh "
+                "but keeping the parent lineage."
+            )
+            return self.train_model(
+                key, params, skeleton_id, vid_group, sel_entry, model_instance
+            )
+
+        # epochs: explicit kwarg wins; else the max_epochs baked into params by
+        # apply_epochs (Model.train's epochs= arrives here as params max_epochs,
+        # since make() does not thread the kwarg through).
+        eff_epochs = epochs if epochs is not None else params.get("max_epochs")
+        config_override = None
+        if eff_epochs is not None:
+            config_override = self._write_epochs_config(
+                params.get("initial_config"), int(eff_epochs), model_instance
+            )
+
+        model_instance._info_msg(
+            f"Resuming SLEAP training from parent checkpoint: {checkpoint}"
+        )
+        return self._run_training(
+            key,
+            params,
+            sel_entry,
+            model_instance,
+            base_checkpoint=checkpoint,
+            config_override=config_override,
         )
 
     def _find_model_output_dir(self, run_name: str, output_dir: str) -> Path:

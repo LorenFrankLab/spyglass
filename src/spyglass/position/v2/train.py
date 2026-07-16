@@ -1418,8 +1418,10 @@ class Model(SpyglassMixin, dj.Computed):
           model, resume its weights, train ``epochs`` more, and return the new
           parent-linked ``Model`` key. ``epochs`` is normalized to each tool's
           native length knob (DLC PyTorch → ``epochs``; DLC TF → ``maxiters``;
-          SLEAP → ``max_epochs``). SLEAP continuation raises
-          ``NotImplementedError`` (weight-resume is DLC-only).
+          SLEAP → ``max_epochs``). SLEAP resumes from the parent's checkpoint
+          (``best.ckpt``/``best_model.h5``) via ``sleap-train
+          --base_checkpoint``, rewriting a config copy to carry the epoch
+          budget (sleap-train reads length from the config, not params).
         - **Fresh train** (no ``Model`` row yet, but a ``ModelSelection``
           matches *key*): ``populate(key)`` runs ``make`` → ``train_model``;
           return the resulting ``Model`` key.

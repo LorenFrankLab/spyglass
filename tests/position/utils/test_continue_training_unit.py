@@ -12,11 +12,15 @@ unavailable in this environment. To keep these tests DB-free we load
 """
 
 import importlib
+import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+import yaml
 
 _SRC = Path(__file__).resolve().parents[3] / "src"
 
@@ -140,26 +144,244 @@ class TestApplyEpochs:
 
 
 # --------------------------------------------------------------------------
-# continuation not supported (base + SLEAP)
+# continuation not supported (base strategy only)
 # --------------------------------------------------------------------------
 
 
 class TestContinuationUnsupported:
-    """Base and SLEAP strategies reject continued training."""
+    """The base strategy rejects continued training with a clear message.
 
-    def test_sleap_continue_raises(self, ts):
+    SLEAP now supports continuation (see ``TestSLEAPContinue`` below), so the
+    unsupported behavior is exercised through the *base* ``PoseToolStrategy``
+    implementation rather than a concrete tool. Invoking it unbound on a SLEAP
+    instance reaches the base ``raise`` without SLEAP's override (mirroring the
+    ``test_base_apply_epochs_is_noop`` pattern).
+    """
+
+    def test_base_raises_not_implemented(self, ts):
+        with pytest.raises(NotImplementedError, match="not supported"):
+            ts.PoseToolStrategy.continue_training(
+                ts.SLEAPStrategy(), {}, {}, "skel", {}, {}, model_instance=None
+            )
+
+    def test_base_message_names_tool(self, ts):
+        # The base message interpolates the concrete tool_name.
         with pytest.raises(NotImplementedError, match="SLEAP"):
-            ts.SLEAPStrategy().continue_training(
-                {}, {}, "skel", {}, {}, model_instance=None
+            ts.PoseToolStrategy.continue_training(
+                ts.SLEAPStrategy(), {}, {}, "skel", {}, {}, model_instance=None
             )
 
-    def test_base_message_format(self, ts):
-        with pytest.raises(
-            NotImplementedError, match="Continuation not supported"
+
+# --------------------------------------------------------------------------
+# SLEAP continuation (weight-resume via --base_checkpoint)
+# --------------------------------------------------------------------------
+
+
+def _make_sleap(ts, parent_dir, recording=False):
+    """Build a SLEAPStrategy with parent-dir resolution stubbed.
+
+    Parameters
+    ----------
+    ts : module
+        The imported ``tool_strategies`` module.
+    parent_dir : Path or None
+        Directory returned by ``_resolve_parent_model_dir``.
+    recording : bool
+        When True, ``train_model`` records calls (degrade path) rather than
+        shelling out to ``sleap-train``.
+    """
+    base = ts.SLEAPStrategy
+    cls = (
+        type("RecordingSLEAP", (_RecordingStrategy, base), {})
+        if recording
+        else base
+    )
+    strategy = cls()
+    strategy._resolve_parent_model_dir = lambda sel, mi: parent_dir
+    return strategy
+
+
+def _sleap_inputs(tmp_path, config_text=None, config_suffix=".json"):
+    """Create labels + optional config files; return (sel_entry, params)."""
+    labels = tmp_path / "labels.slp"
+    labels.write_text("")
+    params = {"run_name": "child_run", "output_dir": str(tmp_path / "models")}
+    if config_text is not None:
+        config = tmp_path / f"config{config_suffix}"
+        config.write_text(config_text)
+        params["initial_config"] = str(config)
+    sel_entry = {
+        "parent_id": "parent_model",
+        "training_labels_path": str(labels),
+    }
+    return sel_entry, params
+
+
+class TestSLEAPResolveCheckpoint:
+    """``_resolve_parent_checkpoint`` finds the resumable checkpoint file."""
+
+    def test_prefers_best_ckpt(self, ts, tmp_path):
+        (tmp_path / "best.ckpt").write_text("")
+        (tmp_path / "best_model.h5").write_text("")
+        ckpt = ts.SLEAPStrategy()._resolve_parent_checkpoint(tmp_path)
+        assert ckpt == tmp_path / "best.ckpt"
+
+    def test_legacy_h5_fallback(self, ts, tmp_path):
+        (tmp_path / "best_model.h5").write_text("")
+        ckpt = ts.SLEAPStrategy()._resolve_parent_checkpoint(tmp_path)
+        assert ckpt == tmp_path / "best_model.h5"
+
+    def test_searches_one_level_down(self, ts, tmp_path):
+        run = tmp_path / "child_run"
+        run.mkdir()
+        (run / "best.ckpt").write_text("")
+        ckpt = ts.SLEAPStrategy()._resolve_parent_checkpoint(tmp_path)
+        assert ckpt == run / "best.ckpt"
+
+    def test_none_when_absent(self, ts, tmp_path):
+        assert ts.SLEAPStrategy()._resolve_parent_checkpoint(tmp_path) is None
+
+    def test_none_when_dir_missing(self, ts, tmp_path):
+        missing = tmp_path / "nope"
+        assert ts.SLEAPStrategy()._resolve_parent_checkpoint(missing) is None
+
+
+class TestSLEAPContinue:
+    """continue_training wires --base_checkpoint or degrades to fresh."""
+
+    @patch("subprocess.run")
+    def test_wires_base_checkpoint(self, mock_run, ts, tmp_path):
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        ckpt = parent / "best.ckpt"
+        ckpt.write_text("")
+        strategy = _make_sleap(ts, parent)
+        sel_entry, params = _sleap_inputs(tmp_path, config_text="{}")
+        model_dir = tmp_path / "models" / "child_run"
+
+        with patch.object(
+            strategy, "_find_model_output_dir", return_value=model_dir
         ):
-            ts.SLEAPStrategy().continue_training(
-                {}, {}, "skel", {}, {}, model_instance=None
+            result = strategy.continue_training(
+                {}, params, "skel", {}, sel_entry, MagicMock()
             )
+
+        assert mock_run.called
+        cmd = mock_run.call_args[0][0]
+        assert "--base_checkpoint" in cmd
+        assert str(ckpt) in cmd
+        # checkpoint value immediately follows the flag
+        assert cmd[cmd.index("--base_checkpoint") + 1] == str(ckpt)
+        assert result["model_path"] == str(model_dir)
+
+    def test_missing_checkpoint_degrades_to_fresh(self, ts, tmp_path):
+        parent = tmp_path / "parent"
+        parent.mkdir()  # no checkpoint inside
+        strategy = _make_sleap(ts, parent, recording=True)
+        sel_entry, params = _sleap_inputs(tmp_path, config_text="{}")
+        msg = MagicMock()
+
+        result = strategy.continue_training(
+            {}, params, "skel", {}, sel_entry, msg
+        )
+
+        # Fresh (recorded) train_model was called; no base_checkpoint wiring.
+        assert len(strategy.train_calls) == 1
+        assert result["model_id"] == "child"
+        assert msg._warn_msg.called
+
+    @patch("subprocess.run")
+    def test_epochs_rewrites_yaml_config(self, mock_run, ts, tmp_path):
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        (parent / "best.ckpt").write_text("")
+        strategy = _make_sleap(ts, parent)
+        cfg_text = yaml.safe_dump({"trainer_config": {"max_epochs": 200}})
+        sel_entry, params = _sleap_inputs(
+            tmp_path, config_text=cfg_text, config_suffix=".yaml"
+        )
+        model_dir = tmp_path / "models" / "child_run"
+
+        with patch.object(
+            strategy, "_find_model_output_dir", return_value=model_dir
+        ):
+            strategy.continue_training(
+                {}, params, "skel", {}, sel_entry, MagicMock(), epochs=50
+            )
+
+        cmd = mock_run.call_args[0][0]
+        used_config = Path(cmd[1])  # config is first positional after program
+        assert used_config != Path(params["initial_config"])  # a rewritten copy
+        written = yaml.safe_load(used_config.read_text())
+        assert written["trainer_config"]["max_epochs"] == 50
+
+    @patch("subprocess.run")
+    def test_epochs_rewrites_json_config(self, mock_run, ts, tmp_path):
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        (parent / "best.ckpt").write_text("")
+        strategy = _make_sleap(ts, parent)
+        sel_entry, params = _sleap_inputs(
+            tmp_path, config_text=json.dumps({"optimization": {"epochs": 100}})
+        )
+        model_dir = tmp_path / "models" / "child_run"
+
+        with patch.object(
+            strategy, "_find_model_output_dir", return_value=model_dir
+        ):
+            strategy.continue_training(
+                {}, params, "skel", {}, sel_entry, MagicMock(), epochs=25
+            )
+
+        cmd = mock_run.call_args[0][0]
+        written = json.loads(Path(cmd[1]).read_text())
+        assert written["optimization"]["epochs"] == 25
+
+    @patch("subprocess.run")
+    def test_epochs_from_params_max_epochs(self, mock_run, ts, tmp_path):
+        # Model.train(epochs=N) lands as params['max_epochs'] via apply_epochs;
+        # continue_training must honor it even without the explicit kwarg.
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        (parent / "best.ckpt").write_text("")
+        strategy = _make_sleap(ts, parent)
+        sel_entry, params = _sleap_inputs(
+            tmp_path, config_text=json.dumps({"optimization": {"epochs": 1}})
+        )
+        params["max_epochs"] = 77
+        model_dir = tmp_path / "models" / "child_run"
+
+        with patch.object(
+            strategy, "_find_model_output_dir", return_value=model_dir
+        ):
+            strategy.continue_training(
+                {}, params, "skel", {}, sel_entry, MagicMock()
+            )
+
+        cmd = mock_run.call_args[0][0]
+        written = json.loads(Path(cmd[1]).read_text())
+        assert written["optimization"]["epochs"] == 77
+
+    @patch("subprocess.run")
+    def test_epochs_without_config_warns(self, mock_run, ts, tmp_path):
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        (parent / "best.ckpt").write_text("")
+        strategy = _make_sleap(ts, parent)
+        sel_entry, params = _sleap_inputs(tmp_path)  # no initial_config
+        model_dir = tmp_path / "models" / "child_run"
+        msg = MagicMock()
+
+        with patch.object(
+            strategy, "_find_model_output_dir", return_value=model_dir
+        ):
+            strategy.continue_training(
+                {}, params, "skel", {}, sel_entry, msg, epochs=40
+            )
+
+        assert msg._warn_msg.called  # epochs not silently dropped
+        cmd = mock_run.call_args[0][0]
+        assert "--base_checkpoint" in cmd  # resume still happens
 
 
 # --------------------------------------------------------------------------
