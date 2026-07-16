@@ -382,14 +382,16 @@ def test_populate_tolerating_concurrent_duplicate():
 
 
 @pytest.mark.unit
-def test_populate_once_populates_within_lock(monkeypatch):
+@pytest.mark.parametrize("lock_acquired", [True, False])
+def test_populate_once_populates_within_lock(monkeypatch, lock_acquired):
     """``_populate_once`` invokes populate while holding the key's advisory lock.
 
     No-duplicated-compute comes from serialization + DataJoint's own no-op (a
     waiter that acquires the lock after the winner commits finds the row done),
     NOT from short-circuiting here -- populate is always invoked so a genuine
-    stage failure still surfaces. This asserts the ordering: populate happens
-    strictly between lock-enter and lock-exit.
+    stage failure still surfaces. Parametrized over whether the lock was
+    acquired: populate must run in BOTH cases (a lock timeout must not skip the
+    stage), strictly between lock-enter and lock-exit.
     """
     import contextlib
 
@@ -401,7 +403,7 @@ def test_populate_once_populates_within_lock(monkeypatch):
     def _fake_lock(table, key, **kwargs):
         events.append("lock-enter")
         try:
-            yield True
+            yield lock_acquired
         finally:
             events.append("lock-exit")
 
@@ -466,3 +468,47 @@ def test_advisory_key_lock_acquire_error_is_non_fatal():
 
     with _advisory_key_lock(_FakeTable(), {"id": "z"}) as acquired:
         assert acquired is False
+
+
+@pytest.mark.database
+def test_advisory_key_lock_excludes_other_session(dj_conn):
+    """A second DB session cannot take the lock while the first holds it.
+
+    This is the property the fix actually relies on and that the single-
+    connection round-trip test CANNOT prove: MySQL named locks are reentrant
+    within a session, so ``IS_FREE_LOCK == 0`` on the holding session is equally
+    consistent with a working lock and a no-op. Here an independent second
+    connection must BLOCK (time out) while the first holds the lock, then
+    acquire once the first releases.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._pipeline_run import _advisory_key_lock
+
+    conn_b = dj.Connection(
+        dj.config["database.host"],
+        dj.config["database.user"],
+        dj.config["database.password"],
+        port=dj.config["database.port"],
+    )
+
+    class _FakeTable:
+        full_table_name = "`sgv2test`.`exclusion`"
+
+    holder = _FakeTable()
+    holder.connection = dj.conn()
+    waiter = _FakeTable()
+    waiter.connection = conn_b
+    key = {"id": "excl"}
+
+    try:
+        with _advisory_key_lock(holder, key) as held:
+            assert held is True
+            # The OTHER session blocks and times out -- cannot acquire.
+            with _advisory_key_lock(waiter, key, timeout_s=1) as while_held:
+                assert while_held is False
+        # Once the holder releases, the other session acquires it.
+        with _advisory_key_lock(waiter, key, timeout_s=1) as after_release:
+            assert after_release is True
+    finally:
+        conn_b.close()

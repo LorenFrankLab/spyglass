@@ -115,6 +115,12 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
 
     A duplicate error with the row STILL absent afterward, or any non-duplicate
     error, is a genuine failure and is re-raised unchanged.
+
+    Precondition: ``key`` must be a single-row primary key. The ``table & key``
+    recovery check proves that THAT specific row now exists; with an
+    under-specified / multi-row restriction a truthy match would no longer prove
+    the failed row committed, and a genuine duplicate could be swallowed. Every
+    call site passes a full selection PK, so this holds.
     """
     from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
@@ -190,6 +196,12 @@ def _populate_once(table, key) -> None:
     surfaces; and if the lock cannot be taken (timeout / a non-transactional
     server), :func:`_populate_tolerating_concurrent_duplicate` keeps the
     residual insert race from failing the pipeline.
+
+    The "runs once" guarantee is best-effort, not absolute: the lock is bound to
+    the DB session, so if that session drops and reconnects mid-compute the lock
+    is released and a concurrent run could recompute. The duplicate-tolerance
+    still prevents a hard failure -- the worst case degrades to duplicated
+    compute, never a crash or a wrong result.
     """
     with _advisory_key_lock(table, key):
         _populate_tolerating_concurrent_duplicate(table, key)
@@ -975,7 +987,12 @@ def run_v2_pipeline(
             ) = _run_stage(
                 "figpack",
                 bundle_present,
-                lambda: FigPackCuration.populate(figpack_selection),
+                # Same concurrency handling as every other stage: serialize the
+                # populate on the content-addressed selection and tolerate a
+                # benign duplicate. (The stale-bundle delete above runs outside
+                # the lock -- it only fires when the bundle is already gone, so
+                # it cannot race a live build.)
+                lambda: _populate_once(FigPackCuration, figpack_selection),
                 run_summary,
             )
             run_summary["figpack_uri"] = (
