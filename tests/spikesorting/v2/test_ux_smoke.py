@@ -678,6 +678,49 @@ def test_plot_sort_group_geometry_auto_labels(monkeypatch):
     plt.close(fig)
 
 
+@pytest.mark.parametrize("per_column,expect_labels", [(8, True), (9, False)])
+def test_plot_sort_group_geometry_auto_label_threshold(
+    monkeypatch, per_column, expect_labels
+):
+    """Auto-labeling flips exactly at ``_AUTO_LABEL_MAX_PER_COLUMN`` (8).
+
+    Pins the decision boundary so a regression moving the threshold (to 4 or 16)
+    is caught: a single-shank column of 8 contacts auto-labels, 9 does not.
+    """
+    matplotlib = pytest.importorskip("matplotlib")
+
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    def _rows(nwb_file_name):
+        return [
+            {
+                "sort_group_id": 0,
+                "electrode_id": k,
+                "probe_id": "p",  # single probe -> no multi-probe warning/label
+                "bad_channel": "False",
+                "is_reference": False,
+                "coordinate_source": "probe",
+                "plot_x": 0.0,
+                "plot_y": -20.0 * k,
+            }
+            for k in range(per_column)
+        ]
+
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._pipeline_geometry."
+        "_sort_group_geometry_rows",
+        _rows,
+    )
+    fig, ax = plt.subplots()
+    pl.plot_sort_group_geometry("any_.nwb", ax=ax)  # default None -> auto
+    labels = [t.get_text() for t in ax.texts if t.get_text().isdigit()]
+    assert bool(labels) is expect_labels
+    plt.close(fig)
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sort_group_geometry_specific_reference_star_row(ux_session):

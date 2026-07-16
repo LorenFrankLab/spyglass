@@ -98,9 +98,8 @@ RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
     "alternative": (
         "A sound, working substitute for when the production recipe does not "
         "fit -- e.g. MountainSort5 stands in for the production MountainSort4 "
-        "where MS4's ml_ms4alg numpy<2 pin is unavailable, and Kilosort is the "
-        "Neuropixels-density alternative. Fine to use; just not the lab's first "
-        "pick for that probe/region."
+        "where MS4's ml_ms4alg numpy<2 pin is unavailable. Fine to use; just "
+        "not the lab's first pick for that probe/region."
     ),
     "experimental": (
         "Not yet validated on Frank-lab data. It runs, but inspect the output "

@@ -432,9 +432,8 @@ Each preset carries a `recommendation_status` telling you how much to trust it:
   MountainSort4 hippocampus recipes).
 - **`alternative`** -- a sound, working substitute for when the production
   recipe does not fit. For example MountainSort5 is the `alternative` to the
-  `production` MountainSort4 because MS4's `ml_ms4alg` backend needs `numpy<2`,
-  and Kilosort is the Neuropixels-density alternative. Fine to use; just not the
-  lab's first pick for that probe/region.
+  `production` MountainSort4 because MS4's `ml_ms4alg` backend needs `numpy<2`.
+  Fine to use; just not the lab's first pick for that probe/region.
 - **`experimental`** -- not yet validated on Frank Lab data. It runs, but
   inspect the output before relying on it (e.g. multi-day concatenation,
   Neuropixels Kilosort4).

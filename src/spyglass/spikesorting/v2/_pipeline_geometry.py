@@ -606,8 +606,9 @@ def plot_sort_group_geometry(
             ax.annotate(
                 str(probe_id),
                 (center_x, top_y),
-                # Lifted clear of the per-electrode reference annotation
-                # ("elec <id> (ref)"), which sits ~4 pt above the top contact.
+                # Lifted well above the top contacts so the bold probe_id sits
+                # clear of any electrode-id labels drawn on them (offset (3, 3))
+                # when label_electrodes is on, rather than overlapping.
                 xytext=(0, 22),
                 textcoords="offset points",
                 ha="center",
