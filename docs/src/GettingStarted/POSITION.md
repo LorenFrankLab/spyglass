@@ -45,26 +45,41 @@ cleaner three-step flow: `PoseEstim → PoseV2 → PositionOutput`.
 
 ### Why V2 uses the PyTorch backend
 
-V2's code is **engine-agnostic** — DeepLabCut 3.x supports both PyTorch and
-TensorFlow engines, and V2 dispatches to whichever a model was trained with. So
-V2 does not *need* PyTorch in principle.
+DeepLabCut 3.x defaults to the **PyTorch** engine
+(`deeplabcut.compat.DEFAULT_ENGINE = Engine.PYTORCH`), and Position V2
+standardizes on it. V2's code is **engine-agnostic** — DLC 3.x supports both the
+PyTorch and TensorFlow engines, and V2 dispatches to whichever a model was
+trained with — so V2 does not strictly *need* PyTorch. But PyTorch is the
+recommended and better-supported path, chiefly for **dependency coexistence**.
 
-In practice PyTorch is required for **dependency coexistence**, not by the pose
-code. The rest of Spyglass pulls in `jax` (via `non_local_detector`), and
-TensorFlow cannot cleanly share one environment with `jax`:
+The TensorFlow backend forces tight, conflicting version pins that collide with
+the rest of the modern scientific-Python stack and with the GPU runtimes
+Spyglass already loads (the rest of Spyglass pulls in `jax` via
+`non_local_detector`):
 
-- **XLA collision.** TensorFlow and `jaxlib` each bundle their own XLA/CUDA and
-    both try to register cuDNN/cuFFT/cuBLAS on the GPU
+- **XLA / cuDNN collision.** TensorFlow and `jaxlib` each bundle their own
+    XLA/CUDA and both try to register cuDNN/cuFFT/cuBLAS on the GPU
     (`Unable to register cuDNN factory ... already registered`).
-- **Version wedge.** DeepLabCut 3.x pins `numpy<2`; within that, TensorFlow
-    forces an old `jax`, and the newer TensorFlow/`jax` releases that would line
-    up each require `numpy 2`. No single set of versions satisfies all three.
+- **numpy / jax version wedge.** DeepLabCut 3.x pins `numpy<2`; within that,
+    TensorFlow forces an old `jax`, and the newer TensorFlow/`jax` releases that
+    would line up each require `numpy 2`. No single set of versions satisfies
+    all three.
+- **Keras / tf-keras wedge.** TensorFlow 2.16+ ships Keras 3, which DeepLabCut's
+    TF compat layer cannot load without `tf-keras` — the loader recurses
+    infinitely (a `RecursionError` at import) unless you also set
+    `TF_USE_LEGACY_KERAS=1` and install `tf-keras`.
 
-PyTorch has neither problem, so it keeps the whole Spyglass stack in one working
-environment. If you are locked to a TensorFlow-trained DLC model, run that
-inference in a **separate** environment (no `jax` / `non_local_detector`) and
-ingest the resulting `.h5`/NWB via `PoseEstimSelection` with `task_mode="load"`
-or via `ImportedPose`. See
+The PyTorch engine has none of these problems: it coexists with modern `numpy`
+and `jax`, keeps the whole Spyglass stack in one working environment, and is
+DeepLabCut's actively-developed default. It is also the better-supported path
+inside Spyglass — continued training resumes cleanly from a parent snapshot on
+PyTorch (`train_network(snapshot_path=…)`), whereas the TensorFlow weight-resume
+mechanism (`init_weights` in `pose_cfg`) is not exposed as a training kwarg.
+
+If you are locked to a TensorFlow-trained DLC model, run that inference in a
+**separate** environment (no `jax` / `non_local_detector`) and ingest the
+resulting `.h5`/NWB via `PoseEstimSelection` with `task_mode="load"` or via
+`ImportedPose`. See
 [Troubleshooting → TensorFlow / jax conflict](./TROUBLESHOOTING.md) for the
 migration fix.
 
