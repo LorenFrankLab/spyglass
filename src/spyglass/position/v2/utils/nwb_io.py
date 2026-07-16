@@ -88,6 +88,29 @@ class PoseInferenceRunner(BaseMixin):
             if param in kwargs:
                 analyze_params[param] = kwargs[param]
 
+        # GPU selection: `gputouse` is a legacy DLC/TensorFlow parameter. The
+        # v2 path (DLC>=3, PyTorch) chooses the GPU via `device`, so a stray
+        # `gputouse` would otherwise be silently dropped by the allowlist
+        # above. Warn, and route the intent to the best available `device`.
+        if "gputouse" in kwargs and "device" not in analyze_params:
+            gpu = kwargs["gputouse"]
+            try:
+                device = f"cuda:{int(gpu)}"
+            except (TypeError, ValueError):
+                device = "auto"
+            self._warn_msg(
+                "`gputouse` is a v1/TensorFlow parameter and is not used by "
+                f"the v2 PyTorch inference path; routing gputouse={gpu!r} to "
+                f"device={device!r}. Set `device` directly (e.g. 'cuda:0' or "
+                "'auto') to control GPU selection in v2."
+            )
+            analyze_params["device"] = device
+        elif "gputouse" in kwargs:
+            self._warn_msg(
+                "Ignoring `gputouse` (a v1/TensorFlow parameter); using the "
+                f"provided device={analyze_params['device']!r} instead."
+            )
+
         self._info_msg(f"Running DLC inference on {videos}")
         self._logger.debug("DLC parameters: %s", analyze_params)
 
