@@ -1015,13 +1015,22 @@ class ModelSelection(SpyglassMixin, dj.Manual):
             + (f" (overlaps {c['overlap']})" if c["overlap"] else "")
             for c in candidates
         ]
+        example_id = candidates[0]["model_id"]
         return (
             f"{len(candidates)} existing model(s) already use skeleton "
             f"'{skeleton_id}'. Reuse one instead of declaring a new model:\n"
             + "\n".join(lines)
-            + f"\n\nDiscover them with Model.reusable_for('{skeleton_id}'). "
-            "To declare a new model anyway (e.g. new body parts or a "
-            "deliberate retrain), pass allow_redundant_model=True."
+            + "\n\nEither...\n"
+            "1. Train and/or reuse an existing model:\n"
+            f"    1.1. Explore these matching-skeleton models with "
+            f"`Model.reusable_for('{skeleton_id}')`\n"
+            "    1.2. Continue training a model with "
+            f"`Model().train({{'model_id': '{example_id}'}}, "
+            "epochs=<n>)`\n"
+            "    1.3. Run inference with that model (queue a "
+            "`PoseEstimSelection` task, then `PoseEstim.populate`)\n"
+            "2. Declare a new model with "
+            "`ModelSelection().insert1(your_key, allow_redundant_model=True)`"
         )
 
 
@@ -1242,13 +1251,25 @@ class Model(SpyglassMixin, dj.Computed):
                 f"Use a different tool that supports training."
             )
 
+        # Route continued training (parent_id set) to the fine-tune path,
+        # which resumes the parent's weights. Fresh selections train_model.
+        parent_id = sel_entry.get("parent_id")
         try:
-            model_result = strategy.train_model(
-                key, params, skeleton_id, vid_group, sel_entry, self
-            )
+            if parent_id:
+                self._info_msg(
+                    f"Continuing training from parent model: {parent_id}"
+                )
+                model_result = strategy.continue_training(
+                    key, params, skeleton_id, vid_group, sel_entry, self
+                )
+            else:
+                model_result = strategy.train_model(
+                    key, params, skeleton_id, vid_group, sel_entry, self
+                )
         except NotImplementedError as e:
+            verb = "Continuation" if parent_id else "Training"
             raise NotImplementedError(
-                f"Training not implemented for {tool}: {e}"
+                f"{verb} not implemented for {tool}: {e}"
             ) from e
 
         # Insert into Model table
@@ -1382,131 +1403,215 @@ class Model(SpyglassMixin, dj.Computed):
 
     def train(
         self,
-        model_key: dict,
-        maxiters: Union[int, None] = None,
-        **kwargs,
+        key: dict,
+        *,
+        epochs: Union[int, None] = None,
+        **overrides,
     ) -> dict:
-        """Continue training an existing model or train with new parameters.
+        """Train a model — either continuing an existing one or a fresh run.
 
-        This method creates a new ModelSelection entry with parent_id pointing
-        to the original model, then triggers populate() to train the new model.
+        A single, tool-agnostic, state-driven verb. The path is chosen by
+        ``bool(Model & key)``:
+
+        - **Continue / fine-tune** (a ``Model`` row already matches *key*):
+          derive a new ``ModelSelection`` with ``parent_id`` set to that
+          model, resume its weights, train ``epochs`` more, and return the new
+          parent-linked ``Model`` key. ``epochs`` is normalized to each tool's
+          native length knob (DLC PyTorch → ``epochs``; DLC TF → ``maxiters``;
+          SLEAP → ``max_epochs``). SLEAP continuation raises
+          ``NotImplementedError`` (weight-resume is DLC-only).
+        - **Fresh train** (no ``Model`` row yet, but a ``ModelSelection``
+          matches *key*): ``populate(key)`` runs ``make`` → ``train_model``;
+          return the resulting ``Model`` key.
+        - **Neither**: raise ``ValueError``.
+
+        The rule works for either key shape — a ``{'model_id': ...}`` key, or a
+        full ``ModelSelection`` key (which resolves a ``Model`` only once it has
+        been populated).
 
         Parameters
         ----------
-        model_key : dict
-            Primary key for existing Model entry (must include 'model_id')
-        maxiters : Union[int, None], optional
-            Additional training iterations. If None, uses default from params.
-        **kwargs
-            Additional parameters to override in ModelParams. Can include:
-            - shuffle : int, new shuffle index
-            - trainingsetindex : int, new training set fraction
-            - displayiters : int, display frequency
-            - saveiters : int, save frequency
+        key : dict
+            A ``Model`` key (e.g. ``{'model_id': ...}``) to continue, or a
+            ``ModelSelection`` key to train fresh.
+        epochs : int or None, optional
+            Additional training length for the continue path (ignored when a
+            fresh ``ModelSelection`` only needs populating). Mapped to the
+            tool's native knob.
+        **overrides
+            Parameter overrides applied to the derived ``ModelParams`` on the
+            continue path (e.g. ``shuffle``, ``trainingsetindex``). Unknown
+            names are warned about and ignored.
 
         Returns
         -------
         dict
-            Primary key for the new Model entry
+            Primary key for the trained (new) ``Model`` entry.
 
         Raises
         ------
         ValueError
-            If model_key doesn't exist in Model table
+            If *key* matches neither a ``Model`` nor a ``ModelSelection`` row.
 
         Examples
         --------
-        >>> # Continue training with 50k more iterations
-        >>> model_key = {"model_id": "my_dlc_model"}
-        >>> new_model_key = model.train(model_key, maxiters=50000)
-        >>>
-        >>> # Train new shuffle from same model
-        >>> new_model_key = model.train(model_key, shuffle=2)
+        >>> # Continue training an existing model for 50 more epochs
+        >>> new_model_key = Model().train({"model_id": "my_dlc_model"},
+        ...                               epochs=50)
+        >>> # Fine-tune a new shuffle from the same model
+        >>> new_model_key = Model().train({"model_id": "my_dlc_model"},
+        ...                               shuffle=2)
+        >>> # Train a freshly declared selection
+        >>> model_key = Model().train(selection_key)
         """
-        # Validate model exists
-        if not self & model_key:
-            raise ValueError(
-                f"Model not found in database: {model_key}. "
-                "Cannot continue training from non-existent model."
+        if self & key:  # a Model row exists → continue / fine-tune
+            model_entry = (self & key).fetch1()
+            return self._derive_model(
+                model_entry, epochs=epochs, overrides=overrides
             )
 
-        # Fetch existing model info
-        model_entry = (self & model_key).fetch1()
-        old_sel_key = {
-            "model_params_id": model_entry["model_params_id"],
-            "tool": model_entry["tool"],
-            "vid_group_id": model_entry["vid_group_id"],
-        }
+        if ModelSelection() & key:  # selection exists, not yet trained → fresh
+            if epochs is not None or overrides:
+                self._warn_msg(
+                    "epochs/overrides are ignored for a fresh ModelSelection; "
+                    "bake them into ModelParams before populating."
+                )
+            self._info_msg(f"Training fresh model for selection: {key}")
+            self.populate(key)
+            return (self & key).fetch1("KEY")
 
-        self._info_msg(
-            f"Creating new training session from model: {model_key['model_id']}"
+        raise ValueError(
+            f"Nothing to train for key: {key}. No matching Model or "
+            "ModelSelection row exists. Declare a ModelSelection first, or "
+            "pass an existing model_id to continue training."
         )
 
-        # Fetch original params
-        params_entry = (ModelParams() & old_sel_key).fetch1()
-        old_params = params_entry["params"].copy()
+    def _derive_model(
+        self,
+        parent_entry: dict,
+        *,
+        epochs: Union[int, None] = None,
+        overrides: Union[dict, None] = None,
+    ) -> dict:
+        """Derive and train a child model from an existing parent model.
 
-        # Update params with new values
-        if maxiters is not None:
-            old_params["maxiters"] = maxiters
+        Shared plumbing for the continue/fine-tune path: builds the child's
+        ``ModelParams`` (a new row only if the normalized params actually
+        changed, otherwise the parent's is reused to keep content-addressing
+        clean), creates a ``ModelSelection`` with ``parent_id`` set — carrying
+        any tool-specific selection fields (SLEAP ``training_labels_path``) —
+        then populates ``make`` and returns the new ``Model`` key.
 
-        for k, v in kwargs.items():
-            if k in ModelParams().get_accepted_params(params_entry["tool"]):
-                old_params[k] = v
+        Parameters
+        ----------
+        parent_entry : dict
+            Full parent ``Model`` row (``fetch1()``).
+        epochs : int or None, optional
+            Additional training length, mapped to the tool's native knob via
+            the strategy's ``apply_epochs``.
+        overrides : dict, optional
+            Validated parameter overrides for the child ``ModelParams``.
+
+        Returns
+        -------
+        dict
+            Primary key for the new (child) ``Model`` entry.
+        """
+        overrides = dict(overrides or {})
+        parent_id = parent_entry["model_id"]
+        parent_sel_key = {
+            "model_params_id": parent_entry["model_params_id"],
+            "tool": parent_entry["tool"],
+            "vid_group_id": parent_entry["vid_group_id"],
+            "model_selection_id": parent_entry["model_selection_id"],
+        }
+        params_key = {
+            "model_params_id": parent_entry["model_params_id"],
+            "tool": parent_entry["tool"],
+        }
+        params_entry = (ModelParams() & params_key).fetch1()
+        tool = params_entry["tool"]
+        strategy = ToolStrategyFactory.create_strategy(tool)
+
+        self._info_msg(f"Deriving new training session from model: {parent_id}")
+
+        # Normalize epochs → the tool's native length knob.
+        new_params = params_entry["params"].copy()
+        new_params = strategy.apply_epochs(
+            new_params, epochs, config=self._project_config(new_params, tool)
+        )
+
+        # Apply validated overrides.
+        accepted = ModelParams().get_accepted_params(tool)
+        for k, v in overrides.items():
+            if k in accepted:
+                new_params[k] = v
             else:
                 self._warn_msg(f"Ignoring unknown parameter: {k}")
 
-        # Create new ModelParams entry if params changed
-        if old_params != params_entry["params"]:
+        # New ModelParams only if the params actually changed.
+        if new_params == params_entry["params"]:
+            new_params_key = params_key
+        else:
             new_params_key = ModelParams().insert1(
                 dict(
-                    tool=params_entry["tool"],
-                    params=old_params,
+                    tool=tool,
+                    params=new_params,
                     skeleton_id=params_entry.get("skeleton_id"),
                 ),
                 skip_duplicates=True,
             )
-            if not new_params_key:
-                # Params already exist, fetch the key
-                params_hash = dj.hash.key_hash(old_params)
-                new_params_key = (
-                    ModelParams()
-                    & {
-                        "tool": params_entry["tool"],
-                        "params_hash": params_hash,
-                    }
-                ).fetch1("KEY")
-        else:
-            new_params_key = {
-                "model_params_id": params_entry["model_params_id"],
-                "tool": params_entry["tool"],
-            }
 
-        # Create new ModelSelection with parent_id
+        # New ModelSelection with parent_id, carrying tool-specific fields.
         new_sel_key = dict(
             new_params_key,
-            vid_group_id=old_sel_key["vid_group_id"],
-            parent_id=model_key["model_id"],
+            vid_group_id=parent_entry["vid_group_id"],
+            parent_id=parent_id,
+        )
+        labels_path = (ModelSelection() & parent_sel_key).fetch1(
+            "training_labels_path"
+        )
+        if labels_path:  # SLEAP .slp labels — carry forward for populate()
+            new_sel_key["training_labels_path"] = labels_path
+
+        new_sel_key["model_selection_id"] = default_pk_name(
+            "ms-train", {"parent_id": parent_id}
         )
 
-        # Generate model_selection_id if not provided
-        if "model_selection_id" not in new_sel_key:
-            new_sel_key["model_selection_id"] = default_pk_name(
-                "ms-train", {"parent_id": model_key["model_id"]}
-            )
-
-        self._info_msg(f"Inserting new ModelSelection: {model_key['model_id']}")
+        self._info_msg(f"Inserting new ModelSelection from parent: {parent_id}")
         ModelSelection().insert1(new_sel_key, skip_duplicates=True)
 
-        # Populate to trigger make()
         self._info_msg("Triggering model training...")
         self.populate(new_sel_key)
 
-        # Fetch and return new model key
         new_model = (self & new_sel_key).fetch1("KEY")
         self._info_msg(f"New model trained: {new_model}")
-
         return new_model
+
+    @staticmethod
+    def _project_config(params: dict, tool: str) -> Union[dict, None]:
+        """Load a tool project's config for engine resolution (DLC only).
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters (may contain ``project_path``).
+        tool : str
+            Tool name.
+
+        Returns
+        -------
+        dict or None
+            The project configuration, or ``None`` when unavailable / not
+            applicable.
+        """
+        if tool != "DLC" or not params.get("project_path"):
+            return None
+        cfg_path = Path(params["project_path"]) / "config.yaml"
+        try:
+            return load_yaml(cfg_path)
+        except Exception:  # best-effort; PyTorch default applies otherwise
+            return None
 
     def evaluate(
         self,
@@ -2256,10 +2361,7 @@ class Model(SpyglassMixin, dj.Computed):
                 "Install with: pip install deeplabcut"
             ) from e
 
-        from spyglass.position.utils import (
-            get_param_names,
-            sanitize_filename,
-        )
+        from spyglass.position.utils import get_param_names, sanitize_filename
         from spyglass.settings import pose_project_dir, pose_video_dir
 
         # Split kwargs by function signature so callers control both steps
@@ -2366,9 +2468,7 @@ class Model(SpyglassMixin, dj.Computed):
             or pose_project_dir
             or Path.home() / "dlc_projects"
         )
-        from spyglass.position.utils.tool_strategies import (
-            ToolStrategyFactory,
-        )
+        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 
         config_path = ToolStrategyFactory.create_strategy("DLC").ensure_project(
             project_name=project_name,

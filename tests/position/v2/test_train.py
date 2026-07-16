@@ -371,6 +371,7 @@ class TestModelParams:
             "decay_steps",
             "deterministic",
             "displayiters",
+            "epochs",
             "global_scale",
             "init_weights",
             "intermediate_supervision",
@@ -389,6 +390,7 @@ class TestModelParams:
             "numframes2pick",
             "project_path",
             "regularize",
+            "save_epochs",
             "saveiters",
             "scoremap_dir",
             "scorer",
@@ -409,24 +411,39 @@ class TestModelParams:
 
 
 class TestModelTrain:
-    """Test Model.train() for continued/additional training."""
+    """Test Model.train() dispatch and the _derive_model plumbing."""
 
-    def test_train_creates_new_selection(
+    @staticmethod
+    def _parent_entry():
+        """A full parent Model row as returned by ``(self & key).fetch1()``."""
+        return {
+            "model_id": "parent_model",
+            "model_params_id": "parent_params",
+            "tool": "DLC",
+            "vid_group_id": "test_videos",
+            "model_selection_id": "parent_sel",
+        }
+
+    @staticmethod
+    def _params_entry(params):
+        """A ModelParams row as returned by ``(ModelParams & ...).fetch1()``."""
+        return {
+            "tool": "DLC",
+            "params": params,
+            "skeleton_id": None,
+            "model_params_id": "parent_params",
+        }
+
+    def test_train_continue_creates_new_selection(
         self,
         model,
         skip_if_no_dlc,
     ):
-        """Test that train() creates new ModelSelection with parent_id."""
-        model_key = {"model_id": "original_model"}
+        """A Model key routes to CONTINUE: derives a parent-linked selection."""
+        model_key = {"model_id": "parent_model"}
 
-        # train() uses (self & key), so patch __and__ at the class level
         mock_restricted = MagicMock()
-        mock_restricted.fetch1.return_value = {
-            "model_id": "original_model",
-            "model_params_id": "original_params",
-            "tool": "DLC",
-            "vid_group_id": "original_videos",
-        }
+        mock_restricted.fetch1.return_value = self._parent_entry()
 
         with (
             patch.object(type(model), "__and__", return_value=mock_restricted),
@@ -434,94 +451,78 @@ class TestModelTrain:
             patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
             patch.object(model, "populate") as mock_populate,
         ):
+            mock_params.return_value.__and__.return_value.fetch1.return_value = self._params_entry(
+                {"shuffle": 1}
+            )
             mock_params.return_value.insert1.return_value = {
                 "model_params_id": "continued_params",
                 "tool": "DLC",
             }
+            mock_sel.return_value.__and__.return_value.fetch1.return_value = (
+                None
+            )
 
-            _ = model.train(model_key, maxiters=50000)
+            model.train(model_key, epochs=50)
 
             mock_sel.return_value.insert1.assert_called_once()
             sel_args = mock_sel.return_value.insert1.call_args[0][0]
-            assert sel_args["parent_id"] == "original_model"
+            assert sel_args["parent_id"] == "parent_model"
             mock_populate.assert_called_once()
 
-    def test_train_with_more_iterations(
+    def test_train_epochs_maps_to_native_knob(
         self,
         model,
         skip_if_no_dlc,
     ):
-        """Test continuing training with additional iterations."""
-        model_key = {"model_id": "test_model"}
-        original_params = {
-            "shuffle": 1,
-            "trainingsetindex": 0,
-            "maxiters": 10000,
-        }
+        """epochs is normalized to the DLC PyTorch ``epochs`` knob (default)."""
+        model_key = {"model_id": "parent_model"}
 
         mock_restricted = MagicMock()
-        mock_restricted.fetch1.return_value = {
-            "model_id": "test_model",
-            "model_params_id": "test_params",
-            "tool": "DLC",
-            "vid_group_id": "test_videos",
-        }
+        mock_restricted.fetch1.return_value = self._parent_entry()
 
         with (
             patch.object(type(model), "__and__", return_value=mock_restricted),
             patch("spyglass.position.v2.train.ModelParams") as mock_params,
-            patch("spyglass.position.v2.train.ModelSelection"),
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
             patch.object(model, "populate"),
         ):
-            mock_params.return_value.__and__.return_value.fetch1.return_value = {
-                "tool": "DLC",
-                "params": original_params,
-                "skeleton_id": None,
-                "model_params_id": "test_params",
-            }
+            mock_params.return_value.__and__.return_value.fetch1.return_value = self._params_entry(
+                {"shuffle": 1, "trainingsetindex": 0, "maxiters": 10000}
+            )
             mock_params.return_value.insert1.return_value = {
                 "model_params_id": "continued_params",
                 "tool": "DLC",
             }
+            mock_sel.return_value.__and__.return_value.fetch1.return_value = (
+                None
+            )
 
-            model.train(model_key, maxiters=50000)
+            model.train(model_key, epochs=500)
 
             insert_call = mock_params.return_value.insert1.call_args[0][0]
-            assert insert_call["params"]["maxiters"] == 50000
+            # No project_path → PyTorch default → epochs, not maxiters
+            assert insert_call["params"]["epochs"] == 500
 
-    def test_train_with_new_data(
+    def test_train_applies_validated_override(
         self,
         model,
         skip_if_no_dlc,
     ):
-        """Test training with additional labeled frames."""
-        model_key = {"model_id": "test_model"}
-        original_params = {
-            "shuffle": 1,
-            "trainingsetindex": 0,
-            "maxiters": 10000,
-        }
+        """A recognized override is written into the derived ModelParams."""
+        model_key = {"model_id": "parent_model"}
 
         mock_restricted = MagicMock()
-        mock_restricted.fetch1.return_value = {
-            "model_id": "test_model",
-            "model_params_id": "test_params",
-            "tool": "DLC",
-            "vid_group_id": "test_videos",
-        }
+        mock_restricted.fetch1.return_value = self._parent_entry()
 
         with (
             patch.object(type(model), "__and__", return_value=mock_restricted),
             patch("spyglass.position.v2.train.ModelParams") as mock_params,
-            patch("spyglass.position.v2.train.ModelSelection"),
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
             patch.object(model, "populate"),
         ):
-            mock_params.return_value.__and__.return_value.fetch1.return_value = {
-                "tool": "DLC",
-                "params": original_params,
-                "skeleton_id": None,
-                "model_params_id": "test_params",
-            }
+            mock_params.return_value.__and__.return_value.fetch1.return_value = self._params_entry(
+                {"shuffle": 1, "trainingsetindex": 0}
+            )
             mock_params.return_value.get_accepted_params.return_value = {
                 "trainingsetindex",
                 "shuffle",
@@ -531,6 +532,9 @@ class TestModelTrain:
                 "model_params_id": "continued_params",
                 "tool": "DLC",
             }
+            mock_sel.return_value.__and__.return_value.fetch1.return_value = (
+                None
+            )
 
             model.train(model_key, trainingsetindex=1)
 
@@ -542,15 +546,51 @@ class TestModelTrain:
         model,
         skip_if_no_dlc,
     ):
-        """Test that parent model is properly tracked."""
+        """The derived ModelSelection records the parent model_id."""
         model_key = {"model_id": "parent_model"}
 
         mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = self._parent_entry()
+
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+            patch.object(model, "populate"),
+        ):
+            mock_params.return_value.__and__.return_value.fetch1.return_value = self._params_entry(
+                {"shuffle": 1}
+            )
+            mock_params.return_value.get_accepted_params.return_value = {
+                "shuffle"
+            }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "child_params",
+                "tool": "DLC",
+            }
+            mock_sel.return_value.__and__.return_value.fetch1.return_value = (
+                None
+            )
+
+            model.train(model_key, shuffle=2)
+
+            sel_insert_call = mock_sel.return_value.insert1.call_args[0][0]
+            assert sel_insert_call["parent_id"] == "parent_model"
+
+    def test_train_carries_sleap_labels_forward(
+        self,
+        model,
+    ):
+        """SLEAP training_labels_path is carried into the child selection."""
+        model_key = {"model_id": "sleap_parent"}
+
+        mock_restricted = MagicMock()
         mock_restricted.fetch1.return_value = {
-            "model_id": "parent_model",
-            "model_params_id": "parent_params",
-            "tool": "DLC",
+            "model_id": "sleap_parent",
+            "model_params_id": "sleap_params",
+            "tool": "SLEAP",
             "vid_group_id": "test_videos",
+            "model_selection_id": "sleap_sel",
         }
 
         with (
@@ -559,30 +599,78 @@ class TestModelTrain:
             patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
             patch.object(model, "populate"),
         ):
-            mock_params.return_value.insert1.return_value = {
-                "model_params_id": "child_params",
-                "tool": "DLC",
+            mock_params.return_value.__and__.return_value.fetch1.return_value = {
+                "tool": "SLEAP",
+                "params": {"model_type": "single_instance"},
+                "skeleton_id": None,
+                "model_params_id": "sleap_params",
             }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "sleap_child",
+                "tool": "SLEAP",
+            }
+            mock_sel.return_value.__and__.return_value.fetch1.return_value = (
+                "/data/labels.slp"
+            )
 
-            model.train(model_key, shuffle=2)
+            model.train(model_key, epochs=10)
 
-            sel_insert_call = mock_sel.return_value.insert1.call_args[0][0]
-            assert sel_insert_call["parent_id"] == "parent_model"
+            sel_args = mock_sel.return_value.insert1.call_args[0][0]
+            assert sel_args["training_labels_path"] == "/data/labels.slp"
 
-    def test_train_invalid_model(
+    def test_train_fresh_selection_populates(
+        self,
+        model,
+        skip_if_no_dlc,
+    ):
+        """A ModelSelection-only key routes to TRAIN FRESH via populate()."""
+        sel_key = {
+            "model_params_id": "p",
+            "tool": "DLC",
+            "vid_group_id": "v",
+            "model_selection_id": "s",
+        }
+
+        no_model = MagicMock()
+        no_model.__bool__.return_value = False  # no Model row yet
+        result_key = MagicMock()
+        result_key.fetch1.return_value = {"model_id": "fresh_model"}
+
+        # First (self & key) is falsy (no Model); the post-populate
+        # (self & key) returns the trained Model key.
+        and_results = [no_model, result_key]
+
+        with (
+            patch.object(type(model), "__and__", side_effect=and_results),
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+            patch.object(model, "populate") as mock_populate,
+        ):
+            mock_sel.return_value.__and__.return_value.__bool__.return_value = (
+                True  # selection exists
+            )
+
+            out = model.train(sel_key)
+
+            mock_populate.assert_called_once_with(sel_key)
+            assert out == {"model_id": "fresh_model"}
+
+    def test_train_invalid_key(
         self,
         model,
     ):
-        """Test error when training non-existent model."""
-        with patch.object(model, "__and__", return_value=model):
-            with patch.object(
-                model, "fetch1", side_effect=Exception("No entries")
-            ):
-                with pytest.raises(
-                    ValueError,
-                    match="Model not found in database.*Cannot continue training",
-                ):
-                    model.train({"model_id": "nonexistent"})
+        """Neither a Model nor a ModelSelection match → ValueError."""
+        no_row = MagicMock()
+        no_row.__bool__.return_value = False
+
+        with (
+            patch.object(type(model), "__and__", return_value=no_row),
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+        ):
+            mock_sel.return_value.__and__.return_value.__bool__.return_value = (
+                False
+            )
+            with pytest.raises(ValueError, match="Nothing to train"):
+                model.train({"model_id": "nonexistent"})
 
 
 class TestModelMetadataRegistration:

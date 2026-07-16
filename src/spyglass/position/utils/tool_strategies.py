@@ -348,6 +348,82 @@ class PoseToolStrategy(ABC):
 
         return expanded_params
 
+    def apply_epochs(self, params: dict, epochs, config: dict = None) -> dict:
+        """Map a generic ``epochs`` budget onto this tool's native knob.
+
+        ``epochs`` is the tool-agnostic "how much more training" unit used by
+        :meth:`Model.train`. Each strategy translates it to whatever length
+        parameter its trainer actually consumes. The base implementation is a
+        no-op, returning *params* unchanged.
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters to update (never mutated in place by
+            overrides).
+        epochs : int or None
+            Requested training length. ``None`` leaves *params* unchanged.
+        config : dict, optional
+            Tool configuration, used by strategies (e.g. DLC) that resolve the
+            native knob from an engine setting.
+
+        Returns
+        -------
+        dict
+            Parameters with the native length knob set (or *params* unchanged).
+        """
+        return params
+
+    def continue_training(
+        self,
+        key: dict,
+        params: dict,
+        skeleton_id: str,
+        vid_group: dict,
+        sel_entry: dict,
+        model_instance,
+        *,
+        epochs=None,
+    ) -> dict:
+        """Resume training from a parent model's weights (fine-tune).
+
+        Mirrors :meth:`train_model` but wires the parent model's latest
+        snapshot into the trainer so training resumes from those weights
+        rather than starting fresh. The base implementation is unsupported;
+        concrete strategies override where true weight-resume is available.
+
+        Parameters
+        ----------
+        key : dict
+            ModelSelection key for the new (child) model.
+        params : dict
+            Training parameters from ModelParams.
+        skeleton_id : str
+            Skeleton ID for this model.
+        vid_group : dict
+            VidFileGroup entry.
+        sel_entry : dict
+            Full ModelSelection entry (carries ``parent_id``).
+        model_instance
+            Model table instance for logging/utilities.
+        epochs : int or None, optional
+            Additional training length; when ``None`` the native knob already
+            baked into *params* is used.
+
+        Returns
+        -------
+        dict
+            Model table entry with model_id, analysis_file_name, model_path.
+
+        Raises
+        ------
+        NotImplementedError
+            If this tool does not support continued training.
+        """
+        raise NotImplementedError(
+            f"Continuation not supported for {self.tool_name}"
+        )
+
 
 class DLCStrategy(PoseToolStrategy):
     """DeepLabCut tool strategy implementation."""
@@ -382,6 +458,8 @@ class DLCStrategy(PoseToolStrategy):
             "shuffle",
             "trainingsetindex",
             "maxiters",
+            "epochs",  # DLC 3.x PyTorch length knob
+            "save_epochs",  # DLC 3.x PyTorch snapshot cadence
             "displayiters",
             "saveiters",
             "net_type",
@@ -463,6 +541,185 @@ class DLCStrategy(PoseToolStrategy):
                 raise ValueError(
                     f"DLC parameter '{param}' must be {param_type.__name__}"
                 )
+
+    @staticmethod
+    def _is_tf_engine(config: dict) -> bool:
+        """Whether the project config selects the TensorFlow engine.
+
+        DLC 3.x defaults to the PyTorch engine
+        (``deeplabcut.compat.DEFAULT_ENGINE = Engine.PYTORCH``); an explicit
+        ``engine: tensorflow`` (or legacy ``tf``) opts back into TensorFlow.
+
+        Parameters
+        ----------
+        config : dict
+            DLC project configuration.
+
+        Returns
+        -------
+        bool
+            True for the TensorFlow engine, False for PyTorch (the default).
+        """
+        engine = str((config or {}).get("engine", "pytorch")).lower()
+        return "tensorflow" in engine or engine == "tf"
+
+    def apply_epochs(self, params: dict, epochs, config: dict = None) -> dict:
+        """Map ``epochs`` onto DLC's engine-specific length knob.
+
+        Resolves the engine from ``config['engine']``: the PyTorch engine
+        (DLC 3.x default) consumes ``epochs``; the TensorFlow engine consumes
+        ``maxiters``.
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters.
+        epochs : int or None
+            Requested training length; ``None`` returns *params* unchanged.
+        config : dict, optional
+            DLC project configuration (for engine resolution).
+
+        Returns
+        -------
+        dict
+            Copy of *params* with the resolved native knob set.
+        """
+        if epochs is None:
+            return params
+        params = dict(params)
+        if self._is_tf_engine(config):
+            params["maxiters"] = int(epochs)
+        else:  # PyTorch is the DLC 3.x default
+            params["epochs"] = int(epochs)
+        return params
+
+    @staticmethod
+    def _build_resume_kwargs(*, snapshot_path, epochs=None) -> dict:
+        """Build the PyTorch trainer kwargs that resume from a parent snapshot.
+
+        DLC 3.x PyTorch resumes from a checkpoint via ``snapshot_path`` (and
+        optionally ``epochs``). TensorFlow-engine weight-resume is not
+        supported and is rejected earlier in :meth:`continue_training`
+        (``init_weights`` is not a ``train_network`` kwarg, so it would be
+        silently dropped), so this helper is PyTorch-only.
+
+        Parameters
+        ----------
+        snapshot_path : str or Path
+            Path to the parent model's latest snapshot.
+        epochs : int or None, optional
+            Additional training length. When ``None``, only the weight path is
+            set (length comes from the params already baked by ``apply_epochs``).
+
+        Returns
+        -------
+        dict
+            Keyword arguments to merge into the training parameters.
+        """
+        kwargs = {"snapshot_path": str(snapshot_path)}
+        if epochs is not None:
+            kwargs["epochs"] = int(epochs)
+        return kwargs
+
+    def _resolve_parent_snapshot(self, config: dict, *, shuffle=None):
+        """Locate the parent project's latest training snapshot.
+
+        Uses :meth:`get_latest_model_info` to find the most recent train
+        directory, then returns its newest snapshot file (PyTorch ``*.pt`` or
+        TensorFlow ``*.index``). Returns ``None`` when no resumable snapshot is
+        available — e.g. the requested ``shuffle`` differs from the trained
+        one, so weight-resume is invalid and the caller should degrade to a
+        fresh (parent-linked) train.
+
+        Parameters
+        ----------
+        config : dict
+            DLC project configuration (must include ``project_path``).
+        shuffle : int, optional
+            Requested shuffle; if it differs from the latest trained model's
+            shuffle, no snapshot is returned.
+
+        Returns
+        -------
+        Path or None
+            Newest snapshot path, or ``None`` if none is resumable.
+        """
+        info = self.get_latest_model_info(config)
+        if not info:
+            return None
+        if shuffle is not None and info.get("shuffle") != shuffle:
+            return None  # shuffle changed → weights can't be reused
+        train_dir = Path(info["path"])
+        snaps = sorted(train_dir.glob("snapshot-*.pt")) or sorted(
+            train_dir.glob("*.index")
+        )
+        if not snaps:
+            return None
+        return max(snaps, key=lambda p: self._fs.getmtime(p))
+
+    def continue_training(
+        self,
+        key: dict,
+        params: dict,
+        skeleton_id: str,
+        vid_group: dict,
+        sel_entry: dict,
+        model_instance,
+        *,
+        epochs=None,
+    ) -> dict:
+        """Resume DLC training from the parent model's latest snapshot.
+
+        Resolves the parent snapshot from the project and wires it into the
+        PyTorch trainer via ``snapshot_path`` so training continues from those
+        weights. When no resumable snapshot is available (missing snapshot, or
+        a ``shuffle`` override that invalidates weight-resume) this degrades to
+        a fresh — but still ``parent_id`` linked — train, keeping the lineage
+        while starting weights from scratch. The caller never has to decide
+        this.
+
+        The TensorFlow engine is not supported for continuation: its resume
+        mechanism (``init_weights`` in ``pose_cfg``) is not a ``train_network``
+        kwarg, so it cannot be wired here without risk of a silent no-op. A
+        clear ``NotImplementedError`` is raised instead.
+
+        See :meth:`PoseToolStrategy.continue_training` for parameters.
+
+        Raises
+        ------
+        NotImplementedError
+            If the project uses the DLC TensorFlow engine.
+        """
+        config = self._fs.read_yaml(
+            Path(params["project_path"]) / "config.yaml"
+        )
+        if self._is_tf_engine(config):
+            raise NotImplementedError(
+                "DLC TensorFlow-engine continuation (weight-resume) is not "
+                "implemented: `init_weights` is not a `train_network` kwarg "
+                "and would be silently dropped. Use the PyTorch engine (the "
+                "DLC 3.x default) to continue training, or retrain fresh."
+            )
+        shuffle = int(params.get("shuffle", config.get("shuffle", 1)))
+        snapshot = self._resolve_parent_snapshot(config, shuffle=shuffle)
+
+        if snapshot is None:
+            model_instance._warn_msg(
+                "No resumable parent snapshot found (or shuffle changed); "
+                "training fresh but keeping the parent lineage."
+            )
+            return self.train_model(
+                key, params, skeleton_id, vid_group, sel_entry, model_instance
+            )
+
+        resume = self._build_resume_kwargs(snapshot_path=snapshot)
+        model_instance._info_msg(
+            f"Resuming DLC training from parent snapshot: {snapshot}"
+        )
+        aug_params = dict(params, **resume)
+        return self.train_model(
+            key, aug_params, skeleton_id, vid_group, sel_entry, model_instance
+        )
 
     def train_model(
         self,
@@ -553,9 +810,12 @@ class DLCStrategy(PoseToolStrategy):
         )
         self._execute_training(config_path, params, model_instance)
 
-        # Localize and register trained model
+        # Localize and register trained model. Pass the selection *key* so the
+        # generated model_id is unique per selection: default_pk_name("mdl")
+        # with no params is deterministic per day, which collides when two
+        # models are trained the same day (e.g. a parent and its continuation).
         model_path, model_id = self._localize_trained_model(
-            config, model_instance
+            config, model_instance, key=key
         )
         latest_model = self.get_latest_model_info(config)
 
@@ -906,17 +1166,28 @@ class DLCStrategy(PoseToolStrategy):
                 trainset_pct = int(trainset_match.group(1))
                 train_fraction = trainset_pct / 100.0
 
-                # Check for train directory containing pose_cfg.yaml
+                # Check for train directory containing a trainer config.
+                # DLC 3.x PyTorch writes ``pytorch_config.yaml`` here; the
+                # TensorFlow engine writes ``pose_cfg.yaml``. Accept either so
+                # a real PyTorch-trained model is discoverable (otherwise
+                # weight-resume degrades to a fresh train).
                 train_dir = model_dir / "train"
                 if not train_dir.exists():
                     continue
 
-                pose_cfg = train_dir / "pose_cfg.yaml"
-                if not pose_cfg.exists():
+                marker = next(
+                    (
+                        train_dir / name
+                        for name in ("pytorch_config.yaml", "pose_cfg.yaml")
+                        if (train_dir / name).exists()
+                    ),
+                    None,
+                )
+                if marker is None:
                     continue
 
-                # Get modification time of pose_cfg.yaml as training date
-                mtime = pose_cfg.stat().st_mtime
+                # Modification time of the trainer config as the training date
+                mtime = marker.stat().st_mtime
                 date_trained = datetime.fromtimestamp(mtime)
 
                 models_found.append(
@@ -1076,9 +1347,27 @@ class DLCStrategy(PoseToolStrategy):
                 raise
 
     def _localize_trained_model(
-        self, config: dict, model_instance
+        self, config: dict, model_instance, key: dict = None
     ) -> tuple[Path, str]:
-        """Localize the trained model and generate model ID."""
+        """Localize the trained model and generate model ID.
+
+        Parameters
+        ----------
+        config : dict
+            DLC configuration (must include ``project_path``).
+        model_instance
+            Model table instance for logging.
+        key : dict, optional
+            ModelSelection key. Seeds the generated ``model_id`` hash so it is
+            unique per selection (a parent and its same-day continuation get
+            distinct ids). When ``None``, the id is deterministic per day
+            (legacy behavior, retained for direct unit-test callers).
+
+        Returns
+        -------
+        tuple of (Path, str)
+            The model config path and the generated ``model_id``.
+        """
         from deeplabcut.utils import get_model_folder
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
@@ -1143,8 +1432,11 @@ class DLCStrategy(PoseToolStrategy):
                     max_modified_time = modified_time
 
         # Generate model ID. ``default_pk_name`` supplies the date segment,
-        # so the prefix must stay date-free to avoid a doubled date.
-        model_id = default_pk_name("mdl")
+        # so the prefix must stay date-free to avoid a doubled date. Hashing
+        # the selection *key* keeps ids unique across models trained the same
+        # day (e.g. a parent and its continuation share the date segment but
+        # differ by model_selection_id).
+        model_id = default_pk_name("mdl", key)
 
         model_instance._info_msg(
             f"Located trained model - snapshot: {latest_snapshot}, "
@@ -1264,6 +1556,34 @@ class SLEAPStrategy(PoseToolStrategy):
                 raise ValueError(
                     f"SLEAP parameter '{param}' must be {param_type.__name__}"
                 )
+
+    def apply_epochs(self, params: dict, epochs, config: dict = None) -> dict:
+        """Map ``epochs`` onto SLEAP's ``max_epochs`` (plus aliases).
+
+        SLEAP's native training length is ``max_epochs``; it is aliased to
+        ``epochs``/``training_epochs`` via :meth:`get_parameter_aliases`, so
+        this sets ``max_epochs`` and expands the aliases for downstream config
+        assembly.
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters.
+        epochs : int or None
+            Requested training length; ``None`` returns *params* unchanged.
+        config : dict, optional
+            Unused (present for interface symmetry).
+
+        Returns
+        -------
+        dict
+            Copy of *params* with ``max_epochs`` and its aliases set.
+        """
+        if epochs is None:
+            return params
+        params = dict(params)
+        params["max_epochs"] = int(epochs)
+        return self.append_aliases(params)
 
     def train_model(
         self,
