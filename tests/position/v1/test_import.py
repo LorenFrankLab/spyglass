@@ -150,6 +150,22 @@ def test_fetch_pose_dataframe(imported_pose_tbl, import_pose_nwb):
         imported_pose_tbl.fetch_pose_dataframe(key=dict(nwb_file_name="f"))
 
 
+def test_named_edges_conversion():
+    """_named_edges maps integer index pairs to (name, name) tuples."""
+    from spyglass.position.v1.imported_pose import _named_edges
+
+    bodyparts = ["nose", "tail", "ear"]
+
+    assert _named_edges(bodyparts, None) == []
+    assert _named_edges(bodyparts, []) == []
+    assert _named_edges(bodyparts, [[0, 1], [1, 2]]) == [
+        ("nose", "tail"),
+        ("tail", "ear"),
+    ]
+    # numpy-style rows with float-like indices are coerced to int
+    assert _named_edges(bodyparts, np.array([[0.0, 2.0]])) == [("nose", "ear")]
+
+
 def test_fetch_skeleton(imported_pose_tbl, import_pose_nwb):
     _ = import_pose_nwb  # Ensure fixture is executed
 

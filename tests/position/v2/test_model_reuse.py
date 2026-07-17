@@ -199,3 +199,187 @@ class TestCreateProjectNudge:
             [{"nwb_file_name": "x_.nwb", "epoch": 1}]
         )
         assert "msg" not in called
+
+
+class TestRankModelRows:
+    """Pure ranking of same-skeleton models by comparable metric (no DB)."""
+
+    @pytest.fixture(autouse=True)
+    def _cls(self, pv2_train):
+        self.Model = pv2_train.Model
+
+    def test_scored_models_sorted_by_error_ascending(self):
+        rows = [
+            {"model_id": "hi", "evaluation": {"test_error": 9.0}},
+            {"model_id": "lo", "evaluation": {"test_error": 2.0}},
+            {"model_id": "mid", "evaluation": {"test_error": 5.0}},
+        ]
+        ranked = self.Model._rank_model_rows(rows)
+        assert [d["model_id"] for d in ranked] == ["lo", "mid", "hi"]
+        assert ranked[0]["metric"] == "test_error"
+        assert ranked[0]["value"] == 2.0
+
+    def test_unscored_models_sort_after_scored(self):
+        rows = [
+            {"model_id": "null1", "evaluation": None},
+            {"model_id": "scored", "evaluation": {"test_error": 4.0}},
+            {"model_id": "null2", "evaluation": {}},
+        ]
+        ranked = self.Model._rank_model_rows(rows)
+        assert ranked[0]["model_id"] == "scored"
+        # Both unscored carry no fabricated value.
+        assert all(d["value"] is None for d in ranked[1:])
+
+    def test_all_null_yields_no_metric(self):
+        rows = [
+            {"model_id": "a", "evaluation": None},
+            {"model_id": "b", "evaluation": {"train_error": 3.0}},
+        ]
+        ranked = self.Model._rank_model_rows(rows)
+        # train_error alone is not a comparable validation/test metric here.
+        assert all(d["value"] is None and d["metric"] is None for d in ranked)
+
+    def test_falls_back_to_test_error_p(self):
+        row = {"model_id": "m", "evaluation": {"test_error_p": 1.5}}
+        (scored,) = self.Model._rank_model_rows([row])
+        assert scored["metric"] == "test_error_p"
+        assert scored["value"] == 1.5
+
+    def test_bool_not_treated_as_metric(self):
+        row = {"model_id": "m", "evaluation": {"test_error": True}}
+        (scored,) = self.Model._rank_model_rows([row])
+        assert scored["value"] is None
+
+    def test_iterations_are_weak_tiebreaker_for_unscored(self):
+        rows = [
+            {"model_id": "few", "evaluation": {"training_iterations": 10}},
+            {"model_id": "many", "evaluation": {"training_iterations": 99}},
+        ]
+        ranked = self.Model._rank_model_rows(rows)
+        # More iterations sorts first among unscored (deterministic only).
+        assert [d["model_id"] for d in ranked] == ["many", "few"]
+
+
+class TestSuboptimalModelWarning:
+    """Selection-time nudge toward the best-scoring model (warn, not block)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch, pv2_train, pv2_estim):
+        self.Model = pv2_train.Model
+        self.sel = pv2_estim.PoseEstimSelection()
+        self.monkeypatch = monkeypatch
+        self.warned = {}
+        monkeypatch.setattr(
+            type(self.sel),
+            "_warn_msg",
+            lambda _self, msg: self.warned.setdefault("msg", msg),
+        )
+        monkeypatch.setattr(
+            self.Model, "skeleton_of", classmethod(lambda cls, mid: "skel1")
+        )
+
+    def _set_ranked(self, ranked):
+        self.monkeypatch.setattr(
+            self.Model,
+            "rank_for_skeleton",
+            classmethod(lambda cls, skel: ranked),
+        )
+
+    def test_warns_when_better_model_exists(self):
+        self._set_ranked(
+            [
+                {
+                    "model_id": "best",
+                    "metric": "test_error",
+                    "value": 2.0,
+                    "iterations": 100,
+                },
+                {
+                    "model_id": "chosen",
+                    "metric": "test_error",
+                    "value": 8.0,
+                    "iterations": 100,
+                },
+            ]
+        )
+        self.sel._warn_suboptimal_model("chosen")
+        msg = self.warned.get("msg", "")
+        assert "best" in msg  # names the better candidate
+        assert "test_error=2" in msg  # shows its metric
+        assert "model_id='best'" in msg  # tells the user how to switch
+
+    def test_silent_when_chosen_is_best(self):
+        self._set_ranked(
+            [
+                {
+                    "model_id": "chosen",
+                    "metric": "test_error",
+                    "value": 2.0,
+                    "iterations": 100,
+                },
+                {
+                    "model_id": "worse",
+                    "metric": "test_error",
+                    "value": 8.0,
+                    "iterations": 100,
+                },
+            ]
+        )
+        self.sel._warn_suboptimal_model("chosen")
+        assert "msg" not in self.warned
+
+    def test_silent_when_no_comparable_metric(self):
+        # All evaluation NULL → chosen has no value → never fabricate an order.
+        self._set_ranked(
+            [
+                {
+                    "model_id": "chosen",
+                    "metric": None,
+                    "value": None,
+                    "iterations": None,
+                },
+                {
+                    "model_id": "other",
+                    "metric": None,
+                    "value": None,
+                    "iterations": None,
+                },
+            ]
+        )
+        self.sel._warn_suboptimal_model("chosen")
+        assert "msg" not in self.warned
+
+    def test_silent_on_lookup_failure(self):
+        def _boom(cls, skel):
+            raise RuntimeError("db down")
+
+        self.monkeypatch.setattr(
+            self.Model, "rank_for_skeleton", classmethod(_boom)
+        )
+        self.sel._warn_suboptimal_model("chosen")  # no raise
+        assert "msg" not in self.warned
+
+    def test_silent_when_no_model_id(self):
+        self.sel._warn_suboptimal_model(None)
+        assert "msg" not in self.warned
+
+    def test_only_same_metric_counts_as_better(self):
+        # A model measured on a different metric never fabricates an order.
+        self._set_ranked(
+            [
+                {
+                    "model_id": "othermetric",
+                    "metric": "test_error_p",
+                    "value": 0.1,
+                    "iterations": 100,
+                },
+                {
+                    "model_id": "chosen",
+                    "metric": "test_error",
+                    "value": 8.0,
+                    "iterations": 100,
+                },
+            ]
+        )
+        self.sel._warn_suboptimal_model("chosen")
+        assert "msg" not in self.warned

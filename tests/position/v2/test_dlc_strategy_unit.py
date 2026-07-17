@@ -122,6 +122,76 @@ def test_dlc_strategy_execute_training_test_mode(
         assert call_args.get("save_epochs") == 1
 
 
+def test_dlc_strategy_execute_training_routes_gputouse_pytorch(
+    pv2_train, tmp_path, skip_if_no_dlc
+):
+    """PyTorch engine (config=None default): gputouse is routed to device."""
+
+    from spyglass.position.utils.tool_strategies import DLCStrategy
+
+    strategy = DLCStrategy()
+    model_instance = Mock()
+    model_instance._info_msg = Mock()
+    model_instance._warn_msg = Mock()
+
+    config_path = tmp_path / "config.yaml"
+    params = {"gputouse": 0}
+
+    with (
+        patch("deeplabcut.train_network") as mock_train,
+        patch(
+            "spyglass.position.utils.get_param_names",
+            return_value=["gputouse", "device"],
+        ),
+        patch("spyglass.position.utils.suppress_print_from_package"),
+        patch("spyglass.position.utils.test_mode_suppress"),
+    ):
+        strategy._execute_training(config_path, params, model_instance)
+
+    call_args = mock_train.call_args[1]
+    # PyTorch: legacy gputouse dropped, routed to the modern device selector.
+    assert "gputouse" not in call_args
+    assert call_args["device"] == "cuda:0"
+
+
+def test_dlc_strategy_execute_training_preserves_gputouse_tf(
+    pv2_train, tmp_path, skip_if_no_dlc
+):
+    """TensorFlow engine honors gputouse; it must not be routed to device."""
+
+    from spyglass.position.utils.tool_strategies import DLCStrategy
+
+    strategy = DLCStrategy()
+    model_instance = Mock()
+    model_instance._info_msg = Mock()
+    model_instance._warn_msg = Mock()
+
+    config_path = tmp_path / "config.yaml"
+    params = {"gputouse": 0}
+
+    with (
+        patch("deeplabcut.train_network") as mock_train,
+        patch(
+            "spyglass.position.utils.get_param_names",
+            return_value=["gputouse", "device"],
+        ),
+        patch("spyglass.position.utils.suppress_print_from_package"),
+        patch("spyglass.position.utils.test_mode_suppress"),
+    ):
+        strategy._execute_training(
+            config_path,
+            params,
+            model_instance,
+            config={"engine": "tensorflow"},
+        )
+
+    call_args = mock_train.call_args[1]
+    # TF: gputouse forwarded untouched; no silent device override.
+    assert call_args["gputouse"] == 0
+    assert "device" not in call_args
+    model_instance._warn_msg.assert_not_called()
+
+
 def test_dlc_strategy_localize_model(pv2_train, tmp_path, skip_if_no_dlc):
     """Test _localize_trained_model snapshot selection."""
 

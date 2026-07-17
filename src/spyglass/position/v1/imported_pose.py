@@ -14,7 +14,31 @@ from spyglass.utils.nwb_helper_fn import (
 schema = dj.schema("position_v1_imported_pose")
 
 
-@schema
+def _named_edges(bodyparts, edges_arr):
+    """Convert integer-index skeleton edges to name pairs.
+
+    Parameters
+    ----------
+    bodyparts : list of str
+        Ordered node names; edge indices refer to positions in this list.
+    edges_arr : array-like or None
+        Iterable of ``(i, j)`` integer index pairs, or None when the
+        skeleton defines no edges.
+
+    Returns
+    -------
+    list of tuple of str
+        ``(bodyparts[i], bodyparts[j])`` for each edge; empty when
+        ``edges_arr`` is None.
+    """
+    if edges_arr is None:
+        return []
+    return [
+        (bodyparts[int(edge[0])], bodyparts[int(edge[1])]) for edge in edges_arr
+    ]
+
+
+@schema  # TODO: Move to spyglass.position.imported to match LFP convention?
 class ImportedPose(SpyglassMixin, dj.Manual):
     """
     Table to ingest pose data generated prior to spyglass.
@@ -145,48 +169,59 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         import warnings
 
         import ndx_pose
-        import pynwb
         from pynwb import NWBHDF5IO
-
-        from spyglass.position.v2.train import Skeleton
 
         try:
             with NWBHDF5IO(str(file_path), mode="r") as io:
                 nwbf = io.read()
-                behavior = nwbf.processing.get("behavior")
-                if behavior is None:
+                if nwbf.processing.get("behavior") is None:
                     return
-                for obj in nwbf.objects.values():
-                    if not isinstance(obj, ndx_pose.Skeleton):
-                        continue
-                    bodyparts = list(obj.nodes)
-                    edges_arr = obj.edges
-                    edges = []
-                    if edges_arr is not None:
-                        for edge in edges_arr:
-                            edges.append(
-                                (
-                                    bodyparts[int(edge[0])],
-                                    bodyparts[int(edge[1])],
-                                )
-                            )
-                    try:
-                        Skeleton().insert1(
-                            {"bodyparts": bodyparts, "edges": edges},
-                            accept_default=True,
-                            skip_duplicates=True,
-                        )
-                    except Exception as sk_exc:  # noqa: BLE001
-                        warnings.warn(
-                            f"V2 Skeleton insert failed for '{obj.name}' "
-                            f"in '{nwb_file_name}': {sk_exc}",
-                            stacklevel=4,
-                        )
+                skeletons = [
+                    obj
+                    for obj in nwbf.objects.values()
+                    if isinstance(obj, ndx_pose.Skeleton)
+                ]
+                for skeleton_obj in skeletons:
+                    self._insert_v2_skeleton(skeleton_obj, nwb_file_name)
         except Exception as exc:  # noqa: BLE001
             warnings.warn(
                 f"V2 skeleton registration failed for '{nwb_file_name}': "
                 f"{exc}. ImportedPose entries were inserted successfully.",
                 stacklevel=3,
+            )
+
+    @staticmethod
+    def _insert_v2_skeleton(skeleton_obj, nwb_file_name):
+        """Register one ndx-pose Skeleton in the V2 ``Skeleton`` table.
+
+        A failed insert is logged as a warning rather than raised, so that a
+        single bad skeleton does not abort registration of the others or roll
+        back the primary ``ImportedPose`` ingestion.
+
+        Parameters
+        ----------
+        skeleton_obj : ndx_pose.Skeleton
+            Skeleton graph object read from the ndx-pose NWB file.
+        nwb_file_name : str
+            Spyglass-registered NWB filename (used only for logging).
+        """
+        import warnings
+
+        from spyglass.position.v2.train import Skeleton
+
+        bodyparts = list(skeleton_obj.nodes)
+        edges = _named_edges(bodyparts, skeleton_obj.edges)
+        try:
+            Skeleton().insert1(
+                {"bodyparts": bodyparts, "edges": edges},
+                accept_default=True,
+                skip_duplicates=True,
+            )
+        except Exception as sk_exc:  # noqa: BLE001
+            warnings.warn(
+                f"V2 Skeleton insert failed for '{skeleton_obj.name}' "
+                f"in '{nwb_file_name}': {sk_exc}",
+                stacklevel=4,
             )
 
     def fetch_pose_dataframe(self, key=None):

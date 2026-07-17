@@ -33,6 +33,95 @@ COLOR_SWATCH = [
     "#ffe91a",
 ]
 
+# Quiet ffmpeg logging (shared by ``ffmpeg_clip`` and ``VideoMaker``).
+FFMPEG_LOG_ARGS = ["-hide_banner", "-loglevel", "error"]
+
+
+def ffmpeg_clip(
+    src,
+    dest_folder,
+    *,
+    start="00:00:00",
+    end="00:00:01",
+    suffix="short",
+    overwrite=False,
+):
+    """Write a short, time-bounded clip of a video with ffmpeg.
+
+    A dependency-light helper (raw ``ffmpeg`` on PATH, the same assumption
+    the rest of this module already makes) for the common "grab a few
+    seconds of a video" operation. Selection is by *time*, matching
+    DeepLabCut's ``VideoWriter.shorten`` command
+    (``ffmpeg -i src -ss start -to end -c:a copy out``) so its output is a
+    drop-in replacement, without importing DeepLabCut.
+
+    Note this is distinct from :class:`VideoMaker`'s ffmpeg usage, which
+    selects individual *frames* by index and re-encodes them for annotated
+    overlay videos.
+
+    Parameters
+    ----------
+    src : str or pathlib.Path
+        Path to the source video.
+    dest_folder : str or pathlib.Path
+        Directory the clip is written into. Created if it does not exist.
+        The output file is named ``<src_stem><suffix><src_suffix>`` so the
+        source's identifying tokens are preserved in the clip name.
+    start : str, optional
+        Clip start as ``HH:MM:SS``. Defaults to ``"00:00:00"``.
+    end : str, optional
+        Clip end as ``HH:MM:SS``. Defaults to ``"00:00:01"`` (a one-second
+        clip).
+    suffix : str, optional
+        String inserted before the extension of the output name. Defaults
+        to ``"short"``.
+    overwrite : bool, optional
+        If True, overwrite an existing clip (``ffmpeg -y``). If False
+        (default), ffmpeg refuses to overwrite (``-n``) and the existing
+        file's path is returned.
+
+    Returns
+    -------
+    pathlib.Path
+        Full path to the written (or pre-existing) clip.
+
+    Raises
+    ------
+    RuntimeError
+        If ffmpeg exits non-zero or the expected output file is missing.
+    """
+    src = Path(src)
+    dest_folder = Path(dest_folder)
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    out = dest_folder / f"{src.stem}{suffix}{src.suffix}"
+
+    if out.exists() and not overwrite:
+        logger.debug(f"Clip already exists, skipping: {out}")
+        return out
+
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-y" if overwrite else "-n",
+        "-i",
+        str(src),
+        "-ss",
+        start,
+        "-to",
+        end,
+        "-c:a",
+        "copy",
+        str(out),
+        *FFMPEG_LOG_ARGS,
+    ]
+    ret = subprocess.run(
+        ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if ret.returncode != 0 or not out.exists():
+        raise RuntimeError(
+            f"ffmpeg failed to clip {src} -> {out}: {ret.stderr}"
+        )
+    return out
+
 
 class VideoMaker:
     def __init__(
@@ -152,7 +241,7 @@ class VideoMaker:
         self.max_jobs_in_queue = max_jobs_in_queue
         self.timeout = 30 if test_mode else 300
 
-        self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
+        self.ffmpeg_log_args = FFMPEG_LOG_ARGS
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         prev_backend = matplotlib.get_backend()

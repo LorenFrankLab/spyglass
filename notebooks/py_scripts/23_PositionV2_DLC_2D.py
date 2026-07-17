@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.3
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: pv2
 #     language: python
@@ -23,9 +23,6 @@
 # ### Notes
 
 # %% [markdown]
-# _Developer Note:_ if you may make a PR in the future, be sure to copy this
-# notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
-#
 # This is one notebook in a multi-part series on Spyglass.
 #
 # - To set up your Spyglass environment and database, see
@@ -33,26 +30,33 @@
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [the Insert Data notebook](./02_Insert_Data.ipynb)
-# - For the legacy V1 DLC pipeline, see
-#   [the DLC notebook](./21_DLC.ipynb)
+# - For pose tracking with **SLEAP**, see
+#   [the SLEAP notebook](./25_PositionV2_SLEAP_2D.ipynb) (runs in its own
+#   `spyglass-sleap` environment)
 #
-# **Position V2** is designed to expand the functionality of the V1 pipeline
-# while simplifying the number of tables. The V2 pipeline:
+# <details>
+# <summary><b>For contributors</b></summary>
 #
-# - **Reduces complexity**: just a few main tables
-# - **Multi-tool support**: Works with DLC with planned expansion for SLEAP
-# - **Flexible workflows**: Train models in Spyglass or import pre-trained ones
-# - **NWB-native storage**: Uses ndx-pose extension for standardized data
-# - **Simplified processing**: Single PoseV2 table handles all post-processing
+# If you may make a PR in the future, be sure to copy this notebook and use
+# the `gitignore` prefix `temp` to avoid future conflicts.
 #
-# This tutorial assumes you have already ingested an NWB session file.
-# It covers:
+# </details>
 #
-# - **Primary path**: Training a model from scratch within Spyglass
-# - **Alternative path**: Importing a pre-trained model (DLC, SLEAP, or NWB)
-# - Running pose estimation on videos
-# - Processing pose data (orientation, centroid, smoothing)
-# - Retrieving and visualizing results
+# **Position V2** is a streamlined pose-estimation pipeline built around a few
+# main tables. It:
+#
+# - **Supports multiple tools**: DeepLabCut here, and SLEAP in notebook 25
+# - **Flexible workflows**: train models in Spyglass or import pre-trained ones
+# - **NWB-native storage**: uses the ndx-pose extension for standardized data
+# - **Simplified processing**: a single PoseV2 table handles all post-processing
+#
+# This tutorial assumes you have already ingested an NWB session file. It covers:
+#
+# - **Primary path**: training a model from scratch within Spyglass
+# - **Alternative path**: importing a pre-trained DeepLabCut model, or ingesting
+#   results from another tool (e.g. SLEAP) via an ndx-pose NWB file
+# - Running pose estimation, processing pose data (orientation, centroid,
+#   smoothing), and retrieving/visualizing results
 #
 
 # %% [markdown]
@@ -72,11 +76,10 @@
 #     - Training loss curve visualization
 # - [Path B: Import a Pre-Trained Model](#PathB) - Import existing model
 #     - Find or download a pretrained model (DLC Model Zoo, DANDI)
-#     - Import from a V1 Spyglass model (`Model.import_from_v1()`)
 #     - Import any DLC project directly (`config.yaml`)
-#     - SLEAP / ndx-pose NWB ingestion
+#     - Ingest results from other tools via ndx-pose NWB (`ImportedPose`)
 # - [Pose Estimation](#PoseEstim) - Run inference on videos
-#     - Configure inference parameters (e.g., device, batch size)
+#     - Configure inference parameters (e.g., batch size)
 #     - Set up estimation task
 #     - Run inference and validation
 # - [Parameters](#PoseParams) - Configure processing settings
@@ -99,9 +102,8 @@
 # #### Reference
 #
 # - [Troubleshooting](#Troubleshooting) - Common issues & solutions
-# - [V1→V2 Migration](#Migration) - Upgrade guide
 # - [External Resources](#Resources) - Documentation links
-# - [Multi-Tool Support](#MultiTool) - SLEAP integration status
+# - [Multi-Tool Support](#MultiTool) - SLEAP is supported (see notebook 25)
 # - [JSON Parameters](#json-parameters) - `blob` search functionality
 
 # %% [markdown]
@@ -135,9 +137,8 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
-dj.config.load("../dj_local_conf_prod.json")
-# dj.config.load("dj_local_conf.json")
-print(dj.conn(reset=True))
+# See the Setup notebook (./00_Setup.ipynb) if the following fails:
+print(dj.conn())
 
 # %%
 from spyglass.common import Session, VideoFile
@@ -160,36 +161,15 @@ from spyglass.position.v2 import (
     video,
 )
 
-_ = (
-    video,
-    train,
-    estim,
-    BodyPart,
-    Session,
-    VideoFile,
-    Model,
-    ModelSelection,
-    ModelParams,
-    PoseEstim,
-    PoseEstimParams,
-    PoseEstimSelection,
-    PoseParams,
-    PoseSelection,
-    PoseV2,
-    Skeleton,
-    VidFileGroup,
-)
-
 print("All imports successful!")
 
 # %% [markdown]
 # ### Check the environment
 #
-# Catches common dependency issues before you train or run inference. The most
-# frequent one for users coming from **Position V1** is a leftover TensorFlow
-# install (V1's DeepLabCut backend) colliding with V2's jax stack on the GPU.
-# If flagged, follow the printed fix (or rebuild from
-# `environments/environment_dlc.yml`), then restart the kernel.
+# Catches common dependency issues before training or inference — e.g. a
+# conflicting deep-learning backend on the GPU. If anything is flagged, follow
+# the printed fix (or rebuild from `environments/environment_dlc.yml`), then
+# restart the kernel.
 
 # %%
 check_environment()
@@ -207,12 +187,11 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 #
 # A few key points before diving in:
 #
-# 1. Training starts with a skeleton, representing a collection of body parts.
-# 2. A skeleton is specified with model training parameters.
-# 3. A video group is a collection of one or more files or calibrations.
-# 4. Training takes place on a video group and results in a Model.
-# 5. Pose estimation applies a given model to a given video group.
-# 6. The final `PoseV2` table incorporates all secondary calculations, like
+# 1. A skeleton is a collection of body parts, paired with training parameters.
+# 2. A video group is a collection of one or more files or calibrations.
+# 3. Training runs on a video group and produces a Model.
+# 4. Pose estimation applies a model to a video group.
+# 5. The final `PoseV2` table incorporates all secondary calculations, like
 #     orientation and smoothing.
 
 # %% [markdown]
@@ -228,21 +207,31 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 # %% [markdown]
 # ### Shared state for both paths
 #
-# The Pose Estimation and pose-processing sections below reference the variables
-# initialized here **regardless of which path you run** — so you can run either
-# Path A or Path B without the other. Each path fills in `model_key`; the
-# tutorial bootstrap fills in the video/session variables.
+# The Pose Estimation and pose-processing sections below read the variables
+# initialized here **regardless of which path you run**, so you can run either
+# path without the other. Each path fills in `model_key`; the tutorial bootstrap
+# fills in the video/session variables.
 
 # %%
-# Tutorial-only scaffolding: import the bootstrap helper from the test suite so
-# it lives in one place (and is exercised by the test suite). NOT for production.
+# The tutorial creates a few dummy Spyglass entries so it can run without a
+# recorded session. That helper ships with the Spyglass source checkout (not the
+# pip package), so this step needs a git clone of the repo. It is NOT needed for
+# real analysis — register your own session instead (see the Setup notebook).
 import sys
 
 import spyglass
 
-_tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
-if str(_tests_v2) not in sys.path:
-    sys.path.insert(0, str(_tests_v2))
+tests_dir = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
+if not tests_dir.exists():
+    raise FileNotFoundError(
+        f"Tutorial helper directory not found: {tests_dir}\n"
+        "This tutorial's example-data helpers live in the Spyglass source "
+        "checkout, which is not included in the pip package. Clone the repo "
+        "(https://github.com/LorenFrankLab/spyglass) and run from there, or "
+        "substitute your own registered session and videos."
+    )
+if str(tests_dir) not in sys.path:
+    sys.path.insert(0, str(tests_dir))
 from make_example_dlc_project import bootstrap_from_video_paths  # noqa: E402
 
 # Shared state — set by whichever path you run (A: train, B: import). Both the
@@ -254,12 +243,12 @@ nwb_file_name = None
 inf_vid_path = None
 training_vid_group_id = None
 skeleton_id = None
-DEMO_OUTPUT_DIR = None
+demo_output_dir = None
 
 # %% [markdown]
 # ## Path A: Train a New Model <a id="PathA"></a>
 #
-# **🎯 Goal**: Create a DLC project from videos in Spyglass, label frames, and
+# **Goal**: Create a DLC project from videos in Spyglass, label frames, and
 # train a pose estimation model.
 #
 # **Steps**:
@@ -271,18 +260,34 @@ DEMO_OUTPUT_DIR = None
 # 6. Visualize training curves
 
 # %% [markdown]
-# ### Step 1 — Choose training videos
-#
-# Browse the `VideoFile` table to find recordings you want to train on.
-# Each row corresponds to one video file registered in Spyglass.
+# **Before you start**: Path A trains a DeepLabCut model, so DeepLabCut must be
+# installed. The check below fails early with a clear message rather than deep
+# inside training.
 
 # %%
-# Inspect available videos — pick the ones you want to use for training
+try:
+    import deeplabcut  # noqa: F401
+except ImportError as exc:
+    raise ImportError(
+        "DeepLabCut is required for Path A (training a new model) but is not "
+        "installed in this environment. Install it (e.g. rebuild from "
+        "`environments/environment_dlc.yml`) and restart the kernel, or use "
+        "Path B to import a pre-trained model instead."
+    ) from exc
+
+# %% [markdown]
+# ### Step 1 — Choose training videos
+#
+# Browse the `VideoFile` table to find recordings to train on. Each row is one
+# video file registered in Spyglass.
+
+# %%
+# Inspect available videos — pick the ones to train on
 VideoFile()
 
 # %% [markdown]
-# Select your training videos.  You can use `nwb_file_name` + `epoch` dicts
-# to reference videos by session, or supply absolute paths:
+# Select your training videos. Use `nwb_file_name` + `epoch` dicts to reference
+# videos by session, or supply absolute paths:
 
 # %%
 # ── Choose your training videos ──────────────────────────────────────────────
@@ -301,8 +306,8 @@ training_video_list = []  # overridden in the bootstrap block below
 # ### Step 2 — Define body parts and skeleton
 
 # %%
-# List the body parts your model will track.
-# Every name must already exist in the BodyPart table (admins can add new ones).
+# Body parts your model will track. Each name must already exist in the
+# BodyPart table (admins can add new ones).
 training_bodyparts = ["whiteLED", "tailBase"]
 
 # %% [markdown]
@@ -312,7 +317,7 @@ training_bodyparts = ["whiteLED", "tailBase"]
 # <summary><b>Tutorial helper — not for production use</b></summary>
 #
 # `Model.create_project()` calls DLC to create a project folder and extract
-# frames.  Later, `Model.load()` calls `VidFileGroup.create_from_dlc_config()`
+# frames. Later, `Model.load()` calls `VidFileGroup.create_from_dlc_config()`
 # internally, which needs a matching `Session` in the Spyglass database.
 #
 # **In production**, register your NWB session with `insert_sessions()` and
@@ -320,49 +325,47 @@ training_bodyparts = ["whiteLED", "tailBase"]
 # `Model.load()`.
 #
 # The `bootstrap_from_video_paths()` helper (from
-# `tests/position/v2/make_example_dlc_project.py`) creates minimal dummy
-# entries so this tutorial works without a recorded session.  It is maintained
-# alongside the test suite to stay in sync with the production API.
+# `tests/position/v2/make_example_dlc_project.py`) creates minimal dummy entries
+# so this tutorial works without a recorded session.
 #
-# **If you run this on a shared database, please delete the dummy entries when
-# done.**
+# **On a shared database, please delete the dummy entries when done.**
 #
 # </details>
 
 # %%
-# Path-A tutorial imports. The bootstrap helper and shared-state variables are
-# defined once in "Shared state for both paths" above (Setup), so Path A and
-# Path B stay independent; here we only add the training-specific helpers.
+# Path-A tutorial imports. The bootstrap helper and shared-state variables come
+# from "Shared state for both paths" above; here we add only the
+# training-specific helpers.
 import yaml
 from make_example_dlc_project import make_dlc_project  # noqa: E402
 
 # ── Tutorial: create a minimal example DLC project if none exists ─────────
-_demo_dlc_dir = Path.home() / "DeepLabCut" / "examples"
-_demo_config = (
-    _demo_dlc_dir / "tutorial_dlc-tutorial_dlc-2025-01-01" / "config.yaml"
+demo_dlc_dir = Path.home() / "DeepLabCut" / "examples"
+demo_config = (
+    demo_dlc_dir / "tutorial_dlc-tutorial_dlc-2025-01-01" / "config.yaml"
 )
 
-print("_demo_config:", _demo_config)
+print("demo_config:", demo_config)
 
-if not _demo_config.exists():
+if not demo_config.exists():
     print("Demo config not exist")
-    _demo_config = make_dlc_project(_demo_dlc_dir)
-    print(f"Created example DLC project: {_demo_config}")
+    demo_config = make_dlc_project(demo_dlc_dir)
+    print(f"Created example DLC project: {demo_config}")
 else:
-    print(f"Using existing DLC project: {_demo_config}")
+    print(f"Using existing DLC project: {demo_config}")
 
-config_path = Path(_demo_config)
+config_path = Path(demo_config)
 
 # ── Read the DLC config to get video paths ───────────────────────────────────
-with open(config_path) as _f:
-    _cfg = yaml.safe_load(_f)
-_training_videos = list(_cfg.get("video_sets", {}).keys())
-_project_name = Path(_cfg.get("project_path", str(config_path.parent))).name
+with open(config_path) as config_file:
+    config = yaml.safe_load(config_file)
+training_videos = list(config.get("video_sets", {}).keys())
+project_name = Path(config.get("project_path", str(config_path.parent))).name
 
 # ── Register a Spyglass session for those videos (tutorial only) ──────────────
 print("Bootstrapping tutorial Spyglass session...")
 nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
-    _training_videos, nwb_stem=_project_name
+    training_videos, nwb_stem=project_name
 )
 print(f"  nwb_file_name  : {nwb_file_name}")
 print(f"  inf_vid_path   : {inf_vid_path}")
@@ -372,13 +375,10 @@ training_video_list = [{"nwb_file_name": nwb_file_name, "epoch": 1}]
 
 
 # %% [markdown]
-# Now call `Model.create_project()`.  This:
-# 1. Validates body parts are in the `BodyPart` table
-# 2. Resolves video paths from `VideoFile` (or uses absolute paths directly)
-# 3. Calls `deeplabcut.create_new_project()` to create the project folder
-# 4. Calls `deeplabcut.extract_frames()` with uniform sampling
-# 5. Inserts (or retrieves) a `Skeleton` entry
-# 6. Returns `{"config_path": ..., "skeleton_id": ...}`
+# Now call `Model.create_project()` with a project name, your body parts, and
+# the training videos. It sets up the DLC project on disk (creating the folder
+# and extracting frames to label) and returns `config_path` and `skeleton_id`
+# for the next steps.
 
 # %%
 project_info = Model().create_project(
@@ -406,26 +406,16 @@ seed_labeled_data(config_path)
 print("Synthetic labels written (tutorial only - replace with real labels).")
 
 # %% [markdown]
-# <details>
-# <summary><b>Why no <code>DLCProject</code> table in V2?</b></summary>
-#
-# V1 maintained a `DLCProject` table to track project state and training files,
-# keeping a copy of every config and video path in the database.  In practice
-# this created bookkeeping overhead without adding scientific value, because the
-# on-disk DLC project folder already serves as the ground truth.
-#
-# V2 treats the `config.yaml` on disk as the record of truth.  The config is
-# stored in `ModelParams` only *after* training is complete (via `Model.load()`),
-# keeping the database focused on results rather than intermediate state.
-#
-# </details>
+# For the full V1 → V2 migration guide (including why V2 has no `DLCProject`
+# table), see the Position Pipelines page:
+# https://lorenfranklab.github.io/spyglass/latest/GettingStarted/POSITION/
 
 # %% [markdown]
 # ### Step 4 — Label frames (manual step)
 #
 # After `create_project()` finishes, DLC has extracted frames into
-# `labeled-data/` inside the project folder.  Label them using the DLC GUI or
-# the napari plugin before training:
+# `labeled-data/` inside the project folder. Label them with the DLC GUI or the
+# napari plugin before training:
 #
 # ```bash
 # # DLC GUI (requires a display)
@@ -450,19 +440,17 @@ print("Synthetic labels written (tutorial only - replace with real labels).")
 train_params = {
     "trainingsetindex": 0,
     "shuffle": 1,
-    "gputouse": None,
-    "TFGPUinference": False,
     "net_type": "resnet_50",
     "augmenter_type": "imgaug",
     "epochs": 1,
     "save_epochs": 1,
     "project_path": str(config_path.parent),
 }
-TRAIN_PARAMS_ID = "path_a_demo_1epoch"
+train_params_id = "path_a_demo_1epoch"
 
 ModelParams.insert1(
     {
-        "model_params_id": TRAIN_PARAMS_ID,
+        "model_params_id": train_params_id,
         "params": train_params,
         "tool": "DLC",
         "skeleton_id": skeleton_id,
@@ -471,64 +459,99 @@ ModelParams.insert1(
 )
 
 # Create a VidFileGroup from the DLC config so ModelSelection can reference it.
-# Package-level matching now includes explicit basename->full-key fallback.
 training_vid_group_key = VidFileGroup.create_from_dlc_config(config_path)
 training_vid_group_id = training_vid_group_key["vid_group_id"]
 
-_sel_key = {
-    "model_params_id": TRAIN_PARAMS_ID,
+selection_key = {
+    "model_params_id": train_params_id,
     "tool": "DLC",
     "vid_group_id": training_vid_group_id,
-    "model_selection_id": TRAIN_PARAMS_ID,  # reuse params id as selection id
+    "model_selection_id": train_params_id,  # reuse params id as selection id
     "parent_id": None,
 }
-ModelSelection.insert1(_sel_key, skip_duplicates=True)
+ModelSelection.insert1(selection_key, skip_duplicates=True)
 
-if len(Model & _sel_key) > 0:
-    print(f"Model '{TRAIN_PARAMS_ID }' already exists — skipping training")
+if len(Model & selection_key) > 0:
+    print(f"Model '{train_params_id}' already exists — skipping training")
 else:
-    print("Starting training (10 iterations) ...")
-    Model.populate(_sel_key, display_progress=True)
-    print(f"Model '{TRAIN_PARAMS_ID }' trained and saved")
+    print("Starting training (1 epoch) ...")
+    # `Model().train()` is the unified training verb: given a fresh
+    # ModelSelection it runs training; given an existing Model it resumes
+    # (see "Continue / resume training" below).
+    Model().train(selection_key)
+    print(f"Model '{train_params_id}' trained and saved")
 
-model_key = (Model & _sel_key).fetch1()
+model_key = (Model & selection_key).fetch1()
 print(f"model_key: {model_key['model_id']}")
+
+# %% [markdown]
+# <details>
+# <summary><b>Choosing the compute device</b> (Click to Expand)</summary>
+#
+# The best available device (GPU if present, otherwise CPU) is selected
+# automatically for both training and inference. `device` is a **runtime**
+# choice, not a stored/hashed parameter, so it never forks an
+# otherwise-identical parameter set. To force a specific device, pass it to
+# `populate` via `make_kwargs`:
+#
+# ```python
+# Model().populate(selection_key, make_kwargs={"device": "cuda:0"})  # training
+# PoseEstim().populate(estim_key, make_kwargs={"device": "cuda:0"})  # inference
+# ```
+#
+# </details>
 
 # %% [markdown]
 # ### Step 6 — Visualize training curves
 
 # %%
 if model_key:
-    _history = Model().get_training_history({"model_id": model_key["model_id"]})
-    if len(_history) > 0:
-        Model().plot_training_history({"model_id": model_key["model_id"]})
+    history = Model().get_traininghistory({"model_id": model_key["model_id"]})
+    if len(history) > 0:
+        Model().plot_traininghistory({"model_id": model_key["model_id"]})
     else:
-        print("No training history yet (expected for 10-iteration demo).")
+        print("No training history yet (expected for a 1-epoch demo).")
+
+# %% [markdown]
+# ### Step 7 — Continue / resume training (optional) <a id="ContinueTraining"></a>
+#
+# A model that underfit need not be retrained from scratch. The same
+# `Model().train()` verb resumes an existing model: pass a trained model's key
+# plus how many additional `epochs` to run. Since a `Model` row already matches
+# the key, `train()` loads the saved weights, trains further, inserts a new
+# parent-linked model, and returns its key.
+
+# %%
+if model_key:
+    resumed_key = Model().train(
+        {"model_id": model_key["model_id"]},
+        epochs=50,  # additional epochs to train beyond the current snapshot
+    )
+    print(f"Resumed training → new model_id: {resumed_key['model_id']}")
 
 # %% [markdown]
 # ## Path B: Import a Pre-Trained Model <a id="PathB"></a>
 #
-# **Goal**: Load an existing DLC, SLEAP, or ndx-pose model into Spyglass.
-#
-# **What you'll accomplish**:
-# - Import a DeepLabCut project (`config.yaml`), SLEAP file, or DLC h5 output
-# - Understand skeleton and bodypart organization
-# - Create video file groups for analysis
+# **Goal**: Load an existing pre-trained model into Spyglass — import a
+# DeepLabCut project from its `config.yaml` and create video file groups for
+# analysis.
 #
 # > **Note**: Skip this section if you just completed Path A above.
 
 # %% [markdown]
-# Position V2 supports different import methods:
+# Position V2 supports two import routes:
 #
-# 1. **DLC config.yaml**: Import models trained with DeepLabCut
-# 2. **SLEAP / external tools**: Import via ndx-pose NWB file
-# 3. **DLC h5 output**: Load inference results from pre-run DLC
+# 1. **DLC `config.yaml`** — import a DeepLabCut-trained model (the default
+#    below), then run inference through the pipeline.
+# 2. **Pre-computed pose (ndx-pose NWB)** — ingest results from another tool
+#    (including **SLEAP**, or DLC `.h5` output) with `ImportedPose`; see the
+#    pointer at the end of this section.
 
 # %% [markdown]
 # #### From DeepLabCut Project
 #
-# If you have a DeepLabCut model already trained, you can import it by changing
-# `config_path` below to your `config.yaml`. If not, obtain one from the
+# To import an already-trained DeepLabCut model, set `config_path` below to your
+# `config.yaml`. If you don't have one, obtain it from the
 # [DLC Model Zoo](https://www.mackenziemathislab.org/dlc-modelzoo):
 #
 # ```python
@@ -555,71 +578,76 @@ if model_key:
 # > entries so the import can proceed without a recorded session.
 
 # %%
-# Path B: default — import from a Spyglass V1 DLC model
+# Path B default — import a pre-trained DeepLabCut project from its config.yaml.
 # ────────────────────────────────────────────────────────────────────────────
-# If you completed Path A, model_key is already set — this block is skipped.
+# If you completed Path A, model_key is already set and this block is skipped.
 #
-# By default we import the pre-trained Wtrack_WhiteLED model from the V1
-# schema.  Swap _DEFAULT_V1_KEY for any other V1 model key as needed.
-# To import a raw config.yaml instead, see the commented fallback below.
-
-_DEFAULT_V1_KEY = {
-    "project_name": "Wtrack_WhiteLED",
-    "dlc_model_name": "Wtrack_WhiteLED_ms_stim_wtrack_00",
-    "dlc_model_params_name": "default",
-}
+# To import YOUR model, set `pathb_config_path` to your project's config.yaml.
+# Otherwise the tutorial builds a small example DLC project so the import runs
+# end to end.
+import yaml
+from make_example_dlc_project import make_dlc_project  # noqa: E402
 
 if model_key is None:
-    try:
-        model_key = Model().import_from_v1(_DEFAULT_V1_KEY)
-        print(f"Imported V1 model: {model_key['model_id']}")
-    except (ImportError, KeyError, FileNotFoundError) as _exc:
-        print(f"V1 import unavailable ({type(_exc).__name__}): {_exc}")
-        print(
-            "Falling back to direct config.yaml import.\n"
-            "Uncomment and set _b_config_path in the block below."
-        )
+    # ── Point this at your own trained DLC project to import it ──
+    pathb_config_path = None  # e.g. Path("/path/to/your/config.yaml")
 
-# ── Fallback: import from a raw config.yaml ──────────────────────────────────
-# Uncomment if import_from_v1 is unavailable or you want to import a model
-# that is not in the V1 schema.
-#
-# _b_config_path = Path("/path/to/your/config.yaml")
-# if model_key is None and _b_config_path.exists():
-#     with open(_b_config_path) as _f:
-#         _b_cfg = yaml.safe_load(_f)
-#     _b_videos = list(_b_cfg.get("video_sets", {}).keys())
-#     _b_project_name = Path(
-#         _b_cfg.get("project_path", str(_b_config_path.parent))
-#     ).name
-#     try:
-#         model_key = Model().load(_b_config_path)
-#     except ValueError:
-#         print("Bootstrapping tutorial session for DLC import...")
-#         nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
-#             _b_videos, nwb_stem=_b_project_name
-#         )
-#         model_key = Model().load(_b_config_path)
-#     config_path = _b_config_path
-#     print(f"Imported model: {model_key}")
+    if pathb_config_path is None:  # tutorial: build a small example project
+        pathb_dlc_dir = Path.home() / "DeepLabCut" / "import_example"
+        pathb_config_path = make_dlc_project(pathb_dlc_dir)
+
+    pathb_config_path = Path(pathb_config_path)
+
+    # Register a Spyglass session for the project's videos (tutorial only). In
+    # production, run insert_sessions() on the real training session first.
+    with open(pathb_config_path) as config_file:
+        pathb_config = yaml.safe_load(config_file)
+    pathb_videos = list(pathb_config.get("video_sets", {}).keys())
+    pathb_project_name = Path(
+        pathb_config.get("project_path", str(pathb_config_path.parent))
+    ).name
+    nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
+        pathb_videos, nwb_stem=pathb_project_name
+    )
+
+    model_key = Model().load(pathb_config_path)
+    config_path = pathb_config_path
+    print(f"Imported DLC model: {model_key['model_id']}")
 
 # %% [markdown]
-# The `Model.load()` import process:
+# `Model.load()` reads the DLC project's config and latest trained snapshot and
+# registers a ready-to-use `Model` (plus its `Skeleton`, `ModelParams`, and a
+# `VidFileGroup` linking the project's videos to a Spyglass session).
 #
-# 1. Detects the latest trained model snapshot
-# 2. Extracts the skeleton (bodyparts and connections)
-# 3. Creates entries in Skeleton and ModelParams tables
-# 4. Links the DLC videos to a registered Spyglass session via VidFileGroup
-# 5. Stores model metadata in an NWB file
-# 6. Creates a Model entry for inference
+# Body-part names are reconciled with the curated `BodyPart` table on import, so
+# spelling variants (e.g. `green_led` vs `greenLED`) are handled automatically.
+# To also rewrite your DLC project's `config.yaml` to the canonical spelling,
+# pass `Model().load(config_path, normalize_names=True)`; the original config is
+# saved to a timestamped `config.yaml.<ts>.bak` first. Body parts not in
+# `BodyPart` with no canonical match still require an admin to add them.
 #
-# Body-part names are reconciled with the curated `BodyPart` table on import,
-# so spelling variants (e.g. `green_led` vs `greenLED`) are handled
-# automatically. To also rewrite your DLC project's `config.yaml` to the
-# canonical spelling, pass `Model().load(config_path, normalize_names=True)`;
-# the original config is saved to a timestamped `config.yaml.<ts>.bak` first.
-# Body parts that are not in `BodyPart` and have no canonical match still
-# require an admin to add them.
+
+# %% [markdown]
+# <details>
+# <summary><b>Migrating a model from Position V1</b></summary>
+#
+# If your pre-trained model already lives in the legacy Position **V1** schema,
+# import it into V2 with `Model.import_from_v1()`. It looks up the V1 model's
+# project path and delegates to `Model.load()` on the resolved `config.yaml`:
+#
+# ```python
+# v1_key = {
+#     "project_name": "Wtrack_WhiteLED",
+#     "dlc_model_name": "Wtrack_WhiteLED_ms_stim_wtrack_00",
+#     "dlc_model_params_name": "default",
+# }
+# model_key = Model().import_from_v1(v1_key)
+# ```
+#
+# This is only for models originally trained through the V1 pipeline. For any
+# other pre-trained DLC project, use the `Model.load()` default above.
+#
+# </details>
 #
 
 # %% [markdown]
@@ -627,7 +655,7 @@ if model_key is None:
 
 # %%
 if model_key and not Model() & model_key:
-    raise ValueError(f"❌ Model entry not found : {model_key}")
+    raise ValueError(f"Model entry not found : {model_key}")
 
 if model_key:
     model_params = (
@@ -635,20 +663,19 @@ if model_key:
     ).fetch1()
     skeleton_id = model_params.get("skeleton_id")
     if not (Skeleton() & {"skeleton_id": skeleton_id}).fetch1("KEY"):
-        raise ValueError(f"❌ Skeleton not found for model: {model_key}")
+        raise ValueError(f"Skeleton not found for model: {model_key}")
     if vid_group_id := model_key.get("vid_group_id"):
         if not VidFileGroup() & {"vid_group_id": vid_group_id}:
-            raise ValueError(f"❌ Video group not found: {vid_group_id}")
+            raise ValueError(f"Video group not found: {vid_group_id}")
     training_vid_group_id = model_key["vid_group_id"]
-    print("✅ Path B model import validated")
+    print("Path B model import validated")
 
 # %% [markdown]
-# #### Inference video — auto-generated from training data
+# #### Inference video
 #
-# If `inf_vid_path` is still `None` after Path B, the cell below fetches the
-# first training video from the V1 model, calls `bootstrap_from_video_paths()`
-# to create a 1-second inference clip via ffmpeg, and registers it in
-# `VideoFile`.
+# The Path B default already registered an inference clip (from the imported
+# project's videos) into `inf_vid_path`. If it is still `None`, the cell below
+# derives one from the imported project's videos.
 #
 # To use your own video instead, set `inf_vid_path` before running this cell:
 #
@@ -657,29 +684,20 @@ if model_key:
 # ```
 
 # %%
-if inf_vid_path is None and model_key is not None:
-    _v1_videos = []
-    try:
-        from spyglass.position.v1.position_dlc_model import (
-            DLCModel as _DLCModel,
-        )
-
-        _v1_cfg = (_DLCModel & _DEFAULT_V1_KEY).fetch1("config_template")
-        _v1_videos = list(_v1_cfg.get("video_sets", {}).keys())
-    except Exception as _exc:
-        print(f"Could not fetch V1 training videos: {_exc}")
-
-    if _v1_videos:
-        _v1_project_name = Path(_v1_videos[0]).parent.parent.name
-        print("Creating 1-second inference clip from V1 training video...")
+if inf_vid_path is None and config_path is not None:
+    with open(config_path) as config_file:
+        config = yaml.safe_load(config_file)
+    videos = list(config.get("video_sets", {}).keys())
+    if videos:
+        print("Creating a short inference clip from the project's videos...")
         nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
-            _v1_videos, nwb_stem=_v1_project_name
+            videos, nwb_stem=Path(config_path).parent.name
         )
         print(f"  nwb_file_name : {nwb_file_name}")
         print(f"  inf_vid_path  : {inf_vid_path}")
     else:
         print(
-            "No training videos found in V1 model.  "
+            "No videos found in the imported project. "
             "Set inf_vid_path manually before running Pose Estimation."
         )
 
@@ -689,100 +707,17 @@ if skeleton_id:
     plt.show()
 
 # %% [markdown]
-# #### From SLEAP / External Tools (via ndx-pose NWB)
+# #### Pointer: pose already computed by another tool (ndx-pose NWB)
 #
-# SLEAP and other tools (e.g. DLC2NWB) can export results as NWB files using
-# the ndx-pose extension.  The canonical Spyglass entry point for this data is
-# `ImportedPose`.
-#
-# **Basic ingestion**
-#
-# ```python
-# # 1. Register the session NWB (must be in the Nwbfile table)
-# from spyglass.data_import import insert_sessions
-# insert_sessions("sleap_output.nwb")
-#
-# # 2. Ingest the pose data — this is all you need for most workflows
-# from spyglass.position.v1.imported_pose import ImportedPose
-# ImportedPose().insert_from_nwbfile("sleap_output_.nwb")
-# ```
-#
-# **Optional: also register in the V2 pipeline**
-#
-# If you need the pose data to be accessible through V2 inference tables
-# (Skeleton, ModelParams, Model, PoseEstimSelection), pass `import_to_v2=True`:
-#
-# ```python
-# ImportedPose().insert_from_nwbfile("sleap_output_.nwb", import_to_v2=True)
-# ```
-#
-# > **Note**: `Model.load()` no longer accepts NWB files.  Use
-# > `ImportedPose.insert_from_nwbfile()` as shown above.
-
-# %%
-# Generate an example ndx-pose NWB file using the test-suite helper.
-import sys
-
-import spyglass
-
-_tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
-sys.path.insert(0, str(_tests_v2))
-from make_example_ndx_pose import make_ndx_pose_nwb
-
-ndx_pose_path = config_path.parent / "example_ndx_pose.nwb"
-make_ndx_pose_nwb(ndx_pose_path)
-print(f"ndx-pose NWB file ready: {ndx_pose_path}")
-
-# %%
-# To ingest an ndx-pose NWB, first register it in Spyglass, then call
-# ImportedPose().insert_from_nwbfile().  The block below shows the intended
-# workflow using a locally generated example file (production use requires the
-# NWB to already be inserted via insert_sessions()).
-#
-# Example (uncomment and adapt for real use):
-#   from spyglass.data_import import insert_sessions
-#   from spyglass.position.v1.imported_pose import ImportedPose
-#   insert_sessions("sleap_output.nwb")
-#   ImportedPose().insert_from_nwbfile("sleap_output_.nwb")
-#   # Also register skeleton/model in V2 tables:
-#   ImportedPose().insert_from_nwbfile("sleap_output_.nwb", import_to_v2=True)
-print(
-    "ndx-pose NWB ingestion goes through ImportedPose.insert_from_nwbfile().\n"
-    "See the markdown cell above for the full workflow."
-)
-
-# %% [markdown]
-# #### From DLC h5 output
-#
-# If you have run DLC inference and have `.h5` pose output files,
-# `deeplabcut.analyze_videos_converth5_to_nwb` (requires `dlc2nwb`) converts
-# them to an ndx-pose NWB with real `original_videos` paths.  Register the
-# resulting NWB with `insert_sessions()` and then call
-# `ImportedPose().insert_from_nwbfile()` to ingest the pose data.  Pass
-# `import_to_v2=True` if you also want skeleton/model metadata in the V2 tables.
-
-# %%
-try:
-    import deeplabcut as _dlc
-    import dlc2nwb  # noqa: F401
-
-    # Set config_path and video_folder to your project paths, then:
-    # config_path = "your/config/path/config.yaml"
-    # video_folder = "your/video/folder"
-    # _dlc.analyze_videos_converth5_to_nwb(config_path, video_folder)
-    #
-    # Then register and ingest:
-    # from spyglass.data_import import insert_sessions
-    # from spyglass.position.v1.imported_pose import ImportedPose
-    # insert_sessions("your_dlc_output.nwb")
-    # ImportedPose().insert_from_nwbfile("your_dlc_output_.nwb", import_to_v2=True)
-
-    print("dlc2nwb available — uncomment the lines above to run.")
-except ImportError:
-    print(
-        "dlc2nwb not installed. Install with: pip install dlc2nwb\n"
-        "Required by deeplabcut.analyze_videos_converth5_to_nwb."
-    )
+# If your results already exist as an **ndx-pose NWB file** (from SLEAP, DLC, or
+# any tool), skip training/inference here and use `ImportedPose` — the canonical
+# entry point for pre-computed pose:
+# `insert_sessions("pose.nwb")` then `ImportedPose().insert_from_nwbfile("pose.nwb")`
+# (add `import_to_v2=True` to also register the V2 model tables). DLC `.h5`
+# output first needs converting with `deeplabcut.analyze_videos_converth5_to_nwb`
+# (requires `dlc2nwb`). For SLEAP end-to-end, see
+# [notebook 25](./25_PositionV2_SLEAP_2D.ipynb). Note `Model.load()` does not
+# accept NWB files.
 
 # %% [markdown]
 # ## Pose Estimation <a id="PoseEstim"></a>
@@ -798,44 +733,24 @@ if model_key is None:
 
 # %% [markdown]
 #
-# **🎯 Goal**: Run pose inference on videos using the imported model
-#
-# **🔍 What you'll accomplish**:
-# - Configure inference parameters (device, batch size)
-# - Set up estimation tasks with video groups
-# - Run inference and validate results
-# - Handle common errors gracefully
+# **Goal**: Run pose inference on a video using the model, configuring inference
+# parameters (batch size), setting up an estimation task, and validating
+# results.
 
 # %% [markdown]
-# Now that we have a model, let's run pose estimation on a video.
+# #### Pointer: already ran DLC inference?
 #
-
-# %% [markdown]
-# #### Load existing DLC output
-
-# %% [markdown]
-# If you've already run DLC inference and have the output files:
-#
-
-# %%
-# Example: Load existing DLC h5/csv files into NWB
-# dlc_output = "/path/to/video_DLC_resnet50_project100000.h5"
-# nwb_file = "analysis_20250106.nwb"
-#
-# PoseEstim.load_dlc_output(
-#     dlc_output_path=dlc_output,
-#     nwb_file_name=nwb_file
-# )
+# If you have `.h5`/`.csv` output on disk, set `task_mode='load'` in
+# `PoseEstimSelection` (Step 2 below) to read it in rather than re-running
+# inference. Otherwise, run inference through the pipeline as follows.
 
 # %% [markdown]
 # #### Running Inference via the Pipeline
 #
-
-# %% [markdown]
 # Inference in V2 follows a three-step Spyglass pattern:
 #
 # 1. **`PoseEstimParams`** — name a set of inference parameters
-#     (device, batch size, etc.)
+#     (batch size, etc.)
 # 2. **`PoseEstimSelection`** — pair a model with a video group and choose
 #     `task_mode='trigger'` (run inference) or `'load'` (read existing output)
 # 3. **`PoseEstim.populate()`** — executes inference and stores results in an
@@ -849,20 +764,22 @@ if model_key is None:
 # %% [markdown]
 # ##### Step 1 — Inference parameters (`PoseEstimParams`)
 #
-# In this table, `params_hash` is a unique identifier for the set of params
-# used.  # This will raise an error if you attempt to insert a new entry with
-# `params` matching an existing row.
+# Here `params_hash` uniquely identifies the parameter set; inserting a new
+# entry whose `params` match an existing row raises an error. The compute device
+# (GPU if present, else CPU) is chosen automatically at run time — you don't set
+# it here. These parameters cover scientific settings like `batch_size`.
 
 # %%
-# Define custom params for your hardware:
+params_id = "batch8"
+
 params_result = PoseEstimParams.insert_params(
-    params={"device": "cuda", "batch_size": 8},
-    params_id="gpu_batch8",
+    params={"batch_size": 8},
+    params_id=params_id,
     skip_duplicates=True,
 )
-print(f"Inserted PoseEstimParams: {params_result}")
+print(f"Inserted PoseEstimParams '{params_id}'")
 
-PoseEstimParams & {"params.device": "cuda", "params.batch_size": 8}
+PoseEstimParams & {"pose_estim_params_id": params_id}
 
 # %% [markdown]
 # ##### Step 2 — Estimation task (`PoseEstimSelection`)
@@ -872,28 +789,19 @@ PoseEstimParams & {"params.device": "cuda", "params.batch_size": 8}
 # - **Training group** (`training_vid_group_id`): created by `Model.load` and
 #   linked to `ModelSelection`. Contains the original labeled videos used for
 #   training. Used by `get_nwb_file()` to resolve the parent session.
-# - **Inference group** (`inf_vid_group_id`): created here for the video(s) you
-#   want to run inference on. Linked to `PoseEstimSelection`.
+# - **Inference group** (`inf_vid_group_id`): created here for the video(s) to
+#   run inference on. Linked to `PoseEstimSelection`.
 #
 # This structure supports multi-camera recordings.
 
 # %%
-# Create video groups and estimation selection
 inf_vid_group_key = None
 estim_key = None
 
 if not (inf_vid_path and model_key):
-    raise ValueError("⚠️ Missing video or model - skipping PoseEstimSelection")
+    raise ValueError("Missing video or model - skipping PoseEstimSelection")
 
-# Check/create required params entry
-PARAMS_ID = "cpu_batch8"  # or "gpu_batch8" depending on your hardware
-PoseEstimParams.insert_params(
-    params={"device": "cpu", "batch_size": 8},
-    params_id=PARAMS_ID,
-    skip_duplicates=True,
-)
-
-# Create inference video group
+# Create the inference video group (reusing params_id from Step 1).
 inf_vid_group_key = VidFileGroup().insert1(
     {
         "description": f"Inference video for {model_key['model_id']}",
@@ -902,27 +810,26 @@ inf_vid_group_key = VidFileGroup().insert1(
     skip_duplicates=True,
 )
 
-# Create estimation selection
 estim_selection_key = {
     "model_id": model_key["model_id"],
     "vid_group_id": inf_vid_group_key["vid_group_id"],
-    "pose_estim_params_id": PARAMS_ID,
-    "task_mode": "load" if DEMO_OUTPUT_DIR else "trigger",
-    "output_dir": str(DEMO_OUTPUT_DIR) if DEMO_OUTPUT_DIR else "",
+    "pose_estim_params_id": params_id,
+    "task_mode": "load" if demo_output_dir else "trigger",
+    "output_dir": str(demo_output_dir) if demo_output_dir else "",
 }
 
 PoseEstimSelection().insert1(estim_selection_key, skip_duplicates=True)
 
-# Key for populate
+# Restrict to the primary-key fields needed for populate.
 estim_key = {
     k: v
     for k, v in estim_selection_key.items()
     if k in ["model_id", "vid_group_id", "pose_estim_params_id"]
 }
-print(f"✅ Created estimation selection: {estim_key}")
+print(f"Created estimation selection: {estim_key}")
 
 # %%
-# Inspect video groups if available
+# Inspect the video groups
 if training_vid_group_id:
     print(
         "Training videos:",
@@ -945,7 +852,6 @@ if inf_vid_group_key:
 if not estim_key:
     raise ValueError("No estim_key available - check previous steps")
 
-# Check if this is demo mode vs. real inference
 selection_entry = (PoseEstimSelection() & estim_key).fetch1()
 task_mode = selection_entry.get("task_mode", "trigger")
 output_dir = selection_entry.get("output_dir", "")
@@ -953,43 +859,41 @@ pose_df = None
 
 PoseEstim.populate(estim_key, display_progress=True)
 
-# Fetch the results
 pose_df = (PoseEstim() & estim_key).fetch1_dataframe()
 print(pose_df.head())
 
 # %% [markdown]
 # <details>
-# <summary>🚨 <b>Troubleshooting Pose Estimation</b></summary>
+# <summary><b>Troubleshooting Pose Estimation</b></summary>
 #
 # ### Common Issues & Solutions
 #
-# #### 🔴 **Error**: "No h5 output files found"
+# #### **Error**: "No h5 output files found"
 # **Cause**: Demo mode vs. real inference mismatch
 # **Solution**:
 # - This is expected in tutorial demo mode
 # - For real analysis, ensure `task_mode='trigger'` for automatic inference
 # - Or provide existing DLC `.h5` files with `task_mode='load'`
 #
-# #### 🔴 **Error**: "CUDA out of memory"
+# #### **Error**: "CUDA out of memory"
 # **Cause**: GPU memory insufficient
-# **Solution**:
+# **Solution**: Reduce `batch_size` so each inference step uses less GPU memory:
 # ```python
-# # Use CPU instead
 # PoseEstimParams.insert_params(
-#     params={"device": "cpu", "batch_size": 4},
-#     params_id="cpu_batch4"
+#     params={"batch_size": 4},
+#     params_id="batch4"
 # )
 # ```
 #
-# #### 🔴 **Error**: "Model not found" or "VidFileGroup not found"
+# #### **Error**: "Model not found" or "VidFileGroup not found"
 # **Cause**: Model import incomplete
 # **Solution**: Run the validation checkpoint above to diagnose
 #
-# #### 🔴 **Error**: "KeyError: analysis_file_name"
+# #### **Error**: "KeyError: analysis_file_name"
 # **Cause**: NWB file path resolution issue
 # **Solution**: Ensure video groups are linked to registered sessions
 #
-# #### 🔴 **Warning**: "Low likelihood values"
+# #### **Warning**: "Low likelihood values"
 # **Cause**: Model doesn't generalize to your videos
 # **Solution**:
 # - Adjust `likelihood_thresh` in processing parameters
@@ -1018,16 +922,10 @@ print(pose_df.head())
 
 # %% [markdown]
 #
-# **Goal**: Configure how raw pose data is processed into final trajectories
+# **Goal**: Configure how raw pose data is processed into final trajectories —
+# using default parameters or a custom configuration matched to your setup.
 #
-# **What you'll accomplish**:
-# - Understand orientation, centroid, and smoothing parameters
-# - Use default parameters or create custom configurations
-# - Match parameter settings to your tracking setup
-
-# %% [markdown]
-# Before processing pose data, we need to define processing parameters.
-# PoseParams stores configuration for:
+# `PoseParams` stores configuration for:
 #
 # - **Orientation**: How to calculate head direction
 # - **Centroid**: How to combine bodyparts into a single position
@@ -1060,8 +958,8 @@ print(pose_df.head())
 # - `gaussian` — symmetric Gaussian; best for display / offline analysis
 #
 # **likelihood_thresh** controls which frames are treated as low-confidence and
-# interpolated over before smoothing.  Typical values: `0.9` (strict) → `0.5`
-# (permissive).  Start with `0.9` and lower if too many frames are dropped.
+# interpolated over before smoothing. Typical values: `0.9` (strict) → `0.5`
+# (permissive). Start with `0.9` and lower if too many frames are dropped.
 
 # %% [markdown]
 # #### View Available Parameter Sets
@@ -1074,24 +972,15 @@ PoseParams()
 # Inspect the full JSON contents of any named parameter set:
 
 # %%
-# Helper: pretty-print the contents of a named PoseParams entry.
-# Change the name to any entry shown in the table above.
-import json
+# Pretty-print a named PoseParams entry (change to any entry shown above).
+params_to_inspect = "default"
 
-PARAMS_TO_INSPECT = "default"
-
-if PoseParams() & {"pose_params_id": PARAMS_TO_INSPECT}:
-    _row = (PoseParams() & {"pose_params_id": PARAMS_TO_INSPECT}).fetch1()
-    print("--- orient ---")
-    print(json.dumps(_row["orient"], indent=2))
-    print("\n--- centroid ---")
-    print(json.dumps(_row["centroid"], indent=2))
-    print("\n--- smoothing ---")
-    print(json.dumps(_row["smoothing"], indent=2))
+if PoseParams() & {"pose_params_id": params_to_inspect}:
+    PoseParams().print_params(params_to_inspect)
 else:
     print(
-        f"No entry named '{PARAMS_TO_INSPECT}'. "
-        "Run PoseParams.insert_default() first, or change _params_to_inspect."
+        f"No entry named '{params_to_inspect}'. "
+        "Run PoseParams.insert_default() first, or change params_to_inspect."
     )
 
 # %% [markdown]
@@ -1123,7 +1012,7 @@ PoseParams()
 #
 
 # %%
-# Create custom pose parameters based on model bodyparts
+# Build a custom parameter set from two of the model's body parts.
 if not model_key:
     raise ValueError("No model key available - cannot create custom PoseParams")
 
@@ -1131,11 +1020,8 @@ model_params = (ModelParams() & model_key).fetch1()
 skeleton_id = model_params["skeleton_id"]
 bp_tbl = Skeleton.BodyPart() & {"skeleton_id": skeleton_id}
 skeleton_parts = bp_tbl.fetch("bodypart")
-
-# Multi-bodypart custom parameters using standard DataJoint interface
 bodypart1, bodypart2 = skeleton_parts[0], skeleton_parts[1]
 
-# Use standard DataJoint insert1 interface with automatic validation
 PoseParams.insert1(
     {
         "pose_params_id": "tutorial_custom",
@@ -1167,7 +1053,7 @@ PoseParams.insert1(
     skip_duplicates=True,
 )
 
-print("✅ Created pose parameters using standard DataJoint interface")
+print("Created pose parameters 'tutorial_custom'")
 
 # %% [markdown]
 # Inspect the parameters:
@@ -1188,13 +1074,9 @@ PoseParams & {"params.smoothing.interp_params": "max_pts_to_interp"}
 
 # %% [markdown]
 #
-# **🎯 Goal**: Process raw pose estimates into final position trajectories
-#
-# **🔍 What you'll accomplish**:
-# - Link pose estimation results to processing parameters
-# - Run the position processing pipeline
-# - Generate orientation, centroid, and velocity data
-# - Validate the final processed dataset
+# **Goal**: Process raw pose estimates into final position trajectories — link
+# estimation results to processing parameters, run the pipeline (orientation,
+# centroid, velocity), and validate the result.
 
 # %% [markdown]
 # #### Create Processing Selection
@@ -1210,7 +1092,6 @@ PoseParams & {"params.smoothing.interp_params": "max_pts_to_interp"}
 # > ```
 
 # %%
-# Create pose processing selection and run processing
 pose_selection_key = None
 processed_df = None
 
@@ -1233,11 +1114,11 @@ print(f"Processing with params: {params_name}")
 PoseV2.populate(pose_selection_key)
 
 processed_df = (PoseV2() & pose_selection_key).fetch1_dataframe()
-print(f"✅ Processed data: {processed_df.shape[0]} timepoints")
+print(f"Processed data: {processed_df.shape[0]} timepoints")
 print(processed_df.head())
 
 # %% [markdown]
-# The PoseV2.make() pipeline performs:
+# `PoseV2.populate()` runs the processing pipeline, which performs:
 #
 # 1. **Likelihood filtering**: Remove low-confidence detections
 # 2. **Orientation calculation**: Compute head direction
@@ -1249,50 +1130,39 @@ print(processed_df.head())
 #
 
 # %% [markdown]
-# ### ✅ Validation Checkpoint: Data Processing
+# ### Validation Checkpoint: Data Processing
 #
-# Let's verify the position processing worked correctly:
+# Verify the processing worked correctly:
 
 # %%
 if processed_df is None:
-    raise ValueError(
-        "❌ No processed data - ensure PoseV2.populate() completed"
-    )
+    raise ValueError("No processed data - ensure PoseV2.populate() completed")
 
-required = ["position_x", "position_y", "orientation", "speed"]
-missing = [col for col in required if col not in processed_df.columns]
-
-if missing:
-    raise ValueError(f"❌ Missing columns: {missing}")
+# `PoseV2.fetch1_dataframe` builds a fixed set of columns (position_x/y,
+# orientation, velocity_x/y, speed) by construction, so no manual column
+# check is needed here — the method's contract (and its unit tests) guarantee
+# them.
 
 # Data summary
 time_range = processed_df.index[-1] - processed_df.index[0]
 mean_speed = processed_df["speed"].mean()
 
 if not pose_selection_key or not (PoseV2() & pose_selection_key).fetch1("KEY"):
-    raise ValueError("❌ PoseV2 entry not found for selection key")
+    raise ValueError("PoseV2 entry not found for selection key")
 
-print("✅ Validation passed")
+print("Validation passed")
 print(f"Duration: {time_range:.1f}s, Mean speed: {mean_speed:.1f} cm/s")
 
 # %% [markdown]
 # ## Data Analysis & Retrieval <a id="FetchData"></a>
 
 # %% [markdown]
-# **🎯 Goal**: Access processed position data for analysis and visualization
-#
-# **🔍 What you'll accomplish**:
-# - Retrieve data as pandas DataFrames or raw NWB objects
-# - Generate trajectory and time series visualizations
-# - Understand data structure and coordinate systems
-# - Export results for further analysis
+# **Goal**: Access processed position data for analysis and visualization —
+# retrieve it as pandas DataFrames or raw NWB objects and generate trajectory
+# and time-series plots.
 
 # %% [markdown]
 # ### [Visualization](#TableOfContents) <a id="Visualization"></a>
-#
-
-# %% [markdown]
-# Let's visualize the processed position data:
 #
 
 # %% [markdown]
@@ -1303,24 +1173,11 @@ print(f"Duration: {time_range:.1f}s, Mean speed: {mean_speed:.1f} cm/s")
 if processed_df is None:
     raise ValueError("No processed data available for plotting")
 
-fig, ax = plt.subplots(figsize=(10, 10))
-
-# Plot trajectory colored by speed
-scatter = ax.scatter(
-    processed_df["position_x"],
-    processed_df["position_y"],
-    c=processed_df["speed"],
-    cmap="viridis",
-    s=5,
-    alpha=0.6,
-)
-
-ax.set_xlabel("X position (cm)")
-ax.set_ylabel("Y position (cm)")
-ax.set_title("Animal trajectory (colored by speed)")
-ax.axis("equal")
-ax.invert_yaxis()  # Match video coordinates
-plt.colorbar(scatter, label="Speed (cm/s)", ax=ax)
+# `PoseV2.plot_trajectory()` is a reusable helper: it fetches the processed
+# dataframe and scatter-plots the trajectory colored by speed (a 3D scatter
+# if the data has a position_z column). It returns the Matplotlib axes for
+# further customization.
+ax = (PoseV2() & pose_selection_key).plot_trajectory()
 plt.show()
 
 # %% [markdown]
@@ -1369,13 +1226,10 @@ plt.show()
 # %% [markdown]
 # ## New Models <a id="TrainingWorkflow"></a>
 #
-# The complete workflow for training a new model from scratch — including
-# video selection, skeleton definition, frame extraction, and training —
-# is covered in **[Path A](#PathA)** at the top of this notebook.
-#
-# Return to Path A if you need a refresher.  The steps below (Model
-# Evaluation, Video Generation) assume you have a `model_key` from either
-# Path A or Path B.
+# The full workflow for training a new model from scratch (video selection,
+# skeleton definition, frame extraction, training) is covered in
+# **[Path A](#PathA)** at the top of this notebook. The steps below (Model
+# Evaluation, Video Generation) assume you have a `model_key` from either path.
 
 # %% [markdown]
 # ## Model Evaluation <a id="ModelEvaluation"></a>
@@ -1383,34 +1237,20 @@ plt.show()
 
 # %% [markdown]
 #
-# **🎯 Goal**: Evaluate model performance and visualize training progress
-#
-# **🔍 What you'll accomplish**:
-# - Assess model accuracy on test data
-# - Generate comprehensive training and validation loss curves
-# - Understand model convergence and potential overfitting
-# - Monitor learning rate schedules and optimization progress
-# - Compare multiple models or training configurations
-#
-# ### Background
-#
-# Model evaluation helps you understand:
-# - **Training Progress** - Loss curves show how well the model learned
-# - **Generalization** - Test accuracy indicates real-world performance
-# - **Overfitting Detection** - Training vs. validation divergence
-# - **Hyperparameter Optimization** - Compare different configurations
+# **Goal**: Evaluate model performance and visualize training progress. Loss
+# curves reveal how well the model learned, whether it is overfitting (training
+# vs. validation divergence), and how different configurations compare.
 #
 # ### Check Model Evaluation Availability
 
 # %%
-# Check model evaluation availability
 if model_key is None:
     raise ValueError("No model key available - cannot check evaluation support")
 
 model_params = (ModelParams() & model_key).fetch1()
 model_tool = model_params.get("tool", "Unknown")
-training_history = Model().get_training_history(model_key)
-has_training_history = training_history is not None
+traininghistory = Model().get_traininghistory(model_key)
+has_traininghistory = traininghistory is not None
 evaluation_supported = model_tool.upper() == "DLC"
 
 # %% [markdown]
@@ -1419,83 +1259,43 @@ evaluation_supported = model_tool.upper() == "DLC"
 # Visualize training progress and detect potential overfitting:
 
 # %%
-# Enhanced training curves visualization
-if not (has_training_history and evaluation_supported):
-    raise ValueError("⚠️ Model evaluation unavailable.")
+if not (has_traininghistory and evaluation_supported):
+    raise ValueError("Model evaluation unavailable.")
 
-if len(training_history) < 1:
-    raise ValueError("❌ Not enough training history data available.")
+if len(traininghistory) < 1:
+    raise ValueError("Not enough training history data available.")
 
-# Use built-in plotting method with detailed diagnostics enabled
-fig = Model().plot_training_history(
+# Built-in plotting method with detailed diagnostics enabled
+fig = Model().plot_traininghistory(
     model_key,
     save_path=None,
     detailed=True,
 )
 
 # %% [markdown]
+# If the loss curve suggests the model underfit (still decreasing, or accuracy
+# too low), you don't need to start over — resume training with more epochs. See
+# [Step 7 — Continue / resume training](#ContinueTraining):
+# `Model().train({"model_id": model_key["model_id"]}, epochs=50)`.
+
+# %% [markdown]
 # ## Video Generation <a id="VideoGeneration"></a>
 #
 
 # %% [markdown]
-#
-# ### Prerequisites Check
-#
-# Before generating videos, ensure you have completed pose estimation:
-#
-# ```python
-# # Check video generation prerequisites
-# can_make_video = False
-# if (
-#     processed_df is not None
-#     and len(processed_df) > 0
-#     and pose_selection_key is not None
-# ):
-#     can_make_video = True
-# ```
-#
-# ### Generate Pose Videos
-#
-# Create annotated videos showing keypoints and pose estimation results:
-#
-# ```python
-# if can_make_video:
-#     # Configure video generation parameters
-#     video_params = {
-#         "duration": 30.0,  # seconds
-#         "fps": 30,
-#         "show_skeleton": True,
-#         "keypoint_radius": 3,
-#         "line_thickness": 2,
-#     }
-#
-#     # Generate video with pose overlay
-#     video_path = (PoseV2() & pose_selection_key).make_video(**video_params)
-#     print(f"✅ Video generated: {video_path}")
-# else:
-#     print("⚠️ Complete pose estimation first before generating videos")
-# ```
-#
-# ### Video Quality Optimization
-#
-# ```python
-# # For best quality/size balance
-# optimal_params = {
-#     "fps": 30,                    # Standard framerate
-#     "compression": "h264",        # Standard codec
-#     "quality": "medium",          # Balance size/quality
-#     "resolution": (1280, 720)     # HD ready
-# }
-#
-# # For fastest generation
-# fast_params = {
-#     "fps": 15,                    # Lower framerate
-#     "resolution": (640, 480),     # Lower resolution
-#     "compression": "fast"         # Fast encoding
-# }
-# ```
-#
-# **💡 Tip**: Test with short durations (5-10 seconds) before generating full-length videos.
+# Once `PoseV2` is populated, render an annotated video (keypoints, centroid,
+# and orientation overlaid on the source video) with
+# `(PoseV2() & pose_selection_key).make_video()`. Use `percent_frames` to render
+# only a fraction of the video — start small to preview before rendering the
+# whole clip.
+
+# %%
+if processed_df is not None and pose_selection_key is not None:
+    # Render the first 10% of frames as a quick preview.
+    video_path = (PoseV2() & pose_selection_key).make_video(percent_frames=0.1)
+    print(f"Video generated: {video_path}")
+else:
+    print("⚠️ Complete pose estimation first before generating videos")
 
 # %% [markdown]
 # # Reference
@@ -1552,10 +1352,10 @@ fig = Model().plot_training_history(
 #
 # **"CUDA out of memory"**
 # ```python
-# # Switch to CPU processing
+# # Reduce batch_size to use less GPU memory
 # PoseEstimParams.insert_params(
-#     params={"device": "cpu", "batch_size": 4},
-#     params_id="cpu_small"
+#     params={"batch_size": 4},
+#     params_id="batch4"
 # )
 # ```
 #
@@ -1566,7 +1366,7 @@ fig = Model().plot_training_history(
 #
 # **"Inference taking too long"**
 # - Reduce batch size: `batch_size: 4` or `batch_size: 1`
-# - Use GPU if available: `device: "cuda"`
+# - Run on a machine with a GPU (the best available device is used automatically)
 # - Consider shorter video clips for testing
 #
 # </details>
@@ -1613,180 +1413,46 @@ fig = Model().plot_training_history(
 # ## Guides
 
 # %% [markdown]
-# <details>
-# <summary><b>V1 → V2 Migration Guide</b> (Click to expand)</summary>
-#
-# ### Migration Guide
-#
-# #### Table and Naming Changes
-#
-# Position V2 significantly streamlines the table structure compared to V1. i
-# Here's a comprehensive migration mapping:
-#
-#
-# | V1 | V2 | Notes |
-# |---|---|---|
-# | `BodyPart` | `BodyPart` | Reclassed from `Manual` → `Lookup` |
-# | `DLCProject` | `Skeleton` | Project's body part set → explicit skeleton graph |
-# | — | `Skeleton.BodyPart` | Part table; no V1 equivalent |
-# | `DLCModelTrainingParams` | `ModelParams` | |
-# | `DLCModelTrainingSelection` | `ModelSelection` | |
-# | `DLCModelTraining` | `Model` | |
-# | `DLCModelInput` | `ModelParams` | Merged into params |
-# | `DLCModelSource` | `ModelParams` | Merged into params |
-# | `DLCModelParams` | `ModelParams` | |
-# | `DLCModelSelection` | `ModelSelection` | |
-# | `DLCModel` | `Model` | |
-# | `DLCModelEvaluation` | `Model` |  |
-# | `DLCPoseEstimationSelection` | `PoseEstimSelection` | |
-# | `DLCPoseEstimation` | `PoseEstim` | |
-# | — | `PoseEstimParams` | New; separates inference params (device, batch_size) |
-# | `DLCSmoothInterpParams` | `PoseParams` | Consolidated into `smoothing` sub-dict |
-# | `DLCCentroidParams` | `PoseParams` | Consolidated into `centroid` sub-dict |
-# | `DLCOrientationParams` | `PoseParams` | Consolidated into `orient` sub-dict |
-# | `DLCSmoothInterpSelection` | `PoseSelection` | |
-# | `DLCCentroidSelection` | `PoseSelection` | |
-# | `DLCOrientationSelection` | `PoseSelection` | |
-# | `DLCSmoothInterpCohortSelection` | `PoseSelection` | Cohort concept eliminated |
-# | `DLCSmoothInterpCohort` | `PoseV2` | Cohort concept eliminated |
-# | `DLCSmoothInterp` | `PoseV2` | |
-# | `DLCCentroid` | `PoseV2` | |
-# | `DLCOrientation` | `PoseV2` | |
-# | `DLCPosSelection` | `PoseSelection` | |
-# | `DLCPosV1` | `PoseV2` | |
-# | `DLCPosVideoParams` | `VidFileGroup` | |
-# | `DLCPosVideoSelection` | `VidFileGroup` | |
-# | `DLCPosVideo` | `PoseV2.make_video` | No longer stored as table |
-# | `TrodesPosParams` | — | No V2 equivalent |
-# | `TrodesPosSelection` | — | No V2 equivalent |
-# | `TrodesPosV1` | — | No V2 equivalent |
-# | `TrodesPosVideo` | — | No V2 equivalent |
-# | `ImportedPose` | `ImportedPose` | Poses ingested from external NWB files |
-#
-#
-# #### Key consolidations in V2
-#
-# - `DLCCentroidParams` + `DLCOrientationParams` + `DLCSmoothInterpParams`
-#     → single `PoseParams` with three sub-dicts
-# - `DLCModelInput` + `DLCModelSource` + `DLCModelParams` → single `ModelParams`
-# - Cohort pattern (`DLCSmoothInterpCohort*`) eliminated; `PoseV2`
-#     handles multi-part poses directly
-# - Trodes position and video output tables have no V2 counterparts as V2 is
-#     focused on pose estimation from video, not direct position data
-#
-# #### 🔧 **Key Field Changes**
-#
-#
-# | V1 Field | V2 Field | Type Change |
-# |----------|----------|-------------|
-# | `dlc_model_name` | `model_id` | More generic naming |
-# | `dlc_model_params_name` | `model_params_id` | Consistent ID pattern |
-# | `pose_estimation_task` | `task_mode` | Clearer terminology |
-# | `pose_estimation_output_dir` | `output_dir` | Simplified naming |
-# | `smooth_interp_params_name` | `pose_params_id` | Unified parameter naming |
-#
-#
-# #### 📁 **File Organization**
-#
-# ```
-# V1 Structure:
-# src/spyglass/position/v1/
-# ├── position_dlc_project.py         # Project management
-# ├── position_dlc_training.py        # Model training
-# ├── position_dlc_pose_estimation.py # Inference
-# ├── position_dlc_cohort.py          # Batch processing
-# ├── dlc_utils.py                    # Utilities
-# └── dlc_reader.py                   # File I/O
-#
-# V2 Structure:
-# src/spyglass/position/v2/
-# ├── train.py                     # Model training & management
-# ├── estim.py                     # Pose estimation & processing
-# └── video.py                     # Video file management
-# src/spyglass/position/utils/     # Shared utilities
-# ├── dlc_io.py                    # DLC file parsing
-# ├── validation.py                # Shared validation utilities
-# ├── tool_strategies.py           # Multi-tool support
-# └── ...                          # Other shared utilities
-# ```
-#
-# #### 🔍 **Method Equivalents**
-#
-#
-# | V1 Method | V2 Method | Notes |
-# |-----------|-----------|-------|
-# | `DLCModel.create_dlc_model()` | `Model.train` | Unified training interface |
-# | `DLCModel.import_dlc_model()` | `Model.load` | Tool-agnostic import |
-# | `DLCPoseEstimation.run_estimation()` | `PoseEstim.run_inference()` | Simplified execution |
-# | `DLCSmoothInterp.get_position()` | `PoseV2.fetch1_dataframe()` | Direct DataFrame access |
-#
-#
-# #### ⚠️ **Breaking Changes**
-#
-# - **No backward compatibility**: V1 and V2 use separate schemas
-# - **Different output formats**: V2 uses ndx-pose standardization
-# - **Schema changes**: Field names and types may differ
-# - **Workflow differences**: Simplified but non-interchangeable processes
-#
-# </details>
+# For the full V1 → V2 migration guide (table mapping, consolidations, and
+# intentional differences), see the Position Pipelines page:
+# https://lorenfranklab.github.io/spyglass/latest/GettingStarted/POSITION/
 #
 # <details><summary><b>JSON Parameter Support</b> (Click to Expand)</summary>
 #
 # ### JSON Parameters
 #
-# Position V2 supports **native JSON columns** for enhanced parameter querying
-# capabilities:
+# Parameter tables (`ModelParams`, `PoseParams`, `PoseEstimParams`) store their
+# settings in native JSON columns, so you can query any sub-field directly with
+# dot notation — no custom iteration needed:
 #
 # ```python
-# # Example: ModelParams with JSON column (DataJoint v0.14+)
-# @schema
-# class ModelParams(SpyglassMixin, dj.Lookup):
-#     definition = """
-#     model_params_id: varchar(32)
-#     ---
-#     params: json  # ← Native JSON support!
-#     """
-#
-# # Enhanced querying with dot notation (automatic):
-# filtered = ModelParams & {'params.learning_rate': 0.001}
-# batch_filtered = ModelParams & {'params.batch_size': [4, 8, 16]}
-# nested_query = ModelParams & {'params.training.max_epochs': 100}
+# ModelParams & {'params.learning_rate': 0.001}
+# ModelParams & {'params.batch_size': [4, 8, 16]}   # IN-list query
+# PoseParams & {'smoothing.likelihood_thresh': 0.1}
 # ```
 #
-# **Benefits:**
-# - 🔍 **Native database querying** - No custom iteration needed
-# - 🚀 **Better performance** - Database-level filtering and indexing
-# - 🛠️ **Built-in DataJoint support** - Automatic dot notation translation
-# - 🌐 **Cross-language compatibility** - JSON is universally supported
-#
-# **Migration Note:** Existing blob parameter tables continue to work unchanged. i
-# Consider JSON columns for new parameter tables requiring complex querying.
+# The database does the filtering (and can index it), and JSON is portable
+# across languages. Existing blob parameter tables continue to work unchanged.
 #
 # </details>
 #
 # <details>
-# <summary><b>SLEAP Support Status</b> (Click to expand)</summary>
+# <summary><b>Multi-Tool Support: SLEAP</b> (Click to expand)</summary>
 #
-# ### SLEAP Integration Roadmap
+# ### SLEAP is supported
 #
-# Position V2 includes preliminary SLEAP support architecture but **SLEAP
-# training is not yet functional**. Here's the current status:
+# SLEAP is fully supported in Position V2 — training, continued training, and
+# inference — through a dedicated `SLEAPStrategy`. Because SLEAP and DeepLabCut
+# have conflicting dependencies, SLEAP work lives in its own notebook and
+# environment:
 #
-# #### ✅ **Available Now**
+# - **Notebook**: [`25_PositionV2_SLEAP_2D`](./25_PositionV2_SLEAP_2D.ipynb)
+# - **Environment**: `spyglass-sleap` (separate from this notebook's DLC env)
 #
-# - **Import Support**: Can import pre-trained SLEAP models via `Model.load()`,
-#     but not yet run inference.
-# - **Data Loading**: Can load existing SLEAP NWB files using
-#     `PoseEstim.load_from_nwb()`
-#
-# #### 🔄 **In Development**
-#
-# - **Training Pipeline**: The `train_model()` method raises
-#    `NotImplementedError`
-# - **Inference Integration**: SLEAP analysis integration with Position V2
-#     workflows
-#
-# **Timeline**: Native SLEAP training support is planned for a future release.
+# The V2 table structure (`Skeleton`, `ModelParams`, `Model`,
+# `PoseEstimSelection`, `PoseEstim`, `PoseV2`) is tool-agnostic and identical
+# across DLC and SLEAP; only the training/inference backend differs. Pose data
+# from any tool can also be ingested as an ndx-pose NWB via `ImportedPose`.
 #
 # </details>
 
@@ -1819,6 +1485,7 @@ fig = Model().plot_training_history(
 
 # %% [markdown]
 #
-# **🎉 Tutorial Complete!**
+# **Tutorial Complete!**
 #
-# You've learned the fundamentals of the Position V2 pipeline. For questions or feedback, please use the resources above.
+# You've learned the fundamentals of the Position V2 pipeline. For questions or
+# feedback, use the resources above.

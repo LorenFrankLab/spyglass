@@ -12,9 +12,12 @@ triangulate_pose_df
     Full pipeline: per-camera 2D DataFrames → 3D MultiIndex DataFrame.
 compute_reprojection_errors
     Compute per-camera reprojection error for triangulated 3D points.
+reproject_pose_to_camera
+    Reproject a triangulated 3D pose into one camera as a DLC-style 2D
+    DataFrame (inverse of ``triangulate_pose_df``); closes the 2D→3D→2D loop.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -290,3 +293,84 @@ def triangulate_pose_df(
         names=["scorer", "bodypart", "coords"],
     )
     return df_out
+
+
+def reproject_pose_to_camera(
+    pose_3d: pd.DataFrame,
+    calibration: dict,
+    bodyparts: Optional[List[str]] = None,
+    scale: float = 1.0,
+    scorer_in: str = "triangulated",
+    scorer_out: str = "reprojected3d",
+    out_h5: Optional[str] = None,
+) -> pd.DataFrame:
+    """Reproject a triangulated 3D pose into one camera's image plane.
+
+    This is the inverse of :func:`triangulate_pose_df`: it maps 3D rig-frame
+    points back through a single camera's projection matrix to pixel (u, v)
+    coordinates, producing a DeepLabCut-style 2D DataFrame.  Overlaying the
+    result on the source video closes the 2D → 3D → 2D loop and validates the
+    triangulation and calibration.
+
+    Parameters
+    ----------
+    pose_3d : pd.DataFrame
+        Triangulated 3D pose with 3-level columns ``(scorer, bodypart, coord)``
+        where ``coord ∈ {x, y, z, likelihood}`` — the output of
+        :func:`triangulate_pose_df` (or ``PoseEstim.fetch1_dataframe``).
+    calibration : dict
+        Single-camera calibration ``{"intrinsics": ..., "extrinsics": ...}``,
+        as consumed by :func:`build_projection_matrix`.
+    bodyparts : list of str, optional
+        Bodyparts to reproject.  Defaults to every bodypart present under
+        ``scorer_in`` in ``pose_3d``.
+    scale : float, optional
+        Divisor applied to the stored 3D coordinates to convert them into the
+        units of the extrinsics translation (metres).  Use ``100.0`` when the
+        pose is stored in centimetres.  Default ``1.0`` (already in metres).
+    scorer_in : str, optional
+        Scorer level to read from ``pose_3d``.  Default ``"triangulated"``.
+    scorer_out : str, optional
+        Scorer level written to the returned DataFrame.  Default
+        ``"reprojected3d"``.
+    out_h5 : str or path-like, optional
+        If given, also write the result to a DLC-style HDF5 file (key
+        ``"df_with_missing"``) at this path.
+
+    Returns
+    -------
+    pd.DataFrame
+        DLC-style 2D pose with 3-level columns
+        ``(scorer_out, bodypart, coord)`` where ``coord ∈ {x, y, likelihood}``.
+        Points that project behind the camera (or came from a NaN 3D point)
+        have their likelihood set to 0.  Index is shared with ``pose_3d``.
+    """
+    proj_mat = build_projection_matrix(
+        calibration["intrinsics"], calibration["extrinsics"]
+    )
+    if bodyparts is None:
+        bodyparts = list(
+            dict.fromkeys(pose_3d[scorer_in].columns.get_level_values(0))
+        )
+
+    data: dict = {}
+    for bp in bodyparts:
+        xyz = pose_3d[scorer_in][bp][["x", "y", "z"]].to_numpy() / scale
+        conf = pose_3d[scorer_in][bp]["likelihood"].to_numpy()
+        hom = np.column_stack([xyz, np.ones(len(xyz))])
+        px = (proj_mat @ hom.T).T
+        with np.errstate(invalid="ignore", divide="ignore"):
+            u = px[:, 0] / px[:, 2]
+            v = px[:, 1] / px[:, 2]
+        conf = np.where(np.isnan(u), 0.0, np.nan_to_num(conf, nan=0.0))
+        data[(scorer_out, bp, "x")] = u
+        data[(scorer_out, bp, "y")] = v
+        data[(scorer_out, bp, "likelihood")] = conf
+
+    out = pd.DataFrame(data, index=pose_3d.index)
+    out.columns = pd.MultiIndex.from_tuples(
+        list(out.columns), names=["scorer", "bodyparts", "coords"]
+    )
+    if out_h5 is not None:
+        out.to_hdf(str(out_h5), key="df_with_missing", mode="w")
+    return out

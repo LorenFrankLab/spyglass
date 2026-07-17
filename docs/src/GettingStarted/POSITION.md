@@ -136,7 +136,12 @@ ______________________________________________________________________
 - **`DLCModelInput` + `DLCModelSource` + `DLCModelParams`** → single
     `ModelParams`.
 - **Cohort pattern** (`DLCSmoothInterpCohort*`) eliminated — `PoseV2` handles
-    multi-bodypart poses directly.
+    multi-bodypart poses directly. Choosing *which* bodyparts feed
+    centroid/orientation carries over to `PoseParams`; the cohort's ability to
+    apply *different* smoothing parameters to different bodyparts within one run
+    was dropped — a review of production V1 usage found it was never used in
+    practice (a single parameter set was always applied uniformly across a
+    cohort's bodyparts).
 - **Trodes tables** have no V2 equivalent because V2 focuses on video-based pose
     estimation rather than hardware position sensors.
 
@@ -264,3 +269,18 @@ at the last frame and loses information at boundaries.
 **V2 behavior**: `compute_velocity` uses `np.gradient` (central differences at
 interior points, one-sided differences at boundaries), returning `n` values with
 no boundary artifacts.
+
+### 6. Compute device (GPU/CPU) is a runtime choice, not a parameter
+
+**V1 behavior**: GPU selection (`gputouse`) lived in the DLC parameter tables,
+so the device a run happened to use was baked into the stored, hashed
+parameters.
+
+**V2 behavior**: V2 does not treat the compute device as a pipeline parameter —
+the pose tool selects the best available device at run time (GPU if present,
+otherwise CPU), so the tutorials set no `device`/`gputouse` field. Device
+selection is a runtime/environment concern, not part of a run's scientific
+provenance: the same model and parameters yield the same result on GPU or CPU,
+so pinning a device into the content-addressed parameters would only fork
+otherwise-identical parameter sets. To force a specific GPU, use the environment
+(e.g. `CUDA_VISIBLE_DEVICES`) rather than a pipeline parameter.

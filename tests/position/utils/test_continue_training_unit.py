@@ -245,6 +245,21 @@ class TestSLEAPResolveCheckpoint:
         missing = tmp_path / "nope"
         assert ts.SLEAPStrategy()._resolve_parent_checkpoint(missing) is None
 
+    def test_one_level_down_returns_newest(self, ts, tmp_path):
+        """Multiple one-level-down matches → newest-by-mtime wins."""
+        import os
+
+        older = tmp_path / "run_old"
+        newer = tmp_path / "run_new"
+        older.mkdir()
+        newer.mkdir()
+        (older / "best.ckpt").write_text("")
+        (newer / "best.ckpt").write_text("")
+        os.utime(older / "best.ckpt", (1000, 1000))
+        os.utime(newer / "best.ckpt", (2000, 2000))  # more recent
+        ckpt = ts.SLEAPStrategy()._resolve_parent_checkpoint(tmp_path)
+        assert ckpt == newer / "best.ckpt"
+
 
 class TestSLEAPContinue:
     """continue_training wires --base_checkpoint or degrades to fresh."""
@@ -487,3 +502,31 @@ class TestDLCContinueRouting:
         assert "snapshot_path" not in passed
         assert "init_weights" not in passed
         assert passed["epochs"] == 30
+
+    def test_explicit_epochs_kwarg_honored(self, ts):
+        # A direct continue_training(..., epochs=N) call must reach the trainer
+        # even when params carries no length knob (the make() path relies on
+        # params['epochs'] instead — see test_resumable_pytorch_wires_snapshot).
+        strategy = _make_dlc(
+            ts, {"engine": "pytorch"}, Path("/proj/train/snapshot-050.pt")
+        )
+        params = {"project_path": "/proj", "shuffle": 1}  # no epochs
+        strategy.continue_training(
+            {}, params, "skel", {}, {"parent_id": "p"}, _Msg(), epochs=15
+        )
+        passed = strategy.train_calls[0]
+        assert passed["snapshot_path"] == str(
+            Path("/proj/train/snapshot-050.pt")
+        )
+        assert passed["epochs"] == 15
+
+    def test_explicit_epochs_kwarg_overrides_params(self, ts):
+        # Explicit kwarg wins over the params-baked length knob.
+        strategy = _make_dlc(
+            ts, {"engine": "pytorch"}, Path("/proj/train/snapshot-050.pt")
+        )
+        params = {"project_path": "/proj", "shuffle": 1, "epochs": 30}
+        strategy.continue_training(
+            {}, params, "skel", {}, {"parent_id": "p"}, _Msg(), epochs=99
+        )
+        assert strategy.train_calls[0]["epochs"] == 99

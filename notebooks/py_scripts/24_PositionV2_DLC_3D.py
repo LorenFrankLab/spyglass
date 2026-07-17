@@ -23,10 +23,14 @@
 # ### Notes
 
 # %% [markdown]
-# _Developer Note:_ if you may make a PR in the future, be sure to copy this
-# notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
-#
 # This is one notebook in a multi-part series on Spyglass.
+#
+# <details><summary>For contributors</summary>
+#
+# If you may make a PR in the future, be sure to copy this notebook, and use
+# the `gitignore` prefix `temp` to avoid future conflicts.
+#
+# </details>
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
@@ -35,9 +39,9 @@
 #   [the Position V2 DLC notebook](./23_PositionV2_DLC_2D.ipynb)
 #
 # Most pose pipelines track an animal in a single camera's image plane (2D).
-# When two or more **calibrated, synchronized** cameras view the same scene,
+# Given two or more **calibrated, synchronized** cameras of the same scene,
 # Spyglass V2 can **triangulate** the 2D detections into real-world **3D**
-# coordinates. This notebook covers the extra machinery that makes that work:
+# coordinates. This notebook covers the extra machinery for that:
 #
 # - **Generate** a camera-rig calibration (intrinsics + extrinsics) with an
 #   external tool, and **load** it into the V2 `CameraRig` / `Calibration`
@@ -45,7 +49,7 @@
 # - Group the per-camera videos in a `VidFileGroup`, tagging each with a
 #   `camera_index` and **pairing the group with its calibration**.
 # - Run `PoseEstim` in **3D mode**, which triangulates the per-camera 2D pose
-#   into 3D and stores it in NWB.
+#   and stores it in NWB.
 # - Fetch and visualize the 3D trajectory.
 #
 # **Example data.** We use the two-camera mouse-reaching dataset from the
@@ -81,9 +85,9 @@
 # %%
 import os
 import shutil
+import sys
 import uuid
 import warnings
-import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -103,9 +107,11 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
-# Edit this to point at your own DataJoint config if needed.
-dj.config.load("../dj_local_conf_prod.json")
-print(dj.conn(reset=True))
+# DataJoint resolves your connection config when the first connection is made —
+# from `dj_local_conf.json` in the working directory, `~/.datajoint_config.json`,
+# or `DJ_*` environment variables. See the Setup notebook (00_Setup) if you have
+# not configured one yet.
+print(dj.conn())
 
 # %%
 from spyglass.common import (
@@ -136,10 +142,36 @@ from spyglass.settings import raw_dir
 
 print("All imports successful!")
 
+# %%
+# This notebook needs DeepLabCut (video clipping + inference), OpenCV, and a
+# TOML reader. Check now and fail fast rather than deep inside the pipeline.
+missing_packages = []
+for module_name, install_hint in [
+    ("deeplabcut", "install deeplabcut in this env"),
+    ("cv2", "pip install opencv-python"),
+]:
+    try:
+        __import__(module_name)
+    except ImportError:
+        missing_packages.append(f"  - {module_name} ({install_hint})")
+try:
+    import tomllib  # noqa: F401  (py3.11+)
+except ModuleNotFoundError:
+    try:
+        import tomli  # noqa: F401
+    except ModuleNotFoundError:
+        missing_packages.append("  - tomli (pip install tomli; py<3.11 only)")
+if missing_packages:
+    raise ImportError(
+        "Missing packages required by this notebook:\n"
+        + "\n".join(missing_packages)
+    )
+print("Requirements OK — DeepLabCut, OpenCV, and TOML are available.")
+
 # %% [markdown]
 # ## The 3D tables <a id="Tables"></a>
 #
-# The 3D path reuses the V2 pipeline and adds a small calibration branch:
+# The 3D path reuses the V2 pipeline and adds a small set of calibration tables:
 #
 # - **`CameraDevice`** (common) — one row per physical camera (the source of
 #   truth for camera identity).
@@ -152,91 +184,64 @@ print("All imports successful!")
 #   a `Calibration`.
 #
 # When `PoseEstim` sees a video group with **≥2 cameras and a linked
-# calibration**, it runs the 3D path: per-camera 2D pose → DLT triangulation →
-# 3D pose stored in NWB.
+# calibration**, it runs the 3D path: combining each camera's 2D pose into a
+# single triangulated 3D pose, stored in NWB.
 
 # %%
 # The video + calibration tables, then training, estimation, and the pipeline.
+# Passing the schema modules (video / train / estim) makes the diagram label
+# each table with its schema-module prefix, showing where it is defined.
 dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim)
 
 # %% [markdown]
 # ## Get example data <a id="Data"></a>
 #
-# The Anipose dataset is distributed as a single ~942 MB zip on Zenodo. We
-# download it once (skip if present) and extract only the few files we need for
-# one reaching trial: the calibration, the per-camera 2D detections, the raw
-# videos, and Anipose's reference 3D output.
+# The Anipose dataset is a single ~942 MB zip on Zenodo, and using it takes a
+# few dataset-specific steps: download once, extract only the members one
+# reaching trial needs, and reshape Anipose's multi-candidate 2D detections
+# into the tidy DLC-style `.h5` the pipeline loads. None of that is
+# Spyglass-specific, so it lives in a support helper — `fetch_anipose_example` —
+# that returns the resolved paths this notebook consumes. **Everything after
+# this cell is a user-facing step you would swap for your own data.**
 #
-# > Set `ANIPOSE_DIR` (or the `ANIPOSE_DIR` environment variable) to choose
-# > where the data lives. If you already have a copy, point it there to skip the
-# > download.
+# > `fetch_anipose_example(dest_dir=...)` (or the `ANIPOSE_DIR` environment
+# > variable) chooses where the data lives; default is
+# > `~/spyglass_data/anipose`. Point it at an existing copy to skip the
+# > download. The helper ships in the Spyglass source checkout under
+# > `tests/position/v2/`, alongside the other tutorial bootstrap helpers.
 
 # %%
-ZENODO_URL = (
-    "https://zenodo.org/api/records/5733431/files/mouse-anipose.zip/content"
-)
-ANIPOSE_DIR = Path(
-    os.environ.get("ANIPOSE_DIR", Path.home() / "spyglass_data" / "anipose")
-)
-MOUSE_ZIP = ANIPOSE_DIR / "mouse-anipose.zip"
-EXTRACT_ROOT = ANIPOSE_DIR / "extracted"
+import spyglass  # noqa: E402
 
-# One reaching trial from one session of the two-camera mouse project.
-ZIP_SESS = "mouse-testing/020820_preDTreaches_day1/020820_JiDT13"
-REACH = "preDT1_JiDT13_reach1_hit"
-CAM_TOKENS = ["cam1", "cam2"]  # camera-name tokens used in file names
+tests_v2_dir = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
+if not tests_v2_dir.exists():
+    raise FileNotFoundError(
+        f"Tutorial helper directory not found: {tests_v2_dir}\n"
+        "This tutorial's example-data helper lives in the Spyglass source "
+        "checkout, which is not included in the pip package. Clone the repo "
+        "(https://github.com/LorenFrankLab/spyglass) and run from there, or "
+        "substitute your own calibration, videos, and 2D detections."
+    )
+if str(tests_v2_dir) not in sys.path:
+    sys.path.insert(0, str(tests_v2_dir))
 
-# The minimal set of members we need from the zip.
-NEEDED = [
-    f"{ZIP_SESS}/calibration/calibration.toml",
-    f"{ZIP_SESS}/pose-3d/{REACH}.csv",
-]
-for tok in CAM_TOKENS:
-    NEEDED += [
-        f"{ZIP_SESS}/pose-2d/{REACH}_{tok}.h5",
-        f"{ZIP_SESS}/videos-raw/{REACH}_{tok}.mp4",
-    ]
+from anipose_example import fetch_anipose_example  # noqa: E402
 
-SESSION_DIR = EXTRACT_ROOT / ZIP_SESS
-
-
-def fetch_example_data():
-    """Download (once) and extract only the files this notebook needs."""
-    missing = [m for m in NEEDED if not (EXTRACT_ROOT / m).exists()]
-    if not missing:
-        print("Example data already present — skipping download.")
-        return
-
-    ANIPOSE_DIR.mkdir(parents=True, exist_ok=True)
-    if not MOUSE_ZIP.exists() or MOUSE_ZIP.stat().st_size == 0:
-        import urllib.request
-
-        print(f"Downloading mouse-anipose.zip (~942 MB) to {MOUSE_ZIP} ...")
-        print("This is a one-time download; re-runs reuse the extracted files.")
-        urllib.request.urlretrieve(ZENODO_URL, MOUSE_ZIP)
-
-    print(f"Extracting {len(missing)} needed file(s) ...")
-    with zipfile.ZipFile(MOUSE_ZIP) as zf:
-        for member in missing:
-            zf.extract(member, EXTRACT_ROOT)
-    print("Done.")
-
-
-fetch_example_data()
-print("Session dir:", SESSION_DIR)
+example = fetch_anipose_example()
+session_dir = example["session_dir"]
+print("Session dir:", session_dir)
 
 # %% [markdown]
 # ## Generate a calibration <a id="Generate"></a>
 #
 # A 3D calibration has two parts per camera:
 #
-# - **Intrinsics** — focal lengths, principal point, lens distortion. These
-#   describe a single camera's optics.
-# - **Extrinsics** — the rotation `R` and translation `t` placing each camera in
-#   a shared rig coordinate frame. These describe how the cameras sit relative
-#   to one another.
+# - **Intrinsics** — a single camera's optics: focal lengths, principal point,
+#   lens distortion.
+# - **Extrinsics** — how the cameras sit relative to one another: the rotation
+#   `R` and translation `t` placing each camera in a shared rig coordinate frame.
 #
-# **You generate these with a calibration tool, not in Spyglass.** You record a
+# **You generate these with a calibration tool, not in Spyglass** — record a
 # known calibration board (checkerboard / ChArUco) moving through the shared
 # field of view, then run a calibration routine. Two common options:
 #
@@ -247,11 +252,18 @@ print("Session dir:", SESSION_DIR)
 #   [Anipose tutorial](https://anipose.readthedocs.io/en/latest/tutorial.html);
 #   it writes a `calibration.toml` (the format our example dataset ships).
 #
-# Below we **load the calibration that ships with the Anipose example** rather
-# than re-deriving it, and translate it into the dicts the `Calibration` table
-# expects. The Anipose `.toml` stores each camera's pose as a Rodrigues
-# **rotation vector + translation (world→camera, millimetres)**; the V2 tables
-# store **camera→rig `R`/`t` in metres**, so we invert and rescale.
+# Below we **load the calibration that ships with the Anipose example** and
+# translate it into the dicts the `Calibration` table expects. The two tools use
+# slightly different conventions and units, which the helper below converts.
+#
+# <details><summary>Conversion details</summary>
+#
+# Anipose stores each camera's orientation as a compact "rotation vector" plus a
+# translation in millimetres, oriented world→camera. The V2 tables store the
+# rotation matrix `R` and translation `t` oriented camera→rig, in metres, so the
+# helper inverts the transform and rescales.
+#
+# </details>
 
 # %%
 try:
@@ -298,8 +310,11 @@ def anipose_calibration_to_v2(toml_path):
     return dict(sorted(cams.items()))
 
 
-calib = anipose_calibration_to_v2(
-    SESSION_DIR / "calibration" / "calibration.toml"
+calib = anipose_calibration_to_v2(example["calibration_toml"])
+assert len(calib) >= 2, (
+    f"3D triangulation needs at least 2 calibrated cameras; the calibration "
+    f"parsed only {len(calib)}. Check that calibration.toml has multiple "
+    f"`cam_*` sections."
 )
 for ci, cam in calib.items():
     t = np.asarray(cam["extrinsics"]["t"])
@@ -311,28 +326,29 @@ for ci, cam in calib.items():
 # %% [markdown]
 # ## Load the calibration <a id="Load"></a>
 #
-# Insert order is fixed by the foreign keys:
+# Each table depends on the one before it, so we insert in order:
 # `CameraDevice → CameraRig → CameraRig.Camera → Calibration →
-# Calibration.Camera`. We prefix every tutorial row with `DEMO` so it is easy to
-# remove later (see [Cleanup](#Cleanup)).
+# Calibration.Camera`. Every tutorial row is prefixed with `demo` for easy
+# removal later (see [Cleanup](#Cleanup)).
 
 # %%
-DEMO = "ap3d_nb"  # identifier prefix for every row this notebook creates
-RIG_ID = f"{DEMO}_rig"
-CAL_ID = f"{DEMO}_cal"
+demo = "ap3d_nb"  # identifier prefix for every row this notebook creates
+rig_id = f"{demo}_rig"
+cal_id = f"{demo}_cal"
+cal_key = {"camera_rig_id": rig_id, "calibration_id": cal_id}
 today = datetime.now().date().isoformat()
 
 # 1. One CameraDevice per physical camera (source of truth for identity).
 for ci, cam in calib.items():
     CameraDevice.insert1(
-        {"camera_name": f"{DEMO}_{cam['name']}", "meters_per_pixel": 0.0},
+        {"camera_name": f"{demo}_{cam['name']}", "meters_per_pixel": 0.0},
         skip_duplicates=True,
     )
 
 # 2. The rig + one slot per camera, mapping camera_index -> CameraDevice.
 CameraRig.insert1(
     {
-        "camera_rig_id": RIG_ID,
+        "camera_rig_id": rig_id,
         "description": "Anipose mouse two-camera rig (tutorial)",
         "n_cameras": len(calib),
     },
@@ -341,9 +357,9 @@ CameraRig.insert1(
 for ci, cam in calib.items():
     CameraRig.Camera.insert1(
         {
-            "camera_rig_id": RIG_ID,
+            "camera_rig_id": rig_id,
             "camera_index": ci,
-            "camera_name": f"{DEMO}_{cam['name']}",
+            "camera_name": f"{demo}_{cam['name']}",
         },
         skip_duplicates=True,
     )
@@ -351,8 +367,7 @@ for ci, cam in calib.items():
 # 3. The calibration header + per-camera intrinsics/extrinsics.
 Calibration.insert1(
     {
-        "camera_rig_id": RIG_ID,
-        "calibration_id": CAL_ID,
+        **cal_key,
         "calibration_date": today,
         "notes": "Loaded from Anipose calibration.toml (tutorial)",
     },
@@ -361,8 +376,7 @@ Calibration.insert1(
 for ci, cam in calib.items():
     Calibration.Camera.insert1(
         {
-            "camera_rig_id": RIG_ID,
-            "calibration_id": CAL_ID,
+            **cal_key,
             "camera_index": ci,
             "intrinsics": cam["intrinsics"],
             "extrinsics": cam["extrinsics"],
@@ -372,7 +386,7 @@ for ci, cam in calib.items():
     )
 
 # Read it back to confirm the round-trip.
-(Calibration.Camera & {"camera_rig_id": RIG_ID, "calibration_id": CAL_ID})
+(Calibration.Camera & cal_key)
 
 # %% [markdown]
 # ## Register videos <a id="Videos"></a>
@@ -380,40 +394,31 @@ for ci, cam in calib.items():
 # Next we register the per-camera videos and group them. Two ideas matter here:
 #
 # 1. **`camera_index` must agree with the calibration.** The video at
-#    `camera_index = i` is triangulated using the calibration stored at
-#    `camera_index = i`. We pair them **by camera name**: the calibration entry
-#    for each index carries a name token (`cam1`/`cam2`) that must appear in the
-#    matching video's filename.
+#    `camera_index = i` is triangulated using the calibration at
+#    `camera_index = i`. We pair them **by camera name**: each index's
+#    calibration entry carries a name token (`cam1`/`cam2`) that must appear in
+#    the matching video's filename.
 # 2. **The video group is linked to its calibration** via
-#    `VidFileGroup.Calibration`. That link is what flips `PoseEstim` into 3D
-#    mode.
+#    `VidFileGroup.Calibration` — the link that flips `PoseEstim` into 3D mode.
 #
-# To keep things light we use **DeepLabCut's video writer**
-# (`VideoWriter.shorten`) to clip a short demo segment from each raw reach video.
+# We use Spyglass's dependency-light `ffmpeg_clip` helper to clip a short demo
+# segment from each raw reach video by time. It shells out to `ffmpeg` directly
+# (no DeepLabCut needed) and writes `<stem>short.mp4` into the destination.
 
 # %%
-from deeplabcut.utils.auxfun_videos import VideoReader, VideoWriter
+from deeplabcut.utils.auxfun_videos import VideoReader
 
-CLIPS_DIR = SESSION_DIR / "tutorial_clips"
-CLIPS_DIR.mkdir(exist_ok=True)
+from spyglass.position.utils.make_video import ffmpeg_clip
 
-
-def clip_demo_video(src, dest_folder, end="00:00:01"):
-    """Write a short clip from ``src`` using DLC's VideoWriter; return its path."""
-    out = VideoWriter(str(src)).shorten(
-        "00:00:00", end, dest_folder=str(dest_folder)
-    )
-    if out is None:  # older DLC returns None — locate the produced clip
-        out = next(Path(dest_folder).glob(f"{Path(src).stem}*short*.mp4"))
-    return Path(out)
-
+clips_dir = session_dir / "tutorial_clips"
+clips_dir.mkdir(exist_ok=True)
 
 # Clip one short video per camera, paired to its calibrated camera_index.
 clip_paths = {}
 for ci, cam in calib.items():
     token = cam["name"]
-    src = SESSION_DIR / "videos-raw" / f"{REACH}_{token}.mp4"
-    clip = clip_demo_video(src, CLIPS_DIR)
+    src = example["videos"][token]
+    clip = ffmpeg_clip(src, clips_dir)
     assert (
         token in clip.name
     ), f"clip {clip.name} not paired with calib '{token}'"
@@ -427,17 +432,23 @@ print(f"\nShared frame count: {n_frames}")
 # %% [markdown]
 # #### Register a session and the videos
 #
-# `PoseEstim` stores its results in an NWB analysis file derived from the
-# session NWB that the videos belong to. In production you would register your
-# real recording with `insert_sessions()`. For this tutorial we create a minimal
-# dummy session (a copy of the bundled `minirec` NWB) and register each clip as
-# a `VideoFile`.
+# `PoseEstim` stores results in an NWB analysis file derived from the session
+# NWB the videos belong to. In production you would register your real recording
+# with `insert_sessions()`. For this tutorial we create a minimal dummy session
+# (a copy of the bundled `minirec` NWB) and register each clip as a `VideoFile`.
 
 # %%
-nwb_file_name = f"{DEMO}_.nwb"
+nwb_file_name = f"{demo}_.nwb"
 nwb_path = Path(raw_dir) / nwb_file_name
+minirec_src = Path(raw_dir) / "minirec20230622_.nwb"
 if not nwb_path.exists():
-    shutil.copy2(str(Path(raw_dir) / "minirec20230622_.nwb"), str(nwb_path))
+    if not minirec_src.exists():
+        raise FileNotFoundError(
+            f"Bundled example NWB not found at {minirec_src}. It ships with the "
+            "Setup notebook (00_Setup) test data — run that first, or point "
+            "raw_dir at a directory that contains it."
+        )
+    shutil.copy2(str(minirec_src), str(nwb_path))
 
 ins = dict(allow_direct_insert=True, skip_duplicates=True)
 now = datetime.now()
@@ -456,11 +467,11 @@ Session().insert1(
     },
     **ins,
 )
-Task().insert1({"task_name": f"{DEMO}_task"}, **ins)
+Task().insert1({"task_name": f"{demo}_task"}, **ins)
 IntervalList().insert1(
     {
         "nwb_file_name": nwb_file_name,
-        "interval_list_name": f"{DEMO}_epoch_1",
+        "interval_list_name": f"{demo}_epoch_1",
         "valid_times": np.array([[0.0, 1.0]]),
     },
     **ins,
@@ -469,8 +480,8 @@ TaskEpoch().insert1(
     {
         "nwb_file_name": nwb_file_name,
         "epoch": 1,
-        "task_name": f"{DEMO}_task",
-        "interval_list_name": f"{DEMO}_epoch_1",
+        "task_name": f"{demo}_task",
+        "interval_list_name": f"{demo}_epoch_1",
         "camera_names": [],
     },
     **ins,
@@ -483,7 +494,7 @@ for ci, clip in clip_paths.items():
         VideoFile().insert1(
             {
                 **vf_pk,
-                "camera_name": f"{DEMO}_{calib[ci]['name']}",
+                "camera_name": f"{demo}_{calib[ci]['name']}",
                 "video_file_object_id": str(uuid.uuid4())[:40],
                 "path": str(clip.resolve()),
             },
@@ -500,25 +511,21 @@ print(f"Registered {len(vf_keys)} VideoFile rows for {nwb_file_name}")
 # `VidFileGroup.Calibration` insert is the link that enables 3D triangulation.
 
 # %%
-VID_GROUP = f"{DEMO}_grp"
+vid_group = f"{demo}_grp"
 VidFileGroup().insert1(
     {
-        "vid_group_id": VID_GROUP,
+        "vid_group_id": vid_group,
         "description": "Anipose two-camera reach (tutorial)",
         "files": vf_keys,
         "camera_indices": list(clip_paths.keys()),
     }
 )
 VidFileGroup.Calibration().insert1(
-    {
-        "vid_group_id": VID_GROUP,
-        "camera_rig_id": RIG_ID,
-        "calibration_id": CAL_ID,
-    },
+    {"vid_group_id": vid_group, **cal_key},
     skip_duplicates=True,
 )
 
-VidFileGroup.File & {"vid_group_id": VID_GROUP}
+VidFileGroup.File & {"vid_group_id": vid_group}
 
 # %% [markdown]
 # ## 3D pose estimation <a id="Pose"></a>
@@ -530,94 +537,67 @@ VidFileGroup.File & {"vid_group_id": VID_GROUP}
 #
 # Two preparation steps:
 #
-# 1. **Write the 2D detections as DLC-style `.h5`.** Anipose stores up to 20
-#    candidate detections per body part; we keep the top one (`x`/`y`/
-#    `likelihood`) and write a file named `{clip_stem}DLC_*.h5` next to where
-#    `PoseEstim` looks for it.
+# 1. **Place the 2D detections where `PoseEstim` looks.** The helper already
+#    reshaped Anipose's multi-candidate detections into clean DLC-style `.h5`;
+#    here we only truncate each to its short demo clip's frame count and name it
+#    `{clip_stem}DLC_*.h5`. **With your own data**, drop your model's per-camera
+#    DLC output into `output_dir` under that name instead.
 # 2. **Register a model.** We're loading detections rather than training, so we
 #    register a lightweight placeholder `Skeleton`/`ModelParams`/`Model`. (With
 #    your own data, import a real model as in the
-#    [DLC notebook](./23_PositionV2_DLC_2D.ipynb).)
+#    [DLC notebook](./23_PositionV2_DLC_2D.ipynb) — where you can also continue
+#    training an existing model via `Model().train({'model_id': ...}, epochs=N)`.)
 
 # %%
-BODYPARTS = ["l-base", "l-edge", "l-middle", "r-base", "r-edge", "r-middle"]
-EDGES = [
-    ("l-base", "l-edge"),
-    ("l-edge", "l-middle"),
-    ("l-middle", "l-base"),
-    ("r-base", "r-edge"),
-    ("r-edge", "r-middle"),
-    ("r-middle", "r-base"),
-]
-OUTPUT_DIR = SESSION_DIR / "tutorial_dlc_outputs"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# The body parts + skeleton edges this dataset ships. Swap these two lists for
+# your own model's keypoints when adapting the notebook.
+bodyparts = example["bodyparts"]
+edges = example["edges"]
+output_dir = session_dir / "tutorial_dlc_outputs"
+output_dir.mkdir(exist_ok=True)
 
-
-def write_clean_dlc_h5(pose2d_h5, clip_stem, n_rows):
-    """Keep the top detection per body part and write a tidy DLC h5."""
-    raw = pd.read_hdf(pose2d_h5)
-    scorer = raw.columns.get_level_values("scorer")[0]
-    flat = raw[scorer]
-    cols, data = [], {}
-    for bp in BODYPARTS:
-        for coord in ("x", "y", "likelihood"):
-            cols.append((scorer, bp, coord))
-            data[(scorer, bp, coord)] = flat[(bp, coord)].values
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(
-        cols, names=["scorer", "bodyparts", "coords"]
-    )
-    out = OUTPUT_DIR / f"{clip_stem}DLC_resnet50_mouse.h5"
-    df.iloc[:n_rows].to_hdf(str(out), key="df_with_missing", mode="w")
-    return out
-
-
+# Truncate each camera's cleaned detections to the clip's frame count and name
+# it to match, so PoseEstim (task_mode='load') finds it next to the clip.
 for ci, clip in clip_paths.items():
     token = calib[ci]["name"]
-    write_clean_dlc_h5(
-        SESSION_DIR / "pose-2d" / f"{REACH}_{token}.h5", clip.stem, n_frames
-    )
-print(f"Wrote cleaned DLC h5 files to {OUTPUT_DIR}")
+    clean = pd.read_hdf(example["pose_2d"][token]).iloc[:n_frames]
+    out = output_dir / f"{clip.stem}DLC_resnet50_mouse.h5"
+    clean.to_hdf(str(out), key="df_with_missing", mode="w")
+print(f"Wrote cleaned DLC h5 files to {output_dir}")
 
 # %%
-# Register the placeholder skeleton + model. `accept_new_bodyparts=True` adds
-# any body parts not already in the BodyPart reference table.
-SKELETON_ID = f"{DEMO}_skel"
-if not (Skeleton() & {"skeleton_id": SKELETON_ID}):
+# Register the placeholder skeleton + model. The Anipose keypoints are already
+# canonical entries in the BodyPart reference table, so no extra flag is needed.
+skeleton_id = f"{demo}_skel"
+if not (Skeleton() & {"skeleton_id": skeleton_id}):
     Skeleton().insert1(
-        {"skeleton_id": SKELETON_ID, "bodyparts": BODYPARTS, "edges": EDGES},
-        accept_new_bodyparts=True,
+        {"skeleton_id": skeleton_id, "bodyparts": bodyparts, "edges": edges},
     )
 
 mp = ModelParams().insert1(
     {
-        "model_params_id": f"{DEMO}_mp",
+        "model_params_id": f"{demo}_mp",
         "tool": "DLC",
         "params": {
-            "project_path": str(OUTPUT_DIR),
+            "project_path": str(output_dir),
             "shuffle": 1,
             "trainingsetindex": 0,
         },
-        "skeleton_id": SKELETON_ID,
+        "skeleton_id": skeleton_id,
     },
     skip_duplicates=True,
 )
-ModelSelection().insert1(
-    {
-        "model_params_id": mp["model_params_id"],
-        "tool": "DLC",
-        "vid_group_id": VID_GROUP,
-        "model_selection_id": f"{DEMO}_sel",
-    },
-    skip_duplicates=True,
-)
+sel_key = {
+    "model_params_id": mp["model_params_id"],
+    "tool": "DLC",
+    "vid_group_id": vid_group,
+    "model_selection_id": f"{demo}_sel",
+}
+ModelSelection().insert1(sel_key, skip_duplicates=True)
 Model().insert1(
     {
-        "model_id": f"{DEMO}_model",
-        "model_params_id": mp["model_params_id"],
-        "tool": "DLC",
-        "vid_group_id": VID_GROUP,
-        "model_selection_id": f"{DEMO}_sel",
+        **sel_key,
+        "model_id": f"{demo}_model",
         "model_path": "anipose-mouse (tutorial placeholder)",
     },
     allow_direct_insert=True,
@@ -630,23 +610,23 @@ print("Placeholder model registered.")
 #
 # `PoseEstimParams` carries the triangulation thresholds (here matched to the
 # Anipose project: confidence ≥ 0.3, reprojection error ≤ 5 px). Because the
-# video group has two cameras **and** a linked calibration, `PoseEstim.make()`
-# automatically takes the 3D path.
+# video group has two cameras **and** a linked calibration,
+# `PoseEstim.populate()` automatically takes the 3D path.
 
 # %%
 params_key = PoseEstimParams.insert_params(
     {"min_confidence": 0.3, "max_reproj_error": 5.0},
-    params_id=f"{DEMO}_pep",
+    params_id=f"{demo}_pep",
     skip_duplicates=True,
 )
 estim_key = PoseEstimSelection().insert_estimation_task(
     {
-        "model_id": f"{DEMO}_model",
-        "vid_group_id": VID_GROUP,
+        "model_id": f"{demo}_model",
+        "vid_group_id": vid_group,
         "pose_estim_params_id": params_key["pose_estim_params_id"],
     },
     task_mode="load",
-    output_dir=str(OUTPUT_DIR),
+    output_dir=str(output_dir),
     skip_duplicates=True,
 )
 estim_key = {
@@ -660,12 +640,21 @@ print("PoseEstim populated:", bool(PoseEstim & estim_key))
 # %% [markdown]
 # ## Visualize <a id="Viz"></a>
 #
-# `fetch1_dataframe()` returns a `(scorer, bodypart, coord)` MultiIndex with
-# `x`/`y`/`z`/`likelihood` per body part (in centimetres), indexed by time.
+# `fetch1_dataframe()` returns a table indexed by time, with `x`/`y`/`z`/
+# `likelihood` columns per body part (coordinates in centimetres). Columns are
+# grouped in layers (source, body part, coordinate), so you can pull a single
+# body part's `x`/`y`/`z` at once.
 
 # %%
 df = (PoseEstim & estim_key).fetch1_dataframe()
-print("Columns are 3D:", any(c[-1] == "z" for c in df.columns))
+has_z = any(c[-1] == "z" for c in df.columns)
+if not has_z:
+    raise RuntimeError(
+        "3D estimation produced no `z` columns — the pipeline fell back to the "
+        "2D path. Confirm the video group has >=2 cameras and a linked "
+        "Calibration (VidFileGroup.Calibration)."
+    )
+print("Confirmed 3D output: every body part has a `z` column.")
 df.head()
 
 # %%
@@ -694,14 +683,14 @@ plt.show()
 # %% [markdown]
 # #### Optional: compare to Anipose's reference 3D
 #
-# The dataset ships Anipose's own triangulation. Because the V2 path uses the
-# same linear DLT, the two should agree to within rounding (Anipose stores
-# millimetres; V2 stores centimetres, so we rescale V2 by 10).
+# The dataset ships Anipose's own triangulation. The V2 path uses the same
+# standard triangulation math, so the two should agree to within rounding
+# (Anipose stores millimetres; V2 stores centimetres, so we rescale V2 by 10).
 
 # %%
-ref = pd.read_csv(SESSION_DIR / "pose-3d" / f"{REACH}.csv").iloc[:n_frames]
+ref = pd.read_csv(example["reference_3d"]).iloc[:n_frames]
 diffs = []
-for b in BODYPARTS:
+for b in bodyparts:
     v2 = df["triangulated"][b][["x", "y", "z"]].to_numpy() * 10.0  # cm -> mm
     r = ref[[f"{b}_x", f"{b}_y", f"{b}_z"]].to_numpy()
     m = ~np.isnan(v2[:, 0]) & ~np.isnan(r[:, 0])
@@ -717,66 +706,41 @@ print(
 # ## Video: reproject the 3D pose onto the cameras <a id="Video"></a>
 #
 # Plots confirm the numbers; a video confirms the *result*. The most direct
-# end-user validation is to **reproject** the triangulated 3D points back into
-# each camera image (through the same calibration) and overlay them on the real
-# video. If the reprojected markers stay on the animal, the 3D reconstruction
-# and the calibration are both sound — this closes the 2D → 3D → 2D loop.
+# validation is to **reproject** the triangulated 3D points back into each
+# camera image (through the same calibration) and overlay them on the real
+# video. If the reprojected markers stay on the animal, both the 3D
+# reconstruction and the calibration are sound — closing the 2D → 3D → 2D loop.
 #
 # We render with DeepLabCut's built-in `create_video`, feeding it a small h5 of
 # reprojected points. DLC's native (OpenCV-backed) writer is faster and lighter
-# to maintain than a per-frame matplotlib renderer.
+# than a per-frame matplotlib renderer.
 
 # %%
 from deeplabcut.utils.make_labeled_video import create_video
 
-from spyglass.position.v2.utils.triangulation import build_projection_matrix
+from spyglass.position.v2.utils.triangulation import reproject_pose_to_camera
 
-LABELED_DIR = SESSION_DIR / "tutorial_labeled"
-LABELED_DIR.mkdir(exist_ok=True)
+labeled_dir = session_dir / "tutorial_labeled"
+labeled_dir.mkdir(exist_ok=True)
 
-
-def reproject_to_dlc_h5(pose_3d, cam, out_h5):
-    """Reproject a cm-scale 3D pose into one camera; write a DLC-style h5.
-
-    ``build_projection_matrix`` maps rig-frame metres to pixels, so the 3D
-    coordinates (stored in centimetres) are divided by 100 first. Each marker's
-    confidence carries over from the triangulation likelihood.
-    """
-    proj_mat = build_projection_matrix(cam["intrinsics"], cam["extrinsics"])
-    scorer = "reprojected3d"
-    cols, data = [], {}
-    for bp in BODYPARTS:
-        xyz_m = pose_3d["triangulated"][bp][["x", "y", "z"]].to_numpy() / 100.0
-        conf = pose_3d["triangulated"][bp]["likelihood"].to_numpy()
-        hom = np.column_stack([xyz_m, np.ones(len(xyz_m))])
-        px = (proj_mat @ hom.T).T
-        with np.errstate(invalid="ignore", divide="ignore"):
-            u, v = px[:, 0] / px[:, 2], px[:, 1] / px[:, 2]
-        conf = np.where(np.isnan(u), 0.0, np.nan_to_num(conf, nan=0.0))
-        for coord, val in (("x", u), ("y", v), ("likelihood", conf)):
-            cols.append((scorer, bp, coord))
-            data[(scorer, bp, coord)] = val
-    out = pd.DataFrame(data)
-    out.columns = pd.MultiIndex.from_tuples(
-        cols, names=["scorer", "bodyparts", "coords"]
-    )
-    out.to_hdf(str(out_h5), key="df_with_missing", mode="w")
-    return out_h5
-
-
+# ``reproject_pose_to_camera`` maps rig-frame metres to pixels, so the 3D
+# coordinates (in centimetres) are rescaled with ``scale=100.0``. Marker
+# confidence carries over from the triangulation likelihood, and the DLC-style
+# h5 (written when ``out_h5`` is given) feeds DLC's ``create_video``.
 labeled_videos = {}
 for ci, clip in clip_paths.items():
-    reproj_h5 = reproject_to_dlc_h5(
-        df, calib[ci], LABELED_DIR / f"{clip.stem}_reproj.h5"
+    reproj_h5 = labeled_dir / f"{clip.stem}_reproj.h5"
+    reproject_pose_to_camera(
+        df, calib[ci], bodyparts=bodyparts, scale=100.0, out_h5=reproj_h5
     )
-    out_mp4 = LABELED_DIR / f"{clip.stem}_reproj3d.mp4"
+    out_mp4 = labeled_dir / f"{clip.stem}_reproj3d.mp4"
     out_mp4.unlink(missing_ok=True)
     create_video(
         str(clip),
         str(reproj_h5),
         pcutoff=0.5,
         dotsize=7,
-        skeleton_edges=EDGES,
+        skeleton_edges=edges,
         output_path=str(out_mp4),
     )
     labeled_videos[ci] = out_mp4
@@ -801,28 +765,29 @@ if ok:
 # %% [markdown]
 # ## Cleanup <a id="Cleanup"></a>
 #
-# This tutorial wrote rows to a shared database. Set `CLEANUP = True` and run the
-# cell below to remove everything it created (the `DEMO`-prefixed entries).
+# This tutorial wrote rows to a shared database. Set `CLEANUP = True` and run
+# the cell below to remove everything it created (the `demo`-prefixed entries).
 
 # %%
 CLEANUP = False  # set True to delete all tutorial rows
 
 if CLEANUP:
+    # DataJoint deletes cascade to every downstream/part table, so removing a
+    # handful of roots clears everything this notebook created:
+    #   Nwbfile      -> Session, IntervalList, TaskEpoch, VideoFile,
+    #                   AnalysisNwbfile -> PoseEstim
+    #   VidFileGroup -> ModelSelection -> Model -> PoseEstimSelection -> PoseEstim
+    #   Skeleton     -> ModelParams (-> the Model/PoseEstim chain)
+    #   CameraRig    -> CameraRig.Camera, Calibration(.Camera)
     safe = dict(safemode=False)
-    (PoseEstim & {"model_id": f"{DEMO}_model"}).delete(**safe)
-    (PoseEstimSelection & {"model_id": f"{DEMO}_model"}).delete(**safe)
-    (PoseEstimParams & {"pose_estim_params_id": f"{DEMO}_pep"}).delete(**safe)
-    (Model & {"model_id": f"{DEMO}_model"}).delete(**safe)
-    (ModelSelection & {"model_selection_id": f"{DEMO}_sel"}).delete(**safe)
-    (ModelParams & {"model_params_id": f"{DEMO}_mp"}).delete(**safe)
-    (VidFileGroup & {"vid_group_id": VID_GROUP}).delete(**safe)
-    (Calibration & {"camera_rig_id": RIG_ID}).delete(**safe)
-    (CameraRig & {"camera_rig_id": RIG_ID}).delete(**safe)
-    (Skeleton & {"skeleton_id": SKELETON_ID}).delete(**safe)
-    (Session & {"nwb_file_name": nwb_file_name}).delete(**safe)
     (Nwbfile & {"nwb_file_name": nwb_file_name}).delete(**safe)
+    (VidFileGroup & {"vid_group_id": vid_group}).delete(**safe)
+    (Skeleton & {"skeleton_id": skeleton_id}).delete(**safe)
+    (PoseEstimParams & {"pose_estim_params_id": f"{demo}_pep"}).delete(**safe)
+    (CameraRig & {"camera_rig_id": rig_id}).delete(**safe)
+    (Task & {"task_name": f"{demo}_task"}).delete(**safe)
     for ci, cam in calib.items():
-        (CameraDevice & {"camera_name": f"{DEMO}_{cam['name']}"}).delete(**safe)
+        (CameraDevice & {"camera_name": f"{demo}_{cam['name']}"}).delete(**safe)
     print("Tutorial rows removed.")
 else:
     print("CLEANUP is False — tutorial rows left in place.")
@@ -833,5 +798,5 @@ else:
 # - For per-bodypart smoothing, orientation, centroid, and velocity on the
 #   triangulated pose, continue to `PoseV2` (see the
 #   [DLC notebook](./23_PositionV2_DLC_2D.ipynb) — it reads 3D input transparently).
-# - With your own rig: generate a `calibration.toml` (DLC 3D or Anipose),
-#   then repeat [Load the calibration](#Load) onward with your videos.
+# - With your own rig: generate a `calibration.toml` (DLC 3D or Anipose), then
+#   repeat [Load the calibration](#Load) onward with your videos.
