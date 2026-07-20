@@ -429,40 +429,8 @@ def mock_dlc_inference_output(tmp_path):
 
 
 # ----------------------------- DLC Fixtures -----------------------------------
-
-
-@pytest.fixture
-def skip_if_no_dlc():
-    """Skip test if DLC unavailable or --no-pose flag is set.
-
-    Mirrors V1's skip_if_no_pose pattern. Use as a fixture parameter in
-    any test that requires a real DLC installation or trained model.
-    Pass ``--no-pose`` to pytest to skip all such tests in CI.
-    """
-    if getattr(pytest, "NO_POSE", False):
-        pytest.skip("Skipping DLC test (--no-pose flag set)")
-    try:
-        import deeplabcut  # noqa: F401
-    except ImportError:
-        pytest.skip("Skipping DLC test (deeplabcut not installed)")
-    yield
-
-
-@pytest.fixture
-def skip_if_no_sleap():
-    """Skip test if SLEAP unavailable or --no-pose flag is set.
-
-    Mirrors skip_if_no_dlc. Use as a fixture parameter in any test that
-    requires a real SLEAP installation. Pass ``--no-pose`` to pytest to
-    skip all such tests in CI.
-    """
-    if getattr(pytest, "NO_POSE", False):
-        pytest.skip("Skipping SLEAP test (--no-pose flag set)")
-    try:
-        import sleap  # noqa: F401
-    except ImportError:
-        pytest.skip("Skipping SLEAP test (sleap not installed)")
-    yield
+# ``skip_if_no_dlc`` / ``skip_if_no_sleap`` are defined in the shared
+# ``tests/position/conftest.py`` so v1, v2, and utils suites share one gate.
 
 
 @pytest.fixture(scope="session")

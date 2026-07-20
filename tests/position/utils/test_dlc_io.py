@@ -1,32 +1,14 @@
-"""Tests for DLC I/O and parsing utilities."""
+"""Tests for DLC I/O and parsing utilities.
+
+HDF5 read/write (pytables) is a hard test dependency, so it is assumed
+available and never gates a test. Only tests that need a real DeepLabCut
+installation are gated, via the shared ``skip_if_no_dlc`` fixture defined in
+``tests/position/conftest.py`` (which also honors ``--no-pose``).
+"""
 
 import numpy as np
 import pandas as pd
 import pytest
-
-# Check for pytables availability
-pytables_available = True
-try:
-    import tables  # noqa: F401
-except ImportError:
-    pytables_available = False
-
-skip_if_no_pytables = pytest.mark.skipif(
-    not pytables_available, reason="pytables not available"
-)
-
-# Check for DLC availability
-dlc_available = True
-try:
-    import deeplabcut  # noqa: F401
-except ImportError:
-    dlc_available = False
-
-
-@pytest.fixture
-def skip_if_no_dlc():
-    if not dlc_available:
-        pytest.skip("deeplabcut not installed")
 
 
 class TestDLCOutputParsing:
@@ -65,7 +47,6 @@ class TestDLCOutputParsing:
         df = pd.DataFrame(data, columns=columns)
         return df, scorer, bodyparts
 
-    @skip_if_no_pytables
     @pytest.fixture
     def mock_dlc_h5_file(self, tmp_path, mock_dlc_dataframe):
         """Create a mock DLC H5 file."""
@@ -82,7 +63,6 @@ class TestDLCOutputParsing:
         df.to_csv(csv_path)
         return csv_path, df, scorer, bodyparts
 
-    @skip_if_no_pytables
     def test_parse_dlc_h5_output_with_metadata(
         self, mock_dlc_h5_file, parse_dlc_h5_output
     ):
@@ -105,7 +85,6 @@ class TestDLCOutputParsing:
         assert isinstance(df.columns, pd.MultiIndex)
         assert df.columns.names == ["scorer", "bodypart", "coords"]
 
-    @skip_if_no_pytables
     def test_parse_dlc_h5_output_no_metadata(
         self, mock_dlc_h5_file, parse_dlc_h5_output
     ):
@@ -133,7 +112,6 @@ class TestDLCOutputParsing:
         assert isinstance(df, pd.DataFrame)
         assert df.shape[0] == original_df.shape[0]
 
-    @skip_if_no_pytables
     def test_parse_dlc_output_bodypart_filter(
         self, mock_dlc_h5_file, parse_dlc_h5_output
     ):
@@ -157,7 +135,6 @@ class TestDLCOutputParsing:
         with pytest.raises(FileNotFoundError):
             parse_dlc_h5_output("/nonexistent/file.h5")
 
-    @skip_if_no_pytables
     def test_get_dlc_bodyparts(self, mock_dlc_h5_file, get_dlc_bodyparts):
         """Test extracting bodypart names from DLC DataFrame."""
         h5_path, df, _, expected_bodyparts = mock_dlc_h5_file
@@ -167,7 +144,6 @@ class TestDLCOutputParsing:
         assert set(bodyparts) == set(expected_bodyparts)
         assert len(bodyparts) == len(expected_bodyparts)
 
-    @skip_if_no_pytables
     def test_get_dlc_scorer(self, mock_dlc_h5_file, get_dlc_scorer):
         """Test extracting scorer name from DLC DataFrame."""
         h5_path, df, expected_scorer, _ = mock_dlc_h5_file
@@ -268,7 +244,6 @@ class TestDLCFileHandling:
         with pytest.raises(Exception):  # Could be various exceptions
             parse_dlc_h5_output(h5_path)
 
-    @skip_if_no_pytables
     def test_parse_dlc_output_empty_file(self, tmp_path, parse_dlc_h5_output):
         """Test handling of empty DLC file."""
         h5_path = tmp_path / "empty.h5"
@@ -287,7 +262,6 @@ class TestDLCFileHandling:
         assert len(df) == 0
         assert isinstance(df.columns, pd.MultiIndex)
 
-    @skip_if_no_pytables
     def test_parse_dlc_output_missing_bodyparts(
         self, mock_dlc_h5_file, parse_dlc_h5_output
     ):
