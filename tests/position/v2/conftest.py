@@ -47,10 +47,21 @@ def bodypart(pv2_train):
     yield pv2_train.BodyPart()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def skeleton(pv2_train):
-    """Fixture for Skeleton class."""
-    yield pv2_train.Skeleton()
+    """Fixture for Skeleton class.
+
+    Function-scoped with always-run post-yield teardown: skeletons the test
+    inserts are removed afterward so they do not accumulate across the session
+    and collide on the topology-hash unique index. This matters under
+    ``--no-teardown``, where the database persists between tests.
+    """
+    tbl = pv2_train.Skeleton()
+    before = set(tbl.fetch("skeleton_id"))
+    yield tbl
+    new = set(tbl.fetch("skeleton_id")) - before
+    if new:
+        (tbl & [{"skeleton_id": s} for s in new]).delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -65,10 +76,22 @@ def model_sel(pv2_train):
     yield pv2_train.ModelSelection()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def model(pv2_train):
-    """Fixture for Model class."""
-    yield pv2_train.Model()
+    """Fixture for Model class.
+
+    Function-scoped with always-run post-yield teardown: models the test
+    creates are removed afterward (cascading to their downstream pose
+    entries) so a trained model does not leak into a later test — e.g. making
+    a "weightless" inference unexpectedly succeed. Matters under
+    ``--no-teardown``, where the database persists between tests.
+    """
+    tbl = pv2_train.Model()
+    before = set(tbl.fetch("model_id"))
+    yield tbl
+    new = set(tbl.fetch("model_id")) - before
+    if new:
+        (tbl & [{"model_id": m} for m in new]).delete(safemode=False)
 
 
 @pytest.fixture(scope="session")

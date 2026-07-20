@@ -22,9 +22,7 @@ from pynwb import NWBHDF5IO
 # Register NWB file in AnalysisNwbfile using any available parent file
 from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
 from spyglass.position.utils import suppress_print_from_package
-from spyglass.position.utils.path_helpers import (
-    resolve_model_path,
-)
+from spyglass.position.utils.path_helpers import resolve_model_path
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
@@ -711,11 +709,22 @@ class ModelParams(SpyglassMixin, dj.Lookup):
     # Strategy pattern replaced the tool_info structure
     # Use ToolStrategyFactory to get tool-specific parameters and validation
 
+    # NOTE: ``params`` feeds ``params_hash`` (see ``contents`` below). The DLC
+    # default carries the PyTorch-native length knobs (``epochs``/
+    # ``save_epochs``, matching DeepLabCut's 3.x defaults) so a fresh run's
+    # training budget is explicit rather than implicit. These mirror the subset
+    # of ``DLCStrategy.get_default_params`` (the fuller, non-hashed template).
     default_entries_data = [
         {
             "model_params_id": "dlc_default",
             "tool": "DLC",
-            "params": {"shuffle": 1, "trainingsetindex": 0, "model_prefix": ""},
+            "params": {
+                "shuffle": 1,
+                "trainingsetindex": 0,
+                "model_prefix": "",
+                "epochs": 200,  # PyTorch engine (DLC 3.x default) length knob
+                "save_epochs": 25,  # PyTorch snapshot cadence
+            },
             "skeleton_id": None,
         },
         {

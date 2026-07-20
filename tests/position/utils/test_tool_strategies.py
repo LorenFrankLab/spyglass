@@ -48,6 +48,10 @@ class TestDLCStrategy:
         defaults = strategy.get_default_params()
         assert defaults["shuffle"] == 1
         assert defaults["trainingsetindex"] == 0
+        # PyTorch-first defaults (DLC 3.x): an explicit epoch budget rather
+        # than TF iteration knobs.
+        assert defaults["epochs"] == 200
+        assert defaults["save_epochs"] == 25
         assert isinstance(defaults, dict)
 
     def test_validate_params_missing_required(self, strategy):
@@ -55,6 +59,21 @@ class TestDLCStrategy:
         params = {}  # Missing project_path
 
         with pytest.raises(ValueError, match="missing required parameters"):
+            strategy.validate_params(params)
+
+    def test_validate_params_warns_on_tf_maxiters_as_epochs(self, strategy):
+        """A TF-sized ``epochs`` value warns (TF->PyTorch migration guard)."""
+        params = {"project_path": "/tmp/proj", "epochs": 1_030_000}
+        with pytest.warns(UserWarning, match="implausibly large"):
+            strategy.validate_params(params)
+
+    def test_validate_params_no_warn_on_normal_epochs(self, strategy):
+        """A normal PyTorch ``epochs`` value does not warn."""
+        import warnings
+
+        params = {"project_path": "/tmp/proj", "epochs": 200}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning -> failure
             strategy.validate_params(params)
 
 

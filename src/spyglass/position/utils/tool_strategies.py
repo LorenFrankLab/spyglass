@@ -4,6 +4,7 @@ Provides a pluggable architecture for different pose estimation tools
 (DLC, SLEAP, etc.) with consistent interfaces and parameter management.
 """
 
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Set
@@ -429,6 +430,10 @@ class PoseToolStrategy(ABC):
 class DLCStrategy(PoseToolStrategy):
     """DeepLabCut tool strategy implementation."""
 
+    # Above this, a PyTorch ``epochs`` value is almost certainly a TensorFlow
+    # ``maxiters`` value carried across engines (see ``validate_params``).
+    _EPOCHS_SANITY_LIMIT = 10_000
+
     @property
     def tool_name(self) -> str:
         return "DLC"
@@ -524,6 +529,12 @@ class DLCStrategy(PoseToolStrategy):
         # over the training set (many gradient steps), so ~1e6 epochs is a
         # runaway. The TensorFlow knobs below are retained only for models
         # explicitly trained with ``engine: tensorflow`` (see ``apply_epochs``).
+        #
+        # This is the fuller informational template; the hashed seed row is
+        # the ``dlc_default`` subset in ``ModelParams.default_entries_data``.
+        # Both share ``shuffle``/``trainingsetindex``/``model_prefix``/
+        # ``epochs``/``save_epochs``; only this template adds the TF knobs and
+        # ``net_type``.
         return {
             "shuffle": 1,
             "trainingsetindex": 0,
@@ -558,6 +569,24 @@ class DLCStrategy(PoseToolStrategy):
             if param in params and not isinstance(params[param], param_type):
                 raise ValueError(
                     f"DLC parameter '{param}' must be {param_type.__name__}"
+                )
+
+        # Guardrail for the TF->PyTorch migration trap: ``epochs`` is a full
+        # pass over the training set (many gradient steps), so a value in the
+        # TF-``maxiters`` range (the old TF default was 1,030,000 *iterations*)
+        # is almost certainly a knob carried across engines. Warn, do not fail
+        # -- a user may legitimately want a long run.
+        epochs = params.get("epochs")
+        if isinstance(epochs, (int, float)) and not isinstance(epochs, bool):
+            if epochs > self._EPOCHS_SANITY_LIMIT:
+                warnings.warn(
+                    f"DLC 'epochs' is {int(epochs)}, which is implausibly "
+                    "large for the PyTorch engine (one epoch is a full pass "
+                    "over the training set, not a single iteration). This "
+                    "looks like a TensorFlow 'maxiters' value carried into "
+                    "'epochs'; ~200 epochs is typical. Set 'maxiters' instead "
+                    "for a TensorFlow-engine model.",
+                    stacklevel=2,
                 )
 
     @staticmethod

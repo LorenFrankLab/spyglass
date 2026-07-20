@@ -115,9 +115,11 @@ its default is 200 epochs rather than ~1M iterations.
 engine-agnostic: `DLCStrategy.apply_epochs` resolves the project's engine and
 writes the correct native knob — `epochs` for PyTorch (the DLC 3.x default),
 `maxiters` for an explicit `engine: tensorflow` model. The `dlc_default`
-`ModelParams` set stores no length knob at all, so a fresh PyTorch run simply
-uses DLC's 200-epoch default; pass `epochs=` (or bake it into `ModelParams`) to
-override.
+`ModelParams` set ships an explicit PyTorch budget (`epochs: 200`,
+`save_epochs: 25`), matching DLC's own defaults; pass `epochs=` (or bake a
+different value into `ModelParams`) to override. Declaring `epochs` in the tens
+of thousands raises a warning — that is the size of a TensorFlow `maxiters`
+value, not a PyTorch epoch count.
 
 **How to read training progress.** For a PyTorch model, count epochs: the
 highest `snapshot-<epoch>.pt` (and `snapshot-best-<epoch>.pt`) in the model's

@@ -11,6 +11,22 @@ import pytest
 class TestHelperFunctions:
     """Test utility/helper functions in train.py module."""
 
+    def test_dlc_default_carries_pytorch_length_knob(self):
+        """The hashed ``dlc_default`` seeds an explicit PyTorch epoch budget.
+
+        Guards against silently reverting to a TF-flavored default with no
+        length knob (see POSITION.md, Training parameters: TF -> PyTorch).
+        """
+        from spyglass.position.v2.train import ModelParams
+
+        dlc = next(
+            e
+            for e in ModelParams.default_entries_data
+            if e["model_params_id"] == "dlc_default"
+        )
+        assert dlc["params"]["epochs"] == 200
+        assert dlc["params"]["save_epochs"] == 25
+
     def test_default_pk_name(self):
         """Test default_pk_name generation."""
         from spyglass.position.v2.train import default_pk_name

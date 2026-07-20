@@ -350,6 +350,13 @@ purely about the two dependency stacks coexisting.
     `.h5`/NWB output via `PoseEstimSelection` with `task_mode="load"` or via
     `ImportedPose`.
 
+**Migrating training parameters, too:** the PyTorch engine counts training
+length in **epochs**, not TensorFlow **iterations** — do not reuse a V1
+`maxiters` value (e.g. `1030000`) as PyTorch `epochs`. See
+[Position → Training parameters: TensorFlow → PyTorch](./POSITION.md) for the
+full knob mapping (`maxiters`→`epochs`, `saveiters`→`save_epochs`) and the
+~200-epoch default.
+
 ### SpyglassConfig Issues
 
 **Symptoms:**
