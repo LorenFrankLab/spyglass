@@ -64,7 +64,14 @@ def parse_training_csv(path: Path) -> "pd.DataFrame | None":
     """
     try:
         df_raw = pd.read_csv(path, header=None)
-    except Exception:
+    except (
+        pd.errors.EmptyDataError,
+        pd.errors.ParserError,
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+    ):
+        # Not parseable as training data → documented ``None`` sentinel.
         return None
 
     if df_raw.empty or df_raw.shape[1] < 2:
@@ -83,7 +90,14 @@ def parse_training_csv(path: Path) -> "pd.DataFrame | None":
     else:
         try:
             df = pd.read_csv(path)
-        except Exception:
+        except (
+            pd.errors.EmptyDataError,
+            pd.errors.ParserError,
+            OSError,
+            UnicodeDecodeError,
+            ValueError,
+        ):
+            # Not parseable as training data → documented ``None`` sentinel.
             return None
         if df.empty or df.shape[1] < 2:
             return None

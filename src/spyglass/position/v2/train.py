@@ -48,7 +48,7 @@ from spyglass.position.v2.utils.training_io import (
     parse_training_csv,
 )
 from spyglass.position.v2.video import VidFileGroup
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 
 def _rename_leaves(obj, mapping: dict):
@@ -806,23 +806,25 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
         tool_info = {}
 
-        try:
-            # Build tool_info for each registered strategy
-            for tool_name in ToolStrategyFactory.get_available_tools():
-                try:
-                    strategy = ToolStrategyFactory.create_strategy(tool_name)
-                    tool_info[tool_name] = {
-                        "required": strategy.get_required_params(),
-                        "accepted": strategy.get_accepted_params(),
-                        "skipped": strategy.get_skipped_params(),
-                        "aliases": strategy.get_parameter_aliases(),
-                    }
-                except Exception:
-                    # Skip tools that fail to initialize
-                    continue
-        except Exception:
-            # Return empty dict if anything fails
-            tool_info = {}
+        # Build tool_info for each registered strategy. A registered tool that
+        # fails to instantiate or introspect is a real defect (broken/mis-
+        # registered strategy), so it must surface loudly — never be silently
+        # skipped or collapsed into an empty result.
+        for tool_name in ToolStrategyFactory.get_available_tools():
+            try:
+                strategy = ToolStrategyFactory.create_strategy(tool_name)
+                tool_info[tool_name] = {
+                    "required": strategy.get_required_params(),
+                    "accepted": strategy.get_accepted_params(),
+                    "skipped": strategy.get_skipped_params(),
+                    "aliases": strategy.get_parameter_aliases(),
+                }
+            except Exception:
+                logger.error(
+                    f"Failed to build parameter info for registered tool "
+                    f"'{tool_name}'; its strategy is broken or mis-registered."
+                )
+                raise
 
         cls._cached_tool_info = tool_info
         return tool_info
@@ -1193,10 +1195,15 @@ class Model(SpyglassMixin, dj.Computed):
                     "Consider reusing an existing model instead of training a "
                     "new one (see Model.reusable_for / Model.for_subject)."
                 )
-        except Exception:
-            pass  # nudge is best-effort; never blocks project creation
+        except Exception as e:
+            # Nudge is best-effort; never blocks project creation, but a
+            # failed lookup is downgraded to a visible warning, not silenced.
+            self._warn_msg(
+                f"Could not check for existing models on the same subject(s): "
+                f"{e}. Skipping the model-reuse nudge."
+            )
 
-    def make(self, key):
+    def make(self, key, device=None):
         """Train a new model based on ModelSelection entry.
 
         Performs the following:
@@ -1214,6 +1221,14 @@ class Model(SpyglassMixin, dj.Computed):
             - tool
             - vid_group_id
             - parent_id (optional, for continued training)
+        device : str, optional
+            Compute device for training (e.g. ``"cuda:0"``, ``"cpu"``).
+            This is a *runtime* selection, not a stored/hashed parameter:
+            it is injected into a runtime copy of the fetched params and
+            never persisted, so it does not fork otherwise-identical
+            parameter sets. Pass it via ``populate``'s ``make_kwargs``, e.g.
+            ``Model().populate(sel_key, make_kwargs={"device": "cuda:0"})``.
+            When ``None`` (default), the tool auto-selects a device.
 
         Raises
         ------
@@ -1234,6 +1249,11 @@ class Model(SpyglassMixin, dj.Computed):
         tool = params_entry["tool"]
         params = params_entry["params"]
         skeleton_id = params_entry.get("skeleton_id")
+
+        # Device is a runtime override, not a stored/hashed param: inject it
+        # into a copy so the fetched (persisted) params are never mutated.
+        if device is not None:
+            params = {**(params or {}), "device": device}
 
         # Fetch video group
         vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
@@ -1612,7 +1632,10 @@ class Model(SpyglassMixin, dj.Computed):
         cfg_path = Path(params["project_path"]) / "config.yaml"
         try:
             return load_yaml(cfg_path)
-        except Exception:  # best-effort; PyTorch default applies otherwise
+        except OSError:
+            # Config genuinely unavailable (missing / unreadable) → best-effort
+            # None so the PyTorch default applies. A malformed-but-present
+            # config (YAMLError) is a real defect and is left to propagate.
             return None
 
     def evaluate(
@@ -2450,9 +2473,14 @@ class Model(SpyglassMixin, dj.Computed):
                         + f"video has {shortest_video} frames. Using "
                         + f"{effective_frames_per_video}."
                     )
-        except Exception:
-            # Non-fatal; DLC may still be able to read and sample frames.
-            pass
+        except Exception as e:
+            # Non-fatal frame-count optimization; DLC may still read and
+            # sample frames. Downgraded to a visible warning, not silenced.
+            self._warn_msg(
+                f"Could not pre-check video frame counts ({e}); using the "
+                f"requested {frames_per_video} frames/video and relying on "
+                "DLC's own validation."
+            )
 
         vid_group_key = VidFileGroup.create_from_files(
             video_files=resolved_videos,

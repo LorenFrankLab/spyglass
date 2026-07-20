@@ -25,6 +25,7 @@ Results are registered in ``PositionOutput`` automatically and accessible via
 """
 
 import dataclasses
+import pprint
 import subprocess
 from datetime import datetime
 from difflib import get_close_matches
@@ -200,8 +201,11 @@ def pose_estimation_to_dataframe(pose_estimation, scorer, is_3d, canon_map):
 class PoseEstimParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose estimation inference.
 
-    Stores tool-specific inference parameters (batch_size, device, etc.)
-    as reusable named parameter sets.
+    Stores tool-specific inference parameters (e.g. ``batch_size``) as
+    reusable named parameter sets. The compute ``device`` is deliberately
+    NOT stored here: it is a runtime selection passed to
+    ``PoseEstim().populate(..., make_kwargs={"device": ...})`` so it never
+    forks otherwise-identical parameter sets.
 
     Attributes
     ----------
@@ -242,7 +246,9 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
         Parameters
         ----------
         params : dict
-            Tool-specific inference parameters (batch_size, device, etc.)
+            Tool-specific inference parameters (e.g. ``batch_size``). The
+            compute ``device`` is a runtime ``populate`` kwarg, not a stored
+            param -- do not put it here.
         params_id : str, optional
             Name for this parameter set. If None, auto-generated using
             default_pk_name convention, by default None
@@ -326,8 +332,10 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
             'trigger' to run inference, 'load' to load existing results,
             by default 'trigger'
         params : dict, optional
-            Tool-specific inference parameters (batch_size, device, etc.).
-            Ignored if key already contains pose_estim_params_id.
+            Tool-specific inference parameters (e.g. ``batch_size``). The
+            compute ``device`` is a runtime ``populate`` kwarg, not a stored
+            param -- do not put it here. Ignored if key already contains
+            pose_estim_params_id.
         output_dir : str, optional
             Output directory. If None, inferred from model and video info
         skip_duplicates : bool, optional
@@ -906,7 +914,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         return df
 
-    def make(self, key):
+    def make(self, key, device=None):
         """Run or load pose estimation for a Model + VidFileGroup pairing.
 
         Flow:
@@ -920,6 +928,15 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             Primary key from PoseEstimSelection
+        device : str, optional
+            Compute device for inference (e.g. ``"cuda:0"``, ``"cpu"``).
+            This is a *runtime* selection, not a stored/hashed parameter:
+            it is injected into a runtime copy of the fetched inference
+            params and never persisted, so it does not fork
+            otherwise-identical parameter sets. Pass it via ``populate``'s
+            ``make_kwargs``, e.g.
+            ``PoseEstim().populate(sel_key, make_kwargs={"device": "cuda:0"})``.
+            When ``None`` (default), the tool auto-selects a device.
         """
         if ndx_pose is None:  # pragma: no cover
             raise ImportError(  # pragma: no cover
@@ -945,6 +962,11 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # Fetch inference params from PoseEstimParams
         inference_params = (PoseEstimParams & key).fetch1("params")
         inference_params = inference_params or {}
+
+        # Device is a runtime override, not a stored/hashed param: inject it
+        # into a copy so the persisted inference params are never mutated.
+        if device is not None:
+            inference_params = {**inference_params, "device": device}
 
         self._info_msg(
             "PoseEstim.make: "
@@ -1000,7 +1022,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         try:
             _cam_idxs = (VidFileGroup.File & key).fetch("camera_index")
-        except Exception:
+        except dj.errors.DataJointError:
+            # camera_index column absent (schema not yet migrated) → 2D only.
             _cam_idxs = []
         if len(_cam_idxs) > 1 and not (VidFileGroup.Calibration & key):
             self._warn_msg(
@@ -1315,8 +1338,13 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 cap.release()
                 if n_frames > 0:
                     return np.arange(n_frames) / fps
-            except Exception:
-                pass
+            except Exception as e:
+                # Video-file fallback failed; surface as a warning before the
+                # ValueError below (which reports the overall failure).
+                logger.warning(
+                    f"Timestamp fallback via cv2 for video '{video_path}' "
+                    f"failed: {e}"
+                )
 
         raise ValueError(
             f"Could not fetch timestamps for vid_group_id="
@@ -1341,7 +1369,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             file_rows = (VidFileGroup.File & key).fetch(
                 "camera_index", as_dict=False
             )
-        except Exception:
+        except dj.errors.DataJointError:
             # camera_index column absent (schema not yet migrated) → 2D only.
             return False
         distinct_cams = [ci for ci in file_rows if ci >= 0]
@@ -1686,6 +1714,40 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Stored pose estimation in NWB: {analysis_file_name}")
         return analysis_file_name
+
+
+def format_pose_params(params, name=None):
+    """Render a PoseParams row as human-readable, multi-line text.
+
+    Pure formatter — no database access. The ``orient``, ``centroid``, and
+    ``smoothing`` sub-dicts are each shown under a ``--- <section> ---``
+    header; a missing or empty sub-dict renders as ``(not set)``.
+
+    Parameters
+    ----------
+    params : Mapping
+        A PoseParams-style row (``orient``/``centroid``/``smoothing`` keys).
+    name : str, optional
+        If given, an ``=== PoseParams: <name> ===`` header is prepended.
+
+    Returns
+    -------
+    str
+        Formatted description suitable for ``print``.
+    """
+    lines = []
+    if name is not None:
+        lines.append(f"=== PoseParams: {name} ===")
+    for section in ("orient", "centroid", "smoothing"):
+        lines.append(f"--- {section} ---")
+        value = params.get(section) if hasattr(params, "get") else None
+        if not value:
+            lines.append("(not set)")
+        else:
+            lines.append(
+                pprint.pformat(value, indent=2, sort_dicts=False, width=76)
+            )
+    return "\n".join(lines)
 
 
 @schema
@@ -2066,6 +2128,34 @@ class PoseParams(SpyglassMixin, dj.Lookup):
             params_name, orient, centroid, smoothing, **kwargs
         )
 
+    def print_params(self, key=None, do_print=True):
+        """Pretty-print one row's orient/centroid/smoothing configuration.
+
+        Parameters
+        ----------
+        key : dict or str, optional
+            A restriction ``dict`` (e.g. ``{"pose_params_id": "default"}``)
+            or a bare ``pose_params_id`` string. When None, ``self`` must
+            already resolve to a single row.
+        do_print : bool, optional
+            If True (default), print the formatted text to stdout.
+
+        Returns
+        -------
+        str
+            The formatted text (also printed when ``do_print`` is True).
+        """
+        if key is None:
+            row = self.fetch1()
+        else:
+            if isinstance(key, str):
+                key = {"pose_params_id": key}
+            row = (self & key).fetch1()
+        text = format_pose_params(row, name=row.get("pose_params_id"))
+        if do_print:
+            print(text)
+        return text
+
 
 @schema
 class PoseSelection(SpyglassMixin, dj.Manual):
@@ -2172,6 +2262,114 @@ class PoseSelection(SpyglassMixin, dj.Manual):
                 f"'{pose_params_key['pose_params_id']}' matches skeleton "
                 f"'{skeleton_id}' suggestion"
             )
+
+
+def _plot_trajectory(
+    df,
+    ax=None,
+    color_by="speed",
+    cmap="viridis",
+    s=5,
+    alpha=0.6,
+    invert_yaxis=True,
+    **kwargs,
+):
+    """Scatter-plot a processed pose trajectory (2D or 3D).
+
+    A 3D scatter is drawn when the dataframe carries a ``position_z`` column;
+    otherwise a 2D scatter with equal aspect and (by default) an inverted
+    y-axis to match video pixel coordinates. Pure drawing helper — never
+    calls ``plt.show``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Processed pose data with ``position_x``/``position_y`` (and optional
+        ``position_z``) columns, as from ``PoseV2.fetch1_dataframe``.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. When None, a new figure/axes is created (a 3D axes
+        when ``position_z`` is present).
+    color_by : str or None, optional
+        Column used to color points (default ``"speed"``); a colorbar is
+        added when set. Pass None to skip coloring and the colorbar.
+    cmap : str, optional
+        Matplotlib colormap name (default ``"viridis"``).
+    s : float, optional
+        Marker size (default 5).
+    alpha : float, optional
+        Marker opacity (default 0.6).
+    invert_yaxis : bool, optional
+        For 2D plots, invert the y-axis to match video coordinates
+        (default True). Ignored for 3D.
+    **kwargs
+        Forwarded to ``Axes.scatter``.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes the trajectory was drawn on.
+
+    Raises
+    ------
+    KeyError
+        If ``position_x`` or ``position_y`` is missing from ``df``.
+    """
+    import matplotlib.pyplot as plt
+
+    for col in ("position_x", "position_y"):
+        if col not in df.columns:
+            raise KeyError(col)
+
+    is_3d = "position_z" in df.columns
+    color = (
+        df[color_by]
+        if color_by is not None and color_by in df.columns
+        else None
+    )
+
+    if is_3d:
+        if ax is None:
+            fig = plt.figure(figsize=(10, 8))
+            ax = fig.add_subplot(projection="3d")
+        scatter = ax.scatter(
+            df["position_x"],
+            df["position_y"],
+            df["position_z"],
+            c=color,
+            cmap=cmap,
+            s=s,
+            alpha=alpha,
+            **kwargs,
+        )
+        ax.set_xlabel("X position (cm)")
+        ax.set_ylabel("Y position (cm)")
+        ax.set_zlabel("Z position (cm)")
+    else:
+        if ax is None:
+            _, ax = plt.subplots(figsize=(10, 10))
+        scatter = ax.scatter(
+            df["position_x"],
+            df["position_y"],
+            c=color,
+            cmap=cmap,
+            s=s,
+            alpha=alpha,
+            **kwargs,
+        )
+        ax.set_xlabel("X position (cm)")
+        ax.set_ylabel("Y position (cm)")
+        ax.set_aspect("equal")
+        if invert_yaxis:
+            ax.invert_yaxis()  # Match video pixel coordinates
+
+    if color is not None:
+        ax.set_title(f"Animal trajectory (colored by {color_by})")
+        label = "Speed (cm/s)" if color_by == "speed" else color_by
+        ax.figure.colorbar(scatter, ax=ax, label=label)
+    else:
+        ax.set_title("Animal trajectory")
+
+    return ax
 
 
 @schema
@@ -2309,6 +2507,33 @@ class PoseV2(SpyglassMixin, dj.Computed):
             )
 
         return df
+
+    def plot_trajectory(self, key=None, ax=None, **kwargs):
+        """Scatter-plot this entry's processed trajectory, colored by speed.
+
+        Thin wrapper: fetches the processed dataframe via
+        ``fetch1_dataframe`` and delegates drawing to ``_plot_trajectory``
+        (a 3D scatter when the data carries a ``position_z`` column).
+
+        Parameters
+        ----------
+        key : dict, optional
+            Restriction identifying a single PoseV2 entry. When given, it is
+            applied before fetching; otherwise ``self`` must already resolve
+            to one row.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on (see ``_plot_trajectory``).
+        **kwargs
+            Forwarded to ``_plot_trajectory``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes the trajectory was drawn on.
+        """
+        query = (self & key) if key is not None else self
+        df = query.fetch1_dataframe()
+        return _plot_trajectory(df, ax=ax, **kwargs)
 
     def fetch_pose_dataframe(self):
         """Fetch raw bodypart pose coordinates from the linked PoseEstim entry.

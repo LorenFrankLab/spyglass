@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Set
 
 import datajoint as dj
+import yaml
 
 from .protocols import FileSystemProtocol, RealFileSystem
 
@@ -449,6 +450,12 @@ class DLCStrategy(PoseToolStrategy):
             "video_sets",
             "model_path",
             "analysis_file_id",
+            # Compute-device selection is a runtime concern, not part of a
+            # param set's identity — pass it via
+            # ``populate(make_kwargs={"device": ...})`` instead. Stripped here so
+            # it never enters the content-addressed params hash.
+            "device",
+            "gputouse",
         }
 
     def get_accepted_params(self) -> Set[str]:
@@ -625,8 +632,8 @@ class DLCStrategy(PoseToolStrategy):
         """Locate the parent project's latest training snapshot.
 
         Uses :meth:`get_latest_model_info` to find the most recent train
-        directory, then returns its newest snapshot file (PyTorch ``*.pt`` or
-        TensorFlow ``*.index``). Returns ``None`` when no resumable snapshot is
+        directory, then returns its newest PyTorch snapshot file
+        (``snapshot-*.pt``). Returns ``None`` when no resumable snapshot is
         available — e.g. the requested ``shuffle`` differs from the trained
         one, so weight-resume is invalid and the caller should degrade to a
         fresh (parent-linked) train.
@@ -650,9 +657,10 @@ class DLCStrategy(PoseToolStrategy):
         if shuffle is not None and info.get("shuffle") != shuffle:
             return None  # shuffle changed → weights can't be reused
         train_dir = Path(info["path"])
-        snaps = sorted(train_dir.glob("snapshot-*.pt")) or sorted(
-            train_dir.glob("*.index")
-        )
+        # PyTorch-only: TF-engine continuation is rejected in
+        # ``continue_training`` before this is ever reached, so a ``*.index``
+        # (TensorFlow) fallback here would be dead code.
+        snaps = sorted(train_dir.glob("snapshot-*.pt"))
         if not snaps:
             return None
         return max(snaps, key=lambda p: self._fs.getmtime(p))
@@ -712,7 +720,14 @@ class DLCStrategy(PoseToolStrategy):
                 key, params, skeleton_id, vid_group, sel_entry, model_instance
             )
 
-        resume = self._build_resume_kwargs(snapshot_path=snapshot)
+        # epochs: explicit kwarg wins; else the length knob already baked into
+        # params by apply_epochs (Model.train's epochs= arrives here as
+        # params['epochs'], since make() does not thread the kwarg through).
+        # Mirrors SLEAPStrategy.continue_training's params.get("max_epochs").
+        eff_epochs = epochs if epochs is not None else params.get("epochs")
+        resume = self._build_resume_kwargs(
+            snapshot_path=snapshot, epochs=eff_epochs
+        )
         model_instance._info_msg(
             f"Resuming DLC training from parent snapshot: {snapshot}"
         )
@@ -808,7 +823,9 @@ class DLCStrategy(PoseToolStrategy):
         self._prepare_training_dataset(
             config_path, params, config, model_instance
         )
-        self._execute_training(config_path, params, model_instance)
+        self._execute_training(
+            config_path, params, model_instance, config=config
+        )
 
         # Localize and register trained model. Pass the selection *key* so the
         # generated model_id is unique per selection: default_pk_name("mdl")
@@ -909,7 +926,10 @@ class DLCStrategy(PoseToolStrategy):
         ):
             try:
                 existing = DlcConfig.read(candidate.parent).video_names()
-            except Exception:
+            except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
+                # Unreadable / malformed candidate config → skip it (visibly),
+                # then try the next one. Unexpected errors still propagate.
+                _log(f"Skipping unreadable DLC project candidate: {candidate}")
                 continue
             if existing and existing.issubset(want):
                 config_path = candidate.resolve()
@@ -1264,9 +1284,24 @@ class DLCStrategy(PoseToolStrategy):
             create_training_dataset(str(config_path), **training_dataset_kwargs)
 
     def _execute_training(
-        self, config_path: Path, params: dict, model_instance
+        self, config_path: Path, params: dict, model_instance, config=None
     ) -> None:
-        """Execute DLC model training using train_network."""
+        """Execute DLC model training using train_network.
+
+        Parameters
+        ----------
+        config_path : Path
+            Path to the DLC project ``config.yaml``.
+        params : dict
+            Training parameters from ModelParams.
+        model_instance
+            Model table instance for logging.
+        config : dict, optional
+            The already-loaded DLC project configuration. Used only to resolve
+            the engine (PyTorch vs TensorFlow) for GPU-selection routing. When
+            ``None`` (e.g. direct unit-test callers) the engine defaults to
+            PyTorch, so ``gputouse`` routing stays active.
+        """
         from spyglass.position.utils import (
             get_param_names,
             suppress_print_from_package,
@@ -1316,17 +1351,22 @@ class DLCStrategy(PoseToolStrategy):
                 train_network_kwargs.setdefault("epochs", 1)
                 train_network_kwargs.setdefault("save_epochs", 1)
 
-        # GPU selection: route a legacy `gputouse` to the v2 `device` selector.
-        # `train_network` accepts `gputouse` in its signature but the PyTorch
-        # engine ignores it, so forward `device` instead.
+        # GPU selection: route a legacy `gputouse` to the v2 `device` selector,
+        # but ONLY for the PyTorch engine. `train_network` accepts `gputouse`
+        # in its signature; the PyTorch engine ignores it (it selects the GPU
+        # via `device`), so routing corrects a silent no-op there. The
+        # TensorFlow engine, however, DOES honor `gputouse` — popping it and
+        # setting `device` (which TF ignores) would silently change GPU
+        # selection — so leave TF-engine kwargs untouched.
         from spyglass.position.utils.dlc_io import route_gputouse_to_device
 
-        route_gputouse_to_device(
-            params,
-            train_network_kwargs,
-            model_instance._warn_msg,
-            context="training",
-        )
+        if not self._is_tf_engine(config):
+            route_gputouse_to_device(
+                params,
+                train_network_kwargs,
+                model_instance._warn_msg,
+                context="training",
+            )
 
         model_instance._info_msg("Starting DLC model training...")
 
@@ -1818,7 +1858,8 @@ class SLEAPStrategy(PoseToolStrategy):
             model_path = (
                 model_instance.__class__ & {"model_id": parent_id}
             ).fetch1("model_path")
-        except Exception:  # missing row / no DB — caller degrades to fresh
+        except dj.errors.DataJointError:
+            # missing row / no DB — caller degrades to fresh
             return None
         return Path(model_path) if model_path else None
 
@@ -1829,7 +1870,9 @@ class SLEAPStrategy(PoseToolStrategy):
         SLEAP (<=1.4) wrote ``best_model.h5``. Either is a valid base checkpoint
         (the loader dispatches on the ``.ckpt``/``.h5`` extension), so both are
         accepted, ``best.ckpt`` preferred. Also searches one directory level
-        down, since a stored ``model_path`` may point at the run's parent.
+        down, since a stored ``model_path`` may point at the run's parent; when
+        several one-level-down matches exist, the most recently modified wins
+        (parity with :meth:`DLCStrategy._resolve_parent_snapshot`).
 
         Parameters
         ----------
@@ -1852,9 +1895,9 @@ class SLEAPStrategy(PoseToolStrategy):
             if self._fs.exists(cand):
                 return cand
         for name in ("best.ckpt", "best_model.h5"):
-            matches = sorted(self._fs.glob(str(parent_dir / "*" / name)))
+            matches = self._fs.glob(str(parent_dir / "*" / name))
             if matches:
-                return Path(matches[0])
+                return Path(max(matches, key=self._fs.getmtime))
         return None
 
     def _write_epochs_config(self, config_path, epochs: int, model_instance):
@@ -1920,6 +1963,13 @@ class SLEAPStrategy(PoseToolStrategy):
             )
             return None
 
+        # delete=False is deliberate, not a leak: this rewritten config is
+        # consumed by the out-of-process ``sleap-train`` subprocess launched in
+        # ``_run_training`` (via ``config_override``), so it must outlive this
+        # function's scope — a ``finally: unlink`` would pull it out from under
+        # the trainer. The subprocess reads it, and the file is a small config
+        # left in the system temp dir for post-mortem inspection of the exact
+        # length used; OS temp reaping cleans it up.
         out = tempfile.NamedTemporaryFile(
             prefix="sleap_cont_", suffix=out_suffix, delete=False
         )
