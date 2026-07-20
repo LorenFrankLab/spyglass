@@ -58,7 +58,7 @@ class TestInMemoryRoundTrip:
     """Messy names in -> canonical names out, pose values bit-identical."""
 
     def test_write_then_read_canonicalizes_without_changing_values(self):
-        from spyglass.position.v2.estim import (
+        from spyglass.position.v2.utils.pose_io import (
             canonicalize_pose_columns,
             pose_estimation_to_dataframe,
         )
@@ -97,7 +97,7 @@ class TestInMemoryRoundTrip:
 
     def test_matches_canonical_control_run(self):
         """A messy run and an already-canonical run give identical output."""
-        from spyglass.position.v2.estim import (
+        from spyglass.position.v2.utils.pose_io import (
             canonicalize_pose_columns,
             pose_estimation_to_dataframe,
         )

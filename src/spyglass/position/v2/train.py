@@ -31,6 +31,7 @@ from spyglass.position.utils.path_helpers import (
 from spyglass.position.utils.protocols import default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
+from spyglass.position.v2.utils.config_io import _rename_leaves
 from spyglass.position.v2.utils.skeleton import (
     build_canonical_map,
     build_labeled_graph,
@@ -49,49 +50,6 @@ from spyglass.position.v2.utils.training_io import (
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin, logger
-
-
-def _rename_leaves(obj, mapping: dict):
-    """Recursively rename string leaves of a nested list using *mapping*.
-
-    Used to canonicalize body-part names inside a DLC skeleton structure
-    (which may be nested) while preserving its shape. Strings absent from
-    *mapping* are left unchanged.
-    """
-    if isinstance(obj, str):
-        return mapping.get(obj, obj)
-    if isinstance(obj, (list, tuple)):
-        return [_rename_leaves(item, mapping) for item in obj]
-    return obj
-
-
-def prompt_default(key: str, default, abort_value: str = "n") -> str:
-    """Prompt the user for a value, returning the default on empty input.
-
-    Parameters
-    ----------
-    key : str
-        Label shown in the prompt.
-    default : any
-        Default value returned when the user presses Enter without input.
-    abort_value : str, optional
-        Input that triggers a RuntimeError ("Aborted by user"), by default "n".
-
-    Returns
-    -------
-    str
-        The user's response, or *default* cast to str when input is blank.
-
-    Raises
-    ------
-    RuntimeError
-        If the user enters *abort_value*.
-    """
-    response = input(f"{key} [{default}]: ").strip()
-    if response == abort_value:
-        raise RuntimeError("Aborted by user")
-    return response if response else default
-
 
 # ------------------------------ Optional imports ------------------------------
 with suppress_print_from_package():

@@ -278,7 +278,10 @@ def validate_dlc_file(h5_path: Union[Path, str]) -> bool:
         get_dlc_bodyparts(h5_path)
         return True
 
-    except (Exception,):
+    except (OSError, KeyError, ValueError, TypeError, AttributeError):
+        # Unparsable as a DLC file → not valid. An unexpected error (e.g. a
+        # bug in the parse helpers) is left to propagate rather than masked
+        # as "invalid file".
         return False
 
 

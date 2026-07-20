@@ -440,7 +440,7 @@ class TestCanonicalizePoseColumns:
         return pd.DataFrame(arr, columns=cols)
 
     def test_renames_to_canonical_preserving_values(self, canon_map):
-        from spyglass.position.v2.estim import canonicalize_pose_columns
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
 
         df = self._pose_df(["EarR", "greenLed"])
         ear_x = df[("scorer", "EarR", "x")].to_numpy(copy=True)
@@ -468,7 +468,7 @@ class TestCanonicalizePoseColumns:
     def test_unresolved_name_raises_naming_it(self, canon_map):
         import datajoint as dj
 
-        from spyglass.position.v2.estim import canonicalize_pose_columns
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
 
         df = self._pose_df(["EarR", "noSuchPartXyz"])
         with pytest.raises(dj.DataJointError, match="noSuchPartXyz"):
@@ -479,7 +479,7 @@ class TestCanonicalizePoseColumns:
     ):
         import datajoint as dj
 
-        from spyglass.position.v2.estim import canonicalize_pose_columns
+        from spyglass.position.v2.utils.pose_io import canonicalize_pose_columns
 
         # both normalize to 'green led' -> canonical 'greenLED' (duplicate col)
         df = self._pose_df(["greenLED", "green_led"])
@@ -513,7 +513,9 @@ class TestPoseEstimationToDataframe:
             self.pose_estimation_series = {s.name: s for s in series}
 
     def test_resolves_series_names_to_canonical(self):
-        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
         from spyglass.position.v2.utils.skeleton import build_canonical_map
 
         canon_map = build_canonical_map(["greenLED", "earR"])
@@ -534,7 +536,9 @@ class TestPoseEstimationToDataframe:
 
     def test_unknown_name_left_unchanged(self):
         """A legacy/unknown part with no canonical match reads back as-is."""
-        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
         from spyglass.position.v2.utils.skeleton import build_canonical_map
 
         canon_map = build_canonical_map(["greenLED"])
@@ -546,7 +550,9 @@ class TestPoseEstimationToDataframe:
         assert parts == ["mysteryPart"]
 
     def test_is_3d_reads_z_coordinate(self):
-        from spyglass.position.v2.estim import pose_estimation_to_dataframe
+        from spyglass.position.v2.utils.pose_io import (
+            pose_estimation_to_dataframe,
+        )
         from spyglass.position.v2.utils.skeleton import build_canonical_map
 
         canon_map = build_canonical_map(["earR"])

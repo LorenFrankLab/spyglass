@@ -1,5 +1,6 @@
 """Parameter dataclasses for pose estimation configuration."""
 
+import pprint
 from dataclasses import asdict, dataclass
 
 from spyglass.position.utils.validation import (
@@ -101,3 +102,37 @@ class PoseParameterSet:
             "centroid": self.centroid.to_dict(),
             "smoothing": self.smoothing.to_dict(),
         }
+
+
+def format_pose_params(params, name=None):
+    """Render a PoseParams row as human-readable, multi-line text.
+
+    Pure formatter — no database access. The ``orient``, ``centroid``, and
+    ``smoothing`` sub-dicts are each shown under a ``--- <section> ---``
+    header; a missing or empty sub-dict renders as ``(not set)``.
+
+    Parameters
+    ----------
+    params : Mapping
+        A PoseParams-style row (``orient``/``centroid``/``smoothing`` keys).
+    name : str, optional
+        If given, an ``=== PoseParams: <name> ===`` header is prepended.
+
+    Returns
+    -------
+    str
+        Formatted description suitable for ``print``.
+    """
+    lines = []
+    if name is not None:
+        lines.append(f"=== PoseParams: {name} ===")
+    for section in ("orient", "centroid", "smoothing"):
+        lines.append(f"--- {section} ---")
+        value = params.get(section) if hasattr(params, "get") else None
+        if not value:
+            lines.append("(not set)")
+        else:
+            lines.append(
+                pprint.pformat(value, indent=2, sort_dicts=False, width=76)
+            )
+    return "\n".join(lines)

@@ -25,10 +25,8 @@ Results are registered in ``PositionOutput`` automatically and accessible via
 """
 
 import dataclasses
-import pprint
 import subprocess
 from datetime import datetime
-from difflib import get_close_matches
 from fractions import Fraction
 from pathlib import Path
 from typing import Union
@@ -66,8 +64,13 @@ from spyglass.position.v2.utils.params import (
     OrientationParams,
     PoseParameterSet,
     SmoothingParams,
+    format_pose_params,
 )
-from spyglass.position.v2.utils.skeleton import canonicalize, normalize_label
+from spyglass.position.v2.utils.plotting import _plot_trajectory
+from spyglass.position.v2.utils.pose_io import (
+    canonicalize_pose_columns,
+    pose_estimation_to_dataframe,
+)
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import pose_output_dir
 from spyglass.utils import SpyglassMixin, logger
@@ -80,121 +83,6 @@ except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
 
 schema = dj.schema("cbroz_position_v3_estim")  # Couldn't drop previous
-
-
-def canonicalize_pose_columns(pose_df, bodyparts, canon_map):
-    """Map tool-native body-part names to the canonical Spyglass namespace.
-
-    The single boundary where names emitted by a pose tool (from its model
-    config / inference output) are reconciled with the curated ``BodyPart``
-    spelling, so every downstream stage speaks one namespace. Only the column
-    labels and the bodyparts list are remapped; the underlying pose data is
-    untouched. Tool-agnostic: operates on the shared 3-level MultiIndex used by
-    DLC and SLEAP alike.
-
-    Parameters
-    ----------
-    pose_df : pandas.DataFrame
-        Pose data with a 3-level column MultiIndex
-        ``(scorer, bodyparts, coords)``.
-    bodyparts : list[str]
-        Tool-native body-part names, in column order.
-    canon_map : dict[str, str]
-        Mapping from :func:`~spyglass.position.v2.utils.skeleton.build_canonical_map`,
-        built from the ``BodyPart`` table.
-
-    Returns
-    -------
-    tuple[pandas.DataFrame, list[str]]
-        The relabeled DataFrame and the canonical bodyparts list (column
-        order preserved).
-
-    Raises
-    ------
-    datajoint.errors.DataJointError
-        If any name has no canonical match, or two surface forms collapse to
-        the same canonical spelling (which would create a duplicate column).
-    """
-    mapping = {bp: canonicalize(bp, canon_map) for bp in bodyparts}
-
-    unresolved = [bp for bp, canon in mapping.items() if canon is None]
-    if unresolved:
-        hints = "; ".join(
-            f"{bp!r} (did you mean "
-            f"{[canon_map[m] for m in get_close_matches(normalize_label(bp), list(canon_map), n=3)] or 'no close match'})"
-            for bp in unresolved
-        )
-        raise dj.DataJointError(
-            f"Body part name(s) not in BodyPart: {hints}. Correct the model "
-            "config, ask an admin to add them, or re-run the import with "
-            "normalize_names=True to rewrite the project to canonical names."
-        )
-
-    canonical = [mapping[bp] for bp in bodyparts]
-    dupes = sorted({c for c in canonical if canonical.count(c) > 1})
-    if dupes:
-        raise dj.DataJointError(
-            f"Body part names collapse to the same canonical spelling: "
-            f"{dupes}. The model config has multiple surface forms of one "
-            "part; rename them so each maps to a distinct body part."
-        )
-
-    return pose_df.rename(columns=mapping, level="bodyparts"), canonical
-
-
-def pose_estimation_to_dataframe(pose_estimation, scorer, is_3d, canon_map):
-    """Build a pose DataFrame from an ndx-pose ``PoseEstimation`` object.
-
-    Reconstructs the 3-level column MultiIndex ``(scorer, bodyparts, coords)``
-    used across the pipeline, resolving each series' body-part name to its
-    canonical spelling on read. This is the back-compat counterpart to the
-    write-side ingest boundary: NWB written with tool-native (or older)
-    spellings reads back canonical wherever a match exists. Names with **no**
-    canonical match are left unchanged, so reading never fails on a legacy or
-    unknown part.
-
-    Parameters
-    ----------
-    pose_estimation : ndx_pose.PoseEstimation
-        Object whose ``pose_estimation_series`` provides per-bodypart data,
-        confidence, and timestamps.
-    scorer : str
-        Scorer label for the first MultiIndex level.
-    is_3d : bool
-        When True, a ``z`` coordinate is read from series with >= 3 columns.
-    canon_map : dict[str, str]
-        Mapping from
-        :func:`~spyglass.position.v2.utils.skeleton.build_canonical_map`.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Pose data indexed by real per-frame timestamps (seconds).
-    """
-    data_dict = {}
-    for series in pose_estimation.pose_estimation_series.values():
-        bodypart = series.name.replace("_pose", "")
-        bodypart = canonicalize(bodypart, canon_map, default=bodypart)
-
-        pose_data = series.data[:]
-        data_dict[(scorer, bodypart, "x")] = pose_data[:, 0]
-        data_dict[(scorer, bodypart, "y")] = pose_data[:, 1]
-        if is_3d and pose_data.shape[1] >= 3:
-            data_dict[(scorer, bodypart, "z")] = pose_data[:, 2]
-
-        data_dict[(scorer, bodypart, "likelihood")] = series.confidence[:]
-
-    df = pd.DataFrame(data_dict)
-    df.columns = pd.MultiIndex.from_tuples(
-        df.columns, names=["scorer", "bodyparts", "coords"]
-    )
-
-    # Use real per-frame timestamps (seconds) as the index so that
-    # compute_pose_outputs derives the correct sampling_rate and computes
-    # velocity in cm/s rather than cm/frame.
-    first_series = list(pose_estimation.pose_estimation_series.values())[0]
-    df.index = pd.Index(first_series.timestamps[:], name="time")
-    return df
 
 
 @schema
@@ -1716,40 +1604,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         return analysis_file_name
 
 
-def format_pose_params(params, name=None):
-    """Render a PoseParams row as human-readable, multi-line text.
-
-    Pure formatter — no database access. The ``orient``, ``centroid``, and
-    ``smoothing`` sub-dicts are each shown under a ``--- <section> ---``
-    header; a missing or empty sub-dict renders as ``(not set)``.
-
-    Parameters
-    ----------
-    params : Mapping
-        A PoseParams-style row (``orient``/``centroid``/``smoothing`` keys).
-    name : str, optional
-        If given, an ``=== PoseParams: <name> ===`` header is prepended.
-
-    Returns
-    -------
-    str
-        Formatted description suitable for ``print``.
-    """
-    lines = []
-    if name is not None:
-        lines.append(f"=== PoseParams: {name} ===")
-    for section in ("orient", "centroid", "smoothing"):
-        lines.append(f"--- {section} ---")
-        value = params.get(section) if hasattr(params, "get") else None
-        if not value:
-            lines.append("(not set)")
-        else:
-            lines.append(
-                pprint.pformat(value, indent=2, sort_dicts=False, width=76)
-            )
-    return "\n".join(lines)
-
-
 @schema
 class PoseParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose processing (orientation, centroid, smoothing).
@@ -2262,114 +2116,6 @@ class PoseSelection(SpyglassMixin, dj.Manual):
                 f"'{pose_params_key['pose_params_id']}' matches skeleton "
                 f"'{skeleton_id}' suggestion"
             )
-
-
-def _plot_trajectory(
-    df,
-    ax=None,
-    color_by="speed",
-    cmap="viridis",
-    s=5,
-    alpha=0.6,
-    invert_yaxis=True,
-    **kwargs,
-):
-    """Scatter-plot a processed pose trajectory (2D or 3D).
-
-    A 3D scatter is drawn when the dataframe carries a ``position_z`` column;
-    otherwise a 2D scatter with equal aspect and (by default) an inverted
-    y-axis to match video pixel coordinates. Pure drawing helper — never
-    calls ``plt.show``.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Processed pose data with ``position_x``/``position_y`` (and optional
-        ``position_z``) columns, as from ``PoseV2.fetch1_dataframe``.
-    ax : matplotlib.axes.Axes, optional
-        Axes to draw on. When None, a new figure/axes is created (a 3D axes
-        when ``position_z`` is present).
-    color_by : str or None, optional
-        Column used to color points (default ``"speed"``); a colorbar is
-        added when set. Pass None to skip coloring and the colorbar.
-    cmap : str, optional
-        Matplotlib colormap name (default ``"viridis"``).
-    s : float, optional
-        Marker size (default 5).
-    alpha : float, optional
-        Marker opacity (default 0.6).
-    invert_yaxis : bool, optional
-        For 2D plots, invert the y-axis to match video coordinates
-        (default True). Ignored for 3D.
-    **kwargs
-        Forwarded to ``Axes.scatter``.
-
-    Returns
-    -------
-    matplotlib.axes.Axes
-        The axes the trajectory was drawn on.
-
-    Raises
-    ------
-    KeyError
-        If ``position_x`` or ``position_y`` is missing from ``df``.
-    """
-    import matplotlib.pyplot as plt
-
-    for col in ("position_x", "position_y"):
-        if col not in df.columns:
-            raise KeyError(col)
-
-    is_3d = "position_z" in df.columns
-    color = (
-        df[color_by]
-        if color_by is not None and color_by in df.columns
-        else None
-    )
-
-    if is_3d:
-        if ax is None:
-            fig = plt.figure(figsize=(10, 8))
-            ax = fig.add_subplot(projection="3d")
-        scatter = ax.scatter(
-            df["position_x"],
-            df["position_y"],
-            df["position_z"],
-            c=color,
-            cmap=cmap,
-            s=s,
-            alpha=alpha,
-            **kwargs,
-        )
-        ax.set_xlabel("X position (cm)")
-        ax.set_ylabel("Y position (cm)")
-        ax.set_zlabel("Z position (cm)")
-    else:
-        if ax is None:
-            _, ax = plt.subplots(figsize=(10, 10))
-        scatter = ax.scatter(
-            df["position_x"],
-            df["position_y"],
-            c=color,
-            cmap=cmap,
-            s=s,
-            alpha=alpha,
-            **kwargs,
-        )
-        ax.set_xlabel("X position (cm)")
-        ax.set_ylabel("Y position (cm)")
-        ax.set_aspect("equal")
-        if invert_yaxis:
-            ax.invert_yaxis()  # Match video pixel coordinates
-
-    if color is not None:
-        ax.set_title(f"Animal trajectory (colored by {color_by})")
-        label = "Speed (cm/s)" if color_by == "speed" else color_by
-        ax.figure.colorbar(scatter, ax=ax, label=label)
-    else:
-        ax.set_title("Animal trajectory")
-
-    return ax
 
 
 @schema

@@ -44,7 +44,7 @@ class TestPlotTrajectoryHelper:
     """Tests for the pure ``_plot_trajectory`` drawing helper."""
 
     def test_2d_returns_axes_with_scatter(self):
-        from spyglass.position.v2.estim import _plot_trajectory
+        from spyglass.position.v2.utils.plotting import _plot_trajectory
 
         ax = _plot_trajectory(_df_2d())
         assert ax.name != "3d"
@@ -53,7 +53,7 @@ class TestPlotTrajectoryHelper:
         assert len(ax.figure.axes) == 2
 
     def test_3d_returns_3d_axes(self):
-        from spyglass.position.v2.estim import _plot_trajectory
+        from spyglass.position.v2.utils.plotting import _plot_trajectory
 
         ax = _plot_trajectory(_df_3d())
         assert ax.name == "3d"
@@ -62,21 +62,21 @@ class TestPlotTrajectoryHelper:
     def test_respects_supplied_ax(self):
         import matplotlib.pyplot as plt
 
-        from spyglass.position.v2.estim import _plot_trajectory
+        from spyglass.position.v2.utils.plotting import _plot_trajectory
 
         fig, ax = plt.subplots()
         out = _plot_trajectory(_df_2d(), ax=ax)
         assert out is ax
 
     def test_color_by_none_skips_colorbar(self):
-        from spyglass.position.v2.estim import _plot_trajectory
+        from spyglass.position.v2.utils.plotting import _plot_trajectory
 
         ax = _plot_trajectory(_df_2d(), color_by=None)
         # no colorbar -> figure holds only the single plotting axes
         assert len(ax.figure.axes) == 1
 
     def test_missing_position_column_raises(self):
-        from spyglass.position.v2.estim import _plot_trajectory
+        from spyglass.position.v2.utils.plotting import _plot_trajectory
 
         df = _df_2d().drop(columns=["position_x"])
         with pytest.raises(KeyError, match="position_x"):

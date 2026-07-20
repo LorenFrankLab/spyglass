@@ -81,7 +81,7 @@ class TestHelperFunctions:
 
     def test_prompt_default(self):
         """Test prompt_default function."""
-        from spyglass.position.v2.train import prompt_default
+        from spyglass.position.v2.utils.config_io import prompt_default
 
         # Mock input to test default behavior
         with patch("builtins.input", return_value=""):
