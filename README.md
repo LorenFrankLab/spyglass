@@ -7,7 +7,7 @@
 
 [Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F02_Insert_Data.ipynb&branch=main)
 |
-[Installation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+[Installation](https://lorenfranklab.github.io/spyglass/latest/GettingStarted/QUICKSTART/)
 | [Docs](https://lorenfranklab.github.io/spyglass/) |
 [Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) |
 [Citation](#citation)
@@ -48,7 +48,8 @@ Features of Spyglass include:
     via [Kachery](https://github.com/flatironinstitute/kachery-cloud), a
     decentralized content addressable data sharing platform. Kachery Cloud
     allows users to access the database and pull data and analysis results
-    directly to their local machine.
+    directly to their local machine. Kachery is an optional dependency; install
+    it with `pip install spyglass-neuro[kachery-cloud]`.
 - **Pipeline versioning** - Processing and analysis of data in neuroscience is
     often dynamic, requiring new features. Spyglass uses *Merge tables* to
     ensure that analysis pipelines can be versioned. This allows users to easily
@@ -147,8 +148,8 @@ License and Copyright notice can be found at
 
 ## System requirements
 
-Spyglass has been tested on Linux Ubuntu 20.04 and MacOS 10.15. It has not been
-tested on Windows and likely will not work.
+Spyglass has been tested on Linux (Ubuntu) and recent versions of macOS. Windows
+support is experimental.
 
 No specific hardware requirements are needed to run spyglass. However, the
 amount of data that can be stored and analyzed is limited by the available disk

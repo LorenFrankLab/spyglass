@@ -11,6 +11,7 @@ from operator import itemgetter
 from pathlib import Path
 
 import datajoint as dj
+import matplotlib.path
 import numpy as np
 import pandas as pd
 from position_tools import get_distance
@@ -261,6 +262,19 @@ from spyglass.position.utils.general import (
     get_video_info,
     infer_output_dir,
 )
+
+
+def check_bounds_all_bodyparts(df, bounds):
+    """Checks if (x,y) position of each labeled body part in ROI"""
+    df_copy = df.copy()
+
+    xy_loc = df_copy[["x", "y"]].to_numpy()
+    inside = matplotlib.path.Path(bounds).contains_points(xy_loc)
+    logger.debug(f"Inside bounds mask: {inside.sum()}/{len(inside)}")
+    outside = ~inside
+    df_copy.loc[outside, ["x", "y"]] = np.nan
+    return df_copy
+
 
 # smooth_moving_avg moved to utils.interpolation module
 # Use compatibility wrapper below for V1 API
