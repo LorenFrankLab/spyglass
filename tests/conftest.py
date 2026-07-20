@@ -342,6 +342,17 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help=(
+            "Host directory for per-container MySQL data volumes (e.g. "
+            "/stelmo/cbroz/docker-vols/) to keep test-container data off the "
+            "root disk. Falls back to $SPYGLASS_TEST_DOCKER_VOL_DIR."
+        ),
+    )
 
 
 def pytest_configure(config):
@@ -366,6 +377,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,

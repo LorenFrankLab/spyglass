@@ -258,6 +258,12 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management
 
+--container-vol-dir PATH  # Host dir for per-container MySQL data volumes
+# Bind-mounts <PATH>/<container-name> -> /var/lib/mysql, keeping test-container
+# data off the root disk (e.g. --container-vol-dir /stelmo/cbroz/docker-vols/).
+# Falls back to $SPYGLASS_TEST_DOCKER_VOL_DIR. Useful for: avoiding a full root
+# disk from accumulated test-container volumes.
+
 --no-dlc            # Skip DeepLabCut tests and downloads
 # Useful for: systems without DLC, faster test runs
 ```
