@@ -515,12 +515,23 @@ class DLCStrategy(PoseToolStrategy):
         }
 
     def get_default_params(self) -> Dict[str, Any]:
+        # DLC 3.x defaults to the PyTorch engine, so the PyTorch-native length
+        # knobs (``epochs``/``save_epochs``) are the primary defaults here.
+        # ``epochs=200``/``save_epochs=25`` mirror DeepLabCut's own PyTorch
+        # defaults -- a good fit for the small (~100-frame) Frank Lab training
+        # sets. Do NOT carry a TensorFlow ``maxiters`` value (the old TF default
+        # was 1,030,000 *iterations*) into ``epochs``: one epoch is a full pass
+        # over the training set (many gradient steps), so ~1e6 epochs is a
+        # runaway. The TensorFlow knobs below are retained only for models
+        # explicitly trained with ``engine: tensorflow`` (see ``apply_epochs``).
         return {
             "shuffle": 1,
             "trainingsetindex": 0,
-            "maxiters": None,  # Use DLC default
-            "displayiters": None,
-            "saveiters": None,
+            "epochs": 200,  # PyTorch engine (DLC 3.x default) length knob
+            "save_epochs": 25,  # PyTorch snapshot cadence
+            "maxiters": None,  # TensorFlow engine only; None => DLC default
+            "displayiters": None,  # TensorFlow engine only
+            "saveiters": None,  # TensorFlow engine only
             "model_prefix": "",
             "net_type": "resnet_50",
         }

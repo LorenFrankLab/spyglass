@@ -83,6 +83,49 @@ resulting `.h5`/NWB via `PoseEstimSelection` with `task_mode="load"` or via
 [Troubleshooting → TensorFlow / jax conflict](./TROUBLESHOOTING.md) for the
 migration fix.
 
+### Training parameters: TensorFlow → PyTorch
+
+The two DLC engines **count training length in different units**, and this is
+the single most common source of confusion when moving a V1 (TF) workflow to V2
+(PyTorch). They are *not* interchangeable:
+
+|                  | TensorFlow (DLC 2.x)                | PyTorch (DLC 3.x)                                    |
+| ---------------- | ----------------------------------- | ---------------------------------------------------- |
+| Length unit      | **iteration** (one batch)           | **epoch** (one full pass over the train set)         |
+| Length knob      | `maxiters`                          | `epochs`                                             |
+| Snapshot cadence | `saveiters`                         | `save_epochs`                                        |
+| Console cadence  | `displayiters`                      | `display_iters`                                      |
+| Default length   | ~1,030,000 iterations               | 200 epochs                                           |
+| Snapshot file    | `snapshot-<iter>.{index,meta,data}` | `snapshot-<epoch>.pt` (+ `snapshot-best-<epoch>.pt`) |
+
+One epoch bundles `ceil(n_train_images / batch_size)` gradient steps, so the raw
+counters are **not** comparable: on a ~100-frame training set with
+`batch_size: 8`, epoch 200 is only ~2,400 gradient steps — nothing like 200 TF
+iterations, and nothing like the ~1e6 iterations of a full TF run. PyTorch
+generally reaches equal accuracy in **far fewer total updates**, which is why
+its default is 200 epochs rather than ~1M iterations.
+
+> **Migration pitfall.** Do not copy a TensorFlow `maxiters` value into the
+> PyTorch `epochs` field. A carried-over `epochs: 1030000` (the old TF default)
+> means ~1,000,000 passes over the data — a run that never sensibly terminates
+> and trains long past its best checkpoint. For Frank Lab–sized training sets,
+> ~200 epochs is the right scale.
+
+**How V2 handles this for you.** `Model.train(key, epochs=N)` is
+engine-agnostic: `DLCStrategy.apply_epochs` resolves the project's engine and
+writes the correct native knob — `epochs` for PyTorch (the DLC 3.x default),
+`maxiters` for an explicit `engine: tensorflow` model. The `dlc_default`
+`ModelParams` set stores no length knob at all, so a fresh PyTorch run simply
+uses DLC's 200-epoch default; pass `epochs=` (or bake it into `ModelParams`) to
+override.
+
+**How to read training progress.** For a PyTorch model, count epochs: the
+highest `snapshot-<epoch>.pt` (and `snapshot-best-<epoch>.pt`) in the model's
+`train/` directory, and the `step` column of `learning_stats.csv` (which is the
+epoch number). An empty `dlc-models-pytorch/` **and** an empty
+`training-datasets/.../UnaugmentedDataSet.../` means training never started (the
+training dataset was never created).
+
 ______________________________________________________________________
 
 ## Table Reference

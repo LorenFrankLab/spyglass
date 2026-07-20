@@ -1225,7 +1225,13 @@ def insert_project(
     if NO_POSE:
         pytest.skip("Skipping pose-dependent (e.g., DLC) tests.")
 
-    from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
+    try:
+        from deeplabcut.utils.auxiliaryfunctions import (
+            read_config,
+            write_config,
+        )
+    except ImportError:  # DLC absent (e.g. SLEAP-only env) → skip, don't error
+        pytest.skip("Skipping DLC test (deeplabcut not installed)")
 
     from spyglass.decoding.v1.core import PositionGroup
     from spyglass.linearization.merge import LinearizedPositionOutput
