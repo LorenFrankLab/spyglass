@@ -1,5 +1,6 @@
 import atexit
 import hashlib
+import os
 import socket
 import subprocess
 import time
@@ -199,6 +200,17 @@ class DockerMySQLManager:
             self.container.restart()
 
         else:
+            # Optionally place the MySQL data dir on a larger disk. Set
+            # SPYGLASS_TEST_DOCKER_VOL_DIR to a host directory (e.g. on a
+            # roomy volume) to bind-mount per-container data there instead of
+            # Docker's default storage; unset keeps the default anonymous
+            # volume. Avoids filling the root disk with test-container data.
+            volumes = None
+            vol_dir = os.environ.get("SPYGLASS_TEST_DOCKER_VOL_DIR")
+            if vol_dir:
+                host_path = os.path.join(vol_dir, self.container_name)
+                os.makedirs(host_path, exist_ok=True)
+                volumes = {host_path: {"bind": "/var/lib/mysql", "mode": "rw"}}
             self._ran_container = self.client.containers.run(
                 image=f"{self.image_name}:{self.mysql_version}",
                 name=self.container_name,
@@ -207,6 +219,7 @@ class DockerMySQLManager:
                     f"MYSQL_ROOT_PASSWORD={self.password}",
                     "MYSQL_DEFAULT_STORAGE_ENGINE=InnoDB",
                 ],
+                volumes=volumes,
                 detach=True,
                 tty=True,
             )

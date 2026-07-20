@@ -1053,6 +1053,110 @@ class Model(SpyglassMixin, dj.Computed):
         groups = VidFileGroup.File & (Session & {"subject_id": subject_id})
         return cls & (ModelSelection & groups)
 
+    # ── Inference-time model nudge (rank same-skeleton models by score) ──
+    _COMPARABLE_METRICS = ("test_error", "test_error_p")
+
+    @classmethod
+    def skeleton_of(cls, model_id: str) -> str:
+        """Return the ``skeleton_id`` a model was trained against.
+
+        Parameters
+        ----------
+        model_id : str
+            The model to look up.
+
+        Returns
+        -------
+        str
+            The ``skeleton_id`` from the model's training selection.
+        """
+        return (
+            cls * ModelSelection * ModelParams & {"model_id": model_id}
+        ).fetch1("skeleton_id")
+
+    @classmethod
+    def _rank_model_rows(cls, rows) -> list:
+        """Rank same-skeleton model rows by a comparable evaluation metric.
+
+        Pure helper (no DB). Each row is ``{"model_id", "evaluation"}`` where
+        ``evaluation`` is the tool-specific metrics dict (or None). A model is
+        *scored* when its evaluation carries a real (non-bool) numeric value
+        for ``test_error`` (preferred) or ``test_error_p`` (fallback); other
+        keys (e.g. ``train_error``) are not comparable. Scored models sort
+        first by ascending error; unscored models follow, ordered only by a
+        weak, deterministic ``training_iterations`` tiebreaker (more
+        iterations first). No order is ever fabricated for unscored models.
+
+        Parameters
+        ----------
+        rows : list[dict]
+            ``{"model_id": str, "evaluation": dict | None}`` rows.
+
+        Returns
+        -------
+        list[dict]
+            ``{"model_id", "metric", "value", "iterations"}`` sorted
+            best-first; ``metric``/``value`` are None when no comparable
+            metric is present.
+        """
+        ranked = []
+        for row in rows:
+            evaluation = row.get("evaluation")
+            metric, value, iterations = None, None, None
+            if isinstance(evaluation, dict):
+                for key in cls._COMPARABLE_METRICS:
+                    candidate = evaluation.get(key)
+                    if isinstance(candidate, bool):
+                        continue  # a bool is not a metric value
+                    if isinstance(candidate, (int, float)):
+                        metric, value = key, float(candidate)
+                        break
+                iters = evaluation.get("training_iterations")
+                if isinstance(iters, (int, float)) and not isinstance(
+                    iters, bool
+                ):
+                    iterations = int(iters)
+            ranked.append(
+                {
+                    "model_id": row.get("model_id"),
+                    "metric": metric,
+                    "value": value,
+                    "iterations": iterations,
+                }
+            )
+
+        def _sort_key(entry):
+            if entry["value"] is not None:
+                return (0, entry["value"])
+            iters = entry["iterations"]
+            # unscored: after scored; more iterations first, missing last
+            return (1, -iters if iters is not None else float("inf"))
+
+        ranked.sort(key=_sort_key)
+        return ranked
+
+    @classmethod
+    def rank_for_skeleton(cls, skeleton_id: str) -> list:
+        """Rank existing models sharing *skeleton_id*, best-scoring first.
+
+        Fetches the same-skeleton models and delegates ordering to
+        :meth:`_rank_model_rows`.
+
+        Parameters
+        ----------
+        skeleton_id : str
+            Skeleton (body-part set) to match.
+
+        Returns
+        -------
+        list[dict]
+            Ranked ``{"model_id", "metric", "value", "iterations"}`` entries.
+        """
+        rows = cls.with_skeleton(skeleton_id).fetch(
+            "model_id", "evaluation", as_dict=True
+        )
+        return cls._rank_model_rows(rows)
+
     @staticmethod
     def _reuse_candidates(rows, subjects=None) -> list:
         """Group ``(model_id, subject_id)`` rows into per-model candidates.
@@ -2948,12 +3052,20 @@ class Model(SpyglassMixin, dj.Computed):
             allow_redundant_model=allow_redundant_model,
         )
 
-        # Return the existing Model entry if one already exists for this path.
-        # model_path is the most stable identifier; default_pk_name embeds
-        # today's date so model_id changes across days.
+        # Return an existing Model entry if one already exists for this path.
+        # model_path is the most stable identifier (default_pk_name embeds the
+        # date, so model_id changes across days), but it is NOT guaranteed
+        # unique: the training path can register several models on one path.
+        # Prefer the model tied to this exact selection; otherwise fall back to
+        # the most recent model on the path. Never assume a single match --
+        # ``fetch1`` on a multi-row set would raise.
         stored_path = _to_stored_path(model_path)
-        if existing := self & {"model_path": stored_path}:
-            return existing.fetch1()
+        existing = self & {"model_path": stored_path}
+        if existing:
+            preferred = existing & sel_key
+            chosen = preferred if preferred else existing
+            key = chosen.fetch("KEY", order_by="model_id DESC", limit=1)[0]
+            return (self & key).fetch1()
 
         # Step 5: Generate model_id and insert directly into Model. The id must
         # be unique per model; see _dlc_model_id for why a short prefix matters.

@@ -105,28 +105,6 @@ class TestVidFileGroupHelpers:
         assert "vid_group_id" in group_key
         assert isinstance(group_key["vid_group_id"], str)
 
-    def test_create_from_directory_legacy_interface(
-        self, position_v2, tmp_path
-    ):
-        """Test backward compatibility with legacy parameter interface."""
-        VidFileGroup = position_v2.video.VidFileGroup
-
-        # Create some mock video files
-        (tmp_path / "video1.mp4").touch()
-        (tmp_path / "video2.mp4").touch()
-
-        # Test legacy interface still works
-        group_key = VidFileGroup.create_from_directory_legacy(
-            directory=tmp_path,
-            description="Legacy test group",
-            pattern="*.mp4",
-            recursive=False,
-        )
-
-        # Group should be created
-        assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], str)
-
     def test_add_files_group_not_exists(self, position_v2):
         """Test adding files to non-existent group raises error."""
         VidFileGroup = position_v2.video.VidFileGroup

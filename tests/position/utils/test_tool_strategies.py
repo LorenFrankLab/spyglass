@@ -114,8 +114,20 @@ class TestToolStrategyFactory:
 
     @pytest.fixture
     def factory(self, ToolStrategyFactory):
-        """Create ToolStrategyFactory instance."""
-        return ToolStrategyFactory()
+        """Create ToolStrategyFactory instance with registry isolation.
+
+        ``register_strategy`` mutates the class-level ``_strategies`` dict, so
+        snapshot and restore it around each test. Without this, mock tools
+        registered here (e.g. ``"test"``/``"idempotent"``) leak into the global
+        registry and break unrelated tests that iterate all registered tools
+        (``ModelParams.tool_info`` now raises on a strategy that fails to build).
+        """
+        saved = dict(ToolStrategyFactory._strategies)
+        try:
+            yield ToolStrategyFactory()
+        finally:
+            ToolStrategyFactory._strategies.clear()
+            ToolStrategyFactory._strategies.update(saved)
 
     def test_get_dlc_strategy(self, factory, DLCStrategy):
         """Test getting DLC strategy."""

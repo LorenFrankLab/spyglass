@@ -391,6 +391,50 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
         output_dir.mkdir(parents=True, exist_ok=True)
         return str(output_dir)
 
+    def _warn_suboptimal_model(self, chosen_model_id):
+        """Best-effort nudge toward a better-scoring same-skeleton model.
+
+        Warns (never blocks or raises) when an existing model for the same
+        skeleton scores strictly better on the *same* comparable metric as the
+        chosen model. Silent when the chosen model is already best, has no
+        comparable metric, the best candidate uses a different metric, or on
+        any lookup failure -- an order is never fabricated.
+
+        Parameters
+        ----------
+        chosen_model_id : str
+            The model selected for this estimation task.
+        """
+        if not chosen_model_id:
+            return
+        try:
+            skeleton_id = Model.skeleton_of(chosen_model_id)
+            ranked = Model.rank_for_skeleton(skeleton_id)
+        except Exception:
+            return  # best-effort; a lookup failure never blocks selection
+
+        chosen = next(
+            (r for r in ranked if r.get("model_id") == chosen_model_id), None
+        )
+        if chosen is None or chosen.get("value") is None:
+            return  # no comparable metric for the chosen model
+
+        best = ranked[0]
+        if best.get("model_id") == chosen_model_id:
+            return  # chosen is already the best
+        if best.get("metric") != chosen.get("metric"):
+            return  # only same-metric comparisons count
+        if best.get("value") is None or best.get("value") >= chosen["value"]:
+            return  # not actually better
+
+        self._warn_msg(
+            f"A better-scoring model exists for this skeleton: "
+            f"model_id='{best['model_id']}' "
+            f"({best['metric']}={best['value']:g}) vs the chosen "
+            f"{chosen['metric']}={chosen['value']:g}. To use it, pass "
+            f"model_id='{best['model_id']}' in your selection key."
+        )
+
 
 @schema
 class PoseEstim(SpyglassMixin, dj.Computed):
