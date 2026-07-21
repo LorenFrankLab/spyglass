@@ -21,12 +21,30 @@ class TestModelInference:
         mock_video_file,
         skip_if_no_dlc,
     ):
-        """Test that inference on a freshly loaded DLC model raises without weights."""
+        """run_inference dispatches DLC inference and returns the output path.
+
+        ``analyze_videos`` is patched: its real behavior needs a trained
+        shuffle this fake project lacks (and which only exists once a live
+        training test has run), so a real call is order-dependent. Mocking it
+        keeps the test deterministic and focused on the spyglass wiring — tool
+        dispatch, path handling, and output resolution.
+        """
+        from unittest.mock import patch
+
         model_key = model.load(model_path=str(dlc_project_config))
 
-        # Try to run inference - should fail because model has no trained weights
-        with pytest.raises((ValueError, FileNotFoundError)):
-            model.run_inference(model_key, video_path=str(mock_video_file))
+        def _fake_analyze(**kwargs):
+            video = Path(kwargs["videos"][0])
+            dest = Path(kwargs.get("destfolder") or video.parent)
+            (dest / f"{video.stem}DLC_test.h5").write_text("mock output")
+
+        with patch("deeplabcut.analyze_videos", side_effect=_fake_analyze):
+            output = model.run_inference(
+                model_key, video_path=str(mock_video_file)
+            )
+
+        assert output, "run_inference returned no output path"
+        assert Path(output).exists(), f"Reported output missing: {output}"
 
     def test_run_inference_with_options(
         self,
@@ -36,17 +54,32 @@ class TestModelInference:
         mock_video_file,
         skip_if_no_dlc,
     ):
-        """Test that inference options are validated properly."""
-        model_key = model.load(model_path=str(dlc_project_config))
+        """run_inference forwards save_as_csv/destfolder to DLC analyze_videos."""
+        from unittest.mock import patch
 
-        # Try to run inference with options - should fail (no trained weights)
-        with pytest.raises((ValueError, FileNotFoundError)):
-            model.run_inference(
+        model_key = model.load(model_path=str(dlc_project_config))
+        destfolder = mock_video_file.parent
+        captured = {}
+
+        def _fake_analyze(**kwargs):
+            captured.update(kwargs)
+            video = Path(kwargs["videos"][0])
+            dest = Path(kwargs.get("destfolder") or video.parent)
+            (dest / f"{video.stem}DLC_test.h5").write_text("mock output")
+
+        with patch("deeplabcut.analyze_videos", side_effect=_fake_analyze):
+            output = model.run_inference(
                 model_key,
                 video_path=str(mock_video_file),
                 save_as_csv=True,
-                destfolder=str(mock_video_file.parent),
+                destfolder=str(destfolder),
             )
+
+        assert output, "run_inference returned no output path"
+        assert Path(output).exists(), f"Reported output missing: {output}"
+        # Options are forwarded to DLC's analyze_videos.
+        assert captured.get("save_as_csv") is True
+        assert Path(captured.get("destfolder")) == destfolder
 
     def test_run_inference_invalid_model(
         self,
@@ -362,6 +395,7 @@ class TestEndToEndInference:
         # Redirect the NWB parent to minirec (valid pynwb, already in Nwbfile)
         # so AnalysisNwbfile.create() can open it.
         mini_nwb = (Nwbfile & mini_restr).fetch1("nwb_file_name")
+        n_pose = len(mock_dlc_inference_output["dataframe"])
         with (
             patch.object(
                 VidFileGroup,
@@ -370,6 +404,14 @@ class TestEndToEndInference:
             ),
             patch.object(
                 PoseEstim, "_fetch_meters_per_pixel", return_value=1.0
+            ),
+            # The mock DLC output has n_pose frames, but the patched minirec
+            # video carries a different timestamp count; align them so the
+            # load-mode timestamp/pose-length guard in make() is satisfied.
+            patch.object(
+                PoseEstim,
+                "_fetch_video_timestamps",
+                return_value=np.arange(n_pose) / 30.0,
             ),
         ):
             PoseEstim().populate(selection_key)

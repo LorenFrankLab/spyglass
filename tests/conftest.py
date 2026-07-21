@@ -639,7 +639,10 @@ def mini_insert(
 
 
 @pytest.fixture(scope="session")
-def mini_restr(mini_path):
+def mini_restr(mini_insert, mini_path):
+    # Depend on mini_insert so a restriction to the minirec session implies
+    # it has been ingested. Without this, running tests/position/ in isolation
+    # (no tests/common test triggers mini_insert first) leaves Nwbfile empty.
     yield f"nwb_file_name LIKE '{mini_path.stem}%'"
 
 
@@ -813,7 +816,10 @@ def pos_interval(sgp):
 
 
 @pytest.fixture(scope="session")
-def pos_interval_key(sgp, mini_copy_name, pos_interval):
+def pos_interval_key(sgp, mini_insert, mini_copy_name, pos_interval):
+    # mini_insert ensures the minirec session (and its _raw_position) exists,
+    # so trodes/merge selections keyed on this interval satisfy their foreign
+    # keys when tests/position/ runs in isolation.
     yield {"nwb_file_name": mini_copy_name, "interval_list_name": pos_interval}
 
 
@@ -1422,7 +1428,9 @@ def populate_model(sgp, model_key):
 
 
 @pytest.fixture(scope="session")
-def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
+def pose_estimation_key(
+    sgp, mini_insert, mini_copy_name, populate_model, model_key
+):
     key = {
         "nwb_file_name": mini_copy_name,
         "epoch": 1,
