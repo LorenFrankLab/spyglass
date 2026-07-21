@@ -11,9 +11,11 @@ guarded by the ``skip_if_no_sleap`` fixture, so it *skips* wherever SLEAP is
 absent (e.g. the ``pv2`` env / CI ``--no-pose``) and *runs* where SLEAP lives
 (the ``sl2`` env).
 
-Fixture data (committed under ``tests/_data/sleap/``):
+Fixture data (downloaded to the git-ignored ``tests/_data/sleap/`` by
+``data_downloader.py``; regenerate with the scripts in ``maintenance_scripts/``):
   - ``small_robot_labeled.slp`` -- 2 user-labeled frames with embedded images,
-    single-instance skeleton A/B.  See ``make_labeled_slp.py`` for provenance.
+    single-instance skeleton A/B.  See
+    ``maintenance_scripts/make_labeled_slp.py`` for provenance.
   - ``model/`` -- a minimal single-instance UNet parent model
     (``best_model.h5`` + ``training_config.json``) used as the base checkpoint.
 """
