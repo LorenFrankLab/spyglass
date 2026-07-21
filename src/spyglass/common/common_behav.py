@@ -920,7 +920,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             if path_found is None:
                 try:
                     path_found = self.get_abs_path(row)
-                except FileNotFoundError as e:
+                except (FileNotFoundError, dj.DataJointError) as e:
                     status["path_error"] = str(e)
 
             if path_found is not None:
@@ -998,8 +998,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_path_obj = Path(video_dir)
         video_info = (cls & key).fetch1()
+        video_path_obj = Path(video_dir)
 
         # If the path was stored during make(), use it directly.
         if stored_path := video_info.get("path"):
