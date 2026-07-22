@@ -14,7 +14,7 @@ BASE_URL = "https://ucsf.box.com/shared/static/"
 #       1. upload to box
 #       2. click the link icon
 #       3. click the 'Invited people only', and set to 'People with link'
-#       4. copy the link and extract the potion after `/s/` as the file id
+#       4. copy the link and extract the portion after `/s/` as the file id
 #       5. add to FILE_PATHS below as `"url": BASE_URL + "{file_id}"`
 
 # Per-entry flags (both default False when absent):

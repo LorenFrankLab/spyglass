@@ -53,25 +53,16 @@ def test_null_file_like(schema_test, Mixin):
     assert len(ret) == len(Mixin()), "Null file_like not working."
 
 
-def test_spyglass_mixin_basic_functionality():
-    """Test SpyglassMixin basic functionality."""
-    from spyglass.utils import SpyglassMixin
+def test_spyglass_mixin_basic_functionality(monkeypatch):
+    """BaseMixin._test_mode reflects spyglass.settings.config['test_mode']."""
+    from spyglass.settings import config as sg_config
+    from spyglass.utils.mixins.base import BaseMixin
 
-    # Test basic mixin attributes
-    assert hasattr(SpyglassMixin, "_test_mode")
+    class Dummy(BaseMixin):
+        pass
 
-    # Test test mode detection logic
-    def mock_test_mode_detection():
-        # Simulate test mode detection
-        try:
-            # In real implementation, this would check settings
-            return False  # Default to non-test mode
-        except ImportError:
-            return False
-
-    result = mock_test_mode_detection()
-    assert isinstance(result, bool)
-
+    monkeypatch.setitem(sg_config, "test_mode", True)
+    assert Dummy()._test_mode is True
 
 def test_spyglass_mixin_logging_integration():
     """Test SpyglassMixin logging integration."""

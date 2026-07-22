@@ -24,7 +24,7 @@ def test_sensor_data_insert(sensor_data, mini_insert, mini_restr, mini_content):
 
 
 def test_common_sensors_error_handling_from_targeted():
-    """Basic import/mocking path for common_sensors module."""
-    with patch("spyglass.common.common_sensors") as sensors_module:
-        sensors_module.return_value = Mock()
-        assert sensors_module is not None
+    """Basic import path for common_sensors module."""
+    import spyglass.common.common_sensors as common_sensors
+
+    assert hasattr(common_sensors, "SensorData")

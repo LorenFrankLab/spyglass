@@ -149,20 +149,12 @@ def test_get_pos_dict_with_timestamps():
 
 
 def test_nwb_helper_basic_functionality():
-    """Test NWB helper functions basic functionality."""
+    """estimate_sampling_rate returns expected rate for regular timestamps."""
     from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
-    import numpy as np
 
-    # Test with valid timestamp data
-    regular_times = np.array([0.0, 0.01, 0.02, 0.03, 0.04])  # 100 Hz
-    try:
-        rate = estimate_sampling_rate(regular_times)
-        assert rate > 0
-        assert 90 < rate < 110  # Should be around 100 Hz
-    except Exception:
-        # Some edge cases may not be handled
-        pass
-
+    times = np.linspace(0.0, 1.0, 101)  # 100 intervals -> ~100 Hz
+    rate = estimate_sampling_rate(times)
+    assert 90 < rate < 110
 
 def test_nwb_helper_parameter_validation():
     """Test NWB helper parameter validation."""
