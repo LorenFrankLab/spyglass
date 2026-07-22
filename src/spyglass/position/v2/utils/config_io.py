@@ -45,4 +45,4 @@ def prompt_default(key: str, default, abort_value: str = "n") -> str:
     response = input(f"{key} [{default}]: ").strip()
     if response == abort_value:
         raise RuntimeError("Aborted by user")
-    return response if response else default
+    return response if response else str(default)
