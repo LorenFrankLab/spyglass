@@ -93,7 +93,9 @@ def undistort_points(
     )
     dist = np.array(intrinsics.get("dist_coeffs", [0.0, 0.0, 0.0, 0.0]))
 
-    valid = ~np.isnan(pts[:, 0])
+    # A point is usable only if both coordinates are present; sending a
+    # partially-missing point to OpenCV would break NaN-row preservation.
+    valid = ~np.isnan(pts).any(axis=1)
     out = pts.copy()
     if np.any(valid):
         pts_valid = pts[valid].reshape(-1, 1, 2).astype(np.float64)
@@ -108,9 +110,10 @@ def triangulate_points_dlt(
 ) -> np.ndarray:
     """Triangulate a set of corresponding 2D points from ≥2 cameras via DLT.
 
-    For each frame, constructs a linear system from all camera observations
-    and solves via SVD (Direct Linear Transform).  Frames where any camera
-    has NaN observations are returned as NaN.
+    For each frame, constructs a linear system from all *valid* (non-NaN)
+    camera observations and solves via SVD (Direct Linear Transform).
+    Cameras with a NaN observation are skipped; a frame is returned as NaN
+    only when fewer than two cameras remain valid.
 
     Parameters
     ----------
@@ -184,7 +187,7 @@ def compute_reprojection_errors(
         cam_errors = []
         for pts, P in zip(pts_list, proj_matrices):
             x2d, y2d = pts[i]
-            if np.isnan(x2d):
+            if np.isnan(x2d) or np.isnan(y2d):
                 continue
             proj = P @ X_h
             if abs(proj[2]) < 1e-12:
@@ -270,9 +273,12 @@ def triangulate_pose_df(
             [proj_matrices[ci] for ci in cam_indices],
         )
 
+        # Reproject against the *undistorted* 2D points: the projection
+        # matrices are pinhole (no distortion), so comparing to raw distorted
+        # points would inflate the error and wrongly zero out likelihood.
         reproj = compute_reprojection_errors(
             pts3d,
-            pts_list,
+            undist_list,
             [proj_matrices[ci] for ci in cam_indices],
         )
 
@@ -290,7 +296,7 @@ def triangulate_pose_df(
     df_out = pd.DataFrame(records, index=index)
     df_out.columns = pd.MultiIndex.from_tuples(
         [("triangulated", bp, coord) for bp, coord in df_out.columns],
-        names=["scorer", "bodypart", "coords"],
+        names=["scorer", "bodyparts", "coords"],
     )
     return df_out
 
@@ -362,6 +368,11 @@ def reproject_pose_to_camera(
         with np.errstate(invalid="ignore", divide="ignore"):
             u = px[:, 0] / px[:, 2]
             v = px[:, 1] / px[:, 2]
+        # Points at or behind the camera (depth <= 0) are invalid even though
+        # u/v are finite; drop them so their likelihood becomes 0.
+        behind = px[:, 2] <= 0
+        u = np.where(behind, np.nan, u)
+        v = np.where(behind, np.nan, v)
         conf = np.where(np.isnan(u), 0.0, np.nan_to_num(conf, nan=0.0))
         data[(scorer_out, bp, "x")] = u
         data[(scorer_out, bp, "y")] = v
