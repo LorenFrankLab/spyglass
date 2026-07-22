@@ -156,6 +156,7 @@ def test_nwb_helper_basic_functionality():
     rate = estimate_sampling_rate(times)
     assert 90 < rate < 110
 
+
 def test_nwb_helper_parameter_validation():
     """Test NWB helper parameter validation."""
     import numpy as np

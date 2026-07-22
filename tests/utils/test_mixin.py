@@ -64,6 +64,7 @@ def test_spyglass_mixin_basic_functionality(monkeypatch):
     monkeypatch.setitem(sg_config, "test_mode", True)
     assert Dummy()._test_mode is True
 
+
 def test_spyglass_mixin_logging_integration():
     """Test SpyglassMixin logging integration."""
 
