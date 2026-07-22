@@ -61,3 +61,12 @@ def test_none_acq_device_attrs(common):
 
     system = common.DataAcquisitionDevice._add_system(None)
     assert system is None, "None system should return None"
+
+
+def test_probe_electrode_validation_from_targeted():
+    """Probe should expose an Electrode part table."""
+    from spyglass.common.common_device import Probe
+
+    assert hasattr(Probe, "Electrode")
+    electrode_table = Probe.Electrode()
+    assert electrode_table is not None

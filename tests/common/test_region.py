@@ -30,3 +30,11 @@ def test_region_add(brain_region, region_dict):
     assert (
         region_id == next_id
     ), "Region.fetch_add() should autoincrement region_id."
+
+
+def test_brain_region_lookups_from_targeted():
+    """Basic instantiation path for BrainRegion."""
+    from spyglass.common.common_region import BrainRegion
+
+    brain_region = BrainRegion()
+    assert brain_region is not None

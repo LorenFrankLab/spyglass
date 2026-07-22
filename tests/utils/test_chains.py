@@ -61,3 +61,9 @@ def test_chain_str_no_link(no_link_chain):
 def test_invalid_chain(TableChain):
     with pytest.raises(ValueError):
         TableChain()
+
+
+def test_migrated_chain_operations(TableChain):
+    """Migrated from targeted coverage file: invalid no-arg chain raises."""
+    with pytest.raises(ValueError):
+        TableChain()

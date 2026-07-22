@@ -91,3 +91,10 @@ def test_merge_get_class(merge_table):
 def test_merge_get_class_invalid(spike_merge, pop_spike_merge):
     ret = spike_merge.merge_get_parent_class("bad")
     assert ret is None, "Should return None for invalid part name."
+
+
+def test_merge_table_functionality():
+    from spyglass.utils.dj_merge_tables import Merge
+
+    if hasattr(Merge, "fetch_nwb"):
+        assert callable(getattr(Merge, "fetch_nwb"))

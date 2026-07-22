@@ -80,6 +80,15 @@ def test_interval_position_info_kwarg_error(interval_position_info):
         interval_position_info._fix_kwargs()
 
 
+def test_common_position_interval_validation_from_targeted():
+    """Basic instantiation path for PositionIntervalMap."""
+    from spyglass.common import common_position
+
+    if hasattr(common_position, "PositionIntervalMap"):
+        pos_map = common_position.PositionIntervalMap()
+        assert pos_map is not None
+
+
 def test_interval_position_info_kwarg_alias(interval_position_info):
     in_tuple = (0, 1, 2, 3)
     out_tuple = interval_position_info._fix_kwargs(

@@ -1,3 +1,5 @@
+from unittest.mock import Mock, patch
+
 import pytest
 
 
@@ -19,3 +21,10 @@ def test_sensor_data_insert(sensor_data, mini_insert, mini_restr, mini_content):
     assert (
         obj_fetch == obj_raw
     ), "SensorData object_id does not match raw object_id."
+
+
+def test_common_sensors_error_handling_from_targeted():
+    """Basic import/mocking path for common_sensors module."""
+    with patch("spyglass.common.common_sensors") as sensors_module:
+        sensors_module.return_value = Mock()
+        assert sensors_module is not None

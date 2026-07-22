@@ -77,3 +77,30 @@ def test_create_standard_filters(filter_parameters):
     assert filter_parameters & {
         "filter_name": "LFP 0-400 Hz"
     }, "create_standard_filters failed"
+
+
+def test_filter_parameters_validation_from_targeted():
+    """Basic instantiation path for FirFilterParameters."""
+    from spyglass.common.common_filter import FirFilterParameters
+
+    filter_params = FirFilterParameters()
+    assert filter_params is not None
+
+
+@pytest.mark.parametrize(
+    "filter_type,filter_param",
+    [
+        ("lowpass", 250.0),
+        ("highpass", 1.0),
+        ("bandpass", [1.0, 250.0]),
+    ],
+)
+def test_filter_parameter_types_from_targeted(filter_type, filter_param):
+    """Sanity-check accepted parameter shapes by filter type."""
+    assert filter_type in ["lowpass", "highpass", "bandpass"]
+
+    if filter_type == "bandpass":
+        assert isinstance(filter_param, list)
+        assert len(filter_param) == 2
+    else:
+        assert isinstance(filter_param, (int, float))

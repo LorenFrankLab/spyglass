@@ -49,8 +49,15 @@ import hdmf.build.objectmapper as _hdmf_objectmapper
 import numpy as np
 import pynwb
 import pynwb.device as _pynwb_device
-import pynwb.io.device as _pynwb_io_device
 import pytest
+
+try:
+    import pynwb.io.device as _pynwb_io_device
+
+    _HAS_PYNWB_IO_DEVICE = True
+except ModuleNotFoundError:
+    _pynwb_io_device = None
+    _HAS_PYNWB_IO_DEVICE = False
 import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
@@ -95,15 +102,14 @@ _dj_external.uuid_from_file = _uuid_from_file_safe
 #       replace an attribute on the warnings module itself without side-effects,
 #       so we wrap Device.__init__ instead.
 
-_orig_io_device_warn = _pynwb_io_device.warn
+if _HAS_PYNWB_IO_DEVICE:
+    _orig_io_device_warn = _pynwb_io_device.warn
 
+    def _io_device_warn_filtered(message, *args, **kwargs):
+        if "Device.model was detected as a string" not in str(message):
+            _orig_io_device_warn(message, *args, **kwargs)
 
-def _io_device_warn_filtered(message, *args, **kwargs):
-    if "Device.model was detected as a string" not in str(message):
-        _orig_io_device_warn(message, *args, **kwargs)
-
-
-_pynwb_io_device.warn = _io_device_warn_filtered
+    _pynwb_io_device.warn = _io_device_warn_filtered
 
 _orig_device_init = _pynwb_device.Device.__init__
 
@@ -202,7 +208,7 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_POSE
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -215,6 +221,10 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
+# Disable OMP error from MUA imports
+os.environ.setdefault("KMP_WARNINGS", "0")
+os.environ.setdefault("OMP_DISPLAY_ENV", "FALSE")
 
 # RuntimeWarning: os.fork() was called after os.forkserver() or JAX import.
 # JAX disables fork after parallelism starts; these are harmless in tests.
@@ -312,11 +322,11 @@ def pytest_addoption(parser):
         help="Do not launch datajoint server in Docker.",
     )
     parser.addoption(
-        "--no-dlc",
+        "--no-pose",
         action="store_true",
-        dest="no_dlc",
+        dest="no_pose",
         default=False,
-        help="Skip downloads for and tests of DLC-dependent features.",
+        help="Skip downloads for and tests of pose estimation (DLC/SLEAP) features.",
     )
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
@@ -332,17 +342,28 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help=(
+            "Host directory for per-container MySQL data volumes (e.g. "
+            "/stelmo/cbroz/docker-vols/) to keep test-container data off the "
+            "root disk. Falls back to $SPYGLASS_TEST_DOCKER_VOL_DIR."
+        ),
+    )
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_POSE
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
 
-    NO_DLC = config.option.no_dlc
-    pytest.NO_DLC = NO_DLC
+    NO_POSE = config.option.no_pose
+    pytest.NO_POSE = NO_POSE
 
     _base_dir = config.option.base_dir or os.environ.get(
         "SPYGLASS_BASE_DIR", "./tests/_data/"
@@ -356,6 +377,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
@@ -371,7 +393,7 @@ def pytest_configure(config):
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
-        download_dlc=not NO_DLC,
+        download_dlc=not NO_POSE,
     )
 
 
@@ -502,6 +524,13 @@ def raw_dir(base_dir):
     yield base_dir / "raw"
 
 
+@pytest.fixture(scope="session")
+def logger():
+    from spyglass.utils import logger
+
+    yield logger
+
+
 # ------------------------------- FIXTURES, DATA -------------------------------
 
 
@@ -517,13 +546,13 @@ def mini_path(raw_dir):
 
 
 @pytest.fixture(scope="session")
-def no_dlc(request):
-    yield NO_DLC
+def no_pose(request):
+    yield NO_POSE
 
 
-skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
-    reason="Skipping DLC-dependent tests.",
+skip_if_no_pose = pytest.mark.skipif(
+    condition=lambda: getattr(pytest, "NO_POSE", False),
+    reason="Skipping pose estimation (DLC/SLEAP) tests.",
 )
 
 
@@ -573,9 +602,9 @@ def mini_insert(
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
         SpikeSortingOutput,
-    )  # noqa: E402
+    )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
@@ -595,10 +624,10 @@ def mini_insert(
         # Useful try/except for avoiding a full run on insert failure
         # Should be commented out in favor of vanilla insert for debugging
         # the insert_sessions function itself.
-        try:
-            insert_sessions(mini_path.name, raise_err=True)
-        except Exception as e:  # If can't insert session, exit all tests
-            pytest.exit(f"Failed to insert sessions: {e}")
+        # try:
+        insert_sessions(mini_path.name, raise_err=True)
+        # except Exception as e:  # If can't insert session, exit all tests
+        #     pytest.exit(f"Failed to insert sessions: {e}")
 
     if len(Session()) == 0:
         raise ValueError("No sessions inserted.")
@@ -610,7 +639,10 @@ def mini_insert(
 
 
 @pytest.fixture(scope="session")
-def mini_restr(mini_path):
+def mini_restr(mini_insert, mini_path):
+    # Depend on mini_insert so a restriction to the minirec session implies
+    # it has been ingested. Without this, running tests/position/ in isolation
+    # (no tests/common test triggers mini_insert first) leaves Nwbfile empty.
     yield f"nwb_file_name LIKE '{mini_path.stem}%'"
 
 
@@ -784,7 +816,10 @@ def pos_interval(sgp):
 
 
 @pytest.fixture(scope="session")
-def pos_interval_key(sgp, mini_copy_name, pos_interval):
+def pos_interval_key(sgp, mini_insert, mini_copy_name, pos_interval):
+    # mini_insert ensures the minirec session (and its _raw_position) exists,
+    # so trodes/merge selections keyed on this interval satisfy their foreign
+    # keys when tests/position/ runs in isolation.
     yield {"nwb_file_name": mini_copy_name, "interval_list_name": pos_interval}
 
 
@@ -1193,10 +1228,16 @@ def insert_project(
     bodyparts,
     mini_copy_name,
 ):
-    if NO_DLC:
-        pytest.skip("Skipping DLC-dependent tests.")
+    if NO_POSE:
+        pytest.skip("Skipping pose-dependent (e.g., DLC) tests.")
 
-    from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
+    try:
+        from deeplabcut.utils.auxiliaryfunctions import (
+            read_config,
+            write_config,
+        )
+    except ImportError:  # DLC absent (e.g. SLEAP-only env) → skip, don't error
+        pytest.skip("Skipping DLC test (deeplabcut not installed)")
 
     from spyglass.decoding.v1.core import PositionGroup
     from spyglass.linearization.merge import LinearizedPositionOutput
@@ -1387,7 +1428,9 @@ def populate_model(sgp, model_key):
 
 
 @pytest.fixture(scope="session")
-def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
+def pose_estimation_key(
+    sgp, mini_insert, mini_copy_name, populate_model, model_key
+):
     key = {
         "nwb_file_name": mini_copy_name,
         "epoch": 1,
@@ -1430,7 +1473,10 @@ def si_params_name(sgp, populate_pose_estimation):
             "max_cm_between_pts": 100,
             "num_inds_to_span": 50,
             # Smoothing and Interpolation added later - must check
-            "smoothing_params": {"smoothing_duration": 0.05},
+            "smoothing_params": {
+                "smoothing_duration": 0.05,
+                "likelihood_thresh": 0.4,
+            },
             "interp_params": {"max_cm_to_interp": 100},
         }
     )
@@ -1514,6 +1560,7 @@ def centroid_params(sgp):
                     "smoothing_params": {
                         "smoothing_duration": 0.05,
                         "smooth_method": "moving_avg",
+                        "likelihood_thresh": 0.4,
                     },
                     "max_LED_separation": 50,
                     "speed_smoothing_std_dev": 0.100,
@@ -1544,6 +1591,7 @@ def centroid_key(sgp, centroid_selection):
 @pytest.fixture(scope="session")
 def populate_centroid(sgp, centroid_selection):
     sgp.v1.DLCCentroid.populate(centroid_selection)
+    yield centroid_selection
 
 
 @pytest.fixture(scope="session")
@@ -1627,8 +1675,31 @@ def dlc_key(sgp, dlc_selection):
 
 
 @pytest.fixture(scope="session")
-def populate_dlc(sgp, dlc_key):
+def populate_dlc(sgp, dlc_key, pos_merge):
+    # Populate upstream DLC table
     sgp.v1.DLCPosV1().populate(dlc_key)
+
+    # Instead of merging all entries blindly, only merge for specific keys to avoid ambiguity
+    # Check if entry already exists before trying to merge
+    existing_merge_entries = pos_merge.DLCPosV1() & dlc_key
+    if not existing_merge_entries:
+        try:
+            # Try to merge with a more specific restriction to avoid ambiguity
+            restricted_dlc_key = dlc_key.copy()
+            pos_merge.merge_populate("DLCPosV1", restricted_dlc_key)
+        except ValueError as e:
+            if "Ambiguous entry" in str(e):
+                # If merge fails due to ambiguity, manually insert the DLC entry
+                # without trying to merge with TrodesPos entries
+                dlc_entry = (sgp.v1.DLCPosV1() & dlc_key).fetch1()
+                merge_entry = dict(dlc_entry)
+                merge_entry["merge_id"] = pos_merge._hash_merge_id(
+                    merge_entry, "DLCPosV1"
+                )
+                merge_entry["source"] = "DLCPosV1"
+                pos_merge.DLCPosV1().insert1(merge_entry, skip_duplicates=True)
+            else:
+                raise
     yield
 
 
