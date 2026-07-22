@@ -104,7 +104,9 @@ def pose_estimation_to_dataframe(pose_estimation, scorer, is_3d, canon_map):
     """
     data_dict = {}
     for series in pose_estimation.pose_estimation_series.values():
-        bodypart = series.name.replace("_pose", "")
+        # Strip only the trailing "_pose" suffix (write-side uses
+        # f"{bodypart}_pose"); replace() would corrupt an internal "_pose".
+        bodypart = series.name.removesuffix("_pose")
         bodypart = canonicalize(bodypart, canon_map, default=bodypart)
 
         pose_data = series.data[:]
