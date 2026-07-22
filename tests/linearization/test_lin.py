@@ -115,5 +115,3 @@ def test_linearization_edge_cases():
     assert "use_hmm" in minimal_config
     assert "sensor_std_dev" in minimal_config
     assert minimal_config["sensor_std_dev"] > 0
-    assert minimal_config["sensor_std_dev"] > 0
-    assert minimal_config["sensor_std_dev"] > 0
