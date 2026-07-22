@@ -54,7 +54,12 @@ class TestConfigSchema:
 
         # Check directory_schema has all prefixes
         dir_schema = schema["directory_schema"]
-        assert set(dir_schema.keys()) == {"spyglass", "kachery", "dlc", "moseq"}
+        assert set(dir_schema.keys()) == {
+            "spyglass",
+            "kachery",
+            "pose",
+            "moseq",
+        }
 
     def test_validate_schema_passes_for_valid_schema(self):
         """Test that validate_schema() accepts valid schema."""
@@ -75,7 +80,7 @@ class TestConfigSchema:
                     "directory_schema": {
                         "spyglass": {"raw": "raw"},
                         "kachery": {"cloud": ".kachery-cloud"},
-                        # Missing dlc and moseq
+                        # Missing pose and moseq
                     }
                 }
             )
@@ -104,14 +109,14 @@ class TestSchemaConsistency:
     def test_schema_has_all_required_prefixes(self):
         """Test that schema has all 4 required directory prefixes."""
         schema = load_directory_schema()
-        assert set(schema.keys()) == {"spyglass", "kachery", "dlc", "moseq"}
+        assert set(schema.keys()) == {"spyglass", "kachery", "pose", "moseq"}
 
     @pytest.mark.parametrize(
         "prefix,expected_count",
         [
             ("spyglass", 8),
             ("kachery", 3),
-            ("dlc", 3),
+            ("pose", 3),
             ("moseq", 2),
         ],
     )
@@ -137,7 +142,7 @@ class TestSchemaConsistency:
                 },
             ),
             ("kachery", {"cloud", "temp", "storage"}),
-            ("dlc", {"project", "video", "output"}),
+            ("pose", {"project", "video", "output"}),
             ("moseq", {"project", "video"}),
         ],
     )
@@ -207,10 +212,10 @@ class TestInstallerConfig:
                         "storage": str(dirs["kachery_storage"]),
                         "temp": str(dirs["kachery_temp"]),
                     },
-                    "dlc_dirs": {
-                        "project": str(dirs["dlc_project"]),
-                        "video": str(dirs["dlc_video"]),
-                        "output": str(dirs["dlc_output"]),
+                    "pose_dirs": {
+                        "project": str(dirs["pose_project"]),
+                        "video": str(dirs["pose_video"]),
+                        "output": str(dirs["pose_output"]),
                     },
                     "moseq_dirs": {
                         "project": str(dirs["moseq_project"]),
@@ -223,7 +228,7 @@ class TestInstallerConfig:
             custom = config["custom"]
             assert "spyglass_dirs" in custom
             assert "kachery_dirs" in custom
-            assert "dlc_dirs" in custom
+            assert "pose_dirs" in custom
             assert "moseq_dirs" in custom
 
     def test_installer_directory_paths_match_schema(self):
@@ -304,7 +309,7 @@ class TestBackwardsCompatibility:
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
-            "dlc": {
+            "pose": {
                 "project": "projects",
                 "video": "video",
                 "output": "output",
@@ -345,7 +350,7 @@ class TestBackwardsCompatibility:
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
-            "dlc": {
+            "pose": {
                 "project": "projects",
                 "video": "video",
                 "output": "output",
@@ -473,11 +478,11 @@ class TestConfigCompatibility:
                         "storage": str(dirs["kachery_storage"]),
                         "temp": str(dirs["kachery_temp"]),
                     },
-                    "dlc_dirs": {
+                    "pose_dirs": {
                         "base": str(base_dir / "deeplabcut"),
-                        "project": str(dirs["dlc_project"]),
-                        "video": str(dirs["dlc_video"]),
-                        "output": str(dirs["dlc_output"]),
+                        "project": str(dirs["pose_project"]),
+                        "video": str(dirs["pose_video"]),
+                        "output": str(dirs["pose_output"]),
                     },
                     "moseq_dirs": {
                         "base": str(base_dir / "moseq"),
@@ -607,11 +612,11 @@ class TestExampleConfigSync:
                         "storage": str(dirs["kachery_storage"]),
                         "temp": str(dirs["kachery_temp"]),
                     },
-                    "dlc_dirs": {
+                    "pose_dirs": {
                         "base": str(base_dir / "deeplabcut"),
-                        "project": str(dirs["dlc_project"]),
-                        "video": str(dirs["dlc_video"]),
-                        "output": str(dirs["dlc_output"]),
+                        "project": str(dirs["pose_project"]),
+                        "video": str(dirs["pose_video"]),
+                        "output": str(dirs["pose_output"]),
                     },
                     "moseq_dirs": {
                         "base": str(base_dir / "moseq"),
@@ -683,7 +688,7 @@ class TestExampleConfigSync:
         required_groups = [
             "spyglass_dirs",
             "kachery_dirs",
-            "dlc_dirs",
+            "pose_dirs",
             "moseq_dirs",
         ]
         for group in required_groups:
