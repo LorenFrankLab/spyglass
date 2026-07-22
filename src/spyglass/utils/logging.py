@@ -69,10 +69,13 @@ class SpyglassLogger(logging.Logger):
         log_func(msg)
 
 
-# Register via getLogger so the instance is in the hierarchy (caplog works)
+# Register via getLogger so the instance is in the hierarchy (caplog works).
+# Save and restore the prior logger class so we don't clobber an
+# application-configured custom Logger class.
+_prev_logger_class = logging.getLoggerClass()
 logging.setLoggerClass(SpyglassLogger)
 logger = logging.getLogger(__name__.split(".")[0])
-logging.setLoggerClass(logging.Logger)
+logging.setLoggerClass(_prev_logger_class)
 
 
 # Provide helper functions for easy access to logger methods
