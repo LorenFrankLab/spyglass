@@ -18,8 +18,80 @@ except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
 
 
+def dlc_reported_frame_count(video_path: Union[Path, str]) -> Union[int, None]:
+    """Return the frame count DeepLabCut will read for a video.
+
+    DeepLabCut opens videos with OpenCV and trusts
+    ``cv2.CAP_PROP_FRAME_COUNT`` metadata for ``len(video)``. Probing the
+    same value up front lets us detect videos whose metadata OpenCV cannot
+    read (it returns a non-positive count) before DLC crashes on them.
+
+    Parameters
+    ----------
+    video_path : Union[Path, str]
+        Path to the video file.
+
+    Returns
+    -------
+    Union[int, None]
+        The frame count reported by OpenCV, or ``None`` if the video could
+        not be opened.
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        if not cap.isOpened():
+            return None
+        return int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    finally:
+        cap.release()
+
+
 class PoseInferenceRunner(BaseMixin):
     """Handles pose estimation inference execution for different tools."""
+
+    def _validate_readable_videos(self, videos: list) -> None:
+        """Fail fast on videos DeepLabCut cannot count frames for.
+
+        DLC's ``VideoReader.__len__`` returns ``cv2.CAP_PROP_FRAME_COUNT``
+        verbatim. When OpenCV cannot read a video's frame-count metadata it
+        returns a non-positive value, which later crashes DLC's
+        ``tqdm(video)`` with the opaque ``ValueError: __len__() should
+        return >= 0``. Detecting it here yields an actionable message.
+
+        Parameters
+        ----------
+        videos : list
+            Video file paths to validate.
+
+        Raises
+        ------
+        OSError
+            If a video cannot be opened by OpenCV.
+        ValueError
+            If OpenCV reports a non-positive frame count for a video, which
+            means DLC inference would crash on it.
+        """
+        for vp in videos:
+            count = dlc_reported_frame_count(vp)
+            if count is None:
+                raise OSError(
+                    f"Video could not be opened by OpenCV: {vp}. It may be "
+                    "corrupted or use an unsupported codec. Re-encode it "
+                    "with ffmpeg and re-register the fixed file."
+                )
+            if count <= 0:
+                raise ValueError(
+                    f"Video '{vp}' reports {count} frames via OpenCV "
+                    "metadata (cv2.CAP_PROP_FRAME_COUNT). DeepLabCut trusts "
+                    "this value and crashes during inference with "
+                    "'__len__() should return >= 0'. The frame-count "
+                    "metadata is unreadable — re-encode the video, e.g.:\n"
+                    f"    ffmpeg -i '{vp}' -c:v libx264 -pix_fmt yuv420p "
+                    "-an fixed.mp4\n"
+                    "then re-register the fixed video and re-run inference."
+                )
 
     def run_dlc_inference(
         self,
@@ -56,6 +128,10 @@ class PoseInferenceRunner(BaseMixin):
             if not Path(vp).exists():
                 raise FileNotFoundError(f"Video not found: {vp}")
         videos = [str(vp) for vp in video_path]
+
+        # Preflight: DLC crashes with an opaque "__len__() should return
+        # >= 0" when OpenCV cannot read a video's frame count. Catch it here.
+        self._validate_readable_videos(videos)
 
         model_path = resolve_model_path(model_info["model_path"])
         if not model_path.exists():
