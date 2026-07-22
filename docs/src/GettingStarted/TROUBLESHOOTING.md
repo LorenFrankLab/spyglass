@@ -239,6 +239,124 @@ The validator will check:
     # Should include spyglass source directory
     ```
 
+### JAX / jaxlib Version Mismatch
+
+**Symptoms:**
+
+- `RuntimeError: jaxlib version 0.6.1 is newer than and incompatible with jax   version 0.3.0. Please update your jax and/or jaxlib packages.`
+- Similar errors naming mismatched `jax` and `jaxlib` versions, raised when a
+    `jax`-dependent pipeline (e.g. decoding or keypoint-MoSeq) is imported.
+
+**Cause:**
+
+`jax` and `jaxlib` are distributed as two separate packages that must be kept at
+compatible versions — `jax` checks `jaxlib` at import time and raises if the
+pair is incompatible. They commonly drift out of sync when several stacks share
+one environment: the decoding/MoSeq dependencies pull in `jax`, and a later
+`pip install` of an unrelated package (for example the DeepLabCut/PyTorch pose
+stack) bumps `jaxlib` to the newest wheel while `jax` stays pinned to an older
+version. DeepLabCut does not depend on `jax` itself; it is only the install that
+knocks `jaxlib` loose. Note that the pose pipelines (DeepLabCut/SLEAP) never
+require `jax`, so an environment dedicated to pose estimation should not contain
+it at all.
+
+**Solutions:**
+
+1. **Confirm the mismatch:**
+
+    ```bash
+    pip show jax jaxlib
+    ```
+
+2. **Reinstall a *matched* pair in a single command** (never upgrade `jaxlib` on
+    its own). Since `jax` 0.4.x, `jax` and `jaxlib` are released in lockstep
+    under the same version number, so install them at the same version:
+
+    ```bash
+    pip install --upgrade "jax[cpu]==0.4.30" "jaxlib==0.4.30"
+    ```
+
+    Choose a version your `jax`-dependent packages support — look up the
+    compatible pairing in the externally-maintained references below.
+
+3. **Find the correct pairing.** The authoritative, externally-managed source is
+    the JAX project itself:
+
+    - [JAX changelog](https://docs.jax.dev/en/latest/changelog.html) — records
+        the minimum/compatible `jaxlib` version for each `jax` release (e.g. "the
+        minimum jaxlib version of this release is 0.4.27").
+    - [JAX & jaxlib versioning policy](https://docs.jax.dev/en/latest/jep/9419-jax-versioning.html)
+        — explains the compatibility rules and the shared-version-number scheme.
+
+4. **Isolate conflicting stacks.** Because the `jax` (decoding/MoSeq) and
+    PyTorch (DeepLabCut/SLEAP) dependency trees conflict, keep them in separate
+    conda environments rather than one shared environment.
+
+### TensorFlow / jax conflict (Position V1 → V2 migration)
+
+**Symptoms:**
+
+- `E ... Unable to register cuDNN factory: Attempting to register factory for   plugin cuDNN when one has already been registered`
+    (also cuFFT, cuBLAS), printed when TensorFlow loads alongside a `jax`-using
+    pipeline.
+- DeepLabCut/pose work crashes or hangs on the GPU, or `jax` is stuck on an old
+    version that will not upgrade.
+
+**Cause:**
+
+This almost always happens when a Position **V1** environment is reused or
+cloned for **V2**. V1's DeepLabCut used the **TensorFlow** backend; V2's
+DeepLabCut 3.x uses **PyTorch** and does not need TensorFlow. Meanwhile the rest
+of Spyglass pulls in `jax` (via `non_local_detector`). TensorFlow and `jaxlib`
+each bundle their own XLA runtime and collide when both load in one process, and
+TensorFlow's `ml-dtypes` pin holds `jax` to an old version. V2's code is
+engine-agnostic — see
+[Position → Why V2 uses the PyTorch backend](./POSITION.md); the conflict is
+purely about the two dependency stacks coexisting.
+
+**Solutions:**
+
+1. **Check the environment** (imports neither TensorFlow nor jax, so it is safe
+    to run first):
+
+    ```bash
+    python src/spyglass/position/v2/env_check.py
+    ```
+
+    or, inside a notebook:
+
+    ```python
+    from spyglass.position.v2 import check_environment
+
+    check_environment()
+    ```
+
+2. **Remove the leftover TensorFlow stack** (DeepLabCut 3.x runs on the PyTorch
+    that is already installed):
+
+    ```bash
+    pip uninstall -y tensorflow tensorflow-estimator \
+        tensorflow-io-gcs-filesystem keras tf-keras tf-slim tensorpack
+    ```
+
+3. **Or rebuild from a clean environment file** instead of reusing a V1 env:
+
+    ```bash
+    mamba env create -f environments/environment_dlc.yml
+    ```
+
+4. **Must keep a TensorFlow-trained DLC model?** Run that inference in a
+    separate environment with no `jax` / `non_local_detector`, then ingest the
+    `.h5`/NWB output via `PoseEstimSelection` with `task_mode="load"` or via
+    `ImportedPose`.
+
+**Migrating training parameters, too:** the PyTorch engine counts training
+length in **epochs**, not TensorFlow **iterations** — do not reuse a V1
+`maxiters` value (e.g. `1030000`) as PyTorch `epochs`. See
+[Position → Training parameters: TensorFlow → PyTorch](./POSITION.md) for the
+full knob mapping (`maxiters`→`epochs`, `saveiters`→`save_epochs`) and the
+~200-epoch default.
+
 ### SpyglassConfig Issues
 
 **Symptoms:**

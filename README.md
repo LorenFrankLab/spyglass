@@ -157,9 +157,10 @@ space and memory. GPUs are required for some of the analysis tools, such as
 DeepLabCut.
 
 See [pyproject.toml](pyproject.toml),
-[environment.yml](environments/environment.yml), or
-[environment_dlc.yml](environments/environment_dlc.yml) for software
-dependencies.
+[environment.yml](environments/environment.yml), or, for the position pipeline,
+[environment_dlc.yml](environments/environment_dlc.yml) (DeepLabCut) and
+[environment_sleap.yml](environments/environment_sleap.yml) (SLEAP) for software
+dependencies. DeepLabCut and SLEAP require separate environments.
 
 See
 [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)
