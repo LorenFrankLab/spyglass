@@ -938,7 +938,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         the results into a summary log.
         """
         instance = cls()
-        query = instance & restrict & "camera_name IS NULL OR path IS NULL"
+        query = instance & restrict & "(camera_name IS NULL OR path IS NULL)"
         existing_entries = query.fetch("KEY")
         total = len(existing_entries)
         updated_camera = updated_path = skipped_camera = skipped_path = 0

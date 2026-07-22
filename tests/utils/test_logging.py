@@ -161,15 +161,11 @@ def test_spyglass_logger_message_methods():
     logger = SpyglassLogger("test")
 
     # Test message methods work without crashing
-    try:
-        with patch.object(logger, "debug") as mock_debug:
-            with patch.object(logger, "_get_test_mode", return_value=True):
-                logger.info_msg("test info")
-                # In test mode, should use debug
-                mock_debug.assert_called_once_with("test info")
-    except Exception:
-        # Some configurations might not support this
-        pass
+    with patch.object(logger, "debug") as mock_debug:
+        with patch.object(logger, "_get_test_mode", return_value=True):
+            logger.info_msg("test info")
+            # In test mode, should use debug
+            mock_debug.assert_called_once_with("test info")
 
 
 def test_spyglass_logger_module_functions():
@@ -182,13 +178,9 @@ def test_spyglass_logger_module_functions():
     assert callable(error_msg)
 
     # Test they accept string arguments
-    try:
-        info_msg("test")
-        warn_msg("test")
-        error_msg("test")
-    except Exception:
-        # Should not crash with basic string input
-        pass
+    info_msg("test")
+    warn_msg("test")
+    error_msg("test")
 
 
 def test_spyglass_logger_configuration():
@@ -239,13 +231,9 @@ def test_excepthook_basic_functionality():
 
     # Test with keyboard interrupt (should use system handler)
     with patch.object(sys, "__excepthook__") as mock_sys_hook:
-        try:
-            excepthook(KeyboardInterrupt, KeyboardInterrupt("test"), None)
-            # Should delegate to system handler for KeyboardInterrupt
-            mock_sys_hook.assert_called_once()
-        except Exception:
-            # Excepthook might have different behavior in test environment
-            pass
+        excepthook(KeyboardInterrupt, KeyboardInterrupt("test"), None)
+        # Should delegate to system handler for KeyboardInterrupt
+        mock_sys_hook.assert_called_once()
 
 
 @pytest.mark.parametrize(
