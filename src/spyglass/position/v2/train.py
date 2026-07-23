@@ -22,7 +22,9 @@ from pynwb import NWBHDF5IO
 # Register NWB file in AnalysisNwbfile using any available parent file
 from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
 from spyglass.position.utils import suppress_print_from_package
-from spyglass.position.utils.path_helpers import resolve_model_path
+from spyglass.position.utils.path_helpers import (
+    resolve_model_path,
+)
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
@@ -2318,53 +2320,6 @@ class Model(SpyglassMixin, dj.Computed):
             )
             fig.suptitle(source_text, fontsize=10, y=0.02)
 
-    # Raw elementary-stream formats DeepLabCut cannot read: they carry no
-    # frame count, so DLC's frame extraction raises "__len__() should return
-    # >= 0". These are converted to an mp4 container before use.
-    _RAW_VIDEO_SUFFIXES = (".h264", ".h265", ".hevc")
-
-    @staticmethod
-    def _ensure_mp4(video_paths, output_dir):
-        """Convert raw video streams (h264/h265/hevc) to mp4 for DeepLabCut.
-
-        Raw elementary streams carry no frame count, so DLC's frame extraction
-        raises ``__len__() should return >= 0``. Position V1 converted such
-        videos at project creation; this reuses the same shared ``find_mp4``
-        converter (idempotent — it returns an already-converted mp4 if one
-        exists). Container formats DLC already reads (mp4, avi, mov, …) pass
-        through unchanged.
-
-        Parameters
-        ----------
-        video_paths : list[str]
-            Absolute paths to the source videos.
-        output_dir : str
-            Directory to write converted mp4 files into.
-
-        Returns
-        -------
-        list[str]
-            One path per input: the converted mp4 for raw-stream inputs, or the
-            original path otherwise.
-        """
-        from spyglass.position.utils.general import find_mp4
-
-        result = []
-        for path in map(Path, video_paths):
-            if path.suffix.lower() in Model._RAW_VIDEO_SUFFIXES:
-                result.append(
-                    str(
-                        find_mp4(
-                            video_path=path.parent,
-                            output_path=output_dir,
-                            video_filename=path.name,
-                        )
-                    )
-                )
-            else:
-                result.append(str(path))
-        return result
-
     def create_project(
         self,
         project_name: str,
@@ -2515,7 +2470,9 @@ class Model(SpyglassMixin, dj.Computed):
             or str(Path.home() / "dlc_projects")
         )
         Path(convert_dir).mkdir(parents=True, exist_ok=True)
-        dlc_videos = self._ensure_mp4(resolved_videos, convert_dir)
+        from spyglass.position.utils.general import ensure_mp4
+
+        dlc_videos = ensure_mp4(resolved_videos, convert_dir)
 
         # Try to infer a safe frame budget from the shortest video.  If this
         # fails (e.g., codec issues), we keep the user's requested value and
