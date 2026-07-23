@@ -8,7 +8,10 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
-from spyglass.position.utils_dlc import test_mode_suppress
+from spyglass.position.utils.dlc_io import (
+    parse_dlc_h5_output,
+    reformat_dlc_data,
+)
 from spyglass.settings import test_mode
 
 
@@ -91,14 +94,18 @@ class PoseEstimation:  # Note: simplifying to require only project path
     def rawdata(self):
         """Pandas dataframe of the DLC output from the h5 file."""
         if self._rawdata is None:
-            self._rawdata = pd.read_hdf(self.h5_path)
+            self._rawdata = parse_dlc_h5_output(
+                self.h5_path, return_metadata=False
+            )
         return self._rawdata
 
     @property
     def data(self) -> dict:
         """Dictionary of the bodyparts and corresponding dataframe data."""
         if self._data is None:
-            self._data = self.reformat_rawdata()
+            self._data = reformat_dlc_data(
+                self.rawdata, bodyparts=self.body_parts
+            )
         return self._data
 
     @property
@@ -113,21 +120,12 @@ class PoseEstimation:  # Note: simplifying to require only project path
         return self.df.columns.levels[0]
 
     def reformat_rawdata(self) -> dict:
-        """Reformat the rawdata from the h5 file to a more useful dictionary."""
-        if not len(self.rawdata) == self.pkl["nframes"]:  # pragma: no cover
-            raise ValueError(
-                f"Total frames from .h5 file ({len(self.rawdata)}) differs "
-                + f'from .pickle ({self.pkl["nframes"]})'
-            )
+        """Reformat rawdata using shared utility (DEPRECATED - use .data property).
 
-        body_parts_position = {}
-        for body_part in self.body_parts:
-            body_parts_position[body_part] = {
-                c: self.df.get(body_part).get(c).values
-                for c in self.df.get(body_part).columns
-            }
-
-        return body_parts_position
+        This method is kept for backwards compatibility but now delegates
+        to the shared reformat_dlc_data utility function.
+        """
+        return reformat_dlc_data(self.rawdata, bodyparts=self.body_parts)
 
 
 def read_yaml(fullpath, filename="*"):
@@ -191,66 +189,3 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
     output_filepath = Path(output_dir) / f"{filename}.yaml"
     write_config(output_filepath, config_dict)
     return str(output_filepath)
-
-
-def do_pose_estimation(
-    video_filepaths,
-    dlc_model,
-    project_path,
-    output_dir,
-    videotype="",
-    gputouse=None,
-    save_as_csv=False,
-    batchsize=None,
-    cropping=None,
-    TFGPUinference=True,
-    dynamic=(False, 0.5, 10),
-    robust_nframes=False,
-    allow_growth=False,
-    use_shelve=False,
-):
-    """Launch DLC's analyze_videos within element-deeplabcut
-
-    Other optional parameters may be set other than those described below. See
-    deeplabcut.analyze_videos parameters for descriptions/defaults.
-
-    Parameters
-    ----------
-    video_filepaths: list of videos to analyze
-    dlc_model: element-deeplabcut dlc.Model dict
-    project_path: path to project config.yml
-    output_dir: where to save output
-    """
-    from deeplabcut.pose_estimation_tensorflow import analyze_videos
-
-    # ---- Build and save DLC configuration (yaml) file ----
-    dlc_config = dlc_model["config_template"]
-    dlc_project_path = Path(project_path)
-    dlc_config["project_path"] = dlc_project_path.as_posix()
-
-    # ---- Write config files ----
-    # To output dir: Important for loading/parsing output in datajoint
-    _ = save_yaml(output_dir, dlc_config)
-    # To project dir: Required by DLC to run the analyze_videos
-    if dlc_project_path != output_dir:
-        config_filepath = save_yaml(dlc_project_path, dlc_config)
-    # ---- Trigger DLC prediction job ----
-    with test_mode_suppress():
-        analyze_videos(
-            config=config_filepath,
-            videos=video_filepaths,
-            shuffle=dlc_model["shuffle"],
-            trainingsetindex=dlc_model["trainingsetindex"],
-            destfolder=output_dir,
-            modelprefix=dlc_model["model_prefix"],
-            videotype=videotype,
-            gputouse=gputouse,
-            save_as_csv=save_as_csv,
-            batchsize=batchsize,
-            cropping=cropping,
-            TFGPUinference=TFGPUinference,
-            dynamic=dynamic,
-            robust_nframes=robust_nframes,
-            allow_growth=allow_growth,
-            use_shelve=use_shelve,
-        )

@@ -213,7 +213,7 @@ def test_recent_files(sgp):
 def test_suppress_print(sgp, monkeypatch, capsys):
     import inspect
 
-    suppress_print_from_package = sgp.utils_dlc.suppress_print_from_package
+    suppress_print_from_package = sgp.utils.dlc_io.suppress_print_from_package
 
     def fake_deeplabcut_function():
         print("This should be suppressed")
@@ -234,7 +234,7 @@ def test_suppress_print(sgp, monkeypatch, capsys):
 
 @pytest.fixture(scope="module")
 def estim_class(sgp, centroid_key):
-    estim_class = sgp.v1.dlc_reader.PoseEstimation
+    estim_class = sgp.utils.dlc_io.DLCProjectReader
     infer_dir = sgp.v1.dlc_utils.infer_output_dir
 
     yield estim_class(infer_dir(centroid_key))
