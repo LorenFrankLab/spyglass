@@ -96,5 +96,5 @@ def test_merge_get_class_invalid(spike_merge, pop_spike_merge):
 def test_merge_table_functionality():
     from spyglass.utils.dj_merge_tables import Merge
 
-    if hasattr(Merge, "fetch_nwb"):
-        assert callable(getattr(Merge, "fetch_nwb"))
+    assert hasattr(Merge, "fetch_nwb")
+    assert callable(getattr(Merge, "fetch_nwb"))

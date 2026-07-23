@@ -551,7 +551,7 @@ def no_pose(request):
 
 
 skip_if_no_pose = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_POSE", False),
+    "getattr(pytest, 'NO_POSE', False)",
     reason="Skipping pose estimation (DLC/SLEAP) tests.",
 )
 
