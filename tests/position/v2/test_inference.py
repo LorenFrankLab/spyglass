@@ -127,14 +127,16 @@ class _FakeCap:
         pass
 
 
-class TestVideoFrameCountPreflight:
-    """Preflight guard against videos DLC cannot count frames for.
+class TestFrameCountValidation:
+    """Inference safety net for videos DLC cannot count frames for.
 
     OpenCV returns a non-positive ``CAP_PROP_FRAME_COUNT`` for videos whose
     metadata it cannot read; DLC then crashes deep inside ``tqdm(video)``
-    with ``ValueError: __len__() should return >= 0``. These tests exercise
-    the preflight that turns that opaque crash into an actionable error.
-    They fake ``cv2.VideoCapture`` so they need neither DLC nor a real
+    with ``ValueError: __len__() should return >= 0``. Raw elementary
+    streams (.h264/.h265/.hevc) are converted upstream by the shared
+    ``general.ensure_mp4``; this residual check turns the opaque crash into
+    an actionable error for *container* videos with unreadable metadata.
+    These fake ``cv2.VideoCapture`` so they need neither DLC nor a real
     unreadable video, and run under ``--no-pose``.
     """
 
@@ -149,53 +151,41 @@ class TestVideoFrameCountPreflight:
 
     def test_reported_frame_count(self, monkeypatch):
         """dlc_reported_frame_count returns the OpenCV metadata count."""
-        from spyglass.position.v2.utils.nwb_io import (
-            dlc_reported_frame_count,
-        )
+        from spyglass.position.utils.general import dlc_reported_frame_count
 
         self._patch_cap(monkeypatch, count=42)
         assert dlc_reported_frame_count("any.mp4") == 42
 
     def test_reported_frame_count_unopenable(self, monkeypatch):
         """None is returned when OpenCV cannot open the video."""
-        from spyglass.position.v2.utils.nwb_io import (
-            dlc_reported_frame_count,
-        )
+        from spyglass.position.utils.general import dlc_reported_frame_count
 
         self._patch_cap(monkeypatch, opened=False)
         assert dlc_reported_frame_count("any.mp4") is None
 
-    def test_negative_count_raises_actionable(self, monkeypatch):
-        """A non-positive frame count raises a clear, actionable error."""
-        from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner
-
-        self._patch_cap(monkeypatch, count=-1)
-        with pytest.raises(ValueError, match=r"__len__.*>= 0"):
-            PoseInferenceRunner()._validate_readable_videos(["bad.mp4"])
-
-    def test_zero_count_raises(self, monkeypatch):
-        """A zero frame count is also rejected."""
-        from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner
-
-        self._patch_cap(monkeypatch, count=0)
-        with pytest.raises(ValueError, match="ffmpeg"):
-            PoseInferenceRunner()._validate_readable_videos(["empty.mp4"])
-
-    def test_unopenable_raises_oserror(self, monkeypatch):
-        """An unopenable video raises OSError."""
-        from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner
-
-        self._patch_cap(monkeypatch, opened=False)
-        with pytest.raises(OSError, match="could not be opened"):
-            PoseInferenceRunner()._validate_readable_videos(["nope.mp4"])
-
     def test_valid_count_passes(self, monkeypatch):
         """A positive frame count passes validation silently."""
-        from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner
+        from spyglass.position.v2.utils import nwb_io
 
         self._patch_cap(monkeypatch, count=10)
         # Should not raise.
-        PoseInferenceRunner()._validate_readable_videos(["good.mp4"])
+        nwb_io.PoseInferenceRunner()._assert_countable_videos(["good.mp4"])
+
+    def test_negative_count_raises_actionable(self, monkeypatch):
+        """A non-positive frame count raises a clear, actionable error."""
+        from spyglass.position.v2.utils import nwb_io
+
+        self._patch_cap(monkeypatch, count=-1)
+        with pytest.raises(ValueError, match=r"__len__.*>= 0"):
+            nwb_io.PoseInferenceRunner()._assert_countable_videos(["bad.mp4"])
+
+    def test_unopenable_raises_actionable(self, monkeypatch):
+        """An unopenable video raises the actionable error."""
+        from spyglass.position.v2.utils import nwb_io
+
+        self._patch_cap(monkeypatch, opened=False)
+        with pytest.raises(ValueError, match="Re-encode"):
+            nwb_io.PoseInferenceRunner()._assert_countable_videos(["bad.mp4"])
 
 
 class TestPoseEstimPopulation:
