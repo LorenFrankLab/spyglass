@@ -13,11 +13,7 @@ import pytest
 
 
 class TestEnsureMp4:
-    """Model._ensure_mp4 converts raw h264; other formats pass through."""
-
-    @pytest.fixture(autouse=True)
-    def _model(self, model):
-        self.model = model  # pylint: disable=attribute-defined-outside-init
+    """general.ensure_mp4 converts raw h264; other formats pass through."""
 
     def test_raw_streams_converted_containers_pass_through(
         self, monkeypatch, tmp_path
@@ -26,14 +22,17 @@ class TestEnsureMp4:
 
         converted = []
 
-        def fake_find_mp4(video_path, output_path, video_filename):
+        def fake_find_mp4(
+            video_path, output_path, video_filename, deterministic=True
+        ):
+            assert deterministic is True  # V2 always requests deterministic
             converted.append(video_filename)
             return Path(output_path) / (Path(video_filename).stem + ".mp4")
 
         monkeypatch.setattr(general, "find_mp4", fake_find_mp4)
 
         out = str(tmp_path)
-        result = self.model._ensure_mp4(
+        result = general.ensure_mp4(
             [
                 "/data/camA.mp4",  # container — untouched
                 "/data/camB.h264",  # raw — converted
@@ -52,9 +51,91 @@ class TestEnsureMp4:
         # only the raw streams were routed through the converter
         assert converted == ["camB.h264", "camC.h265", "camD.hevc"]
         # suffix match is case-insensitive
-        assert self.model._ensure_mp4(["/x/Y.H265"], out) == [
+        assert general.ensure_mp4(["/x/Y.H265"], out) == [
             str(Path(out) / "Y.mp4")
         ]
+
+    def test_uncountable_container_converted(self, monkeypatch, tmp_path):
+        """An existing container DLC cannot count is converted, not skipped."""
+        from spyglass.position.utils import general
+
+        avi = tmp_path / "cam.avi"
+        avi.write_text("stub")  # must exist to be probed
+
+        monkeypatch.setattr(general, "dlc_reported_frame_count", lambda p: -1)
+        converted = []
+
+        def fake_find_mp4(
+            video_path, output_path, video_filename, deterministic=True
+        ):
+            converted.append(video_filename)
+            return Path(output_path) / (Path(video_filename).stem + ".mp4")
+
+        monkeypatch.setattr(general, "find_mp4", fake_find_mp4)
+
+        out = str(tmp_path / "conv")
+        result = general.ensure_mp4([str(avi)], out)
+        assert result == [str(Path(out) / "cam.mp4")]
+        assert converted == ["cam.avi"]
+
+    def test_countable_container_passes_through(self, monkeypatch, tmp_path):
+        """An existing container DLC can count is left untouched."""
+        from spyglass.position.utils import general
+
+        avi = tmp_path / "cam.avi"
+        avi.write_text("stub")
+
+        monkeypatch.setattr(general, "dlc_reported_frame_count", lambda p: 300)
+
+        def _boom(**kw):
+            raise AssertionError("find_mp4 should not run for countable video")
+
+        monkeypatch.setattr(general, "find_mp4", _boom)
+
+        result = general.ensure_mp4([str(avi)], str(tmp_path / "conv"))
+        assert result == [str(avi)]
+
+
+class TestDeterministicVideoStem:
+    """V2's collision-free, reproducible converted-mp4 naming.
+
+    Guards against the legacy bare-stem naming where two distinct sources
+    sharing a stem silently collide (see issue #1651).
+    """
+
+    def test_reproducible(self):
+        """Same source path -> same stem (supports delete/regenerate)."""
+        from spyglass.position.utils.general import _deterministic_video_stem
+
+        a = _deterministic_video_stem("clip.1.h264", "/data/s1/clip.1.h264")
+        b = _deterministic_video_stem("clip.1.h264", "/data/s1/clip.1.h264")
+        assert a == b
+
+    def test_distinct_sources_same_stem_do_not_collide(self):
+        """Same filename in different dirs -> different names (no reuse)."""
+        from spyglass.position.utils.general import _deterministic_video_stem
+
+        a = _deterministic_video_stem("clip.h264", "/data/s1/clip.h264")
+        b = _deterministic_video_stem("clip.h264", "/data/s2/clip.h264")
+        assert a != b, "distinct sources must not share a converted mp4 name"
+
+    def test_strips_numeric_stream_suffix_by_anchor(self):
+        """`.1` stream suffix stripped as a trailing group, not a substring.
+
+        The legacy naming used ``".1" in stem`` (substring) and then
+        ``splitext`` again, so ``data.1x`` collapsed to ``data``. The anchored
+        ``\\.\\d+$`` only strips a genuine trailing ``.<digits>`` group.
+        """
+        from spyglass.position.utils.general import _deterministic_video_stem
+
+        # genuine trailing stream number stripped
+        assert _deterministic_video_stem(
+            "clip.1.h264", "/d/clip.1.h264"
+        ).startswith("clip__")
+        # non-numeric trailing token kept (legacy substring bug would strip it)
+        assert _deterministic_video_stem(
+            "data.1x.h264", "/d/data.1x.h264"
+        ).startswith("data.1x__")
 
 
 class TestReconcileVideoSetsIntegration:
@@ -119,7 +200,7 @@ class TestReconcileVideoSetsIntegration:
         stale_sets = yaml.safe_load(Path(stale_cfg).read_text())["video_sets"]
         assert {Path(v).suffix for v in stale_sets} == {".h264"}
 
-        # Convert (as _ensure_mp4 does), then let ensure_project reconcile the
+        # Convert (as ensure_mp4 does), then let ensure_project reconcile the
         # stale project (create-or-update) back onto the mp4.
         conv = tmp_path / "conv"
         conv.mkdir()
@@ -771,6 +852,7 @@ class TestCreateProjectIntegration:
         # video object no longer resolves).
         sys.path.insert(0, str(Path(__file__).parent))
         from make_example_dlc_project import bootstrap_from_video_paths
+
         from spyglass.common import Nwbfile
 
         (Nwbfile & {"nwb_file_name": "h264conv_.nwb"}).delete(safemode=False)
