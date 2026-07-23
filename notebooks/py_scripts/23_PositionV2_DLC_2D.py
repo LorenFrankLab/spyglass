@@ -1303,7 +1303,7 @@ else:
 # %% [markdown]
 # ## Next Steps
 #
-# - **Linearization**: Convert 2D position to 1D track position (notebook 24)
+# - **Linearization**: Convert 2D position to 1D track position (notebook 26)
 # - **Decoding**: Use position for neural decoding (notebooks 41-42)
 # - **Custom Analysis**: Work directly with fetched DataFrames
 #

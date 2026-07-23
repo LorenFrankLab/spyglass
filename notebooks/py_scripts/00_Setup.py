@@ -309,7 +309,7 @@
 #
 # > **Note**: `spyglass.position.v1` (DLC V1) is legacy. New projects should
 # > use `spyglass.position.v2`. See the Position V2 tutorials
-# > (`23_PositionV2_DLC` and `24_PositionV2_SLEAP`).
+# > (`23_PositionV2_DLC_2D` and `25_PositionV2_SLEAP_2D`).
 #
 # Position V2 supports two pose-estimation tools, **DeepLabCut** and
 # **SLEAP**, which require **separate environments** (SLEAP's NumPy-2 /

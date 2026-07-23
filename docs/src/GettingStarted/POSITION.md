@@ -29,15 +29,15 @@ linearization.
 
 ### Two pipelines: V1 and V2
 
-|                    | V1                      | V2                                    |
-| ------------------ | ----------------------- | ------------------------------------- |
-| **Status**         | Stable, production      | Active development                    |
-| **Tables**         | ~15 separate tables     | 3 core tables                         |
-| **Tools**          | DLC only                | DLC, SLEAP (planned), ndx-pose import |
-| **Backend**        | TensorFlow (DLC 2.x)    | PyTorch (DLC 3.x, SLEAP)              |
-| **Storage**        | Custom NWB objects      | ndx-pose extension                    |
-| **Parameters**     | 3 separate param tables | 1 unified `PoseParams`                |
-| **Shared science** | `position/utils/`       | same                                  |
+|                    | V1                      | V2                          |
+| ------------------ | ----------------------- | --------------------------- |
+| **Status**         | Stable, production      | Active development          |
+| **Tables**         | ~15 separate tables     | 3 core tables               |
+| **Tools**          | DLC only                | DLC, SLEAP, ndx-pose import |
+| **Backend**        | TensorFlow (DLC 2.x)    | PyTorch (DLC 3.x, SLEAP)    |
+| **Storage**        | Custom NWB objects      | ndx-pose extension          |
+| **Parameters**     | 3 separate param tables | 1 unified `PoseParams`      |
+| **Shared science** | `position/utils/`       | same                        |
 
 Both pipelines share the same underlying mathematical functions
 (`position/utils/`). V2 consolidates V1's many intermediate tables into a
