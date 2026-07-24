@@ -32,16 +32,23 @@ class TestDLCStrategy:
     def test_get_required_params(self, strategy):
         """Test get_required_params method."""
         required = strategy.get_required_params()
-        assert "project_path" in required
-        assert isinstance(required, set)
+        assert required == {"project_path"}
+        assert isinstance(required, set)  # guard alongside value
 
     def test_get_accepted_params(self, strategy):
         """Test get_accepted_params method."""
         accepted = strategy.get_accepted_params()
-        assert "project_path" in accepted
-        assert "shuffle" in accepted
-        assert "maxiters" in accepted
-        assert isinstance(accepted, set)
+        assert isinstance(accepted, set)  # guard alongside value
+        # Required is always a subset of accepted; DLC exposes both the
+        # PyTorch length knobs (epochs/save_epochs) and legacy TF/project keys.
+        assert strategy.get_required_params() <= accepted
+        assert {
+            "project_path",
+            "shuffle",
+            "maxiters",
+            "epochs",
+            "save_epochs",
+        } <= accepted
 
     def test_get_default_params(self, strategy):
         """Test get_default_params method."""
@@ -49,10 +56,13 @@ class TestDLCStrategy:
         assert defaults["shuffle"] == 1
         assert defaults["trainingsetindex"] == 0
         # PyTorch-first defaults (DLC 3.x): an explicit epoch budget rather
-        # than TF iteration knobs.
+        # than TF iteration knobs. The TF ``maxiters`` default stays None so
+        # DLC picks its own; net_type is the ResNet-50 backbone.
         assert defaults["epochs"] == 200
         assert defaults["save_epochs"] == 25
-        assert isinstance(defaults, dict)
+        assert defaults["maxiters"] is None
+        assert defaults["net_type"] == "resnet_50"
+        assert isinstance(defaults, dict)  # guard alongside value
 
     def test_validate_params_missing_required(self, strategy):
         """Test validate_params with missing required parameters."""
@@ -95,23 +105,25 @@ class TestSLEAPStrategy:
     def test_get_required_params(self, strategy):
         """Test get_required_params method."""
         required = strategy.get_required_params()
-        assert "model_type" in required
-        assert isinstance(required, set)
+        assert required == {"model_type"}
+        assert isinstance(required, set)  # guard alongside value
 
     def test_get_accepted_params(self, strategy):
         """Test get_accepted_params method."""
         accepted = strategy.get_accepted_params()
-        assert "model_type" in accepted
-        assert "max_epochs" in accepted
-        assert "batch_size" in accepted
-        assert isinstance(accepted, set)
+        assert isinstance(accepted, set)  # guard alongside value
+        assert strategy.get_required_params() <= accepted
+        assert {"model_type", "max_epochs", "batch_size"} <= accepted
 
     def test_get_default_params(self, strategy):
         """Test get_default_params method."""
         defaults = strategy.get_default_params()
         assert defaults["model_type"] == "single_instance"
+        assert defaults["backbone"] == "unet"
         assert defaults["max_epochs"] == 200
-        assert isinstance(defaults, dict)
+        assert defaults["batch_size"] == 4
+        assert defaults["learning_rate"] == 1e-4
+        assert isinstance(defaults, dict)  # guard alongside value
 
     def test_validate_params_missing_required(self, strategy):
         """Test validate_params with missing required parameters."""
@@ -151,14 +163,28 @@ class TestToolStrategyFactory:
     def test_get_dlc_strategy(self, factory, DLCStrategy):
         """Test getting DLC strategy."""
         strategy = factory.create_strategy("DLC")
-        assert isinstance(strategy, DLCStrategy)
+        assert isinstance(strategy, DLCStrategy)  # guard alongside behavior
+        # The factory returns a wired DLC strategy: DLC identity, the
+        # DeepLabCut ndx-pose software name, and DLC's output-file patterns.
         assert strategy.tool_name == "DLC"
+        assert strategy.source_software == "DeepLabCut"
+        assert strategy.supports_training is True
+        assert strategy.get_output_file_patterns() == {
+            "primary": "{video_stem}DLC_*.h5",
+            "fallback": "*.h5",
+        }
 
     def test_get_sleap_strategy(self, factory, SLEAPStrategy):
         """Test getting SLEAP strategy."""
         strategy = factory.create_strategy("SLEAP")
-        assert isinstance(strategy, SLEAPStrategy)
+        assert isinstance(strategy, SLEAPStrategy)  # guard alongside behavior
         assert strategy.tool_name == "SLEAP"
+        assert strategy.source_software == "SLEAP"
+        assert strategy.supports_training is True
+        assert strategy.get_output_file_patterns() == {
+            "primary": "*.analysis.h5",
+            "fallback": "*.predictions.slp",
+        }
 
     def test_ndx_pose_is_not_a_strategy(self, factory):
         """ndx-pose is a file format, not a tool strategy."""
