@@ -264,8 +264,8 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # Falls back to $SPYGLASS_TEST_DOCKER_VOL_DIR. Useful for: avoiding a full root
 # disk from accumulated test-container volumes.
 
---no-dlc            # Skip DeepLabCut tests and downloads
-# Useful for: systems without DLC, faster test runs
+--no-pose           # Skip DeepLabCut/SLEAP (pose) tests and downloads
+# Useful for: systems without DLC/SLEAP, faster test runs
 ```
 
 ### Debugging Options

@@ -285,7 +285,8 @@ def pytest_addoption(parser):
     --base-dir (str): Default './tests/test_data/'. Dir for local input file.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
-    --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
+    --no-pose (bool): Default False. Skip DLC/SLEAP (pose) tests. Also skip
+        video downloads.
     --container-name (str): Default 'spyglass-pytest'. Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
