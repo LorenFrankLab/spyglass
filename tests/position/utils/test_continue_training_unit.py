@@ -281,7 +281,8 @@ class TestSLEAPContinue:
                 {}, params, "skel", {}, sel_entry, MagicMock()
             )
 
-        assert mock_run.called
+        mock_run.assert_called_once()
+        assert mock_run.call_args.kwargs == {"check": True}
         cmd = mock_run.call_args[0][0]
         assert "--base_checkpoint" in cmd
         assert str(ckpt) in cmd
@@ -303,7 +304,11 @@ class TestSLEAPContinue:
         # Fresh (recorded) train_model was called; no base_checkpoint wiring.
         assert len(strategy.train_calls) == 1
         assert result["model_id"] == "child"
-        assert msg._warn_msg.called
+        # degrade path warns, naming the parent dir and the fresh fallback
+        msg._warn_msg.assert_called_once()
+        (warn_arg,) = msg._warn_msg.call_args[0]
+        assert str(parent) in warn_arg
+        assert "training fresh" in warn_arg
 
     @patch("subprocess.run")
     def test_epochs_rewrites_yaml_config(self, mock_run, ts, tmp_path):
@@ -394,7 +399,12 @@ class TestSLEAPContinue:
                 {}, params, "skel", {}, sel_entry, msg, epochs=40
             )
 
-        assert msg._warn_msg.called  # epochs not silently dropped
+        # epochs not silently dropped: no initial_config to carry the budget,
+        # so _write_epochs_config warns and returns None.
+        msg._warn_msg.assert_called_once()
+        (warn_arg,) = msg._warn_msg.call_args[0]
+        assert "epochs budget" in warn_arg
+        assert "Ignoring epochs" in warn_arg
         cmd = mock_run.call_args[0][0]
         assert "--base_checkpoint" in cmd  # resume still happens
 

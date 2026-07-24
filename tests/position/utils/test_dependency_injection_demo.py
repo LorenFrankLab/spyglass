@@ -15,62 +15,61 @@ from tests.utils.test_stubs import (
 
 
 def test_dlc_strategy_with_filesystem_injection():
-    """Test DLCStrategy business logic without real filesystem dependencies."""
+    """Real DLCStrategy scan routes through an injected stub filesystem.
+
+    ``get_latest_model_info`` is real DLCStrategy code that probes the project
+    tree via ``self._fs``. With a stub filesystem where the project resolves but
+    holds no ``dlc-models*/iteration-*`` dirs, the real scan yields ``{}`` and
+    never touches the real disk.
+    """
     from spyglass.position.utils.tool_strategies import DLCStrategy
 
-    # Set up mock filesystem state
-    mock_yaml_data = {
-        "/fake/project/config.yaml": {
-            "project_path": "/fake/project",
-            "bodyparts": ["nose", "tail"],
-            "skeleton": [["nose", "tail"]],
-        }
-    }
-
-    # Inject stub filesystem
+    # Project dir resolves (its config.yaml is registered) but has no trained
+    # model directories.
     stub_fs = StubFileSystem(
-        mock_files={
-            "/fake/dlc-models/**/*.pb": ["/fake/dlc-models/model1.pb"],
+        mock_yaml_data={
+            "/fake/project/config.yaml": {"project_path": "/fake/project"},
         },
-        mock_yaml_data=mock_yaml_data,
     )
 
     strategy = DLCStrategy(filesystem=stub_fs)
 
-    # This would fail without dependency injection due to filesystem access
-    assert strategy._fs.exists("/fake/project")
-    config = strategy._fs.read_yaml("/fake/project/config.yaml")
-    assert config["bodyparts"] == ["nose", "tail"]
+    # Real code output given the stub input: empty (no trained models).
+    assert (
+        strategy.get_latest_model_info({"project_path": "/fake/project"}) == {}
+    )
 
-    # Verify the calls were tracked
-    assert len(stub_fs.calls) >= 2
-    assert any(call["method"] == "exists" for call in stub_fs.calls)
-    assert any(call["method"] == "read_yaml" for call in stub_fs.calls)
+    # The real scan probed the injected fs (never the real disk).
+    probed = {c["path"] for c in stub_fs.calls if c["method"] == "exists"}
+    assert "/fake/project" in probed
+    assert any(p.endswith("dlc-models-pytorch") for p in probed)
 
 
 def test_pose_estim_with_injection():
-    """Test PoseEstim make() logic without database or DLC dependencies."""
+    """Real PoseEstim DI seam resolves injected stub runner/builder classes.
 
-    class TestablePoseEstim:
-        """Test subclass that injects stubs."""
+    The stubs are injected onto the real ``PoseEstim`` (class attrs restored
+    afterwards) and the real ``_get_*_cls`` accessors — the seam ``make()``
+    relies on — must return them. The resolved doubles are then driven to
+    confirm they honour the runner/builder contract the pipeline expects.
+    """
+    from spyglass.position.v2.estim import PoseEstim
 
-        _inference_runner_cls = StubInferenceRunner
-        _nwb_builder_cls = StubNWBBuilder
+    saved_runner = PoseEstim._inference_runner_cls
+    saved_builder = PoseEstim._nwb_builder_cls
+    try:
+        PoseEstim._inference_runner_cls = StubInferenceRunner
+        PoseEstim._nwb_builder_cls = StubNWBBuilder
 
-        @classmethod
-        def _get_inference_runner_cls(cls):
-            return cls._inference_runner_cls
+        # Real accessor code returns the injected classes (not the defaults).
+        assert PoseEstim._get_inference_runner_cls() is StubInferenceRunner
+        assert PoseEstim._get_nwb_builder_cls() is StubNWBBuilder
 
-        @classmethod
-        def _get_nwb_builder_cls(cls):
-            return cls._nwb_builder_cls
-
-    testable_pose_estim = TestablePoseEstim()
-
-    assert (
-        testable_pose_estim._get_inference_runner_cls() == StubInferenceRunner
-    )
-    assert testable_pose_estim._get_nwb_builder_cls() == StubNWBBuilder
+        runner_cls = PoseEstim._get_inference_runner_cls()
+        builder_cls = PoseEstim._get_nwb_builder_cls()
+    finally:
+        PoseEstim._inference_runner_cls = saved_runner
+        PoseEstim._nwb_builder_cls = saved_builder
 
     mock_pose_df = pd.DataFrame(
         {
@@ -80,18 +79,15 @@ def test_pose_estim_with_injection():
         }
     )
 
-    runner = testable_pose_estim._get_inference_runner_cls()(
-        mock_result=mock_pose_df
-    )
-    builder = testable_pose_estim._get_nwb_builder_cls()()
+    runner = runner_cls(mock_result=mock_pose_df)
+    builder = builder_cls()
 
     result = runner.run_inference(
         model_info={"model_path": "/fake/model.yaml"},
         video_path="/fake/video.mp4",
     )
 
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert isinstance(result, pd.DataFrame)  # guard alongside value
     assert result.equals(mock_pose_df)
 
     pose_est, skeleton = builder.build_pose_estimation(
@@ -102,8 +98,10 @@ def test_pose_estim_with_injection():
         skeleton_edges=[],
     )
 
-    assert "MockPoseEstimation" in pose_est
-    assert "MockSkeleton" in skeleton
+    # Builder contract: a (pose_estimation, skeleton) pair carrying the
+    # model id and body-part count.
+    assert pose_est == "MockPoseEstimation(test_model)"
+    assert skeleton == "MockSkeleton(1_bodyparts)"
 
     assert len(runner.calls) == 1
     assert len(builder.calls) == 1
