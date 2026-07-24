@@ -76,14 +76,43 @@ class TestDLCOutputParsing:
         assert len(result) == 3
         df, scorer, bodyparts = result
 
+        # Metadata matches the fixture exactly (order preserved)
         assert scorer == expected_scorer
-        assert set(bodyparts) == set(expected_bodyparts)
-        assert isinstance(df, pd.DataFrame)
-        assert df.shape[0] == original_df.shape[0]
+        assert scorer == "DLC_resnet50_test_projectJun1shuffle1_100000"
+        assert bodyparts == expected_bodyparts
+        assert bodyparts == ["nose", "leftear", "rightear", "tailbase"]
 
-        # Check that DataFrame has proper structure
-        assert isinstance(df.columns, pd.MultiIndex)
+        # Column MultiIndex level values round-trip intact
         assert df.columns.names == ["scorer", "bodypart", "coords"]
+        assert df.columns.get_level_values("scorer").unique().tolist() == [
+            scorer
+        ]
+        assert df.columns.get_level_values("bodypart").unique().tolist() == [
+            "nose",
+            "leftear",
+            "rightear",
+            "tailbase",
+        ]
+        assert df.columns.get_level_values("coords").unique().tolist() == [
+            "x",
+            "y",
+            "likelihood",
+        ]
+
+        # Exact shape and specific parsed cell values (seed=42 fixture)
+        assert df.shape == (100, 12)
+        assert df[(scorer, "nose", "x")].iloc[0] == pytest.approx(
+            195.93366235937145
+        )
+        assert df[(scorer, "nose", "y")].iloc[0] == pytest.approx(
+            582.91108057661
+        )
+        assert df[(scorer, "nose", "likelihood")].iloc[0] == pytest.approx(
+            0.706610556743218
+        )
+        assert df[(scorer, "tailbase", "likelihood")].iloc[99] == pytest.approx(
+            0.8153526997312947
+        )
 
     def test_parse_dlc_h5_output_no_metadata(
         self, mock_dlc_h5_file, parse_dlc_h5_output
@@ -93,9 +122,14 @@ class TestDLCOutputParsing:
 
         df = parse_dlc_h5_output(h5_path, return_metadata=False)
 
-        assert isinstance(df, pd.DataFrame)
-        assert df.shape[0] == original_df.shape[0]
-        assert isinstance(df.columns, pd.MultiIndex)
+        # return_metadata=False yields the bare DataFrame, values intact
+        assert df.shape == (100, 12)
+        assert df.shape == original_df.shape
+        assert df.columns.names == ["scorer", "bodypart", "coords"]
+        scorer = "DLC_resnet50_test_projectJun1shuffle1_100000"
+        assert df[(scorer, "nose", "x")].iloc[0] == pytest.approx(
+            195.93366235937145
+        )
 
     def test_parse_dlc_csv_output(self, mock_dlc_csv_file, parse_dlc_h5_output):
         """Test parsing DLC CSV file."""
@@ -107,10 +141,17 @@ class TestDLCOutputParsing:
             csv_path, return_metadata=True
         )
 
+        # CSV path parses to the same content as the H5 path
         assert scorer == expected_scorer
-        assert set(bodyparts) == set(expected_bodyparts)
-        assert isinstance(df, pd.DataFrame)
-        assert df.shape[0] == original_df.shape[0]
+        assert scorer == "DLC_resnet50_test_projectJun1shuffle1_100000"
+        assert bodyparts == expected_bodyparts
+        assert bodyparts == ["nose", "leftear", "rightear", "tailbase"]
+        assert df.shape == (100, 12)
+        assert df.shape == original_df.shape
+        assert df.columns.names == ["scorer", "bodypart", "coords"]
+        assert df[(scorer, "nose", "x")].iloc[0] == pytest.approx(
+            195.93366235937145
+        )
 
     def test_parse_dlc_output_bodypart_filter(
         self, mock_dlc_h5_file, parse_dlc_h5_output
@@ -124,15 +165,18 @@ class TestDLCOutputParsing:
         )
 
         assert scorer == expected_scorer
-        assert set(bodyparts) == set(filter_bodyparts)
+        assert bodyparts == filter_bodyparts
 
-        # Check that only requested bodyparts are in DataFrame
-        df_bodyparts = df.columns.get_level_values("bodypart").unique()
-        assert set(df_bodyparts) == set(filter_bodyparts)
+        # Only the 2 requested bodyparts survive: 2 parts x 3 coords = 6 cols
+        assert df.shape == (100, 6)
+        df_bodyparts = df.columns.get_level_values("bodypart").unique().tolist()
+        assert df_bodyparts == ["nose", "leftear"]
+        assert (scorer, "rightear", "x") not in df.columns
+        assert (scorer, "nose", "x") in df.columns
 
     def test_parse_dlc_output_file_not_found(self, parse_dlc_h5_output):
         """Test error when DLC output file doesn't exist."""
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError, match="not found"):
             parse_dlc_h5_output("/nonexistent/file.h5")
 
     def test_get_dlc_bodyparts(self, mock_dlc_h5_file, get_dlc_bodyparts):
@@ -141,8 +185,8 @@ class TestDLCOutputParsing:
 
         bodyparts = get_dlc_bodyparts(h5_path)
 
-        assert set(bodyparts) == set(expected_bodyparts)
-        assert len(bodyparts) == len(expected_bodyparts)
+        assert bodyparts == expected_bodyparts
+        assert bodyparts == ["nose", "leftear", "rightear", "tailbase"]
 
     def test_get_dlc_scorer(self, mock_dlc_h5_file, get_dlc_scorer):
         """Test extracting scorer name from DLC DataFrame."""
@@ -195,16 +239,33 @@ class TestDLCOutputParsing:
 
         pos_df = convert_dlc_to_position_df(df)
 
-        # Check structure
-        assert isinstance(pos_df, pd.DataFrame)
-        assert len(pos_df) == len(df)
+        assert pos_df.shape == (100, 12)
 
-        # Check that columns include x/y for each bodypart
+        # Flat columns are ordered bodypart-major, coord-minor
         expected_cols = []
         for bp in bodyparts:
             expected_cols.extend([f"{bp}_x", f"{bp}_y", f"{bp}_likelihood"])
+        assert list(pos_df.columns) == expected_cols
+        assert list(pos_df.columns) == [
+            "nose_x",
+            "nose_y",
+            "nose_likelihood",
+            "leftear_x",
+            "leftear_y",
+            "leftear_likelihood",
+            "rightear_x",
+            "rightear_y",
+            "rightear_likelihood",
+            "tailbase_x",
+            "tailbase_y",
+            "tailbase_likelihood",
+        ]
 
-        assert set(pos_df.columns) == set(expected_cols)
+        # Values carry over from the MultiIndex frame unchanged
+        assert pos_df["nose_x"].iloc[0] == pytest.approx(195.93366235937145)
+        assert pos_df["tailbase_likelihood"].iloc[99] == pytest.approx(
+            0.8153526997312947
+        )
 
     def test_convert_dlc_to_position_df_likelihood_threshold(
         self, mock_dlc_dataframe, convert_dlc_to_position_df
@@ -218,18 +279,19 @@ class TestDLCOutputParsing:
             df, likelihood_thresh=likelihood_threshold
         )
 
-        # Check that low likelihood values are set to NaN
+        # x/y are NaN exactly where likelihood < threshold, preserved elsewhere.
+        # The fixture starts with no NaNs, so isna() must equal the low mask.
         for col in pos_df.columns:
             if col.endswith("_likelihood"):
                 bp_name = col.replace("_likelihood", "")
-                x_col = f"{bp_name}_x"
-                y_col = f"{bp_name}_y"
+                low_mask = pos_df[col] < likelihood_threshold
+                assert pos_df[f"{bp_name}_x"].isna().equals(low_mask)
+                assert pos_df[f"{bp_name}_y"].isna().equals(low_mask)
 
-                # Where likelihood < threshold, x/y should be NaN
-                low_likelihood_mask = pos_df[col] < likelihood_threshold
-                if low_likelihood_mask.any():
-                    assert pos_df.loc[low_likelihood_mask, x_col].isna().all()
-                    assert pos_df.loc[low_likelihood_mask, y_col].isna().all()
+        # Concrete count for one bodypart pins the branch (seed=42 fixture)
+        nose_low = pos_df["nose_likelihood"] < likelihood_threshold
+        assert int(nose_low.sum()) == 58
+        assert int(pos_df["nose_x"].isna().sum()) == 58
 
 
 class TestDLCFileHandling:
@@ -258,9 +320,17 @@ class TestDLCFileHandling:
 
         df = parse_dlc_h5_output(h5_path, return_metadata=False)
 
-        assert isinstance(df, pd.DataFrame)
+        # Structure survives an empty frame: no rows, MultiIndex intact
         assert len(df) == 0
-        assert isinstance(df.columns, pd.MultiIndex)
+        assert df.columns.names == ["scorer", "bodypart", "coords"]
+        assert df.columns.get_level_values("bodypart").unique().tolist() == [
+            "nose"
+        ]
+        assert df.columns.get_level_values("coords").unique().tolist() == [
+            "x",
+            "y",
+            "likelihood",
+        ]
 
     def test_parse_dlc_output_missing_bodyparts(
         self, mock_dlc_h5_file, parse_dlc_h5_output
@@ -417,9 +487,14 @@ class TestDLCProjectReader:
         from spyglass.position.utils.dlc_io import DLCProjectReader
 
         reader = DLCProjectReader(dlc_output_dir)
-        assert "Scorer" in reader.model
-        assert "Task" in reader.model
-        assert "shuffle" in reader.model
+        # Values parsed from the synthetic pkl/yaml in dlc_output_dir
+        assert reader.model["Scorer"] == "DLC_resnet50_testJun1shuffle1_50000"
+        assert reader.model["Task"] == "test"
+        assert reader.model["date"] == "Jun1"
+        assert reader.model["shuffle"] == 1
+        assert reader.model["iteration"] == 0
+        assert reader.model["trainingsetindex"] == 0
+        assert reader.model["training_iteration"] == 50000
         assert reader.fps == 30
         assert reader.nframes == 5
 
@@ -429,8 +504,7 @@ class TestDLCProjectReader:
 
         reader = DLCProjectReader(dlc_output_dir)
         bps = reader.body_parts
-        assert "nose" in bps
-        assert "tail" in bps
+        assert sorted(bps) == ["nose", "tail"]
 
 
 class TestDoPoseEstimation:
