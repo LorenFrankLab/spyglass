@@ -1,5 +1,3 @@
-# pylint: disable=protected-access
-
 import pytest
 from pandas import DataFrame
 
@@ -15,7 +13,7 @@ def test_invalid_interval(pos_src):
 
 def test_invalid_epoch_num(common):
     """Test invalid epoch num"""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid interval name"):
         common.PositionSource.get_epoch_num("invalid_epoch_num")
 
 
@@ -27,8 +25,12 @@ def test_valid_epoch_num(common):
 
 @pytest.mark.slow
 def test_pos_source_make(common):
-    """Test custom populate"""
+    """Test custom populate inserts sources tagged 'imported'."""
     common.PositionSource().make(common.Session())
+    sources = set(common.PositionSource().fetch("source"))
+    assert sources == {
+        "imported"
+    }, "PositionSource.make should insert rows with source='imported'"
 
 
 def test_pos_source_make_invalid(common):
@@ -84,9 +86,12 @@ def test_populate_state_script(common, pop_state_script):
 
 
 def test_videofile_update_entries(common):
-    """Test update entries"""
-    key = common.VideoFile().fetch(as_dict=True)[0]
+    """Test update entries leaves camera_name populated for the row."""
+    key = common.VideoFile().fetch("KEY", as_dict=True)[0]
     common.VideoFile().update_entries(key)
+    assert (common.VideoFile() & key).fetch1(
+        "camera_name"
+    ), "update_entries should leave camera_name populated"
 
 
 def test_fetch_key_from_path_no_side_effect(common, tmp_path):
@@ -188,8 +193,11 @@ def test_prepare_video_entry_with_external_file(common):
 
         result = video_file._prepare_video_entry(key, mock_video)
 
-        expected_filename = Path("file1.mp4").name
-        assert expected_filename in result["path"]
+        # "camera_device 1" -> video_file_num 1; first external file used
+        assert result["video_file_num"] == 1
+        assert result["camera_name"] == "test_camera"
+        assert result["video_file_object_id"] == "test_object_id"
+        assert result["path"].endswith("/" + Path("file1.mp4").name)
 
 
 def test_prepare_video_entry_with_file_idx(common):
@@ -219,12 +227,14 @@ def test_prepare_video_entry_with_file_idx(common):
 
         result = video_file._prepare_video_entry(key, mock_video, file_idx=1)
 
-        expected_filename = Path("file2.mp4").name
-        assert expected_filename in result["path"]
+        # "camera_device 2" -> num 2; file_idx=1 selects the second file
+        assert result["video_file_num"] == 2
+        assert result["path"].endswith("/" + Path("file2.mp4").name)
 
 
 def test_prepare_video_entry_with_empty_external_file(common):
     """Test _prepare_video_entry with empty external_file list."""
+    from pathlib import Path
     from unittest.mock import MagicMock, Mock
 
     # Create mock video object with empty external_file
@@ -248,8 +258,9 @@ def test_prepare_video_entry_with_empty_external_file(common):
 
         result = video_file._prepare_video_entry(key, mock_video)
 
-        # Should use video object name as fallback
-        assert "fallback_video_name" in result["path"]
+        # No external_file -> falls back to the video object's own name
+        assert result["video_file_num"] == 3
+        assert result["path"].endswith("/" + Path("fallback_video_name").name)
 
 
 # Additional comprehensive tests for common_behav.py coverage improvement
@@ -332,8 +343,9 @@ def test_prepare_video_entry_file_idx_out_of_range(common):
         # Request file_idx=2 when only 1 file exists
         result = video_file._prepare_video_entry(key, mock_video, file_idx=2)
 
-        # Should fallback to video object name
-        assert "fallback_name" in result["path"]
+        # Out-of-range idx -> falls back to the video object's own name
+        assert result["video_file_num"] == 5
+        assert result["path"].endswith("/fallback_name")
 
 
 def test_validate_video_timestamps_single_file(common):
@@ -464,8 +476,8 @@ def test_validate_multifile_timestamps_no_valid_segments(common):
 
 
 def test_videofile_make_no_videos(common):
-    """Test VideoFile.make when no ImageSeries found in NWB file."""
-    from unittest.mock import Mock, patch
+    """Test VideoFile.make warns and returns when NWB has no ImageSeries."""
+    from unittest.mock import Mock, PropertyMock, patch
 
     # Mock NWB file with no ImageSeries objects
     mock_nwbf = Mock()
@@ -474,20 +486,32 @@ def test_videofile_make_no_videos(common):
     video_file = common.VideoFile()
 
     with (
+        patch.object(
+            type(video_file.connection),
+            "in_transaction",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
         patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
         patch.object(common.Nwbfile, "get_abs_path") as mock_get_path,
+        patch.object(video_file, "_warn_msg") as mock_warn,
     ):
 
         mock_get_nwb.return_value = mock_nwbf
         mock_get_path.return_value = "/fake/path.nwb"
 
-        # Should not raise, just return early with warning
         video_file.make({"nwb_file_name": "test.nwb"})
 
+    # Empty videos dict -> warns about the missing data interface and returns
+    mock_warn.assert_called_once()
+    assert (
+        "No video data interface found in test.nwb" in mock_warn.call_args[0][0]
+    )
 
-def test_videofile_make_camera_device_error(common):
-    """Test VideoFile.make with camera device KeyError during processing."""
-    from unittest.mock import Mock, patch
+
+def test_videofile_make_camera_device_error(common, caplog):
+    """Test VideoFile.make reports a missing-camera KeyError, not raises."""
+    from unittest.mock import Mock, PropertyMock, patch
 
     import pynwb
 
@@ -505,6 +529,12 @@ def test_videofile_make_camera_device_error(common):
     video_file = common.VideoFile()
 
     with (
+        patch.object(
+            type(video_file.connection),
+            "in_transaction",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
         patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
         patch.object(common.Nwbfile, "get_abs_path") as mock_get_path,
         patch.object(common.TaskEpoch, "__and__") as mock_task_epoch,
@@ -522,13 +552,17 @@ def test_videofile_make_camera_device_error(common):
         # Simulate KeyError from _validate_video_timestamps
         mock_validate.side_effect = KeyError("Camera not found")
 
-        # Should handle error gracefully
         video_file.make({"nwb_file_name": "test.nwb"})
 
+    # KeyError is caught and surfaced via the partial-import report
+    assert "VideoFile Partial Import" in caplog.text
+    assert "Missing camera devices" in caplog.text
+    assert "missing_camera" in caplog.text
 
-def test_videofile_make_unexpected_error(common):
-    """Test VideoFile.make with unexpected error during processing."""
-    from unittest.mock import Mock, patch
+
+def test_videofile_make_unexpected_error(common, caplog):
+    """Test VideoFile.make reports an unexpected error, not raises."""
+    from unittest.mock import Mock, PropertyMock, patch
 
     import pynwb
 
@@ -543,6 +577,12 @@ def test_videofile_make_unexpected_error(common):
     video_file = common.VideoFile()
 
     with (
+        patch.object(
+            type(video_file.connection),
+            "in_transaction",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
         patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
         patch.object(common.Nwbfile, "get_abs_path") as mock_get_path,
         patch.object(common.TaskEpoch, "__and__") as mock_task_epoch,
@@ -560,8 +600,12 @@ def test_videofile_make_unexpected_error(common):
         # Simulate unexpected error
         mock_validate.side_effect = RuntimeError("Unexpected error")
 
-        # Should handle error gracefully
         video_file.make({"nwb_file_name": "test.nwb"})
+
+    # RuntimeError is caught and surfaced under the "Other errors" section
+    assert "VideoFile Partial Import" in caplog.text
+    assert "Other errors" in caplog.text
+    assert "RuntimeError: Unexpected error" in caplog.text
 
 
 def test_videofile_report_partial_import(common, caplog):
@@ -771,14 +815,8 @@ def test_videofile_update_entries_with_null_values(common):
         assert mock_update1.call_count == 2
 
 
-def test_position_source_invalid_interval_name(pos_src):
-    """Test PositionSource with invalid interval name formats."""
-    with pytest.raises(ValueError, match="Invalid interval name"):
-        pos_src.get_epoch_num("not_an_epoch_name")
-
-
 def test_position_source_insert_from_nwbfile(common):
-    """Test PositionSource.insert_from_nwbfile with no spatial series."""
+    """Test insert_from_nwbfile logs and skips when no spatial series."""
     from unittest.mock import Mock, patch
 
     # Mock NWB file with no spatial series
@@ -789,36 +827,14 @@ def test_position_source_insert_from_nwbfile(common):
         patch(
             "spyglass.common.common_behav.get_all_spatial_series"
         ) as mock_get_spatial,
+        patch.object(common.PositionSource, "_info_msg") as mock_info,
     ):
 
         mock_get_nwb.return_value = mock_nwbf
         mock_get_spatial.return_value = None  # No spatial series found
 
-        # Should not raise, just log info and return
         common.PositionSource.insert_from_nwbfile("test.nwb")
 
-    with (
-        patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
-        patch(
-            "spyglass.common.common_behav.get_all_spatial_series"
-        ) as mock_get_spatial,
-    ):
-
-        mock_get_nwb.return_value = mock_nwbf
-        mock_get_spatial.return_value = None  # No spatial series found
-
-        # Should not raise, just log info and return
-        common.PositionSource.insert_from_nwbfile("test.nwb")
-
-    with (
-        patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
-        patch(
-            "spyglass.common.common_behav.get_all_spatial_series"
-        ) as mock_get_spatial,
-    ):
-
-        mock_get_nwb.return_value = mock_nwbf
-        mock_get_spatial.return_value = None  # No spatial series found
-
-        # Should not raise, just log info and return
-        common.PositionSource.insert_from_nwbfile("test.nwb")
+    # None spatial series -> the skip branch logs and returns without inserting
+    mock_info.assert_called_once()
+    assert "No position data found in test.nwb" in mock_info.call_args[0][0]
