@@ -25,35 +25,14 @@ if [[ -z "${SPYGLASS_BASE_PATH}"
   exit 1
 fi
 
-source $SPYGLASS_CONDA_PATH
-source "$SCRIPT_DIR/slack_utils.sh"
-source "$SCRIPT_DIR/email_utils.sh"
+source "$SPYGLASS_CONDA_PATH"
+source "$SCRIPT_DIR/script_utils.sh"
 SLACK_LOG="$SPYGLASS_LOG"
-
-EMAIL_TEMPLATE=$(cat <<-EOF
-From: "Spyglass" <$SPYGLASS_EMAIL_SRC>
-To: $SPYGLASS_EMAIL_DEST
-Subject: cron fail - $(date "+%Y-%m-%d")
-
-%s
-EOF
-)
 
 on_fail() { # $1: error message. Echo message and send as email
     echo "Error: $1"
-    if [ -z "$SPYGLASS_EMAIL_SRC" ]; then
-      return 1 # No email source, so don't send an email
-    fi
-    local error_msg="$1"
-    local content
-    content=$(printf "$EMAIL_TEMPLATE" "$error_msg")
-
-    curl -sS -o /dev/null --ssl-reqd \
-      --url "smtps://smtp.gmail.com:465" \
-      --user "${SPYGLASS_EMAIL_SRC}:${SPYGLASS_EMAIL_PASS}" \
-      --mail-from "$SPYGLASS_EMAIL_SRC" \
-      --mail-rcpt "$SPYGLASS_EMAIL_DEST" \
-      -T <(echo "$content")
+    send_email_message "$SPYGLASS_EMAIL_DEST" \
+      "cron fail - $(date "+%Y-%m-%d")" "$1"
 }
 
 exec >> $SPYGLASS_LOG 2>&1
@@ -112,8 +91,8 @@ commit (${commit}). This was first flagged ${days} days ago.
 
 Please reset your repository to an official commit or open a pull request.
 Contact the support team if you need assistance."
-    send_email_message "$user_email" "$SPYGLASS_EMAIL_DEST" \
-      "$subject" "$body"
+    send_email_message "$user_email" "$subject" "$body" \
+      "$SPYGLASS_EMAIL_DEST"
   done < "$DIRTY_ENVS_OUT"
 fi
 rm -f "$DIRTY_ENVS_OUT"

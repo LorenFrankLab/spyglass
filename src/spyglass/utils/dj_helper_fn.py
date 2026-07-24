@@ -163,7 +163,7 @@ def _subclass_factory(
     Usage: OldClass = _subclass_factory('OldClass', __name__, NewClass)
     """
 
-    new_module = new_class().__class__.__module__
+    new_module = new_class.__module__
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):

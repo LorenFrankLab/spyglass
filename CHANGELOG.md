@@ -176,7 +176,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507
+    #1484, #1489, #1507, #1614
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
@@ -220,6 +220,11 @@ for label, interval_data in results.groupby("interval_labels"):
     `_update_external` no longer re-reads the NWB file to verify a hash that was
     just computed by the caller #1600
 - Kachery as optional dependency #1607
+- Allow revisited nodes in graph cascade #1610
+- Add `DandiValidation` tables for tracking dandi compliance during export #1584
+- Save disk checks as csv, predict runway of primary data directory #1611
+- Fix package scanning without database import #1621
+- Allow `RestrGraph` to inspect tables outside of Spyglass #1595
 - Warn users on dirty installs #1601
 
 ### Pipelines
@@ -242,7 +247,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498, #1632
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
@@ -307,6 +312,10 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
+        `curation_label` column #1626
+    - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
+        #1626
 
 ## [0.5.5] (Aug 6, 2025)
 
