@@ -83,7 +83,8 @@ class TestTwoPointOrientation:
 
         orientation = two_pt_orientation(pos_df, "front", "back")
 
-        assert ~np.isnan(orientation[0])  # First frame OK
+        # First frame: (1,1) - (0,0) → arctan2(1, 1) = π/4
+        assert np.isclose(orientation[0], np.pi / 4)
         assert np.isnan(orientation[1])  # Second frame has NaN
         assert np.isnan(orientation[2])  # Third frame has NaN
 
@@ -289,8 +290,8 @@ class TestGetSpanStartStop:
         indices = np.array([1, 3, 5, 7])
         spans = get_span_start_stop(indices)
 
-        assert len(spans) == 4
-        assert all(s[0] == s[1] for s in spans)
+        # Each isolated index is its own single-frame span
+        assert spans == [(1, 1), (3, 3), (5, 5), (7, 7)]
 
 
 class TestInterpOrientation:

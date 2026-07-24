@@ -99,11 +99,12 @@ class TestGet1ptCentroid:
 
         centroid = get_1pt_centroid(pos_df, points={"point1": "nose"})
 
+        # Passthrough: each frame equals the (x, y) of nose, NaN preserved.
+        # assert_array_equal treats NaN as equal, so the NaN-partner values
+        # (5.0 at frame 1, 3.0 at frame 2) are pinned too.
         assert centroid.shape == (3, 2)
-        assert centroid[0, 0] == 1.0
-        assert centroid[0, 1] == 4.0
-        assert np.isnan(centroid[1, 0])  # x is NaN
-        assert np.isnan(centroid[2, 1])  # y is NaN
+        expected = np.array([[1.0, 4.0], [np.nan, 5.0], [3.0, np.nan]])
+        np.testing.assert_array_equal(centroid, expected)
 
     def test_1pt_centroid_missing_key(self):
         """Test that missing point1 key raises error."""
@@ -145,10 +146,9 @@ class TestGet2ptCentroid:
             max_LED_separation=5.0,  # Allow distance
         )
 
-        # Should be average: (1, 1)
+        # Should be average of (0, 0) and (2, 2): (1, 1)
         assert centroid.shape == (1, 2)
-        assert np.isclose(centroid[0, 0], 1.0)
-        assert np.isclose(centroid[0, 1], 1.0)
+        np.testing.assert_allclose(centroid[0], [1.0, 1.0])
 
     def test_2pt_centroid_too_far(self):
         """Test 2-point centroid when points are too far apart."""
@@ -172,6 +172,7 @@ class TestGet2ptCentroid:
         )
 
         # Should be NaN because too far
+        assert centroid.shape == (1, 2)
         assert np.isnan(centroid[0, 0])
         assert np.isnan(centroid[0, 1])
 
@@ -195,17 +196,12 @@ class TestGet2ptCentroid:
             max_LED_separation=5.0,
         )
 
-        # Frame 0: Both valid → average
-        assert np.isclose(centroid[0, 0], 1.5)
-        assert np.isclose(centroid[0, 1], 1.5)
-
-        # Frame 1: Only p2 valid → use p2
-        assert np.isclose(centroid[1, 0], 2.0)
-        assert np.isclose(centroid[1, 1], 2.0)
-
-        # Frame 2: Only p1 valid → use p1
-        assert np.isclose(centroid[2, 0], 3.0)
-        assert np.isclose(centroid[2, 1], 3.0)
+        # Frame 0: both valid → average (1.5, 1.5)
+        # Frame 1: only p2 valid → use p2 (2, 2)
+        # Frame 2: only p1 valid → use p1 (3, 3)
+        assert centroid.shape == (3, 2)
+        expected = np.array([[1.5, 1.5], [2.0, 2.0], [3.0, 3.0]])
+        np.testing.assert_allclose(centroid, expected)
 
     def test_2pt_centroid_both_nan(self):
         """Test 2-point centroid when both points are NaN."""
@@ -227,6 +223,7 @@ class TestGet2ptCentroid:
             max_LED_separation=5.0,
         )
 
+        assert centroid.shape == (1, 2)
         assert np.isnan(centroid[0, 0])
         assert np.isnan(centroid[0, 1])
 
@@ -264,9 +261,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Should be average of green and center: (2, 2)
-        assert np.isclose(centroid[0, 0], 2.0)
-        assert np.isclose(centroid[0, 1], 2.0)
+        # Should be average of green(1,1) and center(3,3): (2, 2)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [2.0, 2.0])
 
     def test_4pt_centroid_green_sides(self):
         """Test 4-point centroid: green and left/right valid (equal 3-pt avg)."""
@@ -300,8 +297,8 @@ class TestGet4ptCentroid:
         )
 
         # Equal 3-pt average (matches V1 Centroid class): x=7/3, y=5/3
-        assert np.isclose(centroid[0, 0], 7.0 / 3.0)
-        assert np.isclose(centroid[0, 1], 5.0 / 3.0)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [7.0 / 3.0, 5.0 / 3.0])
 
     def test_4pt_centroid_only_sides(self):
         """Test 4-point centroid: only left/right valid."""
@@ -333,9 +330,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Should be average of left and right: (2, 0)
-        assert np.isclose(centroid[0, 0], 2.0)
-        assert np.isclose(centroid[0, 1], 0.0)
+        # Should be average of left(0,0) and right(4,0): (2, 0)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [2.0, 0.0])
 
     def test_4pt_centroid_only_center(self):
         """Test 4-point centroid: only center valid."""
@@ -368,8 +365,8 @@ class TestGet4ptCentroid:
         )
 
         # Should be center: (5, 5)
-        assert np.isclose(centroid[0, 0], 5.0)
-        assert np.isclose(centroid[0, 1], 5.0)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [5.0, 5.0])
 
     def test_4pt_centroid_all_nan(self):
         """Test 4-point centroid: all points NaN."""
@@ -401,6 +398,7 @@ class TestGet4ptCentroid:
         )
 
         # Should be NaN
+        assert centroid.shape == (1, 2)
         assert np.isnan(centroid[0, 0])
         assert np.isnan(centroid[0, 1])
 
@@ -434,9 +432,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Should be average of green and left: (1, 1)
-        assert np.isclose(centroid[0, 0], 1.0)
-        assert np.isclose(centroid[0, 1], 1.0)
+        # Should be average of green(2,2) and left(0,0): (1, 1)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [1.0, 1.0])
 
     def test_4pt_centroid_all_valid(self):
         """Test 4-point centroid: all LEDs valid → priority 1 (green+center)."""
@@ -469,8 +467,8 @@ class TestGet4ptCentroid:
         )
 
         # Priority 1 fires: average of green(0,0) and center(2,0) = (1, 0)
-        assert np.isclose(centroid[0, 0], 1.0)
-        assert np.isclose(centroid[0, 1], 0.0)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [1.0, 0.0])
 
     def test_4pt_centroid_only_green(self):
         """Test 4-point centroid: only green valid → use green position."""
@@ -501,9 +499,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        # Should fall back to green position
-        assert np.isclose(centroid[0, 0], 3.0)
-        assert np.isclose(centroid[0, 1], 4.0)
+        # Should fall back to green position (3, 4)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [3.0, 4.0])
 
     def test_4pt_centroid_only_left(self):
         """Test 4-point centroid: only left valid → use left position."""
@@ -534,8 +532,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        assert np.isclose(centroid[0, 0], 1.0)
-        assert np.isclose(centroid[0, 1], 2.0)
+        # Should fall back to left position (1, 2)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [1.0, 2.0])
 
     def test_4pt_centroid_only_right(self):
         """Test 4-point centroid: only right valid → use right position."""
@@ -566,8 +565,9 @@ class TestGet4ptCentroid:
             max_LED_separation=10.0,
         )
 
-        assert np.isclose(centroid[0, 0], 5.0)
-        assert np.isclose(centroid[0, 1], 6.0)
+        # Should fall back to right position (5, 6)
+        assert centroid.shape == (1, 2)
+        np.testing.assert_allclose(centroid[0], [5.0, 6.0])
 
     def test_4pt_centroid_green_sides_vs_v1_class(self):
         """Verify functional get_4pt_centroid matches V1 Centroid class."""
