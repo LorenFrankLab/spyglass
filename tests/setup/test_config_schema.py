@@ -49,8 +49,6 @@ class TestConfigSchema:
 
         # Check top-level structure
         assert isinstance(schema, dict)
-        assert "directory_schema" in schema
-        assert "tls" in schema
 
         # Check directory_schema has all prefixes
         dir_schema = schema["directory_schema"]
@@ -60,6 +58,11 @@ class TestConfigSchema:
             "pose",
             "moseq",
         }
+
+        # Check tls section defines the concrete localhost policy
+        tls = schema["tls"]
+        assert tls["auto_enable_for_remote"] is True
+        assert tls["localhost_addresses"] == ["localhost", "127.0.0.1", "::1"]
 
     def test_validate_schema_passes_for_valid_schema(self):
         """Test that validate_schema() accepts valid schema."""
@@ -183,53 +186,6 @@ class TestInstallerConfig:
             # Should return dict but not create dirs
             assert len(dirs) == 16
             assert not (base_dir / "raw").exists()
-
-    def test_installer_config_has_all_directory_groups(self):
-        """Test that installer creates config with all 4 directory groups."""
-        with TemporaryDirectory() as tmpdir:
-            base_dir = Path(tmpdir) / "spyglass_data"
-
-            # Simulate what create_database_config does
-            dirs = build_directory_structure(
-                base_dir, create=True, verbose=False
-            )
-
-            config = {
-                "custom": {
-                    "spyglass_dirs": {
-                        "base": str(base_dir),
-                        "raw": str(dirs["spyglass_raw"]),
-                        "analysis": str(dirs["spyglass_analysis"]),
-                        "recording": str(dirs["spyglass_recording"]),
-                        "sorting": str(dirs["spyglass_sorting"]),
-                        "waveforms": str(dirs["spyglass_waveforms"]),
-                        "temp": str(dirs["spyglass_temp"]),
-                        "video": str(dirs["spyglass_video"]),
-                        "export": str(dirs["spyglass_export"]),
-                    },
-                    "kachery_dirs": {
-                        "cloud": str(dirs["kachery_cloud"]),
-                        "storage": str(dirs["kachery_storage"]),
-                        "temp": str(dirs["kachery_temp"]),
-                    },
-                    "pose_dirs": {
-                        "project": str(dirs["pose_project"]),
-                        "video": str(dirs["pose_video"]),
-                        "output": str(dirs["pose_output"]),
-                    },
-                    "moseq_dirs": {
-                        "project": str(dirs["moseq_project"]),
-                        "video": str(dirs["moseq_video"]),
-                    },
-                }
-            }
-
-            # Verify all groups present
-            custom = config["custom"]
-            assert "spyglass_dirs" in custom
-            assert "kachery_dirs" in custom
-            assert "pose_dirs" in custom
-            assert "moseq_dirs" in custom
 
     def test_installer_directory_paths_match_schema(self):
         """Test that installer constructs paths according to schema."""
@@ -400,16 +356,18 @@ class TestSchemaVersioning:
     """Tests for schema versioning."""
 
     def test_schema_has_version(self):
-        """Test that schema file includes version."""
+        """Test that schema file declares the expected version."""
         schema = load_full_schema()
-        assert "_schema_version" in schema
         assert schema["_schema_version"] == "1.0.0"
 
     def test_version_history_present(self):
-        """Test that version history is documented."""
+        """Test that version history documents the 1.0.0 entry."""
         schema = load_full_schema()
-        assert "_version_history" in schema
-        assert "1.0.0" in schema["_version_history"]
+        assert set(schema["_version_history"]) == {"1.0.0"}
+        assert schema["_version_history"]["1.0.0"] == (
+            "Initial DRY architecture - JSON schema replaces "
+            "hard-coded directory structure"
+        )
 
 
 class TestConfigCompatibility:
@@ -684,32 +642,27 @@ class TestExampleConfigSync:
 
         custom = example_config["custom"]
 
-        # Check all 4 directory groups present
-        required_groups = [
+        # The *_dirs groups must be exactly the four schema prefixes
+        dir_groups = {k for k in custom if k.endswith("_dirs")}
+        assert dir_groups == {
             "spyglass_dirs",
             "kachery_dirs",
             "pose_dirs",
             "moseq_dirs",
-        ]
-        for group in required_groups:
-            assert (
-                group in custom
-            ), f"dj_local_conf_example.json missing '{group}' in custom section"
+        }, f"Unexpected directory groups in example config: {dir_groups}"
 
-    def test_example_config_is_valid_json(self):
-        """Test that dj_local_conf_example.json is valid JSON."""
-        example_path = (
-            Path(__file__).parent.parent.parent / "dj_local_conf_example.json"
-        )
-
-        assert (
-            example_path.exists()
-        ), "dj_local_conf_example.json not found in repo root"
-
-        # Should not raise JSONDecodeError
-        with open(example_path) as f:
-            config = json.load(f)
-
-        assert isinstance(
-            config, dict
-        ), "Example config should be a JSON object (dict)"
+        # Each group's keys must match the schema's keys for that prefix
+        schema = load_directory_schema()
+        for group, prefix in (
+            ("spyglass_dirs", "spyglass"),
+            ("kachery_dirs", "kachery"),
+            ("pose_dirs", "pose"),
+            ("moseq_dirs", "moseq"),
+        ):
+            schema_keys = set(schema[prefix].keys())
+            example_keys = set(custom[group].keys())
+            # Example may add a "base" key not present in the schema
+            assert schema_keys <= example_keys, (
+                f"{group} missing keys {schema_keys - example_keys} "
+                "present in directory_schema.json"
+            )
