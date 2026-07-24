@@ -154,21 +154,21 @@ def test_get_pos_dict_with_timestamps():
 
 
 def test_estimate_sampling_rate_regular():
-    """Regular timestamps at 100 Hz return ~100."""
+    """Regular timestamps at 100 Hz return exactly 100 (np.round)."""
     from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
 
     times = np.linspace(0.0, 1.0, 101)  # 100 intervals → 100 Hz
     rate = estimate_sampling_rate(times)
-    assert 90 < rate < 110
+    assert rate == 100.0
 
 
 def test_estimate_sampling_rate_30hz():
-    """30 Hz timestamps return ~30."""
+    """30 Hz timestamps return exactly 30 (np.round)."""
     from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
 
     times = np.linspace(0.0, 10.0, 301)  # 300 intervals → 30 Hz
     rate = estimate_sampling_rate(times)
-    assert 25 < rate < 35
+    assert rate == 30.0
 
 
 def test_estimate_sampling_rate_too_few_timestamps():
@@ -196,7 +196,7 @@ def test_estimate_sampling_rate_verbose(capsys):
 
     times = np.linspace(0.0, 1.0, 101)
     rate = estimate_sampling_rate(times, verbose=True, filename="test")
-    assert rate == pytest.approx(100.0, abs=1.0)
+    assert rate == 100.0
 
 
 def test_estimate_sampling_rate_returns_float():
@@ -206,7 +206,7 @@ def test_estimate_sampling_rate_returns_float():
     times = np.linspace(0.0, 1.0, 101)
     rate = estimate_sampling_rate(times)
     assert isinstance(rate, (int, float, np.floating))
-    assert rate == pytest.approx(100.0, abs=1.0)
+    assert rate == 100.0
 
 
 # ------------------------------------------------------------------ #
