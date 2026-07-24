@@ -22,31 +22,43 @@ def test_user_env(user_env_tbl):
     assert no_version == "", "Expected empty string for nonexistent package"
 
 
-def test_comment_intstall_regex(user_env_tbl):
+def test_comment_intstall_regex():
     """Test that install line comment is parsed correctly."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     comment = "# (some-package==1.2.3)"
-    assert user_env_tbl._parse_pip_line(comment), f"Failed to parse '{comment}'"
+    assert cache._parse_pip_line(comment), f"Failed to parse '{comment}'"
 
 
-def test_editable_path_regex(user_env_tbl):
+def test_editable_path_regex():
     """Test that editable path is parsed correctly."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     comment = "# (some-package==1.2.3)"
-    _ = user_env_tbl._parse_pip_line(comment)  # set up comment for path
+    _ = cache._parse_pip_line(comment)  # set up comment for path
     path = "-e /path/to/some-package"
-    assert user_env_tbl._parse_pip_line(path), f"Failed to parse '{path}'"
+    assert cache._parse_pip_line(path), f"Failed to parse '{path}'"
 
 
-def test_editable_path_error(user_env_tbl):
+def test_editable_path_error():
     """Test that an error is raised for an invalid editable path."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     path = "-e /path/to/missing-comment"
     with pytest.raises(ValueError):
-        user_env_tbl._parse_pip_line(path)
+        cache._parse_pip_line(path)
 
 
-def test_parse_fail(user_env_tbl):
+def test_parse_fail():
     """Test that parsing returns false for invalid pip line."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     invalid_line = "invalid pip line"
-    returned = user_env_tbl._parse_pip_line(invalid_line)
+    returned = cache._parse_pip_line(invalid_line)
     assert returned is False, f"Expected False for invalid line, got {returned}"
 
 

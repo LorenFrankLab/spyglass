@@ -29,30 +29,10 @@ source "$SPYGLASS_CONDA_PATH"
 source "$SCRIPT_DIR/script_utils.sh"
 SLACK_LOG="$SPYGLASS_LOG"
 
-EMAIL_TEMPLATE=$(cat <<-EOF
-From: "Spyglass" <$SPYGLASS_EMAIL_SRC>
-To: $SPYGLASS_EMAIL_DEST
-Subject: cron fail - $(date "+%Y-%m-%d")
-
-%s
-EOF
-)
-
 on_fail() { # $1: error message. Echo message and send as email
     echo "Error: $1"
-    if [ -z "$SPYGLASS_EMAIL_SRC" ]; then
-      return 1 # No email source, so don't send an email
-    fi
-    local error_msg="$1"
-    local content
-    content=$(printf "$EMAIL_TEMPLATE" "$error_msg")
-
-    curl -sS -o /dev/null --ssl-reqd \
-      --url "smtps://smtp.gmail.com:465" \
-      --user "${SPYGLASS_EMAIL_SRC}:${SPYGLASS_EMAIL_PASS}" \
-      --mail-from "$SPYGLASS_EMAIL_SRC" \
-      --mail-rcpt "$SPYGLASS_EMAIL_DEST" \
-      -T <(echo "$content")
+    send_email_message "$SPYGLASS_EMAIL_DEST" \
+      "cron fail - $(date "+%Y-%m-%d")" "$1"
 }
 
 exec >> $SPYGLASS_LOG 2>&1
@@ -90,15 +70,32 @@ if $SPYGLASS_CHMOD_FILES; then
     { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
 fi
 
-# Run cleanup script; capture any file issues to a temp file for Slack reporting
+# Run cleanup script; capture file issues (Slack) and dirty envs (email)
 FILE_ISSUES_OUT=$(mktemp)
-FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py
+DIRTY_ENVS_OUT=$(mktemp)
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" DIRTY_ENVS_OUT="$DIRTY_ENVS_OUT" \
+  conda_run python maintenance_scripts/cleanup.py
 
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
 $(cat "$FILE_ISSUES_OUT")"
 fi
 rm -f "$FILE_ISSUES_OUT"
+
+# Send dirty-install email notifications (always CC admin)
+if [[ -s "$DIRTY_ENVS_OUT" ]]; then
+  while IFS=$'\t' read -r user_email days commit dirty_path; do
+    subject="[Spyglass] Dirty installation flagged — action required"
+    body="Your Spyglass repository at ${dirty_path} is not on an official \
+commit (${commit}). This was first flagged ${days} days ago.
+
+Please reset your repository to an official commit or open a pull request.
+Contact the support team if you need assistance."
+    send_email_message "$user_email" "$subject" "$body" \
+      "$SPYGLASS_EMAIL_DEST"
+  done < "$DIRTY_ENVS_OUT"
+fi
+rm -f "$DIRTY_ENVS_OUT"
 
 echo "SPYGLASS CRON JOB END"
 

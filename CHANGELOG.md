@@ -47,6 +47,11 @@ LFPBandV1().fix_1481()
 from spyglass.position.v1.position_dlc_project import DLCProject
 
 DLCProject().alter()
+
+# Add dirty_path and spyglass_commit columns to UserEnvironment
+from spyglass.common.common_user import UserEnvironment
+
+UserEnvironment().alter()
 ```
 
 ### Breaking Changes
@@ -220,6 +225,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Save disk checks as csv, predict runway of primary data directory #1611
 - Fix package scanning without database import #1621
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
+- Warn users on dirty installs #1601
 
 ### Pipelines
 
