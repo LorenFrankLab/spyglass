@@ -1,5 +1,6 @@
 """Tests for common_task.py - Task and TaskEpoch tables."""
 
+import logging
 from unittest.mock import Mock
 
 import pynwb
@@ -166,31 +167,35 @@ def test_get_valid_camera_names_context_no_effect(common):
 # ------------------------------------------------------------------ #
 
 
-def test_check_videos_without_task_no_videos(common):
-    """NWB file with no ImageSeries returns without warning."""
+def test_check_videos_without_task_no_videos(common, caplog):
+    """NWB file with no ImageSeries emits no Issue #1444 warning."""
     mock_nwbf = Mock()
     mock_nwbf.objects.values.return_value = []
-    # Should not raise
-    common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    assert "Issue #1444" not in caplog.text
 
 
-def test_check_videos_without_task_non_image_series(common):
-    """Non-ImageSeries objects in NWB are ignored."""
+def test_check_videos_without_task_non_image_series(common, caplog):
+    """Non-ImageSeries objects are filtered out, so no warning."""
     mock_other = Mock()  # plain Mock, not ImageSeries spec
     mock_nwbf = Mock()
     mock_nwbf.objects.values.return_value = [mock_other]
-    # Should return early without warning
-    common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    assert "Issue #1444" not in caplog.text
 
 
-def test_check_videos_without_task_with_image_series(common):
-    """NWB file with ImageSeries logs a warning and returns."""
+def test_check_videos_without_task_with_image_series(common, caplog):
+    """ImageSeries without TaskEpoch logs an Issue #1444 warning."""
     mock_video = Mock(spec=pynwb.image.ImageSeries)
     mock_video.name = "test_video"
     mock_nwbf = Mock()
     mock_nwbf.objects.values.return_value = [mock_video]
-    # Should not raise even when ImageSeries present
-    common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        common.TaskEpoch._check_videos_without_task(mock_nwbf, "test.nwb")
+    assert "Issue #1444" in caplog.text
+    assert "test_video" in caplog.text
 
 
 # ------------------------------------------------------------------ #

@@ -71,27 +71,6 @@ def test_parse_table_name_multi_underscore_prefix(common_nwbfile):
     assert suffix == "nwbfile"
 
 
-def test_parse_table_name_returns_four_tuple(common_nwbfile):
-    """Return value is always a 4-tuple of strings."""
-    parse = common_nwbfile.AnalysisRegistry._parse_table_name
-    result = parse("`team_nwbfile`.`custom_analysis`")
-    assert len(result) == 4
-    assert all(isinstance(x, str) for x in result)
-
-
-# ------------------------------------------------------------------ #
-# AnalysisRegistry.insert1 (string key path)
-# ------------------------------------------------------------------ #
-
-
-def test_analysis_registry_insert1_string_key(common_nwbfile):
-    """insert1 with a string key converts to dict without raising."""
-    registry = common_nwbfile.AnalysisRegistry()
-    # Access existing entries; we just verify the query path works
-    entries = registry.fetch("full_table_name")
-    assert isinstance(entries, (list, type(entries)))  # any iterable
-
-
 # ------------------------------------------------------------------ #
 # Nwbfile.get_abs_path error case
 # ------------------------------------------------------------------ #
@@ -101,11 +80,3 @@ def test_get_abs_path_no_match_raises(common_nwbfile):
     """get_abs_path raises ValueError if entry not found in table."""
     with pytest.raises(ValueError):
         common_nwbfile.Nwbfile.get_abs_path("nonexistent_file.nwb")
-
-
-def test_analysis_nwbfile_operations_from_targeted():
-    """Basic instantiation path for AnalysisNwbfile."""
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    analysis_nwb = AnalysisNwbfile()
-    assert analysis_nwb is not None

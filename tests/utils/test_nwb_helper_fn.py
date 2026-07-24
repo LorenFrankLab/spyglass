@@ -148,111 +148,6 @@ def test_get_pos_dict_with_timestamps():
     )
 
 
-def test_nwb_helper_basic_functionality():
-    """estimate_sampling_rate returns expected rate for regular timestamps."""
-    from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
-
-    times = np.linspace(0.0, 1.0, 101)  # 100 intervals -> ~100 Hz
-    rate = estimate_sampling_rate(times)
-    assert 90 < rate < 110
-
-
-def test_nwb_helper_parameter_validation():
-    """Test NWB helper parameter validation."""
-    import numpy as np
-
-    # Test timestamp validation
-    def validate_timestamps(timestamps):
-        if len(timestamps) < 2:
-            return False
-        return np.all(np.diff(timestamps) > 0)  # Monotonic increasing
-
-    valid_times = np.array([0.0, 1.0, 2.0, 3.0])
-    invalid_times = np.array([3.0, 1.0, 2.0, 0.0])  # Not monotonic
-
-    assert validate_timestamps(valid_times)
-    assert not validate_timestamps(invalid_times)
-
-
-def test_nwb_helper_edge_cases():
-    """Test NWB helper edge case handling."""
-    # Test empty data handling
-    empty_data = []
-    assert len(empty_data) == 0
-
-    # Test single value data
-    single_value = [1.0]
-    assert len(single_value) == 1
-
-    # Test data type validation
-    def is_numeric_array(data):
-        try:
-            import numpy as np
-
-            arr = np.array(data)
-            return np.issubdtype(arr.dtype, np.number)
-        except Exception:
-            return False
-
-    assert is_numeric_array([1, 2, 3])
-    assert is_numeric_array([1.0, 2.0, 3.0])
-    assert not is_numeric_array(["a", "b", "c"])
-
-
-def test_nwb_helper_config_handling():
-    """Test NWB configuration handling."""
-    # Test configuration structure
-    mock_config = {"test_section": {"param1": "value1", "param2": 10.0}}
-
-    # Test config access
-    section = mock_config.get("test_section", {})
-    assert len(section) == 2
-    assert section.get("param1") == "value1"
-    assert section.get("param2") == 10.0
-
-    # Test missing section
-    missing = mock_config.get("missing_section", {})
-    assert len(missing) == 0
-
-
-def test_nwb_helper_object_validation():
-    """Test NWB object validation."""
-    from unittest.mock import Mock
-
-    # Test object type checking
-    mock_obj = Mock()
-    mock_obj.neurodata_type = "SpatialSeries"
-
-    def check_object_type(obj, expected_type):
-        return (
-            hasattr(obj, "neurodata_type")
-            and obj.neurodata_type == expected_type
-        )
-
-    assert check_object_type(mock_obj, "SpatialSeries")
-    assert not check_object_type(mock_obj, "TimeSeries")
-
-
-def test_nwb_helper_file_operations():
-    """Test NWB file operation handling."""
-
-    # Test file path validation
-    def validate_file_path(path):
-        return isinstance(path, str) and len(path) > 0 and path.endswith(".nwb")
-
-    assert validate_file_path("test_file.nwb")
-    assert not validate_file_path("test_file.txt")
-    assert not validate_file_path("")
-
-    # Test file existence checking simulation
-    def file_exists_mock(path):
-        # Mock implementation
-        return path in ["existing_file.nwb", "valid_file.nwb"]
-
-    assert file_exists_mock("existing_file.nwb")
-    assert not file_exists_mock("nonexistent_file.nwb")
-
-
 # ------------------------------------------------------------------ #
 # estimate_sampling_rate
 # ------------------------------------------------------------------ #
@@ -301,16 +196,17 @@ def test_estimate_sampling_rate_verbose(capsys):
 
     times = np.linspace(0.0, 1.0, 101)
     rate = estimate_sampling_rate(times, verbose=True, filename="test")
-    assert rate > 0
+    assert rate == pytest.approx(100.0, abs=1.0)
 
 
 def test_estimate_sampling_rate_returns_float():
-    """Estimated rate is numeric."""
+    """Estimated rate is numeric with the expected value."""
     from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
 
     times = np.linspace(0.0, 1.0, 101)
     rate = estimate_sampling_rate(times)
     assert isinstance(rate, (int, float, np.floating))
+    assert rate == pytest.approx(100.0, abs=1.0)
 
 
 # ------------------------------------------------------------------ #
@@ -324,7 +220,8 @@ def test_get_valid_intervals_no_gaps():
 
     times = np.linspace(0.0, 1.0, 101)  # 100 Hz, no gaps
     intervals = get_valid_intervals(times, sampling_rate=100.0)
-    assert intervals.shape[0] >= 1
+    assert intervals.shape == (1, 2)
+    np.testing.assert_allclose(intervals[0], [0.0, 1.0], atol=1e-6)
 
 
 def test_get_valid_intervals_with_gap():
@@ -335,7 +232,9 @@ def test_get_valid_intervals_with_gap():
     part2 = np.linspace(10.0, 11.0, 51)  # 9-second gap
     times = np.concatenate([part1, part2])
     intervals = get_valid_intervals(times, sampling_rate=50.0)
-    assert intervals.shape[0] >= 2
+    assert intervals.shape == (2, 2)
+    np.testing.assert_allclose(intervals[0], [0.0, 1.0], atol=1e-6)
+    np.testing.assert_allclose(intervals[1], [10.0, 11.0], atol=1e-6)
 
 
 def test_get_valid_intervals_min_valid_len():
@@ -361,8 +260,9 @@ def test_get_valid_intervals_min_len_exceeds_total():
     intervals = get_valid_intervals(
         times, sampling_rate=100.0, min_valid_len=5.0
     )
-    # Function should not crash and returns some result
-    assert isinstance(intervals, np.ndarray)
+    # min_valid_len clamped to half the 1 s span; full span survives
+    assert intervals.shape == (1, 2)
+    np.testing.assert_allclose(intervals[0], [0.0, 1.0], atol=1e-6)
 
 
 def test_get_valid_intervals_shape():
@@ -459,7 +359,7 @@ def test_get_data_interface_duplicate_returns_first():
     mock_nwbf.identifier = "test_id"
 
     result = get_data_interface(mock_nwbf, "position")
-    assert result in (obj1, obj2)
+    assert result is obj1  # first module in insertion order
 
 
 # ------------------------------------------------------------------ #

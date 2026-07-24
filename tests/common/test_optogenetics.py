@@ -203,8 +203,9 @@ def test_make_speed_filter_entry():
 
 def test_get_stimulus_on_intervals_nominal():
     """get_stimulus_on_intervals pairs on/off transitions correctly."""
-    import numpy as np
     from unittest.mock import Mock, patch
+
+    import numpy as np
 
     from spyglass.common.common_optogenetics import OptogeneticProtocol
 
@@ -242,8 +243,9 @@ def test_get_stimulus_on_intervals_nominal():
 
 def test_get_stimulus_on_intervals_leading_off():
     """Leading off-sample before first on is discarded."""
-    import numpy as np
     from unittest.mock import Mock, patch
+
+    import numpy as np
 
     from spyglass.common.common_optogenetics import OptogeneticProtocol
 
