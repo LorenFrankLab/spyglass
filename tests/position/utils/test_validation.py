@@ -211,16 +211,6 @@ class TestOrientationValidation:
         ):
             validate_orientation_params(params)
 
-    def test_validate_orientation_params_same_bodyparts(
-        self, validate_orientation_params
-    ):
-        """Test validation with empty parameters."""
-        # Empty parameters should require method
-        with pytest.raises(
-            ValueError, match="Orientation params must include.*method"
-        ):
-            validate_orientation_params({})
-
 
 @pytest.mark.skip(
     reason="validate_likelihood_threshold function not implemented yet"
@@ -365,7 +355,9 @@ class TestValidationEdgeCases:
         validate_smoothing_params({"likelihood_thresh": 0.4, "smooth": False})
 
         # But empty params with smooth=True should fail
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError, match="smooth=True requires 'smoothing_params'"
+        ):
             validate_smoothing_params(
                 {"likelihood_thresh": 0.4, "smooth": True}
             )
@@ -402,7 +394,7 @@ class TestValidationEdgeCases:
         )
 
         # Invalid string values - empty method string
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="Unknown smoothing method"):
             validate_smoothing_params(
                 {
                     "likelihood_thresh": 0.4,

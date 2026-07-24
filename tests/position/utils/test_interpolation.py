@@ -96,9 +96,9 @@ class TestInterpPosition:
         spans = [(2, 5)]
         result = interp_position(pos_df, spans, max_pts_to_interp=3)
 
-        # Should remain NaN because span is too long
-        assert np.isnan(result["x"].iloc[2])
-        assert np.isnan(result["x"].iloc[5])
+        # Whole span should remain NaN because it is too long
+        assert np.all(np.isnan(result["x"].iloc[2:6].values))
+        assert np.all(np.isnan(result["y"].iloc[2:6].values))
 
     def test_interp_position_max_cm_constraint(self):
         """Test max_cm_to_interp constraint."""
@@ -149,26 +149,24 @@ class TestSmoothMovingAvg:
         """Test basic moving average smoothing."""
         from spyglass.position.utils.interpolation import smooth_moving_avg
 
-        # Create noisy data
-        time = np.arange(100) / 30.0  # 100 frames at 30 Hz
+        # Deterministic ramp so the exact moving average is known
+        time = np.arange(6, dtype=float)
         pos_df = pd.DataFrame(
             {
-                "x": np.sin(2 * np.pi * time) + np.random.randn(100) * 0.1,
-                "y": np.cos(2 * np.pi * time) + np.random.randn(100) * 0.1,
+                "x": np.arange(6, dtype=float),
+                "y": np.arange(6, dtype=float) * 2.0,
             },
             index=time,
         )
 
-        # Smooth with 50ms window at 30 Hz (window = 1.5 frames, rounds to 2)
+        # window = round(0.05 * 40) = 2; bottleneck move_mean(min_count=1):
+        # out[0] = x[0]; out[i] = mean(x[i-1], x[i]) for i >= 1
         result = smooth_moving_avg(
-            pos_df.copy(), smoothing_duration=0.05, sampling_rate=30.0
+            pos_df.copy(), smoothing_duration=0.05, sampling_rate=40.0
         )
 
-        # Smoothed values should be different from original
-        assert not np.allclose(result["x"].values, pos_df["x"].values)
-        assert not np.allclose(result["y"].values, pos_df["y"].values)
-
-        # Output should have same shape
+        assert np.allclose(result["x"].values, [0.0, 0.5, 1.5, 2.5, 3.5, 4.5])
+        assert np.allclose(result["y"].values, [0.0, 1.0, 3.0, 5.0, 7.0, 9.0])
         assert result.shape == pos_df.shape
 
     def test_smooth_moving_avg_with_nans(self):
@@ -188,11 +186,13 @@ class TestSmoothMovingAvg:
             pos_df.copy(), smoothing_duration=0.1, sampling_rate=10.0
         )
 
-        # Should handle NaN gracefully (bottleneck's min_count=1)
-        assert result.shape == pos_df.shape
-        # NaN should still be NaN
-        assert np.isnan(result["x"].iloc[2])
-        assert np.isnan(result["x"].iloc[6])
+        # window = round(0.1 * 10) = 1 → moving average is the identity:
+        # isolated NaNs stay NaN, every other value is unchanged.
+        expected = np.array(
+            [0.0, 1.0, np.nan, 3.0, 4.0, 5.0, np.nan, 7.0, 8.0, 9.0]
+        )
+        assert np.array_equal(result["x"].values, expected, equal_nan=True)
+        assert np.array_equal(result["y"].values, expected, equal_nan=True)
 
     def test_smooth_moving_avg_custom_cols(self):
         """Test smoothing with custom column names."""
@@ -214,8 +214,9 @@ class TestSmoothMovingAvg:
             coord_cols=("pos_x", "pos_y"),
         )
 
-        assert "pos_x" in result.columns
-        assert "pos_y" in result.columns
+        # window = round(0.1 * 10) = 1 → identity on the custom columns
+        assert np.allclose(result["pos_x"].values, np.arange(10))
+        assert np.allclose(result["pos_y"].values, np.arange(10))
 
 
 class TestSmoothSavgol:
@@ -225,12 +226,12 @@ class TestSmoothSavgol:
         """Test basic Savitzky-Golay smoothing."""
         from spyglass.position.utils.interpolation import smooth_savgol
 
-        # Create noisy data
-        time = np.arange(100) / 30.0
+        # Deterministic linear ramp (a degree-1 polynomial)
+        time = np.arange(20, dtype=float)
         pos_df = pd.DataFrame(
             {
-                "x": np.sin(2 * np.pi * time) + np.random.randn(100) * 0.1,
-                "y": np.cos(2 * np.pi * time) + np.random.randn(100) * 0.1,
+                "x": np.arange(20, dtype=float),
+                "y": np.arange(20, dtype=float) * 3.0,
             },
             index=time,
         )
@@ -238,11 +239,11 @@ class TestSmoothSavgol:
         # Smooth with window length 11, polyorder 3
         result = smooth_savgol(pos_df.copy(), window_length=11, polyorder=3)
 
-        # Smoothed values should be different from original
-        assert not np.allclose(result["x"].values, pos_df["x"].values)
-        assert not np.allclose(result["y"].values, pos_df["y"].values)
-
-        # Output should have same shape
+        # A Savitzky-Golay filter of order p reproduces any polynomial of
+        # degree <= p exactly, so a linear ramp is returned unchanged
+        # (up to floating-point error).
+        assert np.allclose(result["x"].values, np.arange(20))
+        assert np.allclose(result["y"].values, np.arange(20) * 3.0)
         assert result.shape == pos_df.shape
 
     def test_smooth_savgol_invalid_window(self):
@@ -285,26 +286,28 @@ class TestSmoothGaussian:
         """Test basic Gaussian smoothing."""
         from spyglass.position.utils.interpolation import smooth_gaussian
 
-        # Create noisy data
-        time = np.arange(100) / 30.0
+        # Constant signal: a normalized Gaussian kernel preserves the DC
+        # level exactly where it has full support, and rolls the ends off
+        # toward zero (the kernel is truncated at the boundary).
+        time = np.arange(50, dtype=float)
         pos_df = pd.DataFrame(
             {
-                "x": np.sin(2 * np.pi * time) + np.random.randn(100) * 0.1,
-                "y": np.cos(2 * np.pi * time) + np.random.randn(100) * 0.1,
+                "x": np.full(50, 5.0),
+                "y": np.full(50, -2.0),
             },
             index=time,
         )
 
-        # Smooth with 50ms std at 30 Hz (more noticeable smoothing)
         result = smooth_gaussian(
             pos_df.copy(), std_dev=0.05, sampling_rate=30.0
         )
 
-        # Smoothed values should be different from original (noise reduced)
-        assert not np.allclose(result["x"].values, pos_df["x"].values)
-        assert not np.allclose(result["y"].values, pos_df["y"].values)
-
-        # Output should have same shape
+        # Fully-supported interior is unchanged
+        assert np.allclose(result["x"].values[15:35], 5.0)
+        assert np.allclose(result["y"].values[15:35], -2.0)
+        # Boundaries roll off toward zero
+        assert result["x"].iloc[0] < 5.0
+        assert result["y"].iloc[0] > -2.0
         assert result.shape == pos_df.shape
 
 
@@ -330,12 +333,17 @@ class TestGetSmoothingFunction:
 
     def test_smoothing_methods_dict(self):
         """Test SMOOTHING_METHODS dictionary."""
-        from spyglass.position.utils.interpolation import SMOOTHING_METHODS
+        from spyglass.position.utils.interpolation import (
+            SMOOTHING_METHODS,
+            smooth_gaussian,
+            smooth_moving_avg,
+            smooth_savgol,
+        )
 
-        assert "moving_avg" in SMOOTHING_METHODS
-        assert "savgol" in SMOOTHING_METHODS
-        assert "gaussian" in SMOOTHING_METHODS
-        assert len(SMOOTHING_METHODS) == 3
+        assert set(SMOOTHING_METHODS) == {"moving_avg", "savgol", "gaussian"}
+        assert SMOOTHING_METHODS["moving_avg"] is smooth_moving_avg
+        assert SMOOTHING_METHODS["savgol"] is smooth_savgol
+        assert SMOOTHING_METHODS["gaussian"] is smooth_gaussian
 
 
 class TestIntegration:
@@ -357,20 +365,21 @@ class TestIntegration:
 
         pos_df = pd.DataFrame({"x": x, "y": y}, index=time)
 
-        # Interpolate
+        # Interpolate: linear fill over the ramp restores the exact values
         pos_df_interp = interp_position(
             pos_df.copy(), spans_to_interp=[(5, 6), (15, 15)]
         )
 
-        # Should have filled the gaps
-        assert ~np.isnan(pos_df_interp["x"].iloc[5])
-        assert ~np.isnan(pos_df_interp["x"].iloc[6])
-        assert ~np.isnan(pos_df_interp["x"].iloc[15])
+        assert np.allclose(pos_df_interp["x"].values, np.arange(20))
+        assert np.allclose(pos_df_interp["y"].values, np.arange(20))
 
-        # Smooth
+        # Smooth: window = round(0.2 * 10) = 2; move_mean(min_count=1) gives
+        # out[0] = 0, out[i] = i - 0.5 for i >= 1
         pos_df_smooth = smooth_moving_avg(
             pos_df_interp.copy(), smoothing_duration=0.2, sampling_rate=10.0
         )
 
-        # Should be smoothed
+        expected = np.concatenate([[0.0], np.arange(1, 20) - 0.5])
+        assert np.allclose(pos_df_smooth["x"].values, expected)
+        assert np.allclose(pos_df_smooth["y"].values, expected)
         assert pos_df_smooth.shape == pos_df.shape
