@@ -15,11 +15,13 @@ def test_compute_velocity_straight_line():
 
     vel_2d, speed = compute_velocity(position, timestamps)
 
-    # np.gradient gives central diffs; edge values differ slightly
-    # interior points should be ~10 cm/s in x, ~0 in y
-    np.testing.assert_allclose(vel_2d[1:-1, 0], 10.0, rtol=1e-6)
-    np.testing.assert_allclose(vel_2d[1:-1, 1], 0.0, atol=1e-10)
-    np.testing.assert_allclose(speed[1:-1], 10.0, rtol=1e-6)
+    # np.gradient is exact for a linear trajectory at every point,
+    # including the one-sided edge differences: vx == 10, vy == 0 everywhere.
+    assert vel_2d.shape == (n, 2)
+    assert speed.shape == (n,)
+    np.testing.assert_allclose(vel_2d[:, 0], 10.0, rtol=1e-9)
+    np.testing.assert_allclose(vel_2d[:, 1], 0.0, atol=1e-12)
+    np.testing.assert_allclose(speed, 10.0, rtol=1e-9)
 
 
 def test_compute_velocity_matches_position_tools():
