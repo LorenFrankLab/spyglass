@@ -57,16 +57,17 @@ class TestReprojectPoseToCamera:
         out = reproject_pose_to_camera(pose, simple_camera)
 
         assert list(out.columns.names) == ["scorer", "bodyparts", "coords"]
+        # Analytically exact pinhole projection; tolerate only float noise.
         assert out[("reprojected3d", "nose", "x")].iloc[0] == pytest.approx(
-            420.0
+            420.0, abs=1e-9
         )
         assert out[("reprojected3d", "nose", "y")].iloc[0] == pytest.approx(
-            40.0
+            40.0, abs=1e-9
         )
         # Confidence carries over from the 3D likelihood.
         assert out[("reprojected3d", "nose", "likelihood")].iloc[
             0
-        ] == pytest.approx(0.9)
+        ] == pytest.approx(0.9, abs=1e-12)
 
     def test_scale_converts_centimetres(self, simple_camera):
         """``scale=100`` treats stored coords as cm before projecting."""
@@ -86,11 +87,12 @@ class TestReprojectPoseToCamera:
 
         out = reproject_pose_to_camera(pose, simple_camera, scale=100.0)
 
+        # cm coords / 100 -> same metre geometry as the exact case above.
         assert out[("reprojected3d", "nose", "x")].iloc[0] == pytest.approx(
-            420.0
+            420.0, abs=1e-9
         )
         assert out[("reprojected3d", "nose", "y")].iloc[0] == pytest.approx(
-            40.0
+            40.0, abs=1e-9
         )
 
     def test_roundtrip_matches_triangulation_input(self, simple_camera):
@@ -116,11 +118,13 @@ class TestReprojectPoseToCamera:
             }
         )
         out = reproject_pose_to_camera(pose, simple_camera)
+        # Reprojection reruns the same projection matrix, so it must recover
+        # the source pixel to machine precision (u_exp, v_exp == 357.5, 252.5).
         assert out[("reprojected3d", "led", "x")].iloc[0] == pytest.approx(
-            u_exp
+            u_exp, abs=1e-12
         )
         assert out[("reprojected3d", "led", "y")].iloc[0] == pytest.approx(
-            v_exp
+            v_exp, abs=1e-12
         )
 
     def test_nan_point_zeroes_likelihood(self, simple_camera):

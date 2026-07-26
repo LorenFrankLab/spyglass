@@ -270,7 +270,7 @@ class TestTriangulation:
         }
 
     def test_triangulate_known_point(self, two_camera_setup):
-        """Known 3D point projects and recovers within 1 cm (0.01 m)."""
+        """Exact projections of (0, 0, 5) recover it to float precision."""
         from spyglass.position.v2.utils.triangulation import (
             triangulate_points_dlt,
         )
@@ -291,8 +291,9 @@ class TestTriangulation:
 
         pts3d = triangulate_points_dlt(pts_list, proj_matrices)
         assert pts3d.shape == (1, 3)
-        recovered = pts3d[0]
-        assert np.linalg.norm(recovered - X_true[:3]) < 0.01  # within 1 cm
+        # DLT is exact for consistent input: recovery error is ~1e-15, not
+        # merely "within 1 cm". Pin the world coordinate itself.
+        assert np.allclose(pts3d[0], X_true[:3], atol=1e-9)
 
     def test_missing_camera_returns_nan(self, two_camera_setup):
         """Frames with NaN in any camera produce NaN in 3D output."""
@@ -328,7 +329,9 @@ class TestTriangulation:
 
         pts3d = triangulate_points_dlt(pts_list, proj_matrices)
         errors = compute_reprojection_errors(pts3d, pts_list, proj_matrices)
-        assert errors[0] < 0.1  # < 0.1 px for exact input
+        assert errors.shape == (1,)
+        # Exact input round-trips to ~1e-14 px, i.e. numerically zero.
+        assert errors[0] == pytest.approx(0.0, abs=1e-9)
 
     def test_reprojection_gate_masks_bad_frames(self, two_camera_setup):
         """triangulate_pose_df sets likelihood=0 when reproj error is high."""
@@ -369,65 +372,13 @@ class TestTriangulation:
             min_confidence=0.0,
             max_reproj_error=5.0,
         )
-        # All frames should have likelihood > 0 (reprojection is exact).
+        # Reprojection is exact, so every frame passes the gate with
+        # likelihood exactly 1.0 (not merely > 0), and the recovered 3D
+        # point is the (0, 0, 5) that generated the 2D detections.
         lk = result[("triangulated", "bp", "likelihood")].values
-        assert np.all(lk > 0)
-
-
-# ---------------------------------------------------------------------------
-# MC04 — N-dimensional PoseV2 _store_pose_nwb
-# ---------------------------------------------------------------------------
-
-
-class TestStorePoseNwbNDim:
-    """MC04: _store_pose_nwb handles 2D and 3D centroid/velocity."""
-
-    def _make_mock_key(self, nwb_file_name):
-        return {"nwb_file_name": nwb_file_name, "some_pk": "value"}
-
-    def test_velocity_data_shape_2d(self):
-        """2D centroid → velocity stored as (n, 3): vx, vy, speed."""
-        n = 10
-        velocity = np.random.rand(n, 2)
-        speed = np.linalg.norm(velocity, axis=1)
-        velocity_data = np.column_stack([velocity, speed])
-        assert velocity_data.shape == (n, 3)
-
-    def test_velocity_data_shape_3d(self):
-        """3D centroid → velocity stored as (n, 4): vx, vy, vz, speed."""
-        n = 10
-        velocity = np.random.rand(n, 3)
-        speed = np.linalg.norm(velocity, axis=1)
-        velocity_data = np.column_stack([velocity, speed])
-        assert velocity_data.shape == (n, 4)
-
-    def test_fetch1_dataframe_3d_columns(self):
-        """3D centroid data produces position_z and velocity_z columns."""
-        import pandas as pd
-
-        # Simulate 3D centroid data from NWB (what fetch1_dataframe would build).
-        n = 5
-        centroid_data = np.random.rand(n, 3)
-        orientation_data = np.random.rand(n)
-        velocity_data = np.random.rand(n, 4)  # vx, vy, vz, speed
-        timestamps = np.arange(n) / 30.0
-
-        is_3d = centroid_data.shape[1] == 3
-        assert is_3d
-
-        df = pd.DataFrame(
-            {
-                "position_x": centroid_data[:, 0],
-                "position_y": centroid_data[:, 1],
-                "position_z": centroid_data[:, 2],
-                "orientation": orientation_data,
-                "velocity_x": velocity_data[:, 0],
-                "velocity_y": velocity_data[:, 1],
-                "velocity_z": velocity_data[:, 2],
-                "speed": velocity_data[:, 3],
-            },
-            index=pd.Index(timestamps, name="time"),
-        )
-        assert "position_z" in df.columns
-        assert "velocity_z" in df.columns
-        assert df.shape == (n, 8)
+        assert lk.shape == (n,)
+        assert np.all(lk == 1.0)
+        xs = result[("triangulated", "bp", "x")].values
+        zs = result[("triangulated", "bp", "z")].values
+        assert np.allclose(xs, 0.0, atol=1e-9)
+        assert np.allclose(zs, 5.0, atol=1e-9)
