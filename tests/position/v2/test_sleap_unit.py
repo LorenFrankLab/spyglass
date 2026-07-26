@@ -141,7 +141,9 @@ class TestParseSleapAnalysisH5:
 
         path, _, _ = single_h5
         result = parse_sleap_analysis_h5(path, return_metadata=False)
-        assert isinstance(result, pd.DataFrame)
+        # return_metadata=False yields the bare DataFrame, not a 3-tuple
+        assert not isinstance(result, tuple)
+        assert result.shape == (N_FRAMES, N_NODES * 3)
 
     def test_return_metadata_true(self, single_h5):
         from spyglass.position.utils.sleap_io import parse_sleap_analysis_h5
@@ -150,9 +152,11 @@ class TestParseSleapAnalysisH5:
         result = parse_sleap_analysis_h5(path, return_metadata=True)
         assert isinstance(result, tuple) and len(result) == 3
         df, scorer, bodyparts = result
-        assert isinstance(df, pd.DataFrame)
-        assert isinstance(scorer, str)
-        assert set(bodyparts) == set(NODE_NAMES)
+        assert df.shape == (N_FRAMES, N_NODES * 3)
+        # single-track fixture writes track_names=["animal0"]
+        assert scorer == "animal0"
+        # node order is preserved from the h5 node_names dataset
+        assert list(bodyparts) == NODE_NAMES
 
     def test_nan_preserved(self, nan_h5):
         from spyglass.position.utils.sleap_io import parse_sleap_analysis_h5
@@ -386,8 +390,8 @@ class TestSLEAPStrategyEvaluation:
                 model_instance=mock_instance,
             )
 
-        assert "oks" in result
-        assert "mAP" in result
+        # evaluate_model returns _parse_eval_results' dict unchanged
+        assert result == {"oks": 0.85, "mAP": 0.78}
 
 
 # ---------------------------------------------------------------------------
@@ -432,9 +436,10 @@ class TestLoadPoseDataSLEAP:
 
         assert isinstance(result, tuple) and len(result) == 3
         df, scorer, bodyparts = result
-        assert isinstance(df, pd.DataFrame)
-        assert isinstance(scorer, str)
-        assert set(bodyparts) == {"nose", "tail"}
+        assert df.shape == (5, 2 * 3)  # 5 frames, 2 nodes × (x, y, likelihood)
+        # _make_single_h5 writes track_names=["animal0"], nodes nose/tail
+        assert scorer == "animal0"
+        assert list(bodyparts) == ["nose", "tail"]
 
     def test_load_pose_data_sleap_3level_columns(self, tmp_path):
         """SLEAP DataFrame is promoted to 3-level MultiIndex."""
@@ -448,12 +453,22 @@ class TestLoadPoseDataSLEAP:
 
         assert df.columns.nlevels == 3
         assert list(df.columns.names) == ["scorer", "bodyparts", "coords"]
-        # Top level must be the scorer
+        # Top level must be the scorer (track_names=["animal0"])
+        assert scorer == "animal0"
         top_levels = df.columns.get_level_values(0).unique().tolist()
-        assert top_levels == [scorer]
+        assert top_levels == ["animal0"]
         # Innermost level must contain x, y, likelihood
         coord_levels = df.columns.get_level_values(2).unique().tolist()
         assert set(coord_levels) == {"x", "y", "likelihood"}
+        # _make_single_h5 pins tracks[0,0]=arange(5) as x, arange(5)+10 as y,
+        # point_scores=0.9. The transpose in parse_sleap_analysis_h5 must map
+        # these through unchanged.
+        assert df[("animal0", "nose", "x")].tolist() == [0, 1, 2, 3, 4]
+        assert df[("animal0", "nose", "y")].tolist() == [10, 11, 12, 13, 14]
+        assert df[("animal0", "tail", "x")].tolist() == [0, 1, 2, 3, 4]
+        np.testing.assert_allclose(
+            df[("animal0", "nose", "likelihood")].to_numpy(), 0.9
+        )
 
     def test_load_pose_data_unsupported_tool_raises(self):
         """_load_pose_data raises ValueError for unknown tools."""

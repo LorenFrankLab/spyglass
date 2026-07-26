@@ -144,6 +144,9 @@ class TestSkeletonNamespaceRoundTrip:
             assert bodyparts == {"greenLED", "redLED_C", "nose"}
             edges = (skeleton & {"skeleton_id": sid}).fetch1("edges")
             edge_labels = {lbl for edge in edges for lbl in edge}
+            # skeleton [[green,red],[nose,green]] -> exactly these canonical
+            # labels, and a subset of the stored bodyparts.
+            assert edge_labels == {"greenLED", "redLED_C", "nose"}
             assert edge_labels <= bodyparts
         finally:
             (skeleton & {"skeleton_id": sid}).delete(safemode=False)

@@ -46,18 +46,30 @@ class TestPlotTrajectoryHelper:
     def test_2d_returns_axes_with_scatter(self):
         from spyglass.position.v2.utils.plotting import _plot_trajectory
 
-        ax = _plot_trajectory(_df_2d())
+        df = _df_2d()
+        ax = _plot_trajectory(df)
         assert ax.name != "3d"
         assert len(ax.collections) == 1  # one scatter
+        # scatter carries the exact position_x/position_y from the dataframe
+        offsets = ax.collections[0].get_offsets()
+        assert np.allclose(offsets[:, 0], df["position_x"].values)
+        assert np.allclose(offsets[:, 1], df["position_y"].values)
         # colored by speed -> a colorbar axes was added to the figure
         assert len(ax.figure.axes) == 2
+        assert ax.get_title() == "Animal trajectory (colored by speed)"
 
     def test_3d_returns_3d_axes(self):
         from spyglass.position.v2.utils.plotting import _plot_trajectory
 
-        ax = _plot_trajectory(_df_3d())
+        df = _df_3d()
+        ax = _plot_trajectory(df)
         assert ax.name == "3d"
         assert len(ax.collections) == 1
+        # 3D scatter carries all three position axes from the dataframe
+        xs, ys, zs = ax.collections[0]._offsets3d
+        assert np.allclose(xs, df["position_x"].values)
+        assert np.allclose(ys, df["position_y"].values)
+        assert np.allclose(zs, df["position_z"].values)
 
     def test_respects_supplied_ax(self):
         import matplotlib.pyplot as plt
@@ -74,6 +86,8 @@ class TestPlotTrajectoryHelper:
         ax = _plot_trajectory(_df_2d(), color_by=None)
         # no colorbar -> figure holds only the single plotting axes
         assert len(ax.figure.axes) == 1
+        # and the uncolored title is used
+        assert ax.get_title() == "Animal trajectory"
 
     def test_missing_position_column_raises(self):
         from spyglass.position.v2.utils.plotting import _plot_trajectory
@@ -96,6 +110,10 @@ class TestPoseV2PlotTrajectory:
         ax = PoseV2().plot_trajectory()
         assert ax.name != "3d"
         assert len(ax.collections) == 1
+        # the fetched dataframe's positions are what got plotted
+        offsets = ax.collections[0].get_offsets()
+        assert np.allclose(offsets[:, 0], df["position_x"].values)
+        assert np.allclose(offsets[:, 1], df["position_y"].values)
 
     def test_wrapper_forwards_3d_dataframe(self, monkeypatch):
         from spyglass.position.v2.estim import PoseV2
@@ -106,3 +124,5 @@ class TestPoseV2PlotTrajectory:
         )
         ax = PoseV2().plot_trajectory()
         assert ax.name == "3d"
+        _, _, zs = ax.collections[0]._offsets3d
+        assert np.allclose(zs, df["position_z"].values)

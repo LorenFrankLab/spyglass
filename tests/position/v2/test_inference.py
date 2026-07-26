@@ -224,7 +224,8 @@ class TestPoseEstimPopulation:
                 if isinstance(obj, ndx_pose.PoseEstimation)
             }
 
-            assert len(pose_estimations) > 0
+            # load_dlc_output creates exactly one PoseEstimation object.
+            assert len(pose_estimations) == 1
 
     def test_pose_estim_insert(
         self,
@@ -315,14 +316,16 @@ class TestPoseEstimPopulation:
                 if isinstance(obj, ndx_pose.PoseEstimation)
             }
 
-            assert len(pose_estimations) > 0
+            # load_dlc_output creates exactly one PoseEstimation object.
+            assert len(pose_estimations) == 1
             pose_estimation = list(pose_estimations.values())[0]
 
-            # Verify we can read bodyparts and coordinates
-            assert len(pose_estimation.pose_estimation_series) > 0
+            # Verify we can read bodyparts and coordinates: the mock output
+            # has 4 bodyparts, so one series per bodypart.
+            assert len(pose_estimation.pose_estimation_series) == 4
             # pose_estimation_series is a dict-like object
             series_list = list(pose_estimation.pose_estimation_series.values())
-            assert len(series_list) > 0
+            assert len(series_list) == 4
             series = series_list[0]
             assert series.data.shape[0] == 10  # 10 frames
             assert series.data.shape[1] == 2  # x, y coords
@@ -353,9 +356,15 @@ class TestLoadFromNWB:
         # Verify metadata
         assert metadata["nwb_file_path"] == nwb_path
         assert metadata["pose_estimation_name"] == "PoseEstimation"
-        assert len(metadata["bodyparts"]) > 0
+        # The mock DLC output declares these 4 bodyparts and this scorer.
+        assert sorted(metadata["bodyparts"]) == [
+            "bodypart1",
+            "bodypart2",
+            "bodypart3",
+            "objectA",
+        ]
         assert metadata["n_frames"] == 10
-        assert metadata["scorer"] is not None
+        assert metadata["scorer"] == "DLC_resnet50_TESTSep8shuffle1_6"
         assert metadata["source_software"] == "DeepLabCut"
 
     def test_load_from_nwb_file_not_found(self, position_v2):

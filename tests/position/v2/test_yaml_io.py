@@ -21,7 +21,7 @@ class TestYamlIo:
         path = tmp_path / "cfg.yaml"
         path.write_text("a: 1\nb: hello\n")
         result = self.load(path)
-        assert isinstance(result, dict) and result["a"] == 1
+        assert result == {"a": 1, "b": "hello"}
 
     def test_dump_creates_file(self, tmp_path):
         path = tmp_path / "out.yaml"

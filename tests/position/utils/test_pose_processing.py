@@ -73,8 +73,12 @@ class TestSmoothBodypartPositions:
         assert smooth_var < raw_var
 
     def test_interpolates_nan_gaps(self):
-        """Linear interpolation fills NaN spans."""
+        """Linear interpolation fills NaN spans with exact linear values."""
         df = _make_bodypart_df()
+        t = df.index.values
+        # Capture the span-bounding values before masking (positions 4 and 8).
+        x4, x8 = df[("bp", "x")].iloc[4], df[("bp", "x")].iloc[8]
+        y4, y8 = df[("bp", "y")].iloc[4], df[("bp", "y")].iloc[8]
         df.loc[df.index[5:8], ("bp", "x")] = np.nan
         df.loc[df.index[5:8], ("bp", "y")] = np.nan
         params = {
@@ -83,7 +87,12 @@ class TestSmoothBodypartPositions:
             "interp_params": {"max_pts_to_interp": 10, "max_cm_to_interp": 50},
         }
         result = self.fn(df, params, 20.0)
-        assert not np.any(np.isnan(result[("bp", "x")].iloc[5:8]))
+        # interp_position linearly interpolates x/y between the bounding
+        # timestamps t[4] and t[8] over the masked span (positions 5, 6, 7).
+        expected_x = np.interp(t[5:8], [t[4], t[8]], [x4, x8])
+        expected_y = np.interp(t[5:8], [t[4], t[8]], [y4, y8])
+        np.testing.assert_allclose(result[("bp", "x")].iloc[5:8], expected_x)
+        np.testing.assert_allclose(result[("bp", "y")].iloc[5:8], expected_y)
 
     def test_two_bodyparts_independent(self):
         """NaN in one bodypart does not affect the other."""

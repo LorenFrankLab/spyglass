@@ -77,8 +77,8 @@ class TestModelParamsSLEAP:
         # Should insert successfully
         result = ModelParams().insert1(params_key, accept_default=True)
 
-        assert result is not None
-        assert "model_params_id" in result
+        # insert1 returns the generated PK; default_pk_name prefixes "mp-"
+        assert result["model_params_id"].startswith("mp-")
 
     def test_sleap_params_validation(self, pv2_train, skeleton):
         """Test that missing required params raises error."""
@@ -118,4 +118,4 @@ class TestModelParamsSLEAP:
         # Should work due to alias handling
         result = ModelParams().insert1(params_key, accept_default=True)
 
-        assert result is not None
+        assert result["model_params_id"].startswith("mp-")

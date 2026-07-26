@@ -146,11 +146,13 @@ class TestGetLatestDLCModelInfo:
             return yaml.safe_load(f)
 
     def test_returns_nonempty_dict(self, strategy, dlc_project_config):
-        """Returns a non-empty dict for a project with a trained model."""
+        """Returns a dict with exactly the five model-info keys."""
         config = self._read_config(dlc_project_config)
         result = strategy.get_latest_model_info(config)
         assert isinstance(result, dict)
-        assert len(result) > 0
+        # Source builds exactly: path, iteration, trainFraction, shuffle,
+        # date_trained.
+        assert len(result) == 5
 
     def test_has_required_keys(self, strategy, dlc_project_config):
         """Result has path, iteration, trainFraction, shuffle, date_trained."""
@@ -177,14 +179,11 @@ class TestGetLatestDLCModelInfo:
         result = strategy.get_latest_model_info(config)
         assert result["iteration"] == 0
 
-    def test_train_fraction_in_unit_interval(
-        self, strategy, dlc_project_config
-    ):
-        """trainFraction is a float in (0, 1]."""
+    def test_train_fraction_is_point_eight(self, strategy, dlc_project_config):
+        """trainFraction parses to 0.8 (project model dir is 'trainset80')."""
         config = self._read_config(dlc_project_config)
         result = strategy.get_latest_model_info(config)
-        tf = result["trainFraction"]
-        assert isinstance(tf, float) and 0.0 < tf <= 1.0
+        assert result["trainFraction"] == 0.8
 
     def test_nonexistent_project_raises(self, strategy):
         """Raises FileNotFoundError for a project_path that does not exist."""
