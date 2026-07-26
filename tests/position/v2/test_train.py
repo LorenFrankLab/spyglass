@@ -29,25 +29,27 @@ class TestHelperFunctions:
 
     def test_default_pk_name(self):
         """Test default_pk_name generation."""
+        import re
+
         from spyglass.position.v2.train import default_pk_name
 
-        # Test basic functionality
+        # Format is PREFIX-YYYYMMDD-HASH8: 5 + 8 + 1 + 8 = 22 chars
         name = default_pk_name("test", {"param": "value"})
-        assert name.startswith("test-")
-        assert len(name) <= 32
+        assert re.fullmatch(r"test-\d{8}-[0-9a-f]{8}", name)
+        assert len(name) == 22
 
-        # Test without hash
+        # Without hash: PREFIX-YYYYMMDD only (5 + 8 = 13 chars, no suffix)
         name_no_hash = default_pk_name(
             "test", {"param": "value"}, include_hash=False
         )
-        assert name_no_hash.startswith("test-")
-        assert "-" + name.split("-")[-1] not in name_no_hash  # No hash suffix
+        assert re.fullmatch(r"test-\d{8}", name_no_hash)
+        assert len(name_no_hash) == 13
 
-        # Test limit parameter
+        # limit truncates the full string to exactly `limit` characters
         short_name = default_pk_name(
             "verylongprefix", {"many": "params"}, limit=10
         )
-        assert len(short_name) <= 10
+        assert short_name == "verylongpr"
 
     def test_model_id_single_date_segment(self):
         """A generated model_id carries exactly one YYYYMMDD segment.
@@ -184,6 +186,14 @@ class TestModelMake:
 
             mock_factory.create_strategy.assert_called_once_with("DLC")
             mock_strategy.train_model.assert_called_once()
+            # make() forwards (key, params, skeleton_id, vid_group, sel_entry)
+            # to the strategy; device=None leaves params untouched.
+            train_args = mock_strategy.train_model.call_args[0]
+            assert train_args[0] == sel_key
+            assert train_args[1] == {"shuffle": 1, "trainingsetindex": 0}
+            assert train_args[2] == "test_skeleton"
+            assert train_args[3] == vid_group_data
+            assert train_args[4] == sel_data
             mock_insert.assert_called_once_with(train_result)
 
     def test_make_creates_nwb_file(
@@ -236,29 +246,6 @@ class TestModelMake:
                 mock_nwb.assert_called_once()
                 assert result == "test_model_nwb_model.nwb"
 
-    def test_make_stores_model_path(
-        self,
-        pv2_train,
-        skip_if_no_dlc,
-    ):
-        """Test that make() stores the correct model_path."""
-        # Test path storage functions - import only when needed
-        from spyglass.position.v2.train import (
-            _to_stored_path,
-            resolve_model_path,
-        )
-
-        # Test absolute path resolution
-        abs_path = Path("/absolute/model/path.pkl")
-        resolved = resolve_model_path(str(abs_path))
-        assert resolved == abs_path
-
-        # Test relative path storage
-        stored = _to_stored_path(abs_path)
-        assert stored == str(
-            abs_path
-        )  # Should be absolute since no pose_project_dir
-
 
 class TestModelParams:
     """Test ModelParams table and its methods."""
@@ -309,7 +296,12 @@ class TestModelParams:
 
                             # Verify validation was called
                             mock_strategy.validate_params.assert_called_once()
-                            assert result["tool"] == "DLC"
+                            # insert1 returns the stored PK: supplied id +
+                            # tool (no duplicate found, so not the dupe KEY).
+                            assert result == {
+                                "model_params_id": "test_params",
+                                "tool": "DLC",
+                            }
 
     def test_insert1_real_db(self, pv2_train, model_params, skip_if_no_dlc):
         """Test real ModelParams.insert1() with DB count verification."""
@@ -333,20 +325,6 @@ class TestModelParams:
         (model_params & {"model_params_id": result["model_params_id"]}).delete(
             safemode=False
         )
-
-    def test_insert1_duplicate_detection(self, pv2_train, model_params):
-        """Test that insert1() duplicate detection returns expected format."""
-        # This is a simplified test that verifies the return format
-        # when duplicate detection would trigger
-        existing_key = {
-            "model_params_id": "existing_123",
-            "tool": "DLC",
-        }
-
-        # Test that the return format matches expectations
-        # This simulates the successful duplicate detection behavior
-        assert existing_key["model_params_id"] == "existing_123"
-        assert existing_key["tool"] == "DLC"
 
     def test_insert1_unsupported_tool(self, pv2_train, model_params):
         """Test insert1() with unsupported tool."""
@@ -878,152 +856,8 @@ class TestModelMetadataRegistration:
             assert parsed_data["parent_id"] == "json_parent"
 
 
-class TestTrainingDatasetManagement:
-    """Test training dataset creation and management."""
-
-    def test_create_training_dataset_new(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test creating a new training dataset."""
-        # Should call DLC's create_training_dataset
-
-    def test_create_training_dataset_exists(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test behavior when training dataset already exists."""
-        # Should skip creation or append
-
-    def test_training_dataset_with_augmentation(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test creating dataset with augmentation parameters."""
-        # Should pass augmenter params to create_training_dataset
-
-
-class TestModelMetadataStorage:
-    """Test storing model metadata in NWB."""
-
-    def test_model_metadata_in_nwb(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test that model metadata is stored in NWB scratch space."""
-        # Should store:
-        # - Training params
-        # - Training date
-        # - Training duration
-        # - Final loss
-        # - Snapshot info
-
-    def test_training_history_in_nwb(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test that training history is stored."""
-        # Should store loss curves, learning rate, etc.
-
-
-class TestEndToEndTraining:
-    """Test complete training workflows."""
-
-    def test_e2e_train_new_model(
-        self,
-        pv2_train,
-        skip_if_no_dlc,
-        tmp_path,
-    ):
-        """Test complete workflow: setup -> train -> evaluate."""
-        # 1. Create ModelParams
-        # 2. Create VidFileGroup with labeled videos
-        # 3. Create ModelSelection
-        # 4. Populate Model (triggers make())
-        # 5. Verify Model entry created
-        # 6. Verify NWB file exists
-
-    def test_e2e_continue_training(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test complete workflow for continuing training."""
-        # 1. Import or train initial model
-        # 2. Call train() with additional iterations
-        # 3. Verify new model created with parent_id
-        # 4. Verify model improved
-
-    def test_e2e_train_with_validation(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test training with validation split."""
-        # Should use TrainingFraction from params
-
-
-class TestTrainingMonitoring:
-    """Test training progress monitoring."""
-
-    def test_training_callback_logging(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test that training progress is logged."""
-        # Should use logger for training updates
-
-    def test_training_early_stopping(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test early stopping based on validation loss."""
-        # If supported by DLC
-
-    def test_training_checkpoint_saving(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test that checkpoints are saved during training."""
-        # Should save snapshots at specified intervals
-
-
 class TestModelEvaluation:
     """Test Model.evaluate() functionality."""
-
-    def test_evaluate_basic(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test basic model evaluation."""
-        # Should call DLC evaluate_network
-        # Should return dict with train/test errors
-        assert hasattr(model, "evaluate")
-
-    def test_evaluate_with_plotting(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test evaluation with labeled image generation."""
-        # Should create labeled images in evaluation-results
-
-    def test_evaluate_results_parsing(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test parsing of evaluation results CSV."""
-        # Should parse train_error, test_error, p_cutoff, etc.
 
     def test_evaluate_invalid_model(
         self,
@@ -1033,59 +867,9 @@ class TestModelEvaluation:
         with pytest.raises(ValueError, match="Model not found"):
             model.evaluate({"model_id": "nonexistent"})
 
-    def test_evaluate_missing_dlc(
-        self,
-        model,
-    ):
-        """Test error when DLC not available."""
-        # Should raise ImportError if evaluate_network not available
-
 
 class TestTrainingHistory:
     """Test training history extraction and visualization."""
-
-    def test_get_training_history(
-        self,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test extraction of training history from DLC logs."""
-        # Should parse learning_stats.csv
-        # Should return DataFrame with loss, iteration, time
-        """Test extracting training loss curves."""
-        # Should read learning_stats.csv
-        # Should return DataFrame with iteration, loss, learning_rate
-        assert hasattr(model, "get_training_history")
-
-    def test_get_training_history_missing(
-        self,
-        model,
-    ):
-        """Test behavior when training history not found."""
-        # Should return None or empty DataFrame
-
-    def test_plot_training_history(
-        self,
-        model,
-        skip_if_no_dlc,
-        tmp_path,
-    ):
-        """Test plotting training loss curve."""
-        # Should create matplotlib figure
-        # Should save to file if path provided
-        assert hasattr(model, "plot_training_history")
-
-    def test_plot_training_history_save(
-        self,
-        model,
-        skip_if_no_dlc,
-        tmp_path,
-    ):
-        """Test saving training plot to file."""
-        # Should create PNG file
-        tmp_path / "training_plot.png"
-        # Test that file is created
-        assert hasattr(model, "plot_training_history")
 
     def test_plot_training_history_detailed(
         self,

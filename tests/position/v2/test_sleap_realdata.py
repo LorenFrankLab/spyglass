@@ -154,6 +154,10 @@ class TestRealSLEAPProcess:
         assert result["speed"].shape == (_N_FRAMES,)
         assert result["orientation"].shape == (_N_FRAMES,)
         assert result["sampling_rate"] == pytest.approx(30.0, rel=0.01)
+        # 1pt centroid is a passthrough of point "A"; with no threshold /
+        # interp / smooth, frame 0 must equal A's pinned raw pixel coords.
+        assert result["centroid"][0, 0] == pytest.approx(_FRAME0_A_X, abs=0.1)
+        assert result["centroid"][0, 1] == pytest.approx(_FRAME0_A_Y, abs=0.1)
 
     def test_2pt_centroid_orient_finite(self):
         pytest.importorskip("bottleneck")

@@ -89,10 +89,16 @@ class TestFlattenMultiIndex:
 
         result = pose_v2_instance._flatten_multiindex(df)
 
-        # Should have 2-level columns
+        # scorer level dropped -> exactly the (bodypart, coord) columns
         assert result.columns.nlevels == 2
-        assert ("nose", "x") in result.columns
-        assert ("tail", "x") in result.columns
+        assert list(result.columns) == [
+            ("nose", "x"),
+            ("nose", "y"),
+            ("tail", "x"),
+        ]
+        # values carried through unchanged
+        assert result[("nose", "x")].tolist() == [0.0, 1.0]
+        assert result[("tail", "x")].tolist() == [2.0, 3.0]
 
     def test_flatten_already_two_level(self, pose_v2_instance):
         """Test flattening already-flat MultiIndex."""
@@ -106,9 +112,11 @@ class TestFlattenMultiIndex:
 
         result = pose_v2_instance._flatten_multiindex(df)
 
-        # Should remain unchanged
+        # already 2-level -> returned unchanged, columns and values intact
         assert result.columns.nlevels == 2
-        assert ("nose", "x") in result.columns
+        assert list(result.columns) == [("nose", "x"), ("nose", "y")]
+        assert result[("nose", "x")].tolist() == [0.0, 1.0]
+        assert result[("nose", "y")].tolist() == [0.0, 1.0]
 
 
 class TestCalculateOrientation:
@@ -332,9 +340,13 @@ class TestSmoothPosition:
             smooth_params=smooth_params,
         )
 
-        # Should return valid position array
+        # bottleneck move_mean is a trailing window of size
+        # round(0.3 * 10) = 3 with min_count=1, so on the ramp arange(20):
+        #   i=0 -> mean(x0)=0, i=1 -> mean(x0,x1)=0.5, i>=2 -> i-1
+        expected = np.concatenate([[0.0, 0.5], np.arange(1.0, 19.0)])
         assert result.shape == position.shape
-        assert not np.any(np.isnan(result))
+        assert np.allclose(result[:, 0], expected)
+        assert np.allclose(result[:, 1], expected)
 
     def test_interp_then_smooth(self, mini_insert):
         """Test interpolation followed by smoothing."""
@@ -373,9 +385,13 @@ class TestSmoothPosition:
             smooth_params=smooth_params,
         )
 
-        # Should have interpolated and smoothed
-        assert ~np.isnan(result[2, 0])
+        # frame 2 interpolates linearly to 2.0, giving the ramp 0..5;
+        # trailing move_mean window round(0.2 * 10) = 2, min_count=1:
+        #   i=0 -> 0, i>=1 -> mean(x_{i-1}, x_i) = i - 0.5
+        expected = np.array([0.0, 0.5, 1.5, 2.5, 3.5, 4.5])
         assert result.shape == position.shape
+        assert np.allclose(result[:, 0], expected)
+        assert np.allclose(result[:, 1], expected)
 
 
 class TestCalculateVelocity:
@@ -393,6 +409,8 @@ class TestCalculateVelocity:
         # np.gradient gives 1.0 everywhere for uniform motion
         assert vel_2d.shape == (4, 2)
         assert speed.shape == (4,)
+        assert np.allclose(vel_2d[:, 0], 1.0, atol=0.01)  # x moves 1/frame
+        assert np.allclose(vel_2d[:, 1], 0.0, atol=0.01)  # no y motion
         assert np.allclose(speed, 1.0, atol=0.01)
 
     def test_velocity_diagonal(self, pose_v2_instance):
@@ -428,78 +446,8 @@ class TestCalculateVelocity:
         assert np.isnan(speed[3])  # backward diff: frames 2,3 — frame 2 is NaN
 
 
-class TestStorePoseNWB:
-    """Test NWB storage."""
-
-    def test_store_pose_basic(self, mini_insert):
-        """Test that NWB storage creates proper pynwb objects.
-
-        NOTE: This is a unit test that verifies object creation
-        without requiring full database setup.
-        """
-        from spyglass.position.v2.estim import PoseV2
-
-        # Create test data
-        orientation = np.array([0.0, 0.1, 0.2])
-        centroid = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
-        velocity = np.array([0.0, 1.0, 1.0])
-        timestamps = np.array([0.0, 1.0, 2.0])
-
-        # Create pynwb objects directly (without database)
-        import pynwb
-
-        METERS_PER_CM = 0.01
-
-        # Test Position object creation
-        position = pynwb.behavior.Position()
-        position.create_spatial_series(
-            name="centroid",
-            timestamps=timestamps,
-            data=centroid,
-            reference_frame="(0,0) is top left",
-            conversion=METERS_PER_CM,
-            description="Centroid position (x, y) in cm",
-        )
-        assert position.spatial_series["centroid"] is not None
-        assert len(position.spatial_series["centroid"].data) == 3
-
-        # Test BehavioralTimeSeries for orientation
-        orientation_ts = pynwb.behavior.BehavioralTimeSeries()
-        orientation_ts.create_timeseries(
-            name="orientation",
-            timestamps=timestamps,
-            data=orientation,
-            unit="radians",
-            description="Head orientation",
-        )
-        assert orientation_ts.time_series["orientation"] is not None
-        assert len(orientation_ts.time_series["orientation"].data) == 3
-
-        # Test BehavioralTimeSeries for velocity
-        velocity_ts = pynwb.behavior.BehavioralTimeSeries()
-        velocity_ts.create_timeseries(
-            name="velocity",
-            timestamps=timestamps,
-            data=velocity,
-            unit="cm/s",
-            description="Speed",
-        )
-        assert velocity_ts.time_series["velocity"] is not None
-        assert len(velocity_ts.time_series["velocity"].data) == 3
-
-
 class TestPoseV2Integration:
     """Integration tests for full PoseV2 pipeline."""
-
-    def test_full_pipeline_placeholder(self, mini_insert):
-        """Test full make() pipeline with placeholder data.
-
-        NOTE: This test cannot run without actual database entries.
-        It serves as a template for future integration tests.
-        """
-        pytest.skip(
-            "Requires full database setup with PoseEstim, PoseParams entries"
-        )
 
     def test_pipeline_components_integration(self, mini_insert):
         """Test that pipeline components work together."""
@@ -557,12 +505,24 @@ class TestPoseV2Integration:
         # Calculate velocity
         vel_2d, speed = pv2._calculate_velocity(centroid_smooth, time)
 
-        # Verify outputs
+        # orientation = arctan2(green - red) = arctan2(-1, -1) = -3π/4
         assert orientation.shape == (10,)
+        assert np.allclose(orientation, -3 * np.pi / 4)
+
+        # 2pt centroid: raw midpoints are i+0.5, but calculate_centroid applies
+        # an internal trailing moving-average (window 3), so the head ramps
+        # 0.5, 1.0, 1.5 before settling to the lagged linear run. x == y here.
+        expected_centroid = [0.5, 1.0, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5]
         assert centroid.shape == (10, 2)
+        assert np.allclose(centroid[:, 0], expected_centroid)
+        assert np.allclose(centroid[:, 1], expected_centroid)
+
+        # smoothed centroid steps by 1/frame in x and y in its linear
+        # interior, so speed settles at sqrt(2) away from the smoothing edge
         assert centroid_smooth.shape == (10, 2)
         assert vel_2d.shape == (10, 2)
         assert speed.shape == (10,)
+        assert np.allclose(speed[3:9], np.sqrt(2.0))
 
 
 class TestFetchMethods:
