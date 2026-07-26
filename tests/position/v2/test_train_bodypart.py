@@ -16,17 +16,18 @@ class TestBodyPartTable:
         """
         all_parts = set(bodypart.fetch("bodypart"))
 
-        # Check for key default bodyparts from train.py:119-147
+        # Canonical default spellings from BodyPart.contents (train.py:100-128).
+        # fetch returns the stored spelling, so compare against exact canonical
+        # forms rather than normalized ones.
         expected_parts = {
-            "greenled",
-            "redled c",
+            "greenLED",
+            "redLED_C",
             "nose",
             "head",
-            "tailbase",
+            "tailBase",
         }
 
-        # At least some default parts should exist
-        assert len(all_parts & expected_parts) > 0
+        assert expected_parts <= all_parts
 
 
 class TestBodyPartNormalization:
@@ -116,6 +117,9 @@ class TestBodyPartCollisionGuard:
         cmap = bodypart.canon_map()
         assert isinstance(cmap, dict)
         assert cmap.get("green led") == "greenLED"
+        assert cmap.get("red led c") == "redLED_C"
+        assert cmap.get("tail base") == "tailBase"
+        assert cmap.get("nose") == "nose"
 
     def test_canon_map_collision_gives_admin_guidance(self, bodypart):
         """A colliding pair in the table raises clear admin-actionable error.
@@ -145,7 +149,7 @@ class TestBodyPartValidation:
         """Test validation passes for existing bodyparts."""
         # Get actual bodyparts from table
         valid_parts = set(bodypart.fetch("bodypart")[:3])
-        skeleton._validate_bodyparts(valid_parts)
+        assert skeleton._validate_bodyparts(valid_parts) is True
 
     def test_validate_bodyparts_rejects_invalid(self, skeleton):
         """Test validation fails for unknown bodyparts."""

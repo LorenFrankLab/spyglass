@@ -29,7 +29,8 @@ class TestModelVerification:
 
         assert results["valid"] is False
         assert results["checks"]["model_exists"] is False
-        assert len(results["errors"]) > 0
+        # Missing-model path appends exactly one error and returns early.
+        assert len(results["errors"]) == 1
         assert "not found" in results["errors"][0].lower()
 
     def test_verify_with_missing_file(
@@ -63,23 +64,34 @@ class TestModelVerification:
         model_key = model.load(model_path=str(dlc_project_config))
         results = model.verify(model_key)
 
-        # Verify result structure
-        assert "valid" in results
-        assert "checks" in results
-        assert "errors" in results
-        assert "warnings" in results
-        assert "model_info" in results
+        # Exact top-level key set (source: Model.verify return dict)
+        assert set(results) == {
+            "valid",
+            "checks",
+            "errors",
+            "warnings",
+            "model_info",
+        }
+        # Exact per-check key set
+        assert set(results["checks"]) == {
+            "model_exists",
+            "model_path_exists",
+            "skeleton_valid",
+            "params_valid",
+            "inference_ready",
+        }
 
-        # Verify checks structure
-        assert "model_exists" in results["checks"]
-        assert "model_path_exists" in results["checks"]
-        assert "skeleton_valid" in results["checks"]
-        assert "params_valid" in results["checks"]
-        assert "inference_ready" in results["checks"]
+        # Known-exact check values: config is on disk and check_inference
+        # defaults off, so inference_ready is never toggled True.
+        assert results["checks"]["model_exists"] is True
+        assert results["checks"]["model_path_exists"] is True
+        assert results["checks"]["inference_ready"] is False
 
-        # Verify types
-        assert isinstance(results["valid"], bool)
-        assert isinstance(results["checks"], dict)
+        # model_info echoes the fetched Model row (dict(model_entry)), so it
+        # carries the queried model_id.
+        assert results["model_info"]["model_id"] == model_key["model_id"]
+
+        # errors / warnings are collected into lists (contents depend on the
+        # loaded project, so only the container contract is pinned here).
         assert isinstance(results["errors"], list)
         assert isinstance(results["warnings"], list)
-        assert isinstance(results["model_info"], dict)

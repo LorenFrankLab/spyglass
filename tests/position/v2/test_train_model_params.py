@@ -23,7 +23,9 @@ class TestModelParamsInsert:
             **INSERT_KWARGS,
         )
 
-        assert "model_params_id" in key
+        # insert1 returns exactly the two-field primary key.
+        assert set(key) == {"model_params_id", "tool"}
+        assert key["tool"] == "DLC"
         entry = (model_params & key).fetch1()
         assert entry["tool"] == "DLC"
 
@@ -45,6 +47,8 @@ class TestModelParamsInsert:
 
     def test_insert_with_skeleton_link(self, skeleton, model_params):
         """Test inserting model_params with skeleton link."""
+        import uuid
+
         # Create skeleton first
         skeleton_config = {
             "bodyparts": ["nose", "head"],
@@ -52,10 +56,14 @@ class TestModelParamsInsert:
         }
         skeleton_key = skeleton.insert1(skeleton_config, **INSERT_KWARGS)
 
+        # Unique project_path so insert1's params-hash dedup always inserts a
+        # fresh row linked to THIS run's skeleton, rather than returning a
+        # pre-existing (skeleton-less) entry from default contents or a prior
+        # --no-teardown run.
         dlc_kwargs = dict(
             tool="DLC",
             params={
-                "project_path": "/path/to/dlc/project",
+                "project_path": f"/path/to/dlc/project/{uuid.uuid4()}",
                 "net_type": "resnet_50",
             },
         )
@@ -118,7 +126,8 @@ class TestModelParamsInsert:
             {"tool": "DLC", "params": params},
             **INSERT_KWARGS,
         )
-        assert "model_params_id" in model_key
+        assert set(model_key) == {"model_params_id", "tool"}
+        assert model_key["tool"] == "DLC"
 
 
 class TestModelParamsValidation:
@@ -162,9 +171,8 @@ class TestModelParamsToolSupport:
 
     def test_tool_info_contains_supported_tools(self, model_params):
         """Test tool_info contains DLC and SLEAP."""
-        assert "DLC" in model_params.tool_info()
-        assert "SLEAP" in model_params.tool_info()
-        assert "ndx-pose" not in model_params.tool_info()
+        # Exactly the two registered strategies (ToolStrategyFactory).
+        assert set(model_params.tool_info()) == {"DLC", "SLEAP"}
 
     def test_ndx_pose_tool_rejected(self, model_params, tmp_path):
         """ndx-pose is a file format, not a ModelParams tool."""
@@ -214,4 +222,7 @@ class TestModelParamsToolSupport:
         )
 
         entry = (model_params & key).fetch1()
-        assert len(entry["params"]) > 10  # Should store large dict
+        stored = entry["params"]
+        # All 50 custom params round-trip intact, alongside net_type.
+        assert all(f"param_{i}" in stored for i in range(50))
+        assert stored["net_type"] == "resnet_50"

@@ -33,9 +33,17 @@ def basic_args(dummy_video):
     )
 
 
-def _make_vm(args):
-    """Construct VideoMaker with all heavy calls mocked out."""
+def _make_vm(args, ctor=None):
+    """Build a VideoMaker with all heavy calls mocked out.
+
+    ``ctor`` defaults to ``VideoMaker`` but may be ``make_video`` to exercise
+    the passthrough wrapper; the same mocks apply since ``make_video`` builds a
+    ``VideoMaker`` internally.
+    """
     from spyglass.position.utils.make_video import VideoMaker
+
+    if ctor is None:
+        ctor = VideoMaker
 
     def _set_plot_bases_stub(self):
         self.fig = MagicMock()
@@ -48,7 +56,7 @@ def _make_vm(args):
         patch("matplotlib.pyplot.close"),
         patch("shutil.rmtree"),
     ):
-        return VideoMaker(**args)
+        return ctor(**args)
 
 
 class TestVideoMakerInit:
@@ -71,11 +79,16 @@ class TestVideoMakerInit:
     def test_dict_position_mean_unpacked(self, basic_args):
         """Dict-keyed position_mean (legacy input) is unpacked to array."""
         n = 10
-        basic_args["position_mean"] = {"DLC": np.zeros((n, 2))}
-        basic_args["orientation_mean"] = {"DLC": np.zeros(n)}
+        pos = np.arange(n * 2, dtype=float).reshape(n, 2)
+        ori = np.arange(n, dtype=float)
+        basic_args["position_mean"] = {"DLC": pos}
+        basic_args["orientation_mean"] = {"DLC": ori}
         vm = _make_vm(basic_args)
+        # the sole dict value is extracted verbatim for both fields
         assert isinstance(vm.position_mean, np.ndarray)
-        assert vm.position_mean.shape == (n, 2)
+        assert np.array_equal(vm.position_mean, pos)
+        assert isinstance(vm.orientation_mean, np.ndarray)
+        assert np.array_equal(vm.orientation_mean, ori)
 
     def test_attributes_set(self, basic_args):
         """Core attributes are stored on the instance."""
@@ -93,7 +106,8 @@ class TestVideoMakerInit:
     def test_centroids_stored(self, basic_args):
         """centroids dict is stored as-is."""
         vm = _make_vm(basic_args)
-        assert "head" in vm.centroids
+        assert list(vm.centroids) == ["head"]
+        assert np.array_equal(vm.centroids["head"], np.zeros((10, 2)))
 
 
 class TestMakeVideoPassthrough:
@@ -103,5 +117,9 @@ class TestMakeVideoPassthrough:
         """make_video() is a passthrough that returns a VideoMaker instance."""
         from spyglass.position.utils.make_video import VideoMaker, make_video
 
-        result = _make_vm(basic_args)
+        # call make_video itself (not VideoMaker) so the wrapper is exercised
+        result = _make_vm(basic_args, ctor=make_video)
         assert isinstance(result, VideoMaker)
+        # kwargs were forwarded intact to the constructed VideoMaker
+        assert result.video_filename == basic_args["video_filename"]
+        assert result.batch_size == 512

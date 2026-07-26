@@ -52,12 +52,15 @@ def test_prepare_training_dataset(skip_if_no_dlc):
                 config_path, params, config, model_instance
             )
 
-            # Verify DLC function called correctly
+            # Verify DLC function called correctly (engine filtered out by
+            # get_param_names; userfeedback=False always injected).
             mock_create.assert_called_once_with(
                 str(config_path), batch_size=8, userfeedback=False
             )
             # Verify info message was logged
-            model_instance._info_msg.assert_called_once()
+            model_instance._info_msg.assert_called_once_with(
+                "Creating DLC training dataset..."
+            )
 
 
 def test_execute_training_basic(skip_if_no_dlc):
@@ -131,11 +134,14 @@ def test_execute_training_test_mode(skip_if_no_dlc):
 
             strategy._execute_training(config_path, params, model_instance)
 
-            # In test mode, maxiters should be reduced to 2
-            expected_call = mock_train.call_args[1]
-            assert expected_call["maxiters"] == 2
-            assert expected_call.get("epochs") == 1
-            assert expected_call.get("save_epochs") == 1
+            # Test mode caps maxiters at 2 and (DLC 3.x) adds
+            # epochs/save_epochs=1.
+            mock_train.assert_called_once_with(
+                str(config_path),
+                maxiters=2,
+                epochs=1,
+                save_epochs=1,
+            )
 
 
 def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
@@ -191,8 +197,10 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
             snapshot1.touch()
             snapshot2.touch()
 
-            # Mock file modification times
-            with patch("os.path.getmtime") as mock_getmtime:
+            # Patch the strategy's filesystem mtime lookup so snapshot-200 is
+            # the most-recently-modified. RealFileSystem.getmtime reads
+            # Path.stat, so patching os.path.getmtime would be a silent no-op.
+            with patch.object(strategy._fs, "getmtime") as mock_getmtime:
                 mock_getmtime.side_effect = lambda p: {
                     str(snapshot1): 1000,
                     str(snapshot2): 2000,  # More recent
@@ -202,10 +210,10 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
                     config, model_instance
                 )
 
-            # Verify correct snapshot was selected (200, the most recent)
-            call_args = model_instance._info_msg.call_args
-            assert call_args is not None
-            assert "Located trained model" in call_args[0][0]
+            # The most-recent snapshot (200) is the one reported.
+            model_instance._info_msg.assert_called_with(
+                f"Located trained model - snapshot: 200, model_id: {model_id}"
+            )
 
             # Verify returned values
             assert config_path == project_path / "config.yaml"
