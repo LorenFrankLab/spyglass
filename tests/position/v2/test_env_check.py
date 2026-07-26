@@ -57,7 +57,8 @@ class TestCheckEnvironment:
     def test_pose_tool_without_torch_flagged(self, monkeypatch):
         env_check = _patch(monkeypatch, {"deeplabcut": "3.0.0"})
         problems = env_check.check_environment(verbose=False)
-        assert any("PyTorch" in p for p in problems)
+        # Only the missing-PyTorch problem fires (no tf+jax conflict here).
+        assert len(problems) == 1 and "PyTorch" in problems[0]
 
     def test_raise_on_error(self, monkeypatch):
         env_check = _patch(

@@ -2,6 +2,11 @@
 
 import pytest
 
+# VidFileGroup.insert1 derives vid_group_id from key_hash({"files": vid_files}).
+# When no files resolve to the VideoFile table, vid_files == [] and the ID is
+# this deterministic md5 digest of {"files": []}.
+_EMPTY_FILES_HASH = "d751713988987e9331980363e24189ce"
+
 
 class TestVidFileGroupHelpers:
     """Test VidFileGroup helper methods for creating video groups."""
@@ -21,9 +26,9 @@ class TestVidFileGroupHelpers:
             video_files=[video1, video2], description="Test video group"
         )
 
-        # Group should be created even if videos can't be added
-        assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], str)
+        # No files match VideoFile, so the ID is the deterministic
+        # key_hash({"files": []}) fallback.
+        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
 
     def test_create_from_files_empty_list(self, position_v2):
         """Test that empty file list raises error."""
@@ -63,9 +68,8 @@ class TestVidFileGroupHelpers:
             )
         )
 
-        # Group should be created
-        assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], str)
+        # No files in VideoFile table -> deterministic empty-files hash.
+        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
 
     def test_create_from_directory_no_matches(self, position_v2, tmp_path):
         """Test that no matching files raises error."""
@@ -101,9 +105,8 @@ class TestVidFileGroupHelpers:
             )
         )
 
-        # Group should be created
-        assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], str)
+        # No files in VideoFile table -> deterministic empty-files hash.
+        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
 
     def test_add_files_group_not_exists(self, position_v2):
         """Test adding files to non-existent group raises error."""
@@ -147,8 +150,8 @@ class TestVidFileGroupHelpers:
             {"description": "Test group auto ID"}, skip_duplicates=True
         )
 
-        assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], str)
+        # Auto-generated from key_hash({"files": []}) (no files provided).
+        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
         assert len(group_key["vid_group_id"]) == 32
 
 

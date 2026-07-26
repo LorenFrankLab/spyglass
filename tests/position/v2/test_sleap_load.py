@@ -100,7 +100,6 @@ def test_load_from_nwb_returns_valid_metadata(sleap_nwb_path):
 
     metadata = PoseEstim.load_from_nwb(sleap_nwb_path)
 
-    assert isinstance(metadata, dict)
     required_keys = {
         "nwb_file_path",
         "pose_estimation_name",
@@ -110,7 +109,11 @@ def test_load_from_nwb_returns_valid_metadata(sleap_nwb_path):
         "source_software",
     }
     assert required_keys.issubset(metadata.keys())
+    # Fixture builds a single PoseEstimation named "PoseEstimation" with
+    # 50-frame series and source_software="SLEAP".
+    assert metadata["pose_estimation_name"] == "PoseEstimation"
     assert metadata["n_frames"] == 50
+    assert metadata["source_software"] == "SLEAP"
 
 
 def test_load_from_nwb_multimodel_selects_sleap_by_name(

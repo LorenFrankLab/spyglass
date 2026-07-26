@@ -180,7 +180,7 @@ class TestImportFromV1:
             self.model.import_from_v1(self._v1_key())
 
         called_path = Path(mock_load.call_args[0][0])
-        assert "dj_dlc" in called_path.name
+        assert called_path.name == "dj_dlc_config.yaml"
 
     # ── kwargs forwarded to load() ────────────────────────────────────────────
 
@@ -233,5 +233,5 @@ class TestImportFromV1:
                 },
             ),
         ):
-            with pytest.raises((KeyError, Exception)):
+            with pytest.raises(KeyError):
                 self.model.import_from_v1({"dlc_model_name": "ghost"})

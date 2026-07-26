@@ -49,7 +49,9 @@ def test_dlc_strategy_prepare_dataset(pv2_train, tmp_path, skip_if_no_dlc):
             TrainingFraction=0.95,
             userfeedback=False,
         )
-        model_instance._info_msg.assert_called()
+        model_instance._info_msg.assert_called_once_with(
+            "Creating DLC training dataset..."
+        )
 
 
 def test_dlc_strategy_execute_training(pv2_train, tmp_path, skip_if_no_dlc):
@@ -82,11 +84,13 @@ def test_dlc_strategy_execute_training(pv2_train, tmp_path, skip_if_no_dlc):
 
         strategy._execute_training(config_path, params, model_instance)
 
-        # Verify string parameters were converted to integers
-        call_args = mock_train.call_args[1]
-        assert call_args["maxiters"] == 500
-        assert call_args["shuffle"] == 1
-        assert call_args["trainingsetindex"] == 0
+        # Exact call: string params coerced to ints, config_path stringified.
+        mock_train.assert_called_once_with(
+            str(config_path),
+            maxiters=500,
+            shuffle=1,
+            trainingsetindex=0,
+        )
 
 
 def test_dlc_strategy_execute_training_test_mode(
@@ -115,11 +119,13 @@ def test_dlc_strategy_execute_training_test_mode(
 
         strategy._execute_training(config_path, params, model_instance)
 
-        # In test mode, maxiters should be reduced to 2
-        call_args = mock_train.call_args[1]
-        assert call_args["maxiters"] == 2
-        assert call_args.get("epochs") == 1
-        assert call_args.get("save_epochs") == 1
+        # Test mode caps maxiters at 2 and (DLC 3.x) adds epochs/save_epochs=1.
+        mock_train.assert_called_once_with(
+            str(config_path),
+            maxiters=2,
+            epochs=1,
+            save_epochs=1,
+        )
 
 
 def test_dlc_strategy_execute_training_routes_gputouse_pytorch(
@@ -379,46 +385,9 @@ class TestDLCStrategyWithFilesystemInjection:
         # Inject filesystem into strategy
         strategy = DLCStrategy(filesystem=stub_fs)
 
-        # Test filesystem-dependent operations work with stubs
-        assert strategy._fs.exists("/project/config.yaml") is True
-        assert strategy._fs.exists("/nonexistent/path") is False
-
-        config = strategy._fs.read_yaml("/project/config.yaml")
-        assert config["project_path"] == "/project"
-        assert "nose" in config["bodyparts"]
-
-    def test_dlc_model_discovery_with_stub_filesystem(self):
-        """Test model discovery logic with pre-configured filesystem."""
-        from spyglass.position.utils.tool_strategies import DLCStrategy
-        from tests.position.v2.test_estim import StubFileSystem
-
-        # Configure filesystem with model files
-        stub_fs = StubFileSystem()
-        stub_fs.glob_results = {
-            "/models/*/pose_cfg.yaml": [
-                "/models/model1/pose_cfg.yaml",
-                "/models/model2/pose_cfg.yaml",
-            ]
-        }
-        stub_fs.files = {
-            "/models/model1/pose_cfg.yaml": True,
-            "/models/model2/pose_cfg.yaml": True,
-        }
-        stub_fs.yaml_data = {
-            "/models/model1/pose_cfg.yaml": {"net_type": "resnet_50"},
-            "/models/model2/pose_cfg.yaml": {"net_type": "mobilenet_v2"},
-        }
-
-        strategy = DLCStrategy(filesystem=stub_fs)
-
-        # Test that glob results are used correctly
-        results = strategy._fs.glob("/models/*/pose_cfg.yaml")
-        assert len(results) == 2
-        assert "/models/model1/pose_cfg.yaml" in results
-
-        # Test YAML reading works
-        config1 = strategy._fs.read_yaml("/models/model1/pose_cfg.yaml")
-        assert config1["net_type"] == "resnet_50"
+        # DI contract: DLCStrategy stores the injected filesystem verbatim
+        # (does not wrap, copy, or replace it with RealFileSystem).
+        assert strategy._fs is stub_fs
 
     def test_parameter_validation_without_files(self):
         """Test parameter validation logic without requiring real files."""
@@ -429,49 +398,23 @@ class TestDLCStrategyWithFilesystemInjection:
         stub_fs = StubFileSystem(files={})  # No files exist
         strategy = DLCStrategy(filesystem=stub_fs)
 
-        # Test parameter validation still works
+        # Exact DLC parameter contract from get_*_params() source.
         required = strategy.get_required_params()
         accepted = strategy.get_accepted_params()
         defaults = strategy.get_default_params()
 
-        assert isinstance(required, set)
-        assert isinstance(accepted, set)
-        assert isinstance(defaults, dict)
-        assert (
-            "project_path" in required
-        )  # DLC requires project_path, not model_id
-        assert len(accepted) > len(required)
-
-    def test_filesystem_error_handling(self):
-        """Test error handling when filesystem operations fail."""
-        from spyglass.position.utils.tool_strategies import DLCStrategy
-        from tests.position.v2.test_estim import StubFileSystem
-
-        # Filesystem with no YAML data configured
-        stub_fs = StubFileSystem(
-            files={"/config.yaml": True}
-        )  # exists but no data
-        strategy = DLCStrategy(filesystem=stub_fs)
-
-        # Should raise FileNotFoundError when trying to read unconfigured YAML
-        with pytest.raises(FileNotFoundError, match="No YAML data"):
-            strategy._fs.read_yaml("/config.yaml")
-
-    def test_getmtime_functionality(self):
-        """Test modification time functionality with stub filesystem."""
-        from spyglass.position.utils.tool_strategies import DLCStrategy
-        from tests.position.v2.test_estim import StubFileSystem
-
-        stub_fs = StubFileSystem()
-        strategy = DLCStrategy(filesystem=stub_fs)
-
-        # Test that getmtime returns consistent value
-        mtime = strategy._fs.getmtime("/any/path")
-        assert isinstance(mtime, float)
-        assert mtime > 0
-
-        # Should return same value for multiple calls (stub behavior)
-        assert strategy._fs.getmtime("/another/path") == mtime
+        # DLC requires exactly project_path (not model_id).
+        assert required == {"project_path"}
+        # Required params are a subset of accepted.
+        assert required <= accepted
+        assert {"shuffle", "trainingsetindex", "epochs"} <= accepted
+        # Defaults are the DLC 3.x PyTorch seed values.
+        assert defaults["shuffle"] == 1
+        assert defaults["trainingsetindex"] == 0
+        assert defaults["epochs"] == 200
+        assert defaults["save_epochs"] == 25
+        assert defaults["maxiters"] is None
+        assert defaults["net_type"] == "resnet_50"
 
 
 # ---------------------------------------------------------------------------

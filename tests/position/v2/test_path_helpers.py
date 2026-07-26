@@ -21,7 +21,11 @@ class TestPathHelpers:
         assert self.resolve(str(p)) == p
 
     def test_returns_path_object(self):
-        assert isinstance(self.resolve("/some/path"), Path)
+        # Absolute input is returned unchanged as a Path.
+        assert self.resolve("/some/path") == Path("/some/path")
 
     def test_to_stored_path_returns_string(self, tmp_path):
-        assert isinstance(self.store(tmp_path / "model.yaml"), str)
+        # tmp_path is not under pose_project_dir, so the absolute path is
+        # returned verbatim as a string.
+        p = tmp_path / "model.yaml"
+        assert self.store(p) == str(p)

@@ -126,9 +126,14 @@ class TestCalculateVelocity:
         self.fn = calculate_velocity
 
     def test_output_length_matches_input(self):
-        pos = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
-        ts = np.array([0.0, 1.0, 2.0, 3.0])
-        assert len(self.fn(pos, ts, 1.0)) == len(ts)
+        # Non-uniform dt: disp=[5,0,5], dt=[1,2,1] -> speed=[nan,5,0,5]
+        pos = np.array([[0.0, 0.0], [3.0, 4.0], [3.0, 4.0], [6.0, 8.0]])
+        ts = np.array([0.0, 1.0, 3.0, 4.0])
+        result = self.fn(pos, ts, 1.0)
+        assert len(result) == len(ts)
+        np.testing.assert_allclose(
+            result, [np.nan, 5.0, 0.0, 5.0], equal_nan=True
+        )
 
     def test_first_element_is_nan(self):
         pos = np.array([[0.0, 0.0], [1.0, 0.0]])
@@ -146,9 +151,11 @@ class TestCalculateVelocity:
         )
 
     def test_returns_ndarray(self):
-        assert isinstance(
-            self.fn(np.zeros((5, 2)), np.arange(5, dtype=float), 1.0),
-            np.ndarray,
+        # Stationary position -> zero displacement -> speed [nan,0,0,0,0]
+        result = self.fn(np.zeros((5, 2)), np.arange(5, dtype=float), 1.0)
+        assert isinstance(result, np.ndarray)
+        np.testing.assert_allclose(
+            result, [np.nan, 0.0, 0.0, 0.0, 0.0], equal_nan=True
         )
 
 
@@ -180,28 +187,43 @@ class TestComputePoseOutputs:
         result = self.fn(
             _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
         )
+        # method 'none' -> one NaN per frame
         assert len(result["orientation"]) == n
+        assert np.all(np.isnan(result["orientation"]))
 
     def test_centroid_shape(self):
         n = 15
-        result = self.fn(
-            _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
+        df = _make_2level_df(n_frames=n)
+        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+        # 1-pt centroid is a passthrough of the single bodypart's x/y
+        expected = np.column_stack(
+            [df[("nose", "x")].values, df[("nose", "y")].values]
         )
         assert result["centroid"].shape == (n, 2)
+        np.testing.assert_allclose(result["centroid"], expected)
 
     def test_velocity_2d_shape(self):
         n = 20
-        result = self.fn(
-            _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
+        df = _make_2level_df(n_frames=n)
+        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+        centroid = np.column_stack(
+            [df[("nose", "x")].values, df[("nose", "y")].values]
         )
+        expected = np.gradient(centroid, df.index.values, axis=0)
         assert result["velocity_2d"].shape == (n, 2)
+        np.testing.assert_allclose(result["velocity_2d"], expected)
 
     def test_velocity_length(self):
         n = 12
-        result = self.fn(
-            _make_2level_df(n_frames=n), _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH
+        df = _make_2level_df(n_frames=n)
+        result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+        centroid = np.column_stack(
+            [df[("nose", "x")].values, df[("nose", "y")].values]
         )
+        vel = np.gradient(centroid, df.index.values, axis=0)
+        expected_speed = np.sqrt(np.sum(vel**2, axis=1))
         assert len(result["speed"]) == n
+        np.testing.assert_allclose(result["speed"], expected_speed)
 
     def test_timestamps_preserved(self):
         df = _make_2level_df(n_frames=10, sampling_rate=5.0)
@@ -211,14 +233,20 @@ class TestComputePoseOutputs:
     def test_sampling_rate_inferred(self):
         df = _make_2level_df(n_frames=20, sampling_rate=30.0)
         result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
-        assert abs(result["sampling_rate"] - 30.0) < 1.0
+        # uniform 30 Hz index -> 1/median(diff) is exactly 30.0
+        assert result["sampling_rate"] == pytest.approx(30.0)
 
     def test_3level_multiindex_accepted(self):
         df = _make_3level_df(bodyparts=("nose",))
         # Add timestamp index so the function can compute sampling rate
         df.index = np.arange(len(df)) / 10.0
         result = self.fn(df, _ORIENT_NONE, _CENTROID_1PT, _NO_SMOOTH)
+        s = df.columns.get_level_values(0)[0]
+        expected = np.column_stack(
+            [df[(s, "nose", "x")].values, df[(s, "nose", "y")].values]
+        )
         assert "centroid" in result
+        np.testing.assert_allclose(result["centroid"], expected)
 
     def test_likelihood_threshold_applied(self):
         df = _make_2level_df(n_frames=10)
@@ -476,9 +504,10 @@ class TestComputePoseOutputsHighNaN:
         smooth = {**_SMOOTH_INTERP, "smooth": False}
         result = self.fn(df, _ORIENT_2PT, _CENTROID_2PT, smooth)
         self._assert_no_inf(result)
-        valid_orient = result["orientation"][~np.isnan(result["orientation"])]
-        assert len(valid_orient) > 0
-        assert np.all(np.abs(valid_orient) <= np.pi + 1e-9)
+        # red_y == green_y and red_x - green_x == -3 every frame, so two_pt
+        # orientation is arctan2(0, -3) == pi at every frame (no NaN).
+        assert not np.any(np.isnan(result["orientation"]))
+        np.testing.assert_allclose(result["orientation"], np.pi)
 
 
 # ── frame alignment / timestamp continuity ───────────────────────────────────

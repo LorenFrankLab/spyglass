@@ -251,10 +251,13 @@ class TestCreateProjectUnit:
     def _make_fake_config(self, tmp_path):
         """Write a minimal config.yaml for save_yaml round-trip.
 
-        Also creates ``vid.avi`` inside *tmp_path* so that the
-        file-existence pre-flight check in ``create_project`` passes when
-        tests mock ``VideoFile.get_abs_paths`` to return that path.
+        Also writes a real (cv2-encoded) ``vid.avi`` inside *tmp_path* so that
+        ``create_project``'s ``ensure_mp4`` step can read a valid frame count
+        and pass the video through unchanged. A zero-byte stub would instead
+        be routed to the ffmpeg remux path and fail with "Invalid data".
         """
+        import cv2
+        import numpy as np
         import yaml
 
         cfg = {
@@ -266,7 +269,20 @@ class TestCreateProjectUnit:
         }
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text(yaml.safe_dump(cfg))
-        (tmp_path / "vid.avi").touch()  # satisfy Path.exists() check
+
+        # 50 frames: more than any frames_per_video used in these tests, so
+        # create_project's clamp-to-video-length step does not interfere.
+        writer = cv2.VideoWriter(
+            str(tmp_path / "vid.avi"),
+            cv2.VideoWriter_fourcc(*"XVID"),
+            30.0,
+            (64, 64),
+        )
+        for i in range(50):  # varied per frame so the codec keeps them all
+            frame = np.zeros((64, 64, 3), dtype=np.uint8)
+            frame[:, :, 0] = (i * 5) % 256
+            writer.write(frame)
+        writer.release()
         return cfg_path
 
     def test_raises_import_error_without_dlc(self, tmp_path):
@@ -284,7 +300,7 @@ class TestCreateProjectUnit:
         fake_dlc = MagicMock()
         fake_dlc.create_new_project.return_value = str(tmp_path / "config.yaml")
         with patch.dict("sys.modules", {"deeplabcut": fake_dlc}):
-            with pytest.raises((ValueError, Exception)):
+            with pytest.raises(ValueError, match="No valid training videos"):
                 self.model.create_project(
                     project_name="test",
                     bodyparts=["whiteLED"],
@@ -450,7 +466,8 @@ class TestCreateProjectUnit:
                 project_directory=str(tmp_path),
             )
 
-        assert captured.get("algo", "uniform") == "uniform"
+        # No default fallback: extract_frames must actually receive algo.
+        assert captured["algo"] == "uniform"
 
     def test_algo_can_be_overridden(self, tmp_path):
         """User-supplied algo kwarg overrides the default 'uniform'."""
@@ -760,11 +777,11 @@ class TestCreateProjectUnit:
                 **{create_only: "val_c", extract_only: "val_e"},
             )
 
-        # create_only kwarg must NOT appear in extract call
-        assert (
-            extract_only not in captured_create
-            or captured_create.get(extract_only) != "val_e"
-        )
+        # Neither function may receive the other's exclusive kwarg: an
+        # extract-only kwarg must not leak into create_new_project, and a
+        # create-only kwarg must not leak into extract_frames.
+        assert captured_create.get(extract_only) != "val_e"
+        assert captured_extract.get(create_only) != "val_c"
 
 
 # ── Integration test — requires DB + bootstrapped session ─────────────────────

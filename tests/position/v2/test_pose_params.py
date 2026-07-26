@@ -45,10 +45,14 @@ class TestPoseParamsDefaults:
         assert params["orient"]["led2"] == "redLED_R"
         assert params["orient"]["led3"] == "greenLED"
 
-        # Check centroid uses 4pt
+        # Check centroid uses 4pt with the four canonical LED keys
         assert params["centroid"]["method"] == "4pt"
-        assert len(params["centroid"]["points"]) == 4
-        assert "greenLED" in params["centroid"]["points"]
+        assert params["centroid"]["points"] == {
+            "greenLED": "greenLED",
+            "redLED_C": "redLED_C",
+            "redLED_L": "redLED_L",
+            "redLED_R": "redLED_R",
+        }
 
     def test_insert_single_LED(self, mini_insert):
         """Test inserting single LED params."""
@@ -61,9 +65,9 @@ class TestPoseParamsDefaults:
         # Check no orientation
         assert params["orient"]["method"] == "none"
 
-        # Check 1pt centroid
+        # Check 1pt centroid uses the single LED point
         assert params["centroid"]["method"] == "1pt"
-        assert len(params["centroid"]["points"]) == 1
+        assert params["centroid"]["points"] == {"point1": "LED"}
 
         # Check uses savgol smoothing
         assert params["smoothing"]["smoothing_params"]["method"] == "savgol"

@@ -8,7 +8,6 @@ All tests are pure (no database fixtures required).
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -42,11 +41,15 @@ class TestDiscoverTrainingCsvs:
     def test_deduplicates_results(self, tmp_path):
         (tmp_path / "learning_stats.csv").write_text("1,0.5,0.001\n")
         results = self.fn(tmp_path)
-        assert len(results) == len(set(results))
+        # A single on-disk file yields exactly one, unique result.
+        assert len(results) == len(set(results)) == 1
 
     def test_returns_list_of_paths(self, tmp_path):
-        (tmp_path / "learning_stats.csv").write_text("1,0.5,0.001\n")
-        assert all(isinstance(p, Path) for p in self.fn(tmp_path))
+        f = tmp_path / "learning_stats.csv"
+        f.write_text("1,0.5,0.001\n")
+        result = self.fn(tmp_path)
+        assert result == [f]
+        assert isinstance(result[0], Path)
 
     def test_finds_nested_csv_via_glob(self, tmp_path):
         nested = tmp_path / "train" / "pose_cfg"
@@ -91,7 +94,14 @@ class TestParseTrainingCsv:
     def test_returns_dataframe(self, tmp_path):
         f = tmp_path / "learning_stats.csv"
         f.write_text("1,0.5,0.001\n")
-        assert isinstance(self.fn(f), pd.DataFrame)
+        result = self.fn(f)
+        # Full normalized column contract for a header-less 3-col file.
+        assert list(result.columns) == [
+            "iteration",
+            "loss",
+            "learning_rate",
+            "source_file",
+        ]
 
     def test_two_column_csv(self, tmp_path):
         f = tmp_path / "loss.csv"
@@ -146,11 +156,14 @@ class TestAggregateTrainingStats:
         assert len(self.fn([self._df([0, 100, 200], [1.0, 0.8, 0.6])])) == 3
 
     def test_returns_dataframe(self):
-        assert isinstance(self.fn([self._df([0], [1.0])]), pd.DataFrame)
+        result = self.fn([self._df([0], [1.0])])
+        assert list(result["iteration"]) == [0]
+        assert list(result["loss"]) == [1.0]
 
     def test_empty_list_returns_empty_df(self):
         result = self.fn([])
-        assert isinstance(result, pd.DataFrame) and len(result) == 0
+        assert result.empty
+        assert len(result.columns) == 0
 
     def test_preserves_source_file_column(self):
         result = self.fn([self._df([0], [1.0], source="mine.csv")])
@@ -171,11 +184,11 @@ class TestValidateSkeletonGraph:
         self.fn(["nose", "tail"], [("nose", "tail")])
 
     def test_empty_bodyparts_raises(self):
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError, match="must not be empty"):
             self.fn([], [])
 
     def test_edge_with_unknown_bodypart_raises(self):
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError, match="not in"):
             self.fn(["nose"], [("nose", "ghost")])
 
     def test_single_node_no_edges_valid(self):
@@ -224,7 +237,8 @@ class TestIsDuplicateSkeleton:
         )
 
     def test_returns_bool(self):
+        # Identical skeletons return the exact bool ``True`` (not just truthy).
         result = self.fn(
             ["a", "b"], [("a", "b")], ["a", "b"], [("a", "b")], 0.85
         )
-        assert isinstance(result, bool)
+        assert result is True
