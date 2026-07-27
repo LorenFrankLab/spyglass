@@ -846,3 +846,47 @@ class TestEdgeCasesAndValidation:
         b = np.array([1.0, 2.0, 1.0])
         with pytest.raises(RuntimeError, match="overlap read failed"):
             fir._osconvolve(x, b, mode="full", nfft=8)
+
+    @pytest.mark.parametrize(
+        "signal, kernel, nfft",
+        [
+            # A signal shorter than the M-1 overlap combined with an nfft tight
+            # enough to need several blocks: every block after the first reads an
+            # overlap window that starts before the data AND ends after it, so
+            # the read is clipped at BOTH ends.
+            ([2.0], [1.0, 2.0, 3.0, 4.0, 5.0], 5),
+            ([2.0, -1.0], [1.0, 2.0, 3.0, 4.0, 5.0], 6),
+            ([1.0, 2.0, 3.0], [1.0, -1.0, 2.0, 0.5, 3.0, 1.0, -2.0], 8),
+        ],
+    )
+    def test_tight_nfft_short_signal_matches_numpy(self, signal, kernel, nfft):
+        # nfft >= kernel length is the documented contract, so every accepted
+        # nfft must give the true convolution. Placing the clipped overlap from
+        # its LENGTH (rather than from where the read actually starts) used to
+        # shift these blocks and return e.g. [2, 4, 4, 4, 10] for
+        # [2, 4, 6, 8, 10].
+        x, b = np.asarray(signal), np.asarray(kernel)
+        out = fir.filter_data_fir(x, b, axis=0, nfft=nfft, threads=1)
+        np.testing.assert_allclose(
+            out, np.convolve(x, b, "full"), atol=1e-9, rtol=1e-9
+        )
+
+    def test_tight_nfft_oracle_sweep(self):
+        # Randomized sweep over the whole accepted (signal length, kernel
+        # length, nfft) region, against the np.convolve oracle. Fixed seed ->
+        # reproducible.
+        sweep_rng = np.random.default_rng(20240102)
+        for _ in range(400):
+            n = int(sweep_rng.integers(1, 12))
+            numtaps = int(sweep_rng.integers(1, 5)) * 2 + 1
+            nfft = int(sweep_rng.integers(numtaps, 3 * numtaps + 2))
+            x = sweep_rng.standard_normal(n)
+            b = sweep_rng.standard_normal(numtaps)
+            out = fir.filter_data_fir(x, b, axis=0, nfft=nfft, threads=1)
+            np.testing.assert_allclose(
+                out,
+                np.convolve(x, b, "full"),
+                atol=1e-9,
+                rtol=1e-9,
+                err_msg=f"n={n} numtaps={numtaps} nfft={nfft}",
+            )

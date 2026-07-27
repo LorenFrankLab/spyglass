@@ -29,6 +29,14 @@ Intentional divergences from upstream:
   samples; skipping it removes a wasted transform and a read one block past the
   needed data (which could fail on a strict lazy/on-disk signal). Output is
   identical.
+- Overlap placement bug fix: upstream positioned a block's leading M-1 overlap
+  samples from the LENGTH of the (clipped) read, which is only correct when the
+  read reaches the block start. For a signal shorter than M-1 filtered with an
+  ``nfft`` tight enough to need several blocks, the read is clipped at both
+  ends and upstream shifted those samples, returning a wrong convolution
+  (e.g. ``[2, 4, 4, 4, 10]`` instead of ``[2, 4, 6, 8, 10]``). The position is
+  now derived from where the read actually starts. Unreachable at spyglass's
+  default ``nfft`` (>= 10x the kernel), so LFP output is unaffected.
 - Fail-loud / fail-closed hardening that affects only invalid inputs or genuine
   errors (never the valid path spyglass exercises): the M-1 overlap read no
   longer swallows exceptions and silently zero-fills; ``input_index_bounds`` /
@@ -837,28 +845,28 @@ def _osconvolve(
 
         # initialize entire block to 0, then fill with appropriate input data
         block_buffer[:] = 0
+
+        # Fill the kernel_len - 1 overlap portion of the block. Block position p
+        # holds absolute sample overlap_start + p, so the chunk goes wherever the
+        # (possibly clipped) read actually starts. Deriving that position from
+        # the read start handles both clips: a window reaching past the start of
+        # the data, and -- for a short signal under a tight nfft -- one whose
+        # read also stops early at the end of the data. Placing it from the chunk
+        # LENGTH instead is only correct when the read reaches `start`, and
+        # silently shifted the overlap when the signal ended first.
+        #
+        # A slice read clips at the array bounds rather than raising, so a
+        # genuine failure here (e.g. an h5py I/O error on an on-disk signal)
+        # must propagate -- upstream swallowed it and silently zero-filled the
+        # overlap, corrupting the result without any error.
         overlap_start = start - (kernel_len - 1)
-        # fill the kernel_len - 1 overlap portion of the block. It may extend
-        # past the start of the data; if so, place the valid part at the END of
-        # the segment.
-        if overlap_start < 0:
-            overlap_start = 0
-            signal_slices_1[axis] = np.s_[overlap_start:start]
-            signal_chunk = signal[tuple(signal_slices_1)]
-            length = signal_chunk.shape[axis]
-            pad_len = kernel_len - 1 - length
-            block_slices_1[axis] = np.s_[pad_len : kernel_len - 1]
-            block_buffer[tuple(block_slices_1)] = signal_chunk
-        else:
-            # A slice read clips at the array bounds rather than raising, so a
-            # genuine failure here (e.g. an h5py I/O error on an on-disk signal)
-            # must propagate -- upstream swallowed it and silently zero-filled
-            # the overlap, corrupting the result without any error.
-            signal_slices_1[axis] = np.s_[overlap_start:start]
-            signal_chunk = signal[tuple(signal_slices_1)]
-            length = signal_chunk.shape[axis]
-            block_slices_1[axis] = np.s_[:length]
-            block_buffer[tuple(block_slices_1)] = signal_chunk
+        read_start = max(overlap_start, 0)
+        block_pos = read_start - overlap_start
+        signal_slices_1[axis] = np.s_[read_start:start]
+        signal_chunk = signal[tuple(signal_slices_1)]
+        length = signal_chunk.shape[axis]
+        block_slices_1[axis] = np.s_[block_pos : block_pos + length]
+        block_buffer[tuple(block_slices_1)] = signal_chunk
 
         # fill block_step segment of the block
         signal_slices_2[axis] = np.s_[start:stop]
