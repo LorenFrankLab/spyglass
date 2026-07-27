@@ -53,11 +53,9 @@ Intentional divergences from upstream:
   least two ordered ``band_edges``; the spline power ``spline_power`` must be
   > 0; ``decimation_factor`` must be an integer >= 1; ``nfft`` must be an
   integer >= the kernel length; ``input_dim_restrictions`` entries must be 1-D
-  integer index arrays restricting at most one non-filtered axis, and must
-  additionally be strictly increasing when the signal is a lazy/on-disk array
-  that cannot fancy-index out of order; ``output_offset`` must be an integer
-  >= 0 that fits within ``outarray``; complex input no longer raises
-  ``UnboundLocalError``.
+  integer index arrays restricting at most one non-filtered axis;
+  ``output_offset`` must be an integer >= 0 that fits within ``outarray``;
+  complex input no longer raises ``UnboundLocalError``.
 
 Design details (spline-transition FIR) follow Burrus et al., 1992.
 """
@@ -442,6 +440,10 @@ class _OsPlan:
     last_ind: int
     downsample: bool
     decimation_factor: int | None
+    # (dim, read_sel, gather, out_length) per restricted non-filtered axis:
+    # read the signal at ``read_sel`` (sorted unique, which h5py requires) and,
+    # when ``gather`` is not None, take ``gather`` along ``dim`` to restore the
+    # order the caller asked for. ``out_length`` is the requested length.
     restricted_dims: list
     expected_shape: tuple[int, ...]
     dtype: str
@@ -601,13 +603,14 @@ def _plan_osconvolve(
         # so both are unsupported and fail loudly rather than producing a wrong
         # shape.
         #
-        # Order is only constrained for a lazy / on-disk signal: h5py requires
-        # fancy-index arrays to be strictly increasing and unique, while NumPy
-        # indexes an in-memory array in any order (spyglass's public
-        # FirFilterParameters.filter_data documents no ordering requirement for
-        # its `electrodes` argument). Rows come back in the requested order
-        # either way.
-        signal_in_memory = isinstance(signal, np.ndarray)
+        # Any order is accepted, including duplicates, and rows come back in the
+        # order requested (spyglass's public FirFilterParameters.filter_data
+        # documents no ordering requirement for its `electrodes` argument, and
+        # the electrode IDs it sorts can still map to unsorted ElectricalSeries
+        # columns). NumPy would fancy-index an in-memory array in any order, but
+        # h5py cannot, so an unsorted or repeated selection is READ as sorted
+        # unique indices and gathered back into the requested order after each
+        # block read -- which works for every signal type.
         for dim in range(signal.ndim):
             sel = input_dim_restrictions[dim]
             if dim == axis or sel is None:
@@ -626,16 +629,13 @@ def _plan_osconvolve(
                         f"input_dim_restrictions[{dim}] contains indices out of "
                         f"range for axis length {signal.shape[dim]}"
                     )
-                if not signal_in_memory and not np.all(
-                    sel_arr[:-1] < sel_arr[1:]
-                ):
-                    raise ValueError(
-                        f"input_dim_restrictions[{dim}] must be strictly "
-                        "increasing with no duplicate indices when the signal "
-                        "is not an in-memory numpy array (h5py and similar "
-                        "lazy arrays cannot fancy-index out of order)"
-                    )
-            restricted_dims.append((dim, sel, sel_arr.shape[0]))
+            read_sel, gather = sel_arr, None
+            if sel_arr.size > 0 and not np.all(sel_arr[:-1] < sel_arr[1:]):
+                # Read in sorted-unique order (what h5py accepts) and record the
+                # gather that puts the rows back into the requested order.
+                read_sel = np.unique(sel_arr)
+                gather = np.searchsorted(read_sel, sel_arr)
+            restricted_dims.append((dim, read_sel, gather, sel_arr.shape[0]))
             expected_shape[dim] = sel_arr.shape[0]
         if len(restricted_dims) > 1:
             raise ValueError(
@@ -796,7 +796,7 @@ def _osconvolve(
     # Signal block buffer (reused each iteration for the fill logic)
     block_shape = list(signal.shape)
     block_shape[axis] = nfft
-    for dim, _, length in restricted_dims:
+    for dim, _, _, length in restricted_dims:
         block_shape[dim] = length
     # Real input (the common case) uses a real FFT: half the buffer memory and
     # ~2x faster than a full complex FFT. Complex input keeps the full transform.
@@ -827,9 +827,20 @@ def _osconvolve(
 
     signal_slices_1: list = [np.s_[:]] * signal.ndim
     signal_slices_2: list = [np.s_[:]] * signal.ndim
-    for dim, sel, _ in restricted_dims:
-        signal_slices_1[dim] = sel
-        signal_slices_2[dim] = sel
+    # At most one non-filtered axis is restricted, so one gather covers it.
+    gather_dim = gather_index = None
+    for dim, read_sel, gather, _ in restricted_dims:
+        signal_slices_1[dim] = read_sel
+        signal_slices_2[dim] = read_sel
+        if gather is not None:
+            gather_dim, gather_index = dim, gather
+
+    def read_signal(slices: list) -> np.ndarray:
+        """Read one block chunk, restoring the caller's requested row order."""
+        chunk = signal[tuple(slices)]
+        if gather_index is None:
+            return chunk
+        return np.take(chunk, gather_index, axis=gather_dim)
 
     block_slices_1 = [np.s_[:]] * block_buffer.ndim
     block_slices_2 = [np.s_[:]] * block_buffer.ndim
@@ -875,27 +886,34 @@ def _osconvolve(
         # A slice read clips at the array bounds rather than raising, so a
         # genuine failure here (e.g. an h5py I/O error on an on-disk signal)
         # must propagate -- upstream swallowed it and silently zero-filled the
-        # overlap, corrupting the result without any error. The one read that
-        # must NOT be issued is the provably empty one (nothing precedes sample
-        # 0): h5py rejects an empty slice combined with a fancy index of 16 or
-        # more elements, which upstream's blanket except hid. Skipping it leaves
-        # the already-zeroed buffer, which is the correct fill anyway.
+        # overlap, corrupting the result without any error. What must NOT be
+        # issued is a read whose slice is provably empty: h5py rejects an empty
+        # slice combined with a fancy index of 16 or more elements, which
+        # upstream's blanket except hid. Both reads below are therefore guarded
+        # on having something to fetch -- the overlap read when the block starts
+        # at sample 0 (nothing precedes it), and the main read when a tail block
+        # starts at or past the end of the data. Skipping either leaves the
+        # already-zeroed buffer, which is the correct fill.
+        signal_len = signal.shape[axis]
         overlap_start = start - (kernel_len - 1)
         read_start = max(overlap_start, 0)
         if read_start < start:
             block_pos = read_start - overlap_start
             signal_slices_1[axis] = np.s_[read_start:start]
-            signal_chunk = signal[tuple(signal_slices_1)]
+            signal_chunk = read_signal(signal_slices_1)
             length = signal_chunk.shape[axis]
             block_slices_1[axis] = np.s_[block_pos : block_pos + length]
             block_buffer[tuple(block_slices_1)] = signal_chunk
 
         # fill block_step segment of the block
-        signal_slices_2[axis] = np.s_[start:stop]
-        signal_chunk = signal[tuple(signal_slices_2)]
-        length = signal_chunk.shape[axis]
-        block_slices_2[axis] = np.s_[kernel_len - 1 : kernel_len - 1 + length]
-        block_buffer[tuple(block_slices_2)] = signal_chunk
+        if start < signal_len:
+            signal_slices_2[axis] = np.s_[start:stop]
+            signal_chunk = read_signal(signal_slices_2)
+            length = signal_chunk.shape[axis]
+            block_slices_2[axis] = np.s_[
+                kernel_len - 1 : kernel_len - 1 + length
+            ]
+            block_buffer[tuple(block_slices_2)] = signal_chunk
 
         # circular convolution of this block via the convolution theorem
         if real_output:
@@ -1019,11 +1037,11 @@ def filter_data_fir(
         One entry per dimension of ``data``. The entry for ``axis`` must be
         None; at most one other entry may be set, and it must be a 1-D, in-range
         array of integer indices selecting which elements of that (non-filtered)
-        axis to keep -- e.g. a subset of electrodes. Rows are returned in the
-        order given. Any order is allowed for an in-memory numpy ``data``; for a
-        lazy/on-disk ``data`` the indices must be strictly increasing and unique
-        (h5py cannot fancy-index out of order). Slices/masks and restricting
-        more than one axis are not supported (they raise).
+        axis to keep -- e.g. a subset of electrodes. Any order is accepted,
+        including duplicates, and rows are returned in the order given (an
+        unsorted selection is read in sorted order, which is all h5py accepts,
+        then gathered back). Slices/masks and restricting more than one axis are
+        not supported (they raise).
     output_offset : int, optional
         Offset (>= 0) into ``outarray`` along ``axis`` at which to start
         writing. Default 0.

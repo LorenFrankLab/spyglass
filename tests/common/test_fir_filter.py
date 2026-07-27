@@ -789,25 +789,38 @@ class TestEdgeCasesAndValidation:
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
     @pytest.mark.parametrize("electrodes", [np.array([2, 0]), np.array([1, 1])])
-    def test_lazy_restriction_must_be_strictly_increasing(
+    def test_lazy_restriction_allows_any_order(
         self, lfp_lowpass, rng, electrodes, tmp_path
     ):
-        # h5py cannot fancy-index out of order or with duplicates, so a lazy /
-        # on-disk signal is still held to that contract -- validated up front
-        # rather than failing deep in a block read.
+        # h5py cannot fancy-index out of order or with duplicates, so an
+        # unsorted selection is read as sorted unique indices and gathered back.
+        # filter_data_nwb maps sorted electrode IDs onto ElectricalSeries
+        # columns, which can be unsorted, and it filters straight from h5py --
+        # so on-disk signals have to accept the same orders in-memory ones do.
         h5py = pytest.importorskip("h5py")
         b = lfp_lowpass
+        data = rng.standard_normal((6, self.N))
         path = str(tmp_path / "sig.h5")
         with h5py.File(path, "w") as f:
-            f.create_dataset("data", data=rng.standard_normal((6, self.N)))
+            f.create_dataset("data", data=data)
         with h5py.File(path, "r") as f:
-            with pytest.raises(ValueError, match="strictly increasing"):
-                fir.filter_data_fir(
-                    f["data"],
-                    b,
-                    axis=1,
-                    input_dim_restrictions=[electrodes, None],
-                )
+            shape, _ = fir.filter_data_fir(
+                f["data"],
+                b,
+                axis=1,
+                input_dim_restrictions=[electrodes, None],
+                describe_dims=True,
+            )
+            out = fir.filter_data_fir(
+                f["data"],
+                b,
+                axis=1,
+                input_dim_restrictions=[electrodes, None],
+            )
+        ref = reference_filter(data, b, axis=1, electrodes=electrodes)
+        assert shape == ref.shape
+        assert out.shape == ref.shape
+        np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
     def test_restriction_indices_out_of_range_raise(self, lfp_lowpass, rng):
         b = lfp_lowpass
@@ -904,6 +917,44 @@ class TestEdgeCasesAndValidation:
             axis=0,
             input_index_bounds=[0, 3000],
             output_index_bounds=[delay, delay + 3000],
+            electrodes=electrodes,
+        )
+        assert out.shape == ref.shape
+        np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
+
+    def test_h5py_tail_block_starting_past_data_end(self, rng, tmp_path):
+        # The main block read signal[start:stop] is empty whenever a tail block
+        # begins at or past the end of the data -- which happens when the output
+        # stop lands just past a block boundary. Same h5py failure as the empty
+        # overlap read (>= 16 electrodes), so it needs the same guard. Sized so
+        # the last block starts exactly at the end of the data: with nfft=512
+        # and a 101-tap kernel the block stride is 412, and n=412 puts the
+        # second block's read at signal[412:824] on a 412-sample signal.
+        h5py = pytest.importorskip("h5py")
+        n_time, n_elec = 412, 32  # >= 16 electrodes triggers the h5py path
+        b = np.ones(101) / 101
+        delay = (len(b) - 1) // 2
+        arr = rng.standard_normal((n_time, n_elec))
+        path = str(tmp_path / "tail.h5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=arr)
+        electrodes = np.arange(n_elec)
+        with h5py.File(path, "r") as f:
+            out = fir.filter_data_fir(
+                f["data"],
+                b,
+                axis=0,
+                nfft=512,
+                input_index_bounds=[0, n_time],
+                output_index_bounds=[delay, delay + n_time],
+                input_dim_restrictions=[None, electrodes],
+            )
+        ref = reference_filter(
+            arr,
+            b,
+            axis=0,
+            input_index_bounds=[0, n_time],
+            output_index_bounds=[delay, delay + n_time],
             electrodes=electrodes,
         )
         assert out.shape == ref.shape
