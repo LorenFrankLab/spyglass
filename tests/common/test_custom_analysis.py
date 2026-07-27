@@ -421,6 +421,40 @@ class TestCleanupAndRegistry:
         assert Path(valid_fp).exists(), "Valid file should remain"
         assert Path(export_fp).exists(), "Exported valid file should remain"
 
+    def test_safety_threshold_prevents_mass_deletion(
+        self,
+        analysis_registry,
+        custom_analysis_tables,
+        mini_copy_name,
+        base_dir,
+        teardown,
+        common,
+        mock_create,
+    ):
+        """Test that deletion safety threshold prevents mass deletion."""
+        # change to a temporary directory to avoid deleting real files
+        master_table = common.common_nwbfile.AnalysisNwbfile()
+        tmp_dir = Path("tmp_analysis_files")
+        tmp_dir.mkdir(exist_ok=True)
+        master_table._analysis_dir = tmp_dir
+
+        # Create multiple files to exceed the threshold without adding to the table
+        num_files = 20
+        created_files = []
+        for _ in range(num_files):
+            fname = mock_create(master_table)
+            created_files.append(fname)
+
+        with pytest.raises(RuntimeError, match="Attempting to delete"):
+            master_table.cleanup()
+
+        # Cleanup created files manually
+        if teardown:
+            for fname in created_files:
+                fp = tmp_dir / fname
+                if Path(fp).exists():
+                    Path(fp).unlink()
+
     def test_registry_entry_has_metadata(
         self, analysis_registry, custom_analysis_table
     ):
