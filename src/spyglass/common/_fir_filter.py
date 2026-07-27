@@ -93,7 +93,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from multiprocessing import cpu_count
-from typing import Protocol
+from typing import Protocol, TypeVar, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -129,6 +129,13 @@ class _WritableArray(_ReadableArray, Protocol):
     """Output sink, likewise possibly on disk (spyglass writes into NWB)."""
 
     def __setitem__(self, key, value, /) -> None: ...
+
+
+# filter_data_fir writes into a supplied outarray IN PLACE and returns that same
+# object, so the return type follows the argument: an h5py Dataset in gives an
+# h5py Dataset back, not a numpy array. Only the allocate-for-me case returns an
+# ndarray.
+_OutArrayT = TypeVar("_OutArrayT", bound=_WritableArray)
 
 
 __all__ = [
@@ -761,7 +768,7 @@ def _osconvolve(
     decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-) -> np.ndarray:
+) -> _WritableArray:
     """Overlap-save FFT convolution, written to minimize memory usage.
 
     Streams the convolution block-by-block into ``outarray`` (which may be an
@@ -785,8 +792,9 @@ def _osconvolve(
 
     Returns
     -------
-    numpy.ndarray
-        The filled ``outarray``, or a newly allocated array if none was given.
+    numpy.ndarray or the ``outarray`` type
+        The filled ``outarray`` itself, or a newly allocated numpy array if none
+        was given.
     """
     # The kernel is small and always in memory, so normalize it to an array for
     # convenience. The signal is deliberately NOT converted: it may be an
@@ -1106,6 +1114,26 @@ def describe_output(
     return plan.expected_shape, plan.dtype
 
 
+@overload
+def filter_data_fir(
+    data: _ReadableArray,
+    filter_coeffs: npt.ArrayLike,
+    *,
+    outarray: None = None,
+    **kwargs,
+) -> np.ndarray: ...
+
+
+@overload
+def filter_data_fir(
+    data: _ReadableArray,
+    filter_coeffs: npt.ArrayLike,
+    *,
+    outarray: _OutArrayT,
+    **kwargs,
+) -> _OutArrayT: ...
+
+
 def filter_data_fir(
     data: _ReadableArray,
     filter_coeffs: npt.ArrayLike,
@@ -1119,7 +1147,7 @@ def filter_data_fir(
     decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-) -> np.ndarray:
+) -> _WritableArray:
     """Apply an FIR filter to data via overlap-save FFT convolution.
 
     This is the public entry point spyglass uses: a thin ``mode='full'`` wrapper
@@ -1177,11 +1205,12 @@ def filter_data_fir(
 
     Returns
     -------
-    numpy.ndarray
+    numpy.ndarray or the ``outarray`` type
         The filtered (and optionally decimated) data. When an ``outarray`` was
-        supplied, the SAME object is returned (written in place); otherwise a
-        newly allocated array is returned. Use :func:`describe_output` to size
-        that array without filtering.
+        supplied, the SAME object is returned, written in place -- so an h5py
+        ``Dataset`` in gives that ``Dataset`` back, not a numpy array.
+        Otherwise a newly allocated numpy array is returned. Use
+        :func:`describe_output` to size that array without filtering.
 
     Raises
     ------
