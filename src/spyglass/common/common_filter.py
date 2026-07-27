@@ -339,9 +339,15 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             # Zero samples after clipping -- an interval that lands between two
             # timestamps, or entirely outside them. Only genuinely empty
-            # intervals get here; a malformed one raised above rather than
-            # being silently dropped.
+            # intervals get here; a malformed one raised above rather than being
+            # silently dropped. Log it: dropping most of valid_times silently
+            # yields a short result that looks correct, because the timestamps
+            # match the data that WAS filtered.
             if to <= frm:
+                logger.warning(
+                    f"Skipping interval ({a_start}, {a_stop}): no samples "
+                    "between those times in the electrical series"
+                )
                 continue
 
             indices.append((frm, to))
@@ -524,9 +530,14 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-            if (
-                to <= frm
-            ):  # genuinely empty after clipping (see filter_data_nwb)
+            # Zero samples after clipping; a reversed interval raised above.
+            # Logged for the same reason as in filter_data_nwb -- a silently
+            # shortened result is indistinguishable from a correct one.
+            if to <= frm:
+                logger.warning(
+                    f"Skipping interval ({a_start}, {a_stop}): no samples "
+                    "between those times in 'timestamps'"
+                )
                 continue
             indices.append((frm, to))
 

@@ -237,6 +237,8 @@ for label, interval_data in results.groupby("interval_labels"):
     of silently dropping it #1635
 - Electrode selections may again be given in any order, on-disk as well as
     in-memory; rows are returned in the order requested #1635
+- Log a warning when an interval in `valid_times` is skipped for containing no
+    samples, instead of dropping it silently #1635
 
 ### Pipelines
 
