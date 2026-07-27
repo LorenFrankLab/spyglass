@@ -332,7 +332,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps_on_disk, n_samples
             )
-            if np.isclose(frm, to, rtol=0, atol=1e-8):
+            if to <= frm:  # interval holds no samples after clipping
                 continue
 
             indices.append((frm, to))
@@ -341,7 +341,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 data_on_disk,
                 filter_coeff,
                 axis=time_axis,
-                input_index_bounds=[frm, to - 1],
+                input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
                 describe_dims=True,
                 decimation_factor=decimation,
@@ -349,6 +349,16 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             output_shape_list[time_axis] += shape[time_axis]
+
+        # Fail before touching the analysis file: writing a zero-length
+        # ElectricalSeries and only then failing on the empty interval list
+        # would leave a half-populated file behind.
+        if not indices:
+            raise ValueError(
+                "No samples to filter: every interval in 'valid_times' is "
+                "empty after clipping to the electrical series timestamps "
+                f"({len(valid_times)} interval(s) checked)"
+            )
 
         # Create dynamic table region and electrode series, write/close file
         with pynwb.NWBHDF5IO(
@@ -418,7 +428,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                         ts_offset : ts_offset + len(extracted_ts)
                     ] = extracted_ts
                     ts_offset += len(extracted_ts)
-                    input_index_bounds = [0, interval_samples - 1]
+                    input_index_bounds = [0, interval_samples]
 
                 else:
                     logger.info(f"Interval {ii}: leaving data on disk")
@@ -500,7 +510,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-            if np.isclose(frm, to, rtol=0, atol=1e-8):
+            if to <= frm:  # interval holds no samples after clipping
                 continue
             indices.append((frm, to))
 
@@ -516,6 +526,13 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             output_shape_list[time_axis] += shape[time_axis]
+
+        if not indices:
+            raise ValueError(
+                "No samples to filter: every interval in 'valid_times' is "
+                f"empty after clipping to 'timestamps' ({len(valid_times)} "
+                "interval(s) checked)"
+            )
 
         # create the dataset and the timestamps array
         filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)

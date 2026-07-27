@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 
@@ -65,6 +66,25 @@ def test_time_bound_warning(filter_parameters, add_filter, filter_dict):
 @pytest.mark.skip(reason="Not testing V0: filter_data")
 def test_filter_data(filter_parameters, mini_content):
     pass
+
+
+def test_filter_data_rejects_all_empty_intervals(
+    filter_parameters, add_filter, filter_coeff
+):
+    """Degenerate valid_times must fail loudly, not build an empty output.
+
+    Every interval here clips to zero samples. Without an explicit check the
+    empty interval list only surfaces later as an opaque unpack error -- and in
+    filter_data_nwb that happens *after* a zero-length ElectricalSeries has
+    already been written to the analysis file.
+    """
+    timestamps = np.arange(100, dtype=float)
+    data = np.zeros((100, 2))
+    degenerate = np.array([[10.0, 10.0], [50.0, 50.0]])
+    with pytest.raises(ValueError, match="No samples to filter"):
+        filter_parameters.filter_data(
+            timestamps, data, filter_coeff, degenerate, [0, 1], 1
+        )
 
 
 def test_calc_filter_delay(filter_parameters, filter_coeff):
