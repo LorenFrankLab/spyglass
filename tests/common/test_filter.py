@@ -147,9 +147,12 @@ def test_filter_data_timestamps_align_with_data(
 
     assert len(new_timestamps) == filtered.shape[0]
     peak_time = new_timestamps[np.argmax(np.abs(filtered[:, 0]))]
-    # Decimation keeps every `decimation`-th sample, so the peak lands on the
-    # retained sample nearest the impulse -- within one decimated step.
-    assert abs(peak_time - timestamps[impulse_at]) <= decimation / 100.0
+    # `impulse_at` is a multiple of `decimation`, so the impulse sample survives
+    # decimation and the peak must land on it EXACTLY. A tolerance of one
+    # decimated step would accept the very off-by-one-bin drift this test
+    # exists to catch.
+    assert impulse_at % decimation == 0
+    assert peak_time == pytest.approx(timestamps[impulse_at])
 
 
 def filter_data_helper(filter_parameters, timestamps, data, coeff, decimation):

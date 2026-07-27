@@ -837,7 +837,11 @@ class TestEdgeCasesAndValidation:
             float_out.astype(np.int16).astype(np.int32)
             - direct.astype(np.int16).astype(np.int32)
         )
-        assert diff.max() <= 1  # never more than one count
+        # Pin both bounds: it really does happen (so the hazard stays
+        # documented if the FFT backend changes), and it never exceeds one
+        # count (so a genuine filtering error could not hide behind it).
+        assert diff.max() == 1
+        assert 0 < np.count_nonzero(diff) < 0.05 * diff.size
 
     def test_kernel_accepts_python_list(self, rng):
         # b is documented array-like and converted internally, so a plain list
