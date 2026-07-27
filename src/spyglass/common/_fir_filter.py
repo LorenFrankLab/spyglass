@@ -135,6 +135,7 @@ __all__ = [
     "estimate_taps",
     "group_delay",
     "firdesign",
+    "describe_output",
     "filter_data_fir",
 ]
 
@@ -487,7 +488,7 @@ class _OsPlan:
     """Validated arguments and output plan for one overlap-save convolution.
 
     Produced by :func:`_plan_osconvolve` and consumed by :func:`_osconvolve`, it
-    carries everything the block loop (and a ``describe_dims`` query) needs, so
+    carries everything the block loop (and :func:`describe_output`) needs, so
     no argument is re-validated once execution starts.
     """
 
@@ -522,8 +523,9 @@ def _plan_osconvolve(
 
     Pure validation and shape planning: raises on any invalid argument it
     receives and returns the :class:`_OsPlan` the block loop (and
-    ``describe_dims``) needs. ``outarray`` and ``output_offset`` are validated by
-    :func:`_osconvolve`, which is where the array itself is available.
+    :func:`describe_output`) needs. ``outarray`` and ``output_offset`` are
+    validated by :func:`_osconvolve`, which is where the array itself is
+    available.
     No FFT runs and no output array is allocated here; ``kernel`` must already
     be a NumPy array.
     """
@@ -722,7 +724,7 @@ def _plan_osconvolve(
         expected_shape[axis] = n
 
     expected_shape = tuple(expected_shape)
-    # nfft is validated here, in the planning pass, so describe_dims rejects
+    # nfft is validated here, in the planning pass, so describe_output rejects
     # exactly what the real filtering call would reject. _osconvolve only fills
     # in the default when None.
     if nfft is not None:
@@ -756,11 +758,10 @@ def _osconvolve(
     outarray: _WritableArray | None = None,
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
-    describe_dims: bool = False,
     decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-) -> tuple[tuple[int, ...], str] | np.ndarray:
+) -> np.ndarray:
     """Overlap-save FFT convolution, written to minimize memory usage.
 
     Streams the convolution block-by-block into ``outarray`` (which may be an
@@ -784,9 +785,8 @@ def _osconvolve(
 
     Returns
     -------
-    tuple of (tuple of int, str), or numpy.ndarray
-        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
-        have; otherwise the filled ``outarray``.
+    numpy.ndarray
+        The filled ``outarray``, or a newly allocated array if none was given.
     """
     # The kernel is small and always in memory, so normalize it to an array for
     # convenience. The signal is deliberately NOT converted: it may be an
@@ -814,14 +814,6 @@ def _osconvolve(
     expected_shape = plan.expected_shape
     dtype = plan.dtype
     block_offset = 0
-
-    if describe_dims:
-        logger.debug(
-            "Output array should have shape %s and dtype %s",
-            expected_shape,
-            dtype,
-        )
-        return expected_shape, dtype
 
     if outarray is None:
         outarray = np.zeros(expected_shape, dtype=dtype)
@@ -1054,6 +1046,66 @@ def _osconvolve(
     return outarray
 
 
+def describe_output(
+    data: _ReadableArray,
+    filter_coeffs: npt.ArrayLike,
+    *,
+    nfft: int | None = None,
+    axis: int = -1,
+    input_index_bounds: Sequence[int] | None = None,
+    output_index_bounds: Sequence[int] | None = None,
+    decimation_factor: int | None = None,
+    input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
+) -> tuple[tuple[int, ...], str]:
+    """Shape and dtype :func:`filter_data_fir` would produce, without filtering.
+
+    Sizes the preallocated (possibly on-disk) array for the out-of-core
+    streaming protocol described in :func:`filter_data_fir`. No data is read and
+    no FFT runs -- this only validates the arguments and plans the output.
+
+    Every argument that affects the answer is accepted and validated exactly as
+    :func:`filter_data_fir` validates it, so whatever this accepts, the matching
+    filtering call accepts too. The arguments that cannot affect the answer
+    (``threads``, ``outarray``, ``output_offset``) are deliberately absent
+    rather than accepted and ignored.
+
+    Parameters
+    ----------
+    See :func:`filter_data_fir` for the shared parameters.
+
+    Returns
+    -------
+    shape : tuple of int
+        Shape the output would have, including the effect of
+        ``decimation_factor`` and ``input_dim_restrictions``.
+    dtype : str
+        ``'<f8'`` for real input, ``'<c16'`` for complex input.
+
+    Raises
+    ------
+    ValueError, IndexError
+        On the same invalid arguments :func:`filter_data_fir` rejects.
+    """
+    plan = _plan_osconvolve(
+        data,
+        np.asarray(filter_coeffs),
+        mode="full",
+        nfft=nfft,
+        threads=1,  # no FFT runs here, so this cannot affect the answer
+        axis=axis,
+        input_index_bounds=input_index_bounds,
+        output_index_bounds=output_index_bounds,
+        decimation_factor=decimation_factor,
+        input_dim_restrictions=input_dim_restrictions,
+    )
+    logger.debug(
+        "Output array should have shape %s and dtype %s",
+        plan.expected_shape,
+        plan.dtype,
+    )
+    return plan.expected_shape, plan.dtype
+
+
 def filter_data_fir(
     data: _ReadableArray,
     filter_coeffs: npt.ArrayLike,
@@ -1064,11 +1116,10 @@ def filter_data_fir(
     outarray: _WritableArray | None = None,
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
-    describe_dims: bool = False,
     decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
-) -> tuple[tuple[int, ...], str] | np.ndarray:
+) -> np.ndarray:
     """Apply an FIR filter to data via overlap-save FFT convolution.
 
     This is the public entry point spyglass uses: a thin ``mode='full'`` wrapper
@@ -1109,8 +1160,6 @@ def filter_data_fir(
     output_index_bounds : sequence of 2 int, optional
         ``[start, stop)`` indices of the full-convolution output to keep (stop
         exclusive).
-    describe_dims : bool, optional
-        If True, return ``(shape, dtype)`` without filtering. Default False.
     decimation_factor : int, optional
         Integer decimation factor (>= 1). Default None (no decimation).
     input_dim_restrictions : sequence, optional
@@ -1128,11 +1177,11 @@ def filter_data_fir(
 
     Returns
     -------
-    tuple of (tuple of int, str), or numpy.ndarray
-        If ``describe_dims`` is True, the ``(shape, dtype)`` the output would
-        have. Otherwise the filtered (and optionally decimated) data: when an
-        ``outarray`` was supplied, the SAME object is returned (written in
-        place); otherwise a newly allocated array is returned.
+    numpy.ndarray
+        The filtered (and optionally decimated) data. When an ``outarray`` was
+        supplied, the SAME object is returned (written in place); otherwise a
+        newly allocated array is returned. Use :func:`describe_output` to size
+        that array without filtering.
 
     Raises
     ------
@@ -1155,12 +1204,13 @@ def filter_data_fir(
     yields ``complex128`` (``'<c16'``). If you supply your own ``outarray``, its
     dtype is used as-is and the result is cast into it -- assigning the float
     result into an integer array truncates silently, so match the dtype from
-    ``describe_dims`` (a lower-precision float such as ``float32`` is fine).
+    :func:`describe_output` (a lower-precision float such as ``float32`` is
+    fine).
 
     Out-of-core streaming protocol (how spyglass filters data larger than RAM):
-    call once per interval with ``describe_dims=True`` to get each interval's
-    output length, preallocate a single (possibly on-disk) array sized to their
-    sum, then call again per interval with that array as ``outarray`` and the
+    call :func:`describe_output` once per interval to get each interval's output
+    length, preallocate a single (possibly on-disk) array sized to their sum,
+    then call this function per interval with that array as ``outarray`` and the
     running cumulative length as ``output_offset``.
 
     The input is assumed finite: a NaN/inf in any block spreads across that
@@ -1176,7 +1226,6 @@ def filter_data_fir(
         outarray=outarray,
         input_index_bounds=input_index_bounds,
         output_index_bounds=output_index_bounds,
-        describe_dims=describe_dims,
         decimation_factor=decimation_factor,
         input_dim_restrictions=input_dim_restrictions,
         output_offset=output_offset,

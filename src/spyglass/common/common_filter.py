@@ -352,13 +352,12 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
             indices.append((frm, to))
 
-            shape, _ = fir.filter_data_fir(
+            shape, _ = fir.describe_output(
                 data_on_disk,
                 filter_coeff,
                 axis=time_axis,
                 input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
-                describe_dims=True,
                 decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )
@@ -541,13 +540,12 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 continue
             indices.append((frm, to))
 
-            shape, _ = fir.filter_data_fir(
+            shape, _ = fir.describe_output(
                 data,
                 filter_coeff,
                 axis=time_axis,
                 input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
-                describe_dims=True,
                 decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )

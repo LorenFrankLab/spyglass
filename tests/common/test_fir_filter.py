@@ -398,7 +398,8 @@ class TestFilterCorrectness:
 # --------------------------------------------------------------------------- #
 class TestStreaming:
     """Mirror FirFilterParameters.filter_data: several valid_times intervals
-    filtered+decimated into ONE preallocated array via describe_dims/offset."""
+    filtered+decimated into ONE preallocated array via describe_output/offset.
+    """
 
     @pytest.mark.parametrize("time_axis", [0, 1])
     @pytest.mark.parametrize(
@@ -432,13 +433,12 @@ class TestStreaming:
         out_shape[elec_axis] = len(electrodes)
         offsets = [0]
         for frm, to in valid_times:
-            s, _ = fir.filter_data_fir(
+            s, _ = fir.describe_output(
                 data,
                 b,
                 axis=time_axis,
                 input_index_bounds=[frm, to],
                 output_index_bounds=[delay, delay + to - frm],
-                describe_dims=True,
                 decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
             )
@@ -501,14 +501,13 @@ class TestStreaming:
             f.create_dataset("data", data=arr)
         with h5py.File(path, "r+") as f:
             sig = f["data"]
-            shape, dtype = fir.filter_data_fir(
+            shape, dtype = fir.describe_output(
                 sig,
                 b,
                 axis=1,
                 output_index_bounds=oib,
                 decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
-                describe_dims=True,
             )
             out = f.create_dataset("out", shape=shape, dtype=dtype)
             fir.filter_data_fir(
@@ -535,12 +534,12 @@ class TestStreaming:
 
 
 # --------------------------------------------------------------------------- #
-# describe_dims contract
+# describe_output contract
 # --------------------------------------------------------------------------- #
-class TestDescribeDims:
+class TestDescribeOutput:
     @pytest.mark.parametrize("time_axis", [0, 1])
     @pytest.mark.parametrize("decimation_factor", [None, 7])
-    def test_describe_matches_actual_output(
+    def test_describe_output_matches_actual_output(
         self, lfp_lowpass, rng, time_axis, decimation_factor
     ):
         b = lfp_lowpass
@@ -550,13 +549,12 @@ class TestDescribeDims:
         data = rng.standard_normal(shape)
         oib = [delay, delay + N]
 
-        shape_pred, dtype_pred = fir.filter_data_fir(
+        shape_pred, dtype_pred = fir.describe_output(
             data,
             b,
             axis=time_axis,
             output_index_bounds=oib,
             decimation_factor=decimation_factor,
-            describe_dims=True,
         )
         out = fir.filter_data_fir(
             data,
@@ -572,6 +570,53 @@ class TestDescribeDims:
 # --------------------------------------------------------------------------- #
 # _osconvolve modes (reachable only via the private function; spyglass uses full)
 # --------------------------------------------------------------------------- #
+class TestDescribeOutputParity:
+    """describe_output must accept exactly what filter_data_fir accepts."""
+
+    N = 5000
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            ({"nfft": 4.0}, "nfft"),
+            ({"decimation_factor": 0}, "decimation_factor"),
+            ({"input_index_bounds": [10, 5]}, "increasing"),
+            ({"output_index_bounds": [5, 1]}, "increasing"),
+            # one entry per dimension; the signal here is 1-D
+            ({"input_dim_restrictions": [None, None]}, "Expected 1"),
+        ],
+    )
+    def test_rejects_what_filtering_rejects(
+        self, lfp_lowpass, rng, kwargs, match
+    ):
+        # The sizing and filtering passes share _plan_osconvolve, so anything
+        # one rejects the other must reject. Before the split these were one
+        # function behind a describe_dims flag, and the flag returned early --
+        # so a bad output_offset was validated on one path and silently ignored
+        # on the other. Pin the parity that replaced it.
+        b = lfp_lowpass
+        x = rng.standard_normal(self.N)
+        with pytest.raises((ValueError, IndexError), match=match):
+            fir.describe_output(x, b, axis=0, **kwargs)
+        with pytest.raises((ValueError, IndexError), match=match):
+            fir.filter_data_fir(x, b, axis=0, **kwargs)
+
+    def test_signature_omits_arguments_that_cannot_affect_the_answer(self):
+        # threads/outarray/output_offset do not change the shape or dtype, so
+        # describe_output does not take them. Passing one is a caller error and
+        # must say so, rather than being accepted and ignored as the old
+        # describe_dims=True path did.
+        import inspect
+
+        params = inspect.signature(fir.describe_output).parameters
+        for name in ("threads", "outarray", "output_offset", "describe_dims"):
+            assert name not in params
+        with pytest.raises(TypeError):
+            fir.describe_output(
+                np.zeros(100), np.ones(11) / 11, axis=0, output_offset=-99
+            )
+
+
 class TestConvolveModes:
     @pytest.mark.parametrize("mode", ["full", "same", "valid"])
     def test_mode_matches_numpy(self, lfp_lowpass, rng, mode):
@@ -739,14 +784,15 @@ class TestEdgeCasesAndValidation:
             fir.filter_data_fir(x, b, axis=0, outarray=out, output_offset=1.0)
 
     def test_noninteger_nfft_rejected(self, lfp_lowpass, rng):
-        # A non-integer nfft must be rejected in BOTH the sizing (describe_dims)
-        # and filtering passes -- previously describe_dims accepted it and the
-        # real call died with a raw TypeError.
+        # A non-integer nfft must be rejected in BOTH the sizing and filtering
+        # passes -- previously the sizing pass accepted it and the real call
+        # died with a raw TypeError. describe_output shares _plan_osconvolve
+        # with filter_data_fir precisely so the two cannot drift.
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         big_nfft = float(2 * len(b))  # > M, but a float
         with pytest.raises(ValueError, match="nfft.*integer"):
-            fir.filter_data_fir(x, b, axis=0, nfft=big_nfft, describe_dims=True)
+            fir.describe_output(x, b, axis=0, nfft=big_nfft)
         with pytest.raises(ValueError, match="nfft.*integer"):
             fir.filter_data_fir(x, b, axis=0, nfft=big_nfft)
 
@@ -844,12 +890,11 @@ class TestEdgeCasesAndValidation:
         with h5py.File(path, "w") as f:
             f.create_dataset("data", data=data)
         with h5py.File(path, "r") as f:
-            shape, _ = fir.filter_data_fir(
+            shape, _ = fir.describe_output(
                 f["data"],
                 b,
                 axis=1,
                 input_dim_restrictions=[electrodes, None],
-                describe_dims=True,
             )
             out = fir.filter_data_fir(
                 f["data"],

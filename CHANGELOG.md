@@ -239,6 +239,10 @@ for label, interval_data in results.groupby("interval_labels"):
     in-memory; rows are returned in the order requested #1635
 - Log a warning when an interval in `valid_times` is skipped for containing no
     samples, instead of dropping it silently #1635
+- Split the vendored FIR sizing pass into its own `describe_output` function
+    instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
+    type and arguments that cannot affect the sizing answer are rejected rather
+    than ignored #1635
 
 ### Pipelines
 
