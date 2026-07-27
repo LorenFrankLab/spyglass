@@ -1,14 +1,18 @@
 """Tests for the vendored scipy.fft FIR filtering module (``_fir_filter``).
 
-These tests are deliberately self-contained: correctness is checked against an
-independent ``numpy.convolve`` reference rather than against upstream ghostipy,
-so the suite has no dependency on ghostipy. They lock in exactly the behavior
-spyglass relies on in ``common_filter.py`` (FIR design, out-of-core streaming
-into a preallocated array, integer decimation, electrode selection, delay
-compensation) plus the edge cases the vendored copy hardened relative to
-upstream.
+Correctness is checked against an independent ``numpy.convolve`` reference
+rather than against upstream ghostipy, so the suite has no dependency on
+ghostipy. They lock in exactly the behavior spyglass relies on in
+``common_filter.py`` (FIR design, out-of-core streaming into a preallocated
+array, integer decimation, electrode selection, delay compensation) plus the
+edge cases the vendored copy hardened relative to upstream.
 
 Run with:  pytest tests/common/test_fir_filter.py
+
+The tests themselves are pure numerics and need no database, but the import
+below reaches ``spyglass.common.__init__``, which activates DataJoint schemas --
+so collection still requires the test MySQL container like the rest of the
+suite.
 """
 
 import numpy as np
@@ -110,14 +114,14 @@ class TestFirDesign:
             spline_power=2,
         )
         assert len(b) == numtaps
-        np.testing.assert_allclose(b, b[::-1], atol=0)  # still Type I symmetric
+        # Exact: taps are built as hstack((flip(half), center, half)).
+        np.testing.assert_array_equal(b, b[::-1])  # still Type I symmetric
 
     def test_lowpass_is_linear_phase(self, lfp_lowpass):
         b = lfp_lowpass
         assert len(b) % 2 == 1
-        np.testing.assert_allclose(
-            b, b[::-1], atol=0
-        )  # Type I symmetry (exact)
+        # Exact, not merely close: assert_allclose would still admit rtol=1e-7.
+        np.testing.assert_array_equal(b, b[::-1])  # Type I symmetry
 
     @pytest.mark.parametrize(
         "band_edges, desired, tw, passband_hz, stopband_hz",
@@ -139,7 +143,7 @@ class TestFirDesign:
             numtaps, band_edges, desired, sampling_freq=FS, spline_power=2
         )
         assert len(b) == numtaps
-        np.testing.assert_allclose(b, b[::-1], atol=0)  # Type I linear phase
+        np.testing.assert_array_equal(b, b[::-1])  # Type I linear phase (exact)
         w, h = freqz(b, worN=16384, fs=FS)
         mag = np.abs(h)
         for f in passband_hz:
@@ -403,7 +407,8 @@ class TestStreaming:
             # single-block intervals (each tot_length < FFT block stride)
             (60_000, [(500, 20000), (20000, 45000), (45000, 59000)]),
             # multi-block intervals, with lengths deliberately NOT divisible by
-            # decimation_factor=10 so the per-interval decimation phase reset is exercised too
+            # decimation_factor=10 so the per-interval decimation phase reset
+            # is exercised too
             (250_000, [(500, 88007), (88007, 175003), (175003, 249000)]),
         ],
     )
@@ -648,7 +653,8 @@ class TestEdgeCasesAndValidation:
     def test_decimation_below_one_or_noninteger_fails_closed(
         self, lfp_lowpass, rng, bad_factor
     ):
-        # decimation_factor must be an integer >= 1 (consistent with nfft / output_offset).
+        # decimation_factor must be an integer >= 1 (consistent with nfft and
+        # output_offset).
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         with pytest.raises(ValueError, match="decimation_factor"):
@@ -752,6 +758,40 @@ class TestEdgeCasesAndValidation:
         real_out = np.empty(60 + len(b) - 1, dtype=np.float64)
         with pytest.raises(TypeError, match="complex"):
             fir._osconvolve(x, b, mode="full", outarray=real_out)
+
+    def test_integer_outarray_truncates_toward_zero(self, rng):
+        # Production writes into an int16 ElectricalSeries: filter_data_nwb
+        # allocates the output with the RAW dtype, so the float64 filter result
+        # is cast into it. Every other numeric test here is float64-in/out, so
+        # pin the cast semantics: numpy assignment truncates toward zero, it
+        # does NOT round. Anyone "fixing" this to np.rint would shift every
+        # stored LFP sample by up to half an ADC count.
+        x = (rng.standard_normal(self.N) * 100).astype(np.int16)
+        b = np.ones(51) / 51
+        float_out = fir.filter_data_fir(x, b, axis=0)
+        int_out = np.empty(self.N + len(b) - 1, dtype=np.int16)
+        fir.filter_data_fir(x, b, axis=0, outarray=int_out)
+        np.testing.assert_array_equal(int_out, float_out.astype(np.int16))
+        # Compared against np.rint the two differ, which is the point.
+        assert not np.array_equal(int_out, np.rint(float_out).astype(np.int16))
+
+    def test_integer_outarray_amplifies_roundoff_to_one_count(self, rng):
+        # Truncation is discontinuous at every integer, so the ~1e-15 difference
+        # between this FFT convolution and a direct np.convolve lands on either
+        # side of a boundary for a small fraction of samples -- turning
+        # round-off into a full ADC count. The float results agree to 1e-9; the
+        # truncated ones do not agree exactly. Documented so a future reader
+        # does not mistake this for a filtering bug.
+        x = (rng.standard_normal(self.N) * 100).astype(np.int16)
+        b = np.ones(51) / 51
+        float_out = fir.filter_data_fir(x, b, axis=0)
+        direct = np.convolve(x.astype(np.float64), b, "full")
+        np.testing.assert_allclose(float_out, direct, atol=1e-9, rtol=1e-9)
+        diff = np.abs(
+            float_out.astype(np.int16).astype(np.int32)
+            - direct.astype(np.int16).astype(np.int32)
+        )
+        assert diff.max() <= 1  # never more than one count
 
     def test_kernel_accepts_python_list(self, rng):
         # b is documented array-like and converted internally, so a plain list
