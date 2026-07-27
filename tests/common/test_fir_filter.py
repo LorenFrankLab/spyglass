@@ -872,6 +872,43 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(RuntimeError, match="overlap read failed"):
             fir._osconvolve(x, b, mode="full", nfft=8)
 
+    def test_h5py_interval_starting_at_sample_zero(self, rng, tmp_path):
+        # An interval starting at sample 0 has nothing before it, so the first
+        # block's M-1 overlap window is empty. h5py rejects an empty slice
+        # combined with a fancy index of >= 16 elements ("Dataspaces don't have
+        # hyperslab selections"), so that read must not be issued at all -- the
+        # block buffer is already zeroed, which is the correct fill. Upstream
+        # hid this behind a blanket except; failing loudly on genuine read
+        # errors means the empty case has to be skipped explicitly.
+        h5py = pytest.importorskip("h5py")
+        n_time, n_elec = 4000, 32  # >= 16 electrodes triggers the h5py path
+        arr = rng.standard_normal((n_time, n_elec))
+        b = np.ones(101) / 101
+        delay = (len(b) - 1) // 2
+        path = str(tmp_path / "es.h5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=arr)
+        electrodes = np.arange(n_elec)
+        with h5py.File(path, "r") as f:
+            out = fir.filter_data_fir(
+                f["data"],
+                b,
+                axis=0,
+                input_index_bounds=[0, 3000],
+                output_index_bounds=[delay, delay + 3000],
+                input_dim_restrictions=[None, electrodes],
+            )
+        ref = reference_filter(
+            arr,
+            b,
+            axis=0,
+            input_index_bounds=[0, 3000],
+            output_index_bounds=[delay, delay + 3000],
+            electrodes=electrodes,
+        )
+        assert out.shape == ref.shape
+        np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
+
     @pytest.mark.parametrize(
         "signal, kernel, nfft",
         [

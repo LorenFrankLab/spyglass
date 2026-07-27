@@ -875,15 +875,20 @@ def _osconvolve(
         # A slice read clips at the array bounds rather than raising, so a
         # genuine failure here (e.g. an h5py I/O error on an on-disk signal)
         # must propagate -- upstream swallowed it and silently zero-filled the
-        # overlap, corrupting the result without any error.
+        # overlap, corrupting the result without any error. The one read that
+        # must NOT be issued is the provably empty one (nothing precedes sample
+        # 0): h5py rejects an empty slice combined with a fancy index of 16 or
+        # more elements, which upstream's blanket except hid. Skipping it leaves
+        # the already-zeroed buffer, which is the correct fill anyway.
         overlap_start = start - (kernel_len - 1)
         read_start = max(overlap_start, 0)
-        block_pos = read_start - overlap_start
-        signal_slices_1[axis] = np.s_[read_start:start]
-        signal_chunk = signal[tuple(signal_slices_1)]
-        length = signal_chunk.shape[axis]
-        block_slices_1[axis] = np.s_[block_pos : block_pos + length]
-        block_buffer[tuple(block_slices_1)] = signal_chunk
+        if read_start < start:
+            block_pos = read_start - overlap_start
+            signal_slices_1[axis] = np.s_[read_start:start]
+            signal_chunk = signal[tuple(signal_slices_1)]
+            length = signal_chunk.shape[axis]
+            block_slices_1[axis] = np.s_[block_pos : block_pos + length]
+            block_buffer[tuple(block_slices_1)] = signal_chunk
 
         # fill block_step segment of the block
         signal_slices_2[axis] = np.s_[start:stop]
