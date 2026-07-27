@@ -93,6 +93,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from multiprocessing import cpu_count
+from typing import Protocol
 
 import numpy as np
 import numpy.typing as npt
@@ -100,6 +101,35 @@ import scipy.fft
 import scipy.signal
 
 logger = logging.getLogger(__name__)
+
+
+class _ReadableArray(Protocol):
+    """Signal source: an in-memory numpy array OR an on-disk h5py Dataset.
+
+    The signal is deliberately never passed through ``np.asarray`` (that would
+    pull an on-disk dataset fully into memory), so it is typed by the surface the
+    block loop actually uses rather than as ``np.ndarray``. ``dtype`` is required
+    as well as read: ``np.isrealobj`` falls back to materialising the whole array
+    for an object that lacks it.
+    """
+
+    @property
+    def ndim(self) -> int: ...
+
+    @property
+    def shape(self) -> tuple[int, ...]: ...
+
+    @property
+    def dtype(self) -> np.dtype: ...
+
+    def __getitem__(self, key, /) -> np.ndarray: ...
+
+
+class _WritableArray(_ReadableArray, Protocol):
+    """Output sink, likewise possibly on disk (spyglass writes into NWB)."""
+
+    def __setitem__(self, key, value, /) -> None: ...
+
 
 __all__ = [
     "estimate_taps",
@@ -465,19 +495,18 @@ class _OsPlan:
     kernel_len: int
     first_ind: int
     last_ind: int
-    downsample: bool
     decimation_factor: int | None
     # (dim, read_sel, gather, out_length) per restricted non-filtered axis:
     # read the signal at ``read_sel`` (sorted unique, which h5py requires) and,
     # when ``gather`` is not None, take ``gather`` along ``dim`` to restore the
     # order the caller asked for. ``out_length`` is the requested length.
-    restricted_dims: list
+    restricted_dims: list[tuple[int, np.ndarray, np.ndarray | None, int]]
     expected_shape: tuple[int, ...]
     dtype: str
 
 
 def _plan_osconvolve(
-    signal: np.ndarray,
+    signal: _ReadableArray,
     kernel: np.ndarray,
     *,
     mode: str,
@@ -585,7 +614,6 @@ def _plan_osconvolve(
         first_ind = (tot_length - outsize) // 2
         last_ind = first_ind + outsize
 
-    downsample = False
     if decimation_factor is not None:
         # decimation_factor == 1 is a valid (no-op) decimation; reject
         # non-integer / 0 / negative
@@ -600,7 +628,6 @@ def _plan_osconvolve(
                 f"{decimation_factor!r}"
             )
         decimation_factor = int(decimation_factor)
-        downsample = True
 
     ###############################################################
     # handle output params
@@ -649,6 +676,15 @@ def _plan_osconvolve(
             if dim == axis or sel is None:
                 continue
             sel_arr = np.asarray(sel)
+            if sel_arr.ndim == 1 and sel_arr.size == 0:
+                # An empty Python list becomes float64, which the integer-dtype
+                # check below would reject with a message about dtypes. Selecting
+                # no indices is a caller mistake worth naming directly -- e.g. an
+                # LFPElectrodeGroup with no electrodes.
+                raise ValueError(
+                    f"input_dim_restrictions[{dim}] selects no indices; there "
+                    "is nothing to filter along that axis"
+                )
             if sel_arr.ndim != 1 or not np.issubdtype(
                 sel_arr.dtype, np.integer
             ):
@@ -657,10 +693,12 @@ def _plan_osconvolve(
                     "of integer indices (slices/masks are not supported)"
                 )
             if sel_arr.size > 0:
-                if np.any(sel_arr < 0) or np.any(sel_arr >= signal.shape[dim]):
+                bad = sel_arr[(sel_arr < 0) | (sel_arr >= signal.shape[dim])]
+                if bad.size:
                     raise IndexError(
                         f"input_dim_restrictions[{dim}] contains indices out of "
-                        f"range for axis length {signal.shape[dim]}"
+                        f"range for axis length {signal.shape[dim]}: "
+                        f"{np.unique(bad).tolist()}"
                     )
             read_sel, gather = sel_arr, None
             if sel_arr.size > 0 and not np.all(sel_arr[:-1] < sel_arr[1:]):
@@ -676,8 +714,8 @@ def _plan_osconvolve(
                 f"axis, but {len(restricted_dims)} were given"
             )
 
-    # continue modifying expected_shape if downsampling
-    if downsample:
+    # continue modifying expected_shape if decimating
+    if decimation_factor is not None:
         n, mod = divmod(last_ind - first_ind, decimation_factor)
         if mod != 0:
             n += 1
@@ -700,7 +738,6 @@ def _plan_osconvolve(
         kernel_len=kernel_len,
         first_ind=first_ind,
         last_ind=last_ind,
-        downsample=downsample,
         decimation_factor=decimation_factor,
         restricted_dims=restricted_dims,
         expected_shape=expected_shape,
@@ -709,14 +746,14 @@ def _plan_osconvolve(
 
 
 def _osconvolve(
-    signal: np.ndarray,
+    signal: _ReadableArray,
     kernel: npt.ArrayLike,
     *,
     mode: str = "full",
     nfft: int | None = None,
     threads: int = cpu_count(),
     axis: int = -1,
-    outarray: np.ndarray | None = None,
+    outarray: _WritableArray | None = None,
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
     describe_dims: bool = False,
@@ -772,7 +809,6 @@ def _osconvolve(
     kernel_len = plan.kernel_len
     first_ind = plan.first_ind
     last_ind = plan.last_ind
-    downsample = plan.downsample
     decimation_factor = plan.decimation_factor
     restricted_dims = plan.restricted_dims
     expected_shape = plan.expected_shape
@@ -978,16 +1014,16 @@ def _osconvolve(
         # and decimating/non-decimating cases.
         if ii == first_block_to_check:
             low_offset = first_offset
-        elif downsample:
+        elif decimation_factor is not None:
             low_offset = block_offset
         else:
             low_offset = 0
         high_offset = last_offset if ii == last_block_to_check else block_step
-        step = decimation_factor if downsample else 1
+        step = decimation_factor if decimation_factor is not None else 1
         conv_slices[axis] = np.s_[
             kernel_len - 1 + low_offset : kernel_len - 1 + high_offset : step
         ]
-        if downsample:
+        if decimation_factor is not None:
             n_samples = conv_block[tuple(conv_slices)].shape[axis]
             if ii != last_block_to_check:
                 # phase of the next block's first retained sample
@@ -1019,13 +1055,13 @@ def _osconvolve(
 
 
 def filter_data_fir(
-    data: np.ndarray,
+    data: _ReadableArray,
     filter_coeffs: npt.ArrayLike,
     *,
     nfft: int | None = None,
     threads: int = cpu_count(),
     axis: int = -1,
-    outarray: np.ndarray | None = None,
+    outarray: _WritableArray | None = None,
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
     describe_dims: bool = False,
