@@ -434,7 +434,9 @@ class TestCleanupAndRegistry:
         """Test that deletion safety threshold prevents mass deletion."""
         # Use an isolated directory under the pytest base_dir to avoid touching any real analysis files
         master_table = common.common_nwbfile.AnalysisNwbfile()
-        tmp_dir = base_dir / f"tmp_analysis_files_{random.randint(0, 1_000_000)}"
+        tmp_dir = (
+            base_dir / f"tmp_analysis_files_{random.randint(0, 1_000_000)}"
+        )
         tmp_dir.mkdir(parents=True, exist_ok=True)
         master_table._analysis_dir = tmp_dir
 
@@ -444,7 +446,9 @@ class TestCleanupAndRegistry:
             (tmp_dir / f"untracked_{i}.nwb").write_text("test")
 
         with pytest.raises(RuntimeError, match="Attempting to delete"):
-            master_table._remove_untracked_files(custom_tables=[], dry_run=False)
+            master_table._remove_untracked_files(
+                custom_tables=[], dry_run=False
+            )
 
         # Cleanup created files manually
         if teardown:
