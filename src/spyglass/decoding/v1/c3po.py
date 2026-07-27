@@ -609,6 +609,42 @@ class Model(SpyglassMixin, dj.Computed):
             jax.random.split(rand_key)[0],
         )  # initialize model parameters using a small batch of data
 
+        # test model embedding fits in memory prior to training
+        chunk_size = 50000
+        MIN_CHUNK_SIZE = 5000
+        model_args = ModelParams().fetch_model_args(key)
+        analysis = C3poAnalysis(
+            model=model, model_args=model_args, params=params
+        )
+        successful_embedding = False
+        while chunk_size >= MIN_CHUNK_SIZE:
+            try:
+                analysis.embed_data(
+                    marks[None, :chunk_size+2000],
+                    delta_t[None, :chunk_size+2000],
+                    delta_t_units=training_params["delta_t_units"],
+                    first_mark_time=mark_times[0],
+                    chunk_size=chunk_size,
+                    )
+                successful_embedding = True
+                logger.info(
+                    f"Successfully embedded data with chunk size {chunk_size}."
+                )
+                break
+            except RuntimeError as e:
+                chunk_size = chunk_size // 2
+                logger.warning(
+                    f"Embedding failed with chunk size {chunk_size*2}. "
+                    + f"Trying smaller chunk size {chunk_size}. Error: {e}"
+                )
+        if not successful_embedding:
+            raise RuntimeError(
+                "Embedding failed for all tested chunk sizes. "
+                + "Please check your model architecture and data."
+            )
+
+
+
         # train the model using the specified training function
         training_function = TRAINING_FUNCTIONS.get(
             training_params["training_function"], None
@@ -637,11 +673,13 @@ class Model(SpyglassMixin, dj.Computed):
         analysis = C3poAnalysis(
             model=model, model_args=model_args, params=params
         )
+
         analysis.embed_data(
             marks[None, :],
             delta_t[None, :],
             delta_t_units=training_params["delta_t_units"],
             first_mark_time=mark_times[0],
+            chunk_size=chunk_size
         )
 
         z_obj = TimeSeries(
