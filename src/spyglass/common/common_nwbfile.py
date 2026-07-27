@@ -698,9 +698,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         if len(to_delete) > DELETION_SAFETY_THRESHOLD * len(tracked):
             raise RuntimeError(
-                f"Attempting to delete {len(to_delete)} files, which is more than "
-                f"{DELETION_SAFETY_THRESHOLD*100}% of tracked files ({len(tracked)}). "
-                "Aborting to prevent accidental mass deletion."
+                f"Attempting to delete {len(to_delete)} files from {self._analysis_dir}"
+                f", which is more than {DELETION_SAFETY_THRESHOLD*100}% of tracked files"
+                f" ({len(tracked)}). Aborting to prevent accidental mass deletion."
             )
 
         for path in to_delete:
