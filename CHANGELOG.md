@@ -222,7 +222,14 @@ for label, interval_data in results.groupby("interval_labels"):
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
 - Drop the `ghostipy` dependency by vendoring the FIR filter design and
     out-of-core filtering it used (`scipy.fft` backend, no `pyfftw`); LFP filter
-    output is numerically unchanged #1635
+    output is unchanged to floating-point round-off (~1e-15). Declares `scipy`
+    explicitly and ships Ghostipy's Apache-2.0 license #1635
+- Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
+    than the filter combined with a tight `nfft` returned a wrong convolution.
+    Unreachable at the default `nfft`, so LFP output is unaffected #1635
+- `FirFilterParameters.filter_data` and `filter_data_nwb` now raise when every
+    interval in `valid_times` is empty, instead of writing a zero-length
+    electrical series and then failing #1635
 
 ### Pipelines
 

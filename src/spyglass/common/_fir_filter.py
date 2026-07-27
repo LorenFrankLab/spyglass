@@ -1,7 +1,12 @@
 """Self-contained FIR filter design and out-of-core FIR filtering.
 
 Vendored from ghostipy (Apache-2.0, https://github.com/kemerelab/ghostipy),
-covering only the pieces spyglass uses in ``common_filter.py``:
+covering only the pieces spyglass uses in ``common_filter.py``. A copy of the
+Apache License 2.0 ships with spyglass at
+``spyglass/common/licenses/ghostipy-Apache-2.0.txt``; the modifications made
+here are listed under "Intentional divergences from upstream" below.
+
+Vendored pieces:
 
 - ``estimate_taps``  -> FIR tap-count estimate
 - ``firdesign``      -> Type I FIR design with spline transition bands (L2)
@@ -193,7 +198,7 @@ def _firspline(
     pass_freq: float,
     stop_freq: float,
     *,
-    sampling_freq: float | None = None,
+    sampling_freq: float = 2,
     spline_power: float | None = None,
 ) -> np.ndarray:
     """Design a Type I low-pass filter with a spline transition band.
@@ -233,8 +238,6 @@ def _firspline(
     if not numtaps & 1:
         raise ValueError(f"numtaps must be odd but got {numtaps}")
 
-    if sampling_freq is None:
-        sampling_freq = 2
     _assert_finite_positive(sampling_freq, "sampling_freq")
     nyquist = sampling_freq / 2
 
@@ -946,7 +949,7 @@ def _osconvolve(
 
         logger.debug("Computed block %d of %d", ii, last_block_to_check)
 
-    if not expected_shape[axis] == samples_written:
+    if expected_shape[axis] != samples_written:
         raise ValueError(
             f"Expected to write {expected_shape[axis]} samples for axis {axis} "
             f"but actually wrote {samples_written}"
