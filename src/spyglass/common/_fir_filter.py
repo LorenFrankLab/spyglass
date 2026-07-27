@@ -1,33 +1,43 @@
 """Self-contained FIR filter design and out-of-core FIR filtering.
 
 Vendored from ghostipy (Apache-2.0, https://github.com/kemerelab/ghostipy),
-covering only the pieces spyglass uses in ``common_filter.py``. A copy of the
-Apache License 2.0 ships with spyglass at
+covering the FIR subset the spyglass LFP pipeline needs. A copy of the Apache
+License 2.0 ships with spyglass at
 ``spyglass/common/licenses/ghostipy-Apache-2.0.txt``; the modifications made
 here are listed under "Intentional divergences from upstream" below.
 
-Vendored pieces:
+Vendored from upstream (upstream name -> name here):
 
-- ``estimate_taps``  -> FIR tap-count estimate
-- ``firdesign``      -> Type I FIR design with spline transition bands (L2)
-- ``group_delay``    -> integer group delay of a Type I FIR filter
-- ``filter_data_fir``-> overlap-save FFT filtering that streams into a
-  (possibly on-disk) preallocated output array, with decimation and
-  per-dimension index restrictions.
+- ``estimate_taps``    -> ``estimate_taps``, FIR tap-count estimate
+- ``firdesign``        -> ``firdesign``, Type I design with spline transition
+  bands (L2), and its ``_firspline`` low-pass prototype helper
+- ``group_delay``      -> ``group_delay``, integer group delay of a Type I FIR
+- ``filter_data_fir``  -> ``filter_data_fir``, the ``mode='full'`` entry point
+- ``osconvolve``       -> ``_osconvolve``, the overlap-save engine beneath it,
+  which streams into a (possibly on-disk) preallocated output array with
+  decimation and per-dimension index restrictions. Its argument validation and
+  output-shape planning were split out into ``_plan_osconvolve``, which has no
+  upstream counterpart.
+
+``common_filter.py`` calls ``estimate_taps``, ``firdesign`` and
+``filter_data_fir``; ``group_delay`` is vendored and exported for completeness
+but spyglass uses its own ``FirFilterParameters.calc_filter_delay`` instead.
 
 Call signatures keep upstream ghostipy's parameter order and defaults, with
 clearer parameter names (e.g. ``fs`` -> ``sampling_freq``, ``tw`` ->
 ``transition_width``, ``p`` -> ``spline_power``, ``b`` -> ``filter_coeffs``)
 and added type annotations; numeric output matches upstream to floating-point
-round-off.
+round-off (measured: ``firdesign`` coefficients bitwise identical, filtered
+output within 4.4e-16 on spyglass's LFP calls).
 
 Intentional divergences from upstream:
 
 - FFT backend: ``pyfftw`` replaced with ``scipy.fft`` (``workers=`` for
   multithreading), using the real transform (``rfft``/``irfft``) for real input
-  and the full complex transform otherwise. This removes the M1-Mac /
-  conda-forge install friction documented in the spyglass setup and is the only
-  change that touches the numeric path (round-off only).
+  and the full complex transform otherwise. This removed the M1-Mac /
+  conda-forge install friction the spyglass setup notes used to document, and is
+  the only change that touches the numeric path for valid input (round-off
+  only).
 - Block selection at boundaries: when the requested (exclusive) output stop
   lands exactly on an overlap-save block boundary, the trailing empty block is
   no longer processed. Upstream still read and FFT'd it only to write zero
@@ -56,6 +66,23 @@ Intentional divergences from upstream:
   integer index arrays restricting at most one non-filtered axis;
   ``output_offset`` must be an integer >= 0 that fits within ``outarray``;
   complex input no longer raises ``UnboundLocalError``.
+- Provably empty block reads are skipped rather than issued: the leading overlap
+  read when a block starts at sample 0 (nothing precedes it), and the main read
+  when a trailing block starts at or past the end of the data. Upstream issued
+  both unconditionally and hid the fallout in the blanket ``except`` above. h5py
+  rejects an empty slice combined with a fancy index of 16 or more elements
+  ("Dataspaces don't have hyperslab selections"), which is an ordinary LFP
+  configuration. The block buffer is already zeroed, so skipping is also the
+  correct fill.
+- ``input_dim_restrictions`` may select in any order, including duplicates, and
+  rows are returned in the order requested. An unsorted selection is READ as
+  sorted unique indices -- all h5py accepts -- then gathered back. Upstream
+  passed the array straight through, which worked only for a sorted selection on
+  an on-disk signal.
+- ``outarray``'s real/complex check reads its ``dtype`` instead of a slice of
+  its contents, so no data is read from a (possibly on-disk) output array.
+- ``verbose`` is gone from both entry points; progress goes to a module-level
+  ``logging`` logger instead of ``print``.
 
 Design details (spline-transition FIR) follow Burrus et al., 1992.
 """
@@ -464,8 +491,10 @@ def _plan_osconvolve(
 ) -> _OsPlan:
     """Validate arguments and plan the output shape for :func:`_osconvolve`.
 
-    Pure validation and shape planning: raises on any invalid argument and
-    returns the :class:`_OsPlan` the block loop (and ``describe_dims``) needs.
+    Pure validation and shape planning: raises on any invalid argument it
+    receives and returns the :class:`_OsPlan` the block loop (and
+    ``describe_dims``) needs. ``outarray`` and ``output_offset`` are validated by
+    :func:`_osconvolve`, which is where the array itself is available.
     No FFT runs and no output array is allocated here; ``kernel`` must already
     be a NumPy array.
     """
@@ -558,7 +587,8 @@ def _plan_osconvolve(
 
     downsample = False
     if decimation_factor is not None:
-        # decimation_factor == 1 is a valid (no-op) decimation; reject non-integer / 0 / negative
+        # decimation_factor == 1 is a valid (no-op) decimation; reject
+        # non-integer / 0 / negative
         # up front (consistent with nfft/output_offset) so they fail loudly here
         # instead of as a later ZeroDivisionError.
         if (
@@ -581,9 +611,10 @@ def _plan_osconvolve(
     expected_shape[axis] = last_ind - first_ind
 
     # ... and override the appropriate part if input_dim_restrictions were passed
-    # in. The restricted (dim, selection, length) triples are recorded once here
-    # and reused by the _osconvolve block loop for buffer sizing and signal
-    # slices, instead of re-scanning every dimension each time.
+    # in. The restriction is recorded once here (see _OsPlan.restricted_dims for
+    # the tuple layout) and reused by the _osconvolve block loop for buffer
+    # sizing and signal slices, instead of re-scanning every dimension each
+    # time.
     restricted_dims = []
     if input_dim_restrictions is not None:
         if len(input_dim_restrictions) != signal.ndim:
@@ -597,11 +628,13 @@ def _plan_osconvolve(
             )
         # Each restriction must be a 1-D, in-range integer index array (as
         # spyglass passes for electrode selection). Slices/masks are rejected
-        # because shape planning below relies on len(), and restricting more
-        # than one non-filtered axis at once would trigger NumPy paired advanced
-        # indexing (a Cartesian selection is not what the block reads assume),
-        # so both are unsupported and fail loudly rather than producing a wrong
-        # shape.
+        # because shape planning below relies on len(). Restricting more than
+        # one non-filtered axis is unsupported because the shape planning here
+        # sets expected_shape[dim] per restricted dim -- i.e. it assumes a
+        # Cartesian selection -- while NumPy would instead PAIR the index arrays
+        # and broadcast them together (a (3, 2, 10) array indexed with
+        # [[0, 1], [0], 0:5] gives (2, 5), not the (2, 1, 5) assumed here). Both
+        # fail loudly rather than producing a wrong shape.
         #
         # Any order is accepted, including duplicates, and rows come back in the
         # order requested (spyglass's public FirFilterParameters.filter_data
@@ -651,8 +684,9 @@ def _plan_osconvolve(
         expected_shape[axis] = n
 
     expected_shape = tuple(expected_shape)
-    # Validate nfft in the sizing pass too, so describe_dims rejects what the
-    # real filtering call would reject (keep sibling entry points consistent).
+    # nfft is validated here, in the planning pass, so describe_dims rejects
+    # exactly what the real filtering call would reject. _osconvolve only fills
+    # in the default when None.
     if nfft is not None:
         if not isinstance(nfft, (int, np.integer)):
             raise ValueError(f"'nfft' must be an integer but got {nfft!r}")
@@ -693,19 +727,22 @@ def _osconvolve(
     """Overlap-save FFT convolution, written to minimize memory usage.
 
     Streams the convolution block-by-block into ``outarray`` (which may be an
-    on-disk array), supporting decimation (``decimation_factor``) and restricting which
-    indices of the non-filtered axes are used (``input_dim_restrictions``).
+    on-disk array), supporting decimation (``decimation_factor``) and
+    restricting which indices of one non-filtered axis are used
+    (``input_dim_restrictions``).
     ``mode`` selects ``'full'``, ``'same'``, or ``'valid'`` convolution.
 
-    Ported from ghostipy's ``osconvolve``; the numeric output is identical to
-    upstream to floating-point round-off. Argument validation and output-shape
+    Ported from ghostipy's ``osconvolve``; for the inputs spyglass uses, the
+    numeric output matches upstream to floating-point round-off. It differs
+    deliberately where upstream was wrong -- see the overlap-placement fix in the
+    module header, which changes the result for a signal shorter than the filter
+    under a tight ``nfft``. Argument validation and output-shape
     planning live in :func:`_plan_osconvolve`; this function allocates the output
     (with the ``output_offset``/``outarray`` fit check that needs the array) and
     runs the block loop. It is the general convolution engine (any
     ``mode``), of which :func:`filter_data_fir` is the ``mode='full'`` wrapper
-    that spyglass calls. See the module header for the intentional divergences
-    (scipy.fft backend, the exact-boundary block fold, and the fail-loud
-    input/read validation), and :func:`filter_data_fir` for the meaning of the
+    that spyglass calls. See the module header for the full list of intentional
+    divergences from upstream, and :func:`filter_data_fir` for the meaning of the
     shared out-of-core parameters.
 
     Returns
@@ -1006,12 +1043,12 @@ def filter_data_fir(
 
     Parameters
     ----------
-    data : numpy.ndarray
+    data : numpy.ndarray or h5py.Dataset
         The data to be filtered, shape ``(..., n_time, ...)`` with the filtered
-        axis given by ``axis``. Must expose ``.ndim``/``.shape`` and support
-        slice + integer-array indexing (a NumPy array or an h5py ``Dataset``).
-        It is NOT converted to an array, so an on-disk/lazy signal stays on
-        disk. Real input yields a real result; complex input a complex result.
+        axis given by ``axis``. Must expose ``.ndim``/``.shape``/``.dtype`` and
+        support slice + integer-array indexing. It is NOT converted to an array,
+        so an on-disk/lazy signal stays on disk. Real input yields a real
+        result; complex input a complex result.
     filter_coeffs : array_like, shape (M,)
         Filter coefficients (1-D). Converted to a NumPy array internally.
     nfft : int, optional
@@ -1021,11 +1058,18 @@ def filter_data_fir(
         Number of FFT worker threads (>= 1). Default is the CPU count.
     axis : int, optional
         Axis along which to filter. Default is -1.
-    outarray : numpy.ndarray, optional
-        Preallocated output (may be on disk). Default allocates in memory. See
-        Notes for the dtype contract.
+    outarray : numpy.ndarray or h5py.Dataset, optional
+        Preallocated output (may be on disk; spyglass writes into an NWB
+        dataset). Default allocates in memory. See Notes for the dtype
+        contract.
     input_index_bounds : sequence of 2 int, optional
-        ``[start, stop)`` indices of the input along ``axis`` (stop exclusive).
+        ``[start, stop)`` indices along ``axis`` defining WHICH OUTPUT the
+        convolution is computed for (stop exclusive). This is not a promise that
+        only that input range is read: the filter still draws its support from
+        the neighbouring samples of the full array, so with ``[start, stop)`` the
+        result at the window edges depends on data outside the window. To filter
+        a window in isolation instead, slice the array first and pass bounds
+        relative to the slice -- the two give different edge samples.
     output_index_bounds : sequence of 2 int, optional
         ``[start, stop)`` indices of the full-convolution output to keep (stop
         exclusive).
@@ -1057,12 +1101,15 @@ def filter_data_fir(
     Raises
     ------
     ValueError
-        On invalid arguments -- e.g. ``threads < 1``, a non-1-D kernel, an
-        out-of-range or non-integer ``nfft``/``decimation_factor``/``output_offset``, bounds
-        that are reversed or out of range, or unsupported
+        On invalid arguments -- e.g. ``threads < 1``, a non-1-D kernel, a
+        non-integer or out-of-range
+        ``nfft``/``decimation_factor``/``output_offset``, bounds that are not
+        strictly increasing, ``output_index_bounds`` out of range, or unsupported
         ``input_dim_restrictions``.
     IndexError
-        If ``input_index_bounds`` or a restriction array is out of range.
+        If ``input_index_bounds`` or a restriction array is out of range. Note
+        that out-of-range bounds raise ``IndexError`` for the INPUT and
+        ``ValueError`` for the OUTPUT.
     TypeError
         If the result is complex but a real-dtype ``outarray`` was supplied.
 
