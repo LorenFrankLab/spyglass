@@ -772,17 +772,42 @@ class TestEdgeCasesAndValidation:
             )
 
     @pytest.mark.parametrize("electrodes", [np.array([2, 0]), np.array([1, 1])])
-    def test_restriction_indices_must_be_strictly_increasing(
+    def test_in_memory_restriction_allows_any_order(
         self, lfp_lowpass, rng, electrodes
     ):
-        # h5py requires fancy-index arrays to be strictly increasing and unique;
-        # validate that contract up front instead of failing during block reads.
+        # NumPy fancy-indexes an in-memory array in any order, and the public
+        # FirFilterParameters.filter_data documents no ordering requirement for
+        # its `electrodes` argument, so out-of-order / repeated selections must
+        # keep working -- and must come back in the REQUESTED order.
         b = lfp_lowpass
         data = rng.standard_normal((6, self.N))
-        with pytest.raises(ValueError, match="strictly increasing"):
-            fir.filter_data_fir(
-                data, b, axis=1, input_dim_restrictions=[electrodes, None]
-            )
+        out = fir.filter_data_fir(
+            data, b, axis=1, input_dim_restrictions=[electrodes, None]
+        )
+        ref = reference_filter(data, b, axis=1, electrodes=electrodes)
+        assert out.shape == ref.shape
+        np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
+
+    @pytest.mark.parametrize("electrodes", [np.array([2, 0]), np.array([1, 1])])
+    def test_lazy_restriction_must_be_strictly_increasing(
+        self, lfp_lowpass, rng, electrodes, tmp_path
+    ):
+        # h5py cannot fancy-index out of order or with duplicates, so a lazy /
+        # on-disk signal is still held to that contract -- validated up front
+        # rather than failing deep in a block read.
+        h5py = pytest.importorskip("h5py")
+        b = lfp_lowpass
+        path = str(tmp_path / "sig.h5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=rng.standard_normal((6, self.N)))
+        with h5py.File(path, "r") as f:
+            with pytest.raises(ValueError, match="strictly increasing"):
+                fir.filter_data_fir(
+                    f["data"],
+                    b,
+                    axis=1,
+                    input_dim_restrictions=[electrodes, None],
+                )
 
     def test_restriction_indices_out_of_range_raise(self, lfp_lowpass, rng):
         b = lfp_lowpass

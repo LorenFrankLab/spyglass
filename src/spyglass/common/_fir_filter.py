@@ -48,9 +48,11 @@ Intentional divergences from upstream:
   least two ordered ``band_edges``; the spline power ``spline_power`` must be
   > 0; ``decimation_factor`` must be an integer >= 1; ``nfft`` must be an
   integer >= the kernel length; ``input_dim_restrictions`` entries must be 1-D
-  integer index arrays restricting at most one non-filtered axis;
-  ``output_offset`` must be an integer >= 0 that fits within ``outarray``;
-  complex input no longer raises ``UnboundLocalError``.
+  integer index arrays restricting at most one non-filtered axis, and must
+  additionally be strictly increasing when the signal is a lazy/on-disk array
+  that cannot fancy-index out of order; ``output_offset`` must be an integer
+  >= 0 that fits within ``outarray``; complex input no longer raises
+  ``UnboundLocalError``.
 
 Design details (spline-transition FIR) follow Burrus et al., 1992.
 """
@@ -588,13 +590,21 @@ def _plan_osconvolve(
             raise ValueError(
                 f"input_dim_restrictions[{axis}] must be set to None"
             )
-        # Each restriction must be a 1-D, in-range, strictly increasing integer
-        # index array (as spyglass passes for electrode selection, and as h5py
-        # requires for fancy indexing). Slices/masks are rejected because shape
-        # planning below relies on len(), and restricting more than one
-        # non-filtered axis at once would trigger NumPy paired advanced indexing
-        # (a Cartesian selection is not what the block reads assume), so both are
-        # unsupported and fail loudly rather than producing a wrong shape.
+        # Each restriction must be a 1-D, in-range integer index array (as
+        # spyglass passes for electrode selection). Slices/masks are rejected
+        # because shape planning below relies on len(), and restricting more
+        # than one non-filtered axis at once would trigger NumPy paired advanced
+        # indexing (a Cartesian selection is not what the block reads assume),
+        # so both are unsupported and fail loudly rather than producing a wrong
+        # shape.
+        #
+        # Order is only constrained for a lazy / on-disk signal: h5py requires
+        # fancy-index arrays to be strictly increasing and unique, while NumPy
+        # indexes an in-memory array in any order (spyglass's public
+        # FirFilterParameters.filter_data documents no ordering requirement for
+        # its `electrodes` argument). Rows come back in the requested order
+        # either way.
+        signal_in_memory = isinstance(signal, np.ndarray)
         for dim in range(signal.ndim):
             sel = input_dim_restrictions[dim]
             if dim == axis or sel is None:
@@ -613,10 +623,14 @@ def _plan_osconvolve(
                         f"input_dim_restrictions[{dim}] contains indices out of "
                         f"range for axis length {signal.shape[dim]}"
                     )
-                if not np.all(sel_arr[:-1] < sel_arr[1:]):
+                if not signal_in_memory and not np.all(
+                    sel_arr[:-1] < sel_arr[1:]
+                ):
                     raise ValueError(
                         f"input_dim_restrictions[{dim}] must be strictly "
-                        "increasing with no duplicate indices"
+                        "increasing with no duplicate indices when the signal "
+                        "is not an in-memory numpy array (h5py and similar "
+                        "lazy arrays cannot fancy-index out of order)"
                     )
             restricted_dims.append((dim, sel, sel_arr.shape[0]))
             expected_shape[dim] = sel_arr.shape[0]
@@ -995,11 +1009,13 @@ def filter_data_fir(
         Integer decimation factor (>= 1). Default None (no decimation).
     input_dim_restrictions : sequence, optional
         One entry per dimension of ``data``. The entry for ``axis`` must be
-        None; at most one other entry may be set, and it must be a 1-D,
-        in-range, strictly increasing array of unique integer indices selecting
-        which elements of that (non-filtered) axis to keep -- e.g. a subset of
-        electrodes. Slices/masks and restricting more than one axis are not
-        supported (they raise).
+        None; at most one other entry may be set, and it must be a 1-D, in-range
+        array of integer indices selecting which elements of that (non-filtered)
+        axis to keep -- e.g. a subset of electrodes. Rows are returned in the
+        order given. Any order is allowed for an in-memory numpy ``data``; for a
+        lazy/on-disk ``data`` the indices must be strictly increasing and unique
+        (h5py cannot fancy-index out of order). Slices/masks and restricting
+        more than one axis are not supported (they raise).
     output_offset : int, optional
         Offset (>= 0) into ``outarray`` along ``axis`` at which to start
         writing. Default 0.
