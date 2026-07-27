@@ -248,6 +248,7 @@ for label, interval_data in results.groupby("interval_labels"):
     instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
+- Safety check for number of deleted files in `_remove_untracked_files` #1656
 
 ### Pipelines
 

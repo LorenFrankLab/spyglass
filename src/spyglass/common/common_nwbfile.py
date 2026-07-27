@@ -20,6 +20,8 @@ from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
+DELETION_SAFETY_THRESHOLD = 1.0
+
 # A trigger is a DB object that is automatically executed when INSERT occurs
 SQL_TRIGGER_QUERY = """
 SELECT COUNT(*)
@@ -693,6 +695,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         if dry_run:
             logger.info(f"  {len(to_delete)} untracked or empty analysis files")
             return to_delete, tracked
+
+        if len(to_delete) > DELETION_SAFETY_THRESHOLD * len(tracked):
+            raise RuntimeError(
+                f"Attempting to delete {len(to_delete)} files from {self._analysis_dir}"
+                f", which is more than {DELETION_SAFETY_THRESHOLD*100}% of tracked files"
+                f" ({len(tracked)}). Aborting to prevent accidental mass deletion."
+            )
 
         for path in to_delete:
             try:
