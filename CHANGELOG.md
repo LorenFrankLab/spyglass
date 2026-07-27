@@ -220,6 +220,34 @@ for label, interval_data in results.groupby("interval_labels"):
 - Save disk checks as csv, predict runway of primary data directory #1611
 - Fix package scanning without database import #1621
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
+- Drop the `ghostipy` dependency by vendoring the FIR filter design and
+    out-of-core filtering it used (`scipy.fft` backend, no `pyfftw`). Filter
+    coefficients are bit-identical and the filtered float result matches the
+    previous implementation to round-off (~1e-15). Note that LFP is stored in
+    the raw data's dtype, so for `int16` raw data the float result is truncated
+    on write, and truncation can turn that round-off into a one-count difference
+    in a small fraction of stored samples -- recomputing an existing LFP entry
+    may not reproduce it exactly to the bit. Declares `scipy` explicitly and
+    ships Ghostipy's Apache-2.0 license #1635
+- Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
+    than the filter combined with a tight `nfft` returned a wrong convolution.
+    Unreachable at the default `nfft`, so LFP output is unaffected #1635
+- Fix filtering an on-disk electrical series with 16 or more electrodes when a
+    block read is empty -- an interval starting at sample 0, or a trailing block
+    beginning at the end of the data -- which raised an h5py "Dataspaces don't
+    have hyperslab selections" error #1635
+- `FirFilterParameters.filter_data` and `filter_data_nwb` now raise when every
+    interval in `valid_times` is empty, instead of writing a zero-length
+    electrical series and then failing, and reject a reversed interval instead
+    of silently dropping it #1635
+- Electrode selections may again be given in any order, on-disk as well as
+    in-memory; rows are returned in the order requested #1635
+- Log a warning when an interval in `valid_times` is skipped for containing no
+    samples, instead of dropping it silently #1635
+- Split the vendored FIR sizing pass into its own `describe_output` function
+    instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
+    type and arguments that cannot affect the sizing answer are rejected rather
+    than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
 
 ### Pipelines
@@ -271,6 +299,10 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position dataframe in
         `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
+    - Fix `DecodingOutput.create_decoding_view()` for 2D decoders: normalize the
+        posterior over the correct spatial dimension(s), auto-detect the
+        orientation column name, and pass the `linear_position` column (not the
+        whole DataFrame) to the 1D view #1616
 
 - LFP
 
@@ -307,6 +339,10 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
+        `curation_label` column #1626
+    - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
+        #1626
 
 ## [0.5.5] (Aug 6, 2025)
 

@@ -445,6 +445,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.objects[object_id].to_dataframe()
+        # The column is absent when no unit was labeled (see
+        # _write_metric_curation_to_nwb); report that as no labels.
+        if "curation_label" not in units:
+            return {}
         return dict(zip(units.index, units["curation_label"]))
 
     @classmethod
@@ -659,22 +663,22 @@ def _write_metric_curation_to_nwb(
 
         # add labels, merge groups, metrics
         if labels is not None:
-            label_values = []
-            for unit_id in unit_ids:
-                if unit_id not in labels:
-                    label_values.append([])
-                else:
-                    label_values.append(labels[unit_id])
-            nwbf.add_unit_column(
-                name="curation_label",
-                description="curation label",
-                data=label_values,
-                index=True,
-            )
+            label_values = [labels.get(unit_id, []) for unit_id in unit_ids]
+            # Skip the column when no unit is labeled: an all-empty ragged
+            # column has no data for hdmf to infer a dtype from, which would
+            # crash the write. get_labels tolerates the column being absent.
+            if any(len(value) > 0 for value in label_values):
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description="curation label",
+                    data=label_values,
+                    index=True,
+                )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
             merge_groups_list = [
-                [""] for i in merge_groups_dict.values() if i == []
+                [""] if value == [] else value
+                for value in merge_groups_dict.values()
             ]
             nwbf.add_unit_column(
                 name="merge_groups",
