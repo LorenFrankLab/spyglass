@@ -87,6 +87,24 @@ def test_filter_data_rejects_all_empty_intervals(
         )
 
 
+def test_filter_data_rejects_reversed_interval(
+    filter_parameters, add_filter, filter_coeff
+):
+    """A reversed interval is malformed input, not an empty one.
+
+    Skipping zero-sample intervals must not also swallow `[stop, start]`, which
+    would silently drop data instead of telling the caller their valid_times are
+    wrong.
+    """
+    timestamps = np.arange(100, dtype=float)
+    data = np.zeros((100, 2))
+    reversed_and_valid = np.array([[10.0, 5.0], [20.0, 25.0]])
+    with pytest.raises(ValueError, match="Reversed interval"):
+        filter_parameters.filter_data(
+            timestamps, data, filter_coeff, reversed_and_valid, [0, 1], 1
+        )
+
+
 def test_calc_filter_delay(filter_parameters, filter_coeff):
     delay = filter_parameters.calc_filter_delay(filter_coeff)
     assert delay == 27, "filter_delay failed"

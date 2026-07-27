@@ -329,10 +329,19 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         output_offsets = [0]
 
         for a_start, a_stop in valid_times:
+            if a_stop < a_start:
+                raise ValueError(
+                    "Reversed interval in 'valid_times': stop precedes start "
+                    f"({a_start}, {a_stop})"
+                )
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps_on_disk, n_samples
             )
-            if to <= frm:  # interval holds no samples after clipping
+            # Zero samples after clipping -- an interval that lands between two
+            # timestamps, or entirely outside them. Only genuinely empty
+            # intervals get here; a malformed one raised above rather than
+            # being silently dropped.
+            if to <= frm:
                 continue
 
             indices.append((frm, to))
@@ -507,10 +516,17 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
+            if a_stop < a_start:
+                raise ValueError(
+                    "Reversed interval in 'valid_times': stop precedes start "
+                    f"({a_start}, {a_stop})"
+                )
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-            if to <= frm:  # interval holds no samples after clipping
+            if (
+                to <= frm
+            ):  # genuinely empty after clipping (see filter_data_nwb)
                 continue
             indices.append((frm, to))
 
