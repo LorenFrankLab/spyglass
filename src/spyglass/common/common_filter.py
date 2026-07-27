@@ -344,7 +344,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 input_index_bounds=[frm, to - 1],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
                 describe_dims=True,
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
@@ -441,7 +441,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                         filter_delay,
                         filter_delay + stop - start,
                     ],
-                    ds=decimation,
+                    decimation_factor=decimation,
                     input_dim_restrictions=input_dim_restrictions,
                     outarray=filtered_data,
                     output_offset=output_offsets[ii],
@@ -511,7 +511,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
                 describe_dims=True,
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
@@ -544,7 +544,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 axis=time_axis,
                 input_index_bounds=[start, stop],
                 output_index_bounds=[filter_delay, filter_delay + stop - start],
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
                 outarray=filtered_data,
                 output_offset=output_offsets[ii],

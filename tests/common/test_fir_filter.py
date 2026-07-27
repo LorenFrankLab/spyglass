@@ -30,7 +30,7 @@ def reference_filter(
     axis,
     input_index_bounds=None,
     output_index_bounds=None,
-    ds=None,
+    decimation_factor=None,
     electrodes=None,
 ):
     """Ground-truth FIR filter for 2D (time x electrode) data via np.convolve.
@@ -39,7 +39,7 @@ def reference_filter(
     which OUTPUT samples are produced but the filter still draws its support from
     the real neighboring samples of the full lane (overlap-save, not per-window
     zero-padding), so the convolution output index is offset by ``frm``:
-    ``out_lane = conv(full_lane, b)[frm + k1 : frm + k2 : ds]``.
+    ``out_lane = conv(full_lane, b)[frm + k1 : frm + k2 : decimation_factor]``.
     """
     assert data.ndim == 2
     time_axis = axis
@@ -53,7 +53,7 @@ def reference_filter(
     k1, k2 = (
         (0, tot_sub) if output_index_bounds is None else output_index_bounds
     )
-    step = ds or 1
+    step = decimation_factor or 1
     lanes = [
         np.convolve(d[i], b, mode="full")[frm + k1 : frm + k2 : step]
         for i in range(d.shape[0])
@@ -266,8 +266,10 @@ class TestFilterCorrectness:
     N = 40_000
 
     @pytest.mark.parametrize("time_axis", [0, 1])
-    @pytest.mark.parametrize("ds", [None, 4, 15])
-    def test_delay_compensated_filter(self, lfp_lowpass, rng, time_axis, ds):
+    @pytest.mark.parametrize("decimation_factor", [None, 4, 15])
+    def test_delay_compensated_filter(
+        self, lfp_lowpass, rng, time_axis, decimation_factor
+    ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
         n_elec = 5
@@ -280,21 +282,21 @@ class TestFilterCorrectness:
             b,
             axis=time_axis,
             output_index_bounds=oib,
-            ds=ds,
+            decimation_factor=decimation_factor,
         )
         ref = reference_filter(
             data,
             b,
             axis=time_axis,
             output_index_bounds=oib,
-            ds=ds,
+            decimation_factor=decimation_factor,
         )
         assert out.shape == ref.shape
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
     @pytest.mark.parametrize("time_axis", [0, 1])
     @pytest.mark.parametrize(
-        "n_elec, N, electrodes, frm, to, ds",
+        "n_elec, N, electrodes, frm, to, decimation_factor",
         [
             (6, 40_000, [0, 2, 5], 1000, 30000, 5),  # single FFT block
             (4, 200_000, [0, 3], 1500, 190_000, 15),  # spans several blocks
@@ -302,7 +304,16 @@ class TestFilterCorrectness:
         ids=["single_block", "multiblock"],
     )
     def test_restriction_input_bounds_decimation(
-        self, lfp_lowpass, rng, time_axis, n_elec, N, electrodes, frm, to, ds
+        self,
+        lfp_lowpass,
+        rng,
+        time_axis,
+        n_elec,
+        N,
+        electrodes,
+        frm,
+        to,
+        decimation_factor,
     ):
         # Electrode restriction + input bounds + decimation. The multiblock case
         # (N far exceeds the ~59k FFT block stride) exercises the
@@ -324,7 +335,7 @@ class TestFilterCorrectness:
             axis=time_axis,
             input_index_bounds=[frm, to],
             output_index_bounds=[delay, delay + n],
-            ds=ds,
+            decimation_factor=decimation_factor,
             input_dim_restrictions=idr,
         )
         ref = reference_filter(
@@ -333,7 +344,7 @@ class TestFilterCorrectness:
             axis=time_axis,
             input_index_bounds=[frm, to],
             output_index_bounds=[delay, delay + n],
-            ds=ds,
+            decimation_factor=decimation_factor,
             electrodes=electrodes,
         )
         assert out.shape == ref.shape
@@ -392,7 +403,7 @@ class TestStreaming:
             # single-block intervals (each tot_length < FFT block stride)
             (60_000, [(500, 20000), (20000, 45000), (45000, 59000)]),
             # multi-block intervals, with lengths deliberately NOT divisible by
-            # ds=10 so the per-interval decimation phase reset is exercised too
+            # decimation_factor=10 so the per-interval decimation phase reset is exercised too
             (250_000, [(500, 88007), (88007, 175003), (175003, 249000)]),
         ],
     )
@@ -401,7 +412,7 @@ class TestStreaming:
     ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
-        ds = 10
+        decimation_factor = 10
         n_elec = 4
         shape = (N, n_elec) if time_axis == 0 else (n_elec, N)
         data = rng.standard_normal(shape)
@@ -423,7 +434,7 @@ class TestStreaming:
                 input_index_bounds=[frm, to],
                 output_index_bounds=[delay, delay + to - frm],
                 describe_dims=True,
-                ds=ds,
+                decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
             )
             out_shape[time_axis] += s[time_axis]
@@ -437,7 +448,7 @@ class TestStreaming:
                 axis=time_axis,
                 input_index_bounds=[frm, to],
                 output_index_bounds=[delay, delay + to - frm],
-                ds=ds,
+                decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
                 outarray=outarray,
                 output_offset=offsets[i],
@@ -451,7 +462,12 @@ class TestStreaming:
         full = [np.convolve(lane, b, "full") for lane in lanes]
         pieces = [
             np.moveaxis(
-                np.stack([fc[frm + delay : to + delay : ds] for fc in full]),
+                np.stack(
+                    [
+                        fc[frm + delay : to + delay : decimation_factor]
+                        for fc in full
+                    ]
+                ),
                 1,
                 time_axis,
             )
@@ -469,7 +485,7 @@ class TestStreaming:
         h5py = pytest.importorskip("h5py")
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
-        n_elec, N, ds = 5, 40_000, 8
+        n_elec, N, decimation_factor = 5, 40_000, 8
         arr = rng.standard_normal((n_elec, N))
         electrodes = np.array([0, 2, 4])  # h5py requires increasing order
         idr = [np.s_[electrodes], None]
@@ -485,7 +501,7 @@ class TestStreaming:
                 b,
                 axis=1,
                 output_index_bounds=oib,
-                ds=ds,
+                decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
                 describe_dims=True,
             )
@@ -495,7 +511,7 @@ class TestStreaming:
                 b,
                 axis=1,
                 output_index_bounds=oib,
-                ds=ds,
+                decimation_factor=decimation_factor,
                 input_dim_restrictions=idr,
                 outarray=out,
             )
@@ -506,7 +522,7 @@ class TestStreaming:
             b,
             axis=1,
             output_index_bounds=oib,
-            ds=ds,
+            decimation_factor=decimation_factor,
             electrodes=electrodes,
         )
         assert result.shape == ref.shape
@@ -518,9 +534,9 @@ class TestStreaming:
 # --------------------------------------------------------------------------- #
 class TestDescribeDims:
     @pytest.mark.parametrize("time_axis", [0, 1])
-    @pytest.mark.parametrize("ds", [None, 7])
+    @pytest.mark.parametrize("decimation_factor", [None, 7])
     def test_describe_matches_actual_output(
-        self, lfp_lowpass, rng, time_axis, ds
+        self, lfp_lowpass, rng, time_axis, decimation_factor
     ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
@@ -534,7 +550,7 @@ class TestDescribeDims:
             b,
             axis=time_axis,
             output_index_bounds=oib,
-            ds=ds,
+            decimation_factor=decimation_factor,
             describe_dims=True,
         )
         out = fir.filter_data_fir(
@@ -542,7 +558,7 @@ class TestDescribeDims:
             b,
             axis=time_axis,
             output_index_bounds=oib,
-            ds=ds,
+            decimation_factor=decimation_factor,
         )
         assert tuple(shape_pred) == out.shape
         assert np.dtype(dtype_pred) == out.dtype == np.float64
@@ -617,7 +633,7 @@ class TestEdgeCasesAndValidation:
             b,
             axis=1,
             output_index_bounds=[delay, delay + big_N],
-            ds=15,
+            decimation_factor=15,
             input_dim_restrictions=[np.s_[electrodes], None],
         )
         full = [
@@ -628,21 +644,21 @@ class TestEdgeCasesAndValidation:
         assert out.shape == ref.shape and np.iscomplexobj(out)
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
-    @pytest.mark.parametrize("bad_ds", [0, -3, 4.0])
-    def test_ds_below_one_or_noninteger_fails_closed(
-        self, lfp_lowpass, rng, bad_ds
+    @pytest.mark.parametrize("bad_factor", [0, -3, 4.0])
+    def test_decimation_below_one_or_noninteger_fails_closed(
+        self, lfp_lowpass, rng, bad_factor
     ):
-        # ds must be an integer >= 1 (consistent with nfft / output_offset).
+        # decimation_factor must be an integer >= 1 (consistent with nfft / output_offset).
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
-        with pytest.raises(ValueError, match="ds"):
-            fir.filter_data_fir(x, b, axis=0, ds=bad_ds)
+        with pytest.raises(ValueError, match="decimation_factor"):
+            fir.filter_data_fir(x, b, axis=0, decimation_factor=bad_factor)
 
-    def test_ds_one_is_noop(self, lfp_lowpass, rng):
+    def test_decimation_one_is_noop(self, lfp_lowpass, rng):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         np.testing.assert_array_equal(
-            fir.filter_data_fir(x, b, axis=0, ds=1),
+            fir.filter_data_fir(x, b, axis=0, decimation_factor=1),
             fir.filter_data_fir(x, b, axis=0),
         )
 

@@ -38,11 +38,11 @@ Intentional divergences from upstream:
   ``stopband_deviation``, and deviations so loose the tap estimate would be < 1;
   ``firdesign``/``_firspline`` require an integer ``numtaps`` >= 1 and at
   least two ordered ``band_edges``; the spline power ``spline_power`` must be
-  > 0; ``ds`` must be an integer >= 1; ``nfft`` must be an integer >= the
-  kernel length;
-  ``input_dim_restrictions`` entries must be 1-D integer index arrays restricting
-  at most one non-filtered axis; ``output_offset`` must be an integer >= 0 that
-  fits within ``outarray``; complex input no longer raises ``UnboundLocalError``.
+  > 0; ``decimation_factor`` must be an integer >= 1; ``nfft`` must be an
+  integer >= the kernel length; ``input_dim_restrictions`` entries must be 1-D
+  integer index arrays restricting at most one non-filtered axis;
+  ``output_offset`` must be an integer >= 0 that fits within ``outarray``;
+  complex input no longer raises ``UnboundLocalError``.
 
 Design details (spline-transition FIR) follow Burrus et al., 1992.
 """
@@ -428,7 +428,7 @@ class _OsPlan:
     first_ind: int
     last_ind: int
     downsample: bool
-    ds: int | None
+    decimation_factor: int | None
     restricted_dims: list
     expected_shape: tuple[int, ...]
     dtype: str
@@ -444,7 +444,7 @@ def _plan_osconvolve(
     axis: int,
     input_index_bounds: Sequence[int] | None,
     output_index_bounds: Sequence[int] | None,
-    ds: int | None,
+    decimation_factor: int | None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None,
 ) -> _OsPlan:
     """Validate arguments and plan the output shape for :func:`_osconvolve`.
@@ -542,15 +542,19 @@ def _plan_osconvolve(
         last_ind = first_ind + outsize
 
     downsample = False
-    if ds is not None:
-        # ds == 1 is a valid (no-op) decimation; reject non-integer / 0 / negative
+    if decimation_factor is not None:
+        # decimation_factor == 1 is a valid (no-op) decimation; reject non-integer / 0 / negative
         # up front (consistent with nfft/output_offset) so they fail loudly here
         # instead of as a later ZeroDivisionError.
-        if not isinstance(ds, (int, np.integer)) or ds < 1:
+        if (
+            not isinstance(decimation_factor, (int, np.integer))
+            or decimation_factor < 1
+        ):
             raise ValueError(
-                f"'ds' factor must be an integer >= 1 but got {ds!r}"
+                "'decimation_factor' must be an integer >= 1 but got "
+                f"{decimation_factor!r}"
             )
-        ds = int(ds)
+        decimation_factor = int(decimation_factor)
         downsample = True
 
     ###############################################################
@@ -616,7 +620,7 @@ def _plan_osconvolve(
 
     # continue modifying expected_shape if downsampling
     if downsample:
-        n, mod = divmod(last_ind - first_ind, ds)
+        n, mod = divmod(last_ind - first_ind, decimation_factor)
         if mod != 0:
             n += 1
         expected_shape[axis] = n
@@ -638,7 +642,7 @@ def _plan_osconvolve(
         first_ind=first_ind,
         last_ind=last_ind,
         downsample=downsample,
-        ds=ds,
+        decimation_factor=decimation_factor,
         restricted_dims=restricted_dims,
         expected_shape=expected_shape,
         dtype=dtype,
@@ -657,14 +661,14 @@ def _osconvolve(
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
     describe_dims: bool = False,
-    ds: int | None = None,
+    decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
 ) -> tuple[tuple[int, ...], str] | np.ndarray:
     """Overlap-save FFT convolution, written to minimize memory usage.
 
     Streams the convolution block-by-block into ``outarray`` (which may be an
-    on-disk array), supporting decimation (``ds``) and restricting which
+    on-disk array), supporting decimation (``decimation_factor``) and restricting which
     indices of the non-filtered axes are used (``input_dim_restrictions``).
     ``mode`` selects ``'full'``, ``'same'``, or ``'valid'`` convolution.
 
@@ -699,7 +703,7 @@ def _osconvolve(
         axis=axis,
         input_index_bounds=input_index_bounds,
         output_index_bounds=output_index_bounds,
-        ds=ds,
+        decimation_factor=decimation_factor,
         input_dim_restrictions=input_dim_restrictions,
     )
     real_output = plan.real_output
@@ -707,7 +711,7 @@ def _osconvolve(
     first_ind = plan.first_ind
     last_ind = plan.last_ind
     downsample = plan.downsample
-    ds = plan.ds
+    decimation_factor = plan.decimation_factor
     restricted_dims = plan.restricted_dims
     expected_shape = plan.expected_shape
     dtype = plan.dtype
@@ -886,7 +890,7 @@ def _osconvolve(
         # blocks, or 0; the high offset is the last-block tail or the full block
         # length block_step (note kernel_len-1+block_step == nfft). This single
         # form is equivalent to upstream osconvolve's separate first/last/middle
-        # and ds/non-ds cases.
+        # and decimating/non-decimating cases.
         if ii == first_block_to_check:
             low_offset = first_offset
         elif downsample:
@@ -894,7 +898,7 @@ def _osconvolve(
         else:
             low_offset = 0
         high_offset = last_offset if ii == last_block_to_check else block_step
-        step = ds if downsample else 1
+        step = decimation_factor if downsample else 1
         conv_slices[axis] = np.s_[
             kernel_len - 1 + low_offset : kernel_len - 1 + high_offset : step
         ]
@@ -902,7 +906,9 @@ def _osconvolve(
             n_samples = conv_block[tuple(conv_slices)].shape[axis]
             if ii != last_block_to_check:
                 # phase of the next block's first retained sample
-                block_offset = low_offset + n_samples * ds - block_step
+                block_offset = (
+                    low_offset + n_samples * decimation_factor - block_step
+                )
         else:
             n_samples = high_offset - low_offset
         outarray_slices[axis] = np.s_[write_pos : write_pos + n_samples]
@@ -938,7 +944,7 @@ def filter_data_fir(
     input_index_bounds: Sequence[int] | None = None,
     output_index_bounds: Sequence[int] | None = None,
     describe_dims: bool = False,
-    ds: int | None = None,
+    decimation_factor: int | None = None,
     input_dim_restrictions: Sequence[npt.ArrayLike | None] | None = None,
     output_offset: int = 0,
 ) -> tuple[tuple[int, ...], str] | np.ndarray:
@@ -977,7 +983,7 @@ def filter_data_fir(
         exclusive).
     describe_dims : bool, optional
         If True, return ``(shape, dtype)`` without filtering. Default False.
-    ds : int, optional
+    decimation_factor : int, optional
         Integer decimation factor (>= 1). Default None (no decimation).
     input_dim_restrictions : sequence, optional
         One entry per dimension of ``data``. The entry for ``axis`` must be
@@ -1002,7 +1008,7 @@ def filter_data_fir(
     ------
     ValueError
         On invalid arguments -- e.g. ``threads < 1``, a non-1-D kernel, an
-        out-of-range or non-integer ``nfft``/``ds``/``output_offset``, bounds
+        out-of-range or non-integer ``nfft``/``decimation_factor``/``output_offset``, bounds
         that are reversed or out of range, or unsupported
         ``input_dim_restrictions``.
     IndexError
@@ -1038,7 +1044,7 @@ def filter_data_fir(
         input_index_bounds=input_index_bounds,
         output_index_bounds=output_index_bounds,
         describe_dims=describe_dims,
-        ds=ds,
+        decimation_factor=decimation_factor,
         input_dim_restrictions=input_dim_restrictions,
         output_offset=output_offset,
     )
