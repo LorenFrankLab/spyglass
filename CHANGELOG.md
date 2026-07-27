@@ -227,13 +227,16 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
     than the filter combined with a tight `nfft` returned a wrong convolution.
     Unreachable at the default `nfft`, so LFP output is unaffected #1635
-- Fix filtering an interval that starts at sample 0 of an on-disk electrical
-    series with 16 or more electrodes, which raised an h5py "Dataspaces don't
+- Fix filtering an on-disk electrical series with 16 or more electrodes when a
+    block read is empty -- an interval starting at sample 0, or a trailing block
+    beginning at the end of the data -- which raised an h5py "Dataspaces don't
     have hyperslab selections" error #1635
 - `FirFilterParameters.filter_data` and `filter_data_nwb` now raise when every
     interval in `valid_times` is empty, instead of writing a zero-length
-    electrical series and then failing #1635
-- `FirFilterParameters.filter_data` again accepts electrodes in any order #1635
+    electrical series and then failing, and reject a reversed interval instead
+    of silently dropping it #1635
+- Electrode selections may again be given in any order, on-disk as well as
+    in-memory; rows are returned in the order requested #1635
 
 ### Pipelines
 
