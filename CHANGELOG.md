@@ -264,9 +264,13 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position dataframe in
         `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
-    - Fix fetching position df in
-        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
-    - Set `non_local_detector` as conditional import #1619
+    - Import `non_local_detector` inside the decoding operations that use it, so a
+        broken `jax`/`numpy` stack no longer breaks `import   spyglass.common` or
+        data ingestion #1619
+    - Pin `numpy`, `scipy`, and `jax` to the combination `spikeinterface` 0.99
+        needs. Temporary, pending #1609 #1619
+    - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
+        every call, and stop `insert` from mutating the caller's rows #1619
 
 - LFP
 

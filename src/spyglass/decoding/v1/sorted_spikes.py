@@ -13,7 +13,7 @@ from __future__ import annotations
 import copy
 import uuid
 from pathlib import Path
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -23,11 +23,6 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding._non_local_detector_compat import (
-    SortedSpikesDetector,
-    analysis,
-    raise_if_unavailable,
-)
 from spyglass.decoding.v1.core import (
     DecodingParameters,  # noqa: F401
     PositionGroup,
@@ -45,6 +40,9 @@ from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,  # noqa: F401
 )
 from spyglass.utils import SpyglassMixin, logger
+
+if TYPE_CHECKING:  # annotations only: never import non_local_detector eagerly
+    from non_local_detector.models.base import SortedSpikesDetector
 
 schema = dj.schema("decoding_sorted_spikes_v1")
 
@@ -236,7 +234,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
-        raise_if_unavailable()
+        from non_local_detector.models.base import SortedSpikesDetector
+
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
@@ -414,12 +413,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         coordinate instead of separate ``intervals`` dimension. See CHANGELOG.md
         for migration guide.
         """
-        raise_if_unavailable()
+        from non_local_detector.models.base import SortedSpikesDetector
+
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
         """Retrieve the decoding model"""
-        raise_if_unavailable()
+        from non_local_detector.models.base import SortedSpikesDetector
+
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
     @classmethod
@@ -436,7 +437,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         List[TrackGraph]
             list of track graphs in the trained model
         """
-        raise_if_unavailable()
+        from non_local_detector.models.base import SortedSpikesDetector
+
         key = cls.get_fully_defined_key(
             key, required_fields=["decoding_param_name"]
         )
@@ -667,7 +669,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         """
         # TODO: store in table
 
-        raise_if_unavailable()
+        import non_local_detector.analysis as analysis
 
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)

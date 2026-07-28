@@ -48,6 +48,9 @@ dependencies = [
   # "ghostipy", # removed from list bc M1 users need to install pyfftw first
   "hdmf>=3.4.6",
   "ipympl",
+  # jax 0.7.2 requires numpy>=2/scipy>=1.13, which spikeinterface 0.99 can't
+  # use. Also caps the jax[cpu]/jax[cuda12] moseq extras below.
+  "jax<0.7.2",                     # TODO(#1609): remove with SpikeInterface bump
   "kachery-cloud>=0.4",
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
@@ -55,7 +58,9 @@ dependencies = [
   "ndx-ophys-devices",
   "ndx-pose",
   "non-local-detector",
-  "numpy",
+  # spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but declares
+  # an unbounded numpy, so state the bound its code actually needs here.
+  "numpy<2",                       # TODO(#1609): remove with SpikeInterface bump
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
@@ -64,6 +69,9 @@ dependencies = [
   "pydotplus",
   "pynwb>=3.1.3",
   "ripple-detection",
+  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
+  # Already in environments/environment.yml, missing here.
+  "scipy<1.13",                    # TODO(#1609): remove with SpikeInterface bump
   "seaborn",
   "sortingview>=0.11",
   "spikeinterface>=0.99.1,<0.100",

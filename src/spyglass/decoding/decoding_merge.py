@@ -3,11 +3,6 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 
-from spyglass.decoding._non_local_detector_compat import (
-    create_1D_decode_view,
-    create_2D_decode_view,
-    raise_if_unavailable,
-)
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
 from spyglass.decoding.v1.sorted_spikes import (
     SortedSpikesDecodingV1,
@@ -134,7 +129,13 @@ class DecodingOutput(_Merge, SpyglassMixin):
         view
             Figurl visualization view (1D or 2D depending on decoder)
         """
-        raise_if_unavailable()
+        from non_local_detector.visualization.figurl_1D import (
+            create_1D_decode_view,
+        )
+        from non_local_detector.visualization.figurl_2D import (
+            create_2D_decode_view,
+        )
+
         results = cls.fetch_results(key)
 
         # Filter to specific interval if requested
