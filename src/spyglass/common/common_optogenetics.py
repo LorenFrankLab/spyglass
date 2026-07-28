@@ -1,6 +1,11 @@
 import datajoint as dj
 import numpy as np
 
+from spyglass.common._photometry_nwb import (
+    is_photometry_file,
+    optical_fiber_instances,
+    photometry_fiber_names,
+)
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
@@ -341,6 +346,32 @@ class OpticalFiberDevice(SpyglassIngestion, dj.Manual):
         )
     }
 
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """On a photometry file, keep only the ``OpticalFiberModel``\\ s a
+        remaining (non-photometry) fiber still needs; otherwise unchanged.
+
+        Photometry fibers are ingested by ``common_photometry`` (their models may
+        be sparse); dropping a model a surviving optogenetics fiber still
+        references would break that fiber's ``-> OpticalFiberDevice`` FK, so a
+        model shared with a non-photometry fiber is kept. A file with no
+        ``FiberPhotometry`` container is untouched.
+        """
+        models = super().get_nwb_objects(nwb_file, nwb_file_name)
+        if not is_photometry_file(nwb_file):
+            return models
+        photo_fibers = photometry_fiber_names(nwb_file)
+        remaining = [
+            fiber
+            for fiber in optical_fiber_instances(nwb_file)
+            if getattr(fiber, "name", None) not in photo_fibers
+        ]
+        needed = {
+            fiber.model.name
+            for fiber in remaining
+            if getattr(fiber, "model", None) is not None
+        }
+        return [m for m in models if getattr(m, "name", None) in needed]
+
 
 @schema
 class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
@@ -381,6 +412,23 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
         ),
     }
     _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """On a photometry file, drop the ``OpticalFiber`` instances a
+        ``FiberPhotometryTable`` references (``common_photometry`` ingests those,
+        and their insertion metadata may be too sparse for this table's NOT NULL
+        columns); otherwise unchanged. A file with no ``FiberPhotometry``
+        container is untouched, so pure-optogenetics behavior is unchanged.
+        """
+        fibers = super().get_nwb_objects(nwb_file, nwb_file_name)
+        if not is_photometry_file(nwb_file):
+            return fibers
+        photo_fibers = photometry_fiber_names(nwb_file)
+        return [
+            fiber
+            for fiber in fibers
+            if getattr(fiber, "name", None) not in photo_fibers
+        ]
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         self._fiber_index[nwb_file_name] = (

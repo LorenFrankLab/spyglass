@@ -108,6 +108,7 @@ optional-dependencies.test = [
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
+  "ndx-fiber-photometry==0.2.3", # build fiber-photometry test fixtures (never imported at ingest)
   "netcdf4",                # for decoding mocking
   "opencv-python-headless", # for headless testing of Qt
   "pre-commit",             # linting

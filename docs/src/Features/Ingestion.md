@@ -67,3 +67,82 @@ table entries to the source nwb objects and attributes.
 
 For entries not yet contained in the updated format, a complete list of this
 mappings can also be found [here](../ForDevelopers/UsingNWB.md).
+
+## Fiber photometry
+
+Spyglass ingests fiber-photometry setups recorded with the
+[`ndx-fiber-photometry`](https://github.com/catalystneuro/ndx-fiber-photometry)
+NWB extension into the `common_photometry` schema. `insert_sessions` populates:
+
+- Six reusable device/reagent tables — `Indicator`, `ExcitationSource`,
+    `Photodetector`, `DichroicMirror`, `OpticalFilter`, and `OpticalFiber` — a
+    shared catalog keyed by device name and storing only reusable model specs.
+    Each is reference-scoped: it ingests only the objects a `FiberPhotometryTable`
+    references, so a file without a `FiberPhotometry` container is a clean no-op.
+- `FiberPhotometryConfig` — one row per `FiberPhotometryTable` row, with foreign
+    keys to the device tables plus the fiber's session-specific insertion
+    metadata and per-channel excitation/emission wavelengths. The implant site
+    (the row's `location`) is normalized into the shared `BrainRegion` lookup —
+    the same table electrodes use — so photometry sites are queryable alongside
+    ephys regions. When the fiber's indicator carries a viral injection, the row
+    also links (nullably) to the shared, session-scoped
+    `common_optogenetics.VirusInjection` — the same table optogenetic effectors
+    use — rather than duplicating injection modeling.
+- `FiberPhotometryResponseSeries` — one row per recorded
+    `FiberPhotometryResponseSeries`, storing the NWB object id (not the array) so
+    the trace is retrievable via `fetch_nwb()`. Its `.Fiber` part maps each data
+    column to the `FiberPhotometryConfig` row it records, and it references an
+    `IntervalList` of the series' valid (recorded) times so the trace can be
+    time-restricted against the rest of Spyglass (as `Raw` does).
+
+The recorded fluorescence traces are **not** copied into the database — the table
+stores only the NWB object id and the trace stays in the file. A file typically
+holds several response series, so restrict to a single one (e.g. by `name`) and
+retrieve it as a time-indexed `pandas.DataFrame` (per-fiber columns, time axis
+from the series' `rate`/`starting_time` or explicit `timestamps`):
+
+```python
+from spyglass.common import FiberPhotometryResponseSeries
+
+file_key = {"nwb_file_name": "my_session_.nwb"}
+# inspect the available series for this file
+(FiberPhotometryResponseSeries & file_key).fetch("name")
+
+# retrieve one series' trace
+series = FiberPhotometryResponseSeries & file_key & {"name": "green_DLS"}
+df = series.fetch1_dataframe()
+```
+
+Viral-injection provenance (construct, titer, site) for a fiber's indicator is
+retrieved with `FiberPhotometryConfig.fetch_injection()`, which resolves the link
+through the shared `VirusInjection`/`Virus` tables. Use it rather than a bare join:
+`FiberPhotometryConfig` and `VirusInjection` share several column names (fiber
+*insertion* vs injection *site*), so a natural join would silently match on them
+and drop rows.
+
+```python
+from spyglass.common import FiberPhotometryConfig
+
+FiberPhotometryConfig().fetch_injection(as_dict=True)  # construct/titer/site per fiber
+```
+
+An unmodeled `FiberPhotometryTable` column or device attribute is ignored with a
+warning naming it, rather than dropped silently. Analysis (dF/F, isosbestic
+correction, downsampling) is left to a follow-up; this layer stops at retrieving
+the raw trace.
+
+Dependency-floor constraint (not a schema limitation): this feature ships on
+Spyglass's current floor (`pynwb` 3.1.x / NWB **`core` 2.9.0**) with no
+`pynwb`/`hdmf` bump, so on that floor a file must embed `core` 2.9.0 to be
+read — write such files with pynwb 3.1.x. Files embedding the newer `core`
+2.10.0 (as recent Frank-lab photometry files do) are ingestable by the same
+`common_photometry` code once the floor moves to `pynwb` >= 4.0; the schema
+itself is version-agnostic. The `ndx-fiber-photometry` package is only needed
+to *build* test fixtures and is never imported at ingest time (NWB types are
+matched by class name and gated on the file-embedded namespace version).
+
+Ingesting a photometry file also touches `common_optogenetics`, whose optical
+fiber tables (`OpticalFiberDevice`/`OpticalFiberImplant`) share the underlying
+`ndx-ophys-devices` types. Those tables now skip photometry-referenced fibers via
+a `get_nwb_objects()` gate — a behavioral change only, with **no schema change**;
+a non-photometry file is unaffected.
