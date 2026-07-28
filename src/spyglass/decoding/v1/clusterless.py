@@ -23,6 +23,7 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
 from spyglass.decoding.v1.utils import (
@@ -738,8 +739,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     def get_orientation_col(self, df):
         """Examine columns of a input df and return orientation col name"""
-        cols = df.columns
-        return "orientation" if "orientation" in cols else "head_orientation"
+        return resolve_orientation_col(df) or "head_orientation"
 
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
         """get the ahead-behind distance for the decoding model

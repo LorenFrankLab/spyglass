@@ -9,23 +9,11 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
+from spyglass.common import _fir_filter as fir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
-
-
-def _import_ghostipy():
-    try:
-        import ghostipy as gsp
-
-        return gsp
-    except (ImportError, ModuleNotFoundError) as e:
-        raise ImportError(
-            "You must install ghostipy to use filtering methods. Please note "
-            "that to install ghostipy on an Mac M1, you must first install "
-            "pyfftw from conda-forge."
-        ) from e
 
 
 @schema
@@ -131,7 +119,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             )
             return None
 
-        gsp = _import_ghostipy()
         TRANS_SPLINE = 2  # transition spline will be quadratic
 
         if filter_type != "bandpass":
@@ -144,7 +131,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 + (band_edges[3] - band_edges[2])
             ) / 2.0
 
-        numtaps = gsp.estimate_taps(fs, transition_width)
+        numtaps = fir.estimate_taps(fs, transition_width)
         filterdict = {
             "filter_type": filter_type,
             "filter_name": filter_name,
@@ -194,8 +181,12 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             {
                 **pass_stop_dict,
                 "filter_coeff": np.array(
-                    gsp.firdesign(
-                        numtaps, band_edges, desired, fs=fs, p=TRANS_SPLINE
+                    fir.firdesign(
+                        numtaps,
+                        band_edges,
+                        desired,
+                        sampling_freq=fs,
+                        spline_power=TRANS_SPLINE,
                     ),
                     ndmin=1,
                 ),
@@ -278,8 +269,9 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         data_type: Union[None, str] = None,
     ):
         """
-        Filter data from an NWB electrical series using the ghostipy package,
-        and save the result as a new electrical series in the analysis NWB file.
+        Filter data from an NWB electrical series using the vendored FIR
+        filtering code, and save the result as a new electrical series in the
+        analysis NWB file.
 
         Parameters
         ----------
@@ -312,8 +304,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
         MEM_USE_LIMIT = 0.9  # % of RAM use permitted
 
-        gsp = _import_ghostipy()
-
         data_on_disk = eseries.data
         timestamps_on_disk = eseries.timestamps
 
@@ -339,24 +329,50 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         output_offsets = [0]
 
         for a_start, a_stop in valid_times:
+            if a_stop < a_start:
+                raise ValueError(
+                    "Reversed interval in 'valid_times': stop precedes start "
+                    f"({a_start}, {a_stop})"
+                )
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps_on_disk, n_samples
             )
+            # Zero samples after clipping -- an interval that lands between two
+            # timestamps, or entirely outside them. Only genuinely empty
+            # intervals get here; a malformed one raised above rather than being
+            # silently dropped. Log it: dropping most of valid_times silently
+            # yields a short result that looks correct, because the timestamps
+            # match the data that WAS filtered.
+            if to <= frm:
+                logger.warning(
+                    f"Skipping interval ({a_start}, {a_stop}): no samples "
+                    "between those times in the electrical series"
+                )
+                continue
 
             indices.append((frm, to))
 
-            shape, _ = gsp.filter_data_fir(
+            shape, _ = fir.describe_output(
                 data_on_disk,
                 filter_coeff,
                 axis=time_axis,
-                input_index_bounds=[frm, to - 1],
+                input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
-                describe_dims=True,
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             output_shape_list[time_axis] += shape[time_axis]
+
+        # Fail before touching the analysis file: writing a zero-length
+        # ElectricalSeries and only then failing on the empty interval list
+        # would leave a half-populated file behind.
+        if not indices:
+            raise ValueError(
+                "No samples to filter: every interval in 'valid_times' is "
+                "empty after clipping to the electrical series timestamps "
+                f"({len(valid_times)} interval(s) checked)"
+            )
 
         # Create dynamic table region and electrode series, write/close file
         with pynwb.NWBHDF5IO(
@@ -426,7 +442,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                         ts_offset : ts_offset + len(extracted_ts)
                     ] = extracted_ts
                     ts_offset += len(extracted_ts)
-                    input_index_bounds = [0, interval_samples - 1]
+                    input_index_bounds = [0, interval_samples]
 
                 else:
                     logger.info(f"Interval {ii}: leaving data on disk")
@@ -440,7 +456,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                     input_index_bounds = [start, stop]
 
                 # filter the data
-                gsp.filter_data_fir(
+                fir.filter_data_fir(
                     data,
                     filter_coeff,
                     axis=time_axis,
@@ -449,7 +465,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                         filter_delay,
                         filter_delay + stop - start,
                     ],
-                    ds=decimation,
+                    decimation_factor=decimation,
                     input_dim_restrictions=input_dim_restrictions,
                     outarray=filtered_data,
                     output_offset=output_offsets[ii],
@@ -491,8 +507,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         filtered_data, timestamps
         """
 
-        gsp = _import_ghostipy()
-
         n_dim = len(data.shape)
         n_samples = len(timestamps)
         time_axis = 0 if data.shape[0] == n_samples else 1
@@ -507,25 +521,43 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
 
         filter_delay = self.calc_filter_delay(filter_coeff)
         for a_start, a_stop in valid_times:
+            if a_stop < a_start:
+                raise ValueError(
+                    "Reversed interval in 'valid_times': stop precedes start "
+                    f"({a_start}, {a_stop})"
+                )
             frm, to = self._time_bound_check(
                 a_start, a_stop, timestamps, n_samples
             )
-            if np.isclose(frm, to, rtol=0, atol=1e-8):
+            # Zero samples after clipping; a reversed interval raised above.
+            # Logged for the same reason as in filter_data_nwb -- a silently
+            # shortened result is indistinguishable from a correct one.
+            if to <= frm:
+                logger.warning(
+                    f"Skipping interval ({a_start}, {a_stop}): no samples "
+                    "between those times in 'timestamps'"
+                )
                 continue
             indices.append((frm, to))
 
-            shape, _ = gsp.filter_data_fir(
+            shape, _ = fir.describe_output(
                 data,
                 filter_coeff,
                 axis=time_axis,
                 input_index_bounds=[frm, to],
                 output_index_bounds=[filter_delay, filter_delay + to - frm],
-                describe_dims=True,
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
             )
             output_offsets.append(output_offsets[-1] + shape[time_axis])
             output_shape_list[time_axis] += shape[time_axis]
+
+        if not indices:
+            raise ValueError(
+                "No samples to filter: every interval in 'valid_times' is "
+                f"empty after clipping to 'timestamps' ({len(valid_times)} "
+                "interval(s) checked)"
+            )
 
         # create the dataset and the timestamps array
         filtered_data = np.empty(tuple(output_shape_list), dtype=data.dtype)
@@ -548,13 +580,13 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             ts_offset += len(extracted_ts)
 
             # finally ready to filter data!
-            gsp.filter_data_fir(
+            fir.filter_data_fir(
                 data,
                 filter_coeff,
                 axis=time_axis,
                 input_index_bounds=[start, stop],
                 output_index_bounds=[filter_delay, filter_delay + stop - start],
-                ds=decimation,
+                decimation_factor=decimation,
                 input_dim_restrictions=input_dim_restrictions,
                 outarray=filtered_data,
                 output_offset=output_offsets[ii],
