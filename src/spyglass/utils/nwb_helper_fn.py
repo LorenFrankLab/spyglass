@@ -91,13 +91,22 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         f"NWB file not found locally; checking kachery for {nwb_file_path}"
     )
 
-    from ..sharing.sharing_kachery import AnalysisNwbfileKachery
-
-    kachery_success = AnalysisNwbfileKachery.download_file(
-        os.path.basename(nwb_file_path), permit_fail=True
+    from spyglass.sharing.sharing_kachery import (
+        AnalysisNwbfileKachery,
+        _kachery_available,
     )
-    if kachery_success:
-        return _open_nwb_file(nwb_file_path)
+
+    if _kachery_available:
+        kachery_success = AnalysisNwbfileKachery.download_file(
+            os.path.basename(nwb_file_path), permit_fail=True
+        )
+        if kachery_success:  # pragma no cover
+            return _open_nwb_file(nwb_file_path)
+    else:
+        logger.debug(  # pragma no cover
+            "kachery unavailable; skipping kachery check for %s",
+            nwb_file_path,
+        )
 
     logger.info(
         "NWB file not found in kachery; checking Dandi for "
@@ -650,34 +659,6 @@ def get_nwb_copy_filename(nwb_file_name):
         logger.warning(f"File may already be a copy: {nwb_file_name}")
 
     return f"{filename}_{file_extension}"
-
-
-def change_group_permissions(
-    subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
-):
-    """Change group permissions for specified subject ids in analysis dir."""
-    from spyglass.common.common_usage import ActivityLog
-
-    ActivityLog().deprecate_log("change_group_permissions")
-
-    # Change to directory with analysis nwb files
-    os.chdir(analysis_dir)
-    # Get nwb file directories with specified subject ids
-    target_contents = [
-        x
-        for x in os.listdir(analysis_dir)
-        if any([subject_id in x.split("_")[0] for subject_id in subject_ids])
-    ]
-    # Loop through nwb file directories and change group permissions
-    for target_content in target_contents:
-        logger.info(
-            f"For {target_content}, changing group to {set_group_name} "
-            + "and giving read/write/execute permissions"
-        )
-        # Change group
-        os.system(f"chgrp -R {set_group_name} {target_content}")
-        # Give read, write, execute permissions to group
-        os.system(f"chmod -R g+rwx {target_content}")
 
 
 def is_nwb_obj_type(

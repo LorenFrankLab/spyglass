@@ -297,7 +297,7 @@ class ExportMixin(FetchMixin):
             if restriction
             else self
         )
-        if len(restricted_table) == 0:
+        if not bool(restricted_table):
             # No export entry needed if no selected entries
             return
 
@@ -344,7 +344,7 @@ class ExportMixin(FetchMixin):
             chunk_entries = entries[i * chunk_size : (i + 1) * chunk_size]
             if not chunk_entries:
                 break
-            self._insert_log(chunk_entries)
+            self._insert_entries_log(chunk_entries)
 
     def _insert_log(self, restr_str):
         """Executes insert log entry for export table and restriction."""

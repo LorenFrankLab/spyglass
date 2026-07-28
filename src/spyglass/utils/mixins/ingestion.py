@@ -144,12 +144,25 @@ class IngestionMixin(BaseMixin):
                     f"NWB object {object_name} not found in {nwb_obj}."
                 )
 
-            base_key.update(
-                {
-                    k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
-                    for k, v in mapping.items()
-                }
-            )
+            for k, v in mapping.items():
+                # attribute name as string
+                if isinstance(v, str):
+                    base_key[k] = getattr(obj_, v)
+                # attribute with default value as tuple (attr_name, default_val)
+                elif (
+                    isinstance(v, tuple)
+                    and len(v) == 2
+                    and isinstance(v[0], str)
+                ):
+                    base_key[k] = getattr(obj_, v[0], v[1])
+                # callable function
+                elif callable(v):
+                    base_key[k] = v(obj_)
+                else:
+                    raise ValueError(
+                        f"Invalid mapping for {k}: {v}. Must be str, "
+                        + "tuple of (str, default), or callable."
+                    )
         return {self: [base_key]}
 
     def get_nwb_objects(

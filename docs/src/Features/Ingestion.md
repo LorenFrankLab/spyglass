@@ -40,9 +40,13 @@ corresponding table entries.
 
 - `_source_nwb_object_type`: defines the `pynwb` object type containing data for
     this table (eg. `pynwb.misc.Units` for `ImportedSpikesorting`).
-- `table_key_to_obj_attr`: A dict of dicts mapping table keys to NWB object
-    attributes or callable methods that generate the value to store from the nwb
-    object.
+- `table_key_to_obj_attr`: A dict of dicts mapping table keys to NWB object values.
+  There are several options for identifying object values:
+    - `str`: Spyglass will take the object attribute of that name
+    - `Tuple[str, any]`: Spyglass will take the object attribute matching the first
+    term, defaulting to the value of the second if unavailable
+    - `Callable`: A function that takes the nwb object and returns the value to
+    insert
 
 With these defined the table entries are populated from the following methods:
 
