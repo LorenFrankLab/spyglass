@@ -179,7 +179,7 @@ for label, interval_data in results.groupby("interval_labels"):
     #1490
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
-    #1505
+    #1505, #1633
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
@@ -225,10 +225,10 @@ for label, interval_data in results.groupby("interval_labels"):
     coefficients are bit-identical and the filtered float result matches the
     previous implementation to round-off (~1e-15). Note that LFP is stored in
     the raw data's dtype, so for `int16` raw data the float result is truncated
-    on write, and truncation can turn that round-off into a one-count
-    difference in a small fraction of stored samples -- recomputing an existing
-    LFP entry may not reproduce it exactly to the bit. Declares `scipy`
-    explicitly and ships Ghostipy's Apache-2.0 license #1635
+    on write, and truncation can turn that round-off into a one-count difference
+    in a small fraction of stored samples -- recomputing an existing LFP entry
+    may not reproduce it exactly to the bit. Declares `scipy` explicitly and
+    ships Ghostipy's Apache-2.0 license #1635
 - Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
     than the filter combined with a tight `nfft` returned a wrong convolution.
     Unreachable at the default `nfft`, so LFP output is unaffected #1635
@@ -248,6 +248,7 @@ for label, interval_data in results.groupby("interval_labels"):
     instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
+- Remove items scheduled for 0.6.0 deprecation #1633
 
 ### Pipelines
 
