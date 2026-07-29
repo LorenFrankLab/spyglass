@@ -449,14 +449,72 @@ class TestCleanupAndRegistry:
             f"{_relative_paths(missing_before_cleanup)}"
         )
 
-        # Run cleanup in dry-run mode first as a smoke check, then run the
-        # destructive path so the test verifies real orphan-row cleanup and
-        # filesystem unlinking. cleanup() legitimately deletes orphaned analysis
-        # files left by other tests in the shared base_dir, so this test asserts
-        # only on the files it created (see below), not on the full set
-        # cleanup() removes.
-        master_table.cleanup(dry_run=True)
-        master_table.cleanup()
+        def _snapshot():
+            """Files, contents, rows, and externals, across BOTH tables.
+
+            Snapshotting only the common table would miss exactly the rows
+            cleanup touches first -- the custom table's -- so a regression
+            there would go unnoticed.
+            """
+            files = {
+                path: path.read_bytes()
+                for path in created_paths.values()
+                if path.exists()
+            }
+            rows = {
+                "common": set(master_table.fetch("analysis_file_name")),
+                "custom": set(custom_table.fetch("analysis_file_name")),
+            }
+            externals = {
+                "common": {
+                    str(fp[1])
+                    for fp in master_table._ext_tbl.fetch_external_paths()
+                },
+                "custom": {
+                    str(fp[1])
+                    for fp in custom_table._ext_tbl.fetch_external_paths()
+                },
+            }
+            return files, rows, externals
+
+        # Snapshot BEFORE the dry run and compare immediately after. An
+        # after-only snapshot cannot distinguish a correct dry run from one
+        # that deleted everything before the destructive call ran.
+        before_dry_run = _snapshot()
+
+        # min_file_age_hours=0 on BOTH calls: these files were created
+        # seconds ago, so the 24-hour default would defer them and the dry
+        # run would preview a different, empty candidate set from the
+        # destructive run that follows.
+        # The catastrophe limits are disabled here on purpose. This test
+        # runs against the shared test base_dir, which accumulates unrelated
+        # orphaned analysis files from earlier runs -- exactly the "almost
+        # everything is untracked" shape the limits exist to refuse. Leaving
+        # them on would make the test pass or fail based on how much junk
+        # happens to be on disk. The limits have their own unit tests.
+        no_limits = dict(
+            min_file_age_hours=0,
+            max_delete_fraction=1.0,
+            max_delete_to_tracked_ratio=1e9,
+        )
+
+        master_table.cleanup(dry_run=True, **no_limits)
+
+        after_dry_run = _snapshot()
+        assert (
+            after_dry_run[0] == before_dry_run[0]
+        ), "dry_run=True changed analysis files on disk"
+        assert (
+            after_dry_run[1] == before_dry_run[1]
+        ), "dry_run=True changed analysis rows in common or custom table"
+        assert (
+            after_dry_run[2] == before_dry_run[2]
+        ), "dry_run=True changed external table entries"
+
+        # cleanup() legitimately deletes orphaned analysis files left by
+        # other tests in the shared base_dir, so the assertions below cover
+        # only the files this test created, not the full set removed.
+        master_table.cleanup(**no_limits)
 
         after_cleanup = {
             path for path in created_paths.values() if path.exists()
