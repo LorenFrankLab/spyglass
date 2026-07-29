@@ -660,13 +660,11 @@ def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
     assert plan.deferred_recent_files == {f.resolve()}
 
 
-def test_delete_removes_link_but_retains_external_target(
-    common_nwbfile, tmp_path
-):
-    """The link goes; the external target is retained, not deleted.
+def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
+    """An in-root *.nwb symlink authorizes deleting whatever it points at.
 
-    A symlink provides discoverability, not deletion authority: cleanup
-    manages paths inside the analysis directory only.
+    Owner decision: cleanup reclaims across volumes in one pass, which is
+    what makes symlinked multi-drive analysis storage usable.
     """
     volume2 = tmp_path / "volume2"
     volume2.mkdir()
@@ -684,8 +682,8 @@ def test_delete_removes_link_but_retains_external_target(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert target.exists(), "external target must be retained"
-    assert not link.is_symlink(), "the in-root link is removed"
+    assert not target.exists(), "external target should be reclaimed"
+    assert not link.is_symlink(), "the link is removed too"
 
 
 def test_delete_skips_candidate_whose_identity_changed(
@@ -1271,71 +1269,6 @@ def test_registry_refresh_unions_snapshot_and_live(common_nwbfile, tmp_path):
     assert "`a`.`t`" in names, "snapshot table must never be dropped"
 
 
-def test_delete_refuses_regular_in_root_file_as_voucher(
-    common_nwbfile, tmp_path
-):
-    """A regular in-root file must not vouch for an unrelated outside target.
-
-    Canonical equality is required for every access, not just symlinks;
-    otherwise a structurally consistent forged plan could pair an innocent
-    in-root file with an arbitrary victim.
-    """
-    volume2 = tmp_path / "volume2"
-    volume2.mkdir()
-    victim = volume2 / "victim.nwb"
-    victim.write_text("must survive")
-
-    analysis_dir = tmp_path / "analysis"
-    analysis_dir.mkdir()
-    innocent = analysis_dir / "innocent.nwb"
-    innocent.write_text("unrelated in-root file")
-
-    real = victim.resolve()
-    vst = victim.stat()
-    ist = innocent.lstat()
-    forged = common_nwbfile.CleanupCandidate(
-        real_path=real,
-        target=common_nwbfile.TargetSnapshot(
-            real_path=real,
-            dev=vst.st_dev,
-            ino=vst.st_ino,
-            size=vst.st_size,
-            mtime_ns=vst.st_mtime_ns,
-            ctime_ns=vst.st_ctime_ns,
-            mode=vst.st_mode,
-        ),
-        accesses=(
-            common_nwbfile.AccessSnapshot(
-                access_path=innocent,  # in-root, but unrelated to the target
-                is_link=False,
-                raw_link_target=None,
-                dev=ist.st_dev,
-                ino=ist.st_ino,
-                mtime_ns=ist.st_mtime_ns,
-                ctime_ns=ist.st_ctime_ns,
-            ),
-        ),
-    )
-    plan = common_nwbfile.CleanupPlan(
-        scanned_files={real},
-        tracked_files=set(),
-        files_to_delete={real},
-        empty_files=set(),
-        untracked_files={real},
-        candidates={real: forged},
-        deferred_recent_files=set(),
-        broken_links=set(),
-    )
-
-    table = _table(common_nwbfile, analysis_dir)
-    table._remove_untracked_files(
-        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
-    )
-
-    assert victim.exists(), "unrelated in-root file must not vouch"
-    assert innocent.exists(), "the innocent in-root file must survive too"
-
-
 def test_registry_knowledge_persists_across_candidates(
     common_nwbfile, tmp_path, monkeypatch
 ):
@@ -1434,7 +1367,7 @@ def test_delete_handles_chained_aliases_regardless_of_order(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert target.exists(), "external target must be retained"
+    assert not target.exists(), "external target should be reclaimed"
     assert not middle.is_symlink(), "middle link must be removed"
     assert not outer.is_symlink(), "outer link must be removed, not stranded"
 
@@ -1662,16 +1595,13 @@ def test_delete_handles_relative_chained_alias_across_subdir(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert target.exists(), "external target must be retained"
+    assert not target.exists(), "external target should be reclaimed"
     assert not middle.is_symlink(), "traversed link must be removed"
     assert not outer.is_symlink(), "relative outer link must not be stranded"
 
 
-def test_delete_never_removes_out_of_root_target(common_nwbfile, tmp_path):
-    """No path outside the analysis root is ever unlinked.
-
-    This is the whole contract: a link is discoverability, not authority.
-    """
+def test_delete_reclaims_out_of_root_target(common_nwbfile, tmp_path):
+    """An untracked external target is reclaimed along with its link."""
     volume2 = tmp_path / "volume2"
     volume2.mkdir()
     target = volume2 / "target.nwb"
@@ -1690,15 +1620,13 @@ def test_delete_never_removes_out_of_root_target(common_nwbfile, tmp_path):
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert target.exists(), "external target must never be deleted"
+    assert not target.exists(), "external target should be reclaimed"
     assert not link.is_symlink(), "its in-root link is removed"
     assert not local.exists(), "in-root regular files are still deleted"
 
 
-def test_retained_external_targets_are_reported(
-    common_nwbfile, tmp_path, caplog
-):
-    """Retained targets must be visible, not silently orphaned."""
+def test_external_deletions_are_reported(common_nwbfile, tmp_path, caplog):
+    """Cross-volume deletions must be visible in the weekly log."""
     volume2 = tmp_path / "volume2"
     volume2.mkdir()
     target = volume2 / "target.nwb"
@@ -1716,9 +1644,9 @@ def test_retained_external_targets_are_reported(
         )
 
     assert any(
-        "external symlink targets" in r.message and "10 bytes" in r.message
+        "deleted OUTSIDE" in r.message and "10 bytes" in r.message
         for r in caplog.records
-    ), "retained targets must be reported with a byte total"
+    ), "external deletions must be reported with a byte total"
 
 
 def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):

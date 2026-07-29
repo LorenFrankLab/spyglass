@@ -408,29 +408,28 @@ The cleanup process checks:
     (`cleanup_external(delete_external_files=True)`) deletes files through
     DataJoint in the same run and is not age-gated.
 - **Leaf symlink handling**: `*.nwb` symlinks anywhere in the analysis
-    directory tree are followed **for tracking and reporting only**. A
-    tracked or recent link is preserved. An old, untracked, or dangling link
-    has the **link itself** removed after its type, inode, timestamps, raw
-    target, and containment are re-verified; its target is never touched.
-    Directory symlinks are not followed, so a symlinked session directory
-    remains invisible to cleanup.
-- **Retained external targets**: when a removed link pointed outside the
-    analysis directory, the target is reported with its path, size, and a
-    running byte total. That data becomes unreachable from the analysis
-    directory and must be reclaimed by other means -- the deliberate cost of
-    the policy below.
+    directory tree are followed. A tracked or recent link is preserved. An
+    old, untracked link has **both its target and the link** removed, so
+    analysis storage spread across volumes via symlinks is reclaimed in one
+    pass. A dangling link has only the link removed. Directory symlinks are
+    not followed, so a symlinked session directory stays invisible to
+    cleanup.
+- **Cross-volume deletions are logged**: when a deleted target lay outside
+    the analysis directory, its path, size, and a running byte total are
+    reported, so the weekly log shows exactly what was reclaimed and from
+    where.
 
-**Design statement**: *a symlink provides discoverability, not deletion
-authority. Cleanup manages paths inside configured storage roots only.*
+**Deletion authority**: an in-root `*.nwb` symlink authorizes deletion of
+whatever it points at, on any volume. This is a deliberate choice — it is
+what makes symlinked multi-drive analysis storage usable — and it means
+`analysis_dir` must be treated as a privileged directory. Anyone who can
+create a symlink there can direct cleanup at its target, and cleanup runs
+unattended from cron, potentially with elevated privileges. Before deletion
+each target's device, inode, size, mode, and timestamps must match the scan,
+which also catches a re-pointed intermediate directory symlink, and the
+minimum-age gate protects files still being written or awaiting
+registration. Restrict write access to `analysis_dir` accordingly.
 
-Deleting an external target would mean a privileged cron account acting on
-arbitrary volumes on the strength of a link that any user with write access
-to the analysis directory can create. If the lab needs that reclamation, it
-should arrive as an opt-in feature keyed to explicitly configured storage
-roots -- not a boolean -- so a link can only authorize deletion inside a
-volume the operator has declared. Run `cleanup(dry_run=True)` first and use
-the retained-target report to establish how many external targets exist,
-where they live, and how much space they occupy.
 
 **Not concurrency-safe**: two cleanups running at once can adopt and later drop
 each other's insert-blocking triggers. Run cleanup from one process at a time.

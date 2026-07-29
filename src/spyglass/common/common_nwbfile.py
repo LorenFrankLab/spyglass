@@ -1235,11 +1235,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         if not in_root:
             return _refuse("no access path inside the analysis directory")
 
-        # Target checks apply only when the target itself is inside the
-        # analysis root, i.e. when it is a file this cleanup may delete.
-        # An external target is never touched, so its identity is
-        # irrelevant to safety here.
-        if not candidate.broken and real_path.is_relative_to(analysis_root):
+        # Target identity is verified for EVERY live target, in-root or
+        # not, because every live target may be deleted. This is also what
+        # covers a re-pointed intermediate directory symlink: if the path
+        # now resolves to a different file, its identity will not match the
+        # snapshot and the candidate is skipped.
+        if not candidate.broken:
             try:
                 st = os.stat(real_path)
                 lst_target = os.lstat(real_path)
@@ -1390,7 +1391,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # it and delete its tracked files, defeating the "never dropped"
         # guarantee _current_custom_tables provides within a single call.
         known_tables = list(custom_tables)
-        retained_external = []
+        deleted_external = []
         for candidate in plan.candidates.values():
             # Tracking and registry membership are re-read for EVERY
             # candidate, not once up front: a file can be registered, or a
@@ -1426,18 +1427,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not in_root:
                 continue
             try:
-                in_managed_root = candidate.real_path.is_relative_to(
-                    analysis_root
-                )
-                if not candidate.broken and in_managed_root:
+                if not candidate.broken:
+                    if not candidate.real_path.is_relative_to(analysis_root):
+                        # Cross-volume deletion: record it so the weekly log
+                        # shows what was reclaimed outside the analysis dir.
+                        deleted_external.append(
+                            (candidate.real_path, candidate.target.size)
+                        )
                     candidate.real_path.unlink()
-                elif not candidate.broken:
-                    # External target: the link is removed, the data is
-                    # not. Record it so the operator can see what is now
-                    # unreachable from the analysis directory.
-                    retained_external.append(
-                        (candidate.real_path, candidate.target.size)
-                    )
                 # Each leaf is re-checked immediately before its own
                 # unlink, never batched: a link approved earlier in the
                 # pass could be replaced by a regular file that a blind
@@ -1459,17 +1456,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             except OSError as e:
                 failures.append(f"{candidate.real_path}: {e}")
 
-        if retained_external:
-            total = sum(size for _, size in retained_external)
-            roots = sorted({str(p.parent) for p, _ in retained_external})
+        if deleted_external:
+            total = sum(size for _, size in deleted_external)
+            roots = sorted({str(p.parent) for p, _ in deleted_external})
             logger.warning(
-                f"  {len(retained_external)} external symlink targets "
-                f"retained ({total} bytes) after removing their links. "
-                "Cleanup manages paths inside the analysis directory only, "
-                f"so this data is now unreachable from it. Roots: {roots}"
+                f"  {len(deleted_external)} symlink targets deleted OUTSIDE "
+                f"the analysis directory ({total} bytes reclaimed). An "
+                "in-root *.nwb symlink authorizes deletion of whatever it "
+                f"points at. Roots touched: {roots}"
             )
-            for path, size in sorted(retained_external):
-                logger.info(f"    retained {path} ({size} bytes)")
+            for path, size in sorted(deleted_external):
+                logger.info(f"    deleted external {path} ({size} bytes)")
 
         if failures:
             # Raise rather than log: cleanup() runs database cleanup after
