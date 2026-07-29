@@ -1139,24 +1139,50 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         link traverses -- descending -- puts the outermost first.
 
         Non-link accesses are dropped: the real path is unlinked separately.
+
+        Dependencies are matched by filesystem identity, never by comparing
+        paths. A hop may reach a sibling as ``../b.nwb``, through a
+        directory symlink, or through a symlinked analysis root -- none of
+        which compare equal as ``Path`` values, so a lexical check would
+        report depth zero and preserve an unsafe order.
         """
         links = [a for a in accesses if a.is_link]
-        others = {a.access_path for a in links}
+
+        sibling_ids = set()
+        for access in links:
+            try:
+                st = os.lstat(access.access_path)
+            except OSError:
+                continue
+            sibling_ids.add((st.st_dev, st.st_ino))
 
         def _traversed(access: AccessSnapshot) -> int:
-            """How many sibling access paths this link resolves through."""
+            """How many sibling links this one resolves through."""
             count = 0
+            seen = set()  # identities, for cycle detection
             current = access.access_path
-            for _ in range(64):  # bounded: guards a symlink cycle
+            for _ in range(64):  # bounded even if identity checks fail
                 try:
-                    if not current.is_symlink():
-                        break
+                    st = os.lstat(current)
+                except OSError:
+                    break
+                ident = (st.st_dev, st.st_ino)
+                if ident in seen:
+                    break  # symlink cycle
+                seen.add(ident)
+                if not stat_module.S_ISLNK(st.st_mode):
+                    break
+                try:
                     nxt = Path(os.readlink(current))
                 except OSError:
                     break
                 if not nxt.is_absolute():
                     nxt = current.parent / nxt
-                if nxt in others:
+                try:
+                    nxt_st = os.lstat(nxt)
+                except OSError:
+                    break
+                if (nxt_st.st_dev, nxt_st.st_ino) in sibling_ids:
                     count += 1
                 current = nxt
             return count

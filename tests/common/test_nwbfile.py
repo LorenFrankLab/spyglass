@@ -1615,3 +1615,47 @@ def test_delete_refuses_uppercase_nwb_voucher(common_nwbfile, tmp_path):
         )
 
     assert victim.exists(), "uppercase-suffix voucher must not authorize"
+
+
+def test_delete_handles_relative_chained_alias_across_subdir(
+    common_nwbfile, tmp_path
+):
+    """A `../b.nwb` hop must be recognized as a dependency.
+
+    os.walk yields root-level b.nwb before descending into sub/, so the
+    unsafe [b, a] order is the natural one. Comparing paths lexically would
+    score both links depth zero -- `analysis/sub/../b.nwb` is not equal to
+    `analysis/b.nwb` as a Path -- keep that order, and strand a.nwb.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("data")
+
+    analysis_dir = tmp_path / "analysis"
+    (analysis_dir / "sub").mkdir(parents=True)
+    middle = analysis_dir / "b.nwb"
+    middle.symlink_to(target)
+    outer = analysis_dir / "sub" / "a.nwb"
+    outer.symlink_to(Path("..") / "b.nwb")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    candidate = plan.candidates[target.resolve()]
+    assert len(candidate.accesses) == 2, "both links alias one candidate"
+
+    # Force the unsafe order explicitly: b (the traversed link) first.
+    by_name = {a.access_path.name: a for a in candidate.accesses}
+    plan.candidates[target.resolve()] = common_nwbfile.CleanupCandidate(
+        real_path=candidate.real_path,
+        target=candidate.target,
+        accesses=(by_name["b.nwb"], by_name["a.nwb"]),
+    )
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert not target.exists(), "target must be deleted"
+    assert not middle.is_symlink(), "traversed link must be removed"
+    assert not outer.is_symlink(), "relative outer link must not be stranded"
