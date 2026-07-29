@@ -3,7 +3,7 @@ import os
 import datajoint as dj
 import pytest
 
-from tests.conftest import VERBOSE, skip_if_no_dlc
+from tests.conftest import VERBOSE, skip_if_no_pose
 
 
 def test_bp_insert(sgp):
@@ -53,7 +53,7 @@ def insert_dlc_proj_kwargs(dlc_project_name):
     )
 
 
-@skip_if_no_dlc
+@skip_if_no_pose
 def test_failed_name_insert(
     dlc_project_tbl,
     dlc_project_name,
@@ -72,7 +72,7 @@ def test_failed_name_insert(
     ), "Project re-insert did not return expected key"
 
 
-@skip_if_no_dlc
+@skip_if_no_pose
 def test_failed_team_insert(dlc_project_tbl, insert_dlc_proj_kwargs):
     insert_dlc_proj_kwargs["lab_team"] = "non_existent_team"
     with pytest.raises(ValueError):
@@ -86,8 +86,8 @@ def test_dlc_project_insert_type_error(dlc_project_tbl):
         dlc_project_tbl.insert1(dict(project_name="a", frames_per_video="a"))
 
 
-@skip_if_no_dlc
-def test_failed_group_insert(no_dlc, dlc_project_tbl, new_project_key):
+@skip_if_no_pose
+def test_failed_group_insert(no_pose, dlc_project_tbl, new_project_key):
     with pytest.raises(ValueError):
         dlc_project_tbl.insert_new_project(**new_project_key)
 
@@ -118,7 +118,7 @@ def test_add_video_error(dlc_project_tbl):
         dlc_project_tbl.add_video_files(**kwarg, config_path=".")
 
 
-@skip_if_no_dlc
+@skip_if_no_pose
 def test_add_video(dlc_project_tbl):
     with open("temp_file.mp4", "w") as f:
         f.write("This is a temporary file.")
@@ -129,7 +129,7 @@ def test_add_video(dlc_project_tbl):
         )
 
 
-@skip_if_no_dlc
+@skip_if_no_pose
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_label_frame_warn(caplog, dlc_project_tbl):
     key = dlc_project_tbl.fetch("KEY", limit=1)[0]
