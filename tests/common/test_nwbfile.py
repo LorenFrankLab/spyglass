@@ -660,8 +660,14 @@ def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
     assert plan.deferred_recent_files == {f.resolve()}
 
 
-def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
-    """A vouched-for out-of-tree target is deleted, then its link."""
+def test_delete_removes_link_but_retains_external_target(
+    common_nwbfile, tmp_path
+):
+    """The link goes; the external target is retained, not deleted.
+
+    A symlink provides discoverability, not deletion authority: cleanup
+    manages paths inside the analysis directory only.
+    """
     volume2 = tmp_path / "volume2"
     volume2.mkdir()
     target = volume2 / "far.nwb"
@@ -678,8 +684,8 @@ def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert not target.exists(), "symlink target should be deleted"
-    assert not link.is_symlink(), "symlink should be deleted"
+    assert target.exists(), "external target must be retained"
+    assert not link.is_symlink(), "the in-root link is removed"
 
 
 def test_delete_skips_candidate_whose_identity_changed(
@@ -1428,7 +1434,7 @@ def test_delete_handles_chained_aliases_regardless_of_order(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert not target.exists(), "target must be deleted"
+    assert target.exists(), "external target must be retained"
     assert not middle.is_symlink(), "middle link must be removed"
     assert not outer.is_symlink(), "outer link must be removed, not stranded"
 
@@ -1656,6 +1662,82 @@ def test_delete_handles_relative_chained_alias_across_subdir(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert not target.exists(), "target must be deleted"
+    assert target.exists(), "external target must be retained"
     assert not middle.is_symlink(), "traversed link must be removed"
     assert not outer.is_symlink(), "relative outer link must not be stranded"
+
+
+def test_delete_never_removes_out_of_root_target(common_nwbfile, tmp_path):
+    """No path outside the analysis root is ever unlinked.
+
+    This is the whole contract: a link is discoverability, not authority.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("external data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+    local = analysis_dir / "local.nwb"
+    local.write_text("in-root data")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert target.exists(), "external target must never be deleted"
+    assert not link.is_symlink(), "its in-root link is removed"
+    assert not local.exists(), "in-root regular files are still deleted"
+
+
+def test_retained_external_targets_are_reported(
+    common_nwbfile, tmp_path, caplog
+):
+    """Retained targets must be visible, not silently orphaned."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("0123456789")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "link.nwb").symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    with caplog.at_level("WARNING"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert any(
+        "external symlink targets" in r.message and "10 bytes" in r.message
+        for r in caplog.records
+    ), "retained targets must be reported with a byte total"
+
+
+def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
+    """A tracked link is left alone, link and target both."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir, tracked=[link])
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert link.is_symlink(), "tracked link must be preserved"
+    assert target.exists()

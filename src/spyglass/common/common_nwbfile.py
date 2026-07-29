@@ -1127,81 +1127,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return tracked
 
     @staticmethod
-    def _alias_removal_order(
-        accesses: List[AccessSnapshot],
-    ) -> List[AccessSnapshot]:
-        """Order leaf symlinks so traversers are unlinked before their links.
-
-        For ``a.nwb -> b.nwb -> target`` both links alias one candidate.
-        Removing ``b`` first would leave ``a`` unable to resolve to the
-        target, so its pre-unlink check would reject it and strand it as a
-        dangling link. Ordering by how many of the *other* access paths a
-        link traverses -- descending -- puts the outermost first.
-
-        Non-link accesses are dropped: the real path is unlinked separately.
-
-        Dependencies are matched by filesystem identity, never by comparing
-        paths. A hop may reach a sibling as ``../b.nwb``, through a
-        directory symlink, or through a symlinked analysis root -- none of
-        which compare equal as ``Path`` values, so a lexical check would
-        report depth zero and preserve an unsafe order.
-        """
-        links = [a for a in accesses if a.is_link]
-
-        sibling_ids = set()
-        for access in links:
-            try:
-                st = os.lstat(access.access_path)
-            except OSError:
-                continue
-            sibling_ids.add((st.st_dev, st.st_ino))
-
-        def _traversed(access: AccessSnapshot) -> int:
-            """How many sibling links this one resolves through."""
-            count = 0
-            seen = set()  # identities, for cycle detection
-            current = access.access_path
-            for _ in range(64):  # bounded even if identity checks fail
-                try:
-                    st = os.lstat(current)
-                except OSError:
-                    break
-                ident = (st.st_dev, st.st_ino)
-                if ident in seen:
-                    break  # symlink cycle
-                seen.add(ident)
-                if not stat_module.S_ISLNK(st.st_mode):
-                    break
-                try:
-                    nxt = Path(os.readlink(current))
-                except OSError:
-                    break
-                if not nxt.is_absolute():
-                    nxt = current.parent / nxt
-                try:
-                    nxt_st = os.lstat(nxt)
-                except OSError:
-                    break
-                if (nxt_st.st_dev, nxt_st.st_ino) in sibling_ids:
-                    count += 1
-                current = nxt
-            return count
-
-        return sorted(links, key=_traversed, reverse=True)
-
-    @staticmethod
     def _access_still_matches(
-        access: AccessSnapshot, *, real_path: Path, analysis_root: Path
+        access: AccessSnapshot, *, analysis_root: Path
     ) -> bool:
         """Re-verify one leaf symlink immediately before unlinking it.
 
-        Deleting the target opens a window in which the link could be
-        replaced; unlinking blindly would remove the replacement.
-
-        Leaf inode and raw link text are not sufficient on their own: an
-        intermediate directory symlink can be re-pointed without touching
-        either, so the canonical destination, containment, and timestamps
-        are all re-checked here.
+        Proves the leaf is still the entry that was scanned -- same type,
+        inode, timestamps, raw target, and still inside the analysis root.
+        The canonical destination is deliberately NOT re-checked: nothing
+        outside the root is deleted, so where the link points does not
+        confer authority, and requiring it would strand chained aliases.
         """
         try:
             lst = os.lstat(access.access_path)
@@ -1229,11 +1164,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             )
         except OSError:
             return False
-        if not location.is_relative_to(analysis_root):
-            return False
-        # And still aliasing the candidate we just deleted. The target is
-        # gone by now, so realpath resolves non-strictly to the same path.
-        return Path(os.path.realpath(access.access_path)) == real_path
+        return location.is_relative_to(analysis_root)
 
     def _candidate_still_matches(
         self, candidate: CleanupCandidate, *, analysis_root: Path
@@ -1260,6 +1191,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             logger.warning(f"Skipping {real_path}: {reason}")
             return None
 
+        # A symlink provides discoverability, not deletion authority:
+        # nothing outside analysis_root is ever removed, so no access needs
+        # to "vouch" for anything. Accesses are validated only to prove the
+        # leaf we are about to unlink is still the one that was scanned.
         in_root = []
         for access in candidate.accesses:
             try:
@@ -1295,23 +1230,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     return _refuse(f"{access.access_path} readlink failed")
                 if raw != access.raw_link_target:
                     return _refuse(f"{access.access_path} was re-pointed")
-            # Canonical equality is required for EVERY access, not just
-            # symlinks. Without it an unrelated regular file inside the
-            # analysis root could vouch for an arbitrary outside target in
-            # a structurally consistent but forged plan.
-            if Path(os.path.realpath(access.access_path)) != real_path:
-                continue
             in_root.append(access)
 
-        # Applies to broken candidates too: a forged broken plan naming an
-        # outside symlink must not authorize unlinking it.
         if not in_root:
-            return _refuse(
-                "no in-root access currently resolving to it authorizes "
-                "deletion"
-            )
+            return _refuse("no access path inside the analysis directory")
 
-        if not candidate.broken:
+        # Target checks apply only when the target itself is inside the
+        # analysis root, i.e. when it is a file this cleanup may delete.
+        # An external target is never touched, so its identity is
+        # irrelevant to safety here.
+        if not candidate.broken and real_path.is_relative_to(analysis_root):
             try:
                 st = os.stat(real_path)
                 lst_target = os.lstat(real_path)
@@ -1336,7 +1264,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 return _refuse("target timestamps changed since the scan")
             if st.st_mode != snap.mode:
                 return _refuse("target mode changed since the scan")
-        else:
+        elif candidate.broken:
             try:
                 os.stat(real_path)
             except FileNotFoundError:
@@ -1345,6 +1273,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 return _refuse("broken-link target unreadable")
             else:
                 return _refuse("broken link now resolves")
+        # Remaining case: a live target outside the analysis root. Nothing
+        # to verify, because nothing about it will be touched -- only the
+        # in-root links to it are removed.
 
         return in_root
 
@@ -1459,6 +1390,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # it and delete its tracked files, defeating the "never dropped"
         # guarantee _current_custom_tables provides within a single call.
         known_tables = list(custom_tables)
+        retained_external = []
         for candidate in plan.candidates.values():
             # Tracking and registry membership are re-read for EVERY
             # candidate, not once up front: a file can be registered, or a
@@ -1494,33 +1426,50 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not in_root:
                 continue
             try:
-                if not candidate.broken:
+                in_managed_root = candidate.real_path.is_relative_to(
+                    analysis_root
+                )
+                if not candidate.broken and in_managed_root:
                     candidate.real_path.unlink()
-                # Aliases can chain (a.nwb -> b.nwb -> target). Remove them
-                # in dependency order, outermost first, so an alias is
-                # never invalidated by the removal of one it traverses --
-                # that would strand it as a dangling link, and would make
-                # the outcome depend on access order.
-                #
-                # Each link is re-checked IMMEDIATELY before its own
-                # unlink, never batched: validating a group and then
-                # unlinking the group leaves a window in which an approved
-                # link can be replaced by a fresh regular file that the
-                # unlink would then destroy unchecked.
-                for access in self._alias_removal_order(in_root):
+                elif not candidate.broken:
+                    # External target: the link is removed, the data is
+                    # not. Record it so the operator can see what is now
+                    # unreachable from the analysis directory.
+                    retained_external.append(
+                        (candidate.real_path, candidate.target.size)
+                    )
+                # Each leaf is re-checked immediately before its own
+                # unlink, never batched: a link approved earlier in the
+                # pass could be replaced by a regular file that a blind
+                # unlink would then destroy. unlink() operates on the leaf
+                # and never follows it, so removal order does not matter
+                # even for chained aliases.
+                for access in in_root:
+                    if not access.is_link:
+                        continue
                     if not self._access_still_matches(
-                        access,
-                        real_path=candidate.real_path,
-                        analysis_root=analysis_root,
+                        access, analysis_root=analysis_root
                     ):
                         logger.warning(
                             f"Skipping link {access.access_path}: changed "
-                            "after target deletion"
+                            "since it was validated"
                         )
                         continue
                     access.access_path.unlink()
             except OSError as e:
                 failures.append(f"{candidate.real_path}: {e}")
+
+        if retained_external:
+            total = sum(size for _, size in retained_external)
+            roots = sorted({str(p.parent) for p, _ in retained_external})
+            logger.warning(
+                f"  {len(retained_external)} external symlink targets "
+                f"retained ({total} bytes) after removing their links. "
+                "Cleanup manages paths inside the analysis directory only, "
+                f"so this data is now unreachable from it. Roots: {roots}"
+            )
+            for path, size in sorted(retained_external):
+                logger.info(f"    retained {path} ({size} bytes)")
 
         if failures:
             # Raise rather than log: cleanup() runs database cleanup after

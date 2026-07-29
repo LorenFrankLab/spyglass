@@ -407,23 +407,30 @@ The cleanup process checks:
     `*.nwb` filesystem sweep. Custom-table external cleanup
     (`cleanup_external(delete_external_files=True)`) deletes files through
     DataJoint in the same run and is not age-gated.
-- **Leaf symlink support**: `*.nwb` symlinks found anywhere in the analysis
-    directory tree are followed, so analysis files distributed across volumes
-    are cleaned in one pass. Directory symlinks are *not* followed, so a
-    symlinked session directory remains invisible to cleanup. When an untracked
-    symlink's target lives outside the analysis directory, cleanup deletes
-    **both the target and the link**.
+- **Leaf symlink handling**: `*.nwb` symlinks anywhere in the analysis
+    directory tree are followed **for tracking and reporting only**. A
+    tracked or recent link is preserved. An old, untracked, or dangling link
+    has the **link itself** removed after its type, inode, timestamps, raw
+    target, and containment are re-verified; its target is never touched.
+    Directory symlinks are not followed, so a symlinked session directory
+    remains invisible to cleanup.
+- **Retained external targets**: when a removed link pointed outside the
+    analysis directory, the target is reported with its path, size, and a
+    running byte total. That data becomes unreachable from the analysis
+    directory and must be reclaimed by other means -- the deliberate cost of
+    the policy below.
 
-**Security policy**: a `*.nwb` symlink inside the analysis directory is treated
-as authority to delete its target, wherever that target lives. Identity and
-provenance are re-verified immediately before deletion -- the link must still
-be a link, still point at the recorded target, and the target's device, inode,
-size, mode, and timestamps must be unchanged -- which defends against stale
-plans and re-pointed links. It does **not** defend against a user who plants
-the vouching link in the first place. This is sound while the account running
-cleanup and the users who can write to the analysis directory hold equivalent
-privileges. If that stops being true, restrict deletion to an explicit list of
-allowed storage roots.
+**Design statement**: *a symlink provides discoverability, not deletion
+authority. Cleanup manages paths inside configured storage roots only.*
+
+Deleting an external target would mean a privileged cron account acting on
+arbitrary volumes on the strength of a link that any user with write access
+to the analysis directory can create. If the lab needs that reclamation, it
+should arrive as an opt-in feature keyed to explicitly configured storage
+roots -- not a boolean -- so a link can only authorize deletion inside a
+volume the operator has declared. Run `cleanup(dry_run=True)` first and use
+the retained-target report to establish how many external targets exist,
+where they live, and how much space they occupy.
 
 **Not concurrency-safe**: two cleanups running at once can adopt and later drop
 each other's insert-blocking triggers. Run cleanup from one process at a time.
