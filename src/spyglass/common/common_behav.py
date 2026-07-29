@@ -1009,7 +1009,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
-        nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+        nwb_video = (cls & key).fetch_nwb()[0]["video_file"]
 
         # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
         # reference to a ProcessingModule), search the NWB for ImageSeries.
@@ -1112,7 +1112,10 @@ class VideoFile(SpyglassMixin, dj.Imported):
             return None, []
 
         _pk_fields = ("nwb_file_name", "epoch", "video_file_num")
-        _pk = lambda r: {k: r[k] for k in _pk_fields if k in r}  # noqa: E731
+
+        def _pk(row):
+            """Project a fetched row down to VideoFile's primary-key fields."""
+            return {k: row[k] for k in _pk_fields if k in row}
 
         def _fill_path(row):
             """Backfill VideoFile.path with video_path when currently null."""
