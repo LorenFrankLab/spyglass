@@ -615,9 +615,16 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     # n_state_bins is the product of position bins and states
     n_state_bins = n_position_bins * n_states
 
-    # Create state_bins coordinate values (flattened position x state)
-    # This mimics the MultiIndex structure in non_local_detector
-    state_bins_values = np.arange(n_state_bins)
+    # Create MultiIndex for state_bins to match non_local_detector structure
+    # This is required for unstack() to work in create_decoding_view
+    position_indices = np.tile(np.arange(n_position_bins), n_states)
+    state_indices = np.repeat(np.arange(n_states), n_position_bins)
+
+    import pandas as pd
+
+    state_bins_index = pd.MultiIndex.from_arrays(
+        [position_indices, state_indices], names=["position", "state"]
+    )
 
     # Create realistic-looking posterior probabilities
     # Shape: (n_time, n_state_bins) - flattened across position and state
@@ -643,7 +650,7 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         posterior[t] /= posterior[t].sum()
 
     # Create results matching non_local_detector output structure
-    # Primary dimensions: time, state_bins
+    # Primary dimensions: time, state_bins (MultiIndex)
     results = xr.Dataset(
         {
             "acausal_posterior": (["time", "state_bins"], posterior),
@@ -651,7 +658,7 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         },
         coords={
             "time": time,
-            "state_bins": state_bins_values,
+            "state_bins": state_bins_index,
             # states coordinate with state names
             "states": ("states", state_names),
         },

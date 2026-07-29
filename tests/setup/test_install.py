@@ -54,28 +54,23 @@ from install import (
 class TestGetRequiredPythonVersion:
     """Tests for get_required_python_version()."""
 
-    def test_returns_tuple(self):
-        """Returns a tuple of two integers."""
-        version = get_required_python_version()
-        assert isinstance(version, tuple)
-        assert len(version) == 2
+    def test_matches_pyproject_lower_bound(self):
+        """Returns the ``>=`` lower bound parsed from pyproject.toml."""
+        import re
 
-    def test_version_is_reasonable(self):
-        """Returned version is within expected range (3.10-3.13)."""
-        major, minor = get_required_python_version()
-        assert major == 3
-        assert 10 <= minor <= 13
-
-    def test_reads_from_pyproject_toml(self):
-        """Reads version from pyproject.toml, not hardcoded."""
-        # Verify pyproject.toml exists and has requires-python
         pyproject_path = scripts_dir.parent / "pyproject.toml"
-        assert pyproject_path.exists(), "pyproject.toml not found"
+        requires = re.search(
+            r'requires-python\s*=\s*"([^"]+)"',
+            pyproject_path.read_text(),
+        ).group(1)
+        bound = re.search(r">=(\d+)\.(\d+)", requires)
+        expected = (int(bound.group(1)), int(bound.group(2)))
 
-        content = pyproject_path.read_text()
-        assert (
-            "requires-python" in content
-        ), "pyproject.toml should have requires-python"
+        assert get_required_python_version() == expected
+
+    def test_version_is_exactly_3_10(self):
+        """pyproject currently pins the lower bound at 3.10."""
+        assert get_required_python_version() == (3, 10)
 
 
 # =============================================================================
@@ -378,20 +373,19 @@ class TestCheckDiskSpace:
     """Tests for check_disk_space()."""
 
     def test_existing_path(self, tmp_path):
-        """Returns disk space for existing path."""
+        """Returned available GB matches shutil.disk_usage for the path."""
+        import shutil
+
         sufficient, available = check_disk_space(1, tmp_path)
-        # Should have at least 1 GB on any modern system
-        assert isinstance(sufficient, bool)
-        assert isinstance(available, int)
-        assert available >= 0
+        expected_available = int(shutil.disk_usage(tmp_path).free / 1024**3)
+        assert available == expected_available
+        assert sufficient is (expected_available >= 1)
 
     def test_nonexistent_path_checks_parent(self, tmp_path):
-        """Walks up tree to find existing parent for non-existent path."""
+        """Non-existent path yields the same result as its existing parent."""
         nonexistent = tmp_path / "does" / "not" / "exist"
-        sufficient, available = check_disk_space(1, nonexistent)
-        # Should still work by checking tmp_path
-        assert isinstance(sufficient, bool)
-        assert isinstance(available, int)
+        # Walks up to tmp_path, so the result must match checking it directly.
+        assert check_disk_space(1, nonexistent) == check_disk_space(1, tmp_path)
 
     def test_returns_false_when_insufficient(self, tmp_path):
         """Returns False when space is insufficient."""
@@ -627,7 +621,12 @@ class TestValidateDatabaseConfig:
             password="password",
         )
         assert valid is False
-        assert len(errors) >= 3  # At least host, port, user errors
+        # Empty host, out-of-range port, and empty user each add one error;
+        # the valid password adds none, so exactly three are collected.
+        assert len(errors) == 3
+        assert any("hostname" in e.lower() for e in errors)
+        assert any("port" in e.lower() for e in errors)
+        assert any("username" in e.lower() for e in errors)
 
 
 # =============================================================================
@@ -945,14 +944,16 @@ class TestBuildDirectoryStructure:
         assert not base_dir.exists()
 
     def test_creates_expected_prefixes(self, tmp_path):
-        """Creates directories for all four prefixes."""
+        """Each prefix contributes its exact number of directories."""
         base_dir = tmp_path / "spyglass_data"
         dirs = build_directory_structure(base_dir, create=True, verbose=False)
 
-        prefixes = {"spyglass", "kachery", "dlc", "moseq"}
-        for prefix in prefixes:
-            matching = [k for k in dirs.keys() if k.startswith(f"{prefix}_")]
-            assert len(matching) > 0, f"No directories for prefix {prefix}"
+        # Counts follow directory_schema.json: spyglass has 8 subdirs,
+        # kachery 3, pose 3, moseq 2 (16 total).
+        expected_counts = {"spyglass": 8, "kachery": 3, "pose": 3, "moseq": 2}
+        for prefix, count in expected_counts.items():
+            matching = [k for k in dirs if k.startswith(f"{prefix}_")]
+            assert len(matching) == count, f"prefix {prefix}"
 
 
 # =============================================================================
@@ -982,7 +983,7 @@ class TestValidateSchema:
                     "storage": "kachery_storage",
                     "temp": "tmp",
                 },
-                "dlc": {
+                "pose": {
                     "project": "projects",
                     "video": "video",
                     "output": "output",
@@ -1004,7 +1005,7 @@ class TestValidateSchema:
             "directory_schema": {
                 "spyglass": {"raw": "raw"},
                 "kachery": {"cloud": ".kachery-cloud"},
-                # Missing dlc and moseq
+                # Missing pose and moseq
             }
         }
         with pytest.raises(ValueError, match="Missing prefixes"):
@@ -1480,15 +1481,10 @@ class TestConfigOnlyErrorScenarios:
 class TestLoadDirectorySchema:
     """Tests for load_directory_schema()."""
 
-    def test_returns_dict(self):
-        """Returns a dictionary."""
-        schema = load_directory_schema()
-        assert isinstance(schema, dict)
-
     def test_has_all_prefixes(self):
         """Has all four required prefixes."""
         schema = load_directory_schema()
-        assert set(schema.keys()) == {"spyglass", "kachery", "dlc", "moseq"}
+        assert set(schema.keys()) == {"spyglass", "kachery", "pose", "moseq"}
 
     def test_spyglass_has_expected_keys(self):
         """spyglass prefix has expected directory keys."""
@@ -1511,11 +1507,11 @@ class TestLoadDirectorySchema:
         expected = {"cloud", "storage", "temp"}
         assert set(schema["kachery"].keys()) == expected
 
-    def test_dlc_has_expected_keys(self):
-        """dlc prefix has expected directory keys."""
+    def test_pose_has_expected_keys(self):
+        """pose prefix has expected directory keys."""
         schema = load_directory_schema()
         expected = {"project", "video", "output"}
-        assert set(schema["dlc"].keys()) == expected
+        assert set(schema["pose"].keys()) == expected
 
     def test_moseq_has_expected_keys(self):
         """moseq prefix has expected directory keys."""
@@ -1597,6 +1593,13 @@ class TestCreateDatabaseConfig:
             "custom",
         }
         assert required_keys.issubset(set(config.keys()))
+        # Concrete values for the DataJoint general settings
+        assert config["filepath_checksum_size_limit"] == 1 * 1024**3
+        assert config["enable_python_native_blobs"] is True
+        assert config["database.reconnect"] is True
+        assert config["safemode"] is True
+        assert config["loglevel"] == "INFO"
+        assert config["fetch_format"] == "array"
 
     def test_config_has_stores_with_raw_and_analysis(
         self, tmp_path, monkeypatch
@@ -1620,15 +1623,14 @@ class TestCreateDatabaseConfig:
             config = json.load(f)
 
         stores = config["stores"]
-        assert "raw" in stores
-        assert "analysis" in stores
-
-        # Each store should have protocol, location, stage
+        # Schema maps spyglass.raw -> "raw", spyglass.analysis -> "analysis",
+        # so each store's location and stage are base_dir/<name>.
         for store_name in ["raw", "analysis"]:
             store = stores[store_name]
+            expected = str(base_dir / store_name)
             assert store["protocol"] == "file"
-            assert "location" in store
-            assert "stage" in store
+            assert store["location"] == expected
+            assert store["stage"] == expected
 
     def test_config_has_custom_spyglass_dirs(self, tmp_path, monkeypatch):
         """Config file has all spyglass directory paths in custom section."""
@@ -1689,7 +1691,7 @@ class TestCreateDatabaseConfig:
         expected_keys = {"cloud", "storage", "temp"}
         assert set(kachery_dirs.keys()) == expected_keys
 
-    def test_config_has_dlc_dirs(self, tmp_path, monkeypatch):
+    def test_config_has_pose_dirs(self, tmp_path, monkeypatch):
         """Config file has DeepLabCut directory paths."""
         import json
 
@@ -1708,9 +1710,9 @@ class TestCreateDatabaseConfig:
         with config_file.open() as f:
             config = json.load(f)
 
-        dlc_dirs = config["custom"]["dlc_dirs"]
+        pose_dirs = config["custom"]["pose_dirs"]
         expected_keys = {"base", "project", "video", "output"}
-        assert set(dlc_dirs.keys()) == expected_keys
+        assert set(pose_dirs.keys()) == expected_keys
 
     def test_config_has_moseq_dirs(self, tmp_path, monkeypatch):
         """Config file has MoSeq directory paths."""
@@ -1793,28 +1795,6 @@ class TestCreateDatabaseConfig:
             assert (
                 path.is_dir()
             ), f"spyglass_dirs.{key} ({path}) is not a directory"
-
-    def test_config_file_is_valid_json(self, tmp_path, monkeypatch):
-        """Config file is valid JSON that can be parsed."""
-        import json
-
-        config_file = tmp_path / ".datajoint_config.json"
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        base_dir = tmp_path / "spyglass_data"
-        create_database_config(
-            host="localhost",
-            port=3306,
-            user="root",
-            password="pass",
-            base_dir=base_dir,
-        )
-
-        # This should not raise
-        with config_file.open() as f:
-            config = json.load(f)
-
-        assert isinstance(config, dict)
 
     def test_tls_auto_enabled_for_remote_host(self, tmp_path, monkeypatch):
         """TLS is automatically enabled for non-localhost hosts."""
@@ -1958,10 +1938,29 @@ class TestFrankLabConfig:
             config = json.load(f)
 
         custom = config["custom"]
-        assert "spyglass_dirs" in custom
-        assert "kachery_dirs" in custom
-        assert "dlc_dirs" in custom
-        assert "moseq_dirs" in custom
+        assert set(custom["spyglass_dirs"].keys()) == {
+            "base",
+            "raw",
+            "analysis",
+            "recording",
+            "sorting",
+            "waveforms",
+            "temp",
+            "video",
+            "export",
+        }
+        assert set(custom["kachery_dirs"].keys()) == {
+            "cloud",
+            "storage",
+            "temp",
+        }
+        assert set(custom["pose_dirs"].keys()) == {
+            "base",
+            "project",
+            "video",
+            "output",
+        }
+        assert set(custom["moseq_dirs"].keys()) == {"base", "project", "video"}
 
     def test_franklab_config_directories_match_schema(
         self, tmp_path, monkeypatch
@@ -2153,12 +2152,6 @@ class TestConfigOnlyMode:
 class TestSetupFranklabScript:
     """Integration tests for setup_franklab.sh script."""
 
-    def test_setup_franklab_script_exists(self):
-        """setup_franklab.sh script exists."""
-        franklab_script = scripts_dir / "setup_franklab.sh"
-        assert franklab_script.exists()
-        assert franklab_script.is_file()
-
     def test_setup_franklab_help_runs(self):
         """setup_franklab.sh --help runs without error."""
         result = subprocess.run(
@@ -2280,11 +2273,11 @@ class TestConfigCompatibility:
                     "storage": str(dirs["kachery_storage"]),
                     "temp": str(dirs["kachery_temp"]),
                 },
-                "dlc_dirs": {
+                "pose_dirs": {
                     "base": str(base_dir / "deeplabcut"),
-                    "project": str(dirs["dlc_project"]),
-                    "video": str(dirs["dlc_video"]),
-                    "output": str(dirs["dlc_output"]),
+                    "project": str(dirs["pose_project"]),
+                    "video": str(dirs["pose_video"]),
+                    "output": str(dirs["pose_output"]),
                 },
                 "moseq_dirs": {
                     "base": str(base_dir / "moseq"),

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import file_log, infer_output_dir
+from spyglass.position.utils.general import file_log, infer_output_dir
 from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
 )  # noqa: F401
@@ -107,8 +107,8 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
 
     @file_log(logger, console=False)
     def _logged_make(self, key):
-        logger.info("-----------------------")
-        logger.info("Bodypart Cohort")
+        self._info_msg("-----------------------")
+        self._info_msg("Bodypart Cohort")
 
         cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
         table_entries = []
