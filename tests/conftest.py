@@ -348,6 +348,19 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
+    # Validate the requested base dir before anything is created or
+    # downloaded. settings.py enforces this too, but only once spyglass is
+    # first imported, which happens after BASE_DIR.mkdir() and after the
+    # DataDownloader starts fetching.
+    _requested_base = Path(config.option.base_dir).expanduser().resolve()
+    if "tests" not in _requested_base.parts:
+        raise pytest.UsageError(
+            f"--base-dir {str(_requested_base)!r} does not contain a 'tests' "
+            "path component. The test suite runs Spyglass in test_mode and "
+            "performs destructive cleanup; point --base-dir inside a tests/ "
+            "directory (default: ./tests/_data/)."
+        )
+
     # Tests never honor SPYGLASS_BASE_DIR — a shell-exported value pointing at
     # shared/production storage would let destructive tests (e.g.
     # AnalysisNwbfile.cleanup) scan and delete real analysis files. Warn once

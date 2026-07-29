@@ -202,8 +202,6 @@ class SpyglassConfig:
 
         test_mode = _resolve_mode("test_mode")
         debug_mode = _resolve_mode("debug_mode")
-        self._test_mode = test_mode
-        self._debug_mode = debug_mode
 
         resolved_base = (
             base_dir
@@ -218,22 +216,9 @@ class SpyglassConfig:
                 "Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides"
             )
 
-        if resolved_base:
-            base_path = Path(resolved_base).expanduser().resolve()
-            if not self._debug_mode:
-                # Create base directory if it doesn't exist
-                base_path.mkdir(parents=True, exist_ok=True)
-            resolved_base = str(base_path)
-
-            if self._test_mode and "tests" not in base_path.parts:
-                raise ValueError(
-                    f"Refusing to load Spyglass in test_mode with base_dir "
-                    f"{resolved_base!r}: path does not contain a 'tests' "
-                    "component. Run pytest with --base-dir pointing inside a "
-                    "tests/ directory (default: ./tests/_data/) to keep "
-                    "destructive operations off shared/production storage."
-                )
-
+        # ---------------------------- RESOLVE ----------------------------
+        # Compute every path as a plain value. Nothing is created and no
+        # instance or global state is mutated until validation passes.
         if not resolved_base:
             if not on_startup:  # Only warn if not on startup
                 logger.error(
@@ -244,25 +229,25 @@ class SpyglassConfig:
             self.load_failed = True
             return
 
+        base_path = Path(resolved_base).expanduser().resolve()
+        resolved_base = str(base_path)
+
         def env_or_none(var: str) -> str | None:
             """Read an env var, ignored in test_mode to keep the sandbox."""
-            return None if self._test_mode else os.environ.get(var)
+            return None if test_mode else os.environ.get(var)
 
         dlc_project = env_or_none("DLC_PROJECT_PATH")
-        self._dlc_base = (
+        dlc_base = (
             dj_dlc.get("base")
             or env_or_none("DLC_BASE_DIR")
             or (dlc_project.split("projects")[0] if dlc_project else None)
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
-
-        self._moseq_base = (
+        moseq_base = (
             dj_moseq.get("base")
             or env_or_none("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
-        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
@@ -270,15 +255,15 @@ class SpyglassConfig:
             "moseq": dj_moseq,
             "kachery": dj_kachery,
         }
-        base_lookup = {"dlc": self._dlc_base, "moseq": self._moseq_base}
+        base_lookup = {"dlc": dlc_base, "moseq": moseq_base}
         for prefix, dirs in self.relative_dirs.items():
             this_base = base_lookup.get(prefix, resolved_base)
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
-                env_loc = (  # Ignore env vars if base was passed to func or in test_mode
+                env_loc = (  # Ignore env vars if base was passed or test_mode
                     os.environ.get(dir_env_fmt)
-                    if not self.supplied_base_dir and not self._test_mode
+                    if not self.supplied_base_dir and not test_mode
                     else None
                 )
                 source_config = source_config_lookup.get(prefix, dj_spyglass)
@@ -297,6 +282,48 @@ class SpyglassConfig:
                 or "franklab.default"
             )
         }
+
+        # ---------------------------- VALIDATE ---------------------------
+        # Both checks apply ONLY under test_mode. Production configuration
+        # is unchanged: an analysis dir anywhere, including behind a
+        # symlink, stays legal.
+        if test_mode:
+            if "tests" not in base_path.parts:
+                raise ValueError(
+                    f"Refusing to load Spyglass in test_mode with base_dir "
+                    f"{resolved_base!r}: path does not contain a 'tests' "
+                    "component. Run pytest with --base-dir pointing inside a "
+                    "tests/ directory (default: ./tests/_data/) to keep "
+                    "destructive operations off shared/production storage."
+                )
+            # Path.resolve() is non-strict: a dir that does not exist yet
+            # resolves to its would-be path, while an EXISTING symlink
+            # resolves through to its target. That is what catches an
+            # analysis dir symlinked at production storage.
+            checked = dict(config_dirs)
+            checked["DLC_BASE_DIR"] = dlc_base
+            checked["MOSEQ_BASE_DIR"] = moseq_base
+            for var, loc in checked.items():
+                loc_path = Path(loc).expanduser().resolve()
+                if not loc_path.is_relative_to(base_path):
+                    raise ValueError(
+                        f"Refusing to load Spyglass in test_mode: {var} "
+                        f"resolves to {str(loc_path)!r}, outside the test "
+                        f"base {resolved_base!r}. Destructive tests must "
+                        "stay within the test base directory; check "
+                        "dj.config['custom'] and any directory symlinks."
+                    )
+
+        # ----------------------------- COMMIT ----------------------------
+        self._test_mode = test_mode
+        self._debug_mode = debug_mode
+        self._dlc_base = dlc_base
+        self._moseq_base = moseq_base
+
+        if not debug_mode:
+            base_path.mkdir(parents=True, exist_ok=True)
+        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
+        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         loaded_env = self._load_env_vars()
         self._set_env_with_dict(
