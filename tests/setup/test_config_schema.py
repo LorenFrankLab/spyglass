@@ -9,6 +9,7 @@ Verifies that:
 
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -708,6 +709,48 @@ class TestExampleConfigSync:
         assert isinstance(
             config, dict
         ), "Example config should be a JSON object (dict)"
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_config():
+    """Undo the process-global writes that ``load_config`` performs.
+
+    ``SpyglassConfig.load_config`` unconditionally sets ``os.environ``
+    entries and ``dj.config['stores']`` for whatever base_dir it resolved.
+    Tests below call it with tmp_path bases, so without this fixture the
+    last one to run leaves ``dj.config['stores']['analysis']`` pointing at
+    a pytest tmp directory. tests/setup sorts before tests/common, so every
+    later database-backed test would then read and write analysis files in
+    the wrong place.
+    """
+    import os
+
+    import datajoint as dj
+
+    saved_stores = deepcopy(dj.config.get("stores"))
+    saved_custom = deepcopy(dj.config.get("custom"))
+    saved_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key.startswith(("SPYGLASS_", "KACHERY_", "DLC_", "MOSEQ_"))
+    }
+
+    yield
+
+    if saved_stores is None:
+        dj.config.pop("stores", None)
+    else:
+        dj.config["stores"] = saved_stores
+    if saved_custom is not None:
+        dj.config["custom"] = saved_custom
+
+    for key in [
+        key
+        for key in os.environ
+        if key.startswith(("SPYGLASS_", "KACHERY_", "DLC_", "MOSEQ_"))
+    ]:
+        os.environ.pop(key, None)
+    os.environ.update(saved_env)
 
 
 class TestTestModeBaseDirGuard:
