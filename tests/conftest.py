@@ -504,8 +504,13 @@ def _teardown_test_data(base_dir):
                 # Leaving them would be the dangerous choice: a surviving
                 # leaf link can later authorize cleanup to delete its
                 # external target.
+                # Per-file, so one unremovable entry does not strand the
+                # rest of the directory.
                 for file in child.glob("*.nwb"):
-                    file.unlink()
+                    try:
+                        file.unlink()
+                    except OSError as err:
+                        child_failures.append(f"{name}/{file.name}: {err}")
             else:
                 # No ignore_errors: failures must surface, not vanish.
                 shutil_rmtree(str(child))

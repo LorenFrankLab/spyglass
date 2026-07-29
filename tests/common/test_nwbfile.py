@@ -1328,3 +1328,163 @@ def test_delete_refuses_regular_in_root_file_as_voucher(
 
     assert victim.exists(), "unrelated in-root file must not vouch"
     assert innocent.exists(), "the innocent in-root file must survive too"
+
+
+def test_registry_knowledge_persists_across_candidates(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A table seen once must stay known even if it later disappears.
+
+    Table U appears while candidate A is handled, tracks candidate B, then
+    leaves the registry before B is reached. Re-unioning against the
+    original snapshot each time would forget U and delete B's file.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    first = analysis_dir / "aaa.nwb"
+    first.write_text("first")
+    second = analysis_dir / "zzz.nwb"
+    second.write_text("second")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert len(plan.candidates) == 2
+
+    class _Ephemeral:
+        """Registry table tracking whichever file is still on disk."""
+
+        full_table_name = "`ephemeral`.`analysis_nwbfile`"
+
+        def __init__(self):
+            self._ext_tbl = self
+
+        def fetch_external_paths(self):
+            survivors = [p for p in (first, second) if p.exists()]
+            return [("h", survivors[-1])] if survivors else []
+
+    ephemeral = _Ephemeral()
+    state = {"calls": 0}
+
+    class _Registry:
+        @property
+        def all_classes(self):
+            state["calls"] += 1
+            # Present on the first refresh only, then gone.
+            return [ephemeral] if state["calls"] == 1 else []
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", _Registry)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    survivors = [p for p in (first, second) if p.exists()]
+    assert survivors, "the table's tracked file must survive its removal"
+
+
+def test_delete_handles_chained_aliases_regardless_of_order(
+    common_nwbfile, tmp_path
+):
+    """a.nwb -> b.nwb -> target: both links go, in either access order.
+
+    Unlinking b first would leave a unable to resolve to the target, so a
+    validate-then-unlink pass is required for the result to be
+    order-independent.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    middle = analysis_dir / "b.nwb"
+    middle.symlink_to(target)
+    outer = analysis_dir / "a.nwb"
+    outer.symlink_to(middle)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    candidate = plan.candidates[target.resolve()]
+    assert len(candidate.accesses) == 2, "both links alias one candidate"
+
+    # Force the order that removes the middle link first.
+    ordered = sorted(
+        candidate.accesses, key=lambda a: a.access_path.name, reverse=True
+    )
+    plan.candidates[target.resolve()] = common_nwbfile.CleanupCandidate(
+        real_path=candidate.real_path,
+        target=candidate.target,
+        accesses=tuple(ordered),
+    )
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert not target.exists(), "target must be deleted"
+    assert not middle.is_symlink(), "middle link must be removed"
+    assert not outer.is_symlink(), "outer link must be removed, not stranded"
+
+
+def test_delete_refuses_non_nwb_voucher(common_nwbfile, tmp_path):
+    """A forged plan cannot use a non-*.nwb in-root link as authority.
+
+    The scanner only ever yields *.nwb entries, so any other suffix proves
+    the plan did not come from it.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    victim = volume2 / "victim.nwb"
+    victim.write_text("must survive")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    voucher = analysis_dir / "voucher.txt"
+    voucher.symlink_to(victim)
+
+    real = victim.resolve()
+    vst = victim.stat()
+    lst = voucher.lstat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=vst.st_dev,
+            ino=vst.st_ino,
+            size=vst.st_size,
+            mtime_ns=vst.st_mtime_ns,
+            ctime_ns=vst.st_ctime_ns,
+            mode=vst.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=voucher,
+                is_link=True,
+                raw_link_target=str(victim),
+                dev=lst.st_dev,
+                ino=lst.st_ino,
+                mtime_ns=lst.st_mtime_ns,
+                ctime_ns=lst.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files={real},
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    with pytest.raises(RuntimeError, match="not a \\*.nwb entry"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert victim.exists(), "non-.nwb voucher must not authorize deletion"
+    assert voucher.is_symlink()

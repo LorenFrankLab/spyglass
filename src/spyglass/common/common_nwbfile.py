@@ -1370,6 +1370,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     f"{candidate.real_path}: target snapshot names a "
                     f"different path {candidate.target.real_path}"
                 )
+            # The scanner only ever yields *.nwb entries, so any other
+            # suffix means the plan did not come from it. Enforcing the
+            # invariant here stops a forged plan using, say,
+            # analysis/voucher.txt -> /outside/victim.nwb as authority.
+            for access in candidate.accesses:
+                if access.access_path.name[-4:].lower() != ".nwb":
+                    structural.append(
+                        f"{candidate.real_path}: access path "
+                        f"{access.access_path} is not a *.nwb entry"
+                    )
         if structural:
             raise RuntimeError(
                 "Analysis file deletion failed: cleanup plan is malformed; "
@@ -1377,6 +1387,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             )
 
         # ---- ACT ----
+        # Accumulator, not the original snapshot: a table can appear in the
+        # registry while one candidate is processed and be gone before the
+        # next. Re-unioning against `custom_tables` each time would forget
+        # it and delete its tracked files, defeating the "never dropped"
+        # guarantee _current_custom_tables provides within a single call.
+        known_tables = list(custom_tables)
         for candidate in plan.candidates.values():
             # Tracking and registry membership are re-read for EVERY
             # candidate, not once up front: a file can be registered, or a
@@ -1384,8 +1400,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # being deleted. Costs one fetch per candidate; the candidate
             # set is the untracked minority, and correctness wins here.
             # The deferred cleanup lease would let this be hoisted again.
-            live_tables = self._current_custom_tables(custom_tables)
-            if candidate.real_path in self._current_tracked_paths(live_tables):
+            known_tables = self._current_custom_tables(known_tables)
+            if candidate.real_path in self._current_tracked_paths(known_tables):
                 logger.warning(
                     f"Skipping {candidate.real_path}: became tracked since "
                     "the scan"
@@ -1414,14 +1430,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             try:
                 if not candidate.broken:
                     candidate.real_path.unlink()
-                # Only in-root accesses validated above; an extra
-                # out-of-root access is never unlinked.
+                # Re-verify EVERY link as a group before unlinking any of
+                # them. Aliases can chain (a.nwb -> b.nwb -> target): once
+                # b is removed, a no longer resolves to the target, so
+                # validating and unlinking in one pass would reject a and
+                # leave it dangling, with the outcome depending on access
+                # order. Validating first makes the result order-independent.
+                # Only in-root accesses validated earlier are considered, so
+                # an extra out-of-root access is never unlinked.
+                to_unlink = []
                 for access in in_root:
                     if not access.is_link:
                         continue
-                    # Re-verify each link immediately before unlinking it.
-                    # Deleting the target opened a window in which the link
-                    # could have been replaced.
                     if not self._access_still_matches(
                         access,
                         real_path=candidate.real_path,
@@ -1432,6 +1452,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                             "after target deletion"
                         )
                         continue
+                    to_unlink.append(access)
+                for access in to_unlink:
                     access.access_path.unlink()
             except OSError as e:
                 failures.append(f"{candidate.real_path}: {e}")
