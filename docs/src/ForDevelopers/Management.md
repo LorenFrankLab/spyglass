@@ -383,8 +383,11 @@ The cleanup process checks:
     deletion
 - **Logging**: Reports all actions taken during cleanup
 - **Foreign key protection**: Respects downstream table dependencies
-- **Registry blocking**: Temporarily blocks new table registrations during
-    cleanup
+- **Insert blocking**: Temporarily installs `BEFORE INSERT` triggers on the
+    analysis tables that exist when cleanup starts. It does **not** block new
+    table *registration*: a custom analysis table declared mid-cleanup gets no
+    trigger, which is why cleanup re-reads registry membership and tracked
+    paths before every deletion candidate
 - **Filesystem deletion limits**: Refuses destructive cleanup when the sweep
     would delete more than `max_delete_fraction` (default 0.9) of the files it
     was eligible to act on -- the deletions plus the scanned files it

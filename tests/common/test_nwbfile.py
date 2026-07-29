@@ -1213,3 +1213,118 @@ def test_delete_aborts_whole_plan_on_structural_mismatch(
     assert valid.exists(), "sound entry must not be deleted on a bad plan"
     assert victim.exists()
     assert decoy.exists()
+
+
+def test_registry_refresh_failure_aborts_cleanup(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A registry read failure must abort, not fall back to the snapshot.
+
+    Falling back is safe only if the snapshot is a superset of live
+    membership -- exactly false in the case the refresh exists to catch, so
+    a table registered after the snapshot would have its files deleted.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    tracked_by_new_table = analysis_dir / "belongs_to_new_table.nwb"
+    tracked_by_new_table.write_text("data")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {tracked_by_new_table.resolve()}
+
+    def _boom():
+        raise RuntimeError("registry unreachable")
+
+    monkeypatch.setattr(
+        common_nwbfile,
+        "AnalysisRegistry",
+        lambda: type("R", (), {"all_classes": property(lambda s: _boom())})(),
+    )
+
+    with pytest.raises(RuntimeError, match="registry unreachable"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert tracked_by_new_table.exists(), "abort must leave files in place"
+
+
+def test_registry_refresh_unions_snapshot_and_live(common_nwbfile, tmp_path):
+    """Refresh must union, never drop, tables from the initial snapshot."""
+
+    class _Tbl:
+        def __init__(self, name):
+            self.full_table_name = name
+            self._ext_tbl = _FakeExternalTable([])
+
+    snapshot = [_Tbl("`a`.`t`")]
+    merged = common_nwbfile.AnalysisNwbfile._current_custom_tables(snapshot)
+    names = {t.full_table_name for t in merged}
+
+    assert "`a`.`t`" in names, "snapshot table must never be dropped"
+
+
+def test_delete_refuses_regular_in_root_file_as_voucher(
+    common_nwbfile, tmp_path
+):
+    """A regular in-root file must not vouch for an unrelated outside target.
+
+    Canonical equality is required for every access, not just symlinks;
+    otherwise a structurally consistent forged plan could pair an innocent
+    in-root file with an arbitrary victim.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    victim = volume2 / "victim.nwb"
+    victim.write_text("must survive")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    innocent = analysis_dir / "innocent.nwb"
+    innocent.write_text("unrelated in-root file")
+
+    real = victim.resolve()
+    vst = victim.stat()
+    ist = innocent.lstat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=vst.st_dev,
+            ino=vst.st_ino,
+            size=vst.st_size,
+            mtime_ns=vst.st_mtime_ns,
+            ctime_ns=vst.st_ctime_ns,
+            mode=vst.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=innocent,  # in-root, but unrelated to the target
+                is_link=False,
+                raw_link_target=None,
+                dev=ist.st_dev,
+                ino=ist.st_ino,
+                mtime_ns=ist.st_mtime_ns,
+                ctime_ns=ist.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files={real},
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert victim.exists(), "unrelated in-root file must not vouch"
+    assert innocent.exists(), "the innocent in-root file must survive too"

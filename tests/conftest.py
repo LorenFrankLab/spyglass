@@ -484,6 +484,9 @@ def _teardown_test_data(base_dir):
     # tests/_data/analysis would otherwise let glob traverse into it and
     # unlink files outside the test tree -- the same escape the parent check
     # closes one level up.
+    # Each child is attempted independently and failures are aggregated:
+    # one unremovable directory must not leave every later one behind.
+    child_failures = []
     for name in owned:
         child = Path(base_dir) / name
         if child.is_symlink():
@@ -494,17 +497,26 @@ def _teardown_test_data(base_dir):
             continue
         if not child.exists():
             continue
-        if name == "analysis":
-            # unlink() on a symlink removes the LINK, never its target, so
-            # symlinks are removed here like any other entry. Leaving them
-            # in place would be the dangerous choice: a surviving leaf link
-            # can later authorize cleanup to delete its external target.
-            for file in child.glob("*.nwb"):
-                file.unlink()
-        else:
-            # No ignore_errors: failures must reach the caller's failure
-            # aggregation rather than being silently discarded.
-            shutil_rmtree(str(child))
+        try:
+            if name == "analysis":
+                # unlink() on a symlink removes the LINK, never its target,
+                # so symlinks are removed here like any other entry.
+                # Leaving them would be the dangerous choice: a surviving
+                # leaf link can later authorize cleanup to delete its
+                # external target.
+                for file in child.glob("*.nwb"):
+                    file.unlink()
+            else:
+                # No ignore_errors: failures must surface, not vanish.
+                shutil_rmtree(str(child))
+        except OSError as err:
+            child_failures.append(f"{name}: {err}")
+
+    if child_failures:
+        raise RuntimeError(
+            "test-data cleanup failed for "
+            f"{len(child_failures)} directories: " + "; ".join(child_failures)
+        )
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------

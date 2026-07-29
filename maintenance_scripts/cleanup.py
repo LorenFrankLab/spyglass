@@ -103,12 +103,32 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
         print(f"Dry run of delete files in {temp_dir} older than {days_old}d")
         return
 
-    delete_cmd = f"find {temp_dir} -type f -mtime +{days_old} -delete"
-    empty_dirs = f"find {temp_dir} -type d -empty -delete"
-    subprocess_kwargs = dict(shell=True, check=True, executable="/bin/bash")
+    # Argument lists, not shell=True: a temp_dir containing spaces or shell
+    # metacharacters would otherwise be split or interpreted.
+    delete_cmd = [
+        "find",
+        str(dir_path),
+        "-type",
+        "f",
+        "-mtime",
+        f"+{days_old}",
+        "-delete",
+    ]
+    # -mindepth 1 so the sweep cannot delete the configured temp root
+    # itself once it is empty.
+    empty_dirs = [
+        "find",
+        str(dir_path),
+        "-mindepth",
+        "1",
+        "-type",
+        "d",
+        "-empty",
+        "-delete",
+    ]
     try:
-        subprocess.run(delete_cmd, **subprocess_kwargs)
-        subprocess.run(empty_dirs, **subprocess_kwargs)
+        subprocess.run(delete_cmd, check=True)
+        subprocess.run(empty_dirs, check=True)
     except subprocess.CalledProcessError as e:
         # Raise so main() can record it; printing hid the failure from the
         # caller and from the cron job's exit status.

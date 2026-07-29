@@ -1088,25 +1088,28 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     @staticmethod
     def _current_custom_tables(
-        fallback: List[SpyglassAnalysis],
+        snapshot: List[SpyglassAnalysis],
     ) -> List[SpyglassAnalysis]:
-        """Re-read registry membership.
+        """Re-read registry membership, unioned with the initial snapshot.
 
-        The insert-blocking triggers freeze the analysis tables but not the
-        registry, so a custom table declared mid-cleanup would otherwise be
-        invisible and its files would read as untracked. Falls back to the
-        supplied snapshot if the registry cannot be read, which is the
-        conservative choice only when it returns a superset -- a read
-        failure is logged so it is not silent.
+        The insert-blocking triggers only cover tables that existed when the
+        triggers were installed, so a custom table declared mid-cleanup is
+        invisible to them and its files would otherwise read as untracked.
+
+        A refresh failure is **fatal**, not a fallback: falling back to the
+        snapshot is safe only if the snapshot is a superset of live
+        membership, which is exactly false in the case this refresh exists
+        to catch. Aborting leaves files in place; guessing deletes them.
+
+        The result is the union of the snapshot and live registry classes,
+        deduplicated by ``full_table_name``, so a table can only ever be
+        added to the tracked set, never dropped from it.
         """
-        try:
-            return list(AnalysisRegistry().all_classes)
-        except Exception as err:  # noqa: BLE001
-            logger.warning(
-                f"Could not refresh analysis registry ({err}); using the "
-                "membership snapshot taken at cleanup start"
-            )
-            return fallback
+        live = list(AnalysisRegistry().all_classes)  # let errors propagate
+        merged = {}
+        for tbl in list(snapshot) + live:
+            merged[tbl.full_table_name] = tbl
+        return list(merged.values())
 
     def _current_tracked_paths(
         self, custom_tables: List[SpyglassAnalysis]
@@ -1124,11 +1127,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return tracked
 
     @staticmethod
-    def _access_still_matches(access: AccessSnapshot) -> bool:
+    def _access_still_matches(
+        access: AccessSnapshot, *, real_path: Path, analysis_root: Path
+    ) -> bool:
         """Re-verify one leaf symlink immediately before unlinking it.
 
         Deleting the target opens a window in which the link could be
         replaced; unlinking blindly would remove the replacement.
+
+        Leaf inode and raw link text are not sufficient on their own: an
+        intermediate directory symlink can be re-pointed without touching
+        either, so the canonical destination, containment, and timestamps
+        are all re-checked here.
         """
         try:
             lst = os.lstat(access.access_path)
@@ -1138,10 +1148,29 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             return False
         if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
             return False
+        if (lst.st_mtime_ns, lst.st_ctime_ns) != (
+            access.mtime_ns,
+            access.ctime_ns,
+        ):
+            return False
         try:
-            return os.readlink(access.access_path) == access.raw_link_target
+            if os.readlink(access.access_path) != access.raw_link_target:
+                return False
         except OSError:
             return False
+        # Still inside the analysis root, resolving the PARENT so the link
+        # itself is not followed.
+        try:
+            location = (
+                access.access_path.parent.resolve() / access.access_path.name
+            )
+        except OSError:
+            return False
+        if not location.is_relative_to(analysis_root):
+            return False
+        # And still aliasing the candidate we just deleted. The target is
+        # gone by now, so realpath resolves non-strictly to the same path.
+        return Path(os.path.realpath(access.access_path)) == real_path
 
     def _candidate_still_matches(
         self, candidate: CleanupCandidate, *, analysis_root: Path
@@ -1203,10 +1232,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     return _refuse(f"{access.access_path} readlink failed")
                 if raw != access.raw_link_target:
                     return _refuse(f"{access.access_path} was re-pointed")
-                # An in-root link only authorizes the target it currently
-                # resolves to; a stale one must not vouch.
-                if Path(os.path.realpath(access.access_path)) != real_path:
-                    continue
+            # Canonical equality is required for EVERY access, not just
+            # symlinks. Without it an unrelated regular file inside the
+            # analysis root could vouch for an arbitrary outside target in
+            # a structurally consistent but forged plan.
+            if Path(os.path.realpath(access.access_path)) != real_path:
+                continue
             in_root.append(access)
 
         # Applies to broken candidates too: a forged broken plan naming an
@@ -1391,7 +1422,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     # Re-verify each link immediately before unlinking it.
                     # Deleting the target opened a window in which the link
                     # could have been replaced.
-                    if not self._access_still_matches(access):
+                    if not self._access_still_matches(
+                        access,
+                        real_path=candidate.real_path,
+                        analysis_root=analysis_root,
+                    ):
                         logger.warning(
                             f"Skipping link {access.access_path}: changed "
                             "after target deletion"
