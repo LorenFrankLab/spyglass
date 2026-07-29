@@ -417,10 +417,89 @@ def pytest_unconfigure(config):
 
     from spyglass.utils.nwb_helper_fn import close_nwb_files
 
-    close_nwb_files()
+    base_dir = globals().get("BASE_DIR")
+    teardown = globals().get("TEARDOWN", False)
+    failures = []
 
-    if globals().get("TEARDOWN", False):
-        server.stop()
+    # Each step runs independently: a stop failure must not skip cleanup, a
+    # cleanup failure must stay visible, and a secondary failure must not
+    # mask the first.
+    steps = [("close_nwb_files", close_nwb_files)]
+    if teardown:
+        steps.append(("server.stop", server.stop))
+        steps.append(("data cleanup", lambda: _teardown_test_data(base_dir)))
+
+    for label, action in steps:
+        try:
+            action()
+        except Exception as err:  # noqa: BLE001 - reported, not swallowed
+            failures.append(f"{label}: {err}")
+
+    if failures:
+        print("pytest teardown failures:")
+        for failure in failures:
+            print(f"  - {failure}")
+
+
+def _teardown_test_data(base_dir):
+    """Remove generated test data, but only from the canonical test base.
+
+    A 'tests' path component proves location, not ownership: a custom
+    --base-dir may hold real data, so teardown is limited to the
+    repository's own tests/_data, and every owned child is re-checked for
+    being a symlink before it is touched.
+
+    `analysis` is cleaned non-recursively, matching master, because
+    concurrent pytest sessions are supported (--container-name /
+    --container-port) and share this base by default, so an rmtree over
+    nested session directories could erase another run's active files.
+
+    NOTE: the remaining subdirectories ARE removed recursively, exactly as
+    master does. That carries the same concurrent-session race; this
+    function does not make teardown concurrency-safe, it only restores the
+    prior behavior and stops it escaping the test tree. A per-base session
+    lock is a tracked follow-up.
+    """
+    if base_dir is None:
+        return
+
+    data_root = Path(__file__).parent / "_data"
+    canonical = data_root.resolve()
+    if Path(base_dir).resolve() != canonical:
+        print(
+            f"Skipping test-data cleanup: {base_dir} is not the canonical "
+            f"test base {canonical}"
+        )
+        return
+    if data_root.is_symlink():
+        print(
+            "Skipping test-data cleanup: tests/_data is a symlink; its "
+            "target is not owned by the test suite"
+        )
+        return
+
+    owned = ["analysis", "export", "moseq", "recording", "spikesorting", "tmp"]
+
+    # Each child is re-validated without following links. A symlinked
+    # tests/_data/analysis would otherwise let glob traverse into it and
+    # unlink files outside the test tree -- the same escape the parent check
+    # closes one level up.
+    for name in owned:
+        child = Path(base_dir) / name
+        if child.is_symlink():
+            print(
+                f"Skipping test-data cleanup of {name}: it is a symlink; "
+                "its target is not owned by the test suite"
+            )
+            continue
+        if not child.exists():
+            continue
+        if name == "analysis":
+            for file in child.glob("*.nwb"):
+                if not file.is_symlink():
+                    file.unlink()
+        else:
+            shutil_rmtree(str(child), ignore_errors=True)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
