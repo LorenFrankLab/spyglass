@@ -203,13 +203,23 @@ for label, interval_data in results.groupby("interval_labels"):
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
 - Tests default `--base-dir` to `./tests/_data/` and ignore an exported
-    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config(test_mode=True)` refuses a
-    base_dir that does not contain a 'tests' path component and ignores
-    directory env vars, keeping destructive tests off shared/production
-    filesystems #1573 #1574
-- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()` for untracked
-    or empty analysis NWB file cleanup; skip symlinks during the scan #1573
-    #1574
+    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
+    every path before creating anything, and under `test_mode` requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems #1573 #1574
+- `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Gated by a 24-hour minimum file age and an act-time identity and provenance
+    recheck. Directory symlinks are still not followed #1573 #1574
+- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
+    the files the sweep was eligible to act on #1573 #1574
+- Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)
+- Fix: honor `SpyglassConfig(test_mode=...)`; `load_config` previously
+    discarded it in favor of `dj.config` (pre-existing)
+- `maintenance_scripts/cleanup.py` runs its table cleanups independently so one
+    failure no longer skips the rest, and skips later analysis-storage phases
+    when analysis cleanup fails #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575

@@ -385,11 +385,42 @@ The cleanup process checks:
 - **Foreign key protection**: Respects downstream table dependencies
 - **Registry blocking**: Temporarily blocks new table registrations during
     cleanup
-- **Filesystem deletion limits**: Refuses destructive cleanup when the directory
-    scan would delete too large a fraction of analysis NWB files, or too many
-    files relative to the number of tracked analysis files. These limits apply
-    to the broad filesystem sweep for untracked or empty analysis NWB files;
+- **Filesystem deletion limits**: Refuses destructive cleanup when the sweep
+    would delete more than `max_delete_fraction` (default 0.9) of the files it
+    was eligible to act on -- the deletions plus the scanned files it
+    recognized as tracked, with age-deferred files excluded.
+    `max_delete_to_tracked_ratio` (default 10.0) cannot bind at the default
+    fraction, because every scanned file that is kept is tracked and the
+    fraction limit already caps the ratio at 9; it becomes the operative guard
+    only if `max_delete_fraction` is raised above 10/11 (~0.909). These limits
+    apply to the filesystem sweep for untracked or empty analysis NWB files;
     orphan row deletion remains governed by DataJoint table dependencies.
+- **Minimum file age**: Files newer than `min_file_age_hours` (default 24) are
+    deferred to the next cleanup and reported, not deleted. This protects work
+    in the create/populate/register window, where a file exists on disk but is
+    not yet tracked -- notably a file written to another volume and symlinked
+    in before its row is inserted. Pass `min_file_age_hours=0` only for
+    intentional immediate cleanup.
+- **Leaf symlink support**: `*.nwb` symlinks found anywhere in the analysis
+    directory tree are followed, so analysis files distributed across volumes
+    are cleaned in one pass. Directory symlinks are *not* followed, so a
+    symlinked session directory remains invisible to cleanup. When an untracked
+    symlink's target lives outside the analysis directory, cleanup deletes
+    **both the target and the link**.
+
+**Security policy**: a `*.nwb` symlink inside the analysis directory is treated
+as authority to delete its target, wherever that target lives. Identity and
+provenance are re-verified immediately before deletion -- the link must still
+be a link, still point at the recorded target, and the target's device, inode,
+size, mode, and timestamps must be unchanged -- which defends against stale
+plans and re-pointed links. It does **not** defend against a user who plants
+the vouching link in the first place. This is sound while the account running
+cleanup and the users who can write to the analysis directory hold equivalent
+privileges. If that stops being true, restrict deletion to an explicit list of
+allowed storage roots.
+
+**Not concurrency-safe**: two cleanups running at once can adopt and later drop
+each other's insert-blocking triggers. Run cleanup from one process at a time.
 
 ### Custom Tables
 

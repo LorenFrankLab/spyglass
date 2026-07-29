@@ -137,3 +137,23 @@ the app password instead.
 
 [^2]: You may want to run the cronjob from a dedicated conda environment to
     avoid issues with local editable installs or other package conflicts.
+
+### Cleanup failure handling
+
+`cleanup.py` runs each table cleanup independently and reports all failures at
+the end, exiting nonzero only after the file-issues report is written, so
+`run_jobs.sh` can still send that report before failing.
+
+If `AnalysisNwbfile.cleanup()` fails — including a safety refusal from the
+deletion limits — the state of analysis storage is unknown, so later phases that
+also delete from it are skipped: `DecodingOutput.cleanup()` and the external
+analysis deletions. Raw, sorting, recording, and temp cleanups continue
+regardless, as does the read-only file-issues check.
+
+A safety refusal usually means the analysis directory is misconfigured or holds
+a large backlog of untracked files. Run `AnalysisNwbfile().cleanup(dry_run=True)`
+to see the plan before adjusting `max_delete_fraction`.
+
+`AnalysisNwbfile.cleanup()` is **not concurrency-safe**: two runs can adopt and
+later drop each other's insert-blocking triggers. Run it from one process at a
+time.

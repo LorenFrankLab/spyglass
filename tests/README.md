@@ -258,9 +258,22 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # storage would let destructive tests (e.g. AnalysisNwbfile.cleanup) scan
 # and delete real data. Pass --base-dir explicitly to override the default.
 #
-# settings.py enforces, in test_mode=True, that the resolved base_dir
-# contains a 'tests' path component. Pointing --base-dir at a path outside
-# any tests/ directory raises a ValueError before tests collect.
+# The resolved --base-dir must contain a 'tests' path component; this is
+# checked in conftest before anything is created or downloaded, and again
+# in settings.py under test_mode, which additionally requires every
+# resolved Spyglass directory to sit inside the base dir.
+#
+# Generated data (analysis/*.nwb plus the export, moseq, recording,
+# spikesorting, and tmp trees) is removed on teardown ONLY when --base-dir
+# is the repository's own tests/_data. Any other base is left untouched,
+# since a 'tests' component proves location, not ownership. Nested
+# analysis/<session>/*.nwb files are NOT removed and accumulate across
+# runs; if that backlog grows large enough to trip the cleanup deletion
+# limits, clear it with `rm -rf tests/_data/analysis`.
+#
+# Concurrent pytest runs (--container-name/--container-port) should use
+# distinct --base-dir values. This is not currently enforced: two runs
+# sharing a base will race during teardown.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns.
