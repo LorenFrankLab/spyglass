@@ -1,9 +1,12 @@
+import math
 import os
 import re
+import stat as stat_module
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import datajoint as dj
 import h5py
@@ -44,6 +47,107 @@ schema = dj.schema("common_nwbfile")
 
 
 @dataclass(frozen=True)
+class TargetSnapshot:
+    """Identity of a real analysis file at scan time.
+
+    Attributes
+    ----------
+    real_path : pathlib.Path
+        Fully resolved path of the file.
+    dev, ino : int
+        Device and inode, used to prove the file was not swapped.
+    size : int
+        Size in bytes; 0 marks an empty analysis file.
+    mtime_ns, ctime_ns : int
+        Nanosecond timestamps, used by the age gate.
+    mode : int
+        Raw ``st_mode``; must be a regular file to be deletable.
+    """
+
+    real_path: Path
+    dev: int
+    ino: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+    mode: int
+
+    @property
+    def newest_ns(self) -> int:
+        """Newest of mtime/ctime, the conservative age basis."""
+        return max(self.mtime_ns, self.ctime_ns)
+
+    @property
+    def is_regular(self) -> bool:
+        """True when the target is a regular file (not fifo/socket/device)."""
+        return stat_module.S_ISREG(self.mode)
+
+
+@dataclass(frozen=True)
+class AccessSnapshot:
+    """One path under analysis_dir through which a target was reached.
+
+    Attributes
+    ----------
+    access_path : pathlib.Path
+        Path as found by the directory walk.
+    is_link : bool
+        True when ``access_path`` is itself a symlink.
+    raw_link_target : str or None
+        ``os.readlink`` value when ``is_link``, else None. Compared at
+        deletion time so a re-pointed link is not followed.
+    dev, ino : int
+        ``lstat`` device and inode of the access path itself.
+    mtime_ns, ctime_ns : int
+        ``lstat`` nanosecond timestamps of the access path itself.
+    """
+
+    access_path: Path
+    is_link: bool
+    raw_link_target: Optional[str]
+    dev: int
+    ino: int
+    mtime_ns: int
+    ctime_ns: int
+
+    @property
+    def newest_ns(self) -> int:
+        """Newest of mtime/ctime for this access path."""
+        return max(self.mtime_ns, self.ctime_ns)
+
+
+@dataclass(frozen=True)
+class CleanupCandidate:
+    """A real analysis file plus every in-tree path that reaches it.
+
+    A broken symlink has access snapshots but no target snapshot; there is
+    no target to snapshot. ``broken`` is therefore the absence of a target
+    record, not a flag beside meaningless fields.
+    """
+
+    real_path: Path
+    target: Optional[TargetSnapshot]
+    accesses: Tuple[AccessSnapshot, ...]
+
+    @property
+    def broken(self) -> bool:
+        """True when this candidate is a dangling symlink."""
+        return self.target is None
+
+    @property
+    def newest_ns(self) -> int:
+        """Newest timestamp across the target and every access alias.
+
+        A fresh link to an old target may be work awaiting registration, so
+        eligibility requires everything to be old enough.
+        """
+        stamps = [access.newest_ns for access in self.accesses]
+        if self.target is not None:
+            stamps.append(self.target.newest_ns)
+        return max(stamps)
+
+
+@dataclass(frozen=True)
 class CleanupPlan:
     """Filesystem cleanup plan for analysis NWB files.
 
@@ -59,6 +163,13 @@ class CleanupPlan:
         Empty (0-byte) analysis files selected for deletion.
     untracked_files : set of pathlib.Path
         Non-empty files selected because no external store references them.
+    candidates : dict of pathlib.Path to CleanupCandidate
+        Deletion candidates keyed by resolved real path, carrying the
+        identity snapshots re-verified before any unlink.
+    deferred_recent_files : set of pathlib.Path
+        Candidates held back because they are newer than the age limit.
+    broken_links : set of pathlib.Path
+        Resolved targets of dangling ``*.nwb`` symlinks.
     """
 
     scanned_files: Set[Path]
@@ -66,6 +177,9 @@ class CleanupPlan:
     files_to_delete: Set[Path]
     empty_files: Set[Path]
     untracked_files: Set[Path]
+    candidates: Dict[Path, CleanupCandidate]
+    deferred_recent_files: Set[Path]
+    broken_links: Set[Path]
 
 
 @schema
@@ -671,10 +785,125 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
+    def _walk_analysis_files(self) -> Iterator[Path]:
+        """Yield every ``*.nwb`` entry under the analysis directory.
+
+        Directory symlinks are not followed, matching prior behavior. A
+        walk error is re-raised rather than skipped: a destructive sweep
+        must not act on a partial view of the tree.
+
+        Yields
+        ------
+        pathlib.Path
+            Path as found by the walk, which may itself be a symlink.
+        """
+
+        def _reraise(err: OSError) -> None:
+            raise err
+
+        scan_root = str(Path(self._analysis_dir).expanduser())
+        for dirpath, _dirnames, filenames in os.walk(
+            scan_root, followlinks=False, onerror=_reraise
+        ):
+            for fname in filenames:
+                if fname.endswith(".nwb"):
+                    yield Path(dirpath) / fname
+
+    def _snapshot_entry(self, access_path: Path):
+        """Snapshot one scanned entry.
+
+        Returns
+        -------
+        tuple or None
+            ``(real_path, target_or_None, access_snapshot)``, or None when
+            the entry vanished mid-scan and should be skipped.
+
+        Raises
+        ------
+        OSError
+            On permission, symlink-loop, or I/O errors. A destructive sweep
+            fails closed rather than guessing.
+        """
+        try:
+            lst = os.lstat(access_path)
+        except FileNotFoundError:
+            return None  # vanished between walk and stat
+
+        is_link = stat_module.S_ISLNK(lst.st_mode)
+        raw_target = os.readlink(access_path) if is_link else None
+        access = AccessSnapshot(
+            access_path=access_path,
+            is_link=is_link,
+            raw_link_target=raw_target,
+            dev=lst.st_dev,
+            ino=lst.st_ino,
+            mtime_ns=lst.st_mtime_ns,
+            ctime_ns=lst.st_ctime_ns,
+        )
+        real_path = Path(os.path.realpath(access_path))
+
+        try:
+            st = os.stat(access_path)  # follows symlinks
+        except FileNotFoundError:
+            if is_link:
+                return real_path, None, access  # broken link
+            return None  # regular entry vanished mid-scan
+
+        target = TargetSnapshot(
+            real_path=real_path,
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        )
+        return real_path, target, access
+
+    @staticmethod
+    def _is_old_enough(
+        candidate: CleanupCandidate,
+        *,
+        now_ns: int,
+        min_file_age_hours: float,
+    ) -> bool:
+        """Return True when every part of a candidate is old enough.
+
+        Exactly ``min_file_age_hours`` old is eligible. A future timestamp
+        yields a negative age and is therefore deferred.
+        """
+        if min_file_age_hours <= 0:
+            return True
+        threshold_ns = int(min_file_age_hours * 3600 * 10**9)
+        return (now_ns - candidate.newest_ns) >= threshold_ns
+
     def _build_untracked_file_plan(
-        self, custom_tables: List[SpyglassAnalysis]
+        self,
+        custom_tables: List[SpyglassAnalysis],
+        *,
+        min_file_age_hours: float = 24.0,
+        now_ns: Optional[int] = None,
     ) -> CleanupPlan:
-        """Build a cleanup plan for untracked or empty analysis NWB files."""
+        """Build a cleanup plan for untracked or empty analysis NWB files.
+
+        Parameters
+        ----------
+        custom_tables : list
+            Custom analysis table instances whose tracked files count as
+            tracked here.
+        min_file_age_hours : float, optional
+            Candidates whose target or any access alias is newer than this
+            are deferred. Defaults to 24.0. Pass 0 to disable.
+        now_ns : int, optional
+            Injected clock in nanoseconds. Defaults to ``time.time_ns()``.
+            Tests must inject: ``os.utime`` cannot backdate ``ctime``, so a
+            real file always reads as new under ``max(mtime, ctime)``.
+
+        Returns
+        -------
+        CleanupPlan
+        """
+        now_ns = time.time_ns() if now_ns is None else now_ns
 
         def paths_from_external(tbl) -> Set[Path]:
             return {
@@ -686,38 +915,66 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         for tbl in custom_tables:
             tracked.update(paths_from_external(tbl))
 
-        scanned = set()
-        empty = set()
-        untracked = set()
-        for path in tqdm(
-            Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files  ",  # Note extra spaces for alignment
+        targets: Dict[Path, Optional[TargetSnapshot]] = {}
+        accesses: Dict[Path, List[AccessSnapshot]] = {}
+        for access_path in tqdm(
+            self._walk_analysis_files(),
+            desc="Scanning analysis files  ",  # extra spaces for alignment
         ):
-            # rglob("*.nwb") only yields files; skip symlinks so a stray
-            # symlink under analysis_dir can't add its target (potentially
-            # outside analysis_dir) to the deletion plan.
-            if path.is_symlink():
-                try:
-                    target = os.readlink(path)
-                except OSError:
-                    target = "<unreadable>"
+            snapped = self._snapshot_entry(access_path)
+            if snapped is None:
+                continue
+            real_path, target, access = snapped
+            accesses.setdefault(real_path, []).append(access)
+            if target is not None:
+                targets[real_path] = target
+            else:
+                targets.setdefault(real_path, None)
+
+        scanned = set(accesses)
+        candidates: Dict[Path, CleanupCandidate] = {}
+        empty: Set[Path] = set()
+        untracked: Set[Path] = set()
+        broken: Set[Path] = set()
+        deferred: Set[Path] = set()
+
+        for real_path, target in targets.items():
+            if real_path in tracked:
+                continue  # tracked wins over empty and over broken
+            if target is not None and not target.is_regular:
                 logger.warning(
-                    f"Skipping symlink in analysis dir: {path} -> {target}"
+                    f"Skipping non-regular analysis path: {real_path}"
                 )
                 continue
-            resolved_path = path.expanduser().resolve()
-            scanned.add(resolved_path)
-            if path.stat().st_size == 0:
-                empty.add(resolved_path)
-            elif resolved_path not in tracked:
-                untracked.add(resolved_path)
+            candidate = CleanupCandidate(
+                real_path=real_path,
+                target=target,
+                accesses=tuple(accesses[real_path]),
+            )
+            if not self._is_old_enough(
+                candidate,
+                now_ns=now_ns,
+                min_file_age_hours=min_file_age_hours,
+            ):
+                deferred.add(real_path)
+                continue
+            candidates[real_path] = candidate
+            if candidate.broken:
+                broken.add(real_path)
+            elif target.size == 0:
+                empty.add(real_path)
+            else:
+                untracked.add(real_path)
 
         return CleanupPlan(
             scanned_files=scanned,
             tracked_files=tracked,
-            files_to_delete=empty | untracked,
+            files_to_delete=set(candidates),
             empty_files=empty,
             untracked_files=untracked,
+            candidates=candidates,
+            deferred_recent_files=deferred,
+            broken_links=broken,
         )
 
     @staticmethod

@@ -73,14 +73,25 @@ def test_nwbfile_cleanup(common_nwbfile):
 
 
 def _cleanup_plan(common_nwbfile, *, scanned, tracked, delete):
-    scanned_files = {Path(f"scan_{i}.nwb") for i in range(scanned)}
-    files_to_delete = set(list(scanned_files)[:delete])
+    """Build a plan with the shape the real builder produces.
+
+    Tracked entries are drawn from the scanned set, immediately after the
+    deleted ones, so `scanned & tracked` is non-empty and the validator
+    exercises the branch each test is aiming at. The real builder can never
+    produce disjoint sets: a scanned file is kept because it is tracked.
+    """
+    scanned_files = [Path(f"scan_{i}.nwb") for i in range(scanned)]
+    files_to_delete = set(scanned_files[:delete])
+    tracked_files = set(scanned_files[delete : delete + tracked])
     return common_nwbfile.CleanupPlan(
-        scanned_files=scanned_files,
-        tracked_files={Path(f"tracked_{i}.nwb") for i in range(tracked)},
+        scanned_files=set(scanned_files),
+        tracked_files=tracked_files,
         files_to_delete=files_to_delete,
         empty_files=set(),
         untracked_files=files_to_delete,
+        candidates={},
+        deferred_recent_files=set(),
+        broken_links=set(),
     )
 
 
@@ -105,7 +116,9 @@ def test_build_untracked_file_plan_uses_resolved_external_paths(
         [("tracked", analysis_dir / "subdir" / ".." / "tracked.nwb")]
     )
 
-    plan = table._build_untracked_file_plan(custom_tables=[])
+    plan = table._build_untracked_file_plan(
+        custom_tables=[], min_file_age_hours=0
+    )
 
     assert plan.scanned_files == {
         tracked.resolve(),
@@ -208,44 +221,15 @@ def test_analysis_cleanup_plan_accepts_ratio_at_threshold(common_nwbfile):
     assert (ok, msg) == (True, None)
 
 
-def test_build_untracked_file_plan_skips_symlinks(
-    common_nwbfile, tmp_path, caplog
-):
-    """Symlinks under analysis_dir must not appear in any plan set,
-    and must emit a warning naming the symlink and its target."""
-    outside_target = tmp_path / "outside" / "shared.nwb"
-    outside_target.parent.mkdir()
-    outside_target.write_text("shared data")
-
-    analysis_dir = tmp_path / "analysis"
-    analysis_dir.mkdir()
-
-    real = analysis_dir / "real.nwb"
-    real.write_text("real")
-
-    link = analysis_dir / "escape.nwb"
-    link.symlink_to(outside_target)
-
-    table = object.__new__(common_nwbfile.AnalysisNwbfile)
-    table.__dict__["_analysis_dir"] = str(analysis_dir)
-    table._ext_tbl = _FakeExternalTable([])
-
-    with caplog.at_level("WARNING"):
-        plan = table._build_untracked_file_plan(custom_tables=[])
-
-    assert outside_target.resolve() not in plan.scanned_files
-    assert outside_target.resolve() not in plan.files_to_delete
-    assert plan.scanned_files == {real.resolve()}
-    assert any(
-        "Skipping symlink" in record.message and str(link) in record.message
-        for record in caplog.records
-    ), "symlink skip should emit a warning naming the symlink path"
-
-
 def test_remove_untracked_files_refuses_path_outside_analysis_dir(
     common_nwbfile, tmp_path
 ):
-    """Plans containing paths outside analysis_dir must not unlink anything."""
+    """Plans containing paths outside analysis_dir must not unlink anything.
+
+    The candidate is fully populated on purpose: an empty `candidates`
+    dict would make the deletion loop iterate nothing, so the test would
+    pass without exercising the guard it is named for.
+    """
     outside_target = tmp_path / "outside" / "shared.nwb"
     outside_target.parent.mkdir()
     outside_target.write_text("shared data")
@@ -253,16 +237,45 @@ def test_remove_untracked_files_refuses_path_outside_analysis_dir(
     analysis_dir = tmp_path / "analysis"
     analysis_dir.mkdir()
 
+    real = outside_target.resolve()
+    st = outside_target.stat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=real,
+                is_link=False,  # no in-root link vouches for it
+                raw_link_target=None,
+                dev=st.st_dev,
+                ino=st.st_ino,
+                mtime_ns=st.st_mtime_ns,
+                ctime_ns=st.st_ctime_ns,
+            ),
+        ),
+    )
     plan = common_nwbfile.CleanupPlan(
-        scanned_files={outside_target.resolve()},
+        scanned_files={real},
         tracked_files=set(),
-        files_to_delete={outside_target.resolve()},
+        files_to_delete={real},
         empty_files=set(),
-        untracked_files={outside_target.resolve()},
+        untracked_files={real},
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links=set(),
     )
 
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
     table.__dict__["_analysis_dir"] = str(analysis_dir)
+    table._ext_tbl = _FakeExternalTable([])
 
     table._remove_untracked_files(custom_tables=[], dry_run=False, plan=plan)
 
@@ -286,12 +299,12 @@ def test_analysis_cleanup_dry_run_warns_on_refused_plan(
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        lambda self, custom_tables: bad_plan,
+        lambda self, custom_tables, **kw: bad_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_remove_untracked_files",
-        lambda self, custom_tables, dry_run, plan: (set(), set()),
+        lambda self, custom_tables, dry_run, plan, **kw: (set(), set()),
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -323,14 +336,16 @@ def test_analysis_cleanup_validates_plan_before_unlink(
     registry = _FakeRegistry()
     bad_plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
 
-    def _remove_untracked_files(self, custom_tables, dry_run=True, plan=None):
+    def _remove_untracked_files(
+        self, custom_tables, dry_run=True, plan=None, **kw
+    ):
         raise AssertionError("dangerous final cleanup plan should not unlink")
 
     monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        lambda self, custom_tables: bad_plan,
+        lambda self, custom_tables, **kw: bad_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -382,7 +397,7 @@ def test_cleanup_preserves_original_exception_when_unblock_raises(
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        lambda self, custom_tables: bad_plan,
+        lambda self, custom_tables, **kw: bad_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -426,12 +441,12 @@ def test_cleanup_propagates_unblock_failure_when_body_succeeds(
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        lambda self, custom_tables: good_plan,
+        lambda self, custom_tables, **kw: good_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_remove_untracked_files",
-        lambda self, custom_tables, dry_run, plan: (set(), set()),
+        lambda self, custom_tables, dry_run, plan, **kw: (set(), set()),
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -449,3 +464,195 @@ def test_cleanup_propagates_unblock_failure_when_body_succeeds(
         common_nwbfile.AnalysisNwbfile.cleanup(
             table, dry_run=False, max_delete_fraction=0.9
         )
+
+
+def _plan(table, **kwargs):
+    """Build a plan with the age gate disabled unless overridden."""
+    kwargs.setdefault("min_file_age_hours", 0)
+    return table._build_untracked_file_plan(custom_tables=[], **kwargs)
+
+
+def _table(common_nwbfile, analysis_dir, tracked=()):
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    table.__dict__["_analysis_dir"] = str(analysis_dir)
+    table._ext_tbl = _FakeExternalTable([("h", p) for p in tracked])
+    return table
+
+
+def test_scan_includes_untracked_leaf_symlink(common_nwbfile, tmp_path):
+    """A leaf *.nwb symlink is a candidate, keyed by its real target."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "far.nwb"
+    target.write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    plan = _plan(_table(common_nwbfile, analysis_dir))
+
+    assert plan.files_to_delete == {target.resolve()}
+    candidate = plan.candidates[target.resolve()]
+    assert candidate.broken is False
+    assert len(candidate.accesses) == 1
+    access = candidate.accesses[0]
+    assert access.is_link is True
+    assert access.access_path == link
+    assert access.raw_link_target == str(target)
+
+
+def test_scan_leaves_tracked_leaf_symlink_alone(common_nwbfile, tmp_path):
+    """A tracked symlink must not become a candidate."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "far.nwb"
+    target.write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    plan = _plan(_table(common_nwbfile, analysis_dir, tracked=[link]))
+
+    assert plan.files_to_delete == set()
+
+
+def test_scan_does_not_descend_directory_symlink(common_nwbfile, tmp_path):
+    """Directory symlinks stay undescended (unchanged from master)."""
+    volume2 = tmp_path / "volume2" / "session"
+    volume2.mkdir(parents=True)
+    (volume2 / "far.nwb").write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "session").symlink_to(volume2, target_is_directory=True)
+    (analysis_dir / "near.nwb").write_text("near")
+
+    plan = _plan(_table(common_nwbfile, analysis_dir))
+
+    assert plan.scanned_files == {(analysis_dir / "near.nwb").resolve()}
+
+
+def test_scan_treats_tracked_empty_file_as_tracked(common_nwbfile, tmp_path):
+    """Tracked wins over empty: a tracked 0-byte file is never deleted.
+
+    Deleting it would leave a dangling DataJoint row.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    empty = analysis_dir / "empty.nwb"
+    empty.touch()
+
+    plan = _plan(_table(common_nwbfile, analysis_dir, tracked=[empty]))
+
+    assert plan.files_to_delete == set()
+    assert plan.empty_files == set()
+
+
+def test_scan_flags_untracked_broken_symlink(common_nwbfile, tmp_path):
+    """A dangling *.nwb symlink with no tracked entry is a candidate."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "dangling.nwb"
+    link.symlink_to(tmp_path / "nope.nwb")
+
+    plan = _plan(_table(common_nwbfile, analysis_dir))
+
+    real = Path(os.path.realpath(link))
+    assert plan.broken_links == {real}
+    assert plan.candidates[real].broken is True
+
+
+def test_scan_ignores_directory_named_nwb(common_nwbfile, tmp_path):
+    """A directory named *.nwb is not a deletion candidate."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "dir.nwb").mkdir()
+    (analysis_dir / "real.nwb").write_text("real")
+
+    plan = _plan(_table(common_nwbfile, analysis_dir))
+
+    assert plan.scanned_files == {(analysis_dir / "real.nwb").resolve()}
+
+
+def test_scan_fails_closed_on_walk_error(common_nwbfile, tmp_path, monkeypatch):
+    """A permission error must abort, not silently scan a partial tree."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "real.nwb").write_text("real")
+
+    real_walk = os.walk
+
+    def _boom(top, **kwargs):
+        onerror = kwargs.get("onerror")
+        if onerror is not None:
+            onerror(PermissionError(13, "Permission denied", str(top)))
+        return real_walk(top, **kwargs)
+
+    monkeypatch.setattr(os, "walk", _boom)
+
+    with pytest.raises(PermissionError):
+        _plan(_table(common_nwbfile, analysis_dir))
+
+
+def test_scan_defers_recent_files(common_nwbfile, tmp_path):
+    """Files newer than min_file_age_hours are deferred, not deleted.
+
+    The clock is injected because os.utime cannot backdate ctime, so a
+    real file always reads as new under max(mtime_ns, ctime_ns).
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    fresh = analysis_dir / "fresh.nwb"
+    fresh.write_text("fresh")
+
+    table = _table(common_nwbfile, analysis_dir)
+    now_ns = fresh.stat().st_ctime_ns + 3600 * 10**9  # 1 hour later
+
+    plan = table._build_untracked_file_plan(
+        custom_tables=[], min_file_age_hours=24.0, now_ns=now_ns
+    )
+
+    assert plan.files_to_delete == set()
+    assert plan.deferred_recent_files == {fresh.resolve()}
+
+
+def test_scan_age_boundary_is_inclusive(common_nwbfile, tmp_path):
+    """Exactly min_file_age_hours old is eligible; a nanosecond less is not."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "boundary.nwb"
+    f.write_text("x")
+
+    table = _table(common_nwbfile, analysis_dir)
+    newest = max(f.stat().st_mtime_ns, f.stat().st_ctime_ns)
+    day_ns = 24 * 3600 * 10**9
+
+    exactly = table._build_untracked_file_plan(
+        custom_tables=[], min_file_age_hours=24.0, now_ns=newest + day_ns
+    )
+    assert exactly.files_to_delete == {f.resolve()}
+
+    just_under = table._build_untracked_file_plan(
+        custom_tables=[], min_file_age_hours=24.0, now_ns=newest + day_ns - 1
+    )
+    assert just_under.files_to_delete == set()
+
+
+def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
+    """A file stamped in the future must be deferred, not treated as old."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "future.nwb"
+    f.write_text("x")
+
+    table = _table(common_nwbfile, analysis_dir)
+    newest = max(f.stat().st_mtime_ns, f.stat().st_ctime_ns)
+
+    plan = table._build_untracked_file_plan(
+        custom_tables=[], min_file_age_hours=24.0, now_ns=newest - 10**9
+    )
+    assert plan.deferred_recent_files == {f.resolve()}
