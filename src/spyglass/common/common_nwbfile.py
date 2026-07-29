@@ -1127,6 +1127,43 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return tracked
 
     @staticmethod
+    def _alias_removal_order(
+        accesses: List[AccessSnapshot],
+    ) -> List[AccessSnapshot]:
+        """Order leaf symlinks so traversers are unlinked before their links.
+
+        For ``a.nwb -> b.nwb -> target`` both links alias one candidate.
+        Removing ``b`` first would leave ``a`` unable to resolve to the
+        target, so its pre-unlink check would reject it and strand it as a
+        dangling link. Ordering by how many of the *other* access paths a
+        link traverses -- descending -- puts the outermost first.
+
+        Non-link accesses are dropped: the real path is unlinked separately.
+        """
+        links = [a for a in accesses if a.is_link]
+        others = {a.access_path for a in links}
+
+        def _traversed(access: AccessSnapshot) -> int:
+            """How many sibling access paths this link resolves through."""
+            count = 0
+            current = access.access_path
+            for _ in range(64):  # bounded: guards a symlink cycle
+                try:
+                    if not current.is_symlink():
+                        break
+                    nxt = Path(os.readlink(current))
+                except OSError:
+                    break
+                if not nxt.is_absolute():
+                    nxt = current.parent / nxt
+                if nxt in others:
+                    count += 1
+                current = nxt
+            return count
+
+        return sorted(links, key=_traversed, reverse=True)
+
+    @staticmethod
     def _access_still_matches(
         access: AccessSnapshot, *, real_path: Path, analysis_root: Path
     ) -> bool:
@@ -1375,7 +1412,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # invariant here stops a forged plan using, say,
             # analysis/voucher.txt -> /outside/victim.nwb as authority.
             for access in candidate.accesses:
-                if access.access_path.name[-4:].lower() != ".nwb":
+                # Exactly the scanner's predicate, case-sensitive: a
+                # `voucher.NWB` cannot come from the scan, so accepting it
+                # here would let a forged plan authorize deletion.
+                if not access.access_path.name.endswith(".nwb"):
                     structural.append(
                         f"{candidate.real_path}: access path "
                         f"{access.access_path} is not a *.nwb entry"
@@ -1430,18 +1470,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             try:
                 if not candidate.broken:
                     candidate.real_path.unlink()
-                # Re-verify EVERY link as a group before unlinking any of
-                # them. Aliases can chain (a.nwb -> b.nwb -> target): once
-                # b is removed, a no longer resolves to the target, so
-                # validating and unlinking in one pass would reject a and
-                # leave it dangling, with the outcome depending on access
-                # order. Validating first makes the result order-independent.
-                # Only in-root accesses validated earlier are considered, so
-                # an extra out-of-root access is never unlinked.
-                to_unlink = []
-                for access in in_root:
-                    if not access.is_link:
-                        continue
+                # Aliases can chain (a.nwb -> b.nwb -> target). Remove them
+                # in dependency order, outermost first, so an alias is
+                # never invalidated by the removal of one it traverses --
+                # that would strand it as a dangling link, and would make
+                # the outcome depend on access order.
+                #
+                # Each link is re-checked IMMEDIATELY before its own
+                # unlink, never batched: validating a group and then
+                # unlinking the group leaves a window in which an approved
+                # link can be replaced by a fresh regular file that the
+                # unlink would then destroy unchecked.
+                for access in self._alias_removal_order(in_root):
                     if not self._access_still_matches(
                         access,
                         real_path=candidate.real_path,
@@ -1452,8 +1492,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                             "after target deletion"
                         )
                         continue
-                    to_unlink.append(access)
-                for access in to_unlink:
                     access.access_path.unlink()
             except OSError as e:
                 failures.append(f"{candidate.real_path}: {e}")

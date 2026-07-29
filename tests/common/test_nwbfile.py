@@ -1349,6 +1349,12 @@ def test_registry_knowledge_persists_across_candidates(
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
     assert len(plan.candidates) == 2
+    # Force order: `first` must be processed before `second`, otherwise the
+    # old implementation could pass by accident on some filesystems.
+    plan.candidates.clear()
+    for path in (first, second):
+        rebuilt = _plan(_table(common_nwbfile, analysis_dir))
+        plan.candidates[path.resolve()] = rebuilt.candidates[path.resolve()]
 
     class _Ephemeral:
         """Registry table tracking whichever file is still on disk."""
@@ -1488,3 +1494,124 @@ def test_delete_refuses_non_nwb_voucher(common_nwbfile, tmp_path):
 
     assert victim.exists(), "non-.nwb voucher must not authorize deletion"
     assert voucher.is_symlink()
+
+
+def test_delete_rechecks_each_alias_immediately_before_unlink(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """An approved link swapped mid-pass must not be unlinked blindly.
+
+    Validating a group of links and then unlinking the group leaves a
+    window: an earlier-approved link can be replaced by a fresh regular
+    file while later ones are checked. Each link is therefore re-checked
+    immediately before its own unlink.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link_a = analysis_dir / "a.nwb"
+    link_a.symlink_to(target)
+    link_b = analysis_dir / "b.nwb"
+    link_b.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    original = common_nwbfile.AnalysisNwbfile._access_still_matches
+    swapped = {"done": False}
+
+    def _swap_then_check(access, **kwargs):
+        # After the first link is approved, replace the OTHER one with a
+        # regular file, exactly as a racing writer would.
+        result = original(access, **kwargs)
+        if result and not swapped["done"]:
+            swapped["done"] = True
+            other = link_b if access.access_path == link_a else link_a
+            if other.is_symlink():
+                other.unlink()
+                other.write_text("innocent replacement")
+        return result
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_access_still_matches",
+        staticmethod(_swap_then_check),
+    )
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    replacements = [
+        p for p in (link_a, link_b) if p.exists() and not p.is_symlink()
+    ]
+    assert replacements, "test did not exercise the swap"
+    assert (
+        replacements[0].read_text() == "innocent replacement"
+    ), "a regular file that replaced an approved link must not be unlinked"
+
+
+def test_delete_refuses_uppercase_nwb_voucher(common_nwbfile, tmp_path):
+    """The suffix check must match the scanner's case-sensitive predicate.
+
+    The scan uses `fname.endswith(".nwb")`, so `voucher.NWB` can never come
+    from it; accepting it would let a forged plan authorize deletion.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    victim = volume2 / "victim.nwb"
+    victim.write_text("must survive")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    voucher = analysis_dir / "voucher.NWB"
+    voucher.symlink_to(victim)
+
+    real = victim.resolve()
+    vst = victim.stat()
+    lst = voucher.lstat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=vst.st_dev,
+            ino=vst.st_ino,
+            size=vst.st_size,
+            mtime_ns=vst.st_mtime_ns,
+            ctime_ns=vst.st_ctime_ns,
+            mode=vst.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=voucher,
+                is_link=True,
+                raw_link_target=str(victim),
+                dev=lst.st_dev,
+                ino=lst.st_ino,
+                mtime_ns=lst.st_mtime_ns,
+                ctime_ns=lst.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files={real},
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    with pytest.raises(RuntimeError, match="not a \\*.nwb entry"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert victim.exists(), "uppercase-suffix voucher must not authorize"

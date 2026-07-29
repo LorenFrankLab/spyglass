@@ -519,8 +519,8 @@ def _teardown_test_data(base_dir):
 
     if child_failures:
         raise RuntimeError(
-            "test-data cleanup failed for "
-            f"{len(child_failures)} directories: " + "; ".join(child_failures)
+            f"test-data cleanup: {len(child_failures)} failures "
+            "(files and/or directories): " + "; ".join(child_failures)
         )
 
 
