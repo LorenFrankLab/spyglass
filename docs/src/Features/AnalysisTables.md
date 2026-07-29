@@ -119,10 +119,9 @@ with AnalysisNwbfile().build("session.nwb") as builder:
 
 ```python
 with AnalysisNwbfile().build("session.nwb") as builder:
-    with builder.open_for_write() as io:
-        nwbf = io.read()
-        nwbf.add_unit(spike_times=[0.1, 0.5, 1.2], id=1)
-        io.write(nwbf)
+    io, nwbf = builder.open_nwb
+    nwbf.add_unit(spike_times=[0.1, 0.5, 1.2], id=1)
+    # io closing and file write handled at exit
 ```
 
 **What happens on exception**:
@@ -458,9 +457,10 @@ Even with direct I/O, you can still use the builder:
 
 ```python
 with AnalysisNwbfile().build("session.nwb") as builder:
-    with builder.open_for_write() as io:
-        # Direct PyNWB operations here
-        pass
+    io, nwbf = builder.open_nwb
+    # Direct PyNWB operations here
+    ...
+    # io close and file write handled at exit
 ```
 
 ______________________________________________________________________

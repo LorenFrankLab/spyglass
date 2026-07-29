@@ -369,7 +369,7 @@ class AnalysisRegistry(dj.Manual):
             isolated database locks.
             """
 
-            _full_table_name = full_name
+            full_table_name = full_name
             _analysis_prefix = prefix
 
             def __init__(self):
@@ -1024,7 +1024,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     if cleanup_exc is None:
                         raise
 
-    def check_all_files(self, resolve_tables: bool = False) -> dict:
+    def check_all_files(
+        self, resolve_tables: bool = False, verbose: bool = False
+    ) -> dict:
         """Check files across all analysis tables for issues.
 
         Iterates through common and all custom AnalysisNwbfile tables,
@@ -1076,7 +1078,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             self._info_msg(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
             issue_count = file_checker.check_files(
-                analysis_tbl, deleted_files=deleted_files
+                analysis_tbl, deleted_files=deleted_files, verbose=verbose
             )
             results[tbl_name] = issue_count
 

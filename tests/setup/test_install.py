@@ -31,6 +31,7 @@ sys.path.insert(0, str(scripts_dir))
 
 from install import (
     CondaManager,
+    Console,
     DockerManager,
     Validators,
     build_directory_structure,
@@ -98,6 +99,172 @@ class TestCondaManagerGetCommand:
                 RuntimeError, match="Neither mamba nor conda found"
             ):
                 CondaManager.get_command()
+
+
+class TestCondaManagerCreate:
+    """Regression tests for the installer stalling during env creation.
+
+    ``conda env create`` prompts for confirmation by default. The original
+    implementation captured conda's stdout/stderr into a hidden pipe while
+    passing no auto-confirm flag, so conda blocked reading stdin with its
+    prompt invisible -- a silent deadlock users experienced as the installer
+    "stalling" with no output. ``create()`` must run non-interactively (``-y``)
+    and must not capture conda's output, so prompts/progress/errors stay
+    visible on the terminal.
+    """
+
+    @pytest.fixture
+    def mock_create(self):
+        """Isolate ``create()`` from real conda.
+
+        Stubs the existence/command lookups and neuters the legacy ``Popen``
+        path so neither the old nor new implementation can launch conda.
+        Yields the ``subprocess.run`` mock for assertions.
+        """
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch("install.subprocess.Popen") as mock_popen,
+            patch.object(CondaManager, "exists", return_value=False),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            legacy = mock_popen.return_value.__enter__.return_value
+            legacy.stdout = iter(())
+            legacy.returncode = 0
+            yield mock_run
+
+    def test_passes_yes_flag_for_noninteractive_create(self, mock_create):
+        """create() auto-confirms so conda never blocks on its prompt."""
+        CondaManager("spyglass-test").create(
+            "environments/environment_min.yml", force=True
+        )
+
+        assert mock_create.called, (
+            "create() must run conda via streaming subprocess.run, "
+            "not a captured Popen pipe"
+        )
+        cmd = mock_create.call_args.args[0]
+        assert cmd[:3] == ["conda", "env", "create"]
+        assert "-y" in cmd or "--yes" in cmd, (
+            "env create must auto-confirm; otherwise conda blocks on its "
+            "'Proceed ([y]/n)?' prompt and the installer stalls silently"
+        )
+
+    def test_does_not_capture_conda_output(self, mock_create):
+        """Conda's output must stream to the terminal, not into a pipe."""
+        CondaManager("spyglass-test").create(
+            "environments/environment_min.yml", force=True
+        )
+
+        kwargs = mock_create.call_args.kwargs
+        assert not kwargs.get("capture_output", False)
+        assert kwargs.get("stdout") is None
+        assert kwargs.get("stderr") is None
+
+    def test_raises_helpful_error_on_failure(self, mock_create):
+        """A failed create surfaces an actionable RuntimeError."""
+        mock_create.side_effect = subprocess.CalledProcessError(1, "conda")
+
+        with pytest.raises(RuntimeError, match="Failed to create environment"):
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=True
+            )
+
+    def test_existing_env_declined_skips_create_and_remove(self):
+        """Declining the overwrite prompt must not destroy or recreate the env.
+
+        The overwrite path runs the destructive `conda env remove`; a user who
+        answers "no" must keep their environment untouched (no remove, no
+        create).
+        """
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "exists", return_value=True),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+            patch.object(CondaManager, "remove") as mock_remove,
+            patch.object(Console, "prompt_yes_no", return_value=False),
+        ):
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=False
+            )
+
+        mock_remove.assert_not_called()
+        mock_run.assert_not_called()
+
+    def test_force_removes_existing_env_before_create(self):
+        """force=True removes the existing env, then creates a fresh one."""
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "exists", return_value=True),
+            patch.object(CondaManager, "get_command", return_value="conda"),
+            patch.object(CondaManager, "remove") as mock_remove,
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            CondaManager("spyglass-test").create(
+                "environments/environment_min.yml", force=True
+            )
+
+        mock_remove.assert_called_once()
+        assert mock_run.call_args.args[0][:3] == ["conda", "env", "create"]
+
+
+class TestCondaManagerInstallPackage:
+    """Tests for CondaManager.install_package().
+
+    Like environment creation, the editable install can run for a while;
+    capturing its output left users staring at a silent terminal with no way
+    to tell "slow" from "stalled". The install must stream its output so
+    progress and any pip errors stay visible. Because the install runs via
+    ``conda run`` -- which buffers the child's stdout/stderr by default --
+    streaming requires both not capturing at the ``subprocess.run`` layer and
+    passing ``--no-capture-output`` to ``conda run``.
+    """
+
+    @pytest.fixture
+    def mock_install(self):
+        """Isolate install_package() from a real conda/pip invocation."""
+        with (
+            patch("install.subprocess.run") as mock_run,
+            patch.object(CondaManager, "get_command", return_value="conda"),
+        ):
+            mock_run.return_value = Mock(returncode=0)
+            yield mock_run
+
+    def test_streams_output_not_captured(self, mock_install):
+        """pip output must stream to the terminal, not into a hidden pipe."""
+        CondaManager("spyglass-test").install_package()
+
+        assert mock_install.called
+        kwargs = mock_install.call_args.kwargs
+        assert not kwargs.get("capture_output", False)
+        assert kwargs.get("stdout") is None
+        assert kwargs.get("stderr") is None
+        # conda run buffers by default; this flag is what actually makes pip
+        # stream live through the wrapper.
+        assert "--no-capture-output" in mock_install.call_args.args[0]
+
+    def test_installs_editable_local_package(self, mock_install):
+        """Runs `pip install -e` inside the target environment."""
+        CondaManager("spyglass-test").install_package()
+
+        cmd = mock_install.call_args.args[0]
+        assert cmd[:3] == ["conda", "run", "--no-capture-output"]
+        assert cmd[3:5] == ["-n", "spyglass-test"]
+        assert cmd[5:8] == ["pip", "install", "-e"]
+
+    def test_extras_appended_to_package_spec(self, mock_install):
+        """Optional extras are appended to the editable spec."""
+        CondaManager("spyglass-test").install_package(extras=["kachery-cloud"])
+
+        spec = mock_install.call_args.args[0][-1]
+        assert spec.endswith("[kachery-cloud]")
+
+    def test_raises_helpful_error_on_failure(self, mock_install):
+        """A failed install surfaces an actionable RuntimeError."""
+        mock_install.side_effect = subprocess.CalledProcessError(1, "pip")
+
+        with pytest.raises(RuntimeError, match="Failed to install spyglass"):
+            CondaManager("spyglass-test").install_package()
 
 
 # =============================================================================

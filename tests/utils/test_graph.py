@@ -1,3 +1,4 @@
+import datajoint as dj
 import pytest
 from datajoint.utils import to_camel_case
 
@@ -117,6 +118,34 @@ def test_rg_add_list(add_graph_rgs, add_graph_tables):
         len(rg_union._get_ft(tables["B1"].full_table_name, with_restr=True))
         == 2
     ), "Unexpected child restricted table length for union of rg_1 and rg_2."
+
+
+def test_rg_revisits_with_expanded_restriction(graph_tables):
+    from spyglass.utils.dj_graph import RestrGraph
+
+    tables = graph_tables
+    graph = RestrGraph(
+        seed_table=tables["BranchNode"](),
+        leaves=[
+            {
+                "table_name": tables["BranchNode"].full_table_name,
+                "restriction": "intermediate_id = 2",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+    parent_ids = set(
+        graph._get_ft(
+            tables["ParentNode"].full_table_name, with_restr=True
+        ).fetch("parent_id")
+    )
+    assert parent_ids == {
+        1,  # from the intermediate node
+        3,  # from the branch node
+    }, "Parent restriction should union from both sources."
 
 
 def test_rg_repr(restr_graph, leaf):

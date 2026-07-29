@@ -16,55 +16,53 @@ from spyglass.utils.logging import logger
 class AnalysisFileBuilder:
     """Context manager for safe analysis file creation.
 
-    Enforces CREATE → POPULATE → REGISTER lifecycle with automatic state
-    tracking and fail-fast error messages.
+        Enforces CREATE → POPULATE → REGISTER lifecycle with automatic state
+        tracking and fail-fast error messages.
 
-    The builder prevents common errors:
-    - Forgetting to call add() (auto-registration on __exit__)
-    - Calling helpers after registration (state checks with clear errors)
-    - Opening files in write mode after registration (prevented)
-    - Losing track of file state (explicit state machine)
-    - Creating orphaned files on exception (logged for cleanup)
+        The builder prevents common errors:
+        - Forgetting to call add() (auto-registration on __exit__)
+        - Calling helpers after registration (state checks with clear errors)
+        - Opening files in write mode after registration (prevented)
+        - Losing track of file state (explicit state machine)
+        - Creating orphaned files on exception (logged for cleanup)
 
-    Parameters
-    ----------
-    analysis_table : AnalysisMixin instance
-        The table to create/register file in (master or custom)
-    nwb_file_name : str
-        Parent NWB file name
+        Parameters
+        ----------
+        analysis_table : AnalysisMixin instance
+            The table to create/register file in (master or custom)
+        nwb_file_name : str
+            Parent NWB file name
 
-    Attributes
-    ----------
-    analysis_file_name : str
-        Name of created analysis file (set after __enter__)
-    nwb_file_name : str
-        Parent NWB file name
+        Attributes
+        ----------
+        analysis_file_name : str
+            Name of created analysis file (set after __enter__)
+        nwb_file_name : str
+            Parent NWB file name
 
-    Examples
-    --------
-    Basic usage with helper methods:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     builder.add_nwb_object(my_data, "results")
-    ...     file = builder.analysis_file_name
-    # File automatically registered on exit!
+        Examples
+        --------
+        Basic usage with helper methods:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(my_data, "results")
+        ...     file = builder.analysis_file_name
+        # File automatically registered on exit!
 
-    Multiple helper calls:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     builder.add_nwb_object(position_data, "position")
-    ...     builder.add_nwb_object(velocity_data, "velocity")
-    ...     file = builder.analysis_file_name
+        Multiple helper calls:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(position_data, "position")
+        ...     builder.add_nwb_object(velocity_data, "velocity")
+        ...     file = builder.analysis_file_name
 
-    Direct NWB I/O for complex operations:
-    >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
-    ...     with builder.open_for_write() as io:
-    ...         nwbf = io.read()
+        Direct NWB I/O for complex operations:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     io, nwbf = builder.open_nwb
     ...         nwbf.add_unit(spike_times=times, id=unit_id)
-    ...         io.write(nwbf)
-    ...     file = builder.analysis_file_name
+        ...     file = builder.analysis_file_name
 
-    See Also
-    --------
-    AnalysisMixin.build : Factory method that creates this builder
+        See Also
+        --------
+        AnalysisMixin.build : Factory method that creates this builder
     """
 
     def __init__(self, analysis_table, nwb_file_name: str):
@@ -83,6 +81,8 @@ class AnalysisFileBuilder:
         self._state = "INIT"
         self._exception_occurred = False
         self._exception_log = dict()
+        self._open_io = None
+        self._open_nwb = None
 
     def __enter__(self):
         """Create analysis file (CREATE phase).
@@ -134,6 +134,8 @@ class AnalysisFileBuilder:
                     f"File will be detected and cleaned up by "
                     f"AnalysisNwbfile.cleanup()"
                 )
+            if self._open_io:
+                self._open_io.close()
             return False  # Don't suppress exception
 
         # Always auto-register on successful exit
@@ -147,6 +149,8 @@ class AnalysisFileBuilder:
                     f"Failed to register analysis file "
                     f"'{self.analysis_file_name}': {e}"
                 )
+            if self._open_io:
+                self._open_io.close()
             raise  # Re-raise registration error
 
         return False  # Never suppress exceptions
@@ -155,7 +159,7 @@ class AnalysisFileBuilder:
         """Ensure file is in CREATED state (not INIT or REGISTERED).
 
         This helper validates that population methods (add_nwb_object, add_units,
-        open_for_write) are called at the correct time in the lifecycle.
+        open_nwb) are called at the correct time in the lifecycle.
 
         Parameters
         ----------
@@ -184,6 +188,25 @@ class AnalysisFileBuilder:
             )
         # CREATED state is valid, no error
 
+    @property
+    def open_nwb(self):
+        """Tuple of (io, nwb) for currently open NWB file, or opens it if not already open."""
+        self._ensure_created("open_nwb")
+        if self._open_nwb is None:
+            self._open_io = pynwb.NWBHDF5IO(
+                path=self.get_path(),
+                mode="a",
+                load_namespaces=True,
+            )
+            self._open_nwb = self._open_io.read()
+        return self._open_io, self._open_nwb
+
+    def open_for_write(self):
+        raise NotImplementedError(
+            "Please use the open_nwb property to get the NWB file for writing."
+            + " See updated AnalysisTables documentation for examples."
+        )
+
     def register(self):
         """Register the analysis file in the database.
 
@@ -204,6 +227,7 @@ class AnalysisFileBuilder:
                 f"File must be created first (use context manager)."
             )
 
+        self.close_and_write()
         self._table.add(self.nwb_file_name, self.analysis_file_name)
         self._state = "REGISTERED"
         logger.debug(
@@ -211,17 +235,32 @@ class AnalysisFileBuilder:
             f"(parent: {self.nwb_file_name})"
         )
 
-    def add_nwb_object(
-        self, nwb_object, table_name: str = "pandas_table"
-    ) -> str:
+    def close_and_write(self):
+        """Close open NWB file and write changes to disk.
+
+        This is used internally to ensure that any open NWB file is properly
+        closed and written before registration. It can also be called manually
+        if needed (e.g. to finalize changes before registration). If no NWB
+        file is currently open, this method does nothing.
+        """
+        if self._open_io is None or self._open_nwb is None:
+            return
+        self._open_io.write(self._open_nwb)
+        self._open_io.close()
+        self._open_io = None
+        self._open_nwb = None
+
+    def add_nwb_object(self, nwb_object, table_name: str = None) -> str:
         """Add NWB object to analysis file (POPULATE phase).
 
         Parameters
         ----------
         nwb_object : pynwb object, DataFrame, or ndarray
             Object to add to file scratch space
-        table_name : str, default="pandas_table"
-            Name for object in scratch space
+        table_name : str, default=None
+            The name of the pynwb object made from a passed dataframe or array.
+            Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
+            respectively.
 
         Returns
         -------
@@ -233,9 +272,11 @@ class AnalysisFileBuilder:
         ValueError
             If called before create or after registration
         """
+
         self._ensure_created("add_nwb_object")
-        return self._table.add_nwb_object(
-            self.analysis_file_name, nwb_object, table_name
+        nwbf = self.open_nwb[1]
+        return self._table._add_nwb_object_to_open_nwb(
+            nwbf, nwb_object, table_name
         )
 
     def add_units(
@@ -271,8 +312,9 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units")
-        return self._table.add_units(
-            self.analysis_file_name,
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_to_open_nwb(
+            nwbf,
             units,
             units_valid_times,
             units_sort_interval,
@@ -298,7 +340,8 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units_metrics")
-        return self._table.add_units_metrics(self.analysis_file_name, metrics)
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_metrics_to_open_nwb(nwbf, metrics)
 
     def add_units_waveforms(self, waveform_extractor) -> str:
         """Add unit waveforms to analysis file (POPULATE phase).
@@ -319,36 +362,10 @@ class AnalysisFileBuilder:
             If called before create or after registration
         """
         self._ensure_created("add_units_waveforms")
-        return self._table.add_units_waveforms(
-            self.analysis_file_name, waveform_extractor
+        nwbf = self.open_nwb[1]
+        return self._table._add_units_waveforms_to_open_nwb(
+            nwbf, waveform_extractor
         )
-
-    def open_for_write(self):
-        """Open analysis file for direct NWB I/O (POPULATE phase).
-
-        Returns context manager for NWBHDF5IO in append mode.
-        Only works if file is CREATED but not yet REGISTERED.
-
-        Returns
-        -------
-        io : pynwb.NWBHDF5IO
-            Context manager for file I/O
-
-        Raises
-        ------
-        ValueError
-            If called before create or after registration
-
-        Examples
-        --------
-        >>> with builder.open_for_write() as io:
-        ...     nwbf = io.read()
-        ...     nwbf.add_unit(spike_times=times, id=unit_id)
-        ...     io.write(nwbf)
-        """
-        self._ensure_created("open_for_write")
-        path = self.get_path()
-        return pynwb.NWBHDF5IO(path=path, mode="a", load_namespaces=True)
 
     def get_path(self) -> str:
         """Get absolute filesystem path to analysis file.
