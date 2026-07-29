@@ -1351,6 +1351,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         dry_run: bool = False,
         max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
+        *,
+        min_file_age_hours: float = 24.0,
     ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
@@ -1403,21 +1405,35 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             with non-analysis data or a wrong path was supplied. This limit
             applies only to filesystem deletion of untracked or empty analysis
             NWB files, not to orphan row deletion. Defaults to 10.0.
+        min_file_age_hours : float
+            Untracked files newer than this are deferred to the next cleanup
+            rather than deleted, protecting work that exists on disk but is
+            not yet registered -- notably a file written to another volume
+            and symlinked in before its row is inserted. Defaults to 24.0.
+            Pass 0 only for intentional immediate cleanup.
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
         self._info_msg(heading + suffix)
 
         registry = AnalysisRegistry()
+        # Stays OUTSIDE the try. Moving it inside would let a partial
+        # acquisition fall into `finally: unblock_new_inserts()`, which
+        # drops EVERY trigger including ones owned by a concurrent run.
+        # Full ownership tracking needs a cleanup lease (follow-up).
         registry.block_new_inserts(dry_run=dry_run)
 
-        # Get all custom tables first so we can check their tracked files
-        custom_tables = list(registry.all_classes)
-        num_tables = len(custom_tables) + 1  # +1 for common table
-        common_orphans = self.get_orphans().proj()
-
         try:
-            untracked_file_plan = self._build_untracked_file_plan(custom_tables)
+            # Inside the try: a throw from get_orphans() previously landed
+            # between block and try, leaving insert triggers installed
+            # database-wide with no unblock.
+            custom_tables = list(registry.all_classes)
+            num_tables = len(custom_tables) + 1  # +1 for common table
+            common_orphans = self.get_orphans().proj()
+
+            untracked_file_plan = self._build_untracked_file_plan(
+                custom_tables, min_file_age_hours=min_file_age_hours
+            )
             plan_ok, plan_err = self._validate_cleanup_plan(
                 untracked_file_plan,
                 max_delete_fraction=max_delete_fraction,
@@ -1431,6 +1447,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     )
                 else:
                     raise RuntimeError(plan_err)
+
+            # Delete files BEFORE database cleanup, shortening the
+            # validate-to-act window for the filesystem sweep. Files newly
+            # orphaned by this run's row deletion are caught on the next
+            # invocation. Note this deferral applies only to the untracked
+            # sweep: custom-table externals are still deleted below.
+            _ = self._remove_untracked_files(
+                custom_tables,
+                dry_run=dry_run,
+                plan=untracked_file_plan,
+                min_file_age_hours=min_file_age_hours,
+            )
 
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans
@@ -1453,14 +1481,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             self._info_msg(
                 f"  [{num_tables}/{num_tables}] common: {n_orphans} "
                 f"orphans, {len(unused)} unused externals"
-            )
-
-            # Reuse the pre-pass plan rather than rescanning: rescanning here
-            # would bypass the validate-before-act guard already applied to
-            # this plan. Files newly orphaned by this run's orphan deletion
-            # are caught on the next cleanup invocation.
-            _ = self._remove_untracked_files(
-                custom_tables, dry_run=dry_run, plan=untracked_file_plan
             )
 
         finally:

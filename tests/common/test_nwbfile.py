@@ -928,3 +928,43 @@ def test_delete_rechecks_age_at_act_time(common_nwbfile, tmp_path):
     )
 
     assert f.exists(), "act-time age check must defer a fresh candidate"
+
+
+def test_cleanup_deletes_files_before_db_cleanup(common_nwbfile, monkeypatch):
+    """File deletion must precede DB cleanup, shortening validate-to-act."""
+    order = []
+    registry = _FakeRegistry()
+    good_plan = _cleanup_plan(common_nwbfile, scanned=8, tracked=6, delete=1)
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_build_untracked_file_plan",
+        lambda self, custom_tables, **kw: good_plan,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_remove_untracked_files",
+        lambda self, custom_tables, dry_run, plan, **kw: (
+            order.append("files"),
+            (set(), set()),
+        )[1],
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "get_orphans",
+        lambda self: (order.append("orphans"), _EmptyQuery())[1],
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "cleanup_external",
+        lambda self, dry_run, delete_external_files: (
+            order.append("external"),
+            [],
+        )[1],
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    common_nwbfile.AnalysisNwbfile.cleanup(table, dry_run=False)
+
+    assert order.index("files") < order.index("external")
