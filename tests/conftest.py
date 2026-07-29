@@ -495,11 +495,16 @@ def _teardown_test_data(base_dir):
         if not child.exists():
             continue
         if name == "analysis":
+            # unlink() on a symlink removes the LINK, never its target, so
+            # symlinks are removed here like any other entry. Leaving them
+            # in place would be the dangerous choice: a surviving leaf link
+            # can later authorize cleanup to delete its external target.
             for file in child.glob("*.nwb"):
-                if not file.is_symlink():
-                    file.unlink()
+                file.unlink()
         else:
-            shutil_rmtree(str(child), ignore_errors=True)
+            # No ignore_errors: failures must reach the caller's failure
+            # aggregation rather than being silently discarded.
+            shutil_rmtree(str(child))
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------

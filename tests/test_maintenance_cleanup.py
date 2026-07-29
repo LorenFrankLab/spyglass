@@ -1,8 +1,10 @@
 """Behavior of the cron cleanup driver's failure handling.
 
-These tests are database-free: the table calls are replaced with stubs, so
-nothing here needs a live connection. Imports happen inside the fixtures to
-keep module collection independent of the schema modules.
+The table calls are replaced with stubs, so no test here exercises a real
+query. The module still runs under the suite's session fixtures -- the
+autouse ``mini_insert`` in ``tests/conftest.py`` brings up the database for
+every test under ``tests/`` -- so it is not runnable without Docker despite
+needing nothing from the database itself.
 """
 
 import pytest

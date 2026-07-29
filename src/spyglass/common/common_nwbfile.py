@@ -1086,6 +1086,28 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return True, None
 
+    @staticmethod
+    def _current_custom_tables(
+        fallback: List[SpyglassAnalysis],
+    ) -> List[SpyglassAnalysis]:
+        """Re-read registry membership.
+
+        The insert-blocking triggers freeze the analysis tables but not the
+        registry, so a custom table declared mid-cleanup would otherwise be
+        invisible and its files would read as untracked. Falls back to the
+        supplied snapshot if the registry cannot be read, which is the
+        conservative choice only when it returns a superset -- a read
+        failure is logged so it is not silent.
+        """
+        try:
+            return list(AnalysisRegistry().all_classes)
+        except Exception as err:  # noqa: BLE001
+            logger.warning(
+                f"Could not refresh analysis registry ({err}); using the "
+                "membership snapshot taken at cleanup start"
+            )
+            return fallback
+
     def _current_tracked_paths(
         self, custom_tables: List[SpyglassAnalysis]
     ) -> Set[Path]:
@@ -1123,20 +1145,30 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     def _candidate_still_matches(
         self, candidate: CleanupCandidate, *, analysis_root: Path
-    ) -> bool:
+    ) -> Optional[List[AccessSnapshot]]:
         """Re-verify a candidate immediately before deleting it.
 
-        Returns False (with a warning) when anything changed since the
-        scan, when a non-regular target is involved, or when an out-of-root
-        target has no in-root leaf symlink vouching for it.
+        Returns
+        -------
+        list of AccessSnapshot or None
+            The in-root accesses that may be unlinked, or None (with a
+            warning) when anything changed since the scan, when a
+            non-regular target is involved, or when the target has no
+            in-root access authorizing it.
+
+        Notes
+        -----
+        The returned list is what the caller unlinks. Accesses outside the
+        analysis root are never returned, so an extra out-of-root access on
+        an otherwise valid candidate cannot be removed.
         """
         real_path = candidate.real_path
 
-        def _refuse(reason: str) -> bool:
+        def _refuse(reason: str):
             logger.warning(f"Skipping {real_path}: {reason}")
-            return False
+            return None
 
-        vouchers = []
+        in_root = []
         for access in candidate.accesses:
             try:
                 lst = os.lstat(access.access_path)
@@ -1146,34 +1178,46 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 return _refuse(f"{access.access_path} changed link type")
             if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
                 return _refuse(f"{access.access_path} identity changed")
-            if not access.is_link:
-                continue
-            try:
-                if os.readlink(access.access_path) != access.raw_link_target:
-                    return _refuse(f"{access.access_path} was re-pointed")
-            except OSError:
-                return _refuse(f"{access.access_path} readlink failed")
-            # A voucher must be a leaf symlink that (a) LIVES inside the
-            # analysis root and (b) currently resolves to this exact
-            # target. Without (a) an outside link could authorize an
-            # outside target; without (b) a stale link could authorize a
-            # path it no longer points at. Resolve the PARENT, not the
-            # link itself -- resolving the link would follow it.
+            # Alias timestamps are part of identity. Without this,
+            # `os.utime(link, follow_symlinks=False)` makes a link fresh
+            # without changing dev/ino, so the age gate -- which reads the
+            # scan-time snapshot -- would still authorize deletion.
+            if (lst.st_mtime_ns, lst.st_ctime_ns) != (
+                access.mtime_ns,
+                access.ctime_ns,
+            ):
+                return _refuse(
+                    f"{access.access_path} timestamps changed since the scan"
+                )
+            # Resolve the PARENT, not the link itself -- resolving the link
+            # would follow it to the target.
             location = (
                 access.access_path.parent.resolve() / access.access_path.name
             )
             if not location.is_relative_to(analysis_root):
                 continue
-            if Path(os.path.realpath(access.access_path)) != real_path:
-                continue
-            vouchers.append(access)
+            if access.is_link:
+                try:
+                    raw = os.readlink(access.access_path)
+                except OSError:
+                    return _refuse(f"{access.access_path} readlink failed")
+                if raw != access.raw_link_target:
+                    return _refuse(f"{access.access_path} was re-pointed")
+                # An in-root link only authorizes the target it currently
+                # resolves to; a stale one must not vouch.
+                if Path(os.path.realpath(access.access_path)) != real_path:
+                    continue
+            in_root.append(access)
+
+        # Applies to broken candidates too: a forged broken plan naming an
+        # outside symlink must not authorize unlinking it.
+        if not in_root:
+            return _refuse(
+                "no in-root access currently resolving to it authorizes "
+                "deletion"
+            )
 
         if not candidate.broken:
-            if not real_path.is_relative_to(analysis_root) and not vouchers:
-                return _refuse(
-                    "target is outside the analysis directory and no in-root "
-                    "symlink currently resolving to it vouches for it"
-                )
             try:
                 st = os.stat(real_path)
                 lst_target = os.lstat(real_path)
@@ -1208,7 +1252,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             else:
                 return _refuse("broken link now resolves")
 
-        return True
+        return in_root
 
     def _remove_untracked_files(
         self,
@@ -1267,37 +1311,50 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             return plan.files_to_delete, plan.tracked_files
 
         analysis_root = Path(self._analysis_dir).expanduser().resolve()
-        tracked_now = self._current_tracked_paths(custom_tables)
         act_now_ns = time.time_ns() if now_ns is None else now_ns
         failures = []
 
-        # A plan whose keys disagree with its candidates could route a
-        # verified inside candidate to an outside victim path. Refuse the
-        # whole plan rather than trusting any part of it.
+        # ---- PREFLIGHT: validate the WHOLE plan before any unlink ----
+        # A structurally malformed plan must not be partially executed:
+        # collecting per-entry problems while still deleting the valid
+        # entries would let a forged plan do real damage before it failed.
         if set(plan.candidates) != plan.files_to_delete:
             raise RuntimeError(
                 "Analysis file deletion failed: cleanup plan is "
                 "inconsistent, candidate keys do not match files_to_delete. "
                 "Refusing to act on a malformed plan."
             )
-
+        structural = []
         for key_path, candidate in plan.candidates.items():
             if key_path != candidate.real_path:
-                failures.append(
+                structural.append(
                     f"plan key {key_path} does not match candidate "
                     f"{candidate.real_path}"
                 )
-                continue
             if (
                 candidate.target is not None
                 and candidate.target.real_path != candidate.real_path
             ):
-                failures.append(
+                structural.append(
                     f"{candidate.real_path}: target snapshot names a "
                     f"different path {candidate.target.real_path}"
                 )
-                continue
-            if candidate.real_path in tracked_now:
+        if structural:
+            raise RuntimeError(
+                "Analysis file deletion failed: cleanup plan is malformed; "
+                "refusing to delete anything:\n  " + "\n  ".join(structural)
+            )
+
+        # ---- ACT ----
+        for candidate in plan.candidates.values():
+            # Tracking and registry membership are re-read for EVERY
+            # candidate, not once up front: a file can be registered, or a
+            # whole custom table declared, while an earlier candidate is
+            # being deleted. Costs one fetch per candidate; the candidate
+            # set is the untracked minority, and correctness wins here.
+            # The deferred cleanup lease would let this be hoisted again.
+            live_tables = self._current_custom_tables(custom_tables)
+            if candidate.real_path in self._current_tracked_paths(live_tables):
                 logger.warning(
                     f"Skipping {candidate.real_path}: became tracked since "
                     "the scan"
@@ -1305,6 +1362,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 continue
             # Age is re-checked at act time, not only during planning: a
             # long scan may have started before the file was written.
+            # _candidate_still_matches additionally refuses any candidate
+            # whose alias timestamps moved, so a touched link cannot slip
+            # through on a stale snapshot.
             if not self._is_old_enough(
                 candidate,
                 now_ns=act_now_ns,
@@ -1315,14 +1375,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     f"{min_file_age_hours}h at deletion time"
                 )
                 continue
-            if not self._candidate_still_matches(
+            in_root = self._candidate_still_matches(
                 candidate, analysis_root=analysis_root
-            ):
+            )
+            if not in_root:
                 continue
             try:
                 if not candidate.broken:
                     candidate.real_path.unlink()
-                for access in candidate.accesses:
+                # Only in-root accesses validated above; an extra
+                # out-of-root access is never unlinked.
+                for access in in_root:
                     if not access.is_link:
                         continue
                     # Re-verify each link immediately before unlinking it.

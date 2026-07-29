@@ -1020,3 +1020,196 @@ def test_cleanup_rejects_invalid_safety_inputs(common_nwbfile, kwargs):
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
     with pytest.raises(ValueError, match="must be"):
         common_nwbfile.AnalysisNwbfile.cleanup(table, **kwargs)
+
+
+def test_delete_refuses_link_touched_after_planning(common_nwbfile, tmp_path):
+    """Touching a symlink after planning must prevent deletion.
+
+    The act-time age check reads the frozen scan snapshot, so without a
+    live alias-timestamp comparison `os.utime(..., follow_symlinks=False)`
+    would make the link fresh while dev/ino stayed identical.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "far.nwb"
+    target.write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    # Touch the LINK itself, not its target.
+    later = link.lstat().st_mtime + 3600
+    os.utime(link, (later, later), follow_symlinks=False)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert target.exists(), "target of a touched link must survive"
+    assert link.is_symlink(), "touched link must survive"
+
+
+def test_delete_rechecks_tracking_per_candidate(common_nwbfile, tmp_path):
+    """A file registered while an earlier candidate is deleted must survive.
+
+    Tracking is re-read for every candidate, so B cannot be unlinked on a
+    snapshot taken before A was processed.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    first = analysis_dir / "aaa.nwb"
+    first.write_text("first")
+    second = analysis_dir / "zzz.nwb"
+    second.write_text("second")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {first.resolve(), second.resolve()}
+
+    # Register whichever candidate is still on disk once the first one has
+    # been handled. Keyed off actual state rather than a fixed name, since
+    # os.walk does not promise an order.
+    class _LateRegistration:
+        def __init__(self):
+            self.calls = 0
+            self.registered = None
+
+        def fetch_external_paths(self):
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            survivors = [p for p in (first, second) if p.exists()]
+            self.registered = survivors[0] if survivors else None
+            return [("h", self.registered)] if self.registered else []
+
+    ext = _LateRegistration()
+    table._ext_tbl = ext
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert ext.calls == 2, "tracking must be re-read once per candidate"
+    survivors = [p for p in (first, second) if p.exists()]
+    assert survivors == [
+        ext.registered
+    ], "exactly the late-registered candidate must survive"
+
+
+def test_delete_refuses_forged_broken_plan_naming_outside_link(
+    common_nwbfile, tmp_path
+):
+    """A forged broken candidate must not unlink an out-of-root symlink."""
+    outside_link = tmp_path / "elsewhere.nwb"
+    outside_link.symlink_to(tmp_path / "nope.nwb")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+
+    real = Path(os.path.realpath(outside_link))
+    lst = outside_link.lstat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=None,  # broken
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=outside_link,
+                is_link=True,
+                raw_link_target=str(tmp_path / "nope.nwb"),
+                dev=lst.st_dev,
+                ino=lst.st_ino,
+                mtime_ns=lst.st_mtime_ns,
+                ctime_ns=lst.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files=set(),
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links={real},
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert outside_link.is_symlink(), "out-of-root broken link must survive"
+
+
+def test_delete_aborts_whole_plan_on_structural_mismatch(
+    common_nwbfile, tmp_path
+):
+    """A malformed plan must delete NOTHING, not just skip the bad entry."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    valid = analysis_dir / "valid.nwb"
+    valid.write_text("valid")
+    victim = analysis_dir / "victim.nwb"
+    victim.write_text("victim")
+    decoy = analysis_dir / "decoy.nwb"
+    decoy.write_text("decoy")
+
+    table = _table(common_nwbfile, analysis_dir)
+    good = _plan(table)
+
+    def _snap(path):
+        st = path.stat()
+        return common_nwbfile.CleanupCandidate(
+            real_path=path.resolve(),
+            target=common_nwbfile.TargetSnapshot(
+                real_path=path.resolve(),
+                dev=st.st_dev,
+                ino=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                ctime_ns=st.st_ctime_ns,
+                mode=st.st_mode,
+            ),
+            accesses=(
+                common_nwbfile.AccessSnapshot(
+                    access_path=path,
+                    is_link=False,
+                    raw_link_target=None,
+                    dev=st.st_dev,
+                    ino=st.st_ino,
+                    mtime_ns=st.st_mtime_ns,
+                    ctime_ns=st.st_ctime_ns,
+                ),
+            ),
+        )
+
+    # One sound entry, one whose key names a different file.
+    candidates = {
+        valid.resolve(): good.candidates[valid.resolve()],
+        victim.resolve(): _snap(decoy),
+    }
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files=set(candidates),
+        tracked_files=set(),
+        files_to_delete=set(candidates),
+        empty_files=set(),
+        untracked_files=set(candidates),
+        candidates=candidates,
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    with pytest.raises(RuntimeError, match="malformed"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert valid.exists(), "sound entry must not be deleted on a bad plan"
+    assert victim.exists()
+    assert decoy.exists()

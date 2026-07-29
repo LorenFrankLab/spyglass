@@ -400,7 +400,10 @@ The cleanup process checks:
     in the create/populate/register window, where a file exists on disk but is
     not yet tracked -- notably a file written to another volume and symlinked
     in before its row is inserted. Pass `min_file_age_hours=0` only for
-    intentional immediate cleanup.
+    intentional immediate cleanup. **Scope**: the age gate covers only the
+    `*.nwb` filesystem sweep. Custom-table external cleanup
+    (`cleanup_external(delete_external_files=True)`) deletes files through
+    DataJoint in the same run and is not age-gated.
 - **Leaf symlink support**: `*.nwb` symlinks found anywhere in the analysis
     directory tree are followed, so analysis files distributed across volumes
     are cleaned in one pass. Directory symlinks are *not* followed, so a

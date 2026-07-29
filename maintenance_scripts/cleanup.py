@@ -94,8 +94,10 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
     """
     dir_path = Path(temp_dir)
     if not dir_path.is_dir() or dir_path.name not in ["tmp", "temp"]:
-        print(f"Invalid temp_dir: {temp_dir}")
-        return
+        raise RuntimeError(
+            f"Invalid temp_dir: {temp_dir!r} is not a directory named "
+            "'tmp' or 'temp'; refusing to sweep it"
+        )
 
     if dry_run:
         print(f"Dry run of delete files in {temp_dir} older than {days_old}d")
@@ -116,7 +118,12 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
 def main():
     errors = []
     print("Updating Spyglass versions table...")
-    SpyglassVersions().fetch_from_pypi()
+    try:
+        SpyglassVersions().fetch_from_pypi()
+    except Exception as err:  # noqa: BLE001
+        msg = f"SpyglassVersions().fetch_from_pypi() failed: {err}"
+        print(msg)
+        errors.append(msg)
 
     print("Running table cleanups...")
     table_errors, analysis_storage_failed = run_table_cleanups()
@@ -145,14 +152,21 @@ def main():
         print(msg)
         errors.append(msg)
 
+    # Read-only, so it runs regardless of earlier failures. Wrapped so a
+    # failure here cannot bypass the final summary and exit status.
     print("Checking for AnalysisFile Issues...")
-    results = AnalysisNwbfile().check_all_files()
-    out_path = os.environ.get("FILE_ISSUES_OUT")
-    if out_path:
-        issues = {tbl: cnt for tbl, cnt in results.items() if cnt > 0}
-        with open(out_path, "w") as f:
-            for tbl, cnt in issues.items():
-                f.write(f"{tbl}: {cnt}\n")
+    try:
+        results = AnalysisNwbfile().check_all_files()
+        out_path = os.environ.get("FILE_ISSUES_OUT")
+        if out_path:
+            issues = {tbl: cnt for tbl, cnt in results.items() if cnt > 0}
+            with open(out_path, "w") as f:
+                for tbl, cnt in issues.items():
+                    f.write(f"{tbl}: {cnt}\n")
+    except Exception as err:  # noqa: BLE001
+        msg = f"check_all_files() failed: {err}"
+        print(msg)
+        errors.append(msg)
 
     # Exit nonzero only after the issue report is written, so the cron job
     # can still send it before failing.
