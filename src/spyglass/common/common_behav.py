@@ -1007,24 +1007,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
             if stored.exists():
                 return stored.as_posix()
 
-        nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
-        nwbf = get_nwb_file(nwb_path)
+        # VideoFile.make() only ingests ImageSeries objects, so the stored
+        # object id resolves to the video's ImageSeries.
         nwb_video = (cls & key).fetch_nwb()[0]["video_file"]
-
-        # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
-        # reference to a ProcessingModule), search the NWB for ImageSeries.
-        if not isinstance(nwb_video, pynwb.image.ImageSeries):
-            image_series = [
-                obj
-                for obj in nwbf.objects.values()
-                if isinstance(obj, pynwb.image.ImageSeries)
-            ]
-            if not image_series:
-                raise FileNotFoundError(
-                    f"No ImageSeries found in {key['nwb_file_name']}"
-                )
-            nwb_video = image_series[0]
-
         video_filename = nwb_video.name
 
         # Try the NWB object name first (often equals the real filename)
@@ -1078,84 +1063,60 @@ class VideoFile(SpyglassMixin, dj.Imported):
     def _narrow_key_lookup(self, video_path: str, restriction=None) -> tuple:
         """Select a single VideoFile PK for *video_path* under *restriction*.
 
-        Fetches ``(KEY, path)`` rows from ``VideoFile & restriction``, then
-        tries two strategies in order of decreasing reliability:
+        *restriction* scopes VideoFile to a session (the sole caller passes
+        ``{"nwb_file_name": ...}``); this then picks the one ``video_file_num``
+        matching *video_path*:
 
-        1. Only one candidate row — trivially unambiguous.
-        2. ``VideoFile.path`` basename matches the video filename.  Requires
-           ``VideoFile.path`` to be populated; call
-           ``VideoFile.update_entries()`` first if paths are null.
+        1. A lone candidate row is accepted directly, backfilling its ``path``
+           if currently null.
+        2. Otherwise the stored ``VideoFile.path`` is matched by *stem*, so a
+           raw ``file.1.h264`` (V1 ingest) resolves the DLC-converted
+           ``file.mp4`` — stems agree, suffixes differ.  Requires ``path`` to
+           be populated; call ``VideoFile.update_entries()`` first if null.
 
         Parameters
         ----------
         video_path : str
-            Path to the video file as it appears in the DLC config's
+            Path to the video as it appears in the DLC config's
             ``video_sets`` dict.
         restriction : any, optional
-            DataJoint restriction applied to ``VideoFile`` before fetching
-            candidates.  Defaults to no restriction — all rows.
-            Pass a dict such as ``{"nwb_file_name": "SC38_20230606_.nwb"}``
-            to scope the search to a specific session.
+            Restriction applied to VideoFile before fetching candidates.
+            Defaults to ``self.restriction`` (else all rows).
 
         Returns
         -------
         tuple[dict | None, list[dict]]
-            ``(pk_dict, [])`` when exactly one match is found;
-            ``(None, candidates)`` when the result is ambiguous or no rows
-            were fetched.  The pk_dict contains only the primary-key fields
+            ``(pk_dict, [])`` on a unique match; ``(None, candidates)`` when
+            empty or ambiguous.  ``pk_dict`` holds only the primary-key fields
             (``nwb_file_name``, ``epoch``, ``video_file_num``).
         """
         restriction = restriction or self.restriction or True
-
-        vf_rows = (self & restriction).fetch("KEY", "path", as_dict=True)
-        if not vf_rows:
+        candidates = (self & restriction).fetch("KEY", "path", as_dict=True)
+        if not candidates:
             return None, []
 
-        _pk_fields = ("nwb_file_name", "epoch", "video_file_num")
-
-        def _pk(row):
-            """Project a fetched row down to VideoFile's primary-key fields."""
-            return {k: row[k] for k in _pk_fields if k in row}
-
-        def _fill_path(row):
-            """Backfill VideoFile.path with video_path when currently null."""
+        # One candidate under the restriction — unambiguous. Record the DLC
+        # path against it when VideoFile.path is currently null. (update1 needs
+        # the full PK and must run on the base table, not a restriction.)
+        if len(candidates) == 1:
+            row = candidates[0]
             if not row.get("path") and video_path:
-                # update1 requires the full PK in the dict; call on the base
-                # table (self), not on a restricted expression.
-                self.update1({**_pk(row), "path": video_path})
+                self.update1({**self.dict_to_pk(row), "path": video_path})
+            return self.dict_to_pk(row), []
 
-        # Strategy 1 — only one VideoFile for this session: nothing to decide.
-        if len(vf_rows) == 1:
-            _fill_path(vf_rows[0])
-            return _pk(vf_rows[0]), []
-
-        vp_name = Path(video_path).name
-        vp_stem = Path(video_path).stem  # e.g. "20231007_SC1002_10_r5"
-
-        # Strategy 2 — basename match, with extension-agnostic fallback.
-        # V1 NWB ingestion stored raw paths (e.g. "file.1.h264") while DLC
-        # worked from mp4 conversions ("file.mp4").  The stems match but the
-        # suffixes differ.  Accept a VideoFile when its basename equals the DLC
-        # name exactly OR when it starts with the DLC stem followed by "." —
-        # i.e. "file.1.h264".startswith("file.") is True.
-        # Requires VideoFile.path to be populated; call update_entries() first
-        # if paths are null.
-        by_name = [
-            r
-            for r in vf_rows
-            if r.get("path")
-            and (
-                Path(r["path"]).name == vp_name
-                or Path(r["path"]).name.startswith(vp_stem + ".")
-            )
+        # Several candidates (multi-camera epoch) — match the stored path by
+        # stem.  ``name.startswith(stem + ".")`` covers an exact basename match
+        # too, so the raw-vs-converted suffix (h264/mp4) is handled uniformly.
+        stem = Path(video_path).stem
+        matched = [
+            row
+            for row in candidates
+            if row.get("path") and Path(row["path"]).name.startswith(stem + ".")
         ]
-        if len(by_name) == 1:
-            return _pk(by_name[0]), []
+        if len(matched) == 1:
+            return self.dict_to_pk(matched[0]), []
 
-        # All strategies exhausted — caller decides how to handle ambiguity.
-        # If ambiguity persists, run VideoFile.update_entries() to populate
-        # null path fields, then retry.
-        return None, vf_rows
+        return None, candidates
 
     def fetch_key_from_path(
         self, video_file_path: str, update_on_miss: bool = False
