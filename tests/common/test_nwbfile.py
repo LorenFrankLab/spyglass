@@ -153,15 +153,17 @@ def test_analysis_cleanup_plan_rejects_high_delete_fraction(common_nwbfile):
     assert "above the safety limit" in msg
 
 
-def test_analysis_cleanup_plan_rejects_high_delete_to_tracked_ratio(
-    common_nwbfile,
-):
-    plan = _cleanup_plan(common_nwbfile, scanned=100, tracked=1, delete=11)
+def test_ratio_guard_fires_when_fraction_is_raised(common_nwbfile):
+    """The ratio guard is dead only at the default fraction, not always.
+
+    At max_delete_fraction=0.9 it provably cannot fire (every scanned file
+    that is kept is tracked, so the fraction caps the ratio at 9). Raising
+    the fraction is how a caller actually reaches it.
+    """
+    plan = _cleanup_plan(common_nwbfile, scanned=12, tracked=1, delete=11)
 
     ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
-        plan,
-        max_delete_fraction=1.0,
-        max_delete_to_tracked_ratio=10.0,
+        plan, max_delete_fraction=1.0
     )
     assert ok is False
     assert "11.0x" in msg
@@ -968,3 +970,53 @@ def test_cleanup_deletes_files_before_db_cleanup(common_nwbfile, monkeypatch):
     common_nwbfile.AnalysisNwbfile.cleanup(table, dry_run=False)
 
     assert order.index("files") < order.index("external")
+
+
+def test_validator_excludes_deferred_from_denominator(common_nwbfile):
+    """Deferred files must not dilute the delete fraction.
+
+    89 deleted of 100 scanned reads as 89% only because 10 were deferred;
+    of the 90 files actually eligible it is 98.9%.
+    """
+    scanned = {Path(f"s{i}.nwb") for i in range(100)}
+    deferred = {Path(f"s{i}.nwb") for i in range(90, 100)}
+    to_delete = {Path(f"s{i}.nwb") for i in range(89)}
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files=scanned,
+        tracked_files={Path("s89.nwb")},
+        files_to_delete=to_delete,
+        empty_files=set(),
+        untracked_files=to_delete,
+        candidates={},
+        deferred_recent_files=deferred,
+        broken_links=set(),
+    )
+
+    ok, msg = common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(plan)
+    assert ok is False
+    assert "above the safety limit" in msg
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_delete_fraction": float("nan")},
+        {"max_delete_fraction": float("inf")},
+        {"max_delete_fraction": 1.5},
+        {"max_delete_fraction": -0.1},
+        {"max_delete_fraction": True},
+        {"max_delete_to_tracked_ratio": float("nan")},
+        {"max_delete_to_tracked_ratio": float("inf")},
+        {"max_delete_to_tracked_ratio": -1},
+        {"max_delete_to_tracked_ratio": True},
+        {"min_file_age_hours": float("nan")},
+        {"min_file_age_hours": float("inf")},
+        {"min_file_age_hours": -1},
+        {"min_file_age_hours": True},
+    ],
+)
+def test_cleanup_rejects_invalid_safety_inputs(common_nwbfile, kwargs):
+    """Bad limits must fail loudly, not silently disable the guard."""
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+    with pytest.raises(ValueError, match="must be"):
+        common_nwbfile.AnalysisNwbfile.cleanup(table, **kwargs)

@@ -92,18 +92,22 @@ fi
 
 # Run cleanup script; capture any file issues to a temp file for Slack reporting
 FILE_ISSUES_OUT=$(mktemp)
-FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py || {
-  cleanup_status=$?
-  rm -f "$FILE_ISSUES_OUT"
-  on_fail "cleanup.py failed with exit code $cleanup_status"
-  exit "$cleanup_status"
-}
+cleanup_status=0
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py \
+  || cleanup_status=$?
 
+# Report file issues BEFORE failing: cleanup.py writes the report even when
+# it exits nonzero, and discarding it would lose the most useful diagnostic.
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
 $(cat "$FILE_ISSUES_OUT")"
 fi
 rm -f "$FILE_ISSUES_OUT"
+
+if [[ $cleanup_status -ne 0 ]]; then
+  on_fail "cleanup.py failed with exit code $cleanup_status"
+  exit "$cleanup_status"
+fi
 
 echo "SPYGLASS CRON JOB END"
 

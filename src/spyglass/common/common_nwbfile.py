@@ -46,6 +46,53 @@ END
 schema = dj.schema("common_nwbfile")
 
 
+def _check_number(
+    name: str,
+    value: Union[int, float],
+    *,
+    minimum: float,
+    maximum: Optional[float] = None,
+) -> float:
+    """Validate a numeric safety limit.
+
+    Parameters
+    ----------
+    name : str
+        Parameter name, used in the error message.
+    value : int or float
+        Supplied value.
+    minimum : float
+        Inclusive lower bound.
+    maximum : float, optional
+        Inclusive upper bound. Omit for an unbounded limit.
+
+    Returns
+    -------
+    float
+
+    Raises
+    ------
+    ValueError
+        If the value is not a finite number within bounds. ``bool`` is
+        rejected explicitly because it is an ``int`` subclass, so
+        ``max_delete_fraction=True`` would otherwise read as 1.0. NaN and
+        inf are rejected rather than coerced: under NaN every comparison is
+        False and the guard silently vanishes.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    if value < minimum or (maximum is not None and value > maximum):
+        bound = (
+            f"in [{minimum}, {maximum}]"
+            if maximum is not None
+            else f">= {minimum}"
+        )
+        raise ValueError(f"{name} must be {bound}, got {value!r}")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class TargetSnapshot:
     """Identity of a real analysis file at scan time.
@@ -994,11 +1041,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             decide whether to raise (real run) or warn (dry run).
         """
         scanned_count = len(plan.scanned_files)
-        tracked_count = len(plan.tracked_files)
         delete_count = len(plan.files_to_delete)
 
         if delete_count == 0:
             return True, None
+
+        # Denominator is what this sweep was entitled to act on: the
+        # deletions plus the scanned files it recognized as tracked.
+        # Age-deferred files are excluded -- including them would let a plan
+        # that deletes 89 of 90 eligible files read as 89%.
+        local_tracked = plan.scanned_files & plan.tracked_files
+        tracked_count = len(local_tracked)
+        eligible_count = delete_count + tracked_count
 
         if tracked_count == 0:
             return False, (
@@ -1009,11 +1063,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 "configured analysis directory."
             )
 
-        delete_fraction = delete_count / max(scanned_count, 1)
+        delete_fraction = delete_count / max(eligible_count, 1)
         if delete_fraction > max_delete_fraction:
             return False, (
                 "Analysis cleanup would delete "
-                f"{delete_count}/{scanned_count} scanned analysis files "
+                f"{delete_count}/{eligible_count} eligible analysis files "
                 f"({delete_fraction:.1%}), above the safety limit "
                 f"{max_delete_fraction:.1%}. Refusing destructive cleanup; "
                 "run with dry_run=True and verify the cleanup plan."
@@ -1399,12 +1453,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             cleanups. Defaults to 0.9.
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
-            files. Set high by default (10.0) so it only flags scans where
-            untracked-file count dwarfs tracked-file count by an order of
-            magnitude — a strong signal that the analysis directory is mixed
-            with non-analysis data or a wrong path was supplied. This limit
-            applies only to filesystem deletion of untracked or empty analysis
-            NWB files, not to orphan row deletion. Defaults to 10.0.
+            files found in the scan. At the default ``max_delete_fraction``
+            this limit cannot bind: every scanned file that is kept is
+            tracked, so the fraction limit already caps the ratio at 9. It
+            becomes the operative guard only when ``max_delete_fraction`` is
+            raised above 10/11 (~0.909). This limit applies only to
+            filesystem deletion of untracked or empty analysis NWB files, not
+            to orphan row deletion. Defaults to 10.0.
         min_file_age_hours : float
             Untracked files newer than this are deferred to the next cleanup
             rather than deleted, protecting work that exists on disk but is
@@ -1412,6 +1467,20 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             and symlinked in before its row is inserted. Defaults to 24.0.
             Pass 0 only for intentional immediate cleanup.
         """
+        # Validate before anything happens. An unvalidated NaN or inf would
+        # make every comparison False and silently disable the guard.
+        max_delete_fraction = _check_number(
+            "max_delete_fraction", max_delete_fraction, minimum=0, maximum=1
+        )
+        max_delete_to_tracked_ratio = _check_number(
+            "max_delete_to_tracked_ratio",
+            max_delete_to_tracked_ratio,
+            minimum=0,
+        )
+        min_file_age_hours = _check_number(
+            "min_file_age_hours", min_file_age_hours, minimum=0
+        )
+
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
         self._info_msg(heading + suffix)

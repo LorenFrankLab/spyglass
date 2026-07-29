@@ -8,6 +8,7 @@ temporary directory (deleting old files).
 
 import os
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 
@@ -26,13 +27,50 @@ warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
 
 
-def run_table_cleanups():
-    """Run respective table cleanups"""
-    Nwbfile().cleanup()  # cleanup 'raw' externals
-    AnalysisNwbfile().cleanup()  # delete orphans, cleanup 'analysis' externals
-    SpikeSorting().cleanup(verbose=False)  # remove unreferenced sorting_dir
-    DecodingOutput().cleanup()  # remove `.nc` and `.pkl` files
-    SpikeSortingRecording().cleanup(verbose=False)  # remove untracked folders
+def run_table_cleanups() -> tuple:
+    """Run each table cleanup independently.
+
+    AnalysisNwbfile.cleanup() can refuse a plan on safety grounds. It is
+    second of five, so without per-step isolation a refusal would skip the
+    other four cleanups, the temp sweep, and the issue report.
+
+    Returns
+    -------
+    tuple of (list of str, bool)
+        Labeled failure messages (empty when everything succeeded), and
+        whether an analysis-storage phase failed.
+    """
+    steps = [  # (label, callable, touches analysis storage)
+        ("Nwbfile", lambda: Nwbfile().cleanup(), False),
+        ("AnalysisNwbfile", lambda: AnalysisNwbfile().cleanup(), True),
+        ("SpikeSorting", lambda: SpikeSorting().cleanup(verbose=False), False),
+        ("DecodingOutput", lambda: DecodingOutput().cleanup(), True),
+        (
+            "SpikeSortingRecording",
+            lambda: SpikeSortingRecording().cleanup(verbose=False),
+            False,
+        ),
+    ]
+    errors = []
+    analysis_storage_failed = False
+    for name, func, touches_analysis in steps:
+        # Once analysis cleanup has failed, the state of that storage is
+        # unknown, so later phases that also delete from it are skipped.
+        # Unrelated stores (raw, sorting, recording) proceed regardless.
+        if touches_analysis and analysis_storage_failed:
+            msg = f"{name}.cleanup() skipped: analysis storage state unknown"
+            print(msg)
+            errors.append(msg)
+            continue
+        try:
+            func()
+        except Exception as err:  # noqa: BLE001 - reported, not swallowed
+            if touches_analysis:
+                analysis_storage_failed = True
+            msg = f"{name}.cleanup() failed: {err}"
+            print(msg)
+            errors.append(msg)
+    return errors, analysis_storage_failed
 
 
 def cleanup_external_files():
@@ -70,18 +108,43 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
         subprocess.run(delete_cmd, **subprocess_kwargs)
         subprocess.run(empty_dirs, **subprocess_kwargs)
     except subprocess.CalledProcessError as e:
-        print(f"Error cleaning temp_dir: {e}")
+        # Raise so main() can record it; printing hid the failure from the
+        # caller and from the cron job's exit status.
+        raise RuntimeError(f"Error cleaning temp_dir: {e}") from e
 
 
 def main():
+    errors = []
     print("Updating Spyglass versions table...")
     SpyglassVersions().fetch_from_pypi()
+
     print("Running table cleanups...")
-    run_table_cleanups()
-    print("Cleaning up external files...")
-    cleanup_external_files()
+    table_errors, analysis_storage_failed = run_table_cleanups()
+    errors.extend(table_errors)
+
+    if analysis_storage_failed:
+        msg = (
+            "External analysis cleanup skipped: analysis storage state unknown"
+        )
+        print(msg)
+        errors.append(msg)
+    else:
+        print("Cleaning up external files...")
+        try:
+            cleanup_external_files()
+        except Exception as err:  # noqa: BLE001
+            msg = f"cleanup_external_files() failed: {err}"
+            print(msg)
+            errors.append(msg)
+
     print("Cleaning up temporary directory...")
-    cleanup_temp_dir(dry_run=False)
+    try:
+        cleanup_temp_dir(dry_run=False)
+    except Exception as err:  # noqa: BLE001
+        msg = f"cleanup_temp_dir() failed: {err}"
+        print(msg)
+        errors.append(msg)
+
     print("Checking for AnalysisFile Issues...")
     results = AnalysisNwbfile().check_all_files()
     out_path = os.environ.get("FILE_ISSUES_OUT")
@@ -90,6 +153,14 @@ def main():
         with open(out_path, "w") as f:
             for tbl, cnt in issues.items():
                 f.write(f"{tbl}: {cnt}\n")
+
+    # Exit nonzero only after the issue report is written, so the cron job
+    # can still send it before failing.
+    if errors:
+        print("Cleanup completed with failures:")
+        for err in errors:
+            print(f"  - {err}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
