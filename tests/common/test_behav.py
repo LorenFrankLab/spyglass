@@ -655,35 +655,27 @@ def test_videofile_get_abs_path_with_stored_path(common):
 
 
 def test_videofile_get_abs_path_fallback_external_file(common):
-    """Test VideoFile.get_abs_path fallback to external_file when object name fails."""
+    """get_abs_path falls back to the ImageSeries external_file path."""
     from pathlib import Path
-    from unittest.mock import MagicMock, Mock, patch
+    from unittest.mock import Mock, patch
 
     import pynwb
 
-    # Mock scenario where stored path doesn't exist, object name doesn't exist,
-    # but external_file path exists
+    # Stored path absent; object-name path missing; external_file resolves.
     video_info = {"path": None, "video_file_object_id": "obj_123"}
 
-    # Mock ImageSeries with external_file
     mock_video = Mock(spec=pynwb.image.ImageSeries)
     mock_video.name = "nonexistent_video.mp4"
     mock_video.external_file = ["/real/external/path.mp4"]
 
-    mock_nwbf = Mock()
-    mock_nwbf.objects = MagicMock()
-    mock_nwbf.objects.__getitem__.return_value = mock_video
-
     with (
         patch.object(common.VideoFile, "__and__") as mock_query,
-        patch.object(common.Nwbfile, "get_abs_path") as mock_get_abs_path,
-        patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
         patch.object(Path, "exists") as mock_exists,
     ):
-
         mock_query.return_value.fetch1.return_value = video_info
-        mock_get_abs_path.return_value = "/nwb/path.nwb"
-        mock_get_nwb.return_value = mock_nwbf
+        mock_query.return_value.fetch_nwb.return_value = [
+            {"video_file": mock_video}
+        ]
 
         # Object-name path misses, then absolute external path resolves.
         mock_exists.side_effect = [False, True]
@@ -693,74 +685,29 @@ def test_videofile_get_abs_path_fallback_external_file(common):
         assert result == "/real/external/path.mp4"
 
 
-def test_videofile_get_abs_path_non_image_series_fallback(common):
-    """Test VideoFile.get_abs_path when object_id isn't ImageSeries."""
+def test_videofile_get_abs_path_missing_raises(common):
+    """get_abs_path raises FileNotFoundError when no path resolves."""
     from pathlib import Path
-    from unittest.mock import MagicMock, Mock, patch
+    from unittest.mock import Mock, patch
 
     import pynwb
 
-    video_info = {"path": None, "video_file_object_id": "stale_obj_123"}
-
-    # Mock stale object that's not an ImageSeries
-    mock_stale_obj = Mock()  # Not an ImageSeries
-
-    # Mock real ImageSeries to fallback to
-    mock_video = Mock(spec=pynwb.image.ImageSeries)
-    mock_video.name = "real_video.mp4"
-    mock_video.external_file = ["real_video.mp4"]
-
-    mock_nwbf = Mock()
-    mock_nwbf.objects = MagicMock()
-    mock_nwbf.objects.__getitem__.return_value = mock_stale_obj
-    mock_nwbf.objects.values.return_value = [mock_stale_obj, mock_video]
-
-    with (
-        patch.object(common.VideoFile, "__and__") as mock_query,
-        patch.object(common.Nwbfile, "get_abs_path") as mock_get_abs_path,
-        patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
-        patch.object(Path, "exists") as mock_exists,
-    ):
-
-        mock_query.return_value.fetch1.return_value = video_info
-        mock_get_abs_path.return_value = "/nwb/path.nwb"
-        mock_get_nwb.return_value = mock_nwbf
-
-        # Fallback object-name path misses, then the external-file lookup under
-        # video_dir resolves.
-        mock_exists.side_effect = [False, True]
-
-        result = common.VideoFile.get_abs_path({"nwb_file_name": "test.nwb"})
-
-        # Should use the real ImageSeries object, not the stale reference
-        assert "real_video.mp4" in result
-
-
-def test_videofile_get_abs_path_no_image_series_error(common):
-    """Test VideoFile.get_abs_path when no ImageSeries found in NWB."""
-    from unittest.mock import MagicMock, Mock, patch
-
     video_info = {"path": None, "video_file_object_id": "obj_123"}
 
-    # Mock non-ImageSeries object
-    mock_other_obj = Mock()
-
-    mock_nwbf = Mock()
-    mock_nwbf.objects = MagicMock()
-    mock_nwbf.objects.__getitem__.return_value = mock_other_obj
-    mock_nwbf.objects.values.return_value = [mock_other_obj]
+    mock_video = Mock(spec=pynwb.image.ImageSeries)
+    mock_video.name = "missing_video.mp4"
+    mock_video.external_file = []
 
     with (
         patch.object(common.VideoFile, "__and__") as mock_query,
-        patch.object(common.Nwbfile, "get_abs_path") as mock_get_abs_path,
-        patch("spyglass.common.common_behav.get_nwb_file") as mock_get_nwb,
+        patch.object(Path, "exists", return_value=False),
     ):
-
         mock_query.return_value.fetch1.return_value = video_info
-        mock_get_abs_path.return_value = "/nwb/path.nwb"
-        mock_get_nwb.return_value = mock_nwbf
+        mock_query.return_value.fetch_nwb.return_value = [
+            {"video_file": mock_video}
+        ]
 
-        with pytest.raises(FileNotFoundError, match="No ImageSeries found"):
+        with pytest.raises(FileNotFoundError, match="missing_video.mp4"):
             common.VideoFile.get_abs_path({"nwb_file_name": "test.nwb"})
 
 
