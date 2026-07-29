@@ -1032,11 +1032,138 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return True, None
 
+    def _current_tracked_paths(
+        self, custom_tables: List[SpyglassAnalysis]
+    ) -> Set[Path]:
+        """Re-fetch tracked analysis paths for an act-time check."""
+        tracked = {
+            Path(fp[1]).expanduser().resolve()
+            for fp in self._ext_tbl.fetch_external_paths()
+        }
+        for tbl in custom_tables:
+            tracked.update(
+                Path(fp[1]).expanduser().resolve()
+                for fp in tbl._ext_tbl.fetch_external_paths()
+            )
+        return tracked
+
+    @staticmethod
+    def _access_still_matches(access: AccessSnapshot) -> bool:
+        """Re-verify one leaf symlink immediately before unlinking it.
+
+        Deleting the target opens a window in which the link could be
+        replaced; unlinking blindly would remove the replacement.
+        """
+        try:
+            lst = os.lstat(access.access_path)
+        except OSError:
+            return False
+        if not stat_module.S_ISLNK(lst.st_mode):
+            return False
+        if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
+            return False
+        try:
+            return os.readlink(access.access_path) == access.raw_link_target
+        except OSError:
+            return False
+
+    def _candidate_still_matches(
+        self, candidate: CleanupCandidate, *, analysis_root: Path
+    ) -> bool:
+        """Re-verify a candidate immediately before deleting it.
+
+        Returns False (with a warning) when anything changed since the
+        scan, when a non-regular target is involved, or when an out-of-root
+        target has no in-root leaf symlink vouching for it.
+        """
+        real_path = candidate.real_path
+
+        def _refuse(reason: str) -> bool:
+            logger.warning(f"Skipping {real_path}: {reason}")
+            return False
+
+        vouchers = []
+        for access in candidate.accesses:
+            try:
+                lst = os.lstat(access.access_path)
+            except OSError:
+                return _refuse(f"access path {access.access_path} unreadable")
+            if stat_module.S_ISLNK(lst.st_mode) != access.is_link:
+                return _refuse(f"{access.access_path} changed link type")
+            if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
+                return _refuse(f"{access.access_path} identity changed")
+            if not access.is_link:
+                continue
+            try:
+                if os.readlink(access.access_path) != access.raw_link_target:
+                    return _refuse(f"{access.access_path} was re-pointed")
+            except OSError:
+                return _refuse(f"{access.access_path} readlink failed")
+            # A voucher must be a leaf symlink that (a) LIVES inside the
+            # analysis root and (b) currently resolves to this exact
+            # target. Without (a) an outside link could authorize an
+            # outside target; without (b) a stale link could authorize a
+            # path it no longer points at. Resolve the PARENT, not the
+            # link itself -- resolving the link would follow it.
+            location = (
+                access.access_path.parent.resolve() / access.access_path.name
+            )
+            if not location.is_relative_to(analysis_root):
+                continue
+            if Path(os.path.realpath(access.access_path)) != real_path:
+                continue
+            vouchers.append(access)
+
+        if not candidate.broken:
+            if not real_path.is_relative_to(analysis_root) and not vouchers:
+                return _refuse(
+                    "target is outside the analysis directory and no in-root "
+                    "symlink currently resolving to it vouches for it"
+                )
+            try:
+                st = os.stat(real_path)
+                lst_target = os.lstat(real_path)
+            except OSError:
+                return _refuse("target unreadable")
+            if not stat_module.S_ISREG(lst_target.st_mode):
+                return _refuse("target is not a regular file")
+            if (st.st_dev, st.st_ino) != (
+                lst_target.st_dev,
+                lst_target.st_ino,
+            ):
+                return _refuse("target stat/lstat disagree")
+            snap = candidate.target
+            if (st.st_dev, st.st_ino) != (snap.dev, snap.ino):
+                return _refuse("target identity changed since the scan")
+            if st.st_size != snap.size:
+                return _refuse("target size changed since the scan")
+            if (st.st_mtime_ns, st.st_ctime_ns) != (
+                snap.mtime_ns,
+                snap.ctime_ns,
+            ):
+                return _refuse("target timestamps changed since the scan")
+            if st.st_mode != snap.mode:
+                return _refuse("target mode changed since the scan")
+        else:
+            try:
+                os.stat(real_path)
+            except FileNotFoundError:
+                pass  # still broken, as planned
+            except OSError:
+                return _refuse("broken-link target unreadable")
+            else:
+                return _refuse("broken link now resolves")
+
+        return True
+
     def _remove_untracked_files(
         self,
         custom_tables: List[SpyglassAnalysis],
         dry_run: bool = True,
         plan: CleanupPlan | None = None,
+        *,
+        min_file_age_hours: float = 24.0,
+        now_ns: Optional[int] = None,
     ) -> tuple[Set[Path], Set[Path]]:
         """Remove analysis files that are empty (0 bytes) or not tracked.
 
@@ -1061,31 +1188,112 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             (files_to_delete, tracked_files)
         """
 
-        plan = plan or self._build_untracked_file_plan(custom_tables)
+        if plan is None:
+            plan = self._build_untracked_file_plan(
+                custom_tables,
+                min_file_age_hours=min_file_age_hours,
+                now_ns=now_ns,
+            )
+
+        if plan.deferred_recent_files:
+            logger.info(
+                f"  {len(plan.deferred_recent_files)} untracked files "
+                f"deferred because they are newer than {min_file_age_hours} "
+                "hours. Use min_file_age_hours=0 only for intentional "
+                "immediate cleanup."
+            )
 
         if dry_run:
             logger.info(
                 f"  {len(plan.files_to_delete)} untracked or empty analysis "
                 f"files ({len(plan.untracked_files)} untracked, "
-                f"{len(plan.empty_files)} empty)"
+                f"{len(plan.empty_files)} empty, "
+                f"{len(plan.broken_links)} broken links)"
             )
             return plan.files_to_delete, plan.tracked_files
 
-        # files_to_delete holds resolved paths, and Path.resolve() follows
-        # symlinks — a symlink inside analysis_dir resolves to its target.
-        # Skip any path that resolves outside analysis_dir so cleanup cannot
-        # delete data elsewhere via a symlink placed in the analysis directory.
         analysis_root = Path(self._analysis_dir).expanduser().resolve()
-        for path in plan.files_to_delete:
-            if not path.is_relative_to(analysis_root):
-                logger.warning(
-                    f"Skipping deletion outside analysis dir: {path}"
+        tracked_now = self._current_tracked_paths(custom_tables)
+        act_now_ns = time.time_ns() if now_ns is None else now_ns
+        failures = []
+
+        # A plan whose keys disagree with its candidates could route a
+        # verified inside candidate to an outside victim path. Refuse the
+        # whole plan rather than trusting any part of it.
+        if set(plan.candidates) != plan.files_to_delete:
+            raise RuntimeError(
+                "Analysis file deletion failed: cleanup plan is "
+                "inconsistent, candidate keys do not match files_to_delete. "
+                "Refusing to act on a malformed plan."
+            )
+
+        for key_path, candidate in plan.candidates.items():
+            if key_path != candidate.real_path:
+                failures.append(
+                    f"plan key {key_path} does not match candidate "
+                    f"{candidate.real_path}"
                 )
                 continue
+            if (
+                candidate.target is not None
+                and candidate.target.real_path != candidate.real_path
+            ):
+                failures.append(
+                    f"{candidate.real_path}: target snapshot names a "
+                    f"different path {candidate.target.real_path}"
+                )
+                continue
+            if candidate.real_path in tracked_now:
+                logger.warning(
+                    f"Skipping {candidate.real_path}: became tracked since "
+                    "the scan"
+                )
+                continue
+            # Age is re-checked at act time, not only during planning: a
+            # long scan may have started before the file was written.
+            if not self._is_old_enough(
+                candidate,
+                now_ns=act_now_ns,
+                min_file_age_hours=min_file_age_hours,
+            ):
+                logger.warning(
+                    f"Skipping {candidate.real_path}: newer than "
+                    f"{min_file_age_hours}h at deletion time"
+                )
+                continue
+            if not self._candidate_still_matches(
+                candidate, analysis_root=analysis_root
+            ):
+                continue
             try:
-                path.unlink()
+                if not candidate.broken:
+                    candidate.real_path.unlink()
+                for access in candidate.accesses:
+                    if not access.is_link:
+                        continue
+                    # Re-verify each link immediately before unlinking it.
+                    # Deleting the target opened a window in which the link
+                    # could have been replaced.
+                    if not self._access_still_matches(access):
+                        logger.warning(
+                            f"Skipping link {access.access_path}: changed "
+                            "after target deletion"
+                        )
+                        continue
+                    access.access_path.unlink()
             except OSError as e:
-                self._logger.error(f"Error deleting file {path}: {e}")
+                failures.append(f"{candidate.real_path}: {e}")
+
+        if failures:
+            # Raise rather than log: cleanup() runs database cleanup after
+            # this, and the maintenance driver gates later analysis-storage
+            # phases on a failure escaping here. A logged-and-swallowed
+            # error would let both proceed with storage in an unknown state.
+            raise RuntimeError(
+                f"Analysis file deletion failed for {len(failures)} "
+                "candidates; refusing to continue with analysis storage in "
+                "an unknown state:\n  " + "\n  ".join(failures)
+            )
 
         return plan.files_to_delete, plan.tracked_files
 

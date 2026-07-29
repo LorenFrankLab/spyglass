@@ -656,3 +656,275 @@ def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
         custom_tables=[], min_file_age_hours=24.0, now_ns=newest - 10**9
     )
     assert plan.deferred_recent_files == {f.resolve()}
+
+
+def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
+    """A vouched-for out-of-tree target is deleted, then its link."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "far.nwb"
+    target.write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert not target.exists(), "symlink target should be deleted"
+    assert not link.is_symlink(), "symlink should be deleted"
+
+
+def test_delete_skips_candidate_whose_identity_changed(
+    common_nwbfile, tmp_path
+):
+    """A file replaced between planning and acting must not be deleted."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "swapped.nwb"
+    f.write_text("original")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    f.unlink()
+    f.write_text("replacement with a different inode")
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert f.exists(), "replaced file must not be deleted on a stale plan"
+
+
+def test_delete_skips_candidate_that_became_tracked(common_nwbfile, tmp_path):
+    """Tracking is re-fetched at act time and protects every candidate."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "registered.nwb"
+    f.write_text("data")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {f.resolve()}
+
+    # Registered after the plan was built.
+    table._ext_tbl = _FakeExternalTable([("h", f)])
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert f.exists(), "newly tracked file must not be deleted"
+
+
+def test_delete_removes_broken_link_only(common_nwbfile, tmp_path):
+    """A dangling link is unlinked; nothing else is touched."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "dangling.nwb"
+    link.symlink_to(tmp_path / "nope.nwb")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert not link.is_symlink()
+
+
+def test_delete_skips_relinked_symlink(common_nwbfile, tmp_path):
+    """A link re-pointed after planning must not have its new target hit."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    original = volume2 / "original.nwb"
+    original.write_text("original")
+    other = volume2 / "other.nwb"
+    other.write_text("other, must survive")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(original)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    link.unlink()
+    link.symlink_to(other)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert other.exists(), "re-pointed link's new target must survive"
+
+
+def test_delete_refuses_outside_symlink_as_voucher(common_nwbfile, tmp_path):
+    """A voucher must live inside analysis_dir, not merely be a symlink.
+
+    Without the containment check on the access path, an outside symlink
+    could authorize deleting an outside target.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    victim = volume2 / "victim.nwb"
+    victim.write_text("must survive")
+
+    outside_link = tmp_path / "elsewhere.nwb"
+    outside_link.symlink_to(victim)
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+
+    real = victim.resolve()
+    st = victim.stat()
+    lst = outside_link.lstat()
+    forged = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=outside_link,
+                is_link=True,  # a link, but NOT inside analysis_dir
+                raw_link_target=str(victim),
+                dev=lst.st_dev,
+                ino=lst.st_ino,
+                mtime_ns=lst.st_mtime_ns,
+                ctime_ns=lst.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files={real},
+        candidates={real: forged},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert victim.exists(), "outside link must not vouch for an outside target"
+
+
+def test_delete_refuses_plan_with_mismatched_key(common_nwbfile, tmp_path):
+    """A plan key that disagrees with its candidate must be refused.
+
+    Otherwise the loop could verify one path and unlink another.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    victim = analysis_dir / "victim.nwb"
+    victim.write_text("must survive")
+    decoy = analysis_dir / "decoy.nwb"
+    decoy.write_text("decoy")
+
+    st = decoy.stat()
+    candidate = common_nwbfile.CleanupCandidate(
+        real_path=decoy.resolve(),
+        target=common_nwbfile.TargetSnapshot(
+            real_path=decoy.resolve(),
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=decoy,
+                is_link=False,
+                raw_link_target=None,
+                dev=st.st_dev,
+                ino=st.st_ino,
+                mtime_ns=st.st_mtime_ns,
+                ctime_ns=st.st_ctime_ns,
+            ),
+        ),
+    )
+    # Key names the victim; candidate names the decoy.
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={victim.resolve()},
+        tracked_files=set(),
+        files_to_delete={victim.resolve()},
+        empty_files=set(),
+        untracked_files={victim.resolve()},
+        candidates={victim.resolve(): candidate},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    with pytest.raises(RuntimeError, match="deletion failed"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert victim.exists()
+    assert decoy.exists()
+
+
+def test_delete_raises_on_unlink_failure(common_nwbfile, tmp_path, monkeypatch):
+    """Unlink failures must propagate, not be logged and swallowed.
+
+    cleanup() runs database cleanup after this, and the maintenance driver
+    gates later analysis phases on a failure escaping here.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "stubborn.nwb"
+    f.write_text("data")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    def _boom(self, *args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "unlink", _boom)
+
+    with pytest.raises(RuntimeError, match="deletion failed"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+
+def test_delete_rechecks_age_at_act_time(common_nwbfile, tmp_path):
+    """Age is re-checked before deletion, not only during planning."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    f = analysis_dir / "fresh.nwb"
+    f.write_text("data")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)  # built with the gate disabled
+    assert plan.files_to_delete == {f.resolve()}
+
+    # Act with the gate enabled: the candidate is now too young.
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=24.0
+    )
+
+    assert f.exists(), "act-time age check must defer a fresh candidate"
