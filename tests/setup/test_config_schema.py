@@ -833,3 +833,95 @@ class TestTestModeEnvVarIgnore:
         )
 
         assert cfg.config.get("KACHERY_ZONE") == "franklab.default"
+
+
+class TestModePrecedence:
+    """test_mode/debug_mode resolution order in SpyglassConfig.load_config.
+
+    dj.config['custom']['test_mode'] is True for the whole pytest session
+    (tests/container.py sets it in the credentials applied by
+    pytest_configure), so every test here neutralizes it first. Without
+    that, a broken implementation that ignores the constructor argument
+    still resolves to True and the test passes for the wrong reason.
+    """
+
+    @pytest.fixture
+    def no_dj_test_mode(self, monkeypatch):
+        import datajoint as dj
+
+        custom = dj.config.setdefault("custom", {})
+        monkeypatch.setitem(custom, "test_mode", False)
+        monkeypatch.setitem(custom, "debug_mode", False)
+        return custom
+
+    def test_constructor_test_mode_is_honored(self, tmp_path, no_dj_test_mode):
+        """Constructor test_mode=True must survive load_config()."""
+        from spyglass.settings import SpyglassConfig
+
+        outside = tmp_path / "production_data"
+        cfg = SpyglassConfig(base_dir=str(outside), test_mode=True)
+
+        with pytest.raises(ValueError, match="does not contain a 'tests'"):
+            cfg.load_config(force_reload=True)
+
+    def test_call_false_overrides_constructor_true(
+        self, tmp_path, no_dj_test_mode
+    ):
+        """An explicit False at call time must beat constructor True."""
+        from spyglass.settings import SpyglassConfig
+
+        outside = tmp_path / "production_data"
+        cfg = SpyglassConfig(base_dir=str(outside), test_mode=True)
+
+        cfg.load_config(test_mode=False, force_reload=True)  # must not raise
+        assert cfg._test_mode is False
+
+    def test_call_false_overrides_dj_config_true(self, tmp_path, monkeypatch):
+        """An explicit False at call time must beat dj.config True."""
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig
+
+        custom = dj.config.setdefault("custom", {})
+        monkeypatch.setitem(custom, "test_mode", True)
+
+        outside = tmp_path / "production_data"
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(outside), test_mode=False, force_reload=True
+        )
+        assert cfg._test_mode is False
+
+    def test_constructor_false_overrides_dj_config_true(
+        self, tmp_path, monkeypatch
+    ):
+        """An explicit constructor False must beat dj.config True."""
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig
+
+        custom = dj.config.setdefault("custom", {})
+        monkeypatch.setitem(custom, "test_mode", True)
+
+        outside = tmp_path / "production_data"
+        cfg = SpyglassConfig(base_dir=str(outside), test_mode=False)
+        cfg.load_config(force_reload=True)
+        assert cfg._test_mode is False
+
+    def test_string_false_is_respected(self, tmp_path, no_dj_test_mode):
+        """str_to_bool accepts strings; 'false' must resolve to False."""
+        from spyglass.settings import SpyglassConfig
+
+        outside = tmp_path / "production_data"
+        cfg = SpyglassConfig(base_dir=str(outside), test_mode="false")
+        cfg.load_config(force_reload=True)
+        assert cfg._test_mode is False
+
+    def test_debug_mode_uses_same_precedence(self, tmp_path, no_dj_test_mode):
+        """debug_mode has the identical bug and the identical fix."""
+        from spyglass.settings import SpyglassConfig
+
+        base = tmp_path / "tests" / "data"
+        cfg = SpyglassConfig(base_dir=str(base), debug_mode=True)
+        cfg.load_config(force_reload=True)
+        assert cfg._debug_mode is True

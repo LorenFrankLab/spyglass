@@ -10,6 +10,8 @@ from pymysql.err import OperationalError
 from spyglass.utils.dj_helper_fn import str_to_bool
 from spyglass.utils.logging import logger
 
+_UNSET = object()  # distinguishes "not supplied" from an explicit False
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -96,8 +98,21 @@ class SpyglassConfig:
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
-        self._debug_mode = kwargs.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode", False)
+        # Record what the caller supplied separately from the resolved
+        # value: an explicit False must beat dj.config, and _UNSET must
+        # fall through to it. See load_config._resolve_mode.
+        self._debug_mode_arg = kwargs.get("debug_mode", _UNSET)
+        self._test_mode_arg = kwargs.get("test_mode", _UNSET)
+        self._debug_mode = (
+            False
+            if self._debug_mode_arg is _UNSET
+            else str_to_bool(self._debug_mode_arg)
+        )
+        self._test_mode = (
+            False
+            if self._test_mode_arg is _UNSET
+            else str_to_bool(self._test_mode_arg)
+        )
         self._dlc_base = None
         self.load_failed = False
 
@@ -170,12 +185,25 @@ class SpyglassConfig:
         dj_dlc = dj_custom.get("dlc_dirs", {})
         dj_moseq = dj_custom.get("moseq_dirs", {})
 
-        self._debug_mode = dj_custom.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode") or dj_custom.get(
-            "test_mode", False
-        )
-        self._test_mode = str_to_bool(self._test_mode)
-        self._debug_mode = str_to_bool(self._debug_mode)
+        def _resolve_mode(name: str) -> bool:
+            """Resolve a mode flag by precedence.
+
+            call kwarg > constructor kwarg > dj.config['custom'] > False.
+            An explicit False at any level wins over a True below it, which
+            is why _UNSET is needed instead of falsy-checking.
+            """
+            call_val = kwargs.get(name, _UNSET)
+            if call_val is not _UNSET:
+                return str_to_bool(call_val)
+            init_val = getattr(self, f"_{name}_arg", _UNSET)
+            if init_val is not _UNSET:
+                return str_to_bool(init_val)
+            return str_to_bool(dj_custom.get(name, False))
+
+        test_mode = _resolve_mode("test_mode")
+        debug_mode = _resolve_mode("debug_mode")
+        self._test_mode = test_mode
+        self._debug_mode = debug_mode
 
         resolved_base = (
             base_dir
