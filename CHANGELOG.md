@@ -303,6 +303,13 @@ for label, interval_data in results.groupby("interval_labels"):
         posterior over the correct spatial dimension(s), auto-detect the
         orientation column name, and pass the `linear_position` column (not the
         whole DataFrame) to the 1D view #1616
+    - Import `non_local_detector` inside the decoding operations that use it, so a
+        broken `jax`/`numpy` stack no longer breaks `import   spyglass.common` or
+        data ingestion #1619
+    - Pin `numpy`, `scipy`, and `jax` to the combination `spikeinterface` 0.99
+        needs. Temporary, pending #1609 #1619
+    - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
+        every call, and stop `insert` from mutating the caller's rows #1619
 
 - LFP
 
