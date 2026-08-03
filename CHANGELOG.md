@@ -51,15 +51,11 @@ DLCProject().alter()
 
 ### Breaking Changes
 
-#### `insert_sessions` Returns a List (#XXXX)
+#### `insert_sessions` Returns a List (#1660)
 
 `insert_sessions` returned from inside its loop over `nwb_file_names`, so a list
 argument only ever processed its first file. It now processes every file and
 returns one `populate_all_common` result per file, rather than a single result.
-
-**Impact**: Callers passing a single file name and using the return value
-directly receive a one-element list instead. Callers passing a list now see
-every file ingested, where previously only the first was.
 
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
@@ -181,7 +177,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507, #1614, #XXXX
+    #1484, #1489, #1507, #1614, #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
