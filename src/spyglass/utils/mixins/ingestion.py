@@ -2,6 +2,7 @@ import inspect
 from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
+import numpy as np
 from datajoint.utils import to_camel_case
 from packaging.version import Version
 from pynwb import NWBFile
@@ -122,14 +123,20 @@ class IngestionMixin(BaseMixin):
             and not self._single_entry_per_table
         ):
             obj_df = nwb_obj.to_dataframe()
-            entries = sum(
-                [
-                    self.generate_entries_from_nwb_object(row, base_key)[self]
-                    for row in obj_df.itertuples()
-                ],
-                [],
-            )
-            return {self: entries}
+            entries = dict()
+            for row in obj_df.itertuples():
+                # Keep every table a row generates, not just this one: a row
+                # may produce part entries or a parent's entries alongside
+                # its own. First-seen order is preserved, so a subclass that
+                # yields a parent before self keeps that ordering.
+                for (
+                    table,
+                    table_entries,
+                ) in self.generate_entries_from_nwb_object(
+                    row, base_key
+                ).items():
+                    entries.setdefault(table, []).extend(table_entries)
+            return entries
 
         obj_ = None
         for object_name, mapping in self.table_key_to_obj_attr.items():
@@ -164,6 +171,48 @@ class IngestionMixin(BaseMixin):
                         + "tuple of (str, default), or callable."
                     )
         return {self: [base_key]}
+
+    def populate(self, *restrictions, **kwargs):
+        """Ingest whole NWB files rather than running `make` per key.
+
+        Ingestion tables are filled by `insert_from_nwbfile`, which parses a
+        file once and inserts every entry it yields, so `make` on these tables
+        is a deprecation shim. Callers reaching for the DataJoint idiom are
+        routed to the ingestion path, once per file that has no entries here
+        yet -- otherwise `populate()` would call the shim and raise for any
+        session whose rows this table happens to be missing.
+
+        Tables not keyed by `nwb_file_name` fall through to DataJoint's
+        `populate`, since a file cannot be identified for them.
+
+        Parameters
+        ----------
+        *restrictions
+            Restrictions on the key source, as for DataJoint's populate.
+        **kwargs
+            Accepted and ignored; ingestion takes no populate options.
+        """
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        if "nwb_file_name" not in self.primary_key:
+            return super().populate(*restrictions, **kwargs)
+
+        source = getattr(self, "key_source", None)
+        if source is None:
+            source = Nwbfile()
+        if restrictions:
+            source = source & dj.AndList(restrictions)
+
+        files = {
+            key["nwb_file_name"]
+            for key in source.fetch("KEY", as_dict=True)
+            if "nwb_file_name" in key
+        }
+
+        for nwb_file_name in sorted(files):
+            if self & {"nwb_file_name": nwb_file_name}:
+                continue  # already ingested for this file
+            self.insert_from_nwbfile(nwb_file_name)
 
     def get_nwb_objects(
         self,
@@ -247,8 +296,8 @@ class IngestionMixin(BaseMixin):
 
         # fetch relevant NWB objects from file
         fetched_objs = self.get_nwb_objects(nwb_file, nwb_file_name)
-        if len(fetched_objs) == 0:
-            return dict()
+        if len(fetched_objs) == 0 and not config:
+            return dict()  # config may still supply entries on its own
 
         # check extension requirements (if any). Logs warning if objects found and
         # requirements not met
@@ -272,7 +321,9 @@ class IngestionMixin(BaseMixin):
                     base_entry.copy(),
                 )
                 for table, table_entries in obj_entries.items():
-                    entries[table].extend(table_entries)
+                    # setdefault, not indexing: a later object may generate
+                    # entries for a table the first object did not touch.
+                    entries.setdefault(table, []).extend(table_entries)
 
         if config:
             config_entries = self.generate_entries_from_config(config)
@@ -337,11 +388,29 @@ class IngestionMixin(BaseMixin):
         # By default, checks that all non-nullable keys present
         return [key for key in keys if self._key_has_required_attrs(key)]
 
-    def _remove_null_from_dicts(self, d: dict) -> dict:
-        """Remove keys with None values from a dictionary."""
-        # Fallback if FreeTable does not implement _adjust_keys_for_entry
-        # May error on part table with nullable or default keys
-        return {k: v for k, v in d.items() if v not in [None, ""]}
+    def _remove_null_from_dicts(self, keys: List[dict]) -> List[dict]:
+        """Remove null-valued items from each key in a list.
+
+        Fallback for tables that do not implement `_adjust_keys_for_entry`
+        -- a FreeTable, or a part declared with SpyglassMixin rather than
+        SpyglassIngestion. Takes the same list-in/list-out shape as the
+        method it stands in for; it previously took a single dict and so
+        raised AttributeError for every caller.
+
+        Parameters
+        ----------
+        keys : list of dict
+            Planned entries for one table.
+
+        Returns
+        -------
+        list of dict
+            The same entries, without null or empty values.
+        """
+        return [
+            {k: v for k, v in key.items() if v not in [None, ""]}
+            for key in keys
+        ]
 
     def _adjust_entries(
         self, entries: IngestionEntries, nwb_file_name: str = None
@@ -424,7 +493,12 @@ class IngestionMixin(BaseMixin):
         """
         # NOTE: switching from `self` to `tbl` to allow validation from
         # FreeTable instances captured with `parts(as_objects=True)`
-        adjusted_entries = tbl._adjust_keys_for_entry([new_key])
+        # Same fallback as _adjust_entries: tbl may be a plain SpyglassMixin
+        # table generated alongside this one, with no adjustment of its own.
+        adjust_func = getattr(
+            tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
+        )
+        adjusted_entries = adjust_func([new_key])
         if not adjusted_entries:
             return  # entry filtered out by adjustment
 
@@ -459,10 +533,19 @@ class IngestionMixin(BaseMixin):
 
     @staticmethod
     def _unequal_vals(key, a, b):
-        a, b = a.get(key) or "", b.get(key, "") or ""
-        if isinstance(a, str) and isinstance(b, str):
-            return a.lower() != b.lower()
-        return a != b  # prevent false positive on None != ""
+        a_val, b_val = a.get(key), b.get(key)
+
+        # Arrays first: both `array or ""` and `array != other` yield an
+        # array, whose truth value is ambiguous. Blob attributes reach here
+        # from tables that emit a parent's entries alongside their own --
+        # IntervalList.valid_times, say.
+        if isinstance(a_val, np.ndarray) or isinstance(b_val, np.ndarray):
+            return not np.array_equal(a_val, b_val)
+
+        a_val, b_val = a_val or "", b_val or ""
+        if isinstance(a_val, str) and isinstance(b_val, str):
+            return a_val.lower() != b_val.lower()
+        return a_val != b_val  # prevent false positive on None != ""
 
     def check_extension_requirements(self, nwb_file_name: str) -> bool:
         """Check that the NWB file meets the extension requirements (if any).

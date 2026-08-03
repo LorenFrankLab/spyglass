@@ -98,7 +98,10 @@ def import_pose_nwb(verbose_context, imported_pose_tbl):
     # Nwbfile().insert_from_relative_file_name(pose_file.name)
     # Session().populate(dict(nwb_file_name=pose_file.name))
 
-    imported_pose_tbl.insert_from_nwbfile(copy_file_name, skip_duplicates=True)
+    # insert_sessions already ingested the pose data; run it again to check
+    # the second pass is a no-op. `skip_duplicates` is gone: ImportedPose now
+    # ingests through the mixin, which validates existing entries instead.
+    imported_pose_tbl.insert_from_nwbfile(copy_file_name)
 
     yield pose_file
 

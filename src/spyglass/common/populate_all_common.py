@@ -3,7 +3,6 @@ from typing import List, Union
 
 import datajoint as dj
 import yaml
-from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
     PositionSource,
@@ -43,7 +42,7 @@ from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
-from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 
 
@@ -96,64 +95,26 @@ def single_transaction_make(
     error_constants: dict = None,
     config: dict = None,
 ):
-    """For each table, run the `make` method directly instead of `populate`.
+    """Ingest each table from the NWB file, inside one transaction.
 
-    Requires `allow_direct_insert` set to True within each method. Uses
-    nwb_file_name search table key_source for relevant key. Currently assumes
-    all tables will have exactly one key_source entry per nwb file.
+    Every table here is a SpyglassIngestion table, so each parses the file
+    once via `insert_from_nwbfile` rather than running `make` per key_source
+    key. Failures are logged per table unless `raise_err` is set.
     """
 
-    nwbfile_tbl = Nwbfile()
-
-    file_restr = {"nwb_file_name": nwb_file_name}
     with Nwbfile._safe_context():
         for table in tables:
             config_name = _get_config_name(table())
             table_config = config.get(config_name, dict())
 
-            if isinstance(table(), SpyglassIngestion):
-                try:
-                    table().insert_from_nwbfile(
-                        nwb_file_name, config=table_config
-                    )
-                except Exception as err:
-                    if raise_err:
-                        raise err
-                    log_insert_error(
-                        table=table, err=err, error_constants=error_constants
-                    )
-                continue
-
-            # If imported/computed table, get key from key_source
-            nwbfile_tbl._info_msg(f"Populating {table.__name__}...")
-            key_source = getattr(table, "key_source", None)
-            if key_source is None:  # Generate key from parents
-                parents = table.parents(as_objects=True)
-                key_source = parents[0].proj()
-                for parent in parents[1:]:
-                    key_source *= parent.proj()
-
-            table_name = to_camel_case(table.table_name)
-            if table_name == "PositionSource":
-                # PositionSource only uses nwb_file_name - full calls redundant
-                key_source = dj.U("nwb_file_name") & key_source
-            if table_name in [
-                "ImportedPose",
-                "ImportedLFP",
-                "OptogeneticProtocol",
-            ]:
-                key_source = Nwbfile()
-
-            query = key_source & file_restr
-            for pop_key in query.fetch("KEY"):
-                try:
-                    table().make(pop_key)
-                except Exception as err:
-                    if raise_err:
-                        raise err
-                    log_insert_error(
-                        table=table, err=err, error_constants=error_constants
-                    )
+            try:
+                table().insert_from_nwbfile(nwb_file_name, config=table_config)
+            except Exception as err:
+                if raise_err:
+                    raise err
+                log_insert_error(
+                    table=table, err=err, error_constants=error_constants
+                )
 
 
 def populate_all_common(

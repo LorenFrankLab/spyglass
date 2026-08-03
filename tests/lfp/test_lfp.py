@@ -112,6 +112,9 @@ def test_pop_imported_lfp(lfp, common, mini_dict):
         )
         == 1
     )
-    # check that rerunning doesn't add duplicates
-    lfp.lfp_imported.ImportedLFP().make(mini_dict)
+    # check that rerunning doesn't add duplicates. ImportedLFP now ingests
+    # via insert_from_nwbfile, and its `make` is a deprecation shim.
+    lfp.lfp_imported.ImportedLFP().insert_from_nwbfile(
+        mini_dict["nwb_file_name"]
+    )
     assert len(lfp.lfp_imported.ImportedLFP()) == 1

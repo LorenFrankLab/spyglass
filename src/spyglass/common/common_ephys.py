@@ -17,7 +17,6 @@ from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
-    get_data_interface,
     get_electrode_indices,
     get_nwb_file,
     get_valid_intervals,
@@ -374,7 +373,7 @@ class Raw(SpyglassIngestion, dj.Imported):
 
 
 @schema
-class SampleCount(SpyglassMixin, dj.Imported):
+class SampleCount(SpyglassIngestion, dj.Imported):
     definition = """
     # Sample count :s timestamp timeseries
     -> Session
@@ -383,25 +382,27 @@ class SampleCount(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    # TODO: change name when nwb file is changed
+    _source_nwb_object_name = "sample_count"
+    _only_ingest_first = True  # first match wins, as get_data_interface did
+
+    @property
+    def _source_nwb_object_type(self):
+        # The enclosing ProcessingModule carries this name too, and is itself
+        # an NWBDataInterface, so a broader type here matches the module and
+        # stores its object id instead of the series'. The previous lookup
+        # searched module.data_interfaces, which never holds modules.
+        return pynwb.base.TimeSeries
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"sample_count_object_id": "object_id"}}
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        # get the sample count object
-        # TODO: change name when nwb file is changed
-        sample_count = get_data_interface(nwbf, "sample_count")
-        if sample_count is None:
-            self._info_msg(
-                "Unable to import SampleCount: no data interface named "
-                + f'"sample_count" found in {nwb_file_name}.'
-            )
-            return  # see #849
-        key["sample_count_object_id"] = sample_count.object_id
-        self.insert1(key, allow_direct_insert=True)
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "SampleCount.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema

@@ -5,7 +5,7 @@ from spyglass.common.common_device import CameraDevice  # noqa: F401
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import (
     get_config,
@@ -121,7 +121,7 @@ class Task(SpyglassMixin, dj.Manual):
 
 
 @schema
-class TaskEpoch(SpyglassMixin, dj.Imported):
+class TaskEpoch(SpyglassIngestion, dj.Imported):
     # Tasks, session and time intervals
     definition = """
      -> Session
@@ -133,6 +133,168 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      task_environment = NULL: varchar(200)  # the environment the animal was in
      camera_names : blob # list of keys corresponding to entry in CameraDevice
      """
+
+    # Task entries are shared across files, so an existing one is validated
+    # rather than reinserted -- what insert_from_task_table used to do.
+    _expected_duplicates = True
+
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.core.DynamicTable
+
+    @property
+    def table_key_to_obj_attr(self):
+        """Only the task name comes straight off a row; see the override."""
+        return {"self": {"task_name": "task_name"}}
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Read the file's config before ingesting, as `make` used to."""
+        self._file_config = get_config(
+            Nwbfile().get_abs_path(nwb_file_name),
+            calling_table=self.camel_name,
+        )
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Return the task tables, and cache what the row mapping needs.
+
+        Camera names and session intervals are file-level lookups, so they are
+        resolved once here rather than per row.
+        """
+        self._camera_names = self._camera_name_map(nwb_file)
+        self._sess_intervals = (
+            IntervalList & {"nwb_file_name": nwb_file_name}
+        ).fetch("interval_list_name")
+
+        tasks_mod = nwb_file.processing.get("tasks")
+        task_tables = (
+            [
+                table
+                for table in tasks_mod.data_interfaces.values()
+                if self.is_nwb_task_epoch(table)
+            ]
+            if tasks_mod is not None
+            else []
+        )
+
+        if not task_tables and not self._file_config.get("Tasks", []):
+            self._warn_msg(
+                f"No tasks processing module found in {nwb_file} or config\n"
+            )
+            # Issue #1444: Check for orphaned ImageSeries
+            self._check_videos_without_task(nwb_file, nwb_file_name)
+
+        return task_tables
+
+    def _camera_name_map(self, nwb_file) -> dict:
+        """Map each camera id in the file to its camera name.
+
+        Tasks refer to a camera_id unique within the NWB file, not to the
+        CameraDevice primary key, so the id has to be resolved to a name.
+
+        Parameters
+        ----------
+        nwb_file : pynwb.NWBFile
+            The source file.
+
+        Returns
+        -------
+        dict
+            Camera id to camera name, from the file and then the config.
+        """
+        camera_names = dict()
+
+        for device in nwb_file.devices.values():
+            if is_nwb_obj_type(device, "CameraDevice"):
+                camera_id = int(str.split(device.name)[1])
+                camera_names[camera_id] = device.camera_name
+
+        for device in self._file_config.get("CameraDevice") or []:
+            camera_names.update(
+                {
+                    name: id
+                    for name, id in zip(
+                        device.get("camera_name"),
+                        device.get("camera_id", -1),
+                    )
+                }
+            )
+
+        return camera_names
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Generate a Task entry and one TaskEpoch entry per epoch.
+
+        Called once per row of a task table. Task is returned first: it is
+        TaskEpoch's parent and has to exist before the epoch rows land.
+        """
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+
+        if hasattr(nwb_obj, "to_dataframe"):
+            return entries  # the table itself; rows come back through here
+
+        task_key = entries[self][0]
+        nwb_file_name = task_key["nwb_file_name"]
+
+        if camera_names := self._get_valid_camera_names(
+            nwb_obj.camera_id,
+            self._camera_names,
+            context=f" in NWB file {nwb_file_name}",
+        ):
+            task_key["camera_names"] = camera_names
+
+        if hasattr(nwb_obj, "task_environment"):
+            task_key["task_environment"] = nwb_obj.task_environment
+
+        return {
+            # The class, not an instance: entries from several task tables
+            # are merged by dict key, and a fresh instance is a fresh key.
+            Task: [
+                dict(
+                    task_name=nwb_obj.task_name,
+                    task_description=nwb_obj.task_description,
+                )
+            ],
+            self: self._process_task_epochs(
+                task_key,
+                nwb_obj.task_epochs,
+                nwb_file_name,
+                self._sess_intervals,
+            ),
+        }
+
+    def generate_entries_from_config(self, config, base_key=None):
+        """Generate entries for tasks declared in the config file.
+
+        The config names tasks in its own shape -- a `Tasks` list of dicts --
+        rather than as ready-made table keys, so this replaces the generic
+        config handling rather than extending it.
+        """
+        base_key = base_key or dict()
+        nwb_file_name = base_key.get("nwb_file_name")
+        entries = []
+
+        for task in self._file_config.get("Tasks", []):
+            task_key = dict(
+                base_key,
+                task_name=task.get("task_name"),
+                task_environment=task.get("task_environment", None),
+            )
+            if camera_names := self._get_valid_camera_names(
+                task.get("camera_id", []), self._camera_names
+            ):
+                task_key["camera_names"] = camera_names
+
+            entries.extend(
+                self._process_task_epochs(
+                    task_key,
+                    task.get("task_epochs", []),
+                    nwb_file_name,
+                    self._sess_intervals,
+                )
+            )
+
+        return {self: entries} if entries else dict()
 
     @classmethod
     def _get_valid_camera_names(cls, camera_ids, camera_names, context=""):
@@ -204,112 +366,10 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         return inserts
 
     def make(self, key):
-        """Populate TaskEpoch from the processing module in the NWB file."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_dict = dict(nwb_file_name=nwb_file_name)
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
-        camera_names = dict()
-
-        # the tasks refer to the camera_id which is unique for the NWB file but
-        # not for CameraDevice schema, so we need to look up the right camera
-        # map camera ID (in camera name) to camera_name
-
-        for device in nwbf.devices.values():
-            if is_nwb_obj_type(device, "CameraDevice"):
-                # get the camera ID
-                camera_id = int(str.split(device.name)[1])
-                camera_names[camera_id] = device.camera_name
-
-        if device_list := config.get("CameraDevice"):
-            for device in device_list:
-                camera_names.update(
-                    {
-                        name: id
-                        for name, id in zip(
-                            device.get("camera_name"),
-                            device.get("camera_id", -1),
-                        )
-                    }
-                )
-
-        # find the task modules and for each one, add the task to the Task
-        # schema if it isn't there and then add an entry for each epoch
-
-        tasks_mod = nwbf.processing.get("tasks")
-        config_tasks = config.get("Tasks", [])
-        if tasks_mod is None and (not config_tasks):
-            self._warn_msg(
-                f"No tasks processing module found in {nwbf} or config\n"
-            )
-            # Issue #1444: Check for orphaned ImageSeries
-            self._check_videos_without_task(nwbf, nwb_file_name)
-            return
-
-        sess_intervals = (IntervalList & nwb_dict).fetch("interval_list_name")
-
-        task_inserts = []  # inserts for Task table
-        task_epoch_inserts = []  # inserts for TaskEpoch table
-        for task_table in tasks_mod.data_interfaces.values():
-            if not self.is_nwb_task_epoch(task_table):
-                continue
-            task_inserts.append(task_table)
-            task_df = task_table.to_dataframe()
-            for task in task_df.itertuples(index=False):
-                key["task_name"] = task.task_name
-
-                # Get valid camera names for this task
-                camera_names_list = self._get_valid_camera_names(
-                    task.camera_id,
-                    camera_names,
-                    context=f" in NWB file {nwbf}",
-                )
-                if camera_names_list:
-                    key["camera_names"] = camera_names_list
-
-                # Add task environment if present
-                if hasattr(task, "task_environment"):
-                    key["task_environment"] = task.task_environment
-
-                # Process all epochs for this task
-                task_epoch_inserts.extend(
-                    self._process_task_epochs(
-                        key, task.task_epochs, nwb_file_name, sess_intervals
-                    )
-                )
-
-        # Add tasks from config
-        for task in config_tasks:
-            task_key = {
-                **key,
-                "task_name": task.get("task_name"),
-                "task_environment": task.get("task_environment", None),
-            }
-
-            # Add cameras if specified
-            camera_names_list = self._get_valid_camera_names(
-                task.get("camera_id", []), camera_names
-            )
-            if camera_names_list:
-                task_key["camera_names"] = camera_names_list
-
-            # Process all epochs for this task
-            task_epoch_inserts.extend(
-                self._process_task_epochs(
-                    task_key,
-                    task.get("task_epochs", []),
-                    nwb_file_name,
-                    sess_intervals,
-                )
-            )
-
-        # check if the task entries are in the Task table and if not, add it
-        [
-            Task().insert_from_task_table(task_table)
-            for task_table in task_inserts
-        ]
-        self.insert(task_epoch_inserts, allow_direct_insert=True)
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "TaskEpoch.make is deprecated. Use insert_from_nwbfile."
+        )
 
     @classmethod
     def get_epoch_interval_name(cls, epoch, session_intervals):
