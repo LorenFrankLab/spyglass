@@ -63,6 +63,15 @@ class PositionSource(SpyglassIngestion, dj.Manual):
         """Entries are grouped by epoch in the override, not per column."""
         return {"self": dict()}
 
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The file itself is the source: position spans the whole file.
+
+        Stated explicitly rather than relying on the default type filter,
+        which searches `nwb_file.objects` and so depends on the root NWBFile
+        appearing in its own object collection.
+        """
+        return [nwb_file]
+
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Group the file's spatial series into one source entry per epoch.
 
@@ -185,6 +194,10 @@ class RawPosition(SpyglassIngestion, dj.Imported):
     def table_key_to_obj_attr(self):
         """Entries follow PositionSource's rows; see the override."""
         return {"self": dict()}
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The file itself is the source, as for PositionSource."""
+        return [nwb_file]
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Mirror PositionSource's entries, one PosObject per spatial series.

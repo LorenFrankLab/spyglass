@@ -178,6 +178,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507, #1614, #1660
+- Fix `TaskEpoch` camera lookup for config-declared cameras, which inverted the
+    id/name mapping and raised on the scalar `camera_id` #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440

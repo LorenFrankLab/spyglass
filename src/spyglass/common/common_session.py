@@ -38,6 +38,18 @@ class Session(SpyglassIngestion, dj.Imported):
         """The NWB object type from which this table can ingest data."""
         return pynwb.NWBFile
 
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """The file itself is the source: a session describes the whole file.
+
+        Stated explicitly rather than leaning on the default type filter. That
+        filter searches `nwb_file.objects`, so it only finds the root NWBFile
+        if the file lists itself in its own object collection -- true today,
+        but an implicit dependency on pynwb's internals for a table whose
+        source is unambiguous. Same reasoning as PositionSource and
+        RawPosition in common_behav.
+        """
+        return [nwb_file]
+
     @property
     def table_key_to_obj_attr(self):
         return {

@@ -542,10 +542,15 @@ class IngestionMixin(BaseMixin):
         if isinstance(a_val, np.ndarray) or isinstance(b_val, np.ndarray):
             return not np.array_equal(a_val, b_val)
 
-        a_val, b_val = a_val or "", b_val or ""
+        # Only None collapses to "": the point is to avoid a false positive on
+        # None vs "". Coalescing every falsy value would treat a stored 0,
+        # 0.0 or False as missing and hide a genuine divergence.
+        a_val = "" if a_val is None else a_val
+        b_val = "" if b_val is None else b_val
+
         if isinstance(a_val, str) and isinstance(b_val, str):
             return a_val.lower() != b_val.lower()
-        return a_val != b_val  # prevent false positive on None != ""
+        return a_val != b_val
 
     def check_extension_requirements(self, nwb_file_name: str) -> bool:
         """Check that the NWB file meets the extension requirements (if any).

@@ -305,3 +305,35 @@ def test_statescript_ignores_non_script_files(
     assert not next(
         iter(generated.values())
     ), "A non-script associated file should not produce entries"
+
+
+def test_task_epoch_config_cameras_map_by_id(common):
+    """Config-declared cameras resolve by id, matching NWB-declared ones.
+
+    Tasks reference a camera by id, so the lookup must be keyed by id. The
+    previous implementation zipped the config's scalar `camera_name` and
+    `camera_id`, which both inverted the mapping and raised TypeError on the
+    int -- a config-declared camera never resolved.
+    """
+
+    class _NoDevices:
+        devices = {}
+
+    table = common.TaskEpoch()
+    table._file_config = {
+        "CameraDevice": [
+            {"camera_id": 7, "camera_name": "cam seven"},
+            {"camera_id": 8, "camera_name": "cam eight"},
+        ]
+    }
+
+    mapping = table._camera_name_map(_NoDevices())
+
+    assert mapping == {
+        7: "cam seven",
+        8: "cam eight",
+    }, "Config cameras should map camera_id -> camera_name"
+
+    assert table._get_valid_camera_names([7], mapping) == [
+        {"camera_name": "cam seven"}
+    ], "A task referencing a config-declared camera should resolve it"

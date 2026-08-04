@@ -209,16 +209,13 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                 camera_id = int(str.split(device.name)[1])
                 camera_names[camera_id] = device.camera_name
 
+        # Config entries are scalar per device: {camera_id: int,
+        # camera_name: str}. The previous implementation zipped the two, which
+        # inverted the mapping and raised TypeError on the int -- so a
+        # config-declared camera never resolved. Fixed while moving this here.
         for device in self._file_config.get("CameraDevice") or []:
-            camera_names.update(
-                {
-                    name: id
-                    for name, id in zip(
-                        device.get("camera_name"),
-                        device.get("camera_id", -1),
-                    )
-                }
-            )
+            if (camera_id := device.get("camera_id")) is not None:
+                camera_names[camera_id] = device.get("camera_name")
 
         return camera_names
 
