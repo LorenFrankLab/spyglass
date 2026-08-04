@@ -48,7 +48,7 @@ class MyBackend(FileBackend):
     def has(self, nwb_file_path: str) -> bool:
         """Return True if this backend can supply the file."""
 
-    def download(self, nwb_file_path: str, dest: str = None) -> bool:
+    def download(self, nwb_file_path: str, dest: str | None = None) -> bool:
         """Fetch the file to local disk. Return True on success."""
 ```
 
