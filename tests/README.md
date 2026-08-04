@@ -260,7 +260,29 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 
 --no-dlc            # Skip DeepLabCut tests and downloads
 # Useful for: systems without DLC, faster test runs
+
+--container-name NAME  # Docker container name (default: branch-derived)
+--container-port PORT  # Host port mapped to MySQL's 3306
+
+--container-vol-dir PATH  # Host dir for the container's MySQL data
+# Useful for: keeping a populated test database off a small root disk
 ```
+
+#### Container Data Directory
+
+By default Docker stores the test database on its own root filesystem, which on
+a shared machine is often the smallest disk available. A populated test database
+is not small, so `--container-vol-dir` bind-mounts the container's
+`/var/lib/mysql` onto a directory you choose:
+
+```bash
+pytest --container-vol-dir /path/to/roomy-disk/docker-vols/
+```
+
+Each container gets its own subdirectory, `<vol-dir>/<container-name>`, so
+concurrent runs on different branches do not share data. The directory is
+created if it does not exist. Without the flag, storage is left to Docker
+exactly as before.
 
 ### Debugging Options
 

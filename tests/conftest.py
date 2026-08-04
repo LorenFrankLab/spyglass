@@ -332,6 +332,15 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # Keeps MySQL data off a potentially small root disk
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help="Parent dir for the container's MySQL data, bind-mounted as "
+        + "<vol-dir>/<container-name> -> /var/lib/mysql. Default: "
+        + "Docker-managed storage.",
+    )
 
 
 def pytest_configure(config):
@@ -356,6 +365,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,

@@ -3,6 +3,7 @@ import hashlib
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 import datajoint as dj
 import docker
@@ -32,6 +33,10 @@ class DockerMySQLManager:
         If True, stop and remove container on exit from python. Default True.
     verbose : bool
         If True, print container status on startup. Default False.
+    vol_dir : str
+        Parent directory for the container's MySQL data dir, bind-mounted as
+        `<vol_dir>/<container_name>` -> /var/lib/mysql. Default None, letting
+        Docker manage storage on its own root disk.
     """
 
     def __init__(
@@ -44,6 +49,7 @@ class DockerMySQLManager:
         verbose: bool = False,
         container_name: str = None,
         port: int = None,
+        vol_dir: str = None,
     ) -> None:
         self.image_name = image_name
         self.mysql_version = mysql_version
@@ -62,6 +68,7 @@ class DockerMySQLManager:
 
         self.container_name = container_name
         self.port = port
+        self.vol_dir = self._resolve_vol_dir(vol_dir)
 
         if not self.null_server:
             if shutdown:
@@ -135,6 +142,32 @@ class DockerMySQLManager:
 
         return container_name, port
 
+    def _resolve_vol_dir(self, vol_dir: str = None) -> Path:
+        """Resolve the host directory to bind-mount as MySQL's data dir.
+
+        Keeps container data off the root disk, which can be small relative to
+        the space a populated test database needs.
+
+        Parameters
+        ----------
+        vol_dir : str, optional
+            Parent directory for container volumes. If not given, returns None
+            and Docker manages storage itself.
+
+        Returns
+        -------
+        Path or None
+            `<vol_dir>/<container_name>`, created if needed, else None.
+        """
+        if not vol_dir or self.null_server:
+            return None
+
+        path = Path(vol_dir).expanduser().absolute() / self.container_name
+        path.mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"{self.msg}data dir: {path}")
+
+        return path
+
     @staticmethod
     def string_to_port(
         name: str, min_port: int = 10240, max_port: int = 60000
@@ -199,6 +232,11 @@ class DockerMySQLManager:
             self.container.restart()
 
         else:
+            volumes = (
+                {str(self.vol_dir): {"bind": "/var/lib/mysql", "mode": "rw"}}
+                if self.vol_dir
+                else None
+            )
             self._ran_container = self.client.containers.run(
                 image=f"{self.image_name}:{self.mysql_version}",
                 name=self.container_name,
@@ -207,6 +245,7 @@ class DockerMySQLManager:
                     f"MYSQL_ROOT_PASSWORD={self.password}",
                     "MYSQL_DEFAULT_STORAGE_ENGINE=InnoDB",
                 ],
+                volumes=volumes,
                 detach=True,
                 tty=True,
             )
