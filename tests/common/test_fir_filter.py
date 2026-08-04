@@ -9,19 +9,38 @@ edge cases the vendored copy hardened relative to upstream.
 
 Run with:  pytest tests/common/test_fir_filter.py
 
-The tests themselves are pure numerics and need no database, but the import
-below reaches ``spyglass.common.__init__``, which activates DataJoint schemas --
-so collection still requires the test MySQL container like the rest of the
-suite.
+The tests themselves are pure numerics and need no database. Importing the
+module under test reaches ``spyglass.common.__init__``, which activates
+DataJoint schemas, so the import is deferred into a fixture rather than run at
+module scope -- otherwise collection connects to MySQL before the test
+container is ready. Every other test module in this directory already defers
+its spyglass imports the same way.
 """
 
 import numpy as np
 import pytest
 from scipy.signal import freqz
 
-from spyglass.common import _fir_filter as fir
-
 FS = 30000.0  # spyglass raw ephys rate
+
+# Bound by the autouse fixture below, before any test in this module runs.
+fir = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def import_fir_filter():
+    """Import the module under test once the database fixtures are ready.
+
+    Yields
+    ------
+    module
+        The vendored ``spyglass.common._fir_filter`` module.
+    """
+    global fir
+    from spyglass.common import _fir_filter
+
+    fir = _fir_filter
+    yield fir
 
 
 # --------------------------------------------------------------------------- #

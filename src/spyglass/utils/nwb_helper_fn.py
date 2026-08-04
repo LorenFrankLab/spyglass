@@ -10,6 +10,7 @@ import numpy as np
 import pynwb
 import yaml
 
+from spyglass.utils.file_backends import LocalBackend, get_backends
 from spyglass.utils.logging import logger
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
@@ -22,27 +23,22 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
-def _open_nwb_file(nwb_file_path, source="local"):
-    """Open an NWB file, add to cache, return contents. Does not close file."""
-    if source == "local":
-        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode="r", load_namespaces=True)
-        nwbfile = io.read()
-    elif source == "dandi":
-        from ..common.common_dandi import DandiPath
+def _open_nwb_file(nwb_file_path, source=None):
+    """Open an NWB file, add to cache, return contents. Does not close file.
 
-        if DandiPath().has_file_path(nwb_file_path):
-            path_to_load = nwb_file_path
-        elif DandiPath().has_raw_path(nwb_file_path):
-            path_to_load = DandiPath().raw_from_path(nwb_file_path)["filename"]
-        else:
-            raise ValueError(
-                f"File not found in Dandi: {Path(nwb_file_path).name}"
-            )
-        io, nwbfile = DandiPath().fetch_file_from_dandi(
-            nwb_file_path=path_to_load
-        )
-    else:
-        raise ValueError(f"Invalid open_nwb source: {source}")
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+    source : FileBackend, optional
+        Backend to open the file with. Defaults to local disk.
+
+    Returns
+    -------
+    nwbfile : pynwb.NWBFile
+        The NWB file object.
+    """
+    io, nwbfile = (source or LocalBackend()).open(nwb_file_path)
     __open_nwb_files[nwb_file_path] = (io, nwbfile)
     return nwbfile
 
@@ -50,10 +46,10 @@ def _open_nwb_file(nwb_file_path, source="local"):
 def get_nwb_file(nwb_file_path, query_expression=None):
     """Return an NWBFile object with the given file path in read mode.
 
-    If the file is not found locally, this will check if it has been shared
-    with kachery/dandi and if so, download it and open it. If not, and the
-    query_expression has a `_make_file` method, it will call that method to
-    recompute the file.
+    If the file is not found locally, each remote backend in the resolution
+    chain is tried in order (see `spyglass.utils.file_backends`). If none holds
+    the file and the query_expression has a `_make_file` method, that method is
+    called to recompute the file.
 
     Parameters
     ----------
@@ -71,8 +67,8 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     Raises
     ------
     FileNotFoundError
-        If the NWB file is not found locally or in kachery/Dandi, and cannot be
-        recomputed.
+        If the NWB file is not found locally or in any remote backend, and
+        cannot be recomputed.
     """
     if not Path(nwb_file_path).is_absolute():
         from spyglass.common import Nwbfile
@@ -84,42 +80,25 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     if nwbfile is not None:
         return nwbfile
 
-    if os.path.exists(nwb_file_path):
-        return _open_nwb_file(nwb_file_path)
+    backends = get_backends()
 
-    logger.info(
-        f"NWB file not found locally; checking kachery for {nwb_file_path}"
-    )
-
-    from spyglass.sharing.sharing_kachery import (
-        AnalysisNwbfileKachery,
-        _kachery_available,
-    )
-
-    if _kachery_available:
-        kachery_success = AnalysisNwbfileKachery.download_file(
-            os.path.basename(nwb_file_path), permit_fail=True
-        )
-        if kachery_success:  # pragma no cover
-            return _open_nwb_file(nwb_file_path)
-    else:
-        logger.debug(  # pragma no cover
-            "kachery unavailable; skipping kachery check for %s",
-            nwb_file_path,
-        )
-
-    logger.info(
-        "NWB file not found in kachery; checking Dandi for "
-        + f"{nwb_file_path}"
-    )
-
-    # Dandi fallback SB 2024-04-03
-    from ..common.common_dandi import DandiPath
-
-    if DandiPath().has_file_path(
-        file_path=nwb_file_path
-    ) or DandiPath().has_raw_path(file_path=nwb_file_path):
-        return _open_nwb_file(nwb_file_path, source="dandi")
+    for backend in backends:
+        is_local = isinstance(backend, LocalBackend)
+        if not is_local:
+            logger.info(
+                f"NWB file not found locally; checking {backend.name} for "
+                + f"{nwb_file_path}"
+            )
+        if not backend.has(nwb_file_path):
+            continue
+        try:
+            return _open_nwb_file(nwb_file_path, source=backend)
+        except FileNotFoundError:  # pragma: no cover - try the next backend
+            logger.debug(
+                "%s reported the file but could not supply it: %s",
+                backend.name,
+                nwb_file_path,
+            )
 
     if hasattr(query_expression, "_make_file"):
         # if the query_expression has a _make_file method, call it to
@@ -131,14 +110,18 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         if nwbfile is not None:
             return nwbfile
 
+    sources = (
+        " or ".join(b.name for b in backends if not isinstance(b, LocalBackend))
+        or "any remote backend"
+    )
     raise FileNotFoundError(
-        "NWB file not found in kachery or Dandi: "
+        f"NWB file not found in {sources}: "
         + f"{os.path.basename(nwb_file_path)}."
     )
 
 
-def file_from_dandi(filepath):
-    """helper to determine if open file is streamed from Dandi"""
+def file_is_remote(filepath):
+    """Return True if the open file is being streamed over the network."""
     if filepath not in __open_nwb_files:
         return False
     build_keys = __open_nwb_files[filepath][0]._HDF5IO__built.keys()
@@ -146,6 +129,20 @@ def file_from_dandi(filepath):
         if "HTTPFileSystem" in k:
             return True
     return False
+
+
+def file_from_dandi(filepath):
+    """Deprecated alias for `file_is_remote`.
+
+    .. deprecated::
+        Use `file_is_remote`. The check was never DANDI-specific; it detects
+        any HTTP-backed filesystem.
+    """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("file_from_dandi", alt="file_is_remote")
+
+    return file_is_remote(filepath)
 
 
 def get_linked_nwbs(path: str) -> List[str]:

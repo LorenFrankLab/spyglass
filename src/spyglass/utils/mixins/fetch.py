@@ -9,7 +9,7 @@ from datajoint import Table
 
 from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
-from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
+from spyglass.utils.nwb_helper_fn import file_is_remote, get_nwb_file
 
 try:
     import pynapple  # noqa F401
@@ -219,7 +219,7 @@ class FetchMixin(BaseMixin):
         # get filepath for each. Use datajoint for checksum if local
         for rec_dict in rec_dicts:
             file_path = file_path_fn(rec_dict[file_name_attr])
-            if file_from_dandi(file_path):
+            if file_is_remote(file_path):
                 # skip the filepath checksum if streamed from Dandi
                 rec_dict["nwb2load_filepath"] = file_path
                 continue
