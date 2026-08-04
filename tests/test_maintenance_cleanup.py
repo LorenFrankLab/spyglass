@@ -7,6 +7,9 @@ every test under ``tests/`` -- so it is not runnable without Docker despite
 needing nothing from the database itself.
 """
 
+import os
+import time
+
 import pytest
 
 
@@ -89,10 +92,80 @@ def test_temp_dir_failure_propagates(cleanup_mod, monkeypatch, tmp_path):
         cleanup_mod.cleanup_temp_dir(dry_run=False)
 
 
+def test_cleanup_temp_dir_preserves_configured_root(
+    cleanup_mod, monkeypatch, tmp_path
+):
+    """The empty-directory sweep may remove children, never its root."""
+    temp_root = tmp_path / "temp"
+    empty_child = temp_root / "empty"
+    empty_child.mkdir(parents=True)
+    old_file = temp_root / "old.txt"
+    old_file.write_text("expired\n")
+    old_timestamp = time.time() - 9 * 24 * 60 * 60
+    os.utime(old_file, (old_timestamp, old_timestamp))
+    monkeypatch.setattr(cleanup_mod, "temp_dir", str(temp_root))
+
+    cleanup_mod.cleanup_temp_dir(days_old=7, dry_run=False)
+
+    assert temp_root.is_dir(), "configured temp root must survive the sweep"
+    assert not old_file.exists(), "old file proves the file sweep still ran"
+    assert not empty_child.exists(), "empty child proves the sweep still ran"
+
+
+def test_main_gates_external_analysis_cleanup_after_analysis_failure(
+    cleanup_mod, monkeypatch, capsys
+):
+    """main() must suppress the later external-analysis deletion phase."""
+    calls = []
+    failure = "AnalysisNwbfile.cleanup() failed: boom"
+    monkeypatch.delenv("FILE_ISSUES_OUT", raising=False)
+
+    monkeypatch.setattr(
+        cleanup_mod,
+        "SpyglassVersions",
+        lambda: type("V", (), {"fetch_from_pypi": lambda self: None})(),
+    )
+    monkeypatch.setattr(
+        cleanup_mod, "run_table_cleanups", lambda: ([failure], True)
+    )
+    monkeypatch.setattr(
+        cleanup_mod,
+        "cleanup_external_files",
+        lambda: calls.append("external"),
+    )
+    monkeypatch.setattr(
+        cleanup_mod,
+        "cleanup_temp_dir",
+        lambda dry_run=True: calls.append("temp"),
+    )
+
+    def _check_all_files(self):
+        calls.append("check")
+        return {}
+
+    monkeypatch.setattr(
+        cleanup_mod.AnalysisNwbfile,
+        "check_all_files",
+        _check_all_files,
+        raising=False,
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cleanup_mod.main()
+
+    assert exc.value.code == 1
+    assert "external" not in calls
+    assert calls == ["temp", "check"]
+    assert (
+        "External analysis cleanup skipped: analysis storage state unknown"
+        in capsys.readouterr().out
+    )
+
+
 def test_issue_report_written_before_nonzero_exit(
     cleanup_mod, monkeypatch, tmp_path
 ):
-    """The Slack issue file must exist even when the run fails."""
+    """A successful monitoring pass writes its report before failure exit."""
     out = tmp_path / "issues.txt"
     monkeypatch.setenv("FILE_ISSUES_OUT", str(out))
     _stub(cleanup_mod, monkeypatch, failing={"Nwbfile"})

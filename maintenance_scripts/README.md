@@ -99,8 +99,9 @@ regularly as cron jobs.
 5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
-Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
-lines on each run. 1000 lines should be sufficient.
+After a successful run, the log file is truncated to `SPYGLASS_MAX_LOG` lines
+(1000 by default). A failing run currently exits before truncation, so repeated
+failures can grow the log until the failure-path finalizer is added.
 
 To enable slack notifications, you will need to create a slack app and generate
 a token following the instructions
@@ -141,19 +142,23 @@ the app password instead.
 ### Cleanup failure handling
 
 `cleanup.py` runs each table cleanup independently and reports all failures at
-the end, exiting nonzero only after the file-issues report is written, so
-`run_jobs.sh` can still send that report before failing.
+the end. When the file-issues monitoring pass succeeds, its report is written
+before a nonzero exit so `run_jobs.sh` can still send it. If the monitoring pass
+or report write itself fails, that failure appears in the final summary and the
+report may be absent or incomplete.
 
 If `AnalysisNwbfile.cleanup()` fails — including a safety refusal from the
 deletion limits — the state of analysis storage is unknown, so later phases that
 also delete from it are skipped: `DecodingOutput.cleanup()` and the external
 analysis deletions. Raw, sorting, recording, and temp cleanups continue
-regardless, as does the read-only file-issues check.
+regardless, as does the file-issues monitoring pass. That pass may populate the
+`AnalysisFileIssues` table, but it does not delete analysis files.
 
 A safety refusal usually means the analysis directory is misconfigured or holds
 a large backlog of untracked files. Run `AnalysisNwbfile().cleanup(dry_run=True)`
 to see the plan before adjusting `max_delete_fraction`.
 
 `AnalysisNwbfile.cleanup()` is **not concurrency-safe**: two runs can adopt and
-later drop each other's insert-blocking triggers. Run it from one process at a
-time.
+later drop each other's insert-blocking triggers, and validation is not atomic
+with filesystem unlink. Run it from one process at a time without concurrent
+mutation of eligible analysis paths.

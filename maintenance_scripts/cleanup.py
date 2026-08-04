@@ -172,8 +172,10 @@ def main():
         print(msg)
         errors.append(msg)
 
-    # Read-only, so it runs regardless of earlier failures. Wrapped so a
-    # failure here cannot bypass the final summary and exit status.
+    # This monitoring pass may populate AnalysisFileIssues, but it does not
+    # delete analysis files, so it still runs after earlier cleanup failures.
+    # Keep it wrapped so a monitoring or report-write failure reaches the
+    # final summary and exit status.
     print("Checking for AnalysisFile Issues...")
     try:
         results = AnalysisNwbfile().check_all_files()
@@ -188,8 +190,10 @@ def main():
         print(msg)
         errors.append(msg)
 
-    # Exit nonzero only after the issue report is written, so the cron job
-    # can still send it before failing.
+    # When the monitoring pass succeeds, its issue report has been written
+    # before this nonzero exit so the cron job can send it. If the monitoring
+    # pass or report write itself failed, that failure is summarized here and
+    # the report may be absent or incomplete.
     if errors:
         print("Cleanup completed with failures:")
         for err in errors:

@@ -96,8 +96,9 @@ cleanup_status=0
 FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py \
   || cleanup_status=$?
 
-# Report file issues BEFORE failing: cleanup.py writes the report even when
-# it exits nonzero, and discarding it would lose the most useful diagnostic.
+# Report available file issues BEFORE failing. cleanup.py normally writes the
+# report even when another phase exits nonzero; the file may be absent or
+# incomplete when the monitoring/report step itself failed.
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
 $(cat "$FILE_ISSUES_OUT")"
