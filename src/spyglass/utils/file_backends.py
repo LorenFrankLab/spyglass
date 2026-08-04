@@ -245,20 +245,3 @@ def get_backends() -> List[FileBackend]:
         A copy of the chain, so callers cannot mutate it in place.
     """
     return list(_BACKENDS)
-
-
-def register_backend(backend: FileBackend, index: Optional[int] = None) -> None:
-    """Insert a backend into the resolution chain.
-
-    Parameters
-    ----------
-    backend : FileBackend
-        An instance implementing the `FileBackend` protocol.
-    index : int, optional
-        Position in the chain. Defaults to last. Placing a backend before
-        `LocalBackend` means it is consulted even when the file is on disk.
-    """
-    if index is None:
-        _BACKENDS.append(backend)
-    else:
-        _BACKENDS.insert(index, backend)

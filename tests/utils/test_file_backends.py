@@ -5,23 +5,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import spyglass.utils.nwb_helper_fn as helper
-import spyglass.utils.file_backends as backends_mod
 from spyglass.utils.file_backends import (
     DandiBackend,
     FileBackend,
     KacheryBackend,
     LocalBackend,
     get_backends,
-    register_backend,
 )
-
-
-@pytest.fixture(autouse=True)
-def restore_backend_chain():
-    """Undo any registration, so the chain does not leak between tests."""
-    original = list(backends_mod._BACKENDS)
-    yield
-    backends_mod._BACKENDS[:] = original
 
 
 @pytest.fixture(autouse=True)
@@ -84,18 +74,6 @@ def test_get_backends_returns_a_copy():
     got = get_backends()
     got.clear()
     assert [b.name for b in get_backends()] == ["local", "kachery", "Dandi"]
-
-
-def test_register_backend_appends_by_default():
-    """A registered backend lands at the end of the chain."""
-    register_backend(_FakeStreamBackend())
-    assert [b.name for b in get_backends()][-1] == "fake_stream"
-
-
-def test_register_backend_honors_index():
-    """A backend can be placed ahead of local disk."""
-    register_backend(_FakeStreamBackend(), index=0)
-    assert [b.name for b in get_backends()][0] == "fake_stream"
 
 
 def test_local_backend_has_and_open(tmp_path):

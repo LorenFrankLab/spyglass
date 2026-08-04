@@ -151,9 +151,13 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Add File Backends developer page #XXXX
 
 ### Infrastructure
 
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol,
+    with local, kachery, and DANDI as backends #XXXX
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #XXXX
 - Add cross-platform installer script with Docker support, input validation, and
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
