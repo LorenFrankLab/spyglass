@@ -5,11 +5,26 @@ import pytest
 
 
 class _FakeExternalTable:
+    """Stand-in for a DataJoint external table.
+
+    Supports both access patterns the cleanup code uses: the bulk
+    ``fetch_external_paths()`` and the targeted ``& {"filepath": rel}``
+    restriction, which is how tracking is checked per candidate.
+    """
+
     def __init__(self, external_paths):
         self._external_paths = external_paths
 
     def fetch_external_paths(self):
         return self._external_paths
+
+    def __and__(self, restriction):
+        rel = restriction["filepath"]
+        return [
+            entry
+            for entry in self._external_paths
+            if str(entry[1]).endswith(rel)
+        ]
 
 
 class _EmptyQuery:
@@ -279,7 +294,11 @@ def test_remove_untracked_files_refuses_path_outside_analysis_dir(
     table.__dict__["_analysis_dir"] = str(analysis_dir)
     table._ext_tbl = _FakeExternalTable([])
 
-    table._remove_untracked_files(custom_tables=[], dry_run=False, plan=plan)
+    # min_file_age_hours=0 so the age gate cannot be what makes this
+    # pass -- the containment guard must be what refuses.
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
 
     assert outside_target.exists()
 
@@ -762,14 +781,19 @@ def test_delete_skips_relinked_symlink(common_nwbfile, tmp_path):
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
 
-    link.unlink()
-    link.symlink_to(other)
+    # Re-point WITHOUT changing the leaf inode, so the dev/ino check
+    # cannot be what refuses and the raw-link-target comparison is the
+    # guard actually under test.
+    for access in plan.candidates[original.resolve()].accesses:
+        if access.access_path == link:
+            object.__setattr__(access, "raw_link_target", str(other))
 
     table._remove_untracked_files(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
     assert other.exists(), "re-pointed link's new target must survive"
+    assert original.exists(), "a link whose raw target changed must refuse"
 
 
 def test_delete_refuses_outside_symlink_as_voucher(common_nwbfile, tmp_path):
@@ -1091,6 +1115,17 @@ def test_delete_rechecks_tracking_per_candidate(common_nwbfile, tmp_path):
             self.registered = survivors[0] if survivors else None
             return [("h", self.registered)] if self.registered else []
 
+        def __and__(self, restriction):
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            survivors = [p for p in (first, second) if p.exists()]
+            self.registered = survivors[0] if survivors else None
+            rel = restriction["filepath"]
+            if self.registered and str(self.registered).endswith(rel):
+                return [("h", self.registered)]
+            return []
+
     ext = _LateRegistration()
     table._ext_tbl = ext
 
@@ -1307,6 +1342,14 @@ def test_registry_knowledge_persists_across_candidates(
             survivors = [p for p in (first, second) if p.exists()]
             return [("h", survivors[-1])] if survivors else []
 
+        def __and__(self, restriction):
+            survivors = [p for p in (first, second) if p.exists()]
+            if not survivors:
+                return []
+            rel = restriction["filepath"]
+            tracked = survivors[-1]
+            return [("h", tracked)] if str(tracked).endswith(rel) else []
+
     ephemeral = _Ephemeral()
     state = {"calls": 0}
 
@@ -1324,7 +1367,10 @@ def test_registry_knowledge_persists_across_candidates(
     )
 
     survivors = [p for p in (first, second) if p.exists()]
-    assert survivors, "the table's tracked file must survive its removal"
+    assert len(survivors) == 1, "exactly the tracked file should survive"
+    assert survivors == [
+        second
+    ], "the ephemeral table's tracked file must survive its removal"
 
 
 def test_delete_handles_chained_aliases_regardless_of_order(
@@ -1669,3 +1715,124 @@ def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
 
     assert link.is_symlink(), "tracked link must be preserved"
     assert target.exists()
+
+
+def test_delete_refuses_target_in_another_spyglass_store(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A symlink into the raw store must not delete the raw file.
+
+    `tracked` is built from the analysis external store only, so a raw
+    acquisition file reads as untracked. It is not recomputable, and the
+    age gate cannot help because raw files are old by definition.
+    """
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    acquisition = raw_root / "sub-x_ses-y.nwb"
+    acquisition.write_text("irreplaceable acquisition data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    convenience_link = analysis_dir / "session_copy.nwb"
+    convenience_link.symlink_to(acquisition)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert acquisition.exists(), "raw acquisition file must never be deleted"
+    assert convenience_link.is_symlink(), "the link is left with its target"
+
+
+def test_candidate_rejects_empty_accesses(common_nwbfile, tmp_path):
+    """A candidate with no accesses is unrepresentable.
+
+    Such a candidate passes the structural preflight (its *.nwb loop is
+    vacuous) and then raises from max() partway through the deletion loop,
+    after earlier candidates have already been unlinked.
+    """
+    with pytest.raises(ValueError, match="no access paths"):
+        common_nwbfile.CleanupCandidate(
+            real_path=tmp_path / "x.nwb", target=None, accesses=()
+        )
+
+
+def test_cleanup_unblock_failure_raises_when_called_from_except(
+    common_nwbfile, monkeypatch
+):
+    """An unblock failure must raise even inside a caller's except block.
+
+    sys.exc_info() returns the exception being handled anywhere up the
+    stack, so using it here silently downgraded the failure -- leaving
+    inserts blocked database-wide with only a log line.
+    """
+
+    class _RaisingRegistry:
+        all_classes = []
+
+        def block_new_inserts(self, dry_run):
+            pass
+
+        def unblock_new_inserts(self):
+            raise RuntimeError("unblock_kaboom")
+
+    good_plan = _cleanup_plan(common_nwbfile, scanned=8, tracked=6, delete=1)
+    monkeypatch.setattr(
+        common_nwbfile, "AnalysisRegistry", lambda: _RaisingRegistry()
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_build_untracked_file_plan",
+        lambda self, custom_tables, **kw: good_plan,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_remove_untracked_files",
+        lambda self, custom_tables, dry_run, plan, **kw: (set(), set()),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "get_orphans",
+        lambda self: _EmptyQuery(),
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "cleanup_external",
+        lambda self, dry_run, delete_external_files: [],
+    )
+
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+
+    # The body succeeds; the CALLER is mid-except. This is the case that
+    # sys.exc_info() got wrong.
+    try:
+        raise ValueError("unrelated caller error")
+    except ValueError:
+        with pytest.raises(RuntimeError, match="unblock_kaboom"):
+            common_nwbfile.AnalysisNwbfile.cleanup(table, dry_run=False)
+
+
+def test_scan_skips_symlink_loop_without_aborting(common_nwbfile, tmp_path):
+    """An ELOOP entry is skipped, not fatal.
+
+    One accidental loop must not wedge the weekly sweep -- and with it
+    every later maintenance phase -- since an entry that cannot be stat'd
+    never becomes a deletion candidate anyway.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    good = analysis_dir / "good.nwb"
+    good.write_text("data")
+
+    a = analysis_dir / "loop_a.nwb"
+    b = analysis_dir / "loop_b.nwb"
+    a.symlink_to(b)
+    b.symlink_to(a)
+
+    plan = _plan(_table(common_nwbfile, analysis_dir))
+
+    assert good.resolve() in plan.files_to_delete, "scan must still complete"

@@ -19,7 +19,13 @@ from pynwb.core import ScratchData
 from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
-from spyglass.settings import analysis_dir, raw_dir
+from spyglass.settings import (
+    analysis_dir,
+    raw_dir,
+    recording_dir,
+    sorting_dir,
+    video_dir,
+)
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -175,6 +181,23 @@ class CleanupCandidate:
     real_path: Path
     target: Optional[TargetSnapshot]
     accesses: Tuple[AccessSnapshot, ...]
+
+    def __post_init__(self):
+        """Reject a candidate with no access paths.
+
+        ``newest_ns`` is undefined without at least one access, and an
+        empty-``accesses`` candidate slips through the structural preflight
+        (its ``*.nwb`` loop is vacuous) only to raise from ``max()`` partway
+        through the deletion loop -- after earlier candidates have already
+        been unlinked. Enforcing it here also covers the dry-run path, which
+        returns before the preflight runs.
+        """
+        if not self.accesses:
+            raise ValueError(
+                f"CleanupCandidate for {self.real_path} has no access paths; "
+                "a candidate must be reachable from within the analysis "
+                "directory"
+            )
 
     @property
     def broken(self) -> bool:
@@ -865,19 +888,31 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             ``(real_path, target_or_None, access_snapshot)``, or None when
             the entry vanished mid-scan and should be skipped.
 
-        Raises
-        ------
-        OSError
-            On permission, symlink-loop, or I/O errors. A destructive sweep
-            fails closed rather than guessing.
+        Notes
+        -----
+        Per-entry errors are logged and skipped, not raised: an entry that
+        cannot be stat'd never becomes a deletion candidate, so skipping can
+        only under-clean. Errors from the directory *walk* remain fatal --
+        there a partial view means unseen files, which would skew the
+        deletion-limit denominators.
         """
         try:
             lst = os.lstat(access_path)
-        except FileNotFoundError:
-            return None  # vanished between walk and stat
+        except OSError as err:
+            # Per-ENTRY errors skip; only WALK errors are fatal. An entry
+            # that cannot be stat'd never becomes a candidate, so skipping
+            # can only under-clean, never over-delete -- whereas aborting
+            # lets one bad symlink (a loop, a 0700 parent) wedge the weekly
+            # sweep, and with it every later maintenance phase.
+            logger.warning(f"Skipping unreadable analysis entry: {err}")
+            return None
 
         is_link = stat_module.S_ISLNK(lst.st_mode)
-        raw_target = os.readlink(access_path) if is_link else None
+        try:
+            raw_target = os.readlink(access_path) if is_link else None
+        except OSError as err:
+            logger.warning(f"Skipping unreadable symlink: {err}")
+            return None
         access = AccessSnapshot(
             access_path=access_path,
             is_link=is_link,
@@ -895,6 +930,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if is_link:
                 return real_path, None, access  # broken link
             return None  # regular entry vanished mid-scan
+        except OSError as err:
+            # Symlink loop (ELOOP), unreadable component, or I/O error.
+            # Skip rather than abort, for the reason above.
+            logger.warning(f"Skipping unresolvable analysis entry: {err}")
+            return None
 
         target = TargetSnapshot(
             real_path=real_path,
@@ -1111,20 +1151,60 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             merged[tbl.full_table_name] = tbl
         return list(merged.values())
 
-    def _current_tracked_paths(
-        self, custom_tables: List[SpyglassAnalysis]
-    ) -> Set[Path]:
-        """Re-fetch tracked analysis paths for an act-time check."""
-        tracked = {
-            Path(fp[1]).expanduser().resolve()
-            for fp in self._ext_tbl.fetch_external_paths()
-        }
-        for tbl in custom_tables:
-            tracked.update(
-                Path(fp[1]).expanduser().resolve()
-                for fp in tbl._ext_tbl.fetch_external_paths()
+    @staticmethod
+    def _other_managed_roots() -> List[Path]:
+        """Spyglass stores that analysis cleanup must never delete from.
+
+        ``tracked`` is built from the *analysis* external store only, so a
+        file belonging to another store reads as untracked. Without this,
+        a stray ``ln -s $SPYGLASS_RAW_DIR/sub-x.nwb analysis/copy.nwb``
+        would let the weekly sweep delete a raw acquisition file, which is
+        not recomputable. Checked by path containment rather than by
+        unioning the other stores' externals, so it costs no queries.
+        """
+        roots = []
+        for setting in (raw_dir, recording_dir, sorting_dir, video_dir):
+            if not setting:
+                continue
+            try:
+                roots.append(Path(setting).expanduser().resolve())
+            except OSError:  # unresolvable store dir cannot contain a target
+                continue
+        return roots
+
+    def _is_tracked_now(
+        self,
+        candidate: CleanupCandidate,
+        custom_tables: List[SpyglassAnalysis],
+        *,
+        analysis_root: Path,
+    ) -> bool:
+        """Ask whether this candidate is tracked, right now.
+
+        Tracking is recorded against the in-root access path, not the
+        resolved target, so this can be a targeted restriction per access
+        path instead of fetching and resolving every external row. The
+        previous full-fetch cost O(rows) per candidate -- roughly 0.3 s of
+        `Path.resolve()` per 20k rows, per candidate -- which on a lab-scale
+        backlog dominated the whole sweep.
+        """
+        relatives = []
+        for access in candidate.accesses:
+            location = (
+                access.access_path.parent.resolve() / access.access_path.name
             )
-        return tracked
+            if not location.is_relative_to(analysis_root):
+                continue
+            relatives.append(str(location.relative_to(analysis_root)))
+        if not relatives:
+            return False
+
+        for tbl in [self, *custom_tables]:
+            for relative in relatives:
+                # `filepath` is stored relative to the store location.
+                if tbl._ext_tbl & {"filepath": relative}:
+                    return True
+        return False
 
     @staticmethod
     def _access_still_matches(
@@ -1134,9 +1214,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         Proves the leaf is still the entry that was scanned -- same type,
         inode, timestamps, raw target, and still inside the analysis root.
-        The canonical destination is deliberately NOT re-checked: nothing
-        outside the root is deleted, so where the link points does not
-        confer authority, and requiring it would strand chained aliases.
+        The canonical destination is deliberately NOT re-checked. Target
+        identity is verified separately against the scan snapshot, which is
+        what covers a re-pointed intermediate directory symlink, so the
+        link's current destination is not the authority -- and requiring it
+        here would strand chained aliases.
         """
         try:
             lst = os.lstat(access.access_path)
@@ -1191,10 +1273,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             logger.warning(f"Skipping {real_path}: {reason}")
             return None
 
-        # A symlink provides discoverability, not deletion authority:
-        # nothing outside analysis_root is ever removed, so no access needs
-        # to "vouch" for anything. Accesses are validated only to prove the
-        # leaf we are about to unlink is still the one that was scanned.
+        # An in-root *.nwb access IS the deletion authority: a target is
+        # deletable on any volume, so at least one access must live inside
+        # analysis_root. Accesses are validated to prove two things -- that
+        # the leaf is still the entry that was scanned, and that the
+        # authority for this deletion is genuinely in-root.
         in_root = []
         for access in candidate.accesses:
             try:
@@ -1235,6 +1318,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         if not in_root:
             return _refuse("no access path inside the analysis directory")
 
+        # A target belonging to another Spyglass store is never ours to
+        # delete, however it was reached. `tracked` only knows the analysis
+        # store, so without this a symlink into the raw store would make a
+        # non-recomputable acquisition file look untracked.
+        for managed in self._other_managed_roots():
+            if real_path.is_relative_to(managed):
+                return _refuse(
+                    f"target belongs to another Spyglass store ({managed}); "
+                    "analysis cleanup does not delete from it"
+                )
+
         # Target identity is verified for EVERY live target, in-root or
         # not, because every live target may be deleted. This is also what
         # covers a re-pointed intermediate directory symlink: if the path
@@ -1265,7 +1359,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 return _refuse("target timestamps changed since the scan")
             if st.st_mode != snap.mode:
                 return _refuse("target mode changed since the scan")
-        elif candidate.broken:
+        else:
             try:
                 os.stat(real_path)
             except FileNotFoundError:
@@ -1274,9 +1368,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 return _refuse("broken-link target unreadable")
             else:
                 return _refuse("broken link now resolves")
-        # Remaining case: a live target outside the analysis root. Nothing
-        # to verify, because nothing about it will be touched -- only the
-        # in-root links to it are removed.
 
         return in_root
 
@@ -1400,7 +1491,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # set is the untracked minority, and correctness wins here.
             # The deferred cleanup lease would let this be hoisted again.
             known_tables = self._current_custom_tables(known_tables)
-            if candidate.real_path in self._current_tracked_paths(known_tables):
+            if self._is_tracked_now(
+                candidate, known_tables, analysis_root=analysis_root
+            ):
                 logger.warning(
                     f"Skipping {candidate.real_path}: became tracked since "
                     "the scan"
@@ -1622,6 +1715,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # Full ownership tracking needs a cleanup lease (follow-up).
         registry.block_new_inserts(dry_run=dry_run)
 
+        # An explicit flag, not sys.exc_info(): that returns the exception
+        # being handled ANYWHERE up the calling stack, so a caller shaped
+        # `except Exception: cleanup()` would make it non-None even when the
+        # body succeeded -- silently downgrading an unblock failure that
+        # leaves inserts blocked database-wide.
+        body_failed = False
         try:
             # Inside the try: a throw from get_orphans() previously landed
             # between block and try, leaving insert triggers installed
@@ -1682,14 +1781,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
+        except BaseException:
+            body_failed = True
+            raise
+
         finally:
             if not dry_run:
-                # Capture the outer try-block exception (if any) BEFORE the
-                # inner try: sys.exc_info() inside the inner except returns
-                # the inner exception, not the outer one. We only want to
-                # re-raise an unblock failure when no other exception is
-                # already propagating from the cleanup body.
-                cleanup_exc = sys.exc_info()[1]
                 try:
                     registry.unblock_new_inserts()
                 except Exception as unblock_err:
@@ -1702,10 +1799,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                         "database-wide until restored; run "
                         "AnalysisRegistry().unblock_new_inserts() manually."
                     )
-                    # Re-raise only when no other exception is already
-                    # propagating; otherwise we would mask the original
-                    # cleanup error (the critical log above is the signal).
-                    if cleanup_exc is None:
+                    # Re-raise only when the body itself succeeded;
+                    # otherwise we would mask the original cleanup error
+                    # (the critical log above is the signal).
+                    if not body_failed:
                         raise
 
     def check_all_files(

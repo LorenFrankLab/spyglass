@@ -441,7 +441,7 @@ def pytest_unconfigure(config):
             print(f"  - {failure}")
 
 
-def _teardown_test_data(base_dir):
+def _teardown_test_data(base_dir, data_root=None):
     """Remove generated test data, but only from the canonical test base.
 
     A 'tests' path component proves location, not ownership: a custom
@@ -463,7 +463,9 @@ def _teardown_test_data(base_dir):
     if base_dir is None:
         return
 
-    data_root = Path(__file__).parent / "_data"
+    data_root = (
+        Path(data_root) if data_root else Path(__file__).parent / "_data"
+    )
     canonical = data_root.resolve()
     if Path(base_dir).resolve() != canonical:
         print(
@@ -489,24 +491,32 @@ def _teardown_test_data(base_dir):
     child_failures = []
     for name in owned:
         child = Path(base_dir) / name
-        if child.is_symlink():
-            print(
-                f"Skipping test-data cleanup of {name}: it is a symlink; "
-                "its target is not owned by the test suite"
-            )
-            continue
-        if not child.exists():
-            continue
         try:
+            # Inside the try: is_symlink()/exists() re-raise EACCES, which
+            # would otherwise escape before the aggregation and strand every
+            # later child.
+            if child.is_symlink():
+                print(
+                    f"Skipping test-data cleanup of {name}: it is a symlink; "
+                    "its target is not owned by the test suite"
+                )
+                continue
+            if not child.exists():
+                continue
             if name == "analysis":
                 # unlink() on a symlink removes the LINK, never its target,
                 # so symlinks are removed here like any other entry.
                 # Leaving them would be the dangerous choice: a surviving
                 # leaf link can later authorize cleanup to delete its
                 # external target.
+                # rglob, not glob: analysis files live one level deeper,
+                # at analysis/<session>/<file>.nwb, so a top-level glob
+                # matches nothing and the backlog grows until it trips the
+                # cleanup deletion limits. Files only -- session directories
+                # are left alone, so a concurrent session keeps its tree.
                 # Per-file, so one unremovable entry does not strand the
                 # rest of the directory.
-                for file in child.glob("*.nwb"):
+                for file in child.rglob("*.nwb"):
                     try:
                         file.unlink()
                     except OSError as err:
