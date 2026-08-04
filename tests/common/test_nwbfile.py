@@ -7,9 +7,8 @@ import pytest
 class _FakeExternalTable:
     """Stand-in for a DataJoint external table.
 
-    Supports both access patterns the cleanup code uses: the bulk
-    ``fetch_external_paths()`` and the targeted ``& {"filepath": rel}``
-    restriction, which is how tracking is checked per candidate.
+    Cleanup uses ``fetch_external_paths()`` both while planning and for the
+    canonical per-candidate tracking refresh.
     """
 
     def __init__(self, external_paths):
@@ -17,14 +16,6 @@ class _FakeExternalTable:
 
     def fetch_external_paths(self):
         return self._external_paths
-
-    def __and__(self, restriction):
-        rel = restriction["filepath"]
-        return [
-            entry
-            for entry in self._external_paths
-            if str(entry[1]).endswith(rel)
-        ]
 
 
 class _EmptyQuery:
@@ -680,7 +671,7 @@ def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
 
 
 def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
-    """An in-root *.nwb symlink authorizes deleting whatever it points at.
+    """An in-root link authorizes its live non-protected regular target.
 
     Owner decision: cleanup reclaims across volumes in one pass, which is
     what makes symlinked multi-drive analysis storage usable.
@@ -796,6 +787,47 @@ def test_delete_skips_relinked_symlink(common_nwbfile, tmp_path):
     assert original.exists(), "a link whose raw target changed must refuse"
 
 
+def test_delete_refuses_repointed_intermediate_symlink(
+    common_nwbfile, tmp_path
+):
+    """The complete live alias must still resolve to the planned target.
+
+    Re-pointing an intermediate directory leaves the leaf inode and raw link
+    text unchanged. Target identity alone also cannot detect it when the old
+    target remains in place, so cleanup must re-resolve the full access path
+    before deleting that old target.
+    """
+    volume_a = tmp_path / "volume_a"
+    volume_b = tmp_path / "volume_b"
+    volume_a.mkdir()
+    volume_b.mkdir()
+    old_target = volume_a / "target.nwb"
+    new_target = volume_b / "target.nwb"
+    old_target.write_text("old target must survive")
+    new_target.write_text("new target must survive")
+
+    pivot = tmp_path / "current_volume"
+    pivot.symlink_to(volume_a, target_is_directory=True)
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(pivot / "target.nwb")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    pivot.unlink()
+    pivot.symlink_to(volume_b, target_is_directory=True)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert old_target.exists(), "stale plan must not delete the old target"
+    assert new_target.exists(), "cleanup must not follow the re-pointed chain"
+    assert link.is_symlink(), "a candidate with changed authority is preserved"
+
+
 def test_delete_refuses_outside_symlink_as_voucher(common_nwbfile, tmp_path):
     """A voucher must live inside analysis_dir, not merely be a symlink.
 
@@ -856,6 +888,71 @@ def test_delete_refuses_outside_symlink_as_voucher(common_nwbfile, tmp_path):
     )
 
     assert victim.exists(), "outside link must not vouch for an outside target"
+
+
+def test_delete_refuses_unrelated_in_root_nwb_voucher(common_nwbfile, tmp_path):
+    """An in-root *.nwb link must canonically reach the planned target.
+
+    Suffix and containment preflight alone would accept this forged plan and
+    let an unrelated link authorize deletion of an arbitrary external file.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    victim = volume2 / "victim.nwb"
+    victim.write_text("must survive")
+    decoy = volume2 / "decoy.nwb"
+    decoy.write_text("also survives")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    voucher = analysis_dir / "voucher.nwb"
+    voucher.symlink_to(decoy)
+
+    real = victim.resolve()
+    target_stat = victim.stat()
+    access_stat = voucher.lstat()
+    candidate = common_nwbfile.CleanupCandidate(
+        real_path=real,
+        target=common_nwbfile.TargetSnapshot(
+            real_path=real,
+            dev=target_stat.st_dev,
+            ino=target_stat.st_ino,
+            size=target_stat.st_size,
+            mtime_ns=target_stat.st_mtime_ns,
+            ctime_ns=target_stat.st_ctime_ns,
+            mode=target_stat.st_mode,
+        ),
+        accesses=(
+            common_nwbfile.AccessSnapshot(
+                access_path=voucher,
+                is_link=True,
+                raw_link_target=str(decoy),
+                dev=access_stat.st_dev,
+                ino=access_stat.st_ino,
+                mtime_ns=access_stat.st_mtime_ns,
+                ctime_ns=access_stat.st_ctime_ns,
+            ),
+        ),
+    )
+    plan = common_nwbfile.CleanupPlan(
+        scanned_files={real},
+        tracked_files=set(),
+        files_to_delete={real},
+        empty_files=set(),
+        untracked_files={real},
+        candidates={real: candidate},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+
+    table = _table(common_nwbfile, analysis_dir)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert victim.exists(), "unrelated voucher must not authorize deletion"
+    assert decoy.exists()
+    assert voucher.is_symlink()
 
 
 def test_delete_refuses_plan_with_mismatched_key(common_nwbfile, tmp_path):
@@ -1138,6 +1235,52 @@ def test_delete_rechecks_tracking_per_candidate(common_nwbfile, tmp_path):
     assert survivors == [
         ext.registered
     ], "exactly the late-registered candidate must survive"
+
+
+def test_delete_rechecks_tracking_through_new_alias(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A late registration through an unscanned alias protects its target.
+
+    Candidates are keyed by their resolved target, but DataJoint stores the
+    registered access path. Restricting the act-time query to scan-time alias
+    names misses a new alias and deletes the target out from under it.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("registered data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    scanned_alias = analysis_dir / "scanned.nwb"
+    scanned_alias.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {target.resolve()}
+
+    # Created and registered only after the plan, so this path is absent from
+    # candidate.accesses and can be found only by resolving live externals.
+    new_alias = analysis_dir / "registered_late.nwb"
+    new_alias.symlink_to(target)
+
+    class _LateTable:
+        full_table_name = "`late_nwbfile`.`analysis_nwbfile`"
+        _ext_tbl = _FakeExternalTable([("h", new_alias)])
+
+    class _Registry:
+        all_classes = [_LateTable()]
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", _Registry)
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert target.exists(), "late registration must protect the real target"
+    assert scanned_alias.is_symlink(), "the planned alias must be preserved"
+    assert new_alias.is_symlink(), "the newly registered alias must survive"
 
 
 def test_delete_refuses_forged_broken_plan_naming_outside_link(
@@ -1695,6 +1838,111 @@ def test_external_deletions_are_reported(common_nwbfile, tmp_path, caplog):
     ), "external deletions must be reported with a byte total"
 
 
+def test_external_audit_does_not_claim_failed_unlink(
+    common_nwbfile, tmp_path, monkeypatch, caplog
+):
+    """A failed target unlink must not be reported as reclaimed storage."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    path_type = type(target)
+    real_unlink = path_type.unlink
+
+    def _fail_target_unlink(path, *args, **kwargs):
+        if path == target:
+            raise OSError("simulated target unlink failure")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "unlink", _fail_target_unlink)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="simulated target unlink"):
+            table._remove_untracked_files(
+                custom_tables=[],
+                dry_run=False,
+                plan=plan,
+                min_file_age_hours=0,
+            )
+
+    assert target.exists()
+    assert link.is_symlink()
+    messages = [record.message for record in caplog.records]
+    assert not any(
+        str(target) in message and "Deleted external" in message
+        for message in messages
+    )
+    assert not any("deleted OUTSIDE" in message for message in messages)
+
+
+def test_external_audit_precedes_later_candidate_failure(
+    common_nwbfile, tmp_path, monkeypatch, caplog
+):
+    """A later fatal refresh must not erase an earlier deletion's audit."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    first = volume2 / "first.nwb"
+    second = volume2 / "second.nwb"
+    first.write_text("first")
+    second.write_text("second")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    first_link = analysis_dir / "first.nwb"
+    second_link = analysis_dir / "second.nwb"
+    first_link.symlink_to(first)
+    second_link.symlink_to(second)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    candidates = dict(plan.candidates)
+    plan.candidates.clear()
+    for path in (first, second):
+        plan.candidates[path.resolve()] = candidates[path.resolve()]
+
+    calls = {"count": 0}
+
+    def _fail_second_refresh(snapshot):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("later registry failure")
+        return list(snapshot)
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisNwbfile,
+        "_current_custom_tables",
+        staticmethod(_fail_second_refresh),
+    )
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="later registry failure"):
+            table._remove_untracked_files(
+                custom_tables=[],
+                dry_run=False,
+                plan=plan,
+                min_file_age_hours=0,
+            )
+
+    assert not first.exists(), "first target must have been deleted"
+    assert not first_link.is_symlink()
+    assert second.exists(), "later failure occurs before the second deletion"
+    assert second_link.is_symlink()
+    assert any(
+        "Deleted external analysis target" in record.message
+        and str(first) in record.message
+        for record in caplog.records
+    ), "the successful deletion needs an immediate audit record"
+
+
 def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
     """A tracked link is left alone, link and target both."""
     volume2 = tmp_path / "volume2"
@@ -1717,18 +1965,21 @@ def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
     assert target.exists()
 
 
+@pytest.mark.parametrize(
+    "setting_name", ["raw_dir", "recording_dir", "sorting_dir", "video_dir"]
+)
 def test_delete_refuses_target_in_another_spyglass_store(
-    common_nwbfile, tmp_path, monkeypatch
+    common_nwbfile, tmp_path, monkeypatch, setting_name
 ):
-    """A symlink into the raw store must not delete the raw file.
+    """A symlink into any other managed store must not delete its target.
 
-    `tracked` is built from the analysis external store only, so a raw
-    acquisition file reads as untracked. It is not recomputable, and the
-    age gate cannot help because raw files are old by definition.
+    `tracked` is built from the analysis external store only, so a file in
+    another store reads as untracked. Those files may not be recomputable,
+    and the age gate cannot help when they are already old.
     """
-    raw_root = tmp_path / "raw"
-    raw_root.mkdir()
-    acquisition = raw_root / "sub-x_ses-y.nwb"
+    managed_root = tmp_path / setting_name
+    managed_root.mkdir()
+    acquisition = managed_root / "sub-x_ses-y.nwb"
     acquisition.write_text("irreplaceable acquisition data")
 
     analysis_dir = tmp_path / "analysis"
@@ -1736,7 +1987,7 @@ def test_delete_refuses_target_in_another_spyglass_store(
     convenience_link = analysis_dir / "session_copy.nwb"
     convenience_link.symlink_to(acquisition)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    monkeypatch.setattr(common_nwbfile, setting_name, str(managed_root))
 
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
@@ -1746,6 +1997,34 @@ def test_delete_refuses_target_in_another_spyglass_store(
 
     assert acquisition.exists(), "raw acquisition file must never be deleted"
     assert convenience_link.is_symlink(), "the link is left with its target"
+
+
+def test_managed_root_containment_does_not_match_sibling_prefix(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A sibling named like a protected root is still eligible storage."""
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    sibling = tmp_path / "raw_archive"
+    sibling.mkdir()
+    target = sibling / "recomputable.nwb"
+    target.write_text("analysis result")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert not target.exists(), "path-prefix siblings are not inside raw_dir"
+    assert not link.is_symlink()
 
 
 def test_candidate_rejects_empty_accesses(common_nwbfile, tmp_path):

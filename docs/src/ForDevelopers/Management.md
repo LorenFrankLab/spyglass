@@ -364,12 +364,20 @@ operation treats the analysis directory as a managed resource.
 
 ### How It Works
 
-1. **Discovery**: Finds all custom `AnalysisNwbfile` tables via
-    `AnalysisRegistry`
-2. **Orphan Detection**: For each table, identifies entries with no downstream
-    references
-3. **File Tracking**: Collects all tracked files from all tables
-4. **Cleanup**: Removes database entries and deletes untracked files
+1. **Coordination**: Finds custom `AnalysisNwbfile` tables via
+    `AnalysisRegistry` and blocks inserts into the tables present at startup.
+2. **Planning**: Snapshots the filesystem and resolves tracked external paths
+    from the common and custom tables.
+3. **Validation**: Applies the minimum-age and catastrophic-deletion limits
+    before destructive filesystem work.
+4. **Filesystem cleanup**: Refreshes registry membership and canonical tracking
+    for each candidate, rechecks its live identities, then removes eligible
+    untracked files and leaf symlinks.
+5. **Database cleanup**: Removes custom and common orphan rows and unused
+    DataJoint external entries. Files newly orphaned here are handled by the
+    next run.
+6. **Release**: Removes the insert-blocking triggers, making an unblock failure
+    loud to the caller.
 
 The cleanup process checks:
 
@@ -386,8 +394,8 @@ The cleanup process checks:
 - **Insert blocking**: Temporarily installs `BEFORE INSERT` triggers on the
     analysis tables that exist when cleanup starts. It does **not** block new
     table *registration*: a custom analysis table declared mid-cleanup gets no
-    trigger, which is why cleanup re-reads registry membership and tracked
-    paths before every deletion candidate
+    trigger, which is why cleanup re-reads registry membership and resolves
+    every currently tracked external path before every deletion candidate.
 - **Filesystem deletion limits**: Refuses destructive cleanup when the sweep
     would delete more than `max_delete_fraction` (default 0.9) of the files it
     was eligible to act on -- the deletions plus the scanned files it
@@ -414,25 +422,38 @@ The cleanup process checks:
     pass. A dangling link has only the link removed. Directory symlinks are
     not followed, so a symlinked session directory stays invisible to
     cleanup.
-- **Cross-volume deletions are logged**: when a deleted target lay outside
-    the analysis directory, its path, size, and a running byte total are
-    reported, so the weekly log shows exactly what was reclaimed and from
-    where.
+- **Cross-volume deletions are logged**: after an external target is
+    successfully unlinked, its path and size are logged immediately. A final
+    count, byte total, and list of roots summarize the run. Failed unlinks are
+    never reported as successful, and a later candidate failure cannot hide an
+    earlier successful external deletion.
 
 **Deletion authority**: an in-root `*.nwb` symlink authorizes deletion of
-whatever it points at, on any volume. This is a deliberate choice — it is
-what makes symlinked multi-drive analysis storage usable — and it means
-`analysis_dir` must be treated as a privileged directory. Anyone who can
-create a symlink there can direct cleanup at its target, and cleanup runs
-unattended from cron, potentially with elevated privileges. Before deletion
-each target's device, inode, size, mode, and timestamps must match the scan,
-which also catches a re-pointed intermediate directory symlink, and the
-minimum-age gate protects files still being written or awaiting
+the regular target it resolves to during final pre-delete validation, including
+targets on another volume. Targets beneath the configured raw, recording,
+sorting, or video store roots are always refused: the analysis registry cannot
+establish ownership of files in those stores, and raw data may be
+non-recomputable. This deliberate cross-volume behavior makes symlinked
+multi-drive analysis storage usable, but it also means `analysis_dir` must be
+treated as a privileged directory. Anyone who can create a symlink there can
+direct cleanup at another non-protected target, and cleanup runs unattended
+from cron, potentially with elevated privileges.
+
+During final pre-delete validation, cleanup resolves all current external-table
+paths and skips a target that has become tracked through any alias. It also
+requires each authorizing leaf to remain inside `analysis_dir`, retain its
+scanned identity and raw link text, and resolve to the scanned target. The
+target's device, inode, size, mode, and timestamps must still match the scan.
+The minimum-age gate separately protects files still being written or awaiting
 registration. Restrict write access to `analysis_dir` accordingly.
 
 
 **Not concurrency-safe**: two cleanups running at once can adopt and later drop
-each other's insert-blocking triggers. Run cleanup from one process at a time.
+each other's insert-blocking triggers. Validation and unlink are also separate
+filesystem operations, so a concurrent writer can change tracking, an alias,
+or a target in the remaining check-to-unlink window. Run cleanup from one
+process at a time and do not mutate eligible analysis paths concurrently. A
+shared cleanup/writer protocol is required to close this window completely.
 
 ### Custom Tables
 

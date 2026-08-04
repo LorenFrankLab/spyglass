@@ -209,8 +209,11 @@ for label, interval_data in results.groupby("interval_labels"):
     shared/production filesystems #1573 #1574
 - `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
     targets, so analysis files spread across volumes are cleaned in one pass.
-    Gated by a 24-hour minimum file age and an act-time identity and provenance
-    recheck. Directory symlinks are still not followed #1573 #1574
+    Gated by a 24-hour minimum file age, a canonical act-time tracking refresh,
+    and target/access identity checks. Targets in configured raw, recording,
+    sorting, or video stores are refused; other successful cross-volume
+    deletions are logged immediately. Directory symlinks are still not followed
+    #1573 #1574
 - Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
     the files the sweep was eligible to act on #1573 #1574
 - Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte

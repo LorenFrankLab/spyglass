@@ -1172,39 +1172,30 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 continue
         return roots
 
-    def _is_tracked_now(
-        self,
-        candidate: CleanupCandidate,
-        custom_tables: List[SpyglassAnalysis],
-        *,
-        analysis_root: Path,
-    ) -> bool:
-        """Ask whether this candidate is tracked, right now.
+    def _current_tracked_paths(
+        self, custom_tables: List[SpyglassAnalysis]
+    ) -> Set[Path]:
+        """Re-fetch and canonically resolve every tracked analysis path.
 
-        Tracking is recorded against the in-root access path, not the
-        resolved target, so this can be a targeted restriction per access
-        path instead of fetching and resolving every external row. The
-        previous full-fetch cost O(rows) per candidate -- roughly 0.3 s of
-        `Path.resolve()` per 20k rows, per candidate -- which on a lab-scale
-        backlog dominated the whole sweep.
+        A candidate is keyed by its resolved target, while DataJoint stores
+        the access path used for registration. A file can therefore become
+        tracked after the scan through a *new* alias that is absent from the
+        candidate's access snapshots. Exact restrictions on those snapshots
+        miss that registration and can delete its target. Resolving the live
+        external paths is the only complete act-time comparison available
+        without a cleanup/writer lease.
+
+        Registry and external-table errors deliberately propagate. Failing
+        closed may under-clean; falling back to stale tracking can delete a
+        newly registered file.
         """
-        relatives = []
-        for access in candidate.accesses:
-            location = (
-                access.access_path.parent.resolve() / access.access_path.name
-            )
-            if not location.is_relative_to(analysis_root):
-                continue
-            relatives.append(str(location.relative_to(analysis_root)))
-        if not relatives:
-            return False
-
+        tracked = set()
         for tbl in [self, *custom_tables]:
-            for relative in relatives:
-                # `filepath` is stored relative to the store location.
-                if tbl._ext_tbl & {"filepath": relative}:
-                    return True
-        return False
+            tracked.update(
+                Path(path).expanduser().resolve()
+                for _, path in tbl._ext_tbl.fetch_external_paths()
+            )
+        return tracked
 
     @staticmethod
     def _access_still_matches(
@@ -1214,15 +1205,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         Proves the leaf is still the entry that was scanned -- same type,
         inode, timestamps, raw target, and still inside the analysis root.
-        The canonical destination is deliberately NOT re-checked. Target
-        identity is verified separately against the scan snapshot, which is
-        what covers a re-pointed intermediate directory symlink, so the
-        link's current destination is not the authority -- and requiring it
-        here would strand chained aliases.
+        Its canonical destination was checked while the whole alias chain
+        still existed, during the final validation before target deletion.
+        It cannot be checked here after the target has intentionally been
+        removed; requiring resolution at this point would strand chained
+        aliases.
         """
         try:
             lst = os.lstat(access.access_path)
-        except OSError:
+        except (OSError, RuntimeError):
             return False
         if not stat_module.S_ISLNK(lst.st_mode):
             return False
@@ -1236,7 +1227,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         try:
             if os.readlink(access.access_path) != access.raw_link_target:
                 return False
-        except OSError:
+        except (OSError, RuntimeError):
             return False
         # Still inside the analysis root, resolving the PARENT so the link
         # itself is not followed.
@@ -1244,14 +1235,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             location = (
                 access.access_path.parent.resolve() / access.access_path.name
             )
-        except OSError:
+        except (OSError, RuntimeError):
             return False
         return location.is_relative_to(analysis_root)
 
     def _candidate_still_matches(
         self, candidate: CleanupCandidate, *, analysis_root: Path
     ) -> Optional[List[AccessSnapshot]]:
-        """Re-verify a candidate immediately before deleting it.
+        """Re-verify a candidate during final pre-delete validation.
 
         Returns
         -------
@@ -1275,9 +1266,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         # An in-root *.nwb access IS the deletion authority: a target is
         # deletable on any volume, so at least one access must live inside
-        # analysis_root. Accesses are validated to prove two things -- that
-        # the leaf is still the entry that was scanned, and that the
-        # authority for this deletion is genuinely in-root.
+        # analysis_root. Validate both the scanned leaf identity and its live
+        # canonical destination while every alias in a possible chain still
+        # exists. The later leaf unlink check cannot resolve the destination
+        # because the target has intentionally been removed by then.
         in_root = []
         for access in candidate.accesses:
             try:
@@ -1301,9 +1293,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 )
             # Resolve the PARENT, not the link itself -- resolving the link
             # would follow it to the target.
-            location = (
-                access.access_path.parent.resolve() / access.access_path.name
-            )
+            try:
+                location = (
+                    access.access_path.parent.resolve()
+                    / access.access_path.name
+                )
+            except (OSError, RuntimeError):
+                return _refuse(
+                    f"{access.access_path} parent could not be resolved"
+                )
             if not location.is_relative_to(analysis_root):
                 continue
             if access.is_link:
@@ -1313,6 +1311,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     return _refuse(f"{access.access_path} readlink failed")
                 if raw != access.raw_link_target:
                     return _refuse(f"{access.access_path} was re-pointed")
+            try:
+                live_target = Path(os.path.realpath(access.access_path))
+            except (OSError, RuntimeError):
+                return _refuse(f"{access.access_path} could not be resolved")
+            if live_target != real_path:
+                return _refuse(
+                    f"{access.access_path} no longer resolves to the "
+                    "planned target"
+                )
             in_root.append(access)
 
         if not in_root:
@@ -1329,11 +1336,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     "analysis cleanup does not delete from it"
                 )
 
-        # Target identity is verified for EVERY live target, in-root or
-        # not, because every live target may be deleted. This is also what
-        # covers a re-pointed intermediate directory symlink: if the path
-        # now resolves to a different file, its identity will not match the
-        # snapshot and the candidate is skipped.
+        # Target identity is verified for EVERY live target, in-root or not,
+        # because every live target may be deleted. The access checks above
+        # separately prove that a current in-root *.nwb path still resolves
+        # to this exact target, including through intermediate symlinks.
         if not candidate.broken:
             try:
                 st = os.stat(real_path)
@@ -1382,8 +1388,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     ) -> tuple[Set[Path], Set[Path]]:
         """Remove analysis files that are empty (0 bytes) or not tracked.
 
-        WARNING: This function makes `analysis_dir` a privileged directory and
-        will delete files in it that are not tracked in ANY schema externals.
+        WARNING: This function makes `analysis_dir` a privileged directory.
+        An in-root ``*.nwb`` symlink authorizes deletion of its resolved target
+        on another volume when that target is not tracked in ANY schema
+        externals. Both the live alias destination and target identity are
+        re-verified during the final validation before deletion. Validation
+        and unlink are separate filesystem operations; callers must prevent
+        concurrent writers from mutating eligible paths during cleanup.
 
         NOTE: Subprocess would be faster, but this prioritizes cross-platform
         compatibility.
@@ -1485,15 +1496,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         deleted_external = []
         for candidate in plan.candidates.values():
             # Tracking and registry membership are re-read for EVERY
-            # candidate, not once up front: a file can be registered, or a
-            # whole custom table declared, while an earlier candidate is
-            # being deleted. Costs one fetch per candidate; the candidate
-            # set is the untracked minority, and correctness wins here.
-            # The deferred cleanup lease would let this be hoisted again.
+            # candidate, not once up front: a file can be registered through
+            # a new alias, or a whole custom table declared, while an earlier
+            # candidate is being deleted. Canonically resolving every current
+            # external path is intentionally conservative; an exact query on
+            # the scan-time aliases cannot discover a new alias to this same
+            # target. The deferred cleanup/writer lease would let this be
+            # hoisted or indexed safely.
             known_tables = self._current_custom_tables(known_tables)
-            if self._is_tracked_now(
-                candidate, known_tables, analysis_root=analysis_root
-            ):
+            if candidate.real_path in self._current_tracked_paths(known_tables):
                 logger.warning(
                     f"Skipping {candidate.real_path}: became tracked since "
                     "the scan"
@@ -1519,15 +1530,26 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             )
             if not in_root:
                 continue
+            # Validation and unlink cannot be one atomic filesystem operation.
+            # The caller must exclude concurrent writers from eligible paths;
+            # a shared cleanup/writer lease is the tracked follow-up.
             try:
                 if not candidate.broken:
-                    if not candidate.real_path.is_relative_to(analysis_root):
-                        # Cross-volume deletion: record it so the weekly log
-                        # shows what was reclaimed outside the analysis dir.
-                        deleted_external.append(
-                            (candidate.real_path, candidate.target.size)
-                        )
+                    is_external = not candidate.real_path.is_relative_to(
+                        analysis_root
+                    )
                     candidate.real_path.unlink()
+                    if is_external:
+                        # Record only after unlink succeeds. Emit an immediate
+                        # durable audit entry as well as the end-of-run summary:
+                        # a later registry/DB failure must not erase evidence
+                        # of an irreversible cross-volume deletion.
+                        record = (candidate.real_path, candidate.target.size)
+                        deleted_external.append(record)
+                        logger.warning(
+                            "Deleted external analysis target "
+                            f"{record[0]} ({record[1]} bytes)"
+                        )
                 # Each leaf is re-checked immediately before its own
                 # unlink, never batched: a link approved earlier in the
                 # pass could be replaced by a regular file that a blind
@@ -1555,8 +1577,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             logger.warning(
                 f"  {len(deleted_external)} symlink targets deleted OUTSIDE "
                 f"the analysis directory ({total} bytes reclaimed). An "
-                "in-root *.nwb symlink authorizes deletion of whatever it "
-                f"points at. Roots touched: {roots}"
+                "in-root *.nwb symlink authorizes deletion of the "
+                "non-protected external target it resolved to during "
+                "final validation. "
+                f"Roots touched: {roots}"
             )
             for path, size in sorted(deleted_external):
                 logger.info(f"    deleted external {path} ({size} bytes)")
@@ -1639,13 +1663,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         custom AnalysisNwbfile tables to prevent premature deletion.
 
         Process:
-            1. For each custom analysis table:
+            1. Discover custom tables and snapshot filesystem/tracking state.
+            2. Validate the complete untracked-file deletion plan.
+            3. Re-check tracking, age, alias authority, and target identity;
+               then delete eligible filesystem candidates.
+            4. For each custom analysis table:
                a. Delete orphaned entries (no downstream references)
                b. Clean up unused external file entries
                c. Remove valid entries from common orphan list
-            2. Delete remaining common orphans
-            3. Clean up common external entries
-            4. Delete empty files (0 bytes)
+            5. Delete remaining common orphans.
+            6. Clean up common external entries without deleting their files.
 
         Example:
             from spyglass.common import AnalysisNwbfile
@@ -1669,11 +1696,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             If False, apply the cleanup changes, including deleting orphaned
             entries and associated files.
         max_delete_fraction : float
-            Maximum fraction of scanned analysis NWB files that may be deleted
-            by filesystem cleanup. Set high by default (0.9) so it only
-            catches a catastrophically misconfigured analysis directory (one
-            where the sweep would wipe nearly everything), not routine large
-            cleanups. Defaults to 0.9.
+            Maximum fraction of eligible analysis NWB files that may be
+            deleted by filesystem cleanup. The eligible set is the planned
+            deletions plus scanned files recognized as tracked; age-deferred
+            files are excluded. Set high by default (0.9) so it catches a
+            catastrophically misconfigured analysis directory rather than
+            routine large cleanups. Defaults to 0.9.
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
             files found in the scan. At the default ``max_delete_fraction``
@@ -1689,6 +1717,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             not yet registered -- notably a file written to another volume
             and symlinked in before its row is inserted. Defaults to 24.0.
             Pass 0 only for intentional immediate cleanup.
+
+        Raises
+        ------
+        ValueError
+            If a numeric safety limit is non-finite or outside its bounds.
+        RuntimeError
+            If insert blocking or unblocking fails, a destructive plan is
+            refused or malformed, or a filesystem deletion fails. Registry,
+            external-table, and filesystem inspection errors also propagate
+            so destructive cleanup fails closed.
         """
         # Validate before anything happens. An unvalidated NaN or inf would
         # make every comparison False and silently disable the guard.
@@ -1812,8 +1850,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         Iterates through common and all custom AnalysisNwbfile tables,
         checking file existence and readability. Populates AnalysisFileIssues
-        table with any problems found. This is a read-only monitoring operation
-        that can be run independently of cleanup at different frequencies.
+        with any problems found. This monitoring operation does not delete
+        files, but it does write issue rows and can be run independently of
+        cleanup at different frequencies.
 
         Parameters
         ----------
