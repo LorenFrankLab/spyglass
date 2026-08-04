@@ -249,7 +249,7 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
-- Add pytest config options for docker volume directory, name, and port #XXXX
+- Add pytest config options for docker volume directory, name, and port #1661
 
 ### Pipelines
 
