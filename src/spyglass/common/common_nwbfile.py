@@ -1161,15 +1161,27 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         would let the weekly sweep delete a raw acquisition file, which is
         not recomputable. Checked by path containment rather than by
         unioning the other stores' externals, so it costs no queries.
+
+        Resolution failures abort cleanup. Silently omitting an unavailable
+        root would disable the corresponding deletion guard and fail open.
         """
         roots = []
-        for setting in (raw_dir, recording_dir, sorting_dir, video_dir):
+        for store_name, setting in (
+            ("raw", raw_dir),
+            ("recording", recording_dir),
+            ("sorting", sorting_dir),
+            ("video", video_dir),
+        ):
             if not setting:
                 continue
             try:
                 roots.append(Path(setting).expanduser().resolve())
-            except OSError:  # unresolvable store dir cannot contain a target
-                continue
+            except (OSError, RuntimeError) as err:
+                raise RuntimeError(
+                    "Cannot resolve protected Spyglass "
+                    f"{store_name} store root {setting!r}; refusing "
+                    "analysis cleanup"
+                ) from err
         return roots
 
     def _current_tracked_paths(

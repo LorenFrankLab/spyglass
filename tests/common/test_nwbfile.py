@@ -1999,6 +1999,48 @@ def test_delete_refuses_target_in_another_spyglass_store(
     assert convenience_link.is_symlink(), "the link is left with its target"
 
 
+def test_delete_aborts_when_protected_store_root_cannot_be_resolved(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A protected-store resolution failure must not disable protection."""
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    acquisition = raw_root / "sub-x_ses-y.nwb"
+    acquisition.write_text("irreplaceable acquisition data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    convenience_link = analysis_dir / "session_copy.nwb"
+    convenience_link.symlink_to(acquisition)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    original_resolve = common_nwbfile.Path.resolve
+
+    def _fail_for_raw_root(path, *args, **kwargs):
+        if path == raw_root:
+            raise OSError("protected store is temporarily unavailable")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(common_nwbfile.Path, "resolve", _fail_for_raw_root)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot resolve protected Spyglass raw store root",
+    ):
+        table._remove_untracked_files(
+            custom_tables=[],
+            dry_run=False,
+            plan=plan,
+            min_file_age_hours=0,
+        )
+
+    assert acquisition.exists(), "resolution failure must preserve the target"
+    assert convenience_link.is_symlink(), "the authorizing link must survive"
+
+
 def test_managed_root_containment_does_not_match_sibling_prefix(
     common_nwbfile, tmp_path, monkeypatch
 ):
