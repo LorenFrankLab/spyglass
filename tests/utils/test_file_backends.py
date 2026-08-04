@@ -88,7 +88,7 @@ def test_local_backend_has_and_open(tmp_path):
     assert backend.supports_streaming is False
 
     with patch(
-        "spyglass.utils.file_backends.open_local_nwb",
+        "spyglass.utils.file_backends._open_local_nwb",
         return_value=("io", "nwbfile"),
     ) as mock_open:
         assert backend.open(str(present)) == ("io", "nwbfile")
@@ -101,7 +101,7 @@ def test_download_only_backend_uses_default_open(tmp_path):
     target = str(tmp_path / "file.nwb")
 
     with patch(
-        "spyglass.utils.file_backends.open_local_nwb",
+        "spyglass.utils.file_backends._open_local_nwb",
         return_value=("io", "nwbfile"),
     ) as mock_open:
         result = backend.open(target)

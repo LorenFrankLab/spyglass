@@ -253,6 +253,7 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Refactor remote file resolution to uniform `FileBackend` protocol #1662
 
 ### Pipelines
 

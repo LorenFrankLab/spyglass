@@ -116,10 +116,10 @@ class FileBackend(Protocol):
                 f"Backend '{self.name}' could not download "
                 + f"{Path(nwb_file_path).name}"
             )
-        return open_local_nwb(nwb_file_path)
+        return _open_local_nwb(nwb_file_path)
 
 
-def open_local_nwb(
+def _open_local_nwb(
     nwb_file_path: str,
 ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
     """Open an NWB file from local disk without caching it.
@@ -154,7 +154,7 @@ class LocalBackend(FileBackend):
 
     def open(self, nwb_file_path: str) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
         """Open the file from disk."""
-        return open_local_nwb(nwb_file_path)
+        return _open_local_nwb(nwb_file_path)
 
 
 class KacheryBackend(FileBackend):
