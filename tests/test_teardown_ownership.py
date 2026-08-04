@@ -5,8 +5,9 @@ only on the repository's own tests/_data, and never through a symlink --
 were previously unpinned, so removing either would have silently let a
 developer's real data be removed by `pytest --base-dir ~/somewhere/tests`.
 
-These are pure filesystem tests: `data_root` is injected, so no database,
-no Docker, and no session fixtures are involved.
+Injecting `data_root` makes the teardown behavior testable with `tmp_path`.
+The repository's session-wide fixtures still use the normal MySQL/Docker test
+harness when this module is run through the full suite.
 """
 
 import pytest
@@ -37,16 +38,16 @@ def test_canonical_base_is_cleaned(base):
     assert (base / "raw" / "keep.nwb").exists(), "raw must be preserved"
 
 
-def test_nested_analysis_files_are_removed(base):
-    """Nested analysis files must be cleaned, not just top-level ones.
+def test_nested_analysis_files_are_preserved_for_concurrent_sessions(base):
+    """Only flat leaves are removed without per-run session ownership.
 
-    Files live at analysis/<session>/<file>.nwb, so a non-recursive glob
-    matches nothing and the backlog grows until it trips the cleanup
-    deletion limits.
+    Multiple pytest processes can share the analysis base. Teardown cannot
+    identify which process owns a nested session, so traversing those
+    directories could delete another run's active file.
     """
     _teardown_test_data(base, data_root=base)
 
-    assert not (base / "analysis" / "session_a" / "nested.nwb").exists()
+    assert (base / "analysis" / "session_a" / "nested.nwb").exists()
     assert not (base / "analysis" / "flat.nwb").exists()
 
 

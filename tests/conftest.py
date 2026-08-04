@@ -451,8 +451,10 @@ def _teardown_test_data(base_dir, data_root=None):
 
     `analysis` is cleaned non-recursively, matching master, because
     concurrent pytest sessions are supported (--container-name /
-    --container-port) and share this base by default, so an rmtree over
-    nested session directories could erase another run's active files.
+    --container-port) and share this base by default. Without per-run
+    ownership metadata, traversing nested session directories could erase
+    another run's active files. Nested analysis cleanup is therefore deferred
+    until the test suite has a per-base session lock or ownership manifest.
 
     NOTE: the remaining subdirectories ARE removed recursively, exactly as
     master does. That carries the same concurrent-session race; this
@@ -509,14 +511,15 @@ def _teardown_test_data(base_dir, data_root=None):
                 # Leaving them would be the dangerous choice: a surviving
                 # leaf link can later authorize cleanup to delete its
                 # external target.
-                # rglob, not glob: analysis files live one level deeper,
-                # at analysis/<session>/<file>.nwb, so a top-level glob
-                # matches nothing and the backlog grows until it trips the
-                # cleanup deletion limits. Files only -- session directories
-                # are left alone, so a concurrent session keeps its tree.
+                # Deliberately non-recursive: analysis files normally live at
+                # analysis/<session>/<file>.nwb, but this shared test base has
+                # no record of which session belongs to which pytest process.
+                # A recursive sweep could unlink another run's active file.
+                # Flat leaves are safe to remove; nested cleanup waits for a
+                # per-run ownership mechanism.
                 # Per-file, so one unremovable entry does not strand the
                 # rest of the directory.
-                for file in child.rglob("*.nwb"):
+                for file in child.glob("*.nwb"):
                     try:
                         file.unlink()
                     except OSError as err:
