@@ -13,6 +13,23 @@ from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("spikesorting_group_v1")
 
+# Operators accepted in UnitSelectionParams.unit_criteria, each applied
+# elementwise to one column of the units table
+UNIT_CRITERIA_OPERATORS = {
+    ">": np.greater,
+    ">=": np.greater_equal,
+    "<": np.less,
+    "<=": np.less_equal,
+    "==": np.equal,
+    "!=": np.not_equal,
+    "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
+    "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
+    "isin": lambda vals, target: np.isin(vals, np.atleast_1d(target)),
+    "notin": lambda vals, target: ~np.isin(vals, np.atleast_1d(target)),
+}
+# Curation label columns, v0: "label", v1: "curation_label"
+CURATION_LABEL_COLUMNS = ("label", "curation_label")
+
 
 @schema
 class UnitSelectionParams(SpyglassMixin, dj.Manual):
@@ -26,6 +43,12 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
         list of labels to include, by default None
     exclude_labels : List[str], optional
         list of labels to exclude, by default None
+    label_columns : List[str], optional
+        additional units table columns (e.g. ["brain_region"]) whose values are
+        cast to strings and appended to the unit's labels, by default None
+    unit_criteria : dict, optional
+        criteria on units table columns the unit must satisfy, by default None.
+        See `SortedSpikesGroup.filter_units_by_criteria`
     """
 
     definition = """
@@ -33,24 +56,14 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
     ---
     include_labels = Null: longblob
     exclude_labels = Null: longblob
+    label_columns = Null: longblob # extra units columns to treat as labels
+    unit_criteria = Null: longblob # column -> criterion the unit must satisfy
     """
     # NOTE: pk reduced from 128 to 32 to avoid long primary key error
     contents = [
-        [
-            "all_units",
-            [],
-            [],
-        ],
-        [
-            "exclude_noise",
-            [],
-            ["noise", "mua"],
-        ],
-        [
-            "default_exclusion",
-            [],
-            ["noise", "mua"],
-        ],
+        ["all_units", [], [], [], {}],
+        ["exclude_noise", [], ["noise", "mua"], [], {}],
+        ["default_exclusion", [], ["noise", "mua"], [], {}],
     ]
 
     @classmethod
@@ -139,6 +152,59 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             include_mask[ind] = True
         return include_mask
 
+    @staticmethod
+    def filter_units_by_criteria(units_df, unit_criteria: dict) -> np.ndarray:
+        """Filter units on arbitrary columns of the units table
+
+        Parameters
+        ----------
+        units_df : pd.DataFrame
+            units table of one sorting, one row per unit
+        unit_criteria : dict
+            column name to {operator: value}, or to a bare value or list of
+            values as shorthand for {"isin": value}. A unit is included only if
+            it satisfies every criterion. Operators are ">", ">=", "<", "<=",
+            "==", "!=", "between" and "outside" (an inclusive [low, high]
+            pair), "isin" and "notin".
+
+        Returns
+        -------
+        np.ndarray
+            boolean mask, True for each unit satisfying all criteria
+
+        Notes
+        -----
+        Units whose value is NaN fail every numeric comparison. A criterion
+        naming a column the sorting does not have is skipped with a warning;
+        the remaining criteria still apply. Sortings in one group may not
+        share the same columns (e.g. if they were curated differently),
+        so a criterion may apply to only some of them.
+        """
+        include_mask = np.ones(len(units_df), dtype=bool)
+
+        for column, criterion in (unit_criteria or {}).items():
+            if column not in units_df:
+                logger.warning(
+                    f"Unit criteria column '{column}' not in units table. "
+                    + "Skipping this criterion."
+                )
+                continue
+
+            if not isinstance(criterion, dict):  # shorthand for membership
+                criterion = {"isin": criterion}
+            values = np.asarray(units_df[column].to_list())
+
+            for operator, value in criterion.items():
+                if operator not in UNIT_CRITERIA_OPERATORS:
+                    raise ValueError(
+                        f"Invalid unit criteria operator '{operator}' for "
+                        + f"column '{column}'. Expected one of "
+                        + f"{list(UNIT_CRITERIA_OPERATORS)}"
+                    )
+                include_mask &= UNIT_CRITERIA_OPERATORS[operator](values, value)
+
+        return include_mask
+
     @classmethod
     def fetch_spike_data(
         cls,
@@ -178,10 +244,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             )
         ).fetch("spikesorting_merge_id")
 
-        # get the filtering parameters
-        include_labels, exclude_labels = (UnitSelectionParams & key).fetch1(
-            "include_labels", "exclude_labels"
-        )
+        # get the filtering parameters. label_columns and unit_criteria are
+        # fetched by `get` so that this still works against a table that has
+        # not yet been altered to add them
+        filter_params = (UnitSelectionParams & key).fetch1()
+        include_labels = filter_params["include_labels"]
+        exclude_labels = filter_params["exclude_labels"]
+        label_columns = filter_params.get("label_columns")
+        unit_criteria = filter_params.get("unit_criteria")
 
         # get the spike times for each merge_id
         spike_times = []
@@ -198,29 +268,28 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 # case where no units found or curation removed all units
                 continue
 
-            sorting_spike_times = nwb_file[nwb_field_name][
-                "spike_times"
-            ].to_list()
+            units_df = nwb_file[nwb_field_name]
+            sorting_spike_times = units_df["spike_times"].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
                 for unit_id in range(len(sorting_spike_times))
             ]
 
+            include_unit = np.ones(len(sorting_spike_times), dtype=bool)
+
             # filter the spike times based on the labels if present
-            group_col = (  # v0: "label", v1: "curation_label"
-                c
-                for c in nwb_file[nwb_field_name].columns
-                if c in ("label", "curation_label")
-            )
-            group_labels = nwb_file[nwb_field_name].get(
-                next(group_col, None), None
+            unit_labels = _compile_unit_labels(units_df, label_columns)
+            if unit_labels is not None and not test_mode:
+                include_unit &= SortedSpikesGroup.filter_units(
+                    unit_labels, include_labels, exclude_labels
+                )
+
+            # filter on arbitrary criteria over the units table columns
+            include_unit &= SortedSpikesGroup.filter_units_by_criteria(
+                units_df, unit_criteria
             )
 
-            if group_labels is not None and not test_mode:
-                group_label_list = group_labels.to_list()
-                include_unit = SortedSpikesGroup.filter_units(
-                    group_label_list, include_labels, exclude_labels
-                )
+            if not include_unit.all():
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
                 )
@@ -343,6 +412,33 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         if return_unit_ids:
             return firing_rate, unit_ids
         return firing_rate
+
+
+def _compile_unit_labels(units_df, label_columns=None):
+    """Labels of each unit: the curation labels plus any label_columns values
+
+    Returns a list of list of str, or None if the sorting has no label columns.
+    """
+    columns = [c for c in CURATION_LABEL_COLUMNS if c in units_df]
+    for column in label_columns or []:
+        if column not in units_df:
+            logger.warning(f"Label column '{column}' not in units table")
+        else:
+            columns.append(column)
+
+    if not columns:
+        return None
+
+    unit_labels = [[] for _ in range(len(units_df))]
+    for column in columns:
+        for labels, value in zip(unit_labels, units_df[column].to_list()):
+            labels.extend(
+                [str(v) for v in value]
+                if isinstance(value, (list, tuple, np.ndarray))
+                else [str(value)]
+            )
+
+    return unit_labels
 
 
 def _get_spike_obj_name(nwb_file, allow_empty=False):
