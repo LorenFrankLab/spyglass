@@ -1,5 +1,6 @@
+import re
 import warnings
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -8,6 +9,38 @@ import spikeinterface as si
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.utils import logger
+
+_DIGIT_RUN = re.compile(r"(\d+)")
+
+
+def natural_sort_key(name) -> List[Tuple[int, int, str]]:
+    """Build a sort key that orders digit runs numerically and text lexically.
+
+    Electrode group names are often plain numbers ("0", "1", "10"), but NWB
+    files may name their groups descriptively instead ("probe1_shank1"). This
+    key preserves the numeric ordering of the former while still giving a
+    total order for the latter, so that names like "shank2" sort before
+    "shank10" rather than after.
+
+    Parameters
+    ----------
+    name : str
+        The name to build a sort key for. Cast to str before splitting, so
+        numpy string scalars and integers are both accepted.
+
+    Returns
+    -------
+    List[Tuple[int, int, str]]
+        One (kind, number, text) triple per run in the name. Digit runs use
+        kind 0 and compare on the number field, text runs use kind 1 and
+        compare on the case-folded text field. Every triple has the same
+        field types, so no comparison ever mixes int with str.
+    """
+    return [
+        (0, int(part), "") if part.isdigit() else (1, 0, part.lower())
+        for part in _DIGIT_RUN.split(str(name))
+        if part
+    ]
 
 
 def get_group_by_shank(
@@ -47,7 +80,9 @@ def get_group_by_shank(
     ).fetch()
 
     e_groups = list(np.unique(electrodes["electrode_group_name"]))
-    e_groups.sort(key=int)  # sort electrode groups numerically
+    # Numeric-aware sort. Plain `key=int` raised ValueError on descriptive
+    # group names such as "probe1_shank1". See issue #1623.
+    e_groups.sort(key=natural_sort_key)
 
     sort_group = 0
     sg_keys, sge_keys = list(), list()

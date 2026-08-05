@@ -350,6 +350,9 @@ for label, interval_data in results.groupby("interval_labels"):
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Sort electrode group names with a numeric-aware natural sort in
+        `get_group_by_shank`, so `SortGroup.set_group_by_shank` no longer raises
+        `ValueError` on descriptive names such as `probe1_shank1` #1623
 
 ## [0.5.5] (Aug 6, 2025)
 
