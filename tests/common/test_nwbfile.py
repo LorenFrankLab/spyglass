@@ -2087,7 +2087,24 @@ def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "setting_name", ["raw_dir", "recording_dir", "sorting_dir", "video_dir"]
+    "setting_name",
+    [
+        "raw_dir",
+        "recording_dir",
+        "sorting_dir",
+        "video_dir",
+        "waveforms_dir",
+        "temp_dir",
+        "export_dir",
+        "kachery_cloud_dir",
+        "kachery_storage_dir",
+        "kachery_temp_dir",
+        "dlc_project_dir",
+        "dlc_video_dir",
+        "dlc_output_dir",
+        "moseq_project_dir",
+        "moseq_video_dir",
+    ],
 )
 def test_delete_refuses_target_in_another_spyglass_store(
     common_nwbfile, tmp_path, monkeypatch, setting_name
@@ -2116,8 +2133,49 @@ def test_delete_refuses_target_in_another_spyglass_store(
         custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
     )
 
-    assert acquisition.exists(), "raw acquisition file must never be deleted"
+    assert (
+        acquisition.exists()
+    ), "a protected-store target must never be deleted"
     assert convenience_link.is_symlink(), "the link is left with its target"
+
+
+def test_dry_run_reports_target_candidate_not_leaf_unlink(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """Dry-run reports raw target candidates, not an exact unlink manifest.
+
+    Protected-store and act-time checks deliberately run only during the real
+    pass. The preview can therefore include a target that will be refused, and
+    it does not separately list the in-analysis leaf that an accepted
+    candidate would also remove.
+    """
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    target = raw_root / "protected.nwb"
+    target.write_text("raw")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    preview, _ = table._remove_untracked_files(
+        custom_tables=[], dry_run=True, plan=plan, min_file_age_hours=0
+    )
+
+    assert preview == {target.resolve()}
+    assert link not in preview, "leaf access paths are not target candidates"
+    assert target.exists() and link.is_symlink(), "dry-run must not unlink"
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+    assert target.exists(), "the real pass must refuse the protected target"
+    assert link.is_symlink(), "refusing a target must preserve its leaf"
 
 
 def test_delete_refuses_physical_alias_of_protected_store(
@@ -2364,3 +2422,291 @@ def test_scan_skips_symlink_loop_without_aborting(common_nwbfile, tmp_path):
     plan = _plan(_table(common_nwbfile, analysis_dir))
 
     assert good.resolve() in plan.files_to_delete, "scan must still complete"
+
+
+def test_delete_aborts_when_protected_store_root_is_missing(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """An unavailable configured store root fails closed before deletion.
+
+    A missing spelling may be an unavailable mount whose contents remain
+    reachable through another alias. Without the root identity cleanup cannot
+    prove an apparently external candidate is outside that store.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    untracked = analysis_dir / "untracked.nwb"
+    untracked.write_text("stale")
+
+    missing_raw = tmp_path / "unavailable_raw_mount"
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(missing_raw))
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    with pytest.raises(
+        RuntimeError, match="Cannot resolve protected Spyglass raw store root"
+    ):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+        )
+
+    assert untracked.exists(), "root uncertainty must preserve every candidate"
+
+
+def test_delete_aborts_when_managed_root_ancestry_cannot_be_statted(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """A stat failure while walking a target's ancestry fails closed.
+
+    When lexical containment misses (case variant, bind mount) the guard
+    walks the target's parents. A parent that cannot be inspected cannot
+    rule out a protected store, so cleanup must abort before any unlink.
+    """
+    raw_root = tmp_path / "raw"
+    intermediate = raw_root / "sub"
+    intermediate.mkdir(parents=True)
+    acquisition = intermediate / "sub-x.nwb"
+    acquisition.write_text("irreplaceable")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "copy.nwb"
+    link.symlink_to(acquisition)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    # Force the physical-ancestry walk by making lexical containment miss,
+    # so the guard falls through to stat'ing the target's parents.
+    real_is_relative_to = common_nwbfile.Path.is_relative_to
+    target_path = acquisition.resolve()
+    protected_path = raw_root.resolve()
+
+    def _miss_lexical(path, other, *args):
+        if path == target_path and Path(other) == protected_path:
+            return False
+        return real_is_relative_to(path, other, *args)
+
+    monkeypatch.setattr(common_nwbfile.Path, "is_relative_to", _miss_lexical)
+
+    # _other_managed_roots stats raw_root itself and must succeed; only the
+    # ancestry walk's stat of the intermediate directory fails.
+    real_stat = common_nwbfile.os.stat
+    intermediate_resolved = intermediate.resolve()
+
+    def _fail_intermediate(path, *args, **kwargs):
+        if Path(path) == intermediate_resolved:
+            raise OSError("ancestry stat failure")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(common_nwbfile.os, "stat", _fail_intermediate)
+
+    with pytest.raises(RuntimeError, match="Cannot inspect ancestry"):
+        table._remove_untracked_files(
+            custom_tables=[],
+            dry_run=False,
+            plan=plan,
+            min_file_age_hours=0,
+        )
+
+    assert acquisition.exists(), "ancestry failure must preserve the target"
+    assert link.is_symlink(), "the authorizing link must survive"
+
+
+def test_delete_refuses_target_that_became_non_regular_at_act_time(
+    common_nwbfile, tmp_path
+):
+    """A target planned as a regular file but now a directory is refused.
+
+    The scan-time snapshot recorded a regular file; if the path is a
+    directory by deletion time, the act-time re-check must refuse it rather
+    than unlink an unexpected target that materialized in the window.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "far.nwb"
+    target.write_text("far")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    # Between planning and acting, the target becomes a directory.
+    target.unlink()
+    target.mkdir()
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert target.is_dir(), "a now-directory target must not be unlinked"
+    assert link.is_symlink(), "its authorizing link must survive too"
+
+
+def test_delete_refuses_broken_link_whose_target_now_resolves(
+    common_nwbfile, tmp_path
+):
+    """A dangling link planned as broken but now resolving is refused.
+
+    A broken candidate authorizes only removing the leaf. If its target
+    exists by act time, the leaf now points at a real file, so removing it
+    would silently orphan that file; the re-check refuses instead.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "appeared.nwb"
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)  # target does not exist yet -> broken
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert target.resolve() in plan.broken_links
+
+    # The target materializes between planning and acting.
+    target.write_text("appeared")
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert link.is_symlink(), "a now-resolving link must not be removed"
+    assert target.exists(), "the newly appeared target must survive"
+
+
+def test_cleanup_block_failure_propagates_without_unblock(
+    common_nwbfile, monkeypatch
+):
+    """A block failure surfaces and must not trigger the unblock path.
+
+    block_new_inserts() runs outside cleanup()'s try/finally, so a failure
+    there must propagate without the finally-block unblock running -- which
+    would drop a concurrent run's triggers.
+    """
+    unblock_calls = []
+
+    class _BlockFailRegistry:
+        all_classes = []
+
+        def block_new_inserts(self, dry_run):
+            raise RuntimeError("block_kaboom")
+
+        def unblock_new_inserts(self):
+            unblock_calls.append(True)
+
+    monkeypatch.setattr(
+        common_nwbfile, "AnalysisRegistry", lambda: _BlockFailRegistry()
+    )
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+
+    with pytest.raises(RuntimeError, match="block_kaboom"):
+        common_nwbfile.AnalysisNwbfile.cleanup(table, dry_run=False)
+
+    assert not unblock_calls, "unblock must not run when block itself failed"
+
+
+def test_block_new_inserts_partial_failure_requires_safe_recovery(
+    common_nwbfile, monkeypatch
+):
+    """A partial failure must not prescribe an unconditional global unblock.
+
+    A successful result can mean either that this call created the trigger or
+    that another cleanup already owned it. Recovery guidance must therefore
+    require excluding an active cleanup before removing stale triggers.
+    """
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *a, **k: ["db.`t1`", "db.`t2`", "db.`t3`"],
+    )
+
+    def _block(self, table, dry_run=False):
+        return "trigger DDL error" if table == "db.`t3`" else None
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry, "_block_single_table", _block
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        registry.block_new_inserts(dry_run=False)
+
+    msg = str(exc.value)
+    assert "trigger DDL error" in msg
+    assert "may remain blocked" in msg
+    assert "unblock_new_inserts()" in msg
+    assert "Confirm that no cleanup is active" in msg
+    assert "inspect the blocking triggers" in msg
+    assert "only after confirming every such trigger is stale" in msg
+
+
+def test_access_snapshot_rejects_link_flag_target_mismatch(common_nwbfile):
+    """is_link and raw_link_target must agree at construction."""
+    with pytest.raises(ValueError, match="disagrees with raw_link_target"):
+        common_nwbfile.AccessSnapshot(
+            access_path=Path("/x.nwb"),
+            is_link=True,
+            raw_link_target=None,
+            dev=1,
+            ino=1,
+            mtime_ns=0,
+            ctime_ns=0,
+        )
+    with pytest.raises(ValueError, match="disagrees with raw_link_target"):
+        common_nwbfile.AccessSnapshot(
+            access_path=Path("/x.nwb"),
+            is_link=False,
+            raw_link_target="/y.nwb",
+            dev=1,
+            ino=1,
+            mtime_ns=0,
+            ctime_ns=0,
+        )
+
+
+def test_cleanup_candidate_rejects_mismatched_target(common_nwbfile, tmp_path):
+    """A candidate's target snapshot must describe its own real_path."""
+    a = tmp_path / "a.nwb"
+    a.write_text("a")
+    b = tmp_path / "b.nwb"
+    b.write_text("b")
+    st_a = os.stat(a)
+    st_b = os.stat(b)
+    lst_a = os.lstat(a)
+    access = common_nwbfile.AccessSnapshot(
+        access_path=a,
+        is_link=False,
+        raw_link_target=None,
+        dev=lst_a.st_dev,
+        ino=lst_a.st_ino,
+        mtime_ns=lst_a.st_mtime_ns,
+        ctime_ns=lst_a.st_ctime_ns,
+    )
+
+    def _snap(path, st):
+        return common_nwbfile.TargetSnapshot(
+            real_path=path,
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        )
+
+    # Matching target is accepted.
+    common_nwbfile.CleanupCandidate(
+        real_path=a, target=_snap(a, st_a), accesses=(access,)
+    )
+    # A target snapshot naming a different path is refused at construction.
+    with pytest.raises(ValueError, match="does not match its target"):
+        common_nwbfile.CleanupCandidate(
+            real_path=a, target=_snap(b, st_b), accesses=(access,)
+        )

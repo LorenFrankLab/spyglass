@@ -2,7 +2,6 @@ import math
 import os
 import re
 import stat as stat_module
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +20,21 @@ from tqdm import tqdm
 from spyglass import __version__ as sg_version
 from spyglass.settings import (
     analysis_dir,
+    dlc_output_dir,
+    dlc_project_dir,
+    dlc_video_dir,
+    export_dir,
+    kachery_cloud_dir,
+    kachery_storage_dir,
+    kachery_temp_dir,
+    moseq_project_dir,
+    moseq_video_dir,
     raw_dir,
     recording_dir,
     sorting_dir,
+    temp_dir,
     video_dir,
+    waveforms_dir,
 )
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -163,6 +173,23 @@ class AccessSnapshot:
     mtime_ns: int
     ctime_ns: int
 
+    def __post_init__(self):
+        """Reject an access whose link flag and raw target disagree.
+
+        ``raw_link_target`` is the ``os.readlink`` value of a symlink and is
+        None for a non-link; ``os.readlink`` never returns an empty string,
+        so the two are equivalent. Enforcing it stops the type from lying
+        about itself -- a link with no recorded target, or a non-link
+        carrying one, could otherwise skew the deletion-time re-pointed-link
+        check.
+        """
+        if self.is_link != (self.raw_link_target is not None):
+            raise ValueError(
+                f"AccessSnapshot for {self.access_path}: is_link="
+                f"{self.is_link} disagrees with raw_link_target="
+                f"{self.raw_link_target!r}"
+            )
+
     @property
     def newest_ns(self) -> int:
         """Newest of mtime/ctime for this access path."""
@@ -197,6 +224,15 @@ class CleanupCandidate:
                 f"CleanupCandidate for {self.real_path} has no access paths; "
                 "a candidate must be reachable from within the analysis "
                 "directory"
+            )
+        if self.target is not None and self.target.real_path != self.real_path:
+            # A pure internal-consistency invariant: the target snapshot must
+            # describe this candidate's own file. Enforcing it at construction
+            # fails an honest builder bug before anything is deleted, ahead of
+            # the structural preflight's identical check.
+            raise ValueError(
+                f"CleanupCandidate.real_path {self.real_path} does not match "
+                f"its target snapshot path {self.target.real_path}"
             )
 
     @property
@@ -266,11 +302,17 @@ class CleanupPlan:
     Attributes
     ----------
     scanned_files : set of pathlib.Path
-        Analysis ``*.nwb`` paths found under the configured analysis directory.
+        Resolved real paths of every ``*.nwb`` entry reached by the scan.
+        A leaf symlink contributes the path it resolves to, which may lie
+        outside the analysis directory. Alternate mount spellings can still
+        name the same filesystem object, so "resolved" does not imply a unique
+        canonical spelling.
     tracked_files : set of pathlib.Path
-        Analysis paths currently referenced by DataJoint external stores.
+        Resolved paths currently referenced by DataJoint external stores.
     files_to_delete : set of pathlib.Path
-        Files selected for filesystem deletion.
+        Resolved target paths selected as deletion candidates. Applying the
+        plan may additionally unlink authorizing leaf symlinks; final
+        validation may also refuse a candidate that appears in this set.
     empty_files : set of pathlib.Path
         Empty (0-byte) analysis files selected for deletion.
     untracked_files : set of pathlib.Path
@@ -837,7 +879,9 @@ class AnalysisRegistry(dj.Manual):
         Raises
         ------
         RuntimeError
-            If any trigger creation fails.
+            If any trigger creation fails. Some tables may remain blocked, but
+            the method cannot distinguish triggers created by this call from
+            triggers owned by another cleanup.
         """
         errors = []
         for table in self.fetch("full_table_name"):
@@ -846,8 +890,21 @@ class AnalysisRegistry(dj.Manual):
                 errors.append(error)
 
         if errors:
+            # A partial failure can leave triggers installed, including a
+            # trigger that predated this call and belongs to another cleanup.
+            # There is no ownership token, so never prescribe a blanket
+            # unblock without first excluding an active cleanup.
+            remedy = (
+                "\nSome analysis tables may remain blocked. Confirm that no "
+                "cleanup is active, then inspect the blocking triggers before "
+                "using AnalysisRegistry().unblock_new_inserts(). That helper "
+                "removes all registered analysis blocking triggers; use it "
+                "only after confirming every such trigger is stale."
+            )
             raise RuntimeError(
-                f"Failed to block {len(errors)} table(s):\n" + "\n".join(errors)
+                f"Failed to block {len(errors)} table(s):\n"
+                + "\n".join(errors)
+                + remedy
             )
 
     def unblock_new_inserts(self) -> None:
@@ -921,7 +978,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 if fname.endswith(".nwb"):
                     yield Path(dirpath) / fname
 
-    def _snapshot_entry(self, access_path: Path):
+    def _snapshot_entry(
+        self, access_path: Path
+    ) -> Optional[Tuple[Path, Optional[TargetSnapshot], AccessSnapshot]]:
         """Snapshot one scanned entry.
 
         Returns
@@ -1198,15 +1257,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         file belonging to another store reads as untracked. Without this,
         a stray ``ln -s $SPYGLASS_RAW_DIR/sub-x.nwb analysis/copy.nwb``
         would let the weekly sweep delete a raw acquisition file, which is
-        not recomputable. Checked by path containment rather than by
-        unioning the other stores' externals, so it costs no queries.
+        not recomputable. Every non-analysis Spyglass store is protected,
+        not only the acquisition stores: the analysis registry cannot
+        establish ownership of any of them, so each is refused regardless of
+        whether its contents are recomputable. Checked by path containment
+        rather than by unioning the other stores' externals, so it costs no
+        queries.
 
-        Every root is resolved and stat'd. Its directory identity lets the
-        containment check recognize case variants and alternate names of the
-        configured root itself (including a whole-root bind mount), while
-        still allowing a separate hard link outside the store to be unlinked.
-        Resolution or inspection failures abort cleanup. Silently omitting an
-        unavailable root would disable the corresponding guard.
+        Every configured root is resolved and stat'd. Its directory identity
+        lets the containment check recognize case variants and alternate
+        names of the configured root itself (including a whole-root bind
+        mount), while still allowing a separate hard link outside the store
+        to be unlinked. Any resolution or inspection failure aborts cleanup.
+        A missing configured spelling can represent an unavailable mount while
+        the same storage remains reachable through another alias; silently
+        omitting it would disable the corresponding guard.
         """
         roots = []
         for store_name, setting in (
@@ -1214,6 +1279,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             ("recording", recording_dir),
             ("sorting", sorting_dir),
             ("video", video_dir),
+            ("waveforms", waveforms_dir),
+            ("temp", temp_dir),
+            ("export", export_dir),
+            ("kachery_cloud", kachery_cloud_dir),
+            ("kachery_storage", kachery_storage_dir),
+            ("kachery_temp", kachery_temp_dir),
+            ("dlc_project", dlc_project_dir),
+            ("dlc_video", dlc_video_dir),
+            ("dlc_output", dlc_output_dir),
+            ("moseq_project", moseq_project_dir),
+            ("moseq_video", moseq_video_dir),
         ):
             if not setting:
                 continue
@@ -1395,8 +1471,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         list of AccessSnapshot or None
             The in-root accesses that may be unlinked, or None (with a
             warning) when anything changed since the scan, when a
-            non-regular target is involved, or when the target has no
-            in-root access authorizing it.
+            non-regular target is involved, when the target has no in-root
+            access authorizing it, or when the target belongs to another
+            protected Spyglass store.
 
         Notes
         -----
@@ -1551,7 +1628,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         Parameters
         ----------
         dry_run : bool, optional
-            If True, return the files that would be deleted. Defaults to True.
+            If True, return the plan's resolved candidate target paths.
+            Defaults to True. This is not an exact unlink manifest: protected-
+            store and per-candidate re-checks run only on the real deletion
+            path, so some candidates may ultimately be refused, while applying
+            an accepted symlink candidate also unlinks its authorizing leaf
+            symlink even though that access path is not in the returned set.
         custom_tables : list
             List of custom analysis table instances to check for tracked files.
         plan : CleanupPlan, optional
@@ -1560,7 +1642,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         Returns
         -------
         tuple[Set[Path], Set[Path]]
-            (files_to_delete, tracked_files)
+            ``(candidate_target_paths, tracked_files)``. In dry-run mode the
+            first set describes target candidates, not every leaf path that a
+            real run may unlink.
         """
 
         if plan is None:
@@ -1664,11 +1748,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     "the scan"
                 )
                 continue
-            # Age is re-checked at act time, not only during planning: a
-            # long scan may have started before the file was written.
-            # _candidate_still_matches additionally refuses any candidate
-            # whose alias timestamps moved, so a touched link cannot slip
-            # through on a stale snapshot.
+            # Age is re-checked at act time against the frozen scan-time
+            # snapshot, so with a later clock it can only read older: this
+            # cannot newly defer a candidate that already passed planning, but
+            # it does honor a min_file_age_hours raised between building a
+            # plan and applying it. A file whose bytes actually changed during
+            # a long scan is caught instead by _candidate_still_matches, which
+            # refuses any candidate whose target or alias timestamps moved.
             if not self._is_old_enough(
                 candidate,
                 now_ns=act_now_ns,
@@ -1861,10 +1947,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
             files found in the scan. At the default ``max_delete_fraction``
-            this limit cannot bind: every scanned file that is kept is
-            tracked, so the fraction limit already caps the ratio at 9. It
-            becomes the operative guard only when ``max_delete_fraction`` is
-            raised above 10/11 (~0.909). This limit applies only to
+            this limit cannot bind: both guards divide by the same tracked
+            count T, and ``delete / (delete + T) <= 0.9`` forces
+            ``delete / T <= 9``, so any plan that clears the fraction limit is
+            already within the ratio limit. It becomes the operative guard
+            only when ``max_delete_fraction`` is raised above 10/11 (~0.909).
+            This limit applies only to
             filesystem deletion of untracked or empty analysis NWB files, not
             to orphan row deletion. Defaults to 10.0.
         min_file_age_hours : float
@@ -1934,9 +2022,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not plan_ok:
                 # Dry-run previews must surface refusal; real runs must abort.
                 if dry_run:
-                    self._logger.warning(
-                        f"Cleanup plan would be refused: {plan_err}"
-                    )
+                    logger.warning(f"Cleanup plan would be refused: {plan_err}")
                 else:
                     raise RuntimeError(plan_err)
 
@@ -1987,7 +2073,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     # A failed unblock halts ALL inserts across the database
                     # until manually cleared, so this must be loud regardless
                     # of whether another exception is already propagating.
-                    self._logger.critical(
+                    logger.critical(
                         "Failed to unblock inserts after cleanup: "
                         f"{unblock_err}. Analysis inserts remain BLOCKED "
                         "database-wide until restored; run "

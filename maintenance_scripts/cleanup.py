@@ -32,7 +32,8 @@ def run_table_cleanups() -> tuple:
 
     AnalysisNwbfile.cleanup() can refuse a plan on safety grounds. It is
     second of five, so without per-step isolation a refusal would skip the
-    other four cleanups, the temp sweep, and the issue report.
+    three later table cleanups, the temp sweep, and the issue report (the
+    first cleanup has already run by then).
 
     Returns
     -------

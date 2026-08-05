@@ -55,7 +55,16 @@ on_fail() { # $1: error message. Echo message and send as email
       -T <(echo "$content")
 }
 
+# Keep the log bounded on EVERY exit path, including early failures that skip
+# the end of the script (git pull, conda, db, chmod, or a nonzero cleanup).
+# Without this, a repeatedly-failing weekly run would grow the log unbounded.
+truncate_log() {
+    tail -n "${SPYGLASS_MAX_LOG:-1000}" "$SPYGLASS_LOG" \
+      > "${SPYGLASS_LOG}.tmp" && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
+}
+
 exec >> $SPYGLASS_LOG 2>&1
+trap truncate_log EXIT
 
 # print the date and time
 echo "SPYGLASS CRON JOB START: $(date +"%Y-%m-%d %H:%M:%S")"
@@ -111,7 +120,5 @@ if [[ $cleanup_status -ne 0 ]]; then
 fi
 
 echo "SPYGLASS CRON JOB END"
-
-# truncate long log file
-tail -n ${SPYGLASS_MAX_LOG:-1000} "$SPYGLASS_LOG" > "${SPYGLASS_LOG}.tmp" \
-  && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
+# Log truncation runs from the EXIT trap set above, so it happens on every
+# exit path -- success or early failure -- not only here.

@@ -354,6 +354,14 @@ AnalysisNwbfile().cleanup(dry_run=True)
 AnalysisNwbfile().cleanup(dry_run=False)
 ```
 
+The public dry run reports aggregate counts, not a per-path manifest. Its
+filesystem counts and safety validation are based on resolved **target
+candidates**. Final protected-store, tracking, and identity checks run only
+during the destructive pass, so a counted candidate can still be refused.
+Conversely, when an accepted candidate was reached through a leaf symlink, the
+destructive pass also unlinks that in-analysis leaf; it is not counted as a
+separate target candidate.
+
 **Important**: Cleanup automatically coordinates across all custom
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
 table (common or custom).
@@ -370,7 +378,7 @@ operation treats the analysis directory as a managed resource.
     from the common and custom tables.
 3. **Validation**: Applies the minimum-age and catastrophic-deletion limits
     before destructive filesystem work.
-4. **Filesystem cleanup**: Refreshes registry membership plus canonical paths
+4. **Filesystem cleanup**: Refreshes registry membership plus resolved paths
     and filesystem identities for each candidate, rechecks its live identities,
     then removes eligible untracked files and leaf symlinks.
 5. **Database cleanup**: Removes custom and common orphan rows and unused
@@ -430,14 +438,18 @@ The cleanup process checks:
 
 **Deletion authority**: an in-root `*.nwb` symlink authorizes deletion of
 the regular target it resolves to during final pre-delete validation, including
-targets on another volume. Targets beneath the configured raw, recording,
-sorting, or video store roots are always refused: the analysis registry cannot
-establish ownership of files in those stores, and raw data may be
-non-recomputable. Protection uses filesystem ancestry as well as path spelling,
-so case variants and alternate names of a configured root itself (including a
-whole-root bind mount) are refused too. This guard fails closed: if any
-configured protected root cannot be resolved and inspected as a directory,
-destructive analysis cleanup stops before its first unlink. This deliberate
+targets on another volume. Targets beneath any other configured Spyglass store
+root -- raw, recording, sorting, video, waveforms, temp, export, Kachery, and
+the DLC and MoSeq roots -- are always refused: the analysis registry cannot
+establish ownership of files in those stores, and some (raw acquisition,
+behavior video) may not be recomputable. Protection uses filesystem ancestry
+as well as path spelling, so case variants and alternate names of a
+configured root itself (including a whole-root bind mount) are refused too.
+This guard fails closed: any configured protected root that cannot be resolved
+and inspected as a directory stops destructive analysis cleanup before its
+first unlink. A missing spelling may be an unavailable mount while the same
+storage remains reachable
+through another alias, so it cannot safely be omitted. This deliberate
 cross-volume behavior makes symlinked multi-drive analysis storage usable, but
 it also means `analysis_dir` must be treated as a privileged directory. Anyone
 who can create a symlink there can direct cleanup at another non-protected
