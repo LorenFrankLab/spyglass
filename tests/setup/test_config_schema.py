@@ -801,6 +801,15 @@ class TestTestModeEnvVarIgnore:
         base.mkdir(parents=True)
         return base
 
+    @pytest.fixture
+    def no_dj_test_config(self, monkeypatch):
+        """Ensure these tests prove the requested mode/base precedence."""
+        import datajoint as dj
+
+        custom = dj.config.setdefault("custom", {})
+        monkeypatch.setitem(custom, "test_mode", False)
+        monkeypatch.setitem(custom, "spyglass_dirs", {})
+
     def test_ignores_per_key_dir_env_var(self, monkeypatch, test_base):
         """SPYGLASS_RAW_DIR is ignored under test_mode; resolves to base/raw."""
         from spyglass.settings import SpyglassConfig
@@ -814,6 +823,19 @@ class TestTestModeEnvVarIgnore:
         )
 
         assert cfg.raw_dir == str(test_base / "raw")
+
+    def test_exposes_kachery_directory_properties(self, test_base):
+        """Cleanup can consume each resolved Kachery root directly."""
+        from spyglass.settings import SpyglassConfig
+
+        cfg = SpyglassConfig()
+        cfg.load_config(
+            base_dir=str(test_base), test_mode=True, force_reload=True
+        )
+
+        assert cfg.kachery_cloud_dir == str(test_base / ".kachery-cloud")
+        assert cfg.kachery_storage_dir == str(test_base / "kachery_storage")
+        assert cfg.kachery_temp_dir == str(test_base / "tmp")
 
     def test_ignores_dlc_base_dir_env_var(self, monkeypatch, test_base):
         from spyglass.settings import SpyglassConfig
@@ -876,6 +898,107 @@ class TestTestModeEnvVarIgnore:
         )
 
         assert cfg.config.get("KACHERY_ZONE") == "franklab.default"
+
+    def test_ignores_base_dir_env_var(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """SPYGLASS_BASE_DIR itself is not consulted under test_mode.
+
+        It is the exact production base path the sandbox exists to keep
+        destructive tests off, so with no explicit base_dir or config it must
+        not become the resolved base -- unlike production, where it is the
+        normal fallback. The env path deliberately contains a 'tests'
+        component so a broken gate would pass the tests-component guard and
+        resolve, proving the refusal here is the gate and not that guard.
+        """
+        from spyglass.settings import SpyglassConfig
+
+        evil = tmp_path / "tests" / "production_base"
+        evil.mkdir(parents=True)
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(evil))
+
+        cfg = SpyglassConfig()
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            cfg.load_config(test_mode=True, force_reload=True)
+
+        assert cfg.load_failed, "test_mode must not adopt SPYGLASS_BASE_DIR"
+        assert cfg._config == {}
+        # The call-level kwarg is absent on property access. The failed-mode
+        # latch must still prevent the environment path from loading.
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            _ = cfg.base_dir
+
+    def test_constructor_test_mode_ignores_base_dir_env_var(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """Constructor-resolved test mode also refuses an env-only base."""
+        from spyglass.settings import SpyglassConfig
+
+        evil = tmp_path / "tests" / "production_base"
+        evil.mkdir(parents=True)
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(evil))
+
+        cfg = SpyglassConfig(test_mode=True)
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            cfg.load_config(force_reload=True)
+
+        assert cfg.load_failed
+        assert cfg._config == {}
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            _ = cfg.base_dir
+
+    def test_failed_test_mode_reload_discards_cached_production_config(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """A failed forced transition cannot leave production paths usable."""
+        from spyglass.settings import SpyglassConfig
+
+        production = tmp_path / "production_base"
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
+        cfg = SpyglassConfig()
+        cfg.load_config(test_mode=False, force_reload=True)
+        assert cfg.analysis_dir == str(production / "analysis")
+
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            cfg.load_config(test_mode=True, force_reload=True)
+
+        assert cfg.load_failed
+        assert cfg.test_mode
+        assert cfg._config == {}
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            _ = cfg.analysis_dir
+
+        # Supplying a valid test base recovers the object without allowing the
+        # ambient production path back into resolution.
+        safe = tmp_path / "tests" / "safe_base"
+        cfg.load_config(base_dir=str(safe), force_reload=True)
+        assert not cfg.load_failed
+        assert cfg.test_mode
+        assert cfg.analysis_dir == str(safe / "analysis")
+
+    def test_invalid_test_mode_reload_discards_cached_production_config(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """Every failed production-to-test transition remains fail-closed."""
+        from spyglass.settings import SpyglassConfig
+
+        production = tmp_path / "production_base"
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
+        cfg = SpyglassConfig()
+        cfg.load_config(test_mode=False, force_reload=True)
+        assert cfg.analysis_dir == str(production / "analysis")
+
+        outside = tmp_path / "another_production_base"
+        with pytest.raises(ValueError, match="does not contain a 'tests'"):
+            cfg.load_config(
+                base_dir=str(outside), test_mode=True, force_reload=True
+            )
+
+        assert cfg.load_failed
+        assert cfg.test_mode
+        assert cfg._config == {}
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            _ = cfg.analysis_dir
 
 
 class TestModePrecedence:

@@ -115,6 +115,11 @@ class SpyglassConfig:
         )
         self._dlc_base = None
         self.load_failed = False
+        # A failed test-mode load must remain fail-closed on later implicit
+        # retries. Otherwise a property access such as ``config.base_dir``
+        # could fall back to SPYGLASS_BASE_DIR after the explicit call-level
+        # ``test_mode=True`` kwarg is no longer present.
+        self._failed_test_mode = False
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -167,9 +172,8 @@ class SpyglassConfig:
         Raises
         ------
         ValueError
-            If base_dir is not set in either dj.config or os.environ, or if
-            test_mode=True and the resolved base_dir does not contain a
-            'tests' path component.
+            If test_mode=True and no explicit/configured base_dir is set, or
+            if its resolved base_dir does not contain a 'tests' path component.
 
         Returns
         -------
@@ -201,13 +205,29 @@ class SpyglassConfig:
             return str_to_bool(dj_custom.get(name, False))
 
         test_mode = _resolve_mode("test_mode")
+        if self._failed_test_mode and "test_mode" not in kwargs:
+            test_mode = True
         debug_mode = _resolve_mode("debug_mode")
+
+        # Enter fail-closed state before resolving or validating a transition
+        # from production/unloaded state into test mode. Any exception below
+        # must leave production paths unavailable. A previously validated test
+        # configuration remains transactional: a rejected reload preserves it.
+        if test_mode and (not self._config or not self._test_mode):
+            self._config = {}
+            self._test_mode = True
+            self._failed_test_mode = True
+            self.load_failed = True
 
         resolved_base = (
             base_dir
             or self.supplied_base_dir
             or dj_spyglass.get("base")
-            or os.environ.get("SPYGLASS_BASE_DIR")
+            # Gated by test_mode like every other directory env var below:
+            # SPYGLASS_BASE_DIR is the exact production path this sandbox
+            # exists to keep destructive tests off, so test_mode must not
+            # inherit it. Explicit base_dir/config still resolve.
+            or (None if test_mode else os.environ.get("SPYGLASS_BASE_DIR"))
         )
 
         # Log when supplied base_dir causes environment variable overrides to be ignored
@@ -218,15 +238,24 @@ class SpyglassConfig:
 
         # ---------------------------- RESOLVE ----------------------------
         # Compute every path as a plain value. Nothing is created and no
-        # instance or global state is mutated until validation passes.
+        # external/global state is mutated until validation passes. A failed
+        # test-mode transition may invalidate this instance's cached config so
+        # it cannot continue serving production paths.
         if not resolved_base:
+            self.load_failed = True
+            if test_mode:
+                raise ValueError(
+                    "Refusing to load Spyglass in test_mode without an "
+                    "explicit base_dir or "
+                    "dj.config['custom']['spyglass_dirs']['base']; "
+                    "SPYGLASS_BASE_DIR is ignored in test_mode."
+                )
             if not on_startup:  # Only warn if not on startup
                 logger.error(
                     "Could not find SPYGLASS_BASE_DIR"
                     + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
                     + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
                 )
-            self.load_failed = True
             return
 
         base_path = Path(resolved_base).expanduser().resolve()
@@ -341,6 +370,9 @@ class SpyglassConfig:
         )
 
         self._set_dj_config_stores()
+
+        self._failed_test_mode = False
+        self.load_failed = False
 
         return self._config
 
@@ -593,13 +625,9 @@ class SpyglassConfig:
                     "export": self.export_dir,
                 },
                 "kachery_dirs": {
-                    "cloud": self.config.get(
-                        self.dir_to_var("cloud", "kachery")
-                    ),
-                    "storage": self.config.get(
-                        self.dir_to_var("storage", "kachery")
-                    ),
-                    "temp": self.config.get(self.dir_to_var("temp", "kachery")),
+                    "cloud": self.kachery_cloud_dir,
+                    "storage": self.kachery_storage_dir,
+                    "temp": self.kachery_temp_dir,
                 },
                 "dlc_dirs": {
                     "base": self._dlc_base,
@@ -685,6 +713,21 @@ class SpyglassConfig:
         return self._test_mode
 
     @property
+    def kachery_cloud_dir(self) -> str:
+        """Kachery cloud directory as a string."""
+        return self.config.get(self.dir_to_var("cloud", "kachery"))
+
+    @property
+    def kachery_storage_dir(self) -> str:
+        """Kachery storage directory as a string."""
+        return self.config.get(self.dir_to_var("storage", "kachery"))
+
+    @property
+    def kachery_temp_dir(self) -> str:
+        """Kachery temporary directory as a string."""
+        return self.config.get(self.dir_to_var("temp", "kachery"))
+
+    @property
     def dlc_project_dir(self) -> str:
         """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))
@@ -727,6 +770,9 @@ if sg_config.load_failed:  # Failed to load
     waveforms_dir = None
     video_dir = None
     export_dir = None
+    kachery_cloud_dir = None
+    kachery_storage_dir = None
+    kachery_temp_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -743,6 +789,9 @@ else:
     waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
     export_dir = sg_config.export_dir
+    kachery_cloud_dir = sg_config.kachery_cloud_dir
+    kachery_storage_dir = sg_config.kachery_storage_dir
+    kachery_temp_dir = sg_config.kachery_temp_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)
