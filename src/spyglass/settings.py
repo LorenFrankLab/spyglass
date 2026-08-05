@@ -114,6 +114,11 @@ class SpyglassConfig:
             else str_to_bool(self._test_mode_arg)
         )
         self._dlc_base = None
+        # Initialized here, not only in load_config's COMMIT phase: a load
+        # that fails or returns early (e.g. no base under an ambient test
+        # mode) still leaves `_dj_custom`/`_generate_dj_config` able to read
+        # it, matching `_dlc_base`.
+        self._moseq_base = None
         self.load_failed = False
         # A failed test-mode load must remain fail-closed on later implicit
         # retries. Otherwise a property access such as ``config.base_dir``
@@ -205,15 +210,31 @@ class SpyglassConfig:
             return str_to_bool(dj_custom.get(name, False))
 
         test_mode = _resolve_mode("test_mode")
+        # Whether THIS load deliberately requested test mode, as opposed to
+        # inheriting an ambient dj.config['custom']['test_mode']. Only a
+        # deliberate request (or a latched prior failure) makes an unresolved
+        # base fatal; an implicit/library load -- the ``config`` property,
+        # ``_dj_stores``/``_dj_custom``, the on-startup import -- stays graceful
+        # so a missing base cannot crash unrelated code.
+        explicit_test_mode = (
+            "test_mode" in kwargs or self._test_mode_arg is not _UNSET
+        )
         if self._failed_test_mode and "test_mode" not in kwargs:
             test_mode = True
+            explicit_test_mode = True
         debug_mode = _resolve_mode("debug_mode")
 
-        # Enter fail-closed state before resolving or validating a transition
-        # from production/unloaded state into test mode. Any exception below
-        # must leave production paths unavailable. A previously validated test
-        # configuration remains transactional: a rejected reload preserves it.
-        if test_mode and (not self._config or not self._test_mode):
+        # Enter fail-closed state before resolving or validating a deliberate
+        # transition from production/unloaded state into test mode. Any
+        # exception below must leave production paths unavailable. A previously
+        # validated test configuration remains transactional: a rejected reload
+        # preserves it. An ambient (non-explicit) test_mode does not latch,
+        # so a library load cannot wedge the instance fail-closed.
+        if (
+            test_mode
+            and explicit_test_mode
+            and (not self._config or not self._test_mode)
+        ):
             self._config = {}
             self._test_mode = True
             self._failed_test_mode = True
@@ -243,7 +264,7 @@ class SpyglassConfig:
         # it cannot continue serving production paths.
         if not resolved_base:
             self.load_failed = True
-            if test_mode:
+            if test_mode and explicit_test_mode:
                 raise ValueError(
                     "Refusing to load Spyglass in test_mode without an "
                     "explicit base_dir or "

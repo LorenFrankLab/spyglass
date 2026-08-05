@@ -804,11 +804,21 @@ class TestTestModeEnvVarIgnore:
     @pytest.fixture
     def no_dj_test_config(self, monkeypatch):
         """Ensure these tests prove the requested mode/base precedence."""
+        import os
+
         import datajoint as dj
 
         custom = dj.config.setdefault("custom", {})
         monkeypatch.setitem(custom, "test_mode", False)
         monkeypatch.setitem(custom, "spyglass_dirs", {})
+        # A prior load exports per-directory env vars (SPYGLASS_ANALYSIS_DIR,
+        # ...) pointing at the session base. Under test_mode=False the resolver
+        # consults them, so without clearing them a base supplied here would be
+        # silently overridden for every non-base directory. Restored by
+        # monkeypatch (and the module-level _restore_global_config fixture).
+        for key in list(os.environ):
+            if key.startswith(("SPYGLASS_", "DLC_", "MOSEQ_", "KACHERY_")):
+                monkeypatch.delenv(key, raising=False)
 
     def test_ignores_per_key_dir_env_var(self, monkeypatch, test_base):
         """SPYGLASS_RAW_DIR is ignored under test_mode; resolves to base/raw."""
