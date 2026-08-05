@@ -65,6 +65,11 @@ def dj_topo_sort(graph: DiGraph) -> List[str]:
         return unite_master_parts(list(topological_sort(graph)))
 
 
+# Node attributes this module attaches while cascading. Presence of any one
+# marks a node as reached by the cascade, see `AbstractGraph.included_tables`.
+CASCADE_NODE_KEYS = frozenset({"restr", "restr_list", "files"})
+
+
 class Direction(Enum):
     """Cascade direction enum. Calling Up returns True. Inverting flips."""
 
@@ -114,6 +119,11 @@ class AbstractGraph(ABC):
         child classes. Used in TableChain.
     """
 
+    # When False, `_bridge_restr` always derives the next restriction by
+    # joining, skipping any short-circuit. Tests flip this to assert that the
+    # optimized and unoptimized cascades yield identical restrictions.
+    _fast_bridge = True
+
     def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
         """Initialize graph and connection.
 
@@ -139,7 +149,9 @@ class AbstractGraph(ABC):
         self.undirect_graph = self.graph.to_undirected()
 
         self.verbose = verbose
+        self.debug_bridge = False  # see `_bridge_result`, costly when set
         self.skip_external = True
+        self.spawned_schemas = set()
         self.leaves = set()
         self.visited = set()
         self.to_visit = set()
@@ -194,8 +206,23 @@ class AbstractGraph(ABC):
     # ------------------------------ Graph Nodes ------------------------------
 
     def _get_node(self, table: Union[str, Table]):
-        """Get node from graph."""
+        """Get node from graph, spawning unimported schemas as needed.
+
+        Nodes of tables outside spyglass are either absent from the graph or
+        present without data (i.e., children of imported tables). Either case
+        means the schema was never imported, so attempt to spawn it before
+        giving up. Relevant when `skip_external` is False, where the cascade is
+        expected to reach non-spyglass tables.
+        """
         table = ensure_names(table)
+        if node := self.graph.nodes.get(table):
+            return node
+
+        try:
+            self._spawn_virtual_module(table)
+        except dj.errors.DataJointError:
+            pass  # Schema does not exist, raise below
+
         if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
@@ -218,8 +245,10 @@ class AbstractGraph(ABC):
         Returns
         -------
         Tuple[bool, Dict[str, str]]
-            Tuple of boolean indicating direction and edge data. True if child
-            is child of parent.
+            Tuple of a direction flag and the edge data. The flag is False when
+            the arguments are ordered as named, meaning the graph holds an edge
+            parent -> child, and True when they are swapped. `_bridge_restr`
+            maps this flag directly onto a cascade direction.
         """
         child = ensure_names(child)
         parent = ensure_names(parent)
@@ -230,8 +259,10 @@ class AbstractGraph(ABC):
             return True, edge
 
         # Handle alias nodes. `shortest_path` doesn't work with aliases
-        p1 = all_simple_paths(self.graph, child, parent)
-        p2 = all_simple_paths(self.graph, parent, child)
+        # cutoff=2 bounds an otherwise exponential walk: only paths of up to 3
+        # nodes are accepted below, so longer ones need not be enumerated.
+        p1 = all_simple_paths(self.graph, child, parent, cutoff=2)
+        p2 = all_simple_paths(self.graph, parent, child, cutoff=2)
         paths = [p for p in iter_chain(p1, p2)]  # list for error handling
         for path in paths:  # Ignore long and non-alias paths
             if len(path) > 3 or (len(path) > 2 and not path[1].isnumeric()):
@@ -242,7 +273,7 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        if (restr := self._get_node(ensure_names(table)).get("restr")) is None:
+        if self._get_node(ensure_names(table)).get("restr") is None:
             restr_list = self._get_restr_list(table)
             if not restr_list:
                 return None
@@ -354,17 +385,44 @@ class AbstractGraph(ABC):
 
         return self._get_ft_with_restr(table, restr)
 
+    @lru_cache(maxsize=1024)
+    def _table_is_nonempty(self, table) -> bool:
+        """Whether an unrestricted table has any rows.
+
+        Cached because the answer is invariant for the life of the graph and
+        would otherwise be re-queried once per edge arriving at the table.
+        """
+        return bool(self._get_ft(table))
+
     def _has_out_prefix(self, table):
         return (
             table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
         )
 
     def _spawn_virtual_module(self, table):
+        """Add the tables of a table's schema to the graph, if not imported.
+
+        Parameters
+        ----------
+        table : str
+            Full table name, used to determine the schema to spawn.
+
+        Raises
+        ------
+        DataJointError
+            If the schema does not exist on the database server.
+        """
         schema = table.split(".")[0].strip("`")
+        if schema in self.spawned_schemas:  # Only attempt each schema once
+            return
+        self.spawned_schemas.add(schema)
+
         logger.warning(f"Spawning tables for {schema}")
         vm = VirtualModule(f"RestrGraph_{schema}", schema)
         v_graph = vm.schema.connection.dependencies
-        v_graph.load()
+        # Registering the spawned schema clears the dependency graph, so a
+        # reload is only skipped when the graph already reflects this schema.
+        v_graph.load(force=False)
 
         self.graph.add_nodes_from(v_graph.nodes(data=True))
         self.graph.add_edges_from(v_graph.edges(data=True))
@@ -474,7 +532,9 @@ class AbstractGraph(ABC):
 
         path = f"{self._camel(table1)} -> {self._camel(table2)}"
 
-        if not (bool(ft1) and bool(ft2)):
+        # `ft1` emptiness is checked once per node by the caller, rather than
+        # here, where it would be repeated for every outgoing edge.
+        if not self._table_is_nonempty(table2):
             self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
@@ -484,16 +544,37 @@ class AbstractGraph(ABC):
         ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            if not bool(ret):
-                result = "EMPTY"
-            elif not bool(ft2 - ret.proj()):
-                result = "FULL"
-            else:
-                result = "partial"
-            self._log_truncate(f"Bridge Link: {path}: result {result}")
+            self._log_truncate(
+                f"Bridge Link: {path}: result {self._bridge_result(ft2, ret)}"
+            )
             logger.debug(ret)
 
         return ret
+
+    def _bridge_result(self, ft2, ret) -> str:
+        """Describe a bridge result for logging.
+
+        Distinguishing a full match from a partial one requires an anti-join
+        over the whole unrestricted target table, which can cost more than the
+        cascade itself, so it is only computed when `debug_bridge` is set.
+
+        Parameters
+        ----------
+        ft2 : FreeTable
+            The unrestricted target of the bridge.
+        ret : QueryExpression
+            The restriction derived for that target.
+
+        Returns
+        -------
+        str
+            One of EMPTY, nonempty, FULL, or partial.
+        """
+        if not bool(ret):
+            return "EMPTY"
+        if not self.debug_bridge:
+            return "nonempty"
+        return "FULL" if not bool(ft2 - ret.proj()) else "partial"
 
     def _get_adjacent_path_item(
         self, table: str, direction: Direction = Direction.UP
@@ -621,6 +702,13 @@ class AbstractGraph(ABC):
 
         restriction = self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
+
+        # Checked once here rather than inside `_bridge_restr`, which would
+        # repeat the same query for every outgoing edge. An empty restriction
+        # yields an empty bridge on all of them, so there is nothing to cascade.
+        if not bool(self._get_ft(table) & restriction):
+            self._log_truncate(f"Empty restr : {self._camel(table)}")
+            return
 
         if getattr(self, "found_path", None):  # * Avoid refactor #1356
             # * Ideally, would only grab path once
@@ -786,10 +874,25 @@ class AbstractGraph(ABC):
 
     @property
     def included_tables(self) -> Set[str]:
-        """Get all tables included in the graph that are included from the cascade."""
+        """Get the tables a cascade reached, as those carrying cascade data.
+
+        Membership cannot be inferred from node truthiness. DataJoint's
+        `Dependencies.load` gives every table of every loaded schema a
+        `primary_key` node attribute, so a truthiness check returns the whole
+        database rather than the cascaded subset -- and callers then build a
+        FreeTable and run an existence query per table.
+
+        Keyed on the attributes this module writes rather than on `visited`, so
+        that tables restricted by graph addition (`_graph_union`) are included
+        despite never having been traversed.
+        """
         if not self.cascaded:
-            return {}
-        return set([table for table, node in self.graph.nodes.items() if node])
+            return set()
+        return {
+            table
+            for table, node in self.graph.nodes.items()
+            if not CASCADE_NODE_KEYS.isdisjoint(node)
+        }
 
 
 class RestrGraph(AbstractGraph):

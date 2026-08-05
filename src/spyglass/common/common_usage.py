@@ -369,6 +369,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             verbose=verbose,
             cascade=False,
             include_files=True,
+            skip_external=False,
         )
 
         if included_nwb_files is None:

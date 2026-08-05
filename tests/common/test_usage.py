@@ -334,6 +334,32 @@ def test_export_populate(populate_export, custom_analysis_file):
     assert len(table) == 39, "Export tables not captured correctly"
 
 
+@pytest.mark.slow
+def test_export_populate_identity(populate_export, dj_conn):
+    """The exported tables must be a valid, distinct set of spyglass tables.
+
+    A cascade that reaches the wrong tables can still reach the right *number*
+    of them, so check identity rather than count alone.
+    """
+    from spyglass.utils.database_settings import SHARED_MODULES
+
+    table, _ = populate_export
+    names = list(table.fetch("table_name"))
+
+    assert len(set(names)) == len(names), "Export captured duplicate tables"
+
+    dj_conn.dependencies.load()
+    known = set(dj_conn.dependencies.nodes)
+    unknown = set(names) - known
+    assert (
+        not unknown
+    ), f"Export captured tables absent from the graph: {unknown}"
+
+    prefixes = {n.split(".")[0].strip("`").split("_")[0] for n in names}
+    outside = prefixes - set(SHARED_MODULES)
+    assert not outside, f"Export captured non-spyglass schemas: {outside}"
+
+
 def test_intersect_export_populate(populate_intersect_export, common):
     table, file = populate_intersect_export
 
