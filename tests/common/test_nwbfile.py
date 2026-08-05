@@ -532,6 +532,57 @@ def test_scan_leaves_tracked_leaf_symlink_alone(common_nwbfile, tmp_path):
     assert plan.files_to_delete == set()
 
 
+def test_scan_recognizes_tracked_physical_alias(common_nwbfile, tmp_path):
+    """Tracking by filesystem identity survives a different path spelling.
+
+    A hard link is a portable stand-in for case and bind-mount aliases: its
+    resolved path differs, but its device/inode identifies the same file.
+    """
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("registered data")
+    tracked_alias = volume2 / "registered.nwb"
+    os.link(target, tracked_alias)
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    plan = _plan(_table(common_nwbfile, analysis_dir, tracked=[tracked_alias]))
+
+    assert tracked_alias.resolve() != target.resolve()
+    assert tracked_alias.stat().st_ino == target.stat().st_ino
+    assert plan.files_to_delete == set()
+    assert target.resolve() in plan.tracked_files
+    assert plan.scanned_files & plan.tracked_files == {target.resolve()}
+
+
+def test_scan_preserves_tracked_broken_leaf(common_nwbfile, tmp_path):
+    """A registered dangling link can be tracked only by leaf identity."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "registered_broken.nwb"
+    link.symlink_to("missing.nwb")
+
+    # A hard link to the symlink has the same leaf inode, while its relative
+    # target resolves under a different parent. There is no live target inode,
+    # so neither resolved-path nor target-identity matching can protect it.
+    tracked_dir = tmp_path / "registered_elsewhere"
+    tracked_dir.mkdir()
+    tracked_alias = tracked_dir / "registered_broken.nwb"
+    os.link(link, tracked_alias, follow_symlinks=False)
+
+    assert link.lstat().st_ino == tracked_alias.lstat().st_ino
+    assert Path(os.path.realpath(link)) != Path(os.path.realpath(tracked_alias))
+
+    plan = _plan(_table(common_nwbfile, analysis_dir, tracked=[tracked_alias]))
+
+    assert plan.files_to_delete == set()
+    assert link.is_symlink()
+
+
 def test_scan_does_not_descend_directory_symlink(common_nwbfile, tmp_path):
     """Directory symlinks stay undescended (unchanged from master)."""
     volume2 = tmp_path / "volume2" / "session"
@@ -737,6 +788,76 @@ def test_delete_skips_candidate_that_became_tracked(common_nwbfile, tmp_path):
     )
 
     assert f.exists(), "newly tracked file must not be deleted"
+
+
+def test_delete_skips_late_tracked_physical_alias(common_nwbfile, tmp_path):
+    """Act-time identity refresh protects a newly registered physical alias."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("registered data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {target.resolve()}
+
+    tracked_alias = volume2 / "registered_late.nwb"
+    os.link(target, tracked_alias)
+    table._ext_tbl = _FakeExternalTable([("h", tracked_alias)])
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert target.exists(), "late physical alias must protect the target"
+    assert link.is_symlink(), "the planned link must survive"
+    assert tracked_alias.exists()
+
+
+def test_delete_aborts_on_tracked_identity_inspection_error(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """An unreadable tracked alias must fail closed before target deletion."""
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+    target = volume2 / "target.nwb"
+    target.write_text("must survive")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    link = analysis_dir / "link.nwb"
+    link.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    tracked_alias = volume2 / "tracked_alias.nwb"
+    os.link(target, tracked_alias)
+    table._ext_tbl = _FakeExternalTable([("h", tracked_alias)])
+
+    real_stat = common_nwbfile.os.stat
+
+    def _deny_tracked_target(path, *args, **kwargs):
+        if Path(path) == tracked_alias:
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(common_nwbfile.os, "stat", _deny_tracked_target)
+
+    with pytest.raises(RuntimeError, match="tracked analysis path"):
+        table._remove_untracked_files(
+            custom_tables=[],
+            dry_run=False,
+            plan=plan,
+            min_file_age_hours=0,
+        )
+
+    assert target.exists()
+    assert link.is_symlink()
 
 
 def test_delete_removes_broken_link_only(common_nwbfile, tmp_path):
@@ -1999,6 +2120,50 @@ def test_delete_refuses_target_in_another_spyglass_store(
     assert convenience_link.is_symlink(), "the link is left with its target"
 
 
+def test_delete_refuses_physical_alias_of_protected_store(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """Physical ancestry protects a store when lexical containment misses.
+
+    The conditional monkeypatch reproduces the false negative seen with case
+    variants on case-insensitive filesystems and with whole-root bind mounts,
+    while leaving every other containment check untouched.
+    """
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+    acquisition = raw_root / "sub-x_ses-y.nwb"
+    acquisition.write_text("irreplaceable acquisition data")
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    convenience_link = analysis_dir / "session_copy.nwb"
+    convenience_link.symlink_to(acquisition)
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+
+    real_is_relative_to = common_nwbfile.Path.is_relative_to
+    target_path = acquisition.resolve()
+    protected_path = raw_root.resolve()
+
+    def _miss_lexical_alias(path, other, *args):
+        if path == target_path and Path(other) == protected_path:
+            return False
+        return real_is_relative_to(path, other, *args)
+
+    monkeypatch.setattr(
+        common_nwbfile.Path, "is_relative_to", _miss_lexical_alias
+    )
+
+    table._remove_untracked_files(
+        custom_tables=[], dry_run=False, plan=plan, min_file_age_hours=0
+    )
+
+    assert acquisition.exists(), "physical protected-root alias must survive"
+    assert convenience_link.is_symlink()
+
+
 def test_delete_aborts_when_protected_store_root_cannot_be_resolved(
     common_nwbfile, tmp_path, monkeypatch
 ):
@@ -2039,6 +2204,48 @@ def test_delete_aborts_when_protected_store_root_cannot_be_resolved(
 
     assert acquisition.exists(), "resolution failure must preserve the target"
     assert convenience_link.is_symlink(), "the authorizing link must survive"
+
+
+def test_delete_aborts_when_protected_store_root_cannot_be_statted(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """Protected-root inspection fails before any candidate is unlinked."""
+    raw_root = tmp_path / "raw"
+    raw_root.mkdir()
+
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    first = analysis_dir / "first.nwb"
+    second = analysis_dir / "second.nwb"
+    first.write_text("first")
+    second.write_text("second")
+
+    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    real_stat = common_nwbfile.os.stat
+    raw_resolved = raw_root.resolve()
+
+    def _fail_for_raw_root(path, *args, **kwargs):
+        if Path(path) == raw_resolved:
+            raise PermissionError("protected store is temporarily unavailable")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(common_nwbfile.os, "stat", _fail_for_raw_root)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot resolve protected Spyglass raw store root",
+    ):
+        table._remove_untracked_files(
+            custom_tables=[],
+            dry_run=False,
+            plan=plan,
+            min_file_age_hours=0,
+        )
+
+    assert first.exists(), "root inspection must precede the first unlink"
+    assert second.exists()
 
 
 def test_managed_root_containment_does_not_match_sibling_prefix(

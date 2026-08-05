@@ -370,9 +370,9 @@ operation treats the analysis directory as a managed resource.
     from the common and custom tables.
 3. **Validation**: Applies the minimum-age and catastrophic-deletion limits
     before destructive filesystem work.
-4. **Filesystem cleanup**: Refreshes registry membership and canonical tracking
-    for each candidate, rechecks its live identities, then removes eligible
-    untracked files and leaf symlinks.
+4. **Filesystem cleanup**: Refreshes registry membership plus canonical paths
+    and filesystem identities for each candidate, rechecks its live identities,
+    then removes eligible untracked files and leaf symlinks.
 5. **Database cleanup**: Removes custom and common orphan rows and unused
     DataJoint external entries. Files newly orphaned here are handled by the
     next run.
@@ -433,19 +433,25 @@ the regular target it resolves to during final pre-delete validation, including
 targets on another volume. Targets beneath the configured raw, recording,
 sorting, or video store roots are always refused: the analysis registry cannot
 establish ownership of files in those stores, and raw data may be
-non-recomputable. This deliberate cross-volume behavior makes symlinked
-multi-drive analysis storage usable, but it also means `analysis_dir` must be
-treated as a privileged directory. Anyone who can create a symlink there can
-direct cleanup at another non-protected target, and cleanup runs unattended
-from cron, potentially with elevated privileges.
+non-recomputable. Protection uses filesystem ancestry as well as path spelling,
+so case variants and alternate names of a configured root itself (including a
+whole-root bind mount) are refused too. This guard fails closed: if any
+configured protected root cannot be resolved and inspected as a directory,
+destructive analysis cleanup stops before its first unlink. This deliberate
+cross-volume behavior makes symlinked multi-drive analysis storage usable, but
+it also means `analysis_dir` must be treated as a privileged directory. Anyone
+who can create a symlink there can direct cleanup at another non-protected
+target, and cleanup runs unattended from cron, potentially with elevated
+privileges.
 
 During final pre-delete validation, cleanup resolves all current external-table
-paths and skips a target that has become tracked through any alias. It also
-requires each authorizing leaf to remain inside `analysis_dir`, retain its
-scanned identity and raw link text, and resolve to the scanned target. The
-target's device, inode, size, mode, and timestamps must still match the scan.
-The minimum-age gate separately protects files still being written or awaiting
-registration. Restrict write access to `analysis_dir` accordingly.
+paths, compares their filesystem identities, and skips a target that has become
+tracked through any alias. It also requires each authorizing leaf to remain
+inside `analysis_dir`, retain its scanned identity and raw link text, and
+resolve to the scanned target. The target's device, inode, size, mode, and
+timestamps must still match the scan. The minimum-age gate separately protects
+files still being written or awaiting registration. Restrict write access to
+`analysis_dir` accordingly.
 
 
 **Not concurrency-safe**: two cleanups running at once can adopt and later drop

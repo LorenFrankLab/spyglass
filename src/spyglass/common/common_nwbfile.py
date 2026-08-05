@@ -217,6 +217,48 @@ class CleanupCandidate:
         return max(stamps)
 
 
+@dataclass
+class _TrackedFileState:
+    """Lexical and physical identities fetched from analysis externals.
+
+    ``resolved_paths`` preserves the existing behavior for missing targets,
+    while the identity sets recognize live files and leaf symlinks reached
+    through case variants, hard links, or mount aliases.
+    """
+
+    resolved_paths: Set[Path]
+    target_identities: Set[Tuple[int, int]]
+    access_identities: Set[Tuple[int, int]]
+
+    def matches(self, candidate: CleanupCandidate) -> bool:
+        """Return whether any tracked entry identifies this candidate."""
+        if candidate.real_path in self.resolved_paths:
+            return True
+        if (
+            candidate.target is not None
+            and (
+                candidate.target.dev,
+                candidate.target.ino,
+            )
+            in self.target_identities
+        ):
+            return True
+        return any(
+            (access.dev, access.ino) in self.access_identities
+            for access in candidate.accesses
+        )
+
+
+@dataclass(frozen=True)
+class _PhysicalRoot:
+    """Resolved directory root plus its filesystem identity."""
+
+    name: str
+    path: Path
+    dev: int
+    ino: int
+
+
 @dataclass(frozen=True)
 class CleanupPlan:
     """Filesystem cleanup plan for analysis NWB files.
@@ -992,15 +1034,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         """
         now_ns = time.time_ns() if now_ns is None else now_ns
 
-        def paths_from_external(tbl) -> Set[Path]:
-            return {
-                Path(fp[1]).expanduser().resolve()
-                for fp in tbl._ext_tbl.fetch_external_paths()
-            }
-
-        tracked = paths_from_external(self)
-        for tbl in custom_tables:
-            tracked.update(paths_from_external(tbl))
+        tracked_state = self._current_tracked_state(custom_tables)
+        tracked = set(tracked_state.resolved_paths)
 
         targets: Dict[Path, Optional[TargetSnapshot]] = {}
         accesses: Dict[Path, List[AccessSnapshot]] = {}
@@ -1026,18 +1061,22 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         deferred: Set[Path] = set()
 
         for real_path, target in targets.items():
-            if real_path in tracked:
+            candidate = CleanupCandidate(
+                real_path=real_path,
+                target=target,
+                accesses=tuple(accesses[real_path]),
+            )
+            if tracked_state.matches(candidate):
+                # CleanupPlan's safety denominator intersects scanned and
+                # tracked PATHS. Preserve that contract when tracking matched
+                # through filesystem identity rather than path spelling.
+                tracked.add(real_path)
                 continue  # tracked wins over empty and over broken
             if target is not None and not target.is_regular:
                 logger.warning(
                     f"Skipping non-regular analysis path: {real_path}"
                 )
                 continue
-            candidate = CleanupCandidate(
-                real_path=real_path,
-                target=target,
-                accesses=tuple(accesses[real_path]),
-            )
             if not self._is_old_enough(
                 candidate,
                 now_ns=now_ns,
@@ -1152,7 +1191,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return list(merged.values())
 
     @staticmethod
-    def _other_managed_roots() -> List[Path]:
+    def _other_managed_roots() -> List[_PhysicalRoot]:
         """Spyglass stores that analysis cleanup must never delete from.
 
         ``tracked`` is built from the *analysis* external store only, so a
@@ -1162,8 +1201,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         not recomputable. Checked by path containment rather than by
         unioning the other stores' externals, so it costs no queries.
 
-        Resolution failures abort cleanup. Silently omitting an unavailable
-        root would disable the corresponding deletion guard and fail open.
+        Every root is resolved and stat'd. Its directory identity lets the
+        containment check recognize case variants and alternate names of the
+        configured root itself (including a whole-root bind mount), while
+        still allowing a separate hard link outside the store to be unlinked.
+        Resolution or inspection failures abort cleanup. Silently omitting an
+        unavailable root would disable the corresponding guard.
         """
         roots = []
         for store_name, setting in (
@@ -1175,7 +1218,20 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not setting:
                 continue
             try:
-                roots.append(Path(setting).expanduser().resolve())
+                path = Path(setting).expanduser().resolve()
+                root_stat = os.stat(path)
+                if not stat_module.S_ISDIR(root_stat.st_mode):
+                    raise NotADirectoryError(
+                        f"protected store root is not a directory: {path}"
+                    )
+                roots.append(
+                    _PhysicalRoot(
+                        name=store_name,
+                        path=path,
+                        dev=root_stat.st_dev,
+                        ino=root_stat.st_ino,
+                    )
+                )
             except (OSError, RuntimeError) as err:
                 raise RuntimeError(
                     "Cannot resolve protected Spyglass "
@@ -1184,30 +1240,104 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 ) from err
         return roots
 
-    def _current_tracked_paths(
+    def _current_tracked_state(
         self, custom_tables: List[SpyglassAnalysis]
-    ) -> Set[Path]:
-        """Re-fetch and canonically resolve every tracked analysis path.
+    ) -> _TrackedFileState:
+        """Re-fetch paths and identities for every tracked analysis file.
 
         A candidate is keyed by its resolved target, while DataJoint stores
         the access path used for registration. A file can therefore become
         tracked after the scan through a *new* alias that is absent from the
         candidate's access snapshots. Exact restrictions on those snapshots
-        miss that registration and can delete its target. Resolving the live
-        external paths is the only complete act-time comparison available
-        without a cleanup/writer lease.
+        miss that registration and can delete its target. Resolved paths
+        preserve the behavior for missing entries; target and leaf identities
+        additionally recognize hard links, case variants, and mount aliases.
 
         Registry and external-table errors deliberately propagate. Failing
         closed may under-clean; falling back to stale tracking can delete a
-        newly registered file.
+        newly registered file. Missing paths are normal stale external state,
+        so they retain their resolved-path fallback without an identity.
         """
-        tracked = set()
+        tracked = _TrackedFileState(set(), set(), set())
         for tbl in [self, *custom_tables]:
-            tracked.update(
-                Path(path).expanduser().resolve()
-                for _, path in tbl._ext_tbl.fetch_external_paths()
-            )
+            for _, path in tbl._ext_tbl.fetch_external_paths():
+                access_path = Path(path).expanduser()
+                try:
+                    resolved = access_path.resolve()
+                except (OSError, RuntimeError) as err:
+                    raise RuntimeError(
+                        "Cannot resolve tracked analysis path "
+                        f"{access_path}; refusing analysis cleanup"
+                    ) from err
+                tracked.resolved_paths.add(resolved)
+
+                try:
+                    access_stat = os.lstat(access_path)
+                except FileNotFoundError:
+                    continue
+                except OSError as err:
+                    raise RuntimeError(
+                        "Cannot inspect tracked analysis path "
+                        f"{access_path}; refusing analysis cleanup"
+                    ) from err
+                tracked.access_identities.add(
+                    (access_stat.st_dev, access_stat.st_ino)
+                )
+
+                try:
+                    target_stat = os.stat(access_path)
+                except FileNotFoundError:
+                    # A dangling tracked symlink has a live leaf identity but
+                    # no target identity. A path that vanished between lstat
+                    # and stat is likewise safe to treat as missing.
+                    continue
+                except OSError as err:
+                    raise RuntimeError(
+                        "Cannot inspect target of tracked analysis path "
+                        f"{access_path}; refusing analysis cleanup"
+                    ) from err
+                tracked.target_identities.add(
+                    (target_stat.st_dev, target_stat.st_ino)
+                )
         return tracked
+
+    @staticmethod
+    def _containing_managed_root(
+        path: Path, roots: List[_PhysicalRoot]
+    ) -> Optional[_PhysicalRoot]:
+        """Return the protected root physically containing ``path``.
+
+        Lexical containment is the common fast path. When spellings differ,
+        walk the target's parents once and compare each directory identity
+        with all configured roots. This recognizes case aliases and alternate
+        names of a configured root itself without confusing an outside hard
+        link to a protected file with a path inside the store.
+        """
+        if not roots:
+            return None
+
+        for root in roots:
+            if path.is_relative_to(root.path):
+                return root
+
+        roots_by_identity = {(root.dev, root.ino): root for root in roots}
+        current = path.parent
+        while True:
+            try:
+                current_stat = os.stat(current)
+            except OSError as err:
+                raise RuntimeError(
+                    "Cannot inspect ancestry of analysis target "
+                    f"{path}; refusing analysis cleanup"
+                ) from err
+            if root := roots_by_identity.get(
+                (current_stat.st_dev, current_stat.st_ino)
+            ):
+                return root
+            parent = current.parent
+            if parent == current:
+                return None
+            current = parent
 
     @staticmethod
     def _access_still_matches(
@@ -1252,7 +1382,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return location.is_relative_to(analysis_root)
 
     def _candidate_still_matches(
-        self, candidate: CleanupCandidate, *, analysis_root: Path
+        self,
+        candidate: CleanupCandidate,
+        *,
+        analysis_root: Path,
+        managed_roots: List[_PhysicalRoot],
     ) -> Optional[List[AccessSnapshot]]:
         """Re-verify a candidate during final pre-delete validation.
 
@@ -1341,12 +1475,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # delete, however it was reached. `tracked` only knows the analysis
         # store, so without this a symlink into the raw store would make a
         # non-recomputable acquisition file look untracked.
-        for managed in self._other_managed_roots():
-            if real_path.is_relative_to(managed):
-                return _refuse(
-                    f"target belongs to another Spyglass store ({managed}); "
-                    "analysis cleanup does not delete from it"
-                )
+        managed = None
+        if not candidate.broken:
+            managed = self._containing_managed_root(real_path, managed_roots)
+        if managed is not None:
+            return _refuse(
+                "target belongs to another Spyglass store "
+                f"({managed.name}: {managed.path}); analysis cleanup does "
+                "not delete from it"
+            )
 
         # Target identity is verified for EVERY live target, in-root or not,
         # because every live target may be deleted. The access checks above
@@ -1498,6 +1635,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 "refusing to delete anything:\n  " + "\n  ".join(structural)
             )
 
+        # Snapshot every protected root before the first unlink. A missing or
+        # unreadable configured store must disable the whole destructive pass,
+        # not fail only after earlier candidates have already been removed.
+        managed_roots = self._other_managed_roots() if plan.candidates else []
+
         # ---- ACT ----
         # Accumulator, not the original snapshot: a table can appear in the
         # registry while one candidate is processed and be gone before the
@@ -1510,13 +1652,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # Tracking and registry membership are re-read for EVERY
             # candidate, not once up front: a file can be registered through
             # a new alias, or a whole custom table declared, while an earlier
-            # candidate is being deleted. Canonically resolving every current
-            # external path is intentionally conservative; an exact query on
-            # the scan-time aliases cannot discover a new alias to this same
-            # target. The deferred cleanup/writer lease would let this be
-            # hoisted or indexed safely.
+            # candidate is being deleted. Resolving every current external
+            # path and comparing filesystem identities is intentionally
+            # conservative; an exact query on scan-time names cannot discover
+            # a new alias to this target. The deferred cleanup/writer lease
+            # would let this be hoisted or indexed safely.
             known_tables = self._current_custom_tables(known_tables)
-            if candidate.real_path in self._current_tracked_paths(known_tables):
+            if self._current_tracked_state(known_tables).matches(candidate):
                 logger.warning(
                     f"Skipping {candidate.real_path}: became tracked since "
                     "the scan"
@@ -1538,7 +1680,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 )
                 continue
             in_root = self._candidate_still_matches(
-                candidate, analysis_root=analysis_root
+                candidate,
+                analysis_root=analysis_root,
+                managed_roots=managed_roots,
             )
             if not in_root:
                 continue
