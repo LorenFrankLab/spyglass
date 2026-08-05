@@ -346,6 +346,8 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `SortGroup.set_group_by_shank` to support non-numeric
+        `electrode_group_name`s by falling back to lexicographic ordering #1624
     - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
