@@ -57,6 +57,31 @@ print(
 UnitSelectionParams()
 # -
 
+# Beyond the curation labels, units can be selected on any column of the units
+# table:
+#
+# - `label_columns`: a list of additional units table columns whose values are
+#   treated as labels for the unit. With `label_columns=["brain_region"]`, a unit
+#   recorded in CA1 gains the label `"CA1"`, which `include_labels` and
+#   `exclude_labels` can then match on.
+# - `unit_criteria`: a mapping of units table column to a criterion the unit must
+#   satisfy. Criteria can be numeric comparisons (`">"`, `">="`, `"<"`, `"<="`,
+#   `"=="`, `"!="`), inclusive ranges (`"between"`, `"outside"`), or membership
+#   tests (`"isin"`, `"notin"`). A unit is included only if it satisfies all of
+#   them. Units whose value is NaN fail every numeric comparison.
+#
+# ```python
+# UnitSelectionParams().insert1(
+#     {
+#         "unit_filter_params_name": "good_ca1_units",
+#         "include_labels": ["CA1"],
+#         "exclude_labels": ["noise", "mua"],
+#         "label_columns": ["brain_region"],
+#         "unit_criteria": {"snr": {">=": 3}, "isi_violation": {"<": 0.01}},
+#     }
+# )
+# ```
+
 # We then define the set of curated sorting results to include in the group
 #
 # Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's

@@ -47,6 +47,12 @@ LFPBandV1().fix_1481()
 from spyglass.position.v1.position_dlc_project import DLCProject
 
 DLCProject().alter()
+
+# Add label_columns and unit_criteria to UnitSelectionParams. Only needed to
+# use those options; existing filters work against the un-altered table
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
+UnitSelectionParams().alter()
 ```
 
 ### Breaking Changes
@@ -353,6 +359,9 @@ for label, interval_data in results.groupby("interval_labels"):
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Add `label_columns` and `unit_criteria` to `UnitSelectionParams`, allowing
+        units to be selected on arbitrary units table columns and numeric
+        criteria #1670
 
 ## [0.5.5] (Aug 6, 2025)
 
