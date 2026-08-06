@@ -182,12 +182,15 @@ class TestModelMake:
                 vid_group_data
             )
 
-            model.make(sel_key)
+            # Tri-part make: fetch -> compute -> insert.
+            fetched = model.make_fetch(sel_key)
+            computed = model.make_compute(sel_key, *fetched)
+            model.make_insert(sel_key, *computed)
 
             mock_factory.create_strategy.assert_called_once_with("DLC")
             mock_strategy.train_model.assert_called_once()
-            # make() forwards (key, params, skeleton_id, vid_group, sel_entry)
-            # to the strategy; device=None leaves params untouched.
+            # make_compute forwards (key, params, skeleton_id, vid_group,
+            # sel_entry) to the strategy; device=None leaves params untouched.
             train_args = mock_strategy.train_model.call_args[0]
             assert train_args[0] == sel_key
             assert train_args[1] == {"shuffle": 1, "trainingsetindex": 0}
