@@ -428,6 +428,12 @@ class AbstractGraph(ABC):
     def _spawn_virtual_module(self, table):
         """Add the tables of a table's schema to the graph, if not imported.
 
+        Spawning registers the schema on the connection, which is a
+        process-wide effect that outlives this graph. A cascade over many
+        leaves builds one graph per leaf, so without checking the connection
+        first, every one of them would repeat the spawn and its log line for
+        the same schema.
+
         Parameters
         ----------
         table : str
@@ -439,16 +445,24 @@ class AbstractGraph(ABC):
             If the schema does not exist on the database server.
         """
         schema = table.split(".")[0].strip("`")
-        if schema in self.spawned_schemas:  # Only attempt each schema once
+        if schema in self.spawned_schemas:  # Already merged into this graph
             return
         self.spawned_schemas.add(schema)
 
-        logger.warning(f"Spawning tables for {schema}")
-        vm = VirtualModule(f"RestrGraph_{schema}", schema)
-        v_graph = vm.schema.connection.dependencies
-        # Registering the spawned schema clears the dependency graph, so a
-        # reload is only skipped when the graph already reflects this schema.
-        v_graph.load(force=False)
+        if schema in self.connection.schemas:
+            # Registered already, by an import or an earlier graph's spawn, so
+            # its tables are in the connection's dependency graph. This graph's
+            # copy may predate that, so still merge -- but quietly.
+            v_graph = self.connection.dependencies
+            v_graph.load(force=False)
+        else:
+            logger.warning(f"Spawning tables for {schema}")
+            vm = VirtualModule(f"RestrGraph_{schema}", schema)
+            v_graph = vm.schema.connection.dependencies
+            # Registering the spawned schema clears the dependency graph, so a
+            # reload is only skipped when the graph already reflects this
+            # schema.
+            v_graph.load(force=False)
 
         self.graph.add_nodes_from(v_graph.nodes(data=True))
         self.graph.add_edges_from(v_graph.edges(data=True))
@@ -1007,7 +1021,9 @@ class AbstractGraph(ABC):
     @property
     def as_dict(self) -> List[Dict[str, str]]:
         """Return as a list of dictionaries of table_name: restriction"""
-        self.cascade()
+        # `warn=False` as with the other accessors: reading a cascaded graph is
+        # routine, and callers read this repeatedly.
+        self.cascade(warn=False)
         return [
             {"table_name": table, "restriction": self._get_restr(table)}
             for table in self.included_tables
