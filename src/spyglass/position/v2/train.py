@@ -1276,15 +1276,17 @@ class Model(SpyglassMixin, dj.Computed):
                 f"{e}. Skipping the model-reuse nudge."
             )
 
-    def make(self, key, device=None):
-        """Train a new model based on ModelSelection entry.
+    def make_fetch(self, key, device=None):
+        """Read the selection, parameters, and video group for training.
 
-        Performs the following:
-        1. Fetches model parameters and video group information
-        2. Creates training dataset (if needed)
-        3. Trains the model using the specified tool (DLC, SLEAP, etc.)
-        4. Stores model metadata in NWB file
-        5. Inserts entry into Model table
+        Read-only: the tri-part contract forbids writes here, and DataJoint
+        re-runs this method inside the transaction to verify (via ``DeepHash``)
+        that upstream data did not change during ``make_compute``.
+
+        When ``parent_id`` is set, the parent model's ``model_path`` is
+        resolved here and stashed on the returned ``sel_entry`` as
+        ``parent_model_path``, so the strategy's fine-tune path does not have
+        to query the database from within ``make_compute``.
 
         Parameters
         ----------
@@ -1301,7 +1303,62 @@ class Model(SpyglassMixin, dj.Computed):
             never persisted, so it does not fork otherwise-identical
             parameter sets. Pass it via ``populate``'s ``make_kwargs``, e.g.
             ``Model().populate(sel_key, make_kwargs={"device": "cuda:0"})``.
-            When ``None`` (default), the tool auto-selects a device.
+            DataJoint routes ``make_kwargs`` to ``make_fetch`` only, so the
+            value is threaded through the return value to
+            :meth:`make_compute`. When ``None`` (default), the tool
+            auto-selects a device.
+
+        Returns
+        -------
+        list
+            ``[sel_entry, params_entry, vid_group, device]``, passed as
+            positional arguments to :meth:`make_compute`.
+        """
+        sel_entry = (ModelSelection() & key).fetch1()
+        params_key = {
+            "model_params_id": sel_entry["model_params_id"],
+            "tool": sel_entry["tool"],
+        }
+        params_entry = (ModelParams() & params_key).fetch1()
+
+        vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
+        vid_group = (VidFileGroup() & vid_group_key).fetch1()
+
+        # Pre-resolve the parent model directory so the fine-tune path in
+        # make_compute stays database-free.
+        if parent_id := sel_entry.get("parent_id"):
+            parent = self.__class__ & {"model_id": parent_id}
+            sel_entry["parent_model_path"] = (
+                parent.fetch1("model_path") if parent else None
+            )
+
+        return [sel_entry, params_entry, vid_group, device]
+
+    def make_compute(self, key, sel_entry, params_entry, vid_group, device):
+        """Train the model with the tool-specific strategy.
+
+        Pure with respect to the database: no queries or inserts. Writes
+        training artifacts (checkpoints, the model-metadata NWB file) to disk,
+        which the tri-part contract permits — only database access is barred.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from ModelSelection table.
+        sel_entry : dict
+            ModelSelection entry from :meth:`make_fetch`.
+        params_entry : dict
+            ModelParams entry from :meth:`make_fetch`.
+        vid_group : dict
+            VidFileGroup entry from :meth:`make_fetch`.
+        device : str or None
+            Compute device override threaded through from :meth:`make_fetch`.
+
+        Returns
+        -------
+        list
+            ``[model_result]``, passed as a positional argument to
+            :meth:`make_insert`.
 
         Raises
         ------
@@ -1312,25 +1369,18 @@ class Model(SpyglassMixin, dj.Computed):
         """
         self._info_msg(f"Training model for selection: {key}")
 
-        # Fetch selection details
-        sel_entry = (ModelSelection() & key).fetch1()
+        tool = params_entry["tool"]
+        params = params_entry["params"]
+        skeleton_id = params_entry.get("skeleton_id")
         params_key = {
             "model_params_id": sel_entry["model_params_id"],
             "tool": sel_entry["tool"],
         }
-        params_entry = (ModelParams() & params_key).fetch1()
-        tool = params_entry["tool"]
-        params = params_entry["params"]
-        skeleton_id = params_entry.get("skeleton_id")
 
         # Device is a runtime override, not a stored/hashed param: inject it
         # into a copy so the fetched (persisted) params are never mutated.
         if device is not None:
             params = {**(params or {}), "device": device}
-
-        # Fetch video group
-        vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
-        vid_group = (VidFileGroup() & vid_group_key).fetch1()
 
         self._info_msg(f"Training {tool} model with params: {params_key}")
 
@@ -1365,7 +1415,21 @@ class Model(SpyglassMixin, dj.Computed):
                 f"{verb} not implemented for {tool}: {e}"
             ) from e
 
-        # Insert into Model table
+        return [model_result]
+
+    def make_insert(self, key, model_result):
+        """Insert the trained model row.
+
+        Runs inside a transaction; the only database write in the tri-part
+        sequence.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from ModelSelection table.
+        model_result : dict
+            Row assembled by the tool strategy in :meth:`make_compute`.
+        """
         self.insert1(model_result)
         self._info_msg(f"Model training complete: {model_result['model_id']}")
 
