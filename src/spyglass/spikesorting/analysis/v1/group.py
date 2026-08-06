@@ -176,9 +176,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         -----
         Units whose value is NaN fail every numeric comparison. A criterion
         naming a column the sorting does not have is skipped with a warning;
-        the remaining criteria still apply. The sortings in one group may not
-        share the same columns (e.g. if they were curated differently),
-        so a criterion may apply to only some of them.
+        the remaining criteria still apply. Each sorting in a group has its
+        own units table, and those tables may not share the same columns
+        (e.g. if they were curated differently), so a criterion may apply to
+        only some of them.
         """
         include_mask = np.ones(len(units_df), dtype=bool)
 
