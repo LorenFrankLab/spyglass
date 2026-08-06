@@ -352,12 +352,20 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         leaves = []
         # Condense to single restriction per table (OR of all restrictions).
         # Large performance boost for large exports with many logged entries
-        for table_name in tracked_tables:
+        for table_name in sorted(tracked_tables):
             restr_list = (selection_tables & dict(table_name=table_name)).fetch(
                 "restriction"
             )
+            # Sort and dedupe so the same selection always yields the same
+            # condition. The fetch above has no `order_by`, so its row order is
+            # not guaranteed, and OR-ing the same conditions in a different
+            # order gives an equivalent restriction with different text. Stable
+            # text keeps `Export.Table.restriction` comparable across reruns
+            # and lets the restriction be checksummed.
             restriction = make_condition(
-                dj.FreeTable(dj.conn(), table_name), restr_list, set()
+                dj.FreeTable(dj.conn(), table_name),
+                sorted(set(restr_list)),
+                set(),
             )
             leaves.append(
                 {"table_name": table_name, "restriction": restriction}

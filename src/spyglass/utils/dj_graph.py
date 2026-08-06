@@ -9,12 +9,10 @@ from enum import Enum
 from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 import datajoint as dj
 from datajoint import FreeTable, Table, VirtualModule
-from datajoint import config as dj_config
 from datajoint.condition import make_condition
 from datajoint.expression import QueryExpression
 from datajoint.hash import key_hash
@@ -1470,8 +1468,8 @@ class RestrGraph(AbstractGraph):
 
         1. For any table fk'ing AnalysisNwbfile, add files to node.
         2. For both raw and analysis files, add restrictions to externals tables
-            Uses dj_config['stores'] to determine resolve roots present in the
-            externals tables.
+            Paths come from the externals tables themselves, see
+            `_external_paths`, so no file is touched on disk.
         """
         if not self.include_files:  # Skip if not needed
             return  # if _hash_upstream, may cause 'missing node' error
@@ -1490,8 +1488,6 @@ class RestrGraph(AbstractGraph):
         if not {raw_ext, analysis_ext}.issubset(self.graph.nodes):
             return  # Skip if externals not in graph
 
-        stores = dj_config["stores"]
-
         def set_external(external, file_list=None):
             """Set restriction on external table."""
             if not file_list:
@@ -1504,23 +1500,53 @@ class RestrGraph(AbstractGraph):
             tbl = raw_ext if external == "raw" else analysis_ext
             self._set_restr(tbl, restr)
 
-        analysis_abs_paths = self._get_ft(
-            self.analysis_file_tbl.full_table_name, with_restr=True
-        ).fetch("analysis_file_abs_path")
-        analysis_paths = [
-            str(Path(p).relative_to(stores["analysis"]["location"]))
-            for p in analysis_abs_paths
-        ]
-        set_external("analysis", analysis_paths)
+        set_external(
+            "analysis",
+            self._external_paths(
+                self.analysis_file_tbl.full_table_name,
+                "analysis_file_abs_path",
+                "analysis",
+            ),
+        )
+        set_external(
+            "raw",
+            self._external_paths(
+                "`common_nwbfile`.`nwbfile`", "nwb_file_abs_path", "raw"
+            ),
+        )
 
-        raw_abs_paths = self._get_ft(
-            "`common_nwbfile`.`nwbfile`", with_restr=True
-        ).fetch("nwb_file_abs_path")
-        raw_paths = [
-            str(Path(p).relative_to(stores["raw"]["location"]))
-            for p in raw_abs_paths
-        ]
-        set_external("raw", raw_paths)
+    def _external_paths(
+        self, table_name: str, filepath_attr: str, store: str
+    ) -> List[str]:
+        """Get store-relative paths of the files a restricted table references.
+
+        Reads the paths from the external table, joining on the hash the file
+        table stores, rather than fetching the filepath attribute from the file
+        table itself. Fetching it makes DataJoint resolve every row to an
+        absolute path -- stat-ing, checksumming, and re-staging each file --
+        only for the caller to strip the store root back off. The relative path
+        wanted here is the value the external table already holds, so none of
+        that work is needed, and a file whose contents have drifted from its
+        recorded checksum no longer fails the cascade.
+
+        Parameters
+        ----------
+        table_name : str
+            Name of the file table, e.g. `common_nwbfile`.`nwbfile`.
+        filepath_attr : str
+            Name of that table's filepath attribute, which stores the hash
+            keying the external table.
+        store : str
+            Store name, `raw` or `analysis`.
+
+        Returns
+        -------
+        List[str]
+            Paths relative to the store's root, for the restricted rows.
+        """
+        ft = self._get_ft(table_name, with_restr=True)
+        external = self.file_externals[store]
+        return list((external & ft.proj(hash=filepath_attr)).fetch("filepath"))
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:

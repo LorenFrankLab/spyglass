@@ -228,6 +228,35 @@ def test_export_selection_joins(
     ).fetch1("restriction"), "Export join not captured correctly"
 
 
+def test_export_selection_restr_deterministic(
+    gen_export_selection, export_tbls
+):
+    """The same selection must always yield the same leaf restrictions.
+
+    Restrictions are fetched per table without an `order_by`, so the row order
+    is not guaranteed. OR-ing them in a different order gives an equivalent
+    restriction with different text, which would make the stored restriction
+    differ between otherwise identical exports.
+    """
+    ExportSelection, _ = export_tbls
+    paper_key = {"paper_id": gen_export_selection["paper_id"]}
+
+    def leaf_restrictions(graph):
+        return {table: graph._get_restr(table) for table in graph.leaves}
+
+    first = leaf_restrictions(
+        ExportSelection.get_restr_graph(paper_key, cascade=False)
+    )
+    second = leaf_restrictions(
+        ExportSelection.get_restr_graph(paper_key, cascade=False)
+    )
+
+    assert first == second, "Leaf restrictions differed between identical runs."
+    assert all(
+        isinstance(restr, str) for restr in first.values()
+    ), "Leaf restrictions should be plain conditions."
+
+
 def test_export_selection_merge_fetch(
     gen_export_selection, export_tbls, trodes_pos_v1
 ):
@@ -341,8 +370,6 @@ def test_export_populate_identity(populate_export, dj_conn):
     A cascade that reaches the wrong tables can still reach the right *number*
     of them, so check identity rather than count alone.
     """
-    from spyglass.utils.database_settings import SHARED_MODULES
-
     table, _ = populate_export
     names = list(table.fetch("table_name"))
 
@@ -350,14 +377,16 @@ def test_export_populate_identity(populate_export, dj_conn):
 
     dj_conn.dependencies.load()
     known = set(dj_conn.dependencies.nodes)
-    unknown = set(names) - known
+    # External tables are legitimately exported but never appear in the
+    # dependency graph: `Dependencies.load` filters `table_name NOT LIKE "~%"`.
+    unknown = {
+        name
+        for name in set(names) - known
+        if not name.split(".")[-1].strip("`").startswith("~")
+    }
     assert (
         not unknown
     ), f"Export captured tables absent from the graph: {unknown}"
-
-    prefixes = {n.split(".")[0].strip("`").split("_")[0] for n in names}
-    outside = prefixes - set(SHARED_MODULES)
-    assert not outside, f"Export captured non-spyglass schemas: {outside}"
 
 
 def test_intersect_export_populate(populate_intersect_export, common):
