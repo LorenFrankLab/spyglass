@@ -1894,13 +1894,19 @@ class SLEAPStrategy(PoseToolStrategy):
         parent_id = sel_entry.get("parent_id")
         if not parent_id:
             return None
-        try:
-            model_path = (
-                model_instance.__class__ & {"model_id": parent_id}
-            ).fetch1("model_path")
-        except dj.errors.DataJointError:
-            # missing row / no DB — caller degrades to fresh
-            return None
+        if "parent_model_path" in sel_entry:
+            # Pre-resolved by Model.make_fetch so the tri-part make_compute
+            # stays database-free. Present-but-None means the parent row or
+            # its path was missing; caller degrades to fresh either way.
+            model_path = sel_entry["parent_model_path"]
+        else:
+            try:
+                model_path = (
+                    model_instance.__class__ & {"model_id": parent_id}
+                ).fetch1("model_path")
+            except dj.errors.DataJointError:
+                # missing row / no DB — caller degrades to fresh
+                return None
         return Path(model_path) if model_path else None
 
     def _resolve_parent_checkpoint(self, parent_dir):
