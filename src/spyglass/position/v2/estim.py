@@ -846,15 +846,14 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         return df
 
-    def make(self, key, device=None):
-        """Run or load pose estimation for a Model + VidFileGroup pairing.
+    def make_fetch(self, key, device=None):
+        """Read every upstream input needed for pose estimation.
 
-        Flow:
-        1. Fetch task_mode, output_dir, inference_params from Selection
-        2. If trigger: run inference via self.run_inference()
-        3. Find DLC h5 output in output_dir
-        4. Load into ndx-pose NWB via _store_estimation_nwb()
-        5. Insert entry with analysis_file_name
+        Read-only: the tri-part contract forbids writes here, and DataJoint
+        re-runs this method inside the transaction to verify (via ``DeepHash``)
+        that upstream data did not change during ``make_compute``.  All queries
+        for both the 2D and 3D paths — including those the NWB-store helpers
+        used to perform themselves — are resolved here.
 
         Parameters
         ----------
@@ -868,7 +867,19 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             otherwise-identical parameter sets. Pass it via ``populate``'s
             ``make_kwargs``, e.g.
             ``PoseEstim().populate(sel_key, make_kwargs={"device": "cuda:0"})``.
-            When ``None`` (default), the tool auto-selects a device.
+            DataJoint routes ``make_kwargs`` to ``make_fetch`` only, so the
+            value is folded into ``inference_params`` here.  When ``None``
+            (default), the tool auto-selects a device.
+
+        Returns
+        -------
+        list
+            ``[fetched]`` — a single dict consumed by :meth:`make_compute`.
+
+        Raises
+        ------
+        ValueError
+            If the VidFileGroup has no registered Nwbfile parent.
         """
         if ndx_pose is None:  # pragma: no cover
             raise ImportError(  # pragma: no cover
@@ -900,11 +911,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if device is not None:
             inference_params = {**inference_params, "device": device}
 
-        self._info_msg(
-            "PoseEstim.make: "
-            + f"tool={tool}, mode={task_mode}, output_dir={output_dir}"
-        )
-
         # Resolve video paths (needed for trigger mode inference)
         video_paths = []
         for vf_key in (VidFileGroup.File & key).fetch("KEY"):
@@ -922,7 +928,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         except ValueError:
             pass
 
-        # Step 1: Fail fast if no NWB parent (before any expensive I/O)
+        # Fail fast if no NWB parent (before any expensive I/O)
         if nwb_file_name is None:
             raise ValueError(
                 "Cannot store pose estimation: no registered Nwbfile linked "
@@ -932,32 +938,96 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "VidFileGroup().get_nwb_file() to verify before populating."
             )
 
-        # Step 2: Branch — 3D triangulation vs standard 2D path.
-        if self._is_3d_mode(key):
+        is_3d = self._is_3d_mode(key)
+
+        fetched = {
+            "task_mode": task_mode,
+            "output_dir": output_dir,
+            "tool": tool,
+            "model_info": model_info,  # lets run_inference skip its own query
+            "inference_params": inference_params,
+            "video_paths": video_paths,
+            "nwb_file_name": nwb_file_name,
+            "is_3d": is_3d,
+            "store_ctx": self._fetch_store_context(key),
+        }
+
+        if is_3d:
+            fetched["ctx_3d"] = self._fetch_3d_context(key)
+        else:
+            try:
+                cam_idxs = list((VidFileGroup.File & key).fetch("camera_index"))
+            except dj.errors.DataJointError:
+                # camera_index column absent (schema not migrated) → 2D only.
+                cam_idxs = []
+            fetched["cam_idxs"] = cam_idxs
+            fetched["has_calibration"] = bool(VidFileGroup.Calibration & key)
+            fetched["canon_map"] = BodyPart.canon_map()
+            fetched["meters_per_pixel"] = self._fetch_meters_per_pixel(key)
+
+        return [fetched]
+
+    def make_compute(self, key, fetched):
+        """Run inference and assemble the pose data to be stored.
+
+        Database-free: every query is resolved by :meth:`make_fetch`.  This is
+        the long-running stage (GPU inference, triangulation) and runs outside
+        the transaction, so it holds no table lock.  It does write tool output
+        to disk, which the tri-part contract permits — only database access is
+        barred.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+        fetched : dict
+            Output of :meth:`make_fetch`.
+
+        Returns
+        -------
+        list
+            ``[fetched, computed]``, passed as positional arguments to
+            :meth:`make_insert`.
+
+        Raises
+        ------
+        ValueError
+            If trigger mode is requested with no registered video files.
+        FileNotFoundError
+            If no tool output files can be located.
+        """
+        task_mode = fetched["task_mode"]
+        output_dir = fetched["output_dir"]
+        tool = fetched["tool"]
+        inference_params = fetched["inference_params"]
+        video_paths = fetched["video_paths"]
+
+        self._info_msg(
+            "PoseEstim.make_compute: "
+            + f"tool={tool}, mode={task_mode}, output_dir={output_dir}"
+        )
+
+        # Branch — 3D triangulation vs standard 2D path.
+        if fetched["is_3d"]:
             self._info_msg(
                 "3D mode detected — running per-camera triangulation."
             )
-            analysis_file_name = self._make_3d(
-                key,
-                task_mode,
-                output_dir,
-                inference_params,
-                nwb_file_name,
-                tool,
-                video_paths,
-            )
-            self.insert1({**key, "analysis_file_name": analysis_file_name})
-            self._info_msg("PoseEstim (3D) entry inserted.")
-            return
+            return [
+                fetched,
+                self._compute_3d(
+                    key,
+                    fetched["ctx_3d"],
+                    task_mode,
+                    output_dir,
+                    inference_params,
+                    tool,
+                    model_info=fetched["model_info"],
+                ),
+            ]
 
         # --- 2D path (single camera or multi-camera without calibration) ------
 
-        try:
-            _cam_idxs = (VidFileGroup.File & key).fetch("camera_index")
-        except dj.errors.DataJointError:
-            # camera_index column absent (schema not yet migrated) → 2D only.
-            _cam_idxs = []
-        if len(_cam_idxs) > 1 and not (VidFileGroup.Calibration & key):
+        if len(fetched["cam_idxs"]) > 1 and not fetched["has_calibration"]:
             self._warn_msg(
                 "Multiple camera files detected but no Calibration entry found. "
                 "Falling back to first-camera 2D pose estimation."
@@ -978,10 +1048,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 model_key,
                 video_paths if len(video_paths) > 1 else video_paths[0],
                 destfolder=destfolder,
+                model_info=fetched["model_info"],
+                tool=tool,
                 **inference_params,
             )
 
-        # Step 3: Find output files using tool-specific logic
+        # Find output files using tool-specific logic
         output_files = self._find_output_files(
             tool, video_paths, output_dir, output_file_info
         )
@@ -1009,9 +1081,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         # Single boundary: reconcile tool-native names with the canonical
         # BodyPart namespace so every downstream stage speaks one spelling.
-        canon_map = BodyPart.canon_map()
         pose_df, bodyparts = canonicalize_pose_columns(
-            pose_df, bodyparts, canon_map
+            pose_df, bodyparts, fetched["canon_map"]
         )
         self._info_msg(
             f"Pose data: {len(bodyparts)} bodyparts, {len(pose_df)} frames, "
@@ -1021,15 +1092,58 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # Convert pixel coordinates to centimetres using camera calibration
         from spyglass.position.utils.pose_processing import convert_to_cm
 
-        meters_per_pixel = self._fetch_meters_per_pixel(key)
+        meters_per_pixel = fetched["meters_per_pixel"]
         self._info_msg(
             f"Converting coordinates to cm (meters_per_pixel={meters_per_pixel})"
         )
         pose_df = convert_to_cm(pose_df, meters_per_pixel)
 
-        # Step 5: Store data in AnalysisNwbfile
+        return [
+            fetched,
+            {"pose_df": pose_df, "bodyparts": bodyparts, "scorer": scorer},
+        ]
+
+    def make_insert(self, key, fetched, computed):
+        """Write the analysis NWB file and insert the row.
+
+        Runs inside a transaction.  All database writes — including
+        ``AnalysisNwbfile.add``, which inserts — live here.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+        fetched : dict
+            Output of :meth:`make_fetch`.
+        computed : dict
+            Output of :meth:`make_compute`.
+        """
+        nwb_file_name = fetched["nwb_file_name"]
+        store_ctx = fetched["store_ctx"]
+
+        if fetched["is_3d"]:
+            analysis_file_name = self._store_3d_estimation_nwb(
+                key,
+                computed["cam_dfs"],
+                computed["cam_indices"],
+                computed["pose_3d_df"],
+                computed["bodyparts"],
+                computed["scorer"],
+                nwb_file_name,
+                ctx=store_ctx,
+            )
+            self.insert1({**key, "analysis_file_name": analysis_file_name})
+            self._info_msg("PoseEstim (3D) entry inserted.")
+            return
+
         analysis_file_name = self._store_estimation_nwb(
-            key, pose_df, bodyparts, scorer, nwb_file_name, meters_per_pixel
+            key,
+            computed["pose_df"],
+            computed["bodyparts"],
+            computed["scorer"],
+            nwb_file_name,
+            fetched["meters_per_pixel"],
+            ctx=store_ctx,
         )
         self.insert1({**key, "analysis_file_name": analysis_file_name})
         self._info_msg("PoseEstim entry inserted.")
@@ -1118,6 +1232,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         video_path: Union[Path, str, list],
         save_as_csv: bool = False,
         destfolder: Union[Path, str, None] = None,
+        model_info: dict = None,
+        tool: str = None,
         **kwargs,
     ) -> Union[str, list]:
         """Run pose estimation inference on video(s) using a trained model.
@@ -1132,6 +1248,13 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             Whether to save output as CSV, by default False
         destfolder : Union[Path, str, None], optional
             Destination folder for output files, by default None
+        model_info : dict, optional
+            Pre-fetched ``Model`` row.  Supplied by :meth:`make_compute` (via
+            :meth:`make_fetch`) so the tri-part sequence performs no database
+            reads outside ``make_fetch``.  When ``None`` (direct calls), the
+            row is fetched here.
+        tool : str, optional
+            Pre-fetched tool name, paired with ``model_info``.
         **kwargs
             Additional parameters for underlying inference function
 
@@ -1140,19 +1263,20 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         Union[str, list]
             Path(s) to output file(s)
         """
-        if not Model() & model_key:
-            raise ValueError(
-                f"Model not found in database: {model_key}. "
-                "Please import model first using Model.load()"
-            )
+        if model_info is None or tool is None:
+            if not Model() & model_key:
+                raise ValueError(
+                    f"Model not found in database: {model_key}. "
+                    "Please import model first using Model.load()"
+                )
 
-        model_info = (Model() & model_key).fetch1()
-        model_params_key = {
-            "model_params_id": model_info["model_params_id"],
-            "tool": model_info["tool"],
-        }
-        params_info = (ModelParams() & model_params_key).fetch1()
-        tool = params_info["tool"]
+            model_info = (Model() & model_key).fetch1()
+            model_params_key = {
+                "model_params_id": model_info["model_params_id"],
+                "tool": model_info["tool"],
+            }
+            params_info = (ModelParams() & model_params_key).fetch1()
+            tool = params_info["tool"]
 
         self._info_msg(f"Running inference with {tool} model: {model_key}")
 
@@ -1347,6 +1471,39 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             for r in cam_rows
         }
 
+    def _fetch_store_context(self, key: dict) -> dict:
+        """Collect the upstream metadata the NWB-store helpers need.
+
+        Gathers every database read performed while building an analysis NWB
+        file, so the tri-part ``make`` can resolve them all in
+        :meth:`make_fetch` rather than inside the transaction.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+
+        Returns
+        -------
+        dict
+            ``model_info``, ``skeleton_edges``, ``video_keys``, and
+            ``vid_timestamps``.
+        """
+        model_info = (
+            Model * ModelParams & {"model_id": key["model_id"]}
+        ).fetch1()
+        skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
+        skeleton_edges = (Skeleton & skeleton_key).fetch1().get("edges", [])
+
+        return {
+            "model_info": model_info,
+            "skeleton_edges": skeleton_edges,
+            "video_keys": [
+                str(p) for p in (VidFileGroup.File & key).fetch("KEY")
+            ],
+            "vid_timestamps": self._fetch_video_timestamps(key),
+        }
+
     def _make_3d(
         self,
         key: dict,
@@ -1359,12 +1516,17 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     ) -> str:
         """Run multi-camera 3D triangulation and store results in NWB.
 
+        Thin wrapper retained for direct calls: resolves the database context,
+        runs :meth:`_compute_3d`, and stores the result.  The tri-part
+        ``make`` calls those stages separately so the triangulation runs
+        outside the transaction.
+
         Parameters
         ----------
         key : dict
             Primary key from PoseEstimSelection.
         task_mode, output_dir, inference_params, nwb_file_name, tool : ...
-            As resolved in ``make()``.
+            As resolved in ``make_fetch()``.
         video_paths : list
             Video file paths (may be empty if task_mode != 'trigger').
 
@@ -1373,9 +1535,35 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         str
             ``analysis_file_name`` for the created NWB file.
         """
-        from spyglass.position.utils.pose_processing import convert_to_cm
-        from spyglass.position.v2.utils.triangulation import triangulate_pose_df
+        ctx_3d = self._fetch_3d_context(key)
+        computed = self._compute_3d(
+            key, ctx_3d, task_mode, output_dir, inference_params, tool
+        )
+        return self._store_3d_estimation_nwb(
+            key,
+            computed["cam_dfs"],
+            computed["cam_indices"],
+            computed["pose_3d_df"],
+            computed["bodyparts"],
+            computed["scorer"],
+            nwb_file_name,
+        )
 
+    def _fetch_3d_context(self, key: dict) -> dict:
+        """Collect per-camera database inputs for 3D triangulation.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+
+        Returns
+        -------
+        dict
+            ``cam_indices`` (sorted list), ``ci_to_video_path`` (camera_index →
+            path), ``cam_calibrations``, and ``inference_p`` (PoseEstimParams
+            ``params`` blob, defaulted to ``{}``).
+        """
         file_rows = (VidFileGroup.File & key).fetch(
             "KEY", "camera_index", as_dict=True
         )
@@ -1383,7 +1571,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             {r["camera_index"] for r in file_rows if r["camera_index"] >= 0}
         )
 
-        # Map camera_index → VideoFile key
+        # Map camera_index → VideoFile key, then resolve each to a path.
         ci_to_vf = {
             r["camera_index"]: {
                 k: v for k, v in r.items() if k != "camera_index"
@@ -1391,15 +1579,62 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             for r in file_rows
             if r["camera_index"] >= 0
         }
+        ci_to_video_path = {
+            ci: (VideoFile & vf_key).fetch1().get("path", "")
+            for ci, vf_key in ci_to_vf.items()
+        }
+
+        return {
+            "cam_indices": cam_indices,
+            "ci_to_video_path": ci_to_video_path,
+            "cam_calibrations": self._load_camera_calibrations(key),
+            "inference_p": (PoseEstimParams & key).fetch1("params") or {},
+        }
+
+    def _compute_3d(
+        self,
+        key: dict,
+        ctx_3d: dict,
+        task_mode: str,
+        output_dir: str,
+        inference_params: dict,
+        tool: str,
+        model_info: dict = None,
+    ) -> dict:
+        """Run per-camera inference and triangulate to 3D.
+
+        Database-free when ``model_info`` is supplied: every query is then
+        resolved by :meth:`_fetch_3d_context` and :meth:`make_fetch`.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection.
+        ctx_3d : dict
+            Output of :meth:`_fetch_3d_context`.
+        task_mode, output_dir, inference_params, tool : ...
+            As resolved in ``make_fetch()``.
+        model_info : dict, optional
+            Pre-fetched ``Model`` row forwarded to :meth:`run_inference` so it
+            skips its own query.  ``None`` (direct calls) lets it self-fetch.
+
+        Returns
+        -------
+        dict
+            ``cam_dfs``, ``cam_indices``, ``pose_3d_df``, ``bodyparts``,
+            ``scorer``.
+        """
+        from spyglass.position.v2.utils.triangulation import triangulate_pose_df
+
+        cam_indices = ctx_3d["cam_indices"]
+        ci_to_video_path = ctx_3d["ci_to_video_path"]
 
         cam_dfs: dict = {}
         cam_bodyparts: list = []
         cam_scorer: str = "triangulated"
 
         for ci in cam_indices:
-            vf_key = ci_to_vf[ci]
-            vf_entry = (VideoFile & vf_key).fetch1()
-            cam_video_path = vf_entry.get("path", "")
+            cam_video_path = ci_to_video_path[ci]
 
             # Run or find per-camera output.
             cam_output_info = None
@@ -1409,6 +1644,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     model_key,
                     cam_video_path,
                     destfolder=output_dir or None,
+                    model_info=model_info,
+                    tool=tool if model_info is not None else None,
                     **inference_params,
                 )
 
@@ -1430,9 +1667,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             cam_bodyparts = bodyparts
             cam_scorer = scorer
 
-        # Load calibration.
-        cam_calibrations = self._load_camera_calibrations(key)
-        inference_p = (PoseEstimParams & key).fetch1("params") or {}
+        inference_p = ctx_3d["inference_p"]
 
         from spyglass.position.utils.general import flatten_multiindex
 
@@ -1441,7 +1676,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         pose_3d_df = triangulate_pose_df(
             cam_flat,
-            cam_calibrations,
+            ctx_3d["cam_calibrations"],
             cam_bodyparts,
             min_confidence=inference_p.get("min_confidence", 0.6),
             max_reproj_error=inference_p.get("max_reproj_error", 5.0),
@@ -1452,17 +1687,13 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             for coord in ("x", "y", "z"):
                 pose_3d_df[("triangulated", bp, coord)] *= 100.0
 
-        # Store per-camera 2D + 3D in one analysis NWB file.
-        analysis_file_name = self._store_3d_estimation_nwb(
-            key,
-            cam_dfs,
-            cam_indices,
-            pose_3d_df,
-            cam_bodyparts,
-            cam_scorer,
-            nwb_file_name,
-        )
-        return analysis_file_name
+        return {
+            "cam_dfs": cam_dfs,
+            "cam_indices": cam_indices,
+            "pose_3d_df": pose_3d_df,
+            "bodyparts": cam_bodyparts,
+            "scorer": cam_scorer,
+        }
 
     def _store_3d_estimation_nwb(
         self,
@@ -1473,6 +1704,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         bodyparts: list,
         scorer: str,
         nwb_file_name: str,
+        ctx: dict = None,
     ) -> str:
         """Store per-camera 2D poses and 3D triangulated pose in one NWB file.
 
@@ -1497,17 +1729,15 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         str
             analysis_file_name.
         """
+        ctx = ctx or self._fetch_store_context(key)
+
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         nwb_analysis_file = AnalysisNwbfile()
 
-        vid_timestamps = self._fetch_video_timestamps(key)
+        vid_timestamps = ctx["vid_timestamps"]
         builder = self._get_nwb_builder_cls()()
 
-        model_info = (
-            Model * ModelParams & {"model_id": key["model_id"]}
-        ).fetch1()
-        skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
-        skeleton_edges = (Skeleton & skeleton_key).fetch1().get("edges", [])
+        skeleton_edges = ctx["skeleton_edges"]
 
         analysis_abs_path = nwb_analysis_file.get_abs_path(analysis_file_name)
 
@@ -1553,6 +1783,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         scorer: str,
         nwb_file_name: str,
         meters_per_pixel: float = None,
+        ctx: dict = None,
     ) -> str:
         """Store pose estimation data in AnalysisNwbfile using helper classes.
 
@@ -1572,29 +1803,27 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         meters_per_pixel : float, optional
             Camera calibration factor encoded into the NWB description so
             the conversion can be recovered without re-querying VideoFile.
+        ctx : dict, optional
+            Pre-fetched upstream metadata from :meth:`_fetch_store_context`.
+            Supplied by :meth:`make_insert` so the tri-part sequence resolves
+            every query in ``make_fetch``.  When ``None`` (direct calls), the
+            context is fetched here.
 
         Returns
         -------
         str
             The analysis_file_name for the created NWB file
         """
+        ctx = ctx or self._fetch_store_context(key)
+
         # Create analysis NWB file
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         nwb_analysis_file = AnalysisNwbfile()
 
-        # Fetch skeleton info from ModelParams via Model join
-        model_info = (
-            Model * ModelParams & {"model_id": key["model_id"]}
-        ).fetch1()
-        skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
-        skeleton_entry = (Skeleton & skeleton_key).fetch1()
-        skeleton_edges = skeleton_entry.get("edges", [])
-
-        # Get video information for pose estimation
-        video_keys = [str(p) for p in (VidFileGroup.File & key).fetch("KEY")]
-
-        # Build pose estimation using helper class
-        vid_timestamps = self._fetch_video_timestamps(key)
+        model_info = ctx["model_info"]
+        skeleton_edges = ctx["skeleton_edges"]
+        video_keys = ctx["video_keys"]
+        vid_timestamps = ctx["vid_timestamps"]
         builder = self._get_nwb_builder_cls()()
 
         # Derive canonical software name from the active tool strategy so
@@ -2534,27 +2763,56 @@ class PoseV2(SpyglassMixin, dj.Computed):
         )
         return output_path
 
-    def make(self, key):
-        """Process raw pose estimation with orientation, centroid, and smoothing
+    def make_fetch(self, key):
+        """Read the raw pose DataFrame and processing parameters.
 
-        1. Fail fast: verify NWB link
-        2. Fetch raw pose DataFrame and parameters
-        3. Delegate computation to compute_pose_outputs (pure, no DB)
-        4. Store results in NWB and insert row
+        Read-only: the tri-part contract forbids writes here, and DataJoint
+        re-runs this method inside the transaction to verify (via ``DeepHash``)
+        that upstream data did not change during ``make_compute``.
 
         Parameters
         ----------
         key : dict
-            Primary key from PoseSelection
+            Primary key from PoseSelection.
+
+        Returns
+        -------
+        list
+            ``[nwb_file_name, pose_df, params]``, passed as positional
+            arguments to :meth:`make_compute`.
         """
-        from spyglass.position.utils.pose_processing import compute_pose_outputs
-
         nwb_file_name = self._get_nwb_file_name(key)
-
-        self._info_msg(f"Processing pose for: {key['model_id']}")
         pose_df = (PoseEstim & key).fetch1_dataframe()
         params = (PoseParams & key).fetch1()
 
+        return [nwb_file_name, pose_df, params]
+
+    def make_compute(self, key, nwb_file_name, pose_df, params):
+        """Compute orientation, centroid, velocity, and speed.
+
+        Pure: no database access. Delegates to ``compute_pose_outputs``, the
+        V2 pipeline contract (see ``CLAUDE.md``).
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseSelection.
+        nwb_file_name : str or None
+            Parent NWB file name, threaded through to :meth:`make_insert`.
+        pose_df : pd.DataFrame
+            Raw pose DataFrame from :meth:`make_fetch`.
+        params : dict
+            PoseParams entry from :meth:`make_fetch`.
+
+        Returns
+        -------
+        list
+            ``[nwb_file_name, outputs]``, passed as positional arguments to
+            :meth:`make_insert`.
+        """
+        from spyglass.position.utils.pose_processing import compute_pose_outputs
+
+        self._info_msg(f"Processing pose for: {key['model_id']}")
         outputs = compute_pose_outputs(
             pose_df,
             params["orient"],
@@ -2562,6 +2820,23 @@ class PoseV2(SpyglassMixin, dj.Computed):
             params["smoothing"],
         )
 
+        return [nwb_file_name, outputs]
+
+    def make_insert(self, key, nwb_file_name, outputs):
+        """Write the analysis NWB file and insert the row.
+
+        Runs inside a transaction. All database writes — including
+        ``AnalysisNwbfile.add``, which inserts — live here.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseSelection.
+        nwb_file_name : str or None
+            Parent NWB file name from :meth:`make_compute`.
+        outputs : dict
+            Result of ``compute_pose_outputs``.
+        """
         self._info_msg("Storing results in NWB...")
         analysis_file_name, obj_ids = self._store_pose_nwb(
             {**key, "nwb_file_name": nwb_file_name},
