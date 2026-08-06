@@ -75,7 +75,12 @@ def _run_model_make(device):
         }
         train_mod.ToolStrategyFactory.create_strategy.return_value = strategy
 
-        train_mod.Model.make(fake_self, {"model_id": "m1"}, device=device)
+        # Tri-part make: `device` arrives via make_fetch (DataJoint routes
+        # make_kwargs there) and is threaded into make_compute, which is
+        # where the strategy params are assembled.
+        key = {"model_id": "m1"}
+        fetched = train_mod.Model.make_fetch(fake_self, key, device=device)
+        train_mod.Model.make_compute(fake_self, key, *fetched)
 
     return captured["params"]
 
@@ -100,7 +105,12 @@ def _run_pose_estim_make(device):
 
     captured = {}
 
-    def fake_run_inference(model_key, videos, destfolder=None, **kwargs):
+    def fake_run_inference(
+        model_key, videos, destfolder=None, model_info=None, tool=None, **kwargs
+    ):
+        # model_info/tool are the pre-fetched values make_fetch hands down so
+        # run_inference performs no query of its own; only the inference
+        # params (which carry `device`) are under test here.
         captured["kwargs"] = kwargs
         raise _Abort
 
@@ -119,6 +129,7 @@ def _run_pose_estim_make(device):
         PoseEstimParams=MagicMock(),
         VidFileGroup=MagicMock(),
         VideoFile=MagicMock(),
+        BodyPart=MagicMock(),  # canon_map() now resolved in make_fetch
     ):
         estim_mod.PoseEstimSelection.__and__.return_value.fetch1.return_value = (  # noqa: E501
             "trigger",
@@ -149,8 +160,11 @@ def _run_pose_estim_make(device):
             "vid_group_id": "v1",
             "pose_estim_params_id": "default",
         }
+        # Tri-part make: `device` arrives via make_fetch and is folded into
+        # inference_params, which make_compute forwards to run_inference.
+        fetched = estim_mod.PoseEstim.make_fetch(fake_self, key, device=device)
         with pytest.raises(_Abort):
-            estim_mod.PoseEstim.make(fake_self, key, device=device)
+            estim_mod.PoseEstim.make_compute(fake_self, key, *fetched)
 
     return captured["kwargs"]
 
