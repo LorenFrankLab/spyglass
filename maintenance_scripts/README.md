@@ -99,9 +99,8 @@ regularly as cron jobs.
 5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
-After a successful run, the log file is truncated to `SPYGLASS_MAX_LOG` lines
-(1000 by default). A failing run currently exits before truncation, so repeated
-failures can grow the log until the failure-path finalizer is added.
+After logging is initialized, an exit trap truncates the log to
+`SPYGLASS_MAX_LOG` lines (1000 by default) on both successful and failing exits.
 
 To enable slack notifications, you will need to create a slack app and generate
 a token following the instructions
@@ -141,24 +140,17 @@ the app password instead.
 
 ### Cleanup failure handling
 
-`cleanup.py` runs each table cleanup independently and reports all failures at
-the end. When the file-issues monitoring pass succeeds, its report is written
-before a nonzero exit so `run_jobs.sh` can still send it. If the monitoring pass
-or report write itself fails, that failure appears in the final summary and the
-report may be absent or incomplete.
+`cleanup.py` records ordinary phase failures and exits nonzero after running the
+remaining safe phases and writing any available file-issues report. An
+`AnalysisNwbfile.cleanup()` failure suppresses later analysis-storage deletion
+(`DecodingOutput` and external analysis cleanup), while raw, sorting, recording,
+temp, and file-issues checks continue. Preview a refusal with
+`AnalysisNwbfile().cleanup(dry_run=True)` before changing its safety limits.
 
-If `AnalysisNwbfile.cleanup()` fails — including a safety refusal from the
-deletion limits — the state of analysis storage is unknown, so later phases that
-also delete from it are skipped: `DecodingOutput.cleanup()` and the external
-analysis deletions. Raw, sorting, recording, and temp cleanups continue
-regardless, as does the file-issues monitoring pass. That pass may populate the
-`AnalysisFileIssues` table, but it does not delete analysis files.
-
-A safety refusal usually means the analysis directory is misconfigured or holds
-a large backlog of untracked files. Run `AnalysisNwbfile().cleanup(dry_run=True)`
-to see the plan before adjusting `max_delete_fraction`.
-
-`AnalysisNwbfile.cleanup()` is **not concurrency-safe**: two runs can adopt and
-later drop each other's insert-blocking triggers, and validation is not atomic
-with filesystem unlink. Run it from one process at a time without concurrent
-mutation of eligible analysis paths.
+Analysis cleanup, including a dry-run preview, also refuses to start if an
+insert-blocking trigger already exists, because the trigger may belong to an
+active cleanup or may be stale. Confirm that no cleanup is running before using
+`AnalysisRegistry().unblock_new_inserts()`; that helper removes every registered
+analysis blocking trigger. This check is not a full cleanup lease or ownership
+protocol, and filesystem validation is not atomic with unlink. Run one cleanup
+at a time without concurrent mutation of eligible analysis paths.

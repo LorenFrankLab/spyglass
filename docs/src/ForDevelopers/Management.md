@@ -354,13 +354,9 @@ AnalysisNwbfile().cleanup(dry_run=True)
 AnalysisNwbfile().cleanup(dry_run=False)
 ```
 
-The public dry run reports aggregate counts, not a per-path manifest. Its
-filesystem counts and safety validation are based on resolved **target
-candidates**. Final protected-store, tracking, and identity checks run only
-during the destructive pass, so a counted candidate can still be refused.
-Conversely, when an accepted candidate was reached through a leaf symlink, the
-destructive pass also unlinks that in-analysis leaf; it is not counted as a
-separate target candidate.
+The dry run reports aggregate target counts rather than a per-path manifest.
+The destructive pass repeats its tracking, identity, and protected-store checks,
+so a candidate counted in the preview can still be skipped or refused.
 
 **Important**: Cleanup automatically coordinates across all custom
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
@@ -372,106 +368,54 @@ operation treats the analysis directory as a managed resource.
 
 ### How It Works
 
-1. **Coordination**: Finds custom `AnalysisNwbfile` tables via
-    `AnalysisRegistry` and blocks inserts into the tables present at startup.
-2. **Planning**: Snapshots the filesystem and resolves tracked external paths
-    from the common and custom tables.
-3. **Validation**: Applies the minimum-age and catastrophic-deletion limits
-    before destructive filesystem work.
-4. **Filesystem cleanup**: Refreshes registry membership plus resolved paths
-    and filesystem identities for each candidate, rechecks its live identities,
-    then removes eligible untracked files and leaf symlinks.
-5. **Database cleanup**: Removes custom and common orphan rows and unused
-    DataJoint external entries. Files newly orphaned here are handled by the
-    next run.
-6. **Release**: Removes the insert-blocking triggers, making an unblock failure
-    loud to the caller.
-
-The cleanup process checks:
-
-- Database entries (removes orphaned rows)
-- External file store (removes untracked files)
-- Coordination across tables (prevents premature deletion)
+Cleanup discovers common and custom analysis tables, snapshots tracked paths and
+the filesystem, validates the complete deletion plan, and then rechecks each
+candidate before unlinking it. It next removes orphan rows and unused DataJoint
+external entries. Files made orphaned by that database phase are handled on the
+next run.
 
 ### Safety Features
 
-- **Multi-table check**: Verifies file is unused across ALL tables before
-    deletion
-- **Logging**: Reports all actions taken during cleanup
-- **Foreign key protection**: Respects downstream table dependencies
-- **Insert blocking**: Temporarily installs `BEFORE INSERT` triggers on the
-    analysis tables that exist when cleanup starts. It does **not** block new
-    table *registration*: a custom analysis table declared mid-cleanup gets no
-    trigger, which is why cleanup re-reads registry membership and resolves
-    every currently tracked external path before every deletion candidate.
-- **Filesystem deletion limits**: Refuses destructive cleanup when the sweep
-    would delete more than `max_delete_fraction` (default 0.9) of the files it
-    was eligible to act on -- the deletions plus the scanned files it
-    recognized as tracked, with age-deferred files excluded.
-    `max_delete_to_tracked_ratio` (default 10.0) cannot bind at the default
-    fraction, because every scanned file that is kept is tracked and the
-    fraction limit already caps the ratio at 9; it becomes the operative guard
-    only if `max_delete_fraction` is raised above 10/11 (~0.909). These limits
-    apply to the filesystem sweep for untracked or empty analysis NWB files;
-    orphan row deletion remains governed by DataJoint table dependencies.
-- **Minimum file age**: Files newer than `min_file_age_hours` (default 24) are
-    deferred to the next cleanup and reported, not deleted. This protects work
-    in the create/populate/register window, where a file exists on disk but is
-    not yet tracked -- notably a file written to another volume and symlinked
-    in before its row is inserted. Pass `min_file_age_hours=0` only for
-    intentional immediate cleanup. **Scope**: the age gate covers only the
-    `*.nwb` filesystem sweep. Custom-table external cleanup
-    (`cleanup_external(delete_external_files=True)`) deletes files through
-    DataJoint in the same run and is not age-gated.
-- **Leaf symlink handling**: `*.nwb` symlinks anywhere in the analysis
-    directory tree are followed. A tracked or recent link is preserved. An
-    old, untracked link has **both its target and the link** removed, so
-    analysis storage spread across volumes via symlinks is reclaimed in one
-    pass. A dangling link has only the link removed. Directory symlinks are
-    not followed, so a symlinked session directory stays invisible to
-    cleanup.
-- **Cross-volume deletions are logged**: after an external target is
-    successfully unlinked, its path and size are logged immediately. A final
-    count, byte total, and list of roots summarize the run. Failed unlinks are
-    never reported as successful, and a later candidate failure cannot hide an
-    earlier successful external deletion.
+- **Tracked and recent files are retained**: tracking is checked across all
+    registered common and custom tables, including filesystem aliases. Files
+    newer than `min_file_age_hours` (default 24) are deferred and reported. Pass
+    `min_file_age_hours=0` only for intentional immediate cleanup. This age gate
+    applies to the `*.nwb` filesystem sweep, not DataJoint's custom-table
+    external cleanup later in the run.
+- **Deletion limits catch a wrong directory or large unexpected backlog**:
+    destructive cleanup refuses a plan above `max_delete_fraction` (default
+    0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
+    untracked or empty analysis NWB files; foreign keys continue to govern
+    orphan-row deletion.
+- **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
+    `*.nwb` leaf symlink authorizes deletion of both its regular-file target and
+    the link. Tracked or recent links are retained, dangling links lose only the
+    link, and directory symlinks are not followed.
+- **Other configured stores are protected**: targets beneath raw, recording,
+    sorting, video, waveforms, temp, export, Kachery, DLC, or MoSeq roots are
+    refused, including access through filesystem aliases. If a configured
+    protected root cannot be resolved and inspected as a directory, destructive
+    cleanup fails closed before unlinking anything.
+- **State is rechecked at deletion time**: cleanup skips files that have become
+    tracked and requires the authorizing link and target identities to match the
+    plan. Successful external target deletions are logged with their path and
+    size. Because a leaf inside `analysis_dir` can authorize deletion of an
+    otherwise unprotected external target, restrict write access to
+    `analysis_dir`.
+- **Insert blocking refuses ambiguous ownership**: cleanup checks registered
+    analysis tables for existing blockers before proceeding; a destructive run
+    then installs temporary `BEFORE INSERT` triggers. If a blocker already
+    exists, previews and destructive runs both refuse because they cannot tell
+    whether another cleanup is active or the trigger is stale. First
+    confirm that no cleanup is running; only then inspect the triggers and use
+    `AnalysisRegistry().unblock_new_inserts()` if every blocking trigger is
+    stale. That helper removes all registered analysis blocking triggers.
 
-**Deletion authority**: an in-root `*.nwb` symlink authorizes deletion of
-the regular target it resolves to during final pre-delete validation, including
-targets on another volume. Targets beneath any other configured Spyglass store
-root -- raw, recording, sorting, video, waveforms, temp, export, Kachery, and
-the DLC and MoSeq roots -- are always refused: the analysis registry cannot
-establish ownership of files in those stores, and some (raw acquisition,
-behavior video) may not be recomputable. Protection uses filesystem ancestry
-as well as path spelling, so case variants and alternate names of a
-configured root itself (including a whole-root bind mount) are refused too.
-This guard fails closed: any configured protected root that cannot be resolved
-and inspected as a directory stops destructive analysis cleanup before its
-first unlink. A missing spelling may be an unavailable mount while the same
-storage remains reachable
-through another alias, so it cannot safely be omitted. This deliberate
-cross-volume behavior makes symlinked multi-drive analysis storage usable, but
-it also means `analysis_dir` must be treated as a privileged directory. Anyone
-who can create a symlink there can direct cleanup at another non-protected
-target, and cleanup runs unattended from cron, potentially with elevated
-privileges.
-
-During final pre-delete validation, cleanup resolves all current external-table
-paths, compares their filesystem identities, and skips a target that has become
-tracked through any alias. It also requires each authorizing leaf to remain
-inside `analysis_dir`, retain its scanned identity and raw link text, and
-resolve to the scanned target. The target's device, inode, size, mode, and
-timestamps must still match the scan. The minimum-age gate separately protects
-files still being written or awaiting registration. Restrict write access to
-`analysis_dir` accordingly.
-
-
-**Not concurrency-safe**: two cleanups running at once can adopt and later drop
-each other's insert-blocking triggers. Validation and unlink are also separate
-filesystem operations, so a concurrent writer can change tracking, an alias,
-or a target in the remaining check-to-unlink window. Run cleanup from one
-process at a time and do not mutate eligible analysis paths concurrently. A
-shared cleanup/writer protocol is required to close this window completely.
+**Concurrency limit**: the trigger check is not a database-wide cleanup lease,
+and triggers do not carry per-run ownership. Do not overlap cleanup runs.
+Tracking/identity validation and filesystem unlink are also separate operations,
+so do not concurrently mutate eligible analysis paths. A shared cleanup/writer
+protocol is required to make that check-to-unlink window atomic.
 
 ### Custom Tables
 
