@@ -52,7 +52,7 @@ dependencies = [
   "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
-  "ndx-pose",
+  "ndx-pose<0.4",                  # 0.4 needs pynwb>=4 / hdmf>=6
   "non-local-detector",
   "numpy",
   "opencv-python",
@@ -72,7 +72,7 @@ dependencies = [
 optional-dependencies.dlc = [
   "deeplabcut>=3", # 3.0+ drops TF and uses PyTorch backend
   "ffmpeg",
-  "ndx-pose>=0.2",
+  "ndx-pose>=0.2,<0.4",
 ]
 optional-dependencies.docs = [
   "hatch",                  # Get version from env
@@ -104,7 +104,7 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq",
 ]
 optional-dependencies.sleap = [
-  "ndx-pose>=0.2",
+  "ndx-pose>=0.2,<0.4",
   "sleap-io>=0.7",      # read/write .slp and export analysis.h5
   "sleap-nn>=0.2",      # PyTorch inference backend (SLEAP >= 1.5)
 ]
