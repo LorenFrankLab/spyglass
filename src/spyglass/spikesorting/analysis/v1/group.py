@@ -176,7 +176,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         -----
         Units whose value is NaN fail every numeric comparison. A criterion
         naming a column the sorting does not have is skipped with a warning;
-        the remaining criteria still apply. Sortings in one group may not
+        the remaining criteria still apply. The sortings in one group may not
         share the same columns (e.g. if they were curated differently),
         so a criterion may apply to only some of them.
         """
