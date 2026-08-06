@@ -491,6 +491,13 @@ def _table(common_nwbfile, analysis_dir, tracked=()):
     return table
 
 
+def _patch_config_dir(common_nwbfile, monkeypatch, key, path):
+    """Patch one directory only for this module, not shared settings state."""
+    patched = dict(common_nwbfile.config)
+    patched[key] = str(path)
+    monkeypatch.setattr(common_nwbfile, "config", patched)
+
+
 def test_scan_includes_untracked_leaf_symlink(common_nwbfile, tmp_path):
     """A leaf *.nwb symlink is a candidate, keyed by its real target."""
     volume2 = tmp_path / "volume2"
@@ -2087,27 +2094,28 @@ def test_tracked_external_link_is_preserved(common_nwbfile, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "setting_name",
+    "setting_key",
     [
-        "raw_dir",
-        "recording_dir",
-        "sorting_dir",
-        "video_dir",
-        "waveforms_dir",
-        "temp_dir",
-        "export_dir",
-        "kachery_cloud_dir",
-        "kachery_storage_dir",
-        "kachery_temp_dir",
-        "dlc_project_dir",
-        "dlc_video_dir",
-        "dlc_output_dir",
-        "moseq_project_dir",
-        "moseq_video_dir",
+        "SPYGLASS_RAW_DIR",
+        "SPYGLASS_RECORDING_DIR",
+        "SPYGLASS_SORTING_DIR",
+        "SPYGLASS_VIDEO_DIR",
+        "SPYGLASS_WAVEFORMS_DIR",
+        "SPYGLASS_TEMP_DIR",
+        "SPYGLASS_EXPORT_DIR",
+        "KACHERY_CLOUD_DIR",
+        "KACHERY_STORAGE_DIR",
+        "KACHERY_TEMP_DIR",
+        "DLC_PROJECT_DIR",
+        "DLC_VIDEO_DIR",
+        "DLC_OUTPUT_DIR",
+        "MOSEQ_PROJECT_DIR",
+        "MOSEQ_VIDEO_DIR",
+        "FUTURE_PIPELINE_DIR",
     ],
 )
 def test_delete_refuses_target_in_another_spyglass_store(
-    common_nwbfile, tmp_path, monkeypatch, setting_name
+    common_nwbfile, tmp_path, monkeypatch, setting_key
 ):
     """A symlink into any other managed store must not delete its target.
 
@@ -2115,7 +2123,7 @@ def test_delete_refuses_target_in_another_spyglass_store(
     another store reads as untracked. Those files may not be recomputable,
     and the age gate cannot help when they are already old.
     """
-    managed_root = tmp_path / setting_name
+    managed_root = tmp_path / setting_key.lower()
     managed_root.mkdir()
     acquisition = managed_root / "sub-x_ses-y.nwb"
     acquisition.write_text("irreplaceable acquisition data")
@@ -2125,7 +2133,7 @@ def test_delete_refuses_target_in_another_spyglass_store(
     convenience_link = analysis_dir / "session_copy.nwb"
     convenience_link.symlink_to(acquisition)
 
-    monkeypatch.setattr(common_nwbfile, setting_name, str(managed_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, setting_key, managed_root)
 
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
@@ -2137,6 +2145,26 @@ def test_delete_refuses_target_in_another_spyglass_store(
         acquisition.exists()
     ), "a protected-store target must never be deleted"
     assert convenience_link.is_symlink(), "the link is left with its target"
+
+
+def test_protected_roots_exclude_base_and_analysis(
+    common_nwbfile, tmp_path, monkeypatch
+):
+    """Owned paths and non-directory settings are not protected roots."""
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    monkeypatch.setattr(
+        common_nwbfile,
+        "config",
+        {
+            "SPYGLASS_BASE_DIR": str(tmp_path),
+            "SPYGLASS_ANALYSIS_DIR": str(analysis_dir),
+            "KACHERY_ZONE": "test.zone",
+            "KACHERY_CLOUD_EPHEMERAL": "TRUE",
+        },
+    )
+
+    assert common_nwbfile.AnalysisNwbfile._other_managed_roots() == []
 
 
 def test_dry_run_reports_target_candidate_not_leaf_unlink(
@@ -2159,7 +2187,7 @@ def test_dry_run_reports_target_candidate_not_leaf_unlink(
     link = analysis_dir / "link.nwb"
     link.symlink_to(target)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
 
@@ -2197,7 +2225,7 @@ def test_delete_refuses_physical_alias_of_protected_store(
     convenience_link = analysis_dir / "session_copy.nwb"
     convenience_link.symlink_to(acquisition)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
 
@@ -2236,7 +2264,7 @@ def test_delete_aborts_when_protected_store_root_cannot_be_resolved(
     convenience_link = analysis_dir / "session_copy.nwb"
     convenience_link.symlink_to(acquisition)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
 
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
@@ -2278,7 +2306,7 @@ def test_delete_aborts_when_protected_store_root_cannot_be_statted(
     first.write_text("first")
     second.write_text("second")
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
     real_stat = common_nwbfile.os.stat
@@ -2322,7 +2350,7 @@ def test_managed_root_containment_does_not_match_sibling_prefix(
     link = analysis_dir / "link.nwb"
     link.symlink_to(target)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
 
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
@@ -2439,7 +2467,9 @@ def test_delete_aborts_when_protected_store_root_is_missing(
     untracked.write_text("stale")
 
     missing_raw = tmp_path / "unavailable_raw_mount"
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(missing_raw))
+    _patch_config_dir(
+        common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", missing_raw
+    )
 
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
@@ -2473,7 +2503,7 @@ def test_delete_aborts_when_managed_root_ancestry_cannot_be_statted(
     link = analysis_dir / "copy.nwb"
     link.symlink_to(acquisition)
 
-    monkeypatch.setattr(common_nwbfile, "raw_dir", str(raw_root))
+    _patch_config_dir(common_nwbfile, monkeypatch, "SPYGLASS_RAW_DIR", raw_root)
     table = _table(common_nwbfile, analysis_dir)
     plan = _plan(table)
 
@@ -2617,20 +2647,30 @@ def test_block_new_inserts_partial_failure_requires_safe_recovery(
 ):
     """A partial failure must not prescribe an unconditional global unblock.
 
-    A successful result can mean either that this call created the trigger or
-    that another cleanup already owned it. Recovery guidance must therefore
-    require excluding an active cleanup before removing stale triggers.
+    Acquisition uses one sorted snapshot and stops at the first error. Earlier
+    triggers may still belong to this call, so recovery must exclude an active
+    cleanup before removing anything.
     """
     registry = object.__new__(common_nwbfile.AnalysisRegistry)
     monkeypatch.setattr(
         common_nwbfile.AnalysisRegistry,
         "fetch",
-        lambda self, *a, **k: ["db.`t1`", "db.`t2`", "db.`t3`"],
+        lambda self, *a, **k: ["db.`t3`", "db.`t1`", "db.`t2`"],
     )
+    inspected = []
+    attempted = []
+
+    def _exists(self, table):
+        inspected.append(table)
+        return False
 
     def _block(self, table, dry_run=False):
-        return "trigger DDL error" if table == "db.`t3`" else None
+        attempted.append(table)
+        return "trigger DDL error" if table == "db.`t2`" else None
 
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry, "_block_exists", _exists
+    )
     monkeypatch.setattr(
         common_nwbfile.AnalysisRegistry, "_block_single_table", _block
     )
@@ -2645,6 +2685,152 @@ def test_block_new_inserts_partial_failure_requires_safe_recovery(
     assert "Confirm that no cleanup is active" in msg
     assert "inspect the blocking triggers" in msg
     assert "only after confirming every such trigger is stale" in msg
+    assert inspected == ["db.`t1`", "db.`t2`", "db.`t3`"]
+    assert attempted == ["db.`t1`", "db.`t2`"]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_block_new_inserts_refuses_preexisting_trigger_before_acquisition(
+    common_nwbfile, monkeypatch, dry_run
+):
+    """An active-or-stale trigger is never adopted, even by a preview."""
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *a, **k: ["db.`t3`", "db.`t1`", "db.`t2`"],
+    )
+    inspected = []
+    attempted = []
+
+    def _exists(self, table):
+        inspected.append(table)
+        return table == "db.`t2`"
+
+    def _block(self, table, dry_run=False):
+        attempted.append(table)
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry, "_block_exists", _exists
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry, "_block_single_table", _block
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        registry.block_new_inserts(dry_run=dry_run)
+
+    msg = str(exc.value)
+    assert "already exist" in msg
+    assert "Another cleanup may be active" in msg
+    assert "triggers may be stale" in msg
+    assert "Confirm that no cleanup is active" in msg
+    assert "unblock_new_inserts()" in msg
+    assert inspected == ["db.`t1`", "db.`t2`", "db.`t3`"]
+    assert attempted == []
+
+
+def test_block_new_inserts_refuses_trigger_that_appears_after_preflight(
+    common_nwbfile, monkeypatch
+):
+    """A racing trigger creation is an error rather than adopted ownership."""
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *a, **k: ["db.`t1`"],
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_get_block_info",
+        lambda self, table: ("db", "t1_block_inserts"),
+    )
+    checks = iter([False, True])
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_block_exists",
+        lambda self, table: next(checks),
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        registry.block_new_inserts(dry_run=False)
+
+    msg = str(exc.value)
+    assert "blocking trigger already exists" in msg
+    assert "another cleanup may be active" in msg
+    assert "trigger may be stale" in msg
+
+
+def test_block_new_inserts_fails_closed_when_preflight_cannot_inspect(
+    common_nwbfile, monkeypatch
+):
+    """An unreadable blocker state aborts before trigger acquisition."""
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *a, **k: ["db.`t1`"],
+    )
+    attempted = []
+
+    def _cannot_inspect(self, table):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_block_exists",
+        _cannot_inspect,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_block_single_table",
+        lambda self, table, dry_run=False: attempted.append(table),
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to inspect insert blocker"):
+        registry.block_new_inserts(dry_run=False)
+
+    assert attempted == []
+
+
+def test_block_new_inserts_dry_run_is_sorted_and_has_no_ddl(
+    common_nwbfile, monkeypatch, caplog
+):
+    """A successful preview inspects/logs deterministically without CREATE."""
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *a, **k: ["db.`t2`", "db.`t1`"],
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_get_block_info",
+        lambda self, table: ("db", f"{table[-3:-1]}_block_inserts"),
+    )
+    inspected = []
+
+    def _exists(self, table):
+        inspected.append(table)
+        return False
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry, "_block_exists", _exists
+    )
+
+    with caplog.at_level("INFO"):
+        registry.block_new_inserts(dry_run=True)
+
+    messages = [
+        record.message
+        for record in caplog.records
+        if record.message.startswith("Dry run: would block")
+    ]
+    assert inspected == ["db.`t1`", "db.`t2`", "db.`t1`", "db.`t2`"]
+    assert messages == [
+        "Dry run: would block inserts into db.`t1`",
+        "Dry run: would block inserts into db.`t2`",
+    ]
 
 
 def test_access_snapshot_rejects_link_flag_target_mismatch(common_nwbfile):
@@ -2669,6 +2855,42 @@ def test_access_snapshot_rejects_link_flag_target_mismatch(common_nwbfile):
             mtime_ns=0,
             ctime_ns=0,
         )
+
+
+def test_access_snapshot_from_path_regular_file(common_nwbfile, tmp_path):
+    """The factory records a regular leaf's lstat identity."""
+    path = tmp_path / "regular.nwb"
+    path.write_text("data")
+    lst = os.lstat(path)
+
+    snapshot = common_nwbfile.AccessSnapshot.from_path(path)
+
+    assert snapshot.access_path == path
+    assert snapshot.is_link is False
+    assert snapshot.raw_link_target is None
+    assert (snapshot.dev, snapshot.ino) == (lst.st_dev, lst.st_ino)
+    assert (snapshot.mtime_ns, snapshot.ctime_ns) == (
+        lst.st_mtime_ns,
+        lst.st_ctime_ns,
+    )
+
+
+def test_access_snapshot_from_path_symlink(common_nwbfile, tmp_path):
+    """The factory records the link itself without following its target."""
+    link = tmp_path / "link.nwb"
+    link.symlink_to("missing.nwb")
+    lst = os.lstat(link)
+
+    snapshot = common_nwbfile.AccessSnapshot.from_path(link)
+
+    assert snapshot.access_path == link
+    assert snapshot.is_link is True
+    assert snapshot.raw_link_target == "missing.nwb"
+    assert (snapshot.dev, snapshot.ino) == (lst.st_dev, lst.st_ino)
+    assert (snapshot.mtime_ns, snapshot.ctime_ns) == (
+        lst.st_mtime_ns,
+        lst.st_ctime_ns,
+    )
 
 
 def test_cleanup_candidate_rejects_mismatched_target(common_nwbfile, tmp_path):

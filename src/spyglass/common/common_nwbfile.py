@@ -1,9 +1,7 @@
-import math
 import os
 import re
 import stat as stat_module
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
@@ -18,24 +16,16 @@ from pynwb.core import ScratchData
 from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
-from spyglass.settings import (
-    analysis_dir,
-    dlc_output_dir,
-    dlc_project_dir,
-    dlc_video_dir,
-    export_dir,
-    kachery_cloud_dir,
-    kachery_storage_dir,
-    kachery_temp_dir,
-    moseq_project_dir,
-    moseq_video_dir,
-    raw_dir,
-    recording_dir,
-    sorting_dir,
-    temp_dir,
-    video_dir,
-    waveforms_dir,
+from spyglass.common._nwbfile_cleanup import (
+    AccessSnapshot,
+    CleanupCandidate,
+    CleanupPlan,
+    TargetSnapshot,
+    _check_number,
+    _PhysicalRoot,
+    _TrackedFileState,
 )
+from spyglass.settings import analysis_dir, config, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -60,280 +50,6 @@ END
 """
 
 schema = dj.schema("common_nwbfile")
-
-
-def _check_number(
-    name: str,
-    value: Union[int, float],
-    *,
-    minimum: float,
-    maximum: Optional[float] = None,
-) -> float:
-    """Validate a numeric safety limit.
-
-    Parameters
-    ----------
-    name : str
-        Parameter name, used in the error message.
-    value : int or float
-        Supplied value.
-    minimum : float
-        Inclusive lower bound.
-    maximum : float, optional
-        Inclusive upper bound. Omit for an unbounded limit.
-
-    Returns
-    -------
-    float
-
-    Raises
-    ------
-    ValueError
-        If the value is not a finite number within bounds. ``bool`` is
-        rejected explicitly because it is an ``int`` subclass, so
-        ``max_delete_fraction=True`` would otherwise read as 1.0. NaN and
-        inf are rejected rather than coerced: under NaN every comparison is
-        False and the guard silently vanishes.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite number, got {value!r}")
-    if not math.isfinite(value):
-        raise ValueError(f"{name} must be a finite number, got {value!r}")
-    if value < minimum or (maximum is not None and value > maximum):
-        bound = (
-            f"in [{minimum}, {maximum}]"
-            if maximum is not None
-            else f">= {minimum}"
-        )
-        raise ValueError(f"{name} must be {bound}, got {value!r}")
-    return float(value)
-
-
-@dataclass(frozen=True)
-class TargetSnapshot:
-    """Identity of a real analysis file at scan time.
-
-    Attributes
-    ----------
-    real_path : pathlib.Path
-        Fully resolved path of the file.
-    dev, ino : int
-        Device and inode, used to prove the file was not swapped.
-    size : int
-        Size in bytes; 0 marks an empty analysis file.
-    mtime_ns, ctime_ns : int
-        Nanosecond timestamps, used by the age gate.
-    mode : int
-        Raw ``st_mode``; must be a regular file to be deletable.
-    """
-
-    real_path: Path
-    dev: int
-    ino: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
-    mode: int
-
-    @property
-    def newest_ns(self) -> int:
-        """Newest of mtime/ctime, the conservative age basis."""
-        return max(self.mtime_ns, self.ctime_ns)
-
-    @property
-    def is_regular(self) -> bool:
-        """True when the target is a regular file (not fifo/socket/device)."""
-        return stat_module.S_ISREG(self.mode)
-
-
-@dataclass(frozen=True)
-class AccessSnapshot:
-    """One path under analysis_dir through which a target was reached.
-
-    Attributes
-    ----------
-    access_path : pathlib.Path
-        Path as found by the directory walk.
-    is_link : bool
-        True when ``access_path`` is itself a symlink.
-    raw_link_target : str or None
-        ``os.readlink`` value when ``is_link``, else None. Compared at
-        deletion time so a re-pointed link is not followed.
-    dev, ino : int
-        ``lstat`` device and inode of the access path itself.
-    mtime_ns, ctime_ns : int
-        ``lstat`` nanosecond timestamps of the access path itself.
-    """
-
-    access_path: Path
-    is_link: bool
-    raw_link_target: Optional[str]
-    dev: int
-    ino: int
-    mtime_ns: int
-    ctime_ns: int
-
-    def __post_init__(self):
-        """Reject an access whose link flag and raw target disagree.
-
-        ``raw_link_target`` is the ``os.readlink`` value of a symlink and is
-        None for a non-link; ``os.readlink`` never returns an empty string,
-        so the two are equivalent. Enforcing it stops the type from lying
-        about itself -- a link with no recorded target, or a non-link
-        carrying one, could otherwise skew the deletion-time re-pointed-link
-        check.
-        """
-        if self.is_link != (self.raw_link_target is not None):
-            raise ValueError(
-                f"AccessSnapshot for {self.access_path}: is_link="
-                f"{self.is_link} disagrees with raw_link_target="
-                f"{self.raw_link_target!r}"
-            )
-
-    @property
-    def newest_ns(self) -> int:
-        """Newest of mtime/ctime for this access path."""
-        return max(self.mtime_ns, self.ctime_ns)
-
-
-@dataclass(frozen=True)
-class CleanupCandidate:
-    """A real analysis file plus every in-tree path that reaches it.
-
-    A broken symlink has access snapshots but no target snapshot; there is
-    no target to snapshot. ``broken`` is therefore the absence of a target
-    record, not a flag beside meaningless fields.
-    """
-
-    real_path: Path
-    target: Optional[TargetSnapshot]
-    accesses: Tuple[AccessSnapshot, ...]
-
-    def __post_init__(self):
-        """Reject a candidate with no access paths.
-
-        ``newest_ns`` is undefined without at least one access, and an
-        empty-``accesses`` candidate slips through the structural preflight
-        (its ``*.nwb`` loop is vacuous) only to raise from ``max()`` partway
-        through the deletion loop -- after earlier candidates have already
-        been unlinked. Enforcing it here also covers the dry-run path, which
-        returns before the preflight runs.
-        """
-        if not self.accesses:
-            raise ValueError(
-                f"CleanupCandidate for {self.real_path} has no access paths; "
-                "a candidate must be reachable from within the analysis "
-                "directory"
-            )
-        if self.target is not None and self.target.real_path != self.real_path:
-            # A pure internal-consistency invariant: the target snapshot must
-            # describe this candidate's own file. Enforcing it at construction
-            # fails an honest builder bug before anything is deleted, ahead of
-            # the structural preflight's identical check.
-            raise ValueError(
-                f"CleanupCandidate.real_path {self.real_path} does not match "
-                f"its target snapshot path {self.target.real_path}"
-            )
-
-    @property
-    def broken(self) -> bool:
-        """True when this candidate is a dangling symlink."""
-        return self.target is None
-
-    @property
-    def newest_ns(self) -> int:
-        """Newest timestamp across the target and every access alias.
-
-        A fresh link to an old target may be work awaiting registration, so
-        eligibility requires everything to be old enough.
-        """
-        stamps = [access.newest_ns for access in self.accesses]
-        if self.target is not None:
-            stamps.append(self.target.newest_ns)
-        return max(stamps)
-
-
-@dataclass
-class _TrackedFileState:
-    """Lexical and physical identities fetched from analysis externals.
-
-    ``resolved_paths`` preserves the existing behavior for missing targets,
-    while the identity sets recognize live files and leaf symlinks reached
-    through case variants, hard links, or mount aliases.
-    """
-
-    resolved_paths: Set[Path]
-    target_identities: Set[Tuple[int, int]]
-    access_identities: Set[Tuple[int, int]]
-
-    def matches(self, candidate: CleanupCandidate) -> bool:
-        """Return whether any tracked entry identifies this candidate."""
-        if candidate.real_path in self.resolved_paths:
-            return True
-        if (
-            candidate.target is not None
-            and (
-                candidate.target.dev,
-                candidate.target.ino,
-            )
-            in self.target_identities
-        ):
-            return True
-        return any(
-            (access.dev, access.ino) in self.access_identities
-            for access in candidate.accesses
-        )
-
-
-@dataclass(frozen=True)
-class _PhysicalRoot:
-    """Resolved directory root plus its filesystem identity."""
-
-    name: str
-    path: Path
-    dev: int
-    ino: int
-
-
-@dataclass(frozen=True)
-class CleanupPlan:
-    """Filesystem cleanup plan for analysis NWB files.
-
-    Attributes
-    ----------
-    scanned_files : set of pathlib.Path
-        Resolved real paths of every ``*.nwb`` entry reached by the scan.
-        A leaf symlink contributes the path it resolves to, which may lie
-        outside the analysis directory. Alternate mount spellings can still
-        name the same filesystem object, so "resolved" does not imply a unique
-        canonical spelling.
-    tracked_files : set of pathlib.Path
-        Resolved paths currently referenced by DataJoint external stores.
-    files_to_delete : set of pathlib.Path
-        Resolved target paths selected as deletion candidates. Applying the
-        plan may additionally unlink authorizing leaf symlinks; final
-        validation may also refuse a candidate that appears in this set.
-    empty_files : set of pathlib.Path
-        Empty (0-byte) analysis files selected for deletion.
-    untracked_files : set of pathlib.Path
-        Non-empty files selected because no external store references them.
-    candidates : dict of pathlib.Path to CleanupCandidate
-        Deletion candidates keyed by resolved real path, carrying the
-        identity snapshots re-verified before any unlink.
-    deferred_recent_files : set of pathlib.Path
-        Candidates held back because they are newer than the age limit.
-    broken_links : set of pathlib.Path
-        Resolved targets of dangling ``*.nwb`` symlinks.
-    """
-
-    scanned_files: Set[Path]
-    tracked_files: Set[Path]
-    files_to_delete: Set[Path]
-    empty_files: Set[Path]
-    untracked_files: Set[Path]
-    candidates: Dict[Path, CleanupCandidate]
-    deferred_recent_files: Set[Path]
-    broken_links: Set[Path]
 
 
 @schema
@@ -846,16 +562,20 @@ class AnalysisRegistry(dj.Manual):
         error_msg : str or None
             An error message if blocking fails, otherwise None.
         """
-        if dry_run:
-            logger.info(f"Dry run: would block inserts into {table}")
-            return None
-
         try:
             database, trigger = self._get_block_info(table)
             kwargs = dict(database=database, trigger=trigger, table=table)
 
             if self._block_exists(table):
-                return
+                return (
+                    f"Failed to block {table}: blocking trigger already "
+                    "exists; another cleanup may be active or the trigger "
+                    "may be stale"
+                )
+
+            if dry_run:
+                logger.info(f"Dry run: would block inserts into {table}")
+                return None
 
             # Create trigger
             dj.conn().query(SQL_BLOCK_TEMPLATE.format(**kwargs))
@@ -869,7 +589,8 @@ class AnalysisRegistry(dj.Manual):
         """Block new inserts into all registered analysis tables.
 
         Creates BEFORE INSERT triggers on all registered custom analysis tables
-        to prevent data modifications during maintenance operations.
+        to prevent data modifications during maintenance operations. Refuses
+        to adopt an existing trigger because it may belong to another cleanup.
 
         Parameters
         ----------
@@ -879,33 +600,56 @@ class AnalysisRegistry(dj.Manual):
         Raises
         ------
         RuntimeError
-            If any trigger creation fails. Some tables may remain blocked, but
-            the method cannot distinguish triggers created by this call from
-            triggers owned by another cleanup.
+            If blocker inspection or trigger creation fails, or if any blocker
+            already exists. A partial creation failure may leave some tables
+            blocked because triggers do not carry per-run ownership.
         """
-        errors = []
-        for table in self.fetch("full_table_name"):
+        # Freeze one deterministic acquisition order. Concurrent acquisitions
+        # with the same stable registry snapshot then contend on the same first
+        # trigger rather than each creating a different prefix of the set.
+        tables = sorted(set(self.fetch("full_table_name")))
+
+        # Inspect every table before any DDL. A pre-existing trigger is either
+        # owned by an active cleanup or stale after a failed one; adopting it
+        # would let this call later remove a trigger it did not create.
+        existing = []
+        for table in tables:
+            try:
+                if self._block_exists(table):
+                    existing.append(table)
+            except Exception as err:
+                raise RuntimeError(
+                    f"Failed to inspect insert blocker for {table}; refusing "
+                    f"cleanup before creating any triggers: {err}"
+                ) from err
+
+        if existing:
+            blocked = "\n".join(f"  - {table}" for table in existing)
+            raise RuntimeError(
+                "Refusing cleanup because insert-blocking triggers already "
+                f"exist for:\n{blocked}\nAnother cleanup may be active, or "
+                "the triggers may be stale. Confirm that no cleanup is active "
+                "and inspect the blockers before removing them. Use "
+                "AnalysisRegistry().unblock_new_inserts() only after confirming "
+                "every blocker is stale; that helper removes all registered "
+                "analysis blocking triggers."
+            )
+
+        for table in tables:
             error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
-                errors.append(error)
-
-        if errors:
-            # A partial failure can leave triggers installed, including a
-            # trigger that predated this call and belongs to another cleanup.
-            # There is no ownership token, so never prescribe a blanket
-            # unblock without first excluding an active cleanup.
-            remedy = (
-                "\nSome analysis tables may remain blocked. Confirm that no "
-                "cleanup is active, then inspect the blocking triggers before "
-                "using AnalysisRegistry().unblock_new_inserts(). That helper "
-                "removes all registered analysis blocking triggers; use it "
-                "only after confirming every such trigger is stale."
-            )
-            raise RuntimeError(
-                f"Failed to block {len(errors)} table(s):\n"
-                + "\n".join(errors)
-                + remedy
-            )
+                # Stop immediately. During concurrent acquisition over a
+                # stable registry, the runs collide on the same earliest
+                # trigger instead of continuing into disjoint prefixes.
+                raise RuntimeError(
+                    f"Failed to block 1 table(s):\n{error}\nSome analysis "
+                    "tables may remain blocked. Another cleanup may be active, "
+                    "or a trigger may be stale. Confirm that no cleanup is "
+                    "active, then inspect the blocking triggers before using "
+                    "AnalysisRegistry().unblock_new_inserts(). That helper "
+                    "removes all registered analysis blocking triggers; use "
+                    "it only after confirming every such trigger is stale."
+                )
 
     def unblock_new_inserts(self) -> None:
         """Unblock new inserts into all registered analysis tables.
@@ -998,7 +742,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         deletion-limit denominators.
         """
         try:
-            lst = os.lstat(access_path)
+            access = AccessSnapshot.from_path(access_path)
         except OSError as err:
             # Per-ENTRY errors skip; only WALK errors are fatal. An entry
             # that cannot be stat'd never becomes a candidate, so skipping
@@ -1008,21 +752,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             logger.warning(f"Skipping unreadable analysis entry: {err}")
             return None
 
-        is_link = stat_module.S_ISLNK(lst.st_mode)
-        try:
-            raw_target = os.readlink(access_path) if is_link else None
-        except OSError as err:
-            logger.warning(f"Skipping unreadable symlink: {err}")
-            return None
-        access = AccessSnapshot(
-            access_path=access_path,
-            is_link=is_link,
-            raw_link_target=raw_target,
-            dev=lst.st_dev,
-            ino=lst.st_ino,
-            mtime_ns=lst.st_mtime_ns,
-            ctime_ns=lst.st_ctime_ns,
-        )
+        is_link = access.is_link
         real_path = Path(os.path.realpath(access_path))
 
         try:
@@ -1273,26 +1003,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         the same storage remains reachable through another alias; silently
         omitting it would disable the corresponding guard.
         """
+        excluded = {"SPYGLASS_BASE_DIR", "SPYGLASS_ANALYSIS_DIR"}
+        configured_roots = sorted(
+            (key, value)
+            for key, value in config.items()
+            if isinstance(key, str)
+            and key.endswith("_DIR")
+            and key not in excluded
+            and value
+        )
+
         roots = []
-        for store_name, setting in (
-            ("raw", raw_dir),
-            ("recording", recording_dir),
-            ("sorting", sorting_dir),
-            ("video", video_dir),
-            ("waveforms", waveforms_dir),
-            ("temp", temp_dir),
-            ("export", export_dir),
-            ("kachery_cloud", kachery_cloud_dir),
-            ("kachery_storage", kachery_storage_dir),
-            ("kachery_temp", kachery_temp_dir),
-            ("dlc_project", dlc_project_dir),
-            ("dlc_video", dlc_video_dir),
-            ("dlc_output", dlc_output_dir),
-            ("moseq_project", moseq_project_dir),
-            ("moseq_video", moseq_video_dir),
-        ):
-            if not setting:
-                continue
+        for setting_name, setting in configured_roots:
+            store_name = setting_name.removesuffix("_DIR").lower()
+            if store_name.startswith("spyglass_"):
+                store_name = store_name.removeprefix("spyglass_")
             try:
                 path = Path(setting).expanduser().resolve()
                 root_stat = os.stat(path)
@@ -1308,7 +1033,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                         ino=root_stat.st_ino,
                     )
                 )
-            except (OSError, RuntimeError) as err:
+            except (OSError, RuntimeError, TypeError, ValueError) as err:
                 raise RuntimeError(
                     "Cannot resolve protected Spyglass "
                     f"{store_name} store root {setting!r}; refusing "

@@ -209,15 +209,18 @@ for label, interval_data in results.groupby("interval_labels"):
     shared/production filesystems #1573 #1574
 - `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
     targets, so analysis files spread across volumes are cleaned in one pass.
-    Gated by a 24-hour minimum file age, a resolved-path act-time tracking
-    refresh, and target/access identity checks. Targets inside any other
-    configured Spyglass store (raw, recording, sorting, video, waveforms, temp,
-    export,
-    Kachery, DLC, and MoSeq) are refused; other successful cross-volume
-    deletions are logged immediately. Directory symlinks are still not followed
-    #1573 #1574
+    The sweep has a 24-hour minimum age, deletion limits, act-time tracking and
+    identity checks, and fail-closed protection for every other configured
+    Spyglass, Kachery, DLC, and MoSeq store. Successful cross-volume deletions
+    are logged; directory symlinks are not followed #1573 #1574
 - Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
     the files the sweep was eligible to act on #1573 #1574
+- Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol, and final filesystem validation
+    remains separate from unlink #1574
 - Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
     analysis file, which left a dangling DataJoint row (pre-existing)
 - Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
@@ -225,7 +228,9 @@ for label, interval_data in results.groupby("interval_labels"):
     (pre-existing) #1574
 - `maintenance_scripts/cleanup.py` runs its table cleanups independently so one
     failure no longer skips the rest, and skips later analysis-storage phases
-    when analysis cleanup fails #1574
+    when analysis cleanup fails. `run_jobs.sh` preserves available issue reports,
+    propagates cleanup failure, and truncates its log on every exit after logging
+    is initialized #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575

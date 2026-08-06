@@ -834,19 +834,6 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg.raw_dir == str(test_base / "raw")
 
-    def test_exposes_kachery_directory_properties(self, test_base):
-        """Cleanup can consume each resolved Kachery root directly."""
-        from spyglass.settings import SpyglassConfig
-
-        cfg = SpyglassConfig()
-        cfg.load_config(
-            base_dir=str(test_base), test_mode=True, force_reload=True
-        )
-
-        assert cfg.kachery_cloud_dir == str(test_base / ".kachery-cloud")
-        assert cfg.kachery_storage_dir == str(test_base / "kachery_storage")
-        assert cfg.kachery_temp_dir == str(test_base / "tmp")
-
     def test_ignores_dlc_base_dir_env_var(self, monkeypatch, test_base):
         from spyglass.settings import SpyglassConfig
 

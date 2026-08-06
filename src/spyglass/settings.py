@@ -646,9 +646,13 @@ class SpyglassConfig:
                     "export": self.export_dir,
                 },
                 "kachery_dirs": {
-                    "cloud": self.kachery_cloud_dir,
-                    "storage": self.kachery_storage_dir,
-                    "temp": self.kachery_temp_dir,
+                    "cloud": self.config.get(
+                        self.dir_to_var("cloud", "kachery")
+                    ),
+                    "storage": self.config.get(
+                        self.dir_to_var("storage", "kachery")
+                    ),
+                    "temp": self.config.get(self.dir_to_var("temp", "kachery")),
                 },
                 "dlc_dirs": {
                     "base": self._dlc_base,
@@ -734,21 +738,6 @@ class SpyglassConfig:
         return self._test_mode
 
     @property
-    def kachery_cloud_dir(self) -> str:
-        """Kachery cloud directory as a string."""
-        return self.config.get(self.dir_to_var("cloud", "kachery"))
-
-    @property
-    def kachery_storage_dir(self) -> str:
-        """Kachery storage directory as a string."""
-        return self.config.get(self.dir_to_var("storage", "kachery"))
-
-    @property
-    def kachery_temp_dir(self) -> str:
-        """Kachery temporary directory as a string."""
-        return self.config.get(self.dir_to_var("temp", "kachery"))
-
-    @property
     def dlc_project_dir(self) -> str:
         """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))
@@ -791,9 +780,6 @@ if sg_config.load_failed:  # Failed to load
     waveforms_dir = None
     video_dir = None
     export_dir = None
-    kachery_cloud_dir = None
-    kachery_storage_dir = None
-    kachery_temp_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -810,9 +796,6 @@ else:
     waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
     export_dir = sg_config.export_dir
-    kachery_cloud_dir = sg_config.kachery_cloud_dir
-    kachery_storage_dir = sg_config.kachery_storage_dir
-    kachery_temp_dir = sg_config.kachery_temp_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)
