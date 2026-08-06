@@ -150,6 +150,7 @@ class AbstractGraph(ABC):
 
         self.verbose = verbose
         self.debug_bridge = False  # see `_bridge_result`, costly when set
+        self.max_flat_rows = 5_000  # see `_flatten_restr`
         self.skip_external = True
         self.spawned_schemas = set()
         self.leaves = set()
@@ -278,12 +279,35 @@ class AbstractGraph(ABC):
             if not restr_list:
                 return None
             ft = self._get_ft(table)
-            self._set_node(
-                table,
-                "restr",
-                self._coerce_to_condition(ft, ft & restr_list),
-            )
+            self._set_node(table, "restr", self._combine_restr(ft, restr_list))
         return self._get_node(ensure_names(table)).get("restr")
+
+    @staticmethod
+    def _combine_restr(
+        ft: FreeTable, restr_list: List
+    ) -> Union[str, QueryExpression]:
+        """OR together the restrictions accumulated on one node.
+
+        When every item is a plain condition, `make_condition` combines them
+        into a single condition string. Restricting the table by the list
+        instead would express the same union as a derived table, which then
+        nests into every later use of it.
+
+        Parameters
+        ----------
+        ft : FreeTable
+            The table the restrictions apply to.
+        restr_list : List
+            Restrictions to combine, in the order they were added.
+
+        Returns
+        -------
+        str | QueryExpression
+            The union of the given restrictions.
+        """
+        if all(isinstance(r, str) for r in restr_list):
+            return make_condition(ft, list(restr_list), set())
+        return AbstractGraph._coerce_to_condition(ft, ft & restr_list)
 
     def _get_restr_list(self, table):
         """Get restriction list from graph node."""
@@ -351,8 +375,12 @@ class AbstractGraph(ABC):
             self._set_node(table, "restr", restriction)
             return restriction
 
-        # Merge restrictions
-        restr_list = self._get_restr_list(table) + [restriction]
+        # Merge restrictions. Convergent paths deliver the same condition to a
+        # shared ancestor repeatedly; duplicates widen the OR-list without
+        # widening what it selects.
+        restr_list = self._get_restr_list(table)
+        if restriction not in restr_list:
+            restr_list = restr_list + [restriction]
         self._set_node(table, "restr_list", restr_list)
         # restriction = self._coerce_to_condition(ft, ft & restr_list)
         self._set_node(
@@ -467,9 +495,7 @@ class AbstractGraph(ABC):
 
         Converts any non-string restrictions to string conditions.
         """
-        for table in self.graph.nodes:
-            if not self.graph.nodes.get(table):
-                continue
+        for table in self._restricted_nodes():
             restr = self._get_restr(table)
             if not restr or isinstance(restr, str):
                 continue
@@ -541,22 +567,136 @@ class AbstractGraph(ABC):
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
+        if self._fast_bridge and self._can_copy_restr(
+            table1, table2, restr, attr_map, ft1, ft2
+        ):
+            self._log_truncate(f"Bridge Copy: {path}")
+            return restr
+
         ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
             self._log_truncate(
-                f"Bridge Link: {path}: result {self._bridge_result(ft2, ret)}"
+                f"Bridge Link: {path}{self._bridge_result(ft2, ret)}"
             )
             logger.debug(ret)
 
         return ret
 
+    def _flatten_restr(self, table, restriction) -> Tuple[Any, bool]:
+        """Replace a derived restriction with the literal keys it selects.
+
+        Each bridge restricts a table by a projection of the previous one, so
+        an un-flattened cascade carries one nested subquery per hop. Nothing
+        executes while the expression is only being built, but every evaluation
+        of it -- an emptiness check, a fetch, the next bridge -- pays for the
+        whole nested chain, and that cost climbs steeply with depth. Fetching
+        the keys once and restating them as a condition keeps each hop flat.
+
+        The fetch is not extra work: the caller has to know whether the
+        restriction selects anything, which means evaluating it either way.
+
+        Parameters
+        ----------
+        table : str
+            Table the restriction applies to.
+        restriction : Any
+            Restriction to flatten.
+
+        Returns
+        -------
+        Tuple[Any, bool]
+            The restriction to propagate, flattened where worthwhile, and
+            whether it selects any rows.
+        """
+        ft_base = self._get_ft(table)
+        # A bridge result carries the target's secondary attributes too, and
+        # restricting by those is not a valid join. Project as `_set_restr`
+        # would, but leave `restriction` itself untouched so that declining to
+        # flatten returns exactly what the caller passed in.
+        coerced = self._coerce_to_condition(ft_base, restriction)
+        ft = ft_base & coerced
+
+        if not (self._fast_bridge and isinstance(coerced, QueryExpression)):
+            return restriction, bool(ft)
+
+        # One row past the cap distinguishes "at the cap" from "over" it
+        keys = ft.fetch("KEY", limit=self.max_flat_rows + 1)
+
+        if len(keys) > self.max_flat_rows:
+            # Restating this many keys would trade a nested query for an
+            # unwieldy literal one
+            return restriction, True
+        if not len(keys):
+            return restriction, False
+
+        return make_condition(ft_base, list(keys), set()), True
+
+    def _can_copy_restr(
+        self, table1, table2, restr, attr_map, ft1, ft2
+    ) -> bool:
+        """Whether table2's restriction is table1's verbatim, with no join.
+
+        Adapted from the 'copy the restriction' rule datajoint 2.0 applies when
+        an edge renames nothing and the restriction only touches the linking
+        columns. Each hop that takes this path avoids nesting another subquery
+        inside the restriction, which is what makes deep cascades expensive.
+
+        Only valid from parent to child. Every child row references an existing
+        parent row, so a child row satisfies the condition on the linking
+        columns exactly when its parent does. The reverse does not hold: a
+        parent row satisfying the condition need not have any child row, so
+        copying upward would reach rows the join excludes.
+
+        Parameters
+        ----------
+        table1, table2 : str
+            Source and target table names. The restriction is derived for
+            table2 from table1.
+        restr : Any
+            Restriction applied to table1. Only plain string conditions can be
+            copied; anything else may carry its own join semantics.
+        attr_map : dict
+            Mapping of table2 attribute names to table1 attribute names, as
+            oriented by the caller.
+        ft1, ft2 : FreeTable
+            Free tables for table1 (restricted) and table2 (unrestricted).
+
+        Returns
+        -------
+        bool
+            True when the semijoin reduces to the condition itself.
+        """
+        if not self._fast_bridge or not isinstance(restr, str) or not attr_map:
+            return False
+
+        if any(k != v for k, v in attr_map.items()):
+            return False  # renamed across the edge
+
+        if not self.graph.get_edge_data(table1, table2):
+            return False  # table2 is not table1's child
+
+        # The semijoin matches on every attribute the projection and the target
+        # share, not only the mapped ones. If the projection carries extra
+        # names, it is stricter than the condition alone.
+        projected = set(ft1.primary_key) | set(attr_map)
+        if projected & set(ft2.heading.names) != set(attr_map):
+            return False
+
+        restr_attrs = set()
+        make_condition(ft1, restr, restr_attrs)
+
+        return bool(restr_attrs) and restr_attrs <= set(attr_map)
+
     def _bridge_result(self, ft2, ret) -> str:
         """Describe a bridge result for logging.
 
-        Distinguishing a full match from a partial one requires an anti-join
-        over the whole unrestricted target table, which can cost more than the
-        cascade itself, so it is only computed when `debug_bridge` is set.
+        Says nothing unless `debug_bridge` is set. Every description costs at
+        least one evaluation of the derived restriction, and distinguishing a
+        full match from a partial one additionally needs an anti-join over the
+        whole unrestricted target -- per edge, for a log line. The caller
+        evaluates the restriction once per node regardless, so a quiet bridge
+        log costs nothing.
 
         Parameters
         ----------
@@ -568,13 +708,15 @@ class AbstractGraph(ABC):
         Returns
         -------
         str
-            One of EMPTY, nonempty, FULL, or partial.
+            Empty, or a description prefixed with `: result `.
         """
-        if not bool(ret):
-            return "EMPTY"
         if not self.debug_bridge:
-            return "nonempty"
-        return "FULL" if not bool(ft2 - ret.proj()) else "partial"
+            return ""
+        if not bool(ret):
+            return ": result EMPTY"
+        return ": result " + (
+            "FULL" if not bool(ft2 - ret.proj()) else "partial"
+        )
 
     def _get_adjacent_path_item(
         self, table: str, direction: Direction = Direction.UP
@@ -700,13 +842,15 @@ class AbstractGraph(ABC):
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
 
+        # Evaluated once per node here rather than once per outgoing edge
+        # inside `_bridge_restr`. Doubles as the emptiness check: a restriction
+        # selecting nothing yields an empty bridge on every edge.
+        restriction, nonempty = self._flatten_restr(table, restriction)
+
         restriction = self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
-        # Checked once here rather than inside `_bridge_restr`, which would
-        # repeat the same query for every outgoing edge. An empty restriction
-        # yields an empty bridge on all of them, so there is nothing to cascade.
-        if not bool(self._get_ft(table) & restriction):
+        if not nonempty:
             self._log_truncate(f"Empty restr : {self._camel(table)}")
             return
 
@@ -871,6 +1015,23 @@ class AbstractGraph(ABC):
             for table in self.included_tables
             if self._get_restr(table)
         ]
+
+    def _restricted_nodes(self) -> Set[str]:
+        """Get the tables carrying restrictions or files set by this module.
+
+        Unlike `included_tables`, does not require the graph to have cascaded,
+        so it is usable while restrictions are still being assembled.
+
+        Returns
+        -------
+        Set[str]
+            Names of tables this module has attached cascade data to.
+        """
+        return {
+            table
+            for table, node in self.graph.nodes.items()
+            if not CASCADE_NODE_KEYS.isdisjoint(node)
+        }
 
     @property
     def included_tables(self) -> Set[str]:

@@ -234,6 +234,243 @@ def test_bridge_shared_attr_not_foreign_key(RestrGraph, two_parent_tables):
     )
 
 
+def test_bridge_copies_restr_downward(RestrGraph, graph_tables):
+    """A qualifying downward edge reuses the condition instead of joining.
+
+    Asserts the optimization is actually engaged: a copied restriction stays
+    the original string, where a join would leave a QueryExpression that nests
+    another subquery into every later hop.
+    """
+    Intermediate = graph_tables["IntermediateNode"]()
+    restr = "intermediate_id = 5"
+
+    graph = RestrGraph(
+        seed_table=Intermediate,
+        leaves=[
+            {"table_name": Intermediate.full_table_name, "restriction": restr}
+        ],
+        direction="down",
+        cascade=True,
+        verbose=False,
+    )
+    got = graph._get_restr(graph_tables["PkNode"].full_table_name)
+
+    # Equality, not containment: a flattened restriction is also a string, but
+    # restates the target's keys rather than reusing the source's condition.
+    assert got == restr, f"Expected the condition copied verbatim, got {got}"
+
+
+def test_can_copy_restr_direction(RestrGraph, graph_tables):
+    """The copy shortcut engages parent -> child and never child -> parent.
+
+    Asserted on the predicate rather than on the resulting restriction: a
+    flattened restriction is also a plain string, so the two mechanisms are
+    not distinguishable from the cascade's output alone.
+    """
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    inter = graph_tables["IntermediateNode"].full_table_name
+    pk_node = graph_tables["PkNode"].full_table_name
+    restr = "intermediate_id = 5"
+    attr_map = {"intermediate_id": "intermediate_id"}
+
+    assert graph._can_copy_restr(
+        inter,
+        pk_node,
+        restr,
+        attr_map,
+        graph._get_ft(inter),
+        graph._get_ft(pk_node),
+    ), "Copy shortcut did not engage parent -> child."
+
+    assert not graph._can_copy_restr(
+        pk_node,
+        inter,
+        restr,
+        attr_map,
+        graph._get_ft(pk_node),
+        graph._get_ft(inter),
+    ), "Copy shortcut engaged child -> parent, which over-includes."
+
+
+def test_bridge_up_excludes_unreferenced_parents(RestrGraph, graph_tables):
+    """Cascading up must not reach parent rows no restricted child references.
+
+    This is what makes a copy-the-condition shortcut unsound in the upward
+    direction: `parent_id > 7` matches two `ParentNode` rows, but only one of
+    them is referenced by an `IntermediateNode` row, and a cascade up may only
+    reach that one. Downward the shortcut is safe -- every child row has a
+    parent by referential integrity -- but upward it would over-include.
+    """
+    Intermediate = graph_tables["IntermediateNode"]()
+    Parent = graph_tables["ParentNode"]()
+
+    graph = RestrGraph(
+        seed_table=Intermediate,
+        leaves=[
+            {
+                "table_name": Intermediate.full_table_name,
+                "restriction": "parent_id > 7",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    got = graph._get_ft(Parent.full_table_name, with_restr=True)
+
+    assert len(Parent & "parent_id > 7") == 2, "Fixture assumption changed."
+    assert len(got) == 1, (
+        "Cascade up reached a parent row with no restricted child. Copying "
+        + "the condition instead of joining would return both parent rows."
+    )
+
+
+# --------------------------- Restriction flattening -----------------------------
+
+
+def test_cascade_flattens_nested_restr(RestrGraph, graph_tables):
+    """Each hop must not leave a subquery nested inside the next hop's input.
+
+    Left alone, hop N carries N nested derived tables and every evaluation of
+    it gets more expensive. Replacing a derived restriction with the literal
+    keys it selects keeps each hop's input flat.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+    got = graph._get_restr(graph_tables["IntermediateNode"].full_table_name)
+    assert isinstance(got, str), f"Restriction left nested, got {type(got)}"
+    assert (
+        len(
+            graph._get_ft(
+                graph_tables["IntermediateNode"].full_table_name,
+                with_restr=True,
+            )
+        )
+        == 4
+    ), "Flattening changed which rows the cascade reached."
+
+
+def test_flatten_respects_row_cap(RestrGraph, graph_tables):
+    """Restrictions selecting more rows than the cap keep their subquery.
+
+    Inlining an unbounded key list would trade a nested query for an enormous
+    literal one.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=False,
+        verbose=False,
+    )
+    graph.max_flat_rows = 1  # every restriction here selects more than this
+    graph.cascade()
+
+    intermediate = graph_tables["IntermediateNode"].full_table_name
+    got = graph._get_restr(intermediate)
+
+    assert not isinstance(got, str), "Cap ignored; large key list was inlined."
+    assert (
+        len(graph._get_ft(intermediate, with_restr=True)) == 4
+    ), "Row cap changed which rows the cascade reached."
+
+
+def test_enforce_restr_strings(RestrGraph, graph_tables):
+    """Every restriction becomes a string, selecting the same rows.
+
+    Built with flattening disabled so there are derived restrictions left to
+    convert; with it enabled most are already strings.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=False,
+        verbose=False,
+    )
+    graph.max_flat_rows = 0  # leave restrictions derived
+    graph.cascade()
+
+    before = {ft.full_table_name: len(ft) for ft in graph.restr_ft}
+    assert any(
+        not isinstance(graph._get_restr(t), str) for t in before
+    ), "Nothing to convert; test would be vacuous."
+
+    graph.enforce_restr_strings()
+
+    for table, count in before.items():
+        assert isinstance(
+            graph._get_restr(table), str
+        ), f"{table} restriction is not a string."
+        assert (
+            len(graph._get_ft(table, with_restr=True)) == count
+        ), f"{table} changed row count when converted to a string."
+
+
+# ------------------------ Restriction list accumulation -------------------------
+
+
+def test_merged_string_restrs_stay_strings(RestrGraph, graph_tables):
+    """OR-ing plain conditions must not build a subquery to express the union.
+
+    `make_condition` already combines a list of string conditions into one
+    string, so the union needs no derived table.
+    """
+    Parent = graph_tables["ParentNode"]()
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    graph._set_restr(Parent.full_table_name, "parent_id = 1")
+    graph._set_restr(Parent.full_table_name, "parent_id = 2")
+    got = graph._get_restr(Parent.full_table_name)
+
+    assert isinstance(got, str), f"Union of conditions nested, got {type(got)}"
+    assert len(Parent & got) == 2, "Union of conditions lost rows."
+
+
+def test_duplicate_restrs_deduped(RestrGraph, graph_tables):
+    """Repeated identical conditions must collapse.
+
+    Convergent paths deliver the same condition to a shared ancestor
+    repeatedly; keeping every copy grows the OR-list without narrowing it.
+    """
+    Parent = graph_tables["ParentNode"]()
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    for _ in range(3):
+        graph._set_restr(Parent.full_table_name, "parent_id = 1")
+
+    assert (
+        len(graph._get_restr_list(Parent.full_table_name)) == 1
+    ), "Identical restrictions were not deduped."
+    assert (
+        len(Parent & graph._get_restr(Parent.full_table_name)) == 1
+    ), "Dedupe changed which rows the restriction selects."
+
+
 # ------------------------- Convergence / union semantics ------------------------
 
 
