@@ -664,7 +664,10 @@ class TestPositionOutputInsert:
             mock_pe.__and__.return_value = mock_restricted
             mock_pp.__and__.return_value.fetch1.return_value = mock_params
 
-            pose_v2_instance.make(key)
+            # Tri-part make: fetch -> compute -> insert.
+            fetched = pose_v2_instance.make_fetch(key)
+            computed = pose_v2_instance.make_compute(key, *fetched)
+            pose_v2_instance.make_insert(key, *computed)
 
             mock_merge.assert_called_once()
             call_args = mock_merge.call_args

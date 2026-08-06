@@ -665,9 +665,10 @@ class TestPoseEstimMakeValidation:
             skip_duplicates=True,
         )
 
-        # 6. make() should fail at the NWB storage step
+        # 6. make_fetch() fails fast: the missing Nwbfile parent is detected
+        #    while reading upstream inputs, before any inference runs.
         with pytest.raises(ValueError, match="Cannot store pose estimation"):
-            PoseEstim().make(selection_key)
+            PoseEstim().make_fetch(selection_key)
 
 
 class TestLoadDLCOutputTimestamps:
