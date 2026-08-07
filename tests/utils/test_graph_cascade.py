@@ -471,6 +471,89 @@ def test_duplicate_restrs_deduped(RestrGraph, graph_tables):
     ), "Dedupe changed which rows the restriction selects."
 
 
+# ---------------------------- Traversal invariants ------------------------------
+
+
+@pytest.mark.parametrize(
+    "seed, direction, target, msg",
+    [
+        ("master", "up", "part", "parts of a master, going up"),
+        ("part", "down", "master", "master of a part, going down"),
+    ],
+)
+def test_cascade_reaches_master_and_parts(
+    RestrGraph, graph_tables, seed, direction, target, msg
+):
+    """Master/part links must be traversed in both directions.
+
+    `_get_next_tables` injects these as extra targets rather than reading them
+    off the graph: parts when going up, the master when going down. Because
+    they are synthetic, they are exactly what a traversal rewritten around the
+    dependency graph's own ordering would drop.
+    """
+    tables = {
+        "master": graph_tables["MergeOutput"],
+        "part": graph_tables["MergeOutput"].PkNode,
+    }
+    seed_table = tables[seed]()
+
+    graph = RestrGraph(
+        seed_table=seed_table,
+        leaves=[
+            {"table_name": seed_table.full_table_name, "restriction": True}
+        ],
+        direction=direction,
+        cascade=True,
+        verbose=False,
+    )
+
+    assert (
+        tables[target].full_table_name in graph.included_tables
+    ), f"Cascade did not reach the {msg}."
+
+
+def test_cascade_invariant_to_visit_order(
+    RestrGraph, graph_tables, monkeypatch
+):
+    """The result must not depend on the order neighbours are visited.
+
+    `BranchNode` reaches `ParentNode` by two paths of different lengths, so
+    whichever is walked first arrives with a narrower restriction and the other
+    widens it. Any reordering of the traversal has to end in the same place.
+    """
+
+    def build(reverse):
+        graph = RestrGraph(
+            seed_table=graph_tables["BranchNode"](),
+            leaves=[
+                {
+                    "table_name": graph_tables["BranchNode"].full_table_name,
+                    "restriction": "intermediate_id = 2",
+                }
+            ],
+            direction="up",
+            cascade=False,
+            verbose=False,
+        )
+        if reverse:
+            original = graph._get_next_tables
+
+            def reversed_order(table, direction):
+                next_tables, next_func = original(table, direction)
+                flipped = {k: next_tables[k] for k in reversed(next_tables)}
+                return flipped, next_func
+
+            monkeypatch.setattr(graph, "_get_next_tables", reversed_order)
+        graph.cascade()
+        return cascade_signature(graph)
+
+    forward = build(reverse=False)
+    assert forward, "Fixture assumption changed; cascade reached nothing."
+    assert forward == build(
+        reverse=True
+    ), "Cascade result changed with visit order."
+
+
 # ------------------------- Convergence / union semantics ------------------------
 
 
@@ -691,6 +774,126 @@ def test_redeclared_table_heading(RestrGraph, redeclare_table):
     assert (
         "first_attr" not in names
     ), "Stale heading served after redeclaration."
+
+
+# ------------------------------ Graph construction ------------------------------
+
+
+def test_shared_graph_drops_cascade_data(RestrGraph, graph_tables):
+    """A graph built from another's inherits structure, never restrictions.
+
+    A multi-leaf cascade builds one graph per leaf from a single load. Each
+    must start unrestricted, or a leaf would begin already narrowed by its
+    siblings.
+    """
+    PkNode = graph_tables["PkNode"]()
+    first = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    restricted = {t for t in first.included_tables if not t.isnumeric()}
+    assert restricted, "Fixture assumption changed; nothing was restricted."
+
+    second = RestrGraph(seed_table=PkNode, graph=first.graph, verbose=False)
+
+    assert set(second.graph.nodes) == set(
+        first.graph.nodes
+    ), "Shared graph did not carry the structure over."
+    for table in restricted:
+        assert (
+            second._get_restr(table) is None
+        ), f"{table} inherited a restriction from the graph it was built from."
+
+
+def test_undirect_graph_holds_no_node_data(RestrGraph, graph_tables):
+    """The undirected graph must copy names and edges only.
+
+    Once a cascade has run, node data holds FreeTable objects, which carry a
+    live connection and must not be copied into a second graph.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    assert graph._get_node(PkNode.full_table_name).get(
+        "ft"
+    ), "Fixture assumption changed; no FreeTable was attached."
+
+    assert all(
+        not data for _, data in graph.undirect_graph.nodes(data=True)
+    ), "Undirected graph copied node data."
+    assert set(graph.undirect_graph.nodes) == set(
+        graph.graph.nodes
+    ), "Undirected graph lost nodes."
+
+
+# ------------------------------- Log redundancy ---------------------------------
+
+
+def test_spawn_skips_registered_schema(
+    RestrGraph, graph_tables, caplog, monkeypatch
+):
+    """A schema already registered on the connection is merged, not respawned.
+
+    Registration is process-wide, so once any graph has spawned a schema the
+    rest must reuse it. A cascade over many leaves builds a graph per leaf,
+    which otherwise repeats both the work and the warning for every one.
+    """
+    from spyglass.utils import dj_graph
+
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    table = graph_tables["PkNode"].full_table_name
+    schema = table.split(".")[0].strip("`")
+
+    assert schema in graph.connection.schemas, "Fixture assumption changed."
+
+    def _spawned(*args, **kwargs):
+        raise AssertionError("Respawned a schema already on the connection")
+
+    monkeypatch.setattr(dj_graph, "VirtualModule", _spawned)
+
+    with caplog.at_level("WARNING", logger="spyglass"):
+        graph._spawn_virtual_module(table)
+
+    assert "Spawning tables" not in caplog.text, "Logged a skipped respawn."
+
+
+def test_as_dict_quiet_when_cascaded(RestrGraph, graph_tables, caplog):
+    """Reading a cascaded graph repeatedly must not narrate each read.
+
+    `as_dict` is read once per table by the export, and once per leaf graph
+    when leaf cascades are merged.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[{"table_name": PkNode.full_table_name, "restriction": True}],
+        direction="up",
+        cascade=True,
+        verbose=True,
+    )
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        _, _ = graph.as_dict, graph.as_dict
+
+    assert "Already cascaded" not in caplog.text, "Narrated a routine read."
 
 
 # ----------------------------- Edge resolution ----------------------------------

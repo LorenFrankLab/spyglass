@@ -4,7 +4,6 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from enum import Enum
 from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
@@ -20,6 +19,7 @@ from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
     DiGraph,
+    Graph,
     NetworkXNoPath,
     NodeNotFound,
     all_simple_paths,
@@ -122,7 +122,13 @@ class AbstractGraph(ABC):
     # optimized and unoptimized cascades yield identical restrictions.
     _fast_bridge = True
 
-    def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
+    def __init__(
+        self,
+        seed_table: Table,
+        verbose: bool = False,
+        graph: DiGraph = None,
+        **kwargs,
+    ):
         """Initialize graph and connection.
 
         Parameters
@@ -131,20 +137,34 @@ class AbstractGraph(ABC):
             Table to use to establish connection and graph
         verbose : bool, optional
             Whether to print verbose output. Default False
+        graph : DiGraph, optional
+            Dependency graph to build from instead of loading a fresh one. Used
+            to share one load across the per-leaf graphs of a multi-leaf
+            cascade. Copied, and any cascade data on it is discarded, so the
+            new graph's restrictions remain its own.
         """
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
-        # Deepcopy graph to avoid seed `load()` resetting custom attributes
-        seed_table.connection.dependencies.load()
-        graph = seed_table.connection.dependencies
-        orig_conn = graph._conn  # Cannot deepcopy connection
-        graph._conn = None
-        self.graph = deepcopy(graph)
-        graph._conn = orig_conn
+        if graph is None:
+            # `force=False`: registering a schema clears the dependency graph,
+            # so a reload still happens whenever one is genuinely needed.
+            seed_table.connection.dependencies.load(force=False)
+            graph = seed_table.connection.dependencies
 
-        # undirect not needed in all cases but need to do before adding ft nodes
-        self.undirect_graph = self.graph.to_undirected()
+        # `copy` rather than `deepcopy`: it gives fresh node attribute dicts,
+        # which is all that is needed to keep this graph's restrictions its
+        # own, without duplicating every attribute value. It also drops the
+        # connection, which cannot be deep-copied.
+        self.graph = graph.copy()
+        # `copy` carries no custom attributes, so the copy reports itself as
+        # unloaded. `ancestors`/`descendants` call `load(force=False)`, which
+        # would then try to query through the connection the copy does not
+        # have. The copied data is loaded, so say so.
+        self.graph._loaded = True
+        for _, node in self.graph.nodes(data=True):
+            for key in CASCADE_NODE_KEYS:  # Inherit structure, not restrictions
+                node.pop(key, None)
 
         self.verbose = verbose
         self.debug_bridge = False  # see `_bridge_result`, costly when set
@@ -203,6 +223,20 @@ class AbstractGraph(ABC):
             return [self._camel(t) for t in table]
 
     # ------------------------------ Graph Nodes ------------------------------
+
+    @cached_property
+    def undirect_graph(self) -> Graph:
+        """Get an undirected copy of the dependency graph, structure only.
+
+        Only `TableChain` needs this, and building it eagerly copied every
+        node's data for every graph. Once a cascade has run that data includes
+        FreeTable objects, which hold a connection and must not be copied.
+        Callers only ever use names and edges.
+        """
+        undirected = Graph()
+        undirected.add_nodes_from(self.graph.nodes())
+        undirected.add_edges_from(self.graph.edges())
+        return undirected
 
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph, spawning unimported schemas as needed.
@@ -1292,6 +1326,10 @@ class RestrGraph(AbstractGraph):
             # Then combine results with __add__
             self.cascaded = True  # set now so can be added with (+)
             cascaded_leaves = []
+            # Chained forward so each leaf inherits the FreeTables built by the
+            # ones before it, saving a heading query per table per leaf.
+            # Restrictions do not carry: they are stripped on construction.
+            shared_graph = self.graph
             for table in tqdm(
                 to_visit,
                 desc="RestrGraph: cascading restrictions",
@@ -1300,6 +1338,7 @@ class RestrGraph(AbstractGraph):
             ):
                 leaf_graph = RestrGraph(
                     seed_table=self.seed_table,
+                    graph=shared_graph,  # Share one load across the leaves
                     leaves=[
                         {
                             "table_name": table,
@@ -1313,6 +1352,7 @@ class RestrGraph(AbstractGraph):
                     skip_external=self.skip_external,
                 )
                 cascaded_leaves.append(leaf_graph)
+                shared_graph = leaf_graph.graph
             logger.debug("adding cascaded leaves")
             self = self + cascaded_leaves
 

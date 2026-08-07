@@ -326,7 +326,11 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         return restr_graph
 
     def get_restr_graph(
-        self, key: dict, verbose=False, cascade=True, included_nwb_files=None
+        self,
+        key: dict,
+        verbose=False,
+        cascade=True,
+        included_nwb_files=None,
     ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
@@ -560,7 +564,9 @@ class Export(SpyglassMixin, dj.Computed):
 
         logger.debug(f"Building restr graph for {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
-            paper_key, included_nwb_files=included_nwb_files, verbose=debug_mode
+            paper_key,
+            included_nwb_files=included_nwb_files,
+            verbose=debug_mode,
         )
         # Original plus upstream files
         logger.debug("Collecting file paths from export selection")
