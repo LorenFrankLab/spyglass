@@ -1,3 +1,4 @@
+import inspect
 import os
 from pathlib import Path
 
@@ -76,6 +77,21 @@ def test_nwbfile_cleanup(common_nwbfile):
     common_nwbfile.Nwbfile.cleanup(delete_files=False)
     after = len(common_nwbfile.Nwbfile.fetch())
     assert before == after, "Nwbfile cleanup changed table entry count."
+
+
+def test_analysis_cleanup_safety_controls_are_keyword_only(common_nwbfile):
+    """Destructive-cleanup controls must be explicit at every call site."""
+    parameters = inspect.signature(
+        common_nwbfile.AnalysisNwbfile.cleanup
+    ).parameters
+
+    assert parameters["dry_run"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    for name in (
+        "max_delete_fraction",
+        "max_delete_to_tracked_ratio",
+        "min_file_age_hours",
+    ):
+        assert parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def _cleanup_plan(common_nwbfile, *, scanned, tracked, delete):

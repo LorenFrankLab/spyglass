@@ -273,7 +273,7 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 #
 # Concurrent pytest runs (--container-name/--container-port) should use
 # distinct --base-dir values. This is not currently enforced: two runs
-# sharing a base will race during teardown.
+# sharing a base can race during teardown or other filesystem mutations.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns.

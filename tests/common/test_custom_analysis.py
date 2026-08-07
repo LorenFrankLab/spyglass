@@ -365,6 +365,7 @@ class TestCleanupAndRegistry:
         teardown,
         common,
         mock_create,
+        monkeypatch,
         request,
     ):
         """Test orphan detection across all registered tables.
@@ -425,6 +426,23 @@ class TestCleanupAndRegistry:
             "valid": Path(valid_fp).resolve(),
             "export": Path(export_fp).resolve(),
         }
+
+        # This integration test exercises cleanup against the database rows
+        # above, not the filesystem walk itself (covered in test_nwbfile.py).
+        # Restrict discovery to files owned by this test so a concurrent pytest
+        # session sharing the analysis directory cannot have its unregistered
+        # files mistaken for this session's cleanup candidates.
+        discovered_paths = tuple(sorted(created_paths.values()))
+
+        def _walk_created_analysis_files(_self):
+            yield from discovered_paths
+
+        monkeypatch.setattr(
+            common.common_nwbfile.AnalysisNwbfile,
+            "_walk_analysis_files",
+            _walk_created_analysis_files,
+        )
+
         expected_deleted_paths = {
             created_paths["null"],
             created_paths["orphan"],
@@ -486,19 +504,9 @@ class TestCleanupAndRegistry:
         # seconds ago, so the 24-hour default would defer them and the dry
         # run would preview a different, empty candidate set from the
         # destructive run that follows.
-        # The catastrophe limits are disabled here on purpose. This test
-        # runs against the shared test base_dir, which accumulates unrelated
-        # orphaned analysis files from earlier runs -- exactly the "almost
-        # everything is untracked" shape the limits exist to refuse. Leaving
-        # them on would make the test pass or fail based on how much junk
-        # happens to be on disk. The limits have their own unit tests.
-        no_limits = dict(
-            min_file_age_hours=0,
-            max_delete_fraction=1.0,
-            max_delete_to_tracked_ratio=1e9,
-        )
+        immediate_cleanup = dict(min_file_age_hours=0)
 
-        master_table.cleanup(dry_run=True, **no_limits)
+        master_table.cleanup(dry_run=True, **immediate_cleanup)
 
         after_dry_run = _snapshot()
         assert (
@@ -511,10 +519,7 @@ class TestCleanupAndRegistry:
             after_dry_run[2] == before_dry_run[2]
         ), "dry_run=True changed external table entries"
 
-        # cleanup() legitimately deletes orphaned analysis files left by
-        # other tests in the shared base_dir, so the assertions below cover
-        # only the files this test created, not the full set removed.
-        master_table.cleanup(**no_limits)
+        master_table.cleanup(**immediate_cleanup)
 
         after_cleanup = {
             path for path in created_paths.values() if path.exists()

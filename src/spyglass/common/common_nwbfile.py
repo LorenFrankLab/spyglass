@@ -1617,9 +1617,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     def cleanup(
         self,
         dry_run: bool = False,
+        *,
         max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
-        *,
         min_file_age_hours: float = 24.0,
     ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
