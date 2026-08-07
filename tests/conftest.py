@@ -337,6 +337,27 @@ def pytest_addoption(parser):
     )
 
 
+def _refuse_preimported_spyglass(modules=None):
+    """Refuse Spyglass imports that predate pytest's filesystem sandbox.
+
+    Cached directory values can live in module globals, imported bindings, and
+    class attributes throughout Spyglass.  Environment or DataJoint updates
+    cannot prove all of that state safe, so pytest requires a fresh process
+    rather than trying to reload an already-imported package.
+    """
+    modules = sys.modules if modules is None else modules
+    if any(
+        name == "spyglass" or name.startswith("spyglass.") for name in modules
+    ):
+        raise pytest.UsageError(
+            "Refusing to start Spyglass tests because Spyglass was imported "
+            "before pytest configured its filesystem sandbox. Cached module, "
+            "class, and DataJoint state cannot be made reliably safe by "
+            "reloading. Start pytest in a fresh Python process without "
+            "importing Spyglass first."
+        )
+
+
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
     global NO_DLC
@@ -360,6 +381,11 @@ def pytest_configure(config):
             "performs destructive cleanup; point --base-dir inside a tests/ "
             "directory (default: ./tests/_data/)."
         )
+
+    # This must precede environment mutation, directory creation, Docker, and
+    # downloads. Cached module globals cannot be repaired by changing the
+    # environment after Spyglass has already been imported.
+    _refuse_preimported_spyglass()
 
     # Tests never honor SPYGLASS_BASE_DIR — a shell-exported value pointing at
     # shared/production storage would let destructive tests (e.g.
