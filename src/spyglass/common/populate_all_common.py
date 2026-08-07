@@ -176,6 +176,12 @@ def populate_all_common(
     -------
     List
         A list of keys for InsertError entries if any errors occurred.
+
+    Notes
+    -----
+    InsertError rows logged by an earlier attempt at the same file, under the
+    same user and connection, are cleared before population starts, so the
+    returned list only ever describes the current attempt.
     """
     from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
@@ -188,6 +194,12 @@ def populate_all_common(
         connection_id=dj.conn().connection_id,
         nwb_file_name=nwb_file_name,
     )
+
+    # Drop errors logged by an earlier attempt at this same file, user, and
+    # connection. Without this, the check below reports stale failures and can
+    # roll back an otherwise clean ingestion. See issue #1497. InsertError has
+    # no dependent tables, so delete_quick is safe here.
+    (InsertError & error_constants).delete_quick()
 
     table_lists: List[List[dj.Table]] = [
         # Tables that can be inserted in a single transaction
