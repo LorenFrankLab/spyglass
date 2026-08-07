@@ -89,6 +89,12 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
         Number of days old files should be before deletion (default is 7)
     dry_run : bool, optional
         If True, only print the command that would be run (default is True)
+
+    Raises
+    ------
+    RuntimeError
+        If temp_dir is not a directory named 'tmp' or 'temp', or if the
+        delete command fails.
     """
     dir_path = Path(temp_dir)
     if not dir_path.is_dir() or dir_path.name not in ["tmp", "temp"]:

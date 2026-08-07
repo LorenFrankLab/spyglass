@@ -560,7 +560,8 @@ class AnalysisRegistry(dj.Manual):
         Returns
         -------
         error_msg : str or None
-            An error message if blocking fails, otherwise None.
+            A message when the table could not be blocked -- trigger creation
+            failed, or a blocker already exists -- otherwise None.
         """
         try:
             database, trigger = self._get_block_info(table)
@@ -638,9 +639,9 @@ class AnalysisRegistry(dj.Manual):
         for table in tables:
             error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
-                # Stop immediately. During concurrent acquisition over a
-                # stable registry, the runs collide on the same earliest
-                # trigger instead of continuing into disjoint prefixes.
+                # Raise instead of continuing: given the deterministic order
+                # above, a concurrent run has claimed this same first trigger,
+                # so the rest of the loop would only create triggers to undo.
                 raise RuntimeError(
                     f"Failed to block 1 table(s):\n{error}\nSome analysis "
                     "tables may remain blocked. Another cleanup may be active, "
@@ -730,8 +731,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         Returns
         -------
         tuple or None
-            ``(real_path, target_or_None, access_snapshot)``, or None when
-            the entry vanished mid-scan and should be skipped.
+            ``(real_path, target_or_None, access_snapshot)``, or None when the
+            entry cannot be snapshotted -- it vanished mid-scan, is unreadable,
+            or is unresolvable -- and should be skipped.
 
         Notes
         -----
@@ -744,11 +746,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         try:
             access = AccessSnapshot.from_path(access_path)
         except OSError as err:
-            # Per-ENTRY errors skip; only WALK errors are fatal. An entry
-            # that cannot be stat'd never becomes a candidate, so skipping
-            # can only under-clean, never over-delete -- whereas aborting
-            # lets one bad symlink (a loop, a 0700 parent) wedge the weekly
-            # sweep, and with it every later maintenance phase.
+            # Skip, don't abort (the Notes above cover why per-entry skips are
+            # safe): aborting on one bad symlink -- a loop, a 0700 parent --
+            # would wedge the periodic sweep and every later maintenance phase.
             logger.warning(f"Skipping unreadable analysis entry: {err}")
             return None
 
@@ -916,8 +916,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         # Denominator is what this sweep was entitled to act on: the
         # deletions plus the scanned files it recognized as tracked.
-        # Age-deferred files are excluded -- including them would let a plan
-        # that deletes 89 of 90 eligible files read as 89%.
+        # Age-deferred files are excluded -- folding them in would dilute the
+        # fraction (e.g. 89 deletions against 1 tracked file is 98.9% and
+        # refused, but adding 10 deferred files to the denominator reads as
+        # 89% and passes).
         local_tracked = plan.scanned_files & plan.tracked_files
         tracked_count = len(local_tracked)
         eligible_count = delete_count + tracked_count
@@ -1363,13 +1365,22 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             List of custom analysis table instances to check for tracked files.
         plan : CleanupPlan, optional
             Precomputed cleanup plan. If omitted, the directory is scanned.
+        min_file_age_hours : float, optional
+            Minimum age of the target and every access alias for a candidate to
+            be eligible; younger candidates are deferred. Defaults to 24.0. Pass
+            0 to disable. Re-checked at act time.
+        now_ns : int, optional
+            Injected clock in nanoseconds for the act-time age recheck. Defaults
+            to ``time.time_ns()``.
 
         Returns
         -------
         tuple[Set[Path], Set[Path]]
-            ``(candidate_target_paths, tracked_files)``. In dry-run mode the
-            first set describes target candidates, not every leaf path that a
-            real run may unlink.
+            ``(candidate_target_paths, tracked_files)``. The first set is the
+            plan's candidate targets in both modes: an over-approximation of
+            what a real run deletes (candidates can still be refused at act
+            time) and an under-approximation of the leaves unlinked (an accepted
+            symlink candidate also removes its authorizing leaf).
         """
 
         if plan is None:

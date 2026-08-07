@@ -80,7 +80,8 @@ def test_nwbfile_cleanup(common_nwbfile):
 
 
 def test_analysis_cleanup_safety_controls_are_keyword_only(common_nwbfile):
-    """Destructive-cleanup controls must be explicit at every call site."""
+    """The destructive safety limits are keyword-only, so they cannot be
+    passed positionally by accident; dry_run stays positional-or-keyword."""
     parameters = inspect.signature(
         common_nwbfile.AnalysisNwbfile.cleanup
     ).parameters
@@ -607,7 +608,7 @@ def test_scan_preserves_tracked_broken_leaf(common_nwbfile, tmp_path):
 
 
 def test_scan_does_not_descend_directory_symlink(common_nwbfile, tmp_path):
-    """Directory symlinks stay undescended (unchanged from master)."""
+    """Directory symlinks stay undescended."""
     volume2 = tmp_path / "volume2" / "session"
     volume2.mkdir(parents=True)
     (volume2 / "far.nwb").write_text("far")
@@ -747,8 +748,8 @@ def test_scan_defers_future_timestamps(common_nwbfile, tmp_path):
 def test_delete_removes_symlink_target_and_link(common_nwbfile, tmp_path):
     """An in-root link authorizes its live non-protected regular target.
 
-    Owner decision: cleanup reclaims across volumes in one pass, which is
-    what makes symlinked multi-drive analysis storage usable.
+    Cleanup reclaims across volumes in one pass, which is what makes
+    symlinked multi-drive analysis storage usable.
     """
     volume2 = tmp_path / "volume2"
     volume2.mkdir()

@@ -177,8 +177,12 @@ class SpyglassConfig:
         Raises
         ------
         ValueError
-            If test_mode=True and no explicit/configured base_dir is set, or
-            if its resolved base_dir does not contain a 'tests' path component.
+            Under test_mode, when: test_mode was explicitly requested (or a
+            prior test-mode load latched) and no base_dir is supplied or
+            configured; the resolved base_dir does not contain a 'tests' path
+            component; or any resolved directory -- including one reached
+            through a symlink -- falls outside that base_dir. An ambient
+            (dj.config-only) test_mode with no base returns gracefully instead.
 
         Returns
         -------

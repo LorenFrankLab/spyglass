@@ -183,14 +183,17 @@ class CleanupCandidate:
     accesses: Tuple[AccessSnapshot, ...]
 
     def __post_init__(self):
-        """Reject a candidate with no access paths.
+        """Reject a structurally invalid candidate.
 
-        ``newest_ns`` is undefined without at least one access, and an
-        empty-``accesses`` candidate slips through the structural preflight
-        (its ``*.nwb`` loop is vacuous) only to raise from ``max()`` partway
-        through the deletion loop -- after earlier candidates have already
-        been unlinked. Enforcing it here also covers the dry-run path, which
-        returns before the preflight runs.
+        Two invariants are enforced at construction. First, ``accesses`` must
+        be non-empty: ``newest_ns`` is undefined without at least one access,
+        and an empty-``accesses`` candidate slips through the structural
+        preflight (its ``*.nwb`` loop is vacuous) only to raise from ``max()``
+        partway through the deletion loop -- after earlier candidates have
+        already been unlinked. Enforcing it here also covers the dry-run path,
+        which returns before the preflight runs. Second, a present ``target``
+        must describe this candidate's own ``real_path``; a mismatch is an
+        internal-consistency bug caught here rather than at act time.
         """
         if not self.accesses:
             raise ValueError(

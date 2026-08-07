@@ -475,18 +475,20 @@ def _teardown_test_data(base_dir, data_root=None):
     repository's own tests/_data, and every owned child is re-checked for
     being a symlink before it is touched.
 
-    `analysis` is cleaned non-recursively, matching master, because
-    concurrent pytest sessions are supported (--container-name /
-    --container-port) and share this base by default. Without per-run
-    ownership metadata, traversing nested session directories could erase
-    another run's active files. Nested analysis cleanup is therefore deferred
-    until the test suite has a per-base session lock or ownership manifest.
+    `analysis` is swept non-recursively because concurrent pytest sessions
+    are supported (--container-name / --container-port) and share this base by
+    default; without per-run ownership metadata, traversing nested session
+    directories could erase another run's active files. The other owned
+    subdirectories are removed recursively, which carries that same
+    concurrent-session race -- this function keeps teardown inside the test
+    tree, it does not make it concurrency-safe. Nested analysis cleanup would
+    need a per-base session lock or ownership manifest.
 
-    NOTE: the remaining subdirectories ARE removed recursively, exactly as
-    master does. That carries the same concurrent-session race; this
-    function does not make teardown concurrency-safe, it only restores the
-    prior behavior and stops it escaping the test tree. A per-base session
-    lock is a tracked follow-up.
+    Raises
+    ------
+    RuntimeError
+        If one or more owned children could not be removed. Failures are
+        aggregated so a single unremovable entry does not strand the rest.
     """
     if base_dir is None:
         return
@@ -533,18 +535,12 @@ def _teardown_test_data(base_dir, data_root=None):
                 continue
             if name == "analysis":
                 # unlink() on a symlink removes the LINK, never its target,
-                # so symlinks are removed here like any other entry.
-                # Leaving them would be the dangerous choice: a surviving
-                # leaf link can later authorize cleanup to delete its
-                # external target.
-                # Deliberately non-recursive: analysis files normally live at
-                # analysis/<session>/<file>.nwb, but this shared test base has
-                # no record of which session belongs to which pytest process.
-                # A recursive sweep could unlink another run's active file.
-                # Flat leaves are safe to remove; nested cleanup waits for a
-                # per-run ownership mechanism.
-                # Per-file, so one unremovable entry does not strand the
-                # rest of the directory.
+                # so symlinks are removed here like any other entry. Leaving
+                # them would be the dangerous choice: a surviving leaf link can
+                # later authorize cleanup to delete its external target.
+                # Non-recursive (see the docstring for why): a `*.nwb` glob
+                # touches only flat leaves, each unlinked independently so one
+                # unremovable entry does not strand the rest.
                 for file in child.glob("*.nwb"):
                     try:
                         file.unlink()

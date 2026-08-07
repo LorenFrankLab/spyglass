@@ -719,9 +719,9 @@ def _restore_global_config():
     entries and ``dj.config['stores']`` for whatever base_dir it resolved.
     Tests below call it with tmp_path bases, so without this fixture the
     last one to run leaves ``dj.config['stores']['analysis']`` pointing at
-    a pytest tmp directory. tests/setup sorts before tests/common, so every
-    later database-backed test would then read and write analysis files in
-    the wrong place.
+    a pytest tmp directory. tests/setup is collected before the later
+    database-backed suites, so every later database-backed test would then
+    read and write analysis files in the wrong place.
     """
     import os
 
@@ -815,7 +815,7 @@ class TestTestModeEnvVarIgnore:
         # ...) pointing at the session base. Under test_mode=False the resolver
         # consults them, so without clearing them a base supplied here would be
         # silently overridden for every non-base directory. Restored by
-        # monkeypatch (and the module-level _restore_global_config fixture).
+        # monkeypatch (and the autouse _restore_global_config fixture).
         for key in list(os.environ):
             if key.startswith(("SPYGLASS_", "DLC_", "MOSEQ_", "KACHERY_")):
                 monkeypatch.delenv(key, raising=False)
@@ -1129,7 +1129,8 @@ class TestModePrecedence:
         assert cfg._test_mode is False
 
     def test_debug_mode_uses_same_precedence(self, tmp_path, no_dj_test_mode):
-        """debug_mode has the identical bug and the identical fix."""
+        """debug_mode resolves with the same precedence as test_mode: a
+        constructor value wins over dj.config."""
         from spyglass.settings import SpyglassConfig
 
         base = tmp_path / "tests" / "data"
