@@ -222,17 +222,34 @@ class SpyglassConfig:
         if self._failed_test_mode and "test_mode" not in kwargs:
             test_mode = True
             explicit_test_mode = True
+        # A caller that explicitly forces a cached production configuration to
+        # reload after ambient dj.config has switched into test mode is also
+        # requesting a real mode transition. Treat it like an explicit
+        # test_mode request: if validation fails, the old production paths must
+        # not remain available through this object. A fresh implicit/on-startup
+        # load has no production cache to invalidate and stays graceful.
+        forced_ambient_test_transition = (
+            force_reload
+            and test_mode
+            and not explicit_test_mode
+            and bool(self._config)
+            and not self._test_mode
+        )
+        deliberate_test_mode = (
+            explicit_test_mode or forced_ambient_test_transition
+        )
         debug_mode = _resolve_mode("debug_mode")
 
         # Enter fail-closed state before resolving or validating a deliberate
         # transition from production/unloaded state into test mode. Any
         # exception below must leave production paths unavailable. A previously
         # validated test configuration remains transactional: a rejected reload
-        # preserves it. An ambient (non-explicit) test_mode does not latch,
-        # so a library load cannot wedge the instance fail-closed.
+        # preserves it. An ordinary ambient (non-explicit, non-transitioning)
+        # test_mode load does not latch, so a library load cannot wedge the
+        # instance fail-closed.
         if (
             test_mode
-            and explicit_test_mode
+            and deliberate_test_mode
             and (not self._config or not self._test_mode)
         ):
             self._config = {}
@@ -264,7 +281,7 @@ class SpyglassConfig:
         # it cannot continue serving production paths.
         if not resolved_base:
             self.load_failed = True
-            if test_mode and explicit_test_mode:
+            if test_mode and deliberate_test_mode:
                 raise ValueError(
                     "Refusing to load Spyglass in test_mode without an "
                     "explicit base_dir or "

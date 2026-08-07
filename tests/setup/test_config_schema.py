@@ -997,6 +997,54 @@ class TestTestModeEnvVarIgnore:
         with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
             _ = cfg.analysis_dir
 
+    def test_ambient_test_mode_forced_reload_discards_cached_production(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """A forced ambient production-to-test transition must fail closed."""
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig
+
+        production = tmp_path / "production_base"
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
+        cfg = SpyglassConfig()
+        cfg.load_config(test_mode=False, force_reload=True)
+        assert cfg.analysis_dir == str(production / "analysis")
+
+        # No call- or constructor-level test_mode is supplied. The forced
+        # reload must nevertheless honor the new ambient mode without leaving
+        # the already-cached production paths available after refusal.
+        monkeypatch.setitem(
+            dj.config.setdefault("custom", {}), "test_mode", True
+        )
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            cfg.load_config(force_reload=True)
+
+        assert cfg.load_failed
+        assert cfg.test_mode
+        assert cfg._failed_test_mode
+        assert cfg._config == {}
+        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+            _ = cfg.analysis_dir
+
+    def test_fresh_ambient_test_mode_startup_without_base_is_graceful(
+        self, monkeypatch, no_dj_test_config
+    ):
+        """An ordinary implicit startup load must still return, not raise."""
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig
+
+        monkeypatch.setitem(
+            dj.config.setdefault("custom", {}), "test_mode", True
+        )
+        cfg = SpyglassConfig()
+
+        assert cfg.load_config(on_startup=True) is None
+        assert cfg.load_failed
+        assert cfg._config == {}
+        assert not cfg._failed_test_mode
+
 
 class TestModePrecedence:
     """test_mode/debug_mode resolution order in SpyglassConfig.load_config.
