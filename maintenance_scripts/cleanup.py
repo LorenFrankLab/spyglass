@@ -41,20 +41,17 @@ def run_table_cleanups() -> tuple:
         Labeled failure messages (empty when everything succeeded), and
         whether an analysis-storage phase failed.
     """
-    steps = [  # (label, callable, touches analysis storage)
-        ("Nwbfile", lambda: Nwbfile().cleanup(), False),
-        ("AnalysisNwbfile", lambda: AnalysisNwbfile().cleanup(), True),
-        ("SpikeSorting", lambda: SpikeSorting().cleanup(verbose=False), False),
-        ("DecodingOutput", lambda: DecodingOutput().cleanup(), True),
-        (
-            "SpikeSortingRecording",
-            lambda: SpikeSortingRecording().cleanup(verbose=False),
-            False,
-        ),
+    steps = [  # (table class, cleanup kwargs, touches analysis storage)
+        (Nwbfile, {}, False),
+        (AnalysisNwbfile, {}, True),
+        (SpikeSorting, {"verbose": False}, False),
+        (DecodingOutput, {}, True),
+        (SpikeSortingRecording, {"verbose": False}, False),
     ]
     errors = []
     analysis_storage_failed = False
-    for name, func, touches_analysis in steps:
+    for table_class, cleanup_kwargs, touches_analysis in steps:
+        name = table_class.__name__
         # Once analysis cleanup has failed, the state of that storage is
         # unknown, so later phases that also delete from it are skipped.
         # Unrelated stores (raw, sorting, recording) proceed regardless.
@@ -64,7 +61,7 @@ def run_table_cleanups() -> tuple:
             errors.append(msg)
             continue
         try:
-            func()
+            table_class().cleanup(**cleanup_kwargs)
         except Exception as err:  # noqa: BLE001 - reported, not swallowed
             if touches_analysis:
                 analysis_storage_failed = True
