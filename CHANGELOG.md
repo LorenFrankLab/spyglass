@@ -356,6 +356,9 @@ for label, interval_data in results.groupby("interval_labels"):
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Fix `SpikeSorting.populate` raising `AttributeError: Bad parameters:
+        ['tempdir']` for `spykingcircus2`/`tridesclous2` by extending the
+        existing `mountainsort5` `tempdir` exemption to cover them too
 
 ## [0.5.5] (Aug 6, 2025)
 
