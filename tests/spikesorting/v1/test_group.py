@@ -136,68 +136,32 @@ def test_criteria_invalid_operator(spike_v1_group, units_df):
         )
 
 
-def test_label_columns_appended(spike_v1_group, units_df):
-    """Values of label_columns join the curation labels for each unit"""
-    labels = spike_v1_group._compile_unit_labels(
-        units_df, label_columns=["brain_region"]
+def test_criteria_membership_list_column(spike_v1_group, units_df):
+    """Membership matches any item of a column holding a list per unit"""
+    filter_units_by_criteria = (
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria
     )
-    assert labels == [
-        ["CA1"],
-        ["noise", "CA1"],
-        ["mua", "CA3"],
-        ["CA3"],
-    ], "Unexpected compiled labels"
 
-
-def test_label_columns_cast_to_str(spike_v1_group, units_df):
-    """Non-string label columns are cast to strings"""
-    labels = spike_v1_group._compile_unit_labels(
-        units_df, label_columns=["n_spikes"]
-    )
-    assert labels[0] == ["1000"], "Numeric label not cast to string"
-
-
-def test_label_columns_missing(spike_v1_group, units_df, caplog):
-    """A missing label column warns but leaves curation labels intact"""
-    labels = spike_v1_group._compile_unit_labels(
-        units_df, label_columns=["not_a_column"]
-    )
-    assert labels[1] == ["noise"], "Curation labels lost"
-    assert "not_a_column" in caplog.text, "No warning for missing column"
-
-
-def test_label_columns_no_labels(spike_v1_group):
-    """A sorting with no label columns at all filters no units"""
-    no_labels = spike_v1_group._compile_unit_labels(
-        pd.DataFrame({"snr": [1.0]})
-    )
-    assert (
-        no_labels is None
-    ), "Expected None for units table without label columns"
-
-
-def test_filter_units_with_label_columns(spike_v1_group, units_df):
-    """Extra labels are usable by include_labels/exclude_labels"""
-    labels = spike_v1_group._compile_unit_labels(
-        units_df, label_columns=["brain_region"]
-    )
-    mask = spike_v1_group.SortedSpikesGroup.filter_units(
-        labels, include_labels=["CA1"], exclude_labels=["noise", "mua"]
-    )
     assert np.array_equal(
-        mask, [True, False, False, False]
-    ), "Unexpected mask combining region and curation labels"
+        filter_units_by_criteria(units_df, {"curation_label": "noise"}),
+        [False, True, False, False],
+    ), "Unexpected mask for membership in a list-valued column"
+    assert np.array_equal(
+        filter_units_by_criteria(
+            units_df, {"curation_label": {"notin": ["noise", "mua"]}}
+        ),
+        [True, False, False, True],
+    ), "Unexpected mask for 'notin' on a list-valued column"
 
 
 def test_params_round_trip(spike_v1_group):
-    """New columns round-trip through the table"""
+    """New column round-trips through the table"""
     tbl = spike_v1_group.UnitSelectionParams()
-    name = "test_label_columns"
+    name = "test_unit_criteria"
     params = {
         "unit_filter_params_name": name,
         "include_labels": [],
         "exclude_labels": ["noise", "mua"],
-        "label_columns": ["brain_region"],
         "unit_criteria": {"snr": {">=": 3}},
     }
     tbl.insert1(params, skip_duplicates=True)
@@ -218,7 +182,6 @@ def test_fetch_spike_data_unknown_column(
             "unit_filter_params_name": name,
             "include_labels": [],
             "exclude_labels": [],
-            "label_columns": [],
             "unit_criteria": {"not_a_column": {">": 1}},
         },
         skip_duplicates=True,

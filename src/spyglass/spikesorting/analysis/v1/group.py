@@ -24,8 +24,8 @@ UNIT_CRITERIA_OPERATORS = {
     "!=": np.not_equal,
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
-    "isin": lambda vals, target: np.isin(vals, np.atleast_1d(target)),
-    "notin": lambda vals, target: ~np.isin(vals, np.atleast_1d(target)),
+    "isin": lambda vals, target: _isin(vals, target),
+    "notin": lambda vals, target: ~_isin(vals, target),
 }
 # Curation label columns, v0: "label", v1: "curation_label"
 CURATION_LABEL_COLUMNS = ("label", "curation_label")
@@ -43,9 +43,6 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
         list of labels to include, by default None
     exclude_labels : List[str], optional
         list of labels to exclude, by default None
-    label_columns : List[str], optional
-        additional units table columns (e.g. ["brain_region"]) whose values are
-        cast to strings and appended to the unit's labels, by default None
     unit_criteria : dict, optional
         criteria on units table columns the unit must satisfy, by default None.
         See `SortedSpikesGroup.filter_units_by_criteria`
@@ -56,14 +53,13 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
     ---
     include_labels = Null: longblob
     exclude_labels = Null: longblob
-    label_columns = Null: longblob # extra units columns to treat as labels
     unit_criteria = Null: longblob # column -> criterion the unit must satisfy
     """
     # NOTE: pk reduced from 128 to 32 to avoid long primary key error
     contents = [
-        ["all_units", [], [], [], {}],
-        ["exclude_noise", [], ["noise", "mua"], [], {}],
-        ["default_exclusion", [], ["noise", "mua"], [], {}],
+        ["all_units", [], [], {}],
+        ["exclude_noise", [], ["noise", "mua"], {}],
+        ["default_exclusion", [], ["noise", "mua"], {}],
     ]
 
     @classmethod
@@ -174,12 +170,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         Notes
         -----
-        Units whose value is NaN fail every numeric comparison. A criterion
-        naming a column the sorting does not have is skipped with a warning;
-        the remaining criteria still apply. Each sorting in a group has its
-        own units table, and those tables may not share the same columns
-        (e.g. if they were curated differently), so a criterion may apply to
-        only some of them.
+        Units whose value is NaN fail every numeric comparison. "isin" and
+        "notin" also work on columns holding a list per unit (e.g. the
+        curation labels), matching if any item of the list is in the target.
+        A criterion naming a column the sorting does not have is skipped with
+        a warning; the remaining criteria still apply. Each sorting in a group
+        has its own units table, and those tables may not share the same
+        columns (e.g. if they were curated differently), so a criterion may
+        apply to only some of them.
         """
         include_mask = np.ones(len(units_df), dtype=bool)
 
@@ -193,7 +191,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             if not isinstance(criterion, dict):  # shorthand for membership
                 criterion = {"isin": criterion}
-            values = np.asarray(units_df[column].to_list())
+            values = units_df[column].to_numpy()
 
             for operator, value in criterion.items():
                 if operator not in UNIT_CRITERIA_OPERATORS:
@@ -245,13 +243,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             )
         ).fetch("spikesorting_merge_id")
 
-        # get the filtering parameters. label_columns and unit_criteria are
-        # fetched by `get` so that this still works against a table that has
-        # not yet been altered to add them
+        # get the filtering parameters. unit_criteria is fetched by `get` so
+        # that this still works against a table that has not yet been altered
+        # to add it
         filter_params = (UnitSelectionParams & key).fetch1()
         include_labels = filter_params["include_labels"]
         exclude_labels = filter_params["exclude_labels"]
-        label_columns = filter_params.get("label_columns")
         unit_criteria = filter_params.get("unit_criteria")
 
         # get the spike times for each merge_id
@@ -278,11 +275,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             include_unit = np.ones(len(sorting_spike_times), dtype=bool)
 
-            # filter the spike times based on the labels if present
-            unit_labels = _compile_unit_labels(units_df, label_columns)
-            if unit_labels is not None and not test_mode:
+            # filter the spike times based on the curation labels if present
+            group_col = next(
+                (c for c in CURATION_LABEL_COLUMNS if c in units_df), None
+            )
+            if group_col is not None and not test_mode:
                 include_unit &= SortedSpikesGroup.filter_units(
-                    unit_labels, include_labels, exclude_labels
+                    units_df[group_col].to_list(),
+                    include_labels,
+                    exclude_labels,
                 )
 
             # filter on arbitrary criteria over the units table columns
@@ -415,31 +416,22 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return firing_rate
 
 
-def _compile_unit_labels(units_df, label_columns=None):
-    """Labels of each unit: the curation labels plus any label_columns values
+def _isin(values, target):
+    """True where a unit's value, or any item of it, is in target
 
-    Returns a list of list of str, or None if the sorting has no label columns.
+    Columns of the units table may hold a list per unit (e.g. the curation
+    labels), which np.isin cannot compare against target directly.
     """
-    columns = [c for c in CURATION_LABEL_COLUMNS if c in units_df]
-    for column in label_columns or []:
-        if column not in units_df:
-            logger.warning(f"Label column '{column}' not in units table")
-        else:
-            columns.append(column)
+    target = np.atleast_1d(target)
 
-    if not columns:
-        return None
+    if values.dtype == object and any(
+        isinstance(value, (list, tuple, np.ndarray)) for value in values
+    ):
+        return np.array(
+            [np.isin(np.atleast_1d(value), target).any() for value in values]
+        )
 
-    unit_labels = [[] for _ in range(len(units_df))]
-    for column in columns:
-        for labels, value in zip(unit_labels, units_df[column].to_list()):
-            labels.extend(
-                [str(v) for v in value]
-                if isinstance(value, (list, tuple, np.ndarray))
-                else [str(value)]
-            )
-
-    return unit_labels
+    return np.isin(values, target)
 
 
 def _get_spike_obj_name(nwb_file, allow_empty=False):
