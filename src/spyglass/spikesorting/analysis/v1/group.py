@@ -21,7 +21,7 @@ UNIT_CRITERIA_OPERATORS = {
     "<": np.less,
     "<=": np.less_equal,
     "==": np.equal,
-    "!=": np.not_equal,
+    "!=": lambda vals, target: np.not_equal(vals, target) & np.equal(vals, vals),
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
     "isin": lambda vals, target: _isin(vals, target),

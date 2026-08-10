@@ -65,6 +65,10 @@ UnitSelectionParams()
 # shorthand for `"isin"`. A unit is included only if it satisfies all of the
 # criteria. Units whose value is NaN fail every numeric comparison.
 #
+# In the example below, the `brain_region` criterion keeps only units recorded in
+# CA1, in addition to the curation label and quality criteria. This assumes "brain_region",
+# "snr", and "isi_violation" are columns that exist in the nwb units table.
+#
 # ```python
 # UnitSelectionParams().insert1(
 #     {
