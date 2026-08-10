@@ -92,12 +92,15 @@ class SpyglassConfig:
         _test_mode (bool)
             True if test_mode is set. Required for pytests to run without
             prompts.
+        _prefer_download (bool)
+            True if streaming backends should download whole files instead.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
         self._debug_mode = kwargs.get("debug_mode", False)
         self._test_mode = kwargs.get("test_mode", False)
+        self._prefer_download = kwargs.get("prefer_download", False)
         self._dlc_base = None
         self.load_failed = False
 
@@ -168,8 +171,10 @@ class SpyglassConfig:
         self._test_mode = kwargs.get("test_mode") or dj_custom.get(
             "test_mode", False
         )
+        self._prefer_download = dj_custom.get("prefer_download", False)
         self._test_mode = str_to_bool(self._test_mode)
         self._debug_mode = str_to_bool(self._debug_mode)
+        self._prefer_download = str_to_bool(self._prefer_download)
 
         resolved_base = (
             base_dir
@@ -259,6 +264,7 @@ class SpyglassConfig:
         self._config = dict(
             debug_mode=self._debug_mode,
             test_mode=self._test_mode,
+            prefer_download=self._prefer_download,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -506,6 +512,7 @@ class SpyglassConfig:
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
                 "test_mode": str(self._test_mode).lower(),
+                "prefer_download": str(self._prefer_download).lower(),
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -608,6 +615,30 @@ class SpyglassConfig:
 
         Required for pytests to run without prompts."""
         return self._test_mode
+
+    @property
+    def prefer_download(self) -> bool:
+        """Returns True if whole-file download is preferred over streaming.
+
+        Streaming backends honor this by fetching the file to local disk and
+        reading the copy. Backends that cannot download ignore it. Useful on
+        slow or metered connections, where many small range requests cost more
+        than one sequential transfer.
+        """
+        return self._prefer_download
+
+    @prefer_download.setter
+    def prefer_download(self, value) -> None:
+        """Set the download preference for the current session.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings.
+        """
+        self.load_config()
+        self._prefer_download = str_to_bool(value)
+        self._config["prefer_download"] = self._prefer_download
 
     @property
     def dlc_project_dir(self) -> str:

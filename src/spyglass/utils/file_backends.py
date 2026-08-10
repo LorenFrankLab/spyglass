@@ -12,12 +12,20 @@ The chain is fixed in code rather than user-configurable: local must be tried
 first, and letting a config file put a network source ahead of disk would only
 ever be a mistake.
 
+What a backend *can* do is declared by `supports_streaming`. What it *does* is
+that capability narrowed by user preference: `sg_config.prefer_download` makes
+a stream-capable backend transfer the whole file instead, for users whose
+connection makes many small range requests more expensive than one sequential
+download.
+
 Notes
 -----
 Backends import their supporting modules inside method bodies rather than at
 module scope. This keeps optional dependencies optional, avoids import cycles,
 and lets tests patch module attributes such as
-`spyglass.sharing.sharing_kachery._kachery_available`.
+`spyglass.sharing.sharing_kachery._kachery_available`. `spyglass.settings` is
+imported this way for the cycle reason: it imports `dj_helper_fn`, which
+imports `nwb_helper_fn`, which imports this module.
 """
 
 import os
@@ -39,16 +47,18 @@ class FileBackend(Protocol):
     an ABC would; a third-party backend that implements the same members
     without inheriting still satisfies `isinstance` checks.
 
-    Subclasses must implement `has`. A backend that can stream overrides
-    `open`. A backend that can only transfer whole files implements `download`
-    and inherits the default `open`, which downloads and then reads locally.
+    Subclasses must implement `has`, plus at least one of `stream` and
+    `download`. `open` is concrete and picks between them, so a backend that
+    can do both needs no dispatch logic of its own.
 
     Attributes
     ----------
     name : str
         Short identifier, used in configuration and log messages.
     supports_streaming : bool
-        True if `open` reads over the network without writing a local copy.
+        True if the backend implements `stream`. A capability declaration, not
+        a promise about what `open` will do on any given call: the user may
+        prefer download (see `sg_config.prefer_download`).
     """
 
     name: str = "base"
@@ -90,11 +100,57 @@ class FileBackend(Protocol):
             f"Backend '{self.name}' does not implement download."
         )
 
+    def stream(
+        self, nwb_file_path: str
+    ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
+        """Read the file over the network without writing a local copy.
+
+        Implemented by backends that set `supports_streaming`.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        tuple of (pynwb.NWBHDF5IO, pynwb.NWBFile)
+            Open IO handle and the file it read.
+        """
+        raise NotImplementedError(
+            f"Backend '{self.name}' does not implement stream."
+        )
+
+    def _should_stream(self) -> bool:
+        """Return True if this call should stream rather than download.
+
+        Streams when the backend can and the user has not opted out. A user
+        who prefers download but whose backend cannot download is served by
+        streaming anyway: the setting is a preference, never a failure mode.
+        """
+        from spyglass.settings import sg_config
+
+        if not self.supports_streaming:
+            return False
+        if not sg_config.prefer_download:
+            return True
+
+        # No download to fall back on, so serve the file rather than the
+        # preference.
+        if type(self).download is FileBackend.download:
+            logger.debug(
+                "%s cannot download; streaming despite prefer_download",
+                self.name,
+            )
+            return True
+        return False
+
     def open(self, nwb_file_path: str) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
         """Return an open `(io, nwbfile)` pair.
 
-        Default implementation downloads the file and opens the local copy.
-        Streaming backends override this.
+        Streams if the backend supports it and the user has not set
+        `prefer_download`; otherwise downloads the file and reads the local
+        copy. Backends rarely need to override this.
 
         Parameters
         ----------
@@ -111,6 +167,9 @@ class FileBackend(Protocol):
         FileNotFoundError
             If the download did not produce a local file.
         """
+        if self._should_stream():
+            return self.stream(nwb_file_path)
+
         if not self.download(nwb_file_path):
             raise FileNotFoundError(
                 f"Backend '{self.name}' could not download "
@@ -195,9 +254,11 @@ class KacheryBackend(FileBackend):
 
 
 class DandiBackend(FileBackend):
-    """Stream files published to a DANDI archive.
+    """Fetch files published to a DANDI archive.
 
-    Streaming only. `download` is not implemented, so `open` is overridden.
+    Streams by default. Also implements `download`, so a user on a slow
+    connection can set `prefer_download` and get one sequential transfer
+    instead of many range requests.
     """
 
     name = "Dandi"
@@ -212,20 +273,59 @@ class DandiBackend(FileBackend):
             or DandiPath().has_raw_path(file_path=nwb_file_path)
         )
 
-    def open(self, nwb_file_path: str) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
-        """Stream the file from DANDI over HTTP range requests."""
+    def _resolve(self, nwb_file_path: str) -> str:
+        """Return the name DANDI knows this file by.
+
+        Raw files are published without the trailing underscore Spyglass uses
+        locally, so the two naming schemes are tried in turn.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        str
+            Path or file name to hand to `DandiPath`.
+
+        Raises
+        ------
+        FileNotFoundError
+            If DANDI holds the file under neither scheme.
+        """
         from spyglass.common.common_dandi import DandiPath
 
         if DandiPath().has_file_path(nwb_file_path):
-            path_to_load = nwb_file_path
-        elif DandiPath().has_raw_path(nwb_file_path):
-            path_to_load = DandiPath().raw_from_path(nwb_file_path)["filename"]
-        else:
-            raise FileNotFoundError(
-                f"File not found in Dandi: {Path(nwb_file_path).name}"
-            )
+            return nwb_file_path
+        if DandiPath().has_raw_path(nwb_file_path):
+            return DandiPath().raw_from_path(nwb_file_path)["filename"]
+        raise FileNotFoundError(
+            f"File not found in Dandi: {Path(nwb_file_path).name}"
+        )
 
-        return DandiPath().fetch_file_from_dandi(nwb_file_path=path_to_load)
+    def stream(
+        self, nwb_file_path: str
+    ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
+        """Stream the file from DANDI over HTTP range requests."""
+        from spyglass.common.common_dandi import DandiPath
+
+        return DandiPath().fetch_file_from_dandi(
+            nwb_file_path=self._resolve(nwb_file_path)
+        )
+
+    def download(self, nwb_file_path: str, dest: Optional[str] = None) -> bool:
+        """Download the whole file from DANDI to the local path.
+
+        The destination is the local path Spyglass expects, not the DANDI
+        name, so the file resolves locally on the next call.
+        """
+        from spyglass.common.common_dandi import DandiPath
+
+        return DandiPath().download_file_from_dandi(
+            nwb_file_path=self._resolve(nwb_file_path),
+            dest=dest or nwb_file_path,
+        )
 
 
 # The resolution chain, in order. Local disk first, then remote sources.
