@@ -220,7 +220,8 @@ class FetchMixin(BaseMixin):
         for rec_dict in rec_dicts:
             file_path = file_path_fn(rec_dict[file_name_attr])
             if file_is_remote(file_path):
-                # skip the filepath checksum if streamed from Dandi
+                # skip the filepath checksum for any streamed file; there is
+                # no local copy to check against
                 rec_dict["nwb2load_filepath"] = file_path
                 continue
 

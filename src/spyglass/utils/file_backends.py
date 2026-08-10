@@ -38,6 +38,22 @@ import pynwb
 from spyglass.utils.logging import logger
 
 
+class BackendUnavailable(FileNotFoundError):
+    """A backend cannot supply the file it was asked for.
+
+    Raised only for the expected miss: the backend does not hold the file, or
+    its transfer did not produce one. `get_nwb_file` catches this and moves on
+    to the next backend.
+
+    Genuine failures — a corrupt file, a network error, a DataJoint error — are
+    not this, and must propagate rather than be mistaken for a miss. Otherwise
+    the real error is swallowed and the file may be silently recomputed.
+
+    Subclasses `FileNotFoundError` so existing callers that catch that keep
+    working; resolution catches only this narrower type.
+    """
+
+
 @runtime_checkable
 class FileBackend(Protocol):
     """A remote source of NWB files.
@@ -121,12 +137,28 @@ class FileBackend(Protocol):
             f"Backend '{self.name}' does not implement stream."
         )
 
-    def _should_stream(self) -> bool:
-        """Return True if this call should stream rather than download.
+    def will_stream(self, nwb_file_path: str) -> bool:
+        """Return True if `open` would stream this file rather than download.
 
-        Streams when the backend can and the user has not opted out. A user
-        who prefers download but whose backend cannot download is served by
+        The single decision point: `open` consults it, and so does the resolver,
+        which records the answer so `file_is_remote` can report how the file was
+        actually read instead of inferring it afterward.
+
+        Streams when the backend can and the user has not opted out. A user who
+        prefers download but whose backend cannot download is served by
         streaming anyway: the setting is a preference, never a failure mode.
+
+        A backend that overrides `open` must override this to match.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        bool
+            True if the next `open` call will read over the network.
         """
         from spyglass.settings import sg_config
 
@@ -164,14 +196,15 @@ class FileBackend(Protocol):
 
         Raises
         ------
-        FileNotFoundError
-            If the download did not produce a local file.
+        BackendUnavailable
+            If the download did not produce a local file. Errors raised while
+            reading a file that was transferred propagate untouched.
         """
-        if self._should_stream():
+        if self.will_stream(nwb_file_path):
             return self.stream(nwb_file_path)
 
         if not self.download(nwb_file_path):
-            raise FileNotFoundError(
+            raise BackendUnavailable(
                 f"Backend '{self.name}' could not download "
                 + f"{Path(nwb_file_path).name}"
             )
@@ -264,20 +297,15 @@ class DandiBackend(FileBackend):
     name = "Dandi"
     supports_streaming = True
 
-    def has(self, nwb_file_path: str) -> bool:
-        """Return True if DANDI holds this file under either naming scheme."""
-        from spyglass.common.common_dandi import DandiPath
-
-        return bool(
-            DandiPath().has_file_path(file_path=nwb_file_path)
-            or DandiPath().has_raw_path(file_path=nwb_file_path)
-        )
-
-    def _resolve(self, nwb_file_path: str) -> str:
-        """Return the name DANDI knows this file by.
+    def _resolve(self, nwb_file_path: str) -> Optional[str]:
+        """Return the name DANDI knows this file by, or None if it has neither.
 
         Raw files are published without the trailing underscore Spyglass uses
         locally, so the two naming schemes are tried in turn.
+
+        The single lookup for this backend: `has` is this question asked as a
+        predicate, so the two cannot disagree and the archive is queried once
+        per question rather than once per caller.
 
         Parameters
         ----------
@@ -286,44 +314,64 @@ class DandiBackend(FileBackend):
 
         Returns
         -------
-        str
-            Path or file name to hand to `DandiPath`.
-
-        Raises
-        ------
-        FileNotFoundError
-            If DANDI holds the file under neither scheme.
+        str or None
+            Path or file name to hand to `DandiPath`, or None if DANDI holds
+            the file under neither scheme.
         """
         from spyglass.common.common_dandi import DandiPath
 
-        if DandiPath().has_file_path(nwb_file_path):
+        dandi_path = DandiPath()
+
+        if dandi_path.has_file_path(nwb_file_path):
             return nwb_file_path
-        if DandiPath().has_raw_path(nwb_file_path):
-            return DandiPath().raw_from_path(nwb_file_path)["filename"]
-        raise FileNotFoundError(
-            f"File not found in Dandi: {Path(nwb_file_path).name}"
-        )
+        if dandi_path.has_raw_path(nwb_file_path):
+            return dandi_path.raw_from_path(nwb_file_path)["filename"]
+        return None
+
+    def has(self, nwb_file_path: str) -> bool:
+        """Return True if DANDI holds this file under either naming scheme."""
+        return self._resolve(nwb_file_path) is not None
 
     def stream(
         self, nwb_file_path: str
     ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
-        """Stream the file from DANDI over HTTP range requests."""
+        """Stream the file from DANDI over HTTP range requests.
+
+        Raises
+        ------
+        BackendUnavailable
+            If DANDI holds the file under neither naming scheme. Unreachable
+            via `get_nwb_file`, which gates on `has` first; this covers a
+            direct call, where there is no pair to return instead.
+        """
         from spyglass.common.common_dandi import DandiPath
 
-        return DandiPath().fetch_file_from_dandi(
-            nwb_file_path=self._resolve(nwb_file_path)
-        )
+        path_to_load = self._resolve(nwb_file_path)
+        if path_to_load is None:
+            raise BackendUnavailable(
+                f"File not found in Dandi: {Path(nwb_file_path).name}"
+            )
+
+        return DandiPath().fetch_file_from_dandi(nwb_file_path=path_to_load)
 
     def download(self, nwb_file_path: str, dest: Optional[str] = None) -> bool:
         """Download the whole file from DANDI to the local path.
 
         The destination is the local path Spyglass expects, not the DANDI
         name, so the file resolves locally on the next call.
+
+        Returns False rather than raising when DANDI has no such file: the
+        bool already carries that answer, and `open` turns it into the one
+        `BackendUnavailable` the resolver looks for.
         """
         from spyglass.common.common_dandi import DandiPath
 
+        path_to_load = self._resolve(nwb_file_path)
+        if path_to_load is None:
+            return False
+
         return DandiPath().download_file_from_dandi(
-            nwb_file_path=self._resolve(nwb_file_path),
+            nwb_file_path=path_to_load,
             dest=dest or nwb_file_path,
         )
 

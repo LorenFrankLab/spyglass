@@ -10,11 +10,21 @@ import numpy as np
 import pynwb
 import yaml
 
-from spyglass.utils.file_backends import LocalBackend, get_backends
+from spyglass.utils.file_backends import (
+    BackendUnavailable,
+    LocalBackend,
+    get_backends,
+)
 from spyglass.utils.logging import logger
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
+
+# paths in __open_nwb_files that were read over the network rather than from
+# disk, recorded at open time. Asking the backend is authoritative; inspecting
+# the io object afterward is not, since it would have to guess at the private
+# internals of whatever filesystem implementation the backend chose.
+__streamed_nwb_files = set()
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()
@@ -38,8 +48,20 @@ def _open_nwb_file(nwb_file_path, source=None):
     nwbfile : pynwb.NWBFile
         The NWB file object.
     """
-    io, nwbfile = (source or LocalBackend()).open(nwb_file_path)
+    backend = source or LocalBackend()
+
+    # Ask before opening, while the answer still describes the call we are
+    # about to make.
+    streamed = backend.will_stream(nwb_file_path)
+
+    io, nwbfile = backend.open(nwb_file_path)
     __open_nwb_files[nwb_file_path] = (io, nwbfile)
+
+    if streamed:
+        __streamed_nwb_files.add(nwb_file_path)
+    else:  # a re-open may have downgraded a previously streamed path
+        __streamed_nwb_files.discard(nwb_file_path)
+
     return nwbfile
 
 
@@ -69,6 +91,12 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     FileNotFoundError
         If the NWB file is not found locally or in any remote backend, and
         cannot be recomputed.
+
+    Notes
+    -----
+    Only `BackendUnavailable` falls through to the next backend. A backend that
+    holds the file but fails while reading it raises the underlying error, which
+    propagates rather than being mistaken for a miss and silently recomputed.
     """
     if not Path(nwb_file_path).is_absolute():
         from spyglass.common import Nwbfile
@@ -93,7 +121,7 @@ def get_nwb_file(nwb_file_path, query_expression=None):
             continue
         try:
             return _open_nwb_file(nwb_file_path, source=backend)
-        except FileNotFoundError:  # pragma: no cover - try the next backend
+        except BackendUnavailable:  # expected miss, try the next backend
             logger.debug(
                 "%s reported the file but could not supply it: %s",
                 backend.name,
@@ -121,14 +149,24 @@ def get_nwb_file(nwb_file_path, query_expression=None):
 
 
 def file_is_remote(filepath):
-    """Return True if the open file is being streamed over the network."""
-    if filepath not in __open_nwb_files:
-        return False
-    build_keys = __open_nwb_files[filepath][0]._HDF5IO__built.keys()
-    for k in build_keys:
-        if "HTTPFileSystem" in k:
-            return True
-    return False
+    """Return True if the open file is being streamed over the network.
+
+    Reports what the backend actually did when the file was opened, so any
+    streaming backend is recognized, not only those reading over HTTP.
+
+    Parameters
+    ----------
+    filepath : str
+        Absolute path of the file as Spyglass expects it locally.
+
+    Returns
+    -------
+    bool
+        True if the file is open and was read over the network. False for
+        local reads, for files downloaded before reading, and for paths that
+        are not open.
+    """
+    return filepath in __streamed_nwb_files
 
 
 def file_from_dandi(filepath):
@@ -205,6 +243,7 @@ def close_nwb_files():
     for io, _ in __open_nwb_files.values():
         io.close()
     __open_nwb_files.clear()
+    __streamed_nwb_files.clear()
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):
