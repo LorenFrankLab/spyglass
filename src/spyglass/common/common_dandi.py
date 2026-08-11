@@ -134,14 +134,16 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 "table": self.Violations,
                 "min_severity": MIN_ERROR_SEVERITY,
                 "max_severity": None,
+                "prefix": "violation",
             },
             {
                 "table": self.Warnings,
                 "min_severity": MIN_WARNING_SEVERITY,
                 "max_severity": MIN_ERROR_SEVERITY,
+                "prefix": "warning",
             },
         ]
-        result_inserts = []
+        result_inserts = {}
         for result_map in results_maps:
             min_severity_value = result_map["min_severity"]
             max_severity_value = result_map["max_severity"]
@@ -159,8 +161,8 @@ class DandiValidation(SpyglassMixin, dj.Computed):
             part_keys = [
                 {
                     **key,
-                    "violation_id": i,
-                    "id": result.id,
+                    f"{result_map['prefix']}_id": i,
+                    "id": result.id[:128],
                     "message": result.message[:255]
                     .replace("'", "")
                     .encode("ascii", "ignore")
@@ -172,9 +174,9 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 }
                 for i, result in enumerate(filtered_results)
             ]
-            result_inserts.append({result_map["table"]: part_keys})
+            result_inserts[result_map["table"]] = part_keys
         self.insert1(key)
-        for part_table, part_keys in result_inserts:
+        for part_table, part_keys in result_inserts.items():
             part_table.insert(part_keys)
 
 
