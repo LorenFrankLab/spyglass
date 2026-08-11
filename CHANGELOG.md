@@ -287,6 +287,9 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug from overlapping intervals in interval union #1520
     - Bypass delete permission check when removing null `PositionIntervalMap`
         entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Clear a file's existing `InsertError` rows at the start of
+        `populate_all_common`, so a rerun no longer reports or rolls back on
+        failures logged by an earlier attempt #1497
 
 - Decoding
 
