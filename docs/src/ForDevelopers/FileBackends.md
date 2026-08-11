@@ -86,8 +86,6 @@ class that implements the same members without inheriting still satisfies
 `isinstance` checks.
 
 ```python
-from typing import Optional
-
 from spyglass.utils.file_backends import FileBackend
 
 
@@ -98,7 +96,7 @@ class MyBackend(FileBackend):
     def has(self, nwb_file_path: str) -> bool:
         """Return True if this backend can supply the file."""
 
-    def download(self, nwb_file_path: str, dest: Optional[str] = None) -> bool:
+    def download(self, nwb_file_path: str, dest: str | None = None) -> bool:
         """Fetch the file to local disk. Return True on success."""
 
     def stream(self, nwb_file_path: str):
