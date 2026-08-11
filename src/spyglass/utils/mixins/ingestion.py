@@ -37,6 +37,11 @@ class IngestionMixin(BaseMixin):
         distinguishing between multiple objects of the same type. E.g.
         BehavioralEvents named 'behavioral_events' vs 'analog' or 'video'
         objects of the same type ingested by DIOEvents table.
+    _source_nwb_object_description : str or tuple of str, optional
+        If set, only ingests NWB objects whose description contains one of
+        these markers. Useful when the type and name are shared across
+        objects that differ only by what they describe. E.g. AssociatedFiles
+        describing a state script vs any other associated file.
     table_key_to_obj_attr : Dict[str, Dict[str, Union[str, Callable]]]
         A dict of dicts mapping table keys to NWB object attributes.
     _source_nwb_object_type : Type
@@ -49,6 +54,7 @@ class IngestionMixin(BaseMixin):
     _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
+    _source_nwb_object_description = None  # Optional filter on description
     _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
     _extension_requirements = (
         dict()
@@ -243,7 +249,46 @@ class IngestionMixin(BaseMixin):
                 ]
             ]
 
+        if self._source_nwb_object_description:
+            matching_objects = [
+                obj
+                for obj in matching_objects
+                if self._matches_description(obj)
+            ]
+
         return matching_objects
+
+    def _matches_description(self, nwb_obj) -> bool:
+        """Whether an object's description holds a declared marker.
+
+        Parameters
+        ----------
+        nwb_obj : object
+            A candidate NWB object.
+
+        Returns
+        -------
+        bool
+            True if no markers are declared, or if any marker appears in the
+            object's description. Matched case- and space-insensitively, as
+            for `_source_nwb_object_name`.
+        """
+        markers = self._source_nwb_object_description
+        if not markers:
+            return True
+        if isinstance(markers, str):
+            markers = [markers]
+
+        description = self.sanitize_nwb_object_name(
+            getattr(nwb_obj, "description", None)
+        )
+        if not description:
+            return False
+
+        return any(
+            self.sanitize_nwb_object_name(marker) in description
+            for marker in markers
+        )
 
     @staticmethod
     def sanitize_nwb_object_name(name: Optional[str]) -> Optional[str]:
@@ -326,7 +371,10 @@ class IngestionMixin(BaseMixin):
                     entries.setdefault(table, []).extend(table_entries)
 
         if config:
-            config_entries = self.generate_entries_from_config(config)
+            # Pass the base key: config entries need the file they belong to
+            config_entries = self.generate_entries_from_config(
+                config, base_entry.copy()
+            )
             for table, table_entries in config_entries.items():
                 if table in entries:
                     entries[table].extend(table_entries)
@@ -342,10 +390,7 @@ class IngestionMixin(BaseMixin):
             return dict()
 
         # validate that new entries are consistent with existing entries
-        if self._expected_duplicates:
-            entries_to_insert = self.validate_duplicates(entries)
-        else:
-            entries_to_insert = entries
+        entries_to_insert = self.validate_duplicates(entries)
 
         # run insertions
         if not dry_run:
@@ -446,8 +491,32 @@ class IngestionMixin(BaseMixin):
 
         return entries if len(entries) > 0 else None
 
+    def _expects_duplicates(self, tbl) -> bool:
+        """Whether pre-existing entries in `tbl` are validated, not re-raised.
+
+        Each table an ingestion emits answers for itself, so a table that
+        legitimately recurs across files (Task, say) can be validated while
+        the table driving the ingestion is not. Tables without the flag -- a
+        FreeTable part, or a plain SpyglassMixin parent generated alongside
+        this one -- inherit this table's setting.
+
+        Parameters
+        ----------
+        tbl : dj.Table
+            A table appearing in the planned entries.
+
+        Returns
+        -------
+        bool
+            True if existing entries should be validated and skipped.
+        """
+        return getattr(tbl, "_expected_duplicates", self._expected_duplicates)
+
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
+
+        Only tables that expect duplicates are validated; the rest are passed
+        through, so an unexpected duplicate still raises on insert.
 
         Parameters
         ----------
@@ -465,6 +534,10 @@ class IngestionMixin(BaseMixin):
         for table, table_entries in entry_dict.items():
             if isinstance(table, type):
                 table = table()  # instantiate table object if class provided
+
+            if not self._expects_duplicates(table):
+                entries_to_insert[table] = table_entries
+                continue
 
             entries_to_insert[table] = []
             for table_entry in table_entries:
@@ -543,7 +616,7 @@ class IngestionMixin(BaseMixin):
             return not np.array_equal(a_val, b_val)
 
         # Only None collapses to "": the point is to avoid a false positive on
-        # None vs "". Coalescing every falsy value would treat a stored 0,
+        # None vs "". Coalescing every false value would treat a stored 0,
         # 0.0 or False as missing and hide a genuine divergence.
         a_val = "" if a_val is None else a_val
         b_val = "" if b_val is None else b_val

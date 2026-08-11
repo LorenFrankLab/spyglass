@@ -1,3 +1,4 @@
+import datajoint as dj
 import pytest
 from pandas import DataFrame, Index
 
@@ -112,9 +113,10 @@ def test_pop_imported_lfp(lfp, common, mini_dict):
         )
         == 1
     )
-    # check that rerunning doesn't add duplicates. ImportedLFP now ingests
-    # via insert_from_nwbfile, and its `make` is a deprecation shim.
-    lfp.lfp_imported.ImportedLFP().insert_from_nwbfile(
-        mini_dict["nwb_file_name"]
-    )
+    # Re-ingesting an already-ingested file raises rather than skipping:
+    # ImportedLFP does not expect duplicates, and nothing new is added.
+    with pytest.raises(dj.errors.DuplicateError):
+        lfp.lfp_imported.ImportedLFP().insert_from_nwbfile(
+            mini_dict["nwb_file_name"]
+        )
     assert len(lfp.lfp_imported.ImportedLFP()) == 1

@@ -62,13 +62,13 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
     @property
     def table_key_to_obj_attr(self):
         """Map master columns to attributes of a row of the epochs table."""
-        mapping = {
-            key: self.table_key_to_obj_map[key] for key in self._master_fields
+        return {
+            "self": {
+                key: self.table_key_to_obj_map[key]
+                for key in self._master_fields
+            },
+            "stimulus_signal": {"stimulus_object_id": "object_id"},
         }
-        mapping["stimulus_object_id"] = (
-            lambda row: row.stimulus_signal.object_id
-        )
-        return {"self": mapping}
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Generate a master entry plus whichever conditional parts apply.

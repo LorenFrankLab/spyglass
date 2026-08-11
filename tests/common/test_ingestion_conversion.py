@@ -288,23 +288,38 @@ def test_statescript_expands_one_entry_per_epoch(
 def test_statescript_ignores_non_script_files(
     mini_insert, common, mini_copy_name
 ):
-    """Associated files that are not state scripts yield no entries."""
+    """Associated files that are not state scripts are not selected.
+
+    The description filter lives in `get_nwb_objects` via the mixin's
+    `_source_nwb_object_description`, so selection is what to assert on.
+    """
+    from types import SimpleNamespace
+
     from ndx_franklab_novela import AssociatedFiles
 
-    associated = AssociatedFiles(
+    script = AssociatedFiles(
+        name="statescript_test",
+        description="Statescript for epoch 1",
+        content="callback()\n",
+        task_epochs="1",
+    )
+    notes = AssociatedFiles(
         name="notes_test",
         description="Experimenter notes, not a script of any kind",
         content="the animal was sleepy\n",
         task_epochs="1",
     )
-
-    generated = common.StateScriptFile().generate_entries_from_nwb_object(
-        associated, {"nwb_file_name": mini_copy_name}
+    nwb_file = SimpleNamespace(
+        objects={script.object_id: script, notes.object_id: notes}
     )
 
-    assert not next(
-        iter(generated.values())
-    ), "A non-script associated file should not produce entries"
+    selected = common.StateScriptFile().get_nwb_objects(
+        nwb_file, mini_copy_name
+    )
+
+    assert selected == [
+        script
+    ], "Only the associated file describing a state script should be selected"
 
 
 def test_task_epoch_config_cameras_map_by_id(common):
@@ -327,7 +342,7 @@ def test_task_epoch_config_cameras_map_by_id(common):
         ]
     }
 
-    mapping = table._camera_name_map(_NoDevices())
+    mapping = table._camera_name_map(_NoDevices())  # NWB file with no cameras
 
     assert mapping == {
         7: "cam seven",

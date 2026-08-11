@@ -30,15 +30,22 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _lfp_import_enumerator = 0  # position of a series within its file
 
     @property
     def _source_nwb_object_type(self):
-        return pynwb.ecephys.ElectricalSeries
+        return pynwb.ecephys.LFP
 
     @property
     def table_key_to_obj_attr(self):
-        """Entries need an electrode group and interval; see the override."""
-        return {"self": dict()}
+        """Read a series' own columns; the electrode group is added later."""
+        return {
+            "self": {
+                "lfp_object_id": "object_id",
+                "lfp_sampling_rate": self._rate_fallback,
+                "interval_list_name": self.enumerated_interval_name,
+            }
+        }
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the electrical series held by the file's LFP containers.
@@ -46,49 +53,39 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
         Not every ElectricalSeries is LFP -- raw ephys is one too -- so the
         series are collected through the LFP objects rather than by type.
         """
-        lfp_objects = [
-            obj
-            for obj in nwb_file.objects.values()
-            if isinstance(obj, pynwb.ecephys.LFP)
+        return [
+            es_object
+            for lfp_object in super().get_nwb_objects(nwb_file, nwb_file_name)
+            for es_object in lfp_object.electrical_series.values()
         ]
 
-        if not lfp_objects:
-            self._warn_msg(
-                f"No LFP objects found in {nwb_file_name}. Skipping."
-            )
-            return []
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Insert entries, numbering interval names by position in the file."""
+        self._lfp_import_enumerator = 0  # reset enumerator
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
-        lfp_es_objects = []
-        for lfp_object in lfp_objects:
-            lfp_es_objects.extend(list(lfp_object.electrical_series.values()))
+    def enumerated_interval_name(
+        self, nwb_obj: pynwb.ecephys.ElectricalSeries
+    ) -> str:
+        """Generate a unique interval list name for each electrical series."""
+        name = f"imported lfp {self._lfp_import_enumerator} valid times"
+        self._lfp_import_enumerator += 1
+        return name
 
-        # Interval names carry the series' position in the file, so the index
-        # has to survive being handed one object at a time.
-        self._series_index = {
-            es_object.object_id: index
-            for index, es_object in enumerate(lfp_es_objects)
-        }
-
-        return lfp_es_objects
+    def _rate_fallback(self, nwb_obj: pynwb.ecephys.ElectricalSeries) -> float:
+        """Return the series' rate, estimating it from timestamps if absent."""
+        if (rate := getattr(nwb_obj, "rate", None)) is not None:
+            return rate
+        return estimate_sampling_rate(nwb_obj.get_timestamps()[: int(1e6)])
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
-        """Generate the interval and LFP entry for one electrical series.
+        """Add the electrode group and interval one electrical series needs.
 
         NOTE: this reaches LFPElectrodeGroup.cautious_insert, which writes to
         the database while entries are being generated -- see the legacy
         implementation. Entry generation is otherwise side-effect free, and
         the planner will need this hoisted out (Phase 3).
         """
-        base_key = base_key or dict()
-        nwb_file_name = base_key["nwb_file_name"]
-
-        if len(self & {"lfp_object_id": nwb_obj.object_id}) > 0:
-            logger.warning(
-                f"Skipping {nwb_obj.object_id} because it already exists "
-                + "in ImportedLFP."
-            )
-            return {self: []}
-
         timestamps = nwb_obj.get_timestamps()
         if len(timestamps) == 0:
             logger.warning(
@@ -96,45 +93,38 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             )
             return {self: []}
 
-        electrode_ids = nwb_obj.electrodes.to_dataframe().index.values
+        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = entries[self][0]
+        session_key = {"nwb_file_name": self_key["nwb_file_name"]}
 
         # check if existing group for this set of electrodes exists
-        session_key = {"nwb_file_name": nwb_file_name}
-        e_group_query = LFPElectrodeGroup() & session_key
         group_num = len(
-            e_group_query & "lfp_electrode_group_name LIKE 'imported_lfp_%'"
+            LFPElectrodeGroup()
+            & session_key
+            & "lfp_electrode_group_name LIKE 'imported_lfp_%'"
         )
-        group_key = LFPElectrodeGroup().cautious_insert(
-            session_key=session_key,
-            electrode_ids=electrode_ids,
-            group_name=f"imported_lfp_{group_num:03}",
+        self_key.update(
+            LFPElectrodeGroup().cautious_insert(
+                session_key=session_key,
+                electrode_ids=nwb_obj.electrodes.to_dataframe().index.values,
+                group_name=f"imported_lfp_{group_num:03}",
+            )
         )
-
-        # estimate the sampling rate or read in if available
-        sampling_rate = nwb_obj.rate or estimate_sampling_rate(
-            timestamps[: int(1e6)]
-        )
-
-        index = self._series_index[nwb_obj.object_id]
-        interval_key = {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": f"imported lfp {index} valid times",
-            "valid_times": get_valid_intervals(
-                timestamps, sampling_rate, warn=not self._test_mode
-            ),
-            "pipeline": "imported_lfp",
-        }
 
         return {
-            IntervalList: [interval_key],
-            self: [
+            IntervalList: [
                 {
-                    **group_key,
-                    "interval_list_name": interval_key["interval_list_name"],
-                    "lfp_sampling_rate": sampling_rate,
-                    "lfp_object_id": nwb_obj.object_id,
+                    **session_key,
+                    "interval_list_name": self_key["interval_list_name"],
+                    "valid_times": get_valid_intervals(
+                        timestamps,
+                        self_key["lfp_sampling_rate"],
+                        warn=not self._test_mode,
+                    ),
+                    "pipeline": "imported_lfp",
                 }
             ],
+            self: [self_key],
         }
 
     def make(self, key):

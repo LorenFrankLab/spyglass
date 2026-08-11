@@ -7,7 +7,6 @@ import yaml
 from spyglass.common.common_behav import (
     PositionSource,
     RawCompassDirection,
-    RawPosition,
     StateScriptFile,
     VideoFile,
 )
@@ -185,7 +184,7 @@ def populate_all_common(
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
-            PositionSource,  # Depends on Session
+            PositionSource,  # Depends on Session. Also fills RawPosition
             RawCompassDirection,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
@@ -194,9 +193,6 @@ def populate_all_common(
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
-        ],
-        [
-            RawPosition,  # Depends on PositionSource
         ],
     ]
 

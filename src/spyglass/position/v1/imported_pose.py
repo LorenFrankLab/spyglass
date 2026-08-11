@@ -25,9 +25,6 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
     """
 
     _nwb_table = Nwbfile
-    # Re-ingesting a file validates its existing entries rather than raising,
-    # which is what the previous skip_duplicates=True achieved.
-    _expected_duplicates = True
 
     definition = """
     -> IntervalList
@@ -44,14 +41,18 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         part_object_id: varchar(80)
         """
 
+        table_key_to_obj_attr = {"self": {"part_object_id": "object_id"}}
+
     @property
     def _source_nwb_object_type(self):
         return ndx_pose.PoseEstimation
 
     @property
     def table_key_to_obj_attr(self):
-        """Entries span three tables; see the override."""
-        return {"self": dict()}
+        return {
+            "self": {"pose_object_id": "object_id"},
+            "skeleton": {"skeleton_object_id": "object_id"},
+        }
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Generate the interval, the pose entry, and one entry per body part.
@@ -59,7 +60,6 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         The interval comes first: it is this table's parent, derived from the
         timestamps of the object's first body part.
         """
-        base_key = base_key or dict()
         nwb_file_name = base_key["nwb_file_name"]
 
         # use the timestamps from the first body part to define valid times
@@ -80,6 +80,7 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "interval_list_name": f"pose_{nwb_obj.name}_valid_intervals",
         }
+        part_attr = self.BodyPart.table_key_to_obj_attr["self"]
 
         return {
             IntervalList: [
@@ -89,19 +90,13 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
                     "pipeline": "ImportedPose",
                 }
             ],
-            self: [
-                {
-                    **interval_pk,
-                    "pose_object_id": nwb_obj.object_id,
-                    "skeleton_object_id": nwb_obj.skeleton.object_id,
-                }
-            ],
+            **super().generate_entries_from_nwb_object(nwb_obj, interval_pk),
             self.BodyPart: [
-                {
-                    **interval_pk,
-                    "part_name": part,
-                    "part_object_id": part_obj.object_id,
-                }
+                dict(
+                    interval_pk,
+                    part_name=part,
+                    **{k: getattr(part_obj, v) for k, v in part_attr.items()},
+                )
                 for part, part_obj in nwb_obj.pose_estimation_series.items()
             ],
         }

@@ -172,6 +172,8 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         -> LabMember
         """
 
+        _expected_duplicates = True  # follows the master
+
     _shared_teams = {}
 
     @property
