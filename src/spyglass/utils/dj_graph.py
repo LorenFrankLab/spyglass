@@ -1149,8 +1149,11 @@ class RestrGraph(AbstractGraph):
         skip_external : bool, optional
             Whether to skip tables outside of spyglass during cascade. Default
             True. Set to False to continue the cascade into non-spyglass tables.
+        **kwargs : dict
+            Passed to `AbstractGraph`, notably `graph` to build from an already
+            loaded dependency graph rather than reloading one.
         """
-        super().__init__(seed_table, verbose=verbose)
+        super().__init__(seed_table, verbose=verbose, **kwargs)
         self.include_files = include_files
         self.skip_external = skip_external
 
@@ -1397,6 +1400,7 @@ class RestrGraph(AbstractGraph):
                 include_files=self.include_files,
                 cascade=False,
                 verbose=self.verbose,
+                skip_external=self.skip_external,
             )
 
         table_dicts = []
@@ -1426,6 +1430,9 @@ class RestrGraph(AbstractGraph):
             include_files=self.include_files,
             cascade=False,
             verbose=self.verbose,
+            # Carried over: an intersection that silently reverted to the
+            # default would stop at non-spyglass tables the inputs reached.
+            skip_external=self.skip_external,
         )
 
     def __and__(self, other: "RestrGraph") -> "RestrGraph":

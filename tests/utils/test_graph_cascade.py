@@ -802,8 +802,17 @@ def test_shared_graph_drops_cascade_data(RestrGraph, graph_tables):
     restricted = {t for t in first.included_tables if not t.isnumeric()}
     assert restricted, "Fixture assumption changed; nothing was restricted."
 
+    # A node a fresh load could not produce, so that reusing the given graph is
+    # distinguishable from silently rebuilding one. Without it, both assertions
+    # below hold either way and the test proves nothing.
+    marker = "`not_a_schema`.`not_a_table`"
+    first.graph.add_node(marker)
+
     second = RestrGraph(seed_table=PkNode, graph=first.graph, verbose=False)
 
+    assert (
+        marker in second.graph.nodes
+    ), "Graph was rebuilt from the connection instead of the one given."
     assert set(second.graph.nodes) == set(
         first.graph.nodes
     ), "Shared graph did not carry the structure over."
@@ -811,6 +820,32 @@ def test_shared_graph_drops_cascade_data(RestrGraph, graph_tables):
         assert (
             second._get_restr(table) is None
         ), f"{table} inherited a restriction from the graph it was built from."
+
+
+def test_intersect_preserves_skip_external(RestrGraph, graph_tables):
+    """Intersecting must not reset how the cascade treats outside tables.
+
+    The export builds its graph with `skip_external=False` and then intersects
+    with a whitelist graph. If the intersection reverted to the default, the
+    cascade that follows would stop at the non-spyglass tables the inputs were
+    explicitly told to include.
+    """
+    PkNode = graph_tables["PkNode"]()
+    leaves = [
+        {"table_name": PkNode.full_table_name, "restriction": "pk_attr > 16"}
+    ]
+    kwargs = dict(direction="up", cascade=True, verbose=False)
+
+    first = RestrGraph(
+        seed_table=PkNode, leaves=leaves, skip_external=False, **kwargs
+    )
+    second = RestrGraph(
+        seed_table=PkNode, leaves=leaves, skip_external=False, **kwargs
+    )
+
+    assert (
+        first & second
+    ).skip_external is False, "Intersection reset skip_external to the default."
 
 
 def test_undirect_graph_holds_no_node_data(RestrGraph, graph_tables):

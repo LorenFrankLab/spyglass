@@ -249,7 +249,7 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
-- Optimize `RestrGraph` generation during export #XXXX
+- Optimize `RestrGraph` generation during export #1673
 
 ### Pipelines
 

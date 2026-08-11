@@ -228,16 +228,35 @@ def test_export_selection_joins(
     ).fetch1("restriction"), "Export join not captured correctly"
 
 
+def test_condense_restrictions_normalizes(export_tbls, common):
+    """Order and repeats in the logged restrictions must not change the result.
+
+    The fetch that supplies these has no `order_by`, so the same selection can
+    come back in a different order on a later run. Reverting the sort or the
+    dedupe has to make this fail, which two identical calls would not catch.
+    """
+    ExportSelection, _ = export_tbls
+    table_name = common.Nwbfile.full_table_name
+
+    restrs = ["nwb_file_name = 'a.nwb'", "nwb_file_name = 'b.nwb'"]
+
+    forward = ExportSelection._condense_restrictions(table_name, restrs)
+    reverse = ExportSelection._condense_restrictions(
+        table_name, list(reversed(restrs))
+    )
+    repeated = ExportSelection._condense_restrictions(
+        table_name, restrs + [restrs[0]]
+    )
+
+    assert forward == reverse, "Condensed restriction depends on input order."
+    assert forward == repeated, "Condensed restriction kept a duplicate."
+    assert all(r in forward for r in restrs), "Condensing dropped a condition."
+
+
 def test_export_selection_restr_deterministic(
     gen_export_selection, export_tbls
 ):
-    """The same selection must always yield the same leaf restrictions.
-
-    Restrictions are fetched per table without an `order_by`, so the row order
-    is not guaranteed. OR-ing them in a different order gives an equivalent
-    restriction with different text, which would make the stored restriction
-    differ between otherwise identical exports.
-    """
+    """The same selection yields the same leaf restrictions end to end."""
     ExportSelection, _ = export_tbls
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
 
