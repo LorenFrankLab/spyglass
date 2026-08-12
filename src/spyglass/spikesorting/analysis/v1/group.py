@@ -162,43 +162,69 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return include_mask
 
     @staticmethod
-    def filter_units_by_criteria(units_df, unit_criteria: dict) -> np.ndarray:
+    def filter_units_by_criteria(
+        units_df,
+        unit_criteria: Optional[dict] = None,
+        strict: bool = True,
+    ) -> np.ndarray:
         """Filter units on arbitrary columns of the units table
 
         Parameters
         ----------
         units_df : pd.DataFrame
             units table of one sorting, one row per unit
-        unit_criteria : dict
+        unit_criteria : dict, optional
             column name to {operator: value}, or to a bare value or list of
             values as shorthand for {"isin": value}. A unit is included only if
             it satisfies every criterion. Operators are ">", ">=", "<", "<=",
             "==", "!=", "between" (matches the inclusive [low, high] pair) and
-            "outside" (its exact complement), "isin" and "notin".
+            "outside" (its exact complement), "isin" and "notin". By default
+            None, which includes every unit.
+        strict : bool, optional
+            by default True, raise if a criterion names a column this units
+            table does not have. If False, skip that criterion with a warning
+            and apply the rest, which lets **every** unit of this sorting pass
+            it. `fetch_spike_data` passes False so that it can report which
+            sortings of the group were missing the column, then raises itself.
 
         Returns
         -------
         np.ndarray
-            boolean mask, True for each unit satisfying all criteria
+            boolean mask of shape (n_units,), True for each unit satisfying
+            all criteria
+
+        Raises
+        ------
+        ValueError
+            if an operator is not one of those listed above, or, when strict,
+            if a criterion names a column not in units_df
 
         Notes
         -----
         Units whose value is NaN fail every numeric comparison. "isin" and
         "notin" also work on columns holding a list per unit (e.g. the
         curation labels), matching if any item of the list is in the target.
-        A criterion naming a column the sorting does not have is skipped with
-        a warning; the remaining criteria still apply. Each sorting in a group
-        has its own units table, and those tables may not share the same
-        columns (e.g. if they were curated differently), so a criterion may
-        apply to only some of them.
+
+        Each sorting in a group has its own units table, and those tables may
+        not share the same columns (e.g. if they were curated differently), so
+        a criterion may apply to only some of them. Skipping a criterion is
+        fail-open - the units it should have gated pass instead - so it is an
+        error by default rather than a warning.
         """
         include_mask = np.ones(len(units_df), dtype=bool)
 
         for column, criterion in (unit_criteria or {}).items():
             if column not in units_df:
+                if strict:
+                    raise ValueError(
+                        f"Unit criteria column '{column}' not in units table. "
+                        + f"Columns are {list(units_df.columns)}. Pass "
+                        + "strict=False to skip criteria on missing columns."
+                    )
                 logger.warning(
                     f"Unit criteria column '{column}' not in units table. "
-                    + "Skipping this criterion."
+                    + "Skipping this criterion: every unit of this sorting "
+                    + "passes it unfiltered."
                 )
                 continue
 
@@ -264,6 +290,16 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         exclude_labels = filter_params["exclude_labels"]
         unit_criteria = filter_params.get("unit_criteria")
 
+        # which sortings each criteria column was, and was not, applied to,
+        # as criteria column -> merge_ids of the sortings whose units table
+        # has (applied_to) or lacks (skipped_by) it. Both are needed to tell
+        # a column missing everywhere (potentially a typo) from one missing
+        # from only some sortings (a result mixing gated and un-gated units),
+        # so they are checked once every sorting has been seen
+        criteria_columns = set(unit_criteria or {})
+        applied_to = {column: [] for column in criteria_columns}
+        skipped_by = {column: [] for column in criteria_columns}
+
         # get the spike times for each merge_id
         spike_times = []
         unit_ids = []
@@ -301,8 +337,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 )
 
             # filter on arbitrary criteria over the units table columns
+            for column in criteria_columns:
+                seen = applied_to if column in units_df else skipped_by
+                seen[column].append(merge_id)
             include_unit &= SortedSpikesGroup.filter_units_by_criteria(
-                units_df, unit_criteria
+                units_df, unit_criteria, strict=False
             )
 
             if not include_unit.all():
@@ -327,6 +366,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             # append the approved spike times to the list
             spike_times.extend(sorting_spike_times)
             unit_ids.extend(file_unit_ids)
+
+        if any(skipped_by.values()):
+            raise _skipped_criteria_error(skipped_by, applied_to)
 
         if return_unit_ids:
             return spike_times, unit_ids
@@ -428,6 +470,42 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         if return_unit_ids:
             return firing_rate, unit_ids
         return firing_rate
+
+
+def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
+    """Error naming the sortings a unit criterion could not be applied to
+
+    Parameters
+    ----------
+    skipped_by : dict
+        criteria column -> merge_ids of the sortings whose units table lacks it
+    applied_to : dict
+        criteria column -> merge_ids of the sortings whose units table has it
+    """
+    reasons = []
+    for column, skipped in skipped_by.items():
+        if not skipped:
+            continue
+        applied = applied_to[column]
+        if not applied:
+            reasons.append(
+                f"'{column}': no sorting in this group has this column, so "
+                + "the criterion filtered nothing. Check for a typo."
+            )
+            continue
+        reasons.append(
+            f"'{column}': missing from {len(skipped)} of "
+            + f"{len(skipped) + len(applied)} sortings "
+            + f"({', '.join(str(merge_id) for merge_id in skipped)}), whose "
+            + "units would be returned un-gated alongside the gated ones."
+        )
+    return ValueError(
+        "Unit criteria could not be applied to every sorting in this group:\n"
+        + "\n".join(f"  - {reason}" for reason in reasons)
+        + "\nCorrect the column name in the group's UnitSelectionParams, drop "
+        + "the criterion, or group only the sortings whose units tables share "
+        + "the column."
+    )
 
 
 def _isin(values, target):

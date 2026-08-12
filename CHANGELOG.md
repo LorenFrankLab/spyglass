@@ -361,7 +361,8 @@ for label, interval_data in results.groupby("interval_labels"):
         #1626
     - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be
         selected on arbitrary units table columns with numeric, range, and
-        membership criteria #1670
+        membership criteria. A criterion naming a column a sorting's units
+        table does not have raises an error #1670
 
 ## [0.5.5] (Aug 6, 2025)
 

@@ -109,10 +109,18 @@ def test_criteria_empty(spike_v1_group, units_df):
         ).all(), f"Units dropped by empty criteria {criteria}"
 
 
+def test_criteria_missing_column_strict(spike_v1_group, units_df):
+    """A criterion on a missing column raises rather than failing open"""
+    with pytest.raises(ValueError, match="not_a_column"):
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria(
+            units_df, {"not_a_column": {">": 1}}
+        )
+
+
 def test_criteria_missing_column(spike_v1_group, units_df, caplog):
-    """A criterion on a missing column is skipped, keeping those units"""
+    """Opting out of strict skips a missing column, keeping those units"""
     mask = spike_v1_group.SortedSpikesGroup.filter_units_by_criteria(
-        units_df, {"not_a_column": {">": 1}}
+        units_df, {"not_a_column": {">": 1}}, strict=False
     )
     assert mask.all(), "Units dropped for a missing criteria column"
     assert "not_a_column" in caplog.text, "No warning for missing column"
@@ -121,7 +129,7 @@ def test_criteria_missing_column(spike_v1_group, units_df, caplog):
 def test_criteria_missing_column_others_applied(spike_v1_group, units_df):
     """Skipping a missing column still applies the remaining criteria"""
     mask = spike_v1_group.SortedSpikesGroup.filter_units_by_criteria(
-        units_df, {"not_a_column": {">": 1}, "snr": {">": 3}}
+        units_df, {"not_a_column": {">": 1}, "snr": {">": 3}}, strict=False
     )
     assert np.array_equal(
         mask, [True, False, True, False]
@@ -154,6 +162,26 @@ def test_criteria_membership_list_column(spike_v1_group, units_df):
     ), "Unexpected mask for 'notin' on a list-valued column"
 
 
+def test_skipped_criteria_error_message(spike_v1_group):
+    """The error separates a typo'd column from a heterogeneous group"""
+    skipped_criteria_error = spike_v1_group._skipped_criteria_error
+
+    skipped_id, applied_id = "skipped-merge-id", "applied-merge-id"
+
+    typo = str(skipped_criteria_error({"snr_": [skipped_id]}, {"snr_": []}))
+    assert "no sorting in this group" in typo, "Typo case not called out"
+    assert "snr_" in typo, "Missing column not named"
+
+    mixed = str(
+        skipped_criteria_error(
+            {"snr": [skipped_id]}, {"snr": [applied_id, applied_id]}
+        )
+    )
+    assert "missing from 1 of 3 sortings" in mixed, "Wrong sorting counts"
+    assert skipped_id in mixed, "Skipped sorting not named"
+    assert applied_id not in mixed, "Named a sorting that was not skipped"
+
+
 def test_params_round_trip(spike_v1_group):
     """New column round-trips through the table"""
     tbl = spike_v1_group.UnitSelectionParams()
@@ -171,10 +199,10 @@ def test_params_round_trip(spike_v1_group):
 def test_fetch_spike_data_unknown_column(
     spike_v1_group, pop_spikes_group, mini_dict, group_name
 ):
-    """Criteria on a column no sorting has leave the fetched units untouched
+    """Criteria on a column no sorting has raise instead of filtering nothing
 
-    The units tables of a group need not share columns, so an unknown column
-    must not silently empty the group.
+    Silently passing every unit would let a typo'd column name disable the
+    criterion, so the group reports that it never applied it.
     """
     name = "test_unknown_column"
     spike_v1_group.UnitSelectionParams().insert1(
@@ -191,7 +219,7 @@ def test_fetch_spike_data_unknown_column(
     all_spikes = spike_v1_group.SortedSpikesGroup().fetch_spike_data(key)
     assert len(all_spikes) > 0, "No spike data to filter"
 
-    filtered = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
-        {**key, "unit_filter_params_name": name}
-    )
-    assert len(filtered) == len(all_spikes), "Units dropped for unknown column"
+    with pytest.raises(ValueError, match="no sorting in this group"):
+        spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+            {**key, "unit_filter_params_name": name}
+        )
