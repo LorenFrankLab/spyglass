@@ -21,7 +21,8 @@ UNIT_CRITERIA_OPERATORS = {
     "<": np.less,
     "<=": np.less_equal,
     "==": np.equal,
-    "!=": lambda vals, target: np.not_equal(vals, target) & np.equal(vals, vals),
+    "!=": lambda vals, target: np.not_equal(vals, target)
+    & np.equal(vals, vals),
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
     "isin": lambda vals, target: _isin(vals, target),
@@ -57,9 +58,21 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
     """
     # NOTE: pk reduced from 128 to 32 to avoid long primary key error
     contents = [
-        ["all_units", [], [], {}],
-        ["exclude_noise", [], ["noise", "mua"], {}],
-        ["default_exclusion", [], ["noise", "mua"], {}],
+        {
+            "unit_filter_params_name": "all_units",
+            "include_labels": [],
+            "exclude_labels": [],
+        },
+        {
+            "unit_filter_params_name": "exclude_noise",
+            "include_labels": [],
+            "exclude_labels": ["noise", "mua"],
+        },
+        {
+            "unit_filter_params_name": "default_exclusion",
+            "include_labels": [],
+            "exclude_labels": ["noise", "mua"],
+        },
     ]
 
     @classmethod
@@ -160,8 +173,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             column name to {operator: value}, or to a bare value or list of
             values as shorthand for {"isin": value}. A unit is included only if
             it satisfies every criterion. Operators are ">", ">=", "<", "<=",
-            "==", "!=", "between" and "outside" (an inclusive [low, high]
-            pair), "isin" and "notin".
+            "==", "!=", "between" (matches the inclusive [low, high] pair) and
+            "outside" (its exact complement), "isin" and "notin".
 
         Returns
         -------
@@ -277,7 +290,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             # filter the spike times based on the curation labels if present
             group_col = next(
-                (c for c in CURATION_LABEL_COLUMNS if c in units_df), None
+                (c for c in units_df.columns if c in CURATION_LABEL_COLUMNS),
+                None,
             )
             if group_col is not None and not test_mode:
                 include_unit &= SortedSpikesGroup.filter_units(
