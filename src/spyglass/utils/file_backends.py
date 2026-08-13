@@ -12,11 +12,10 @@ The chain is fixed in code rather than user-configurable: local must be tried
 first, and letting a config file put a network source ahead of disk would only
 ever be a mistake.
 
-What a backend *can* do is declared by `supports_streaming`. What it *does* is
-that capability narrowed by user preference: `sg_config.prefer_download` makes
-a stream-capable backend transfer the whole file instead, for users whose
-connection makes many small range requests more expensive than one sequential
-download.
+What a backend *can* do is declared by `supports_streaming` and
+`supports_download`. What it *does* is those capabilities narrowed by user
+preference, and `open` reports the outcome in `Opened.streamed` so no caller
+has to infer it.
 
 Notes
 -----
@@ -31,11 +30,41 @@ imports `nwb_helper_fn`, which imports this module.
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import List, Optional, Protocol, Tuple, runtime_checkable
+from typing import (
+    List,
+    NamedTuple,
+    Optional,
+    Protocol,
+    Tuple,
+    runtime_checkable,
+)
 
 import pynwb
 
 from spyglass.utils.logging import logger
+
+
+class Opened(NamedTuple):
+    """The result of opening a file, and how it was read.
+
+    `streamed` is reported by the backend that did the work rather than
+    inferred afterward, which would mean guessing at the private internals of
+    whatever filesystem implementation the backend chose. It is what
+    `file_is_remote` answers with.
+
+    Attributes
+    ----------
+    io : pynwb.NWBHDF5IO
+        Open IO handle.
+    nwbfile : pynwb.NWBFile
+        The file it read.
+    streamed : bool
+        True if the bytes crossed the network rather than coming from disk.
+    """
+
+    io: pynwb.NWBHDF5IO
+    nwbfile: pynwb.NWBFile
+    streamed: bool
 
 
 class BackendUnavailable(FileNotFoundError):
@@ -64,21 +93,29 @@ class FileBackend(Protocol):
     without inheriting still satisfies `isinstance` checks.
 
     Subclasses must implement `has`, plus at least one of `stream` and
-    `download`. `open` is concrete and picks between them, so a backend that
-    can do both needs no dispatch logic of its own.
+    `download`, declaring which by setting the matching flag. `open` is
+    concrete and picks between them, so a backend that can do both needs no
+    dispatch logic of its own.
 
     Attributes
     ----------
     name : str
         Short identifier, used in configuration and log messages.
     supports_streaming : bool
-        True if the backend implements `stream`. A capability declaration, not
-        a promise about what `open` will do on any given call: the user may
-        prefer download (see `sg_config.prefer_download`).
+        True if the backend implements `stream`.
+    supports_download : bool
+        True if the backend implements `download`.
+
+    Notes
+    -----
+    The flags are capability declarations, not promises about any given call:
+    a backend that can do both defers to `sg_config.prefer_download`. `open`
+    reports what it actually did in `Opened.streamed`.
     """
 
     name: str = "base"
     supports_streaming: bool = False
+    supports_download: bool = False
 
     @abstractmethod
     def has(self, nwb_file_path: str) -> bool:
@@ -140,15 +177,12 @@ class FileBackend(Protocol):
     def will_stream(self, nwb_file_path: str) -> bool:
         """Return True if `open` would stream this file rather than download.
 
-        The single decision point: `open` consults it, and so does the resolver,
-        which records the answer so `file_is_remote` can report how the file was
-        actually read instead of inferring it afterward.
-
         Streams when the backend can and the user has not opted out. A user who
         prefers download but whose backend cannot download is served by
         streaming anyway: the setting is a preference, never a failure mode.
 
-        A backend that overrides `open` must override this to match.
+        Override to give per-file answers if the backend streams some files and
+        downloads others.
 
         Parameters
         ----------
@@ -164,21 +198,10 @@ class FileBackend(Protocol):
 
         if not self.supports_streaming:
             return False
-        if not sg_config.prefer_download:
-            return True
+        return not (self.supports_download and sg_config.prefer_download)
 
-        # No download to fall back on, so serve the file rather than the
-        # preference.
-        if type(self).download is FileBackend.download:
-            logger.debug(
-                "%s cannot download; streaming despite prefer_download",
-                self.name,
-            )
-            return True
-        return False
-
-    def open(self, nwb_file_path: str) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
-        """Return an open `(io, nwbfile)` pair.
+    def open(self, nwb_file_path: str) -> Opened:
+        """Open the file and report how it was read.
 
         Streams if the backend supports it and the user has not set
         `prefer_download`; otherwise downloads the file and reads the local
@@ -191,8 +214,8 @@ class FileBackend(Protocol):
 
         Returns
         -------
-        tuple of (pynwb.NWBHDF5IO, pynwb.NWBFile)
-            Open IO handle and the file it read.
+        Opened
+            Open IO handle, the file it read, and whether it was streamed.
 
         Raises
         ------
@@ -201,14 +224,14 @@ class FileBackend(Protocol):
             reading a file that was transferred propagate untouched.
         """
         if self.will_stream(nwb_file_path):
-            return self.stream(nwb_file_path)
+            return Opened(*self.stream(nwb_file_path), streamed=True)
 
         if not self.download(nwb_file_path):
             raise BackendUnavailable(
                 f"Backend '{self.name}' could not download "
                 + f"{Path(nwb_file_path).name}"
             )
-        return _open_local_nwb(nwb_file_path)
+        return Opened(*_open_local_nwb(nwb_file_path), streamed=False)
 
 
 def _open_local_nwb(
@@ -239,14 +262,15 @@ class LocalBackend(FileBackend):
 
     name = "local"
     supports_streaming = False
+    supports_download = False
 
     def has(self, nwb_file_path: str) -> bool:
         """Return True if the file exists on disk."""
         return os.path.exists(nwb_file_path)
 
-    def open(self, nwb_file_path: str) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:
+    def open(self, nwb_file_path: str) -> Opened:
         """Open the file from disk."""
-        return _open_local_nwb(nwb_file_path)
+        return Opened(*_open_local_nwb(nwb_file_path), streamed=False)
 
 
 class KacheryBackend(FileBackend):
@@ -258,6 +282,7 @@ class KacheryBackend(FileBackend):
 
     name = "kachery"
     supports_streaming = False
+    supports_download = True
 
     def has(self, nwb_file_path: str) -> bool:
         """Return True if kachery is installed and knows this file."""
@@ -296,6 +321,7 @@ class DandiBackend(FileBackend):
 
     name = "Dandi"
     supports_streaming = True
+    supports_download = True
 
     def _resolve(self, nwb_file_path: str) -> Optional[str]:
         """Return the name DANDI knows this file by, or None if it has neither.
@@ -340,9 +366,9 @@ class DandiBackend(FileBackend):
         Raises
         ------
         BackendUnavailable
-            If DANDI holds the file under neither naming scheme. Unreachable
-            via `get_nwb_file`, which gates on `has` first; this covers a
-            direct call, where there is no pair to return instead.
+            If DANDI holds the file under neither naming scheme. `stream` owes
+            its caller an `(io, nwbfile)` pair and has no value with which to
+            say no.
         """
         from spyglass.common.common_dandi import DandiPath
 

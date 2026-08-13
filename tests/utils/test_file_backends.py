@@ -19,7 +19,7 @@ from spyglass.utils.file_backends import (
 def clear_nwb_cache():
     """Keep fake IO objects out of the module-level open-file cache.
 
-    `get_nwb_file` caches `(io, nwbfile)` pairs, and the session teardown calls
+    `get_nwb_file` caches `Opened` records, and the session teardown calls
     `close()` on every cached io. Fakes used here are not real IO handles.
 
     Removes only what a test added. The cache is process-wide, so clearing it
@@ -27,14 +27,12 @@ def clear_nwb_cache():
     earlier test, leaving them unclosed and unreachable at teardown.
     """
     cache = helper.__open_nwb_files
-    streamed = helper.__streamed_nwb_files
     before = set(cache)
 
     yield
 
     for path in set(cache) - before:
         del cache[path]
-        streamed.discard(path)
 
 
 class _FakeDownloadBackend(FileBackend):
@@ -42,6 +40,7 @@ class _FakeDownloadBackend(FileBackend):
 
     name = "fake_dl"
     supports_streaming = False
+    supports_download = True
 
     def __init__(self, has=True, download_ok=True):
         self._has = has
@@ -62,6 +61,7 @@ class _FakeStreamBackend(FileBackend):
 
     name = "fake_stream"
     supports_streaming = True
+    supports_download = False
 
     def __init__(self, has=True):
         self._has = has
@@ -81,6 +81,7 @@ class _FakeDualBackend(_FakeStreamBackend):
 
     name = "fake_dual"
     supports_streaming = True
+    supports_download = True
 
     def download(self, nwb_file_path, dest=None):
         self.calls.append("download")
@@ -125,7 +126,7 @@ def test_local_backend_has_and_open(tmp_path):
         "spyglass.utils.file_backends._open_local_nwb",
         return_value=("io", "nwbfile"),
     ) as mock_open:
-        assert backend.open(str(present)) == ("io", "nwbfile")
+        assert backend.open(str(present)) == ("io", "nwbfile", False)
     mock_open.assert_called_once_with(str(present))
 
 
@@ -140,7 +141,7 @@ def test_download_only_backend_uses_default_open(tmp_path):
     ) as mock_open:
         result = backend.open(target)
 
-    assert result == ("io", "nwbfile")
+    assert result == ("io", "nwbfile", False)
     assert backend.calls == ["download"]
     mock_open.assert_called_once_with(target)
 
@@ -168,7 +169,7 @@ def test_base_stream_not_implemented(tmp_path):
 def test_streaming_backend_streams_by_default(tmp_path):
     """Absent a preference, a stream-capable backend streams."""
     backend = _FakeDualBackend()
-    assert backend.open(str(tmp_path / "file.nwb")) == ("io", "nwbfile")
+    assert backend.open(str(tmp_path / "file.nwb")) == ("io", "nwbfile", True)
     assert backend.calls == ["stream"]
 
 
@@ -181,7 +182,7 @@ def test_prefer_download_downloads_instead(tmp_path, prefer_download):
         "spyglass.utils.file_backends._open_local_nwb",
         return_value=("io", "nwbfile"),
     ) as mock_open:
-        assert backend.open(target) == ("io", "nwbfile")
+        assert backend.open(target) == ("io", "nwbfile", False)
 
     assert backend.calls == ["download"]
     mock_open.assert_called_once_with(target)
@@ -190,7 +191,7 @@ def test_prefer_download_downloads_instead(tmp_path, prefer_download):
 def test_prefer_download_ignored_when_backend_cannot(tmp_path, prefer_download):
     """A preference never breaks a backend that can only stream."""
     backend = _FakeStreamBackend()
-    assert backend.open(str(tmp_path / "file.nwb")) == ("io", "nwbfile")
+    assert backend.open(str(tmp_path / "file.nwb")) == ("io", "nwbfile", True)
     assert backend.calls == ["stream"]
 
 
@@ -203,7 +204,7 @@ def test_prefer_download_does_not_affect_local(tmp_path, prefer_download):
         "spyglass.utils.file_backends._open_local_nwb",
         return_value=("io", "nwbfile"),
     ) as mock_open:
-        assert LocalBackend().open(str(present)) == ("io", "nwbfile")
+        assert LocalBackend().open(str(present)) == ("io", "nwbfile", False)
     mock_open.assert_called_once_with(str(present))
 
 
@@ -232,11 +233,18 @@ def test_dandi_stream_raises_when_dandi_lacks_the_file(tmp_path):
             DandiBackend().stream(str(tmp_path / "x.nwb"))
 
 
-def test_dandi_declares_both_capabilities():
-    """DandiBackend can stream and download, so the preference is honored."""
-    assert DandiBackend.supports_streaming is True
-    assert DandiBackend.download is not FileBackend.download
-    assert DandiBackend.stream is not FileBackend.stream
+@pytest.mark.parametrize("backend", get_backends(), ids=lambda b: b.name)
+def test_capability_flags_match_implementations(backend):
+    """A declared flag that nothing implements would silently misroute `open`.
+
+    The flags are declarations, so nothing but a test keeps them honest.
+    """
+    cls = type(backend)
+
+    assert backend.supports_streaming == (cls.stream is not FileBackend.stream)
+    assert backend.supports_download == (
+        cls.download is not FileBackend.download
+    )
 
 
 def test_prefer_download_round_trips_through_settings():
@@ -332,10 +340,16 @@ def test_file_from_dandi_is_deprecated_alias():
     mock_fn.assert_called_once_with("/some/path.nwb")
 
 
-def test_backends_declare_streaming_support():
-    """Streaming capability is declared, not inferred."""
+def test_backends_declare_capabilities():
+    """Capability is declared, not inferred.
+
+    Dandi declares both, so `prefer_download` is honored there; kachery has no
+    streaming path.
+    """
     assert KacheryBackend.supports_streaming is False
+    assert KacheryBackend.supports_download is True
     assert DandiBackend.supports_streaming is True
+    assert DandiBackend.supports_download is True
 
 
 def test_backend_unavailable_is_a_file_not_found():

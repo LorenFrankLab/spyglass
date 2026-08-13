@@ -17,14 +17,9 @@ from spyglass.utils.file_backends import (
 )
 from spyglass.utils.logging import logger
 
-# dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
+# dict mapping file path to the `Opened` record returned by the backend that
+# read it: an NWBHDF5IO in read mode, its NWBFile, and whether it was streamed
 __open_nwb_files = dict()
-
-# paths in __open_nwb_files that were read over the network rather than from
-# disk, recorded at open time. Asking the backend is authoritative; inspecting
-# the io object afterward is not, since it would have to guess at the private
-# internals of whatever filesystem implementation the backend chose.
-__streamed_nwb_files = set()
 
 # dict mapping NWB file path to config after it is loaded once
 __configs = dict()
@@ -50,19 +45,10 @@ def _open_nwb_file(nwb_file_path, source=None):
     """
     backend = source or LocalBackend()
 
-    # Ask before opening, while the answer still describes the call we are
-    # about to make.
-    streamed = backend.will_stream(nwb_file_path)
+    opened = backend.open(nwb_file_path)
+    __open_nwb_files[nwb_file_path] = opened
 
-    io, nwbfile = backend.open(nwb_file_path)
-    __open_nwb_files[nwb_file_path] = (io, nwbfile)
-
-    if streamed:
-        __streamed_nwb_files.add(nwb_file_path)
-    else:  # a re-open may have downgraded a previously streamed path
-        __streamed_nwb_files.discard(nwb_file_path)
-
-    return nwbfile
+    return opened.nwbfile
 
 
 def get_nwb_file(nwb_file_path, query_expression=None):
@@ -103,22 +89,21 @@ def get_nwb_file(nwb_file_path, query_expression=None):
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
+    opened = __open_nwb_files.get(nwb_file_path)
 
-    if nwbfile is not None:
-        return nwbfile
+    if opened is not None:
+        return opened.nwbfile
 
     backends = get_backends()
 
     for backend in backends:
-        is_local = isinstance(backend, LocalBackend)
-        if not is_local:
-            logger.info(
-                f"NWB file not found locally; checking {backend.name} for "
-                + f"{nwb_file_path}"
-            )
         if not backend.has(nwb_file_path):
             continue
+        if not isinstance(backend, LocalBackend):
+            logger.info(
+                f"NWB file not found locally; fetching {nwb_file_path} "
+                + f"from {backend.name}"
+            )
         try:
             return _open_nwb_file(nwb_file_path, source=backend)
         except BackendUnavailable:  # expected miss, try the next backend
@@ -166,7 +151,9 @@ def file_is_remote(filepath):
         local reads, for files downloaded before reading, and for paths that
         are not open.
     """
-    return filepath in __streamed_nwb_files
+    opened = __open_nwb_files.get(filepath)
+
+    return bool(opened and opened.streamed)
 
 
 def file_from_dandi(filepath):
@@ -240,10 +227,9 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 def close_nwb_files():
     """Close all open NWB files."""
-    for io, _ in __open_nwb_files.values():
-        io.close()
+    for opened in __open_nwb_files.values():
+        opened.io.close()
     __open_nwb_files.clear()
-    __streamed_nwb_files.clear()
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):

@@ -66,8 +66,8 @@ captured at import would not see the session setter.
 
 The setting changes how a file is fetched, not which backend supplies it. Chain
 order is unaffected, so a file already on disk is still read from disk. A
-backend that can only stream logs a debug message and streams anyway: serving
-the file matters more than honoring a performance preference.
+backend that can only stream streams anyway: serving the file matters more than
+honoring a performance preference.
 
 !!! note
 
@@ -79,11 +79,11 @@ the file matters more than honoring a performance preference.
 
 ## The `FileBackend` protocol
 
-A backend is any object with a `name`, a `supports_streaming` flag, and the
-methods below. `FileBackend` is both the structural type and the base class:
-inheriting from it supplies the concrete `open` and requires `has`, while a
-class that implements the same members without inheriting still satisfies
-`isinstance` checks.
+A backend is any object with a `name`, two capability flags, and the methods
+below. `FileBackend` is both the structural type and the base class: inheriting
+from it supplies the concrete `open` and requires `has`, while a class that
+implements the same members without inheriting still satisfies `isinstance`
+checks.
 
 ```python
 from spyglass.utils.file_backends import FileBackend
@@ -92,6 +92,7 @@ from spyglass.utils.file_backends import FileBackend
 class MyBackend(FileBackend):
     name = "my_store"
     supports_streaming = True
+    supports_download = True
 
     def has(self, nwb_file_path: str) -> bool:
         """Return True if this backend can supply the file."""
@@ -116,17 +117,19 @@ of breaking file access.
 
 ### Transferring the file: `stream` and `download`
 
-Implement at least one. `open` is concrete and picks between them, so a backend
-that can do both needs no dispatch logic of its own:
+Implement at least one, and set the matching flag. `open` is concrete and picks
+between them, so a backend that can do both needs no dispatch logic of its own:
 
-- **Download-only** backends implement `download`. If it returns `False`, `open`
-    raises `BackendUnavailable` and `get_nwb_file` moves on to the next backend.
-- **Streaming-only** backends implement `stream`, returning an `(io, nwbfile)`
-    pair read over the network.
+- **Download-only** backends implement `download` and set `supports_download`.
+    If it returns `False`, `open` raises `BackendUnavailable` and `get_nwb_file`
+    moves on to the next backend.
+- **Streaming-only** backends implement `stream` and set `supports_streaming`,
+    returning an `(io, nwbfile)` pair read over the network.
 - **Both** is the most useful shape, because it lets the user choose.
 
 Whichever you leave unimplemented raises `NotImplementedError` naming the
-backend, so a misconfigured chain fails legibly.
+backend, so a misconfigured chain fails legibly. Set the flags honestly: they
+are declarations, and `open` routes on them rather than inspecting your class.
 
 If your `download` writes to the destination path directly, write to a temporary
 path and rename on success. A partial file left at the expected path is worse
@@ -134,23 +137,27 @@ than no file, because `LocalBackend` will hand it to the next caller as a valid
 local copy.
 
 Overriding `open` is reserved for backends where the split does not apply —
-`LocalBackend` does it, because reading a file already on disk is neither.
+`LocalBackend` does it, because reading a file already on disk is neither, and
+so declares both flags `False`.
 
 ### Choosing between them: `will_stream`
 
-`open` calls `will_stream(nwb_file_path)` to pick its path, and the resolver
-calls it to record how the file was read, which is what `file_is_remote` reports
-later. The inherited implementation combines `supports_streaming` with the
-user's `prefer_download` setting; returning per-file answers is fine if your
-backend streams some files and downloads others.
+`open` calls `will_stream(nwb_file_path)` to pick its path. The inherited
+implementation combines the two flags with the user's `prefer_download` setting;
+override it if your backend streams some files and downloads others.
 
-Set `supports_streaming` to match your `stream` implementation. It is declared
-rather than inferred, so callers can reason about a backend without invoking it.
-It describes what the backend *can* do, while `will_stream` answers what a given
-call will actually do.
+The flags describe what the backend *can* do; `will_stream` answers what a given
+call will do.
 
-**If you override `open`, override `will_stream` to match.** They are the same
-decision, and a disagreement means a streamed file gets treated as local.
+### Reporting the outcome: `Opened`
+
+`open` returns an `Opened(io, nwbfile, streamed)` named tuple. The `streamed`
+field is what `file_is_remote` reports later, so the answer comes from the
+backend that did the work rather than from inspecting the io object afterward.
+
+That is the only reason a backend overriding `open` has to think about
+streaming: return the right `streamed` value and everything downstream is
+correct. `LocalBackend` is the one shipped example, and it returns `False`.
 
 ### Reporting a miss
 
@@ -186,11 +193,11 @@ neither streams nor downloads, so it is the one backend that overrides `open`.
 `has` is a restriction on `AnalysisNwbfileKachery`. Kachery is deprecated and
 will be removed once the shared store replaces it.
 
-**`DandiBackend`** implements both. A single lookup resolves the file under
-either the analysis or raw naming scheme and backs `has` as well as both
-transfer methods, so the archive is queried once per question. Streaming reads
-through `fsspec` with a local cache; downloading fetches the whole file to the
-local path Spyglass expects, so the next call resolves locally.
+**`DandiBackend`** declares both. A single lookup resolves the file under either
+the analysis or raw naming scheme and backs `has` as well as both transfer
+methods, so the archive is queried once per question. Streaming reads through
+`fsspec` with a local cache; downloading fetches the whole file to the local
+path Spyglass expects, so the next call resolves locally.
 
 ## Detecting a streamed file
 
@@ -202,9 +209,9 @@ checksums.
 from spyglass.utils.nwb_helper_fn import file_is_remote
 ```
 
-The answer comes from the backend that opened the file: the resolver asks
-`will_stream` and records it, so any streaming backend is recognized — HTTP, S3,
-ROS3, or something not yet written.
+The answer comes from the backend that opened the file: `open` reports it in
+`Opened.streamed` and the resolver caches that alongside the io handle, so any
+streaming backend is recognized — HTTP, S3, ROS3, or something not yet written.
 
 It reports what happened, not what the backend can do. A stream-capable backend
 that downloaded because the user set `prefer_download` produced a real local
