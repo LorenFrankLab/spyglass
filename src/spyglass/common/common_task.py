@@ -7,11 +7,7 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
-from spyglass.utils.nwb_helper_fn import (
-    get_config,
-    get_nwb_file,
-    is_nwb_obj_type,
-)
+from spyglass.utils.nwb_helper_fn import get_nwb_file, is_nwb_obj_type
 
 schema = dj.schema("common_task")
 
@@ -152,23 +148,16 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         return {"self": {"task_name": "task_name"}}
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        """Supplement the passed config with the file's own, as `make` did.
+        """Hold the caller's config, which `get_nwb_objects` also needs.
 
-        Tasks may be declared in a `_spyglass_config.yaml` beside the NWB
-        file. That is read here and passed down as the config for this run --
-        anything the caller passed still wins.
+        The config is resolved by the caller -- `single_transaction_make`
+        merges the file's own `_spyglass_config.yaml` into it. This table does
+        not reload it. Kept on `self` only because `get_nwb_objects` and
+        `_camera_name_map` take no config argument.
         """
         self._camera_cache, self._interval_cache = dict(), dict()
-        self._file_config = {
-            **get_config(
-                Nwbfile().get_abs_path(nwb_file_name),
-                calling_table=self.camel_name,
-            ),
-            **(config or dict()),
-        }
-        return super().insert_from_nwbfile(
-            nwb_file_name, self._file_config, dry_run
-        )
+        self._file_config = config or dict()
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the file's task tables."""

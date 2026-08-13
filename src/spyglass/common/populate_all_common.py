@@ -43,6 +43,7 @@ from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
+from spyglass.utils.nwb_helper_fn import get_config
 
 
 def log_insert_error(
@@ -101,10 +102,17 @@ def single_transaction_make(
     key. Failures are logged per table unless `raise_err` is set.
     """
 
+    # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
+    # file. Resolved here, with the file's own config under the global one, so
+    # a table is handed its config rather than reloading it (see #1660).
+    file_config = get_config(
+        Nwbfile.get_abs_path(nwb_file_name), calling_table="populate_all_common"
+    )
+
     with Nwbfile._safe_context():
         for table in tables:
             config_name = _get_config_name(table())
-            table_config = config.get(config_name, dict())
+            table_config = {**file_config, **config.get(config_name, dict())}
 
             try:
                 table().insert_from_nwbfile(nwb_file_name, config=table_config)
