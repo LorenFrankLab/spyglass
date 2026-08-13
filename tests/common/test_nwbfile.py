@@ -264,6 +264,60 @@ def test_validate_rejects_nonfinite_limits(common_nwbfile):
             common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
                 plan, max_delete_fraction=bad
             )
+        with pytest.raises(ValueError):
+            common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+                plan, max_delete_to_tracked_ratio=bad
+            )
+
+
+def test_cleanup_planner_builds_with_injected_fakes(common_nwbfile):
+    """CleanupPlanner.build runs entirely on injected callables.
+
+    Locks the module's DataJoint-import-free contract: an empty walk with a
+    faked tracking-state function yields an empty plan without any DataJoint
+    access, so a future accidental schema/DB dependency inside the planner is
+    caught by a fast, DB-free unit test rather than only by integration.
+    """
+    planner = common_nwbfile.CleanupPlanner(
+        walker=lambda: iter(()),
+        snapshotter=lambda path: None,
+        tracking_state_fn=lambda tables: common_nwbfile._TrackedFileState(
+            set(), set(), set()
+        ),
+        logger=common_nwbfile.logger,
+    )
+    plan = planner.build(custom_tables=[])
+    assert plan.scanned_files == set()
+    assert plan.files_to_delete == set()
+
+
+def test_cleanup_executor_runs_with_injected_fakes(common_nwbfile, tmp_path):
+    """CleanupExecutor.execute runs entirely on injected callables.
+
+    Companion to the planner test: an empty plan drives the destructive path
+    with faked refreshers/validators and no DataJoint access, returning the
+    empty ``(files_to_delete, tracked_files)`` tuple.
+    """
+    empty = common_nwbfile.CleanupPlan(
+        scanned_files=set(),
+        tracked_files=set(),
+        files_to_delete=set(),
+        empty_files=set(),
+        untracked_files=set(),
+        candidates={},
+        deferred_recent_files=set(),
+        broken_links=set(),
+    )
+    executor = common_nwbfile.CleanupExecutor(
+        empty,
+        analysis_dir=str(tmp_path),
+        tracking_refresher=lambda tables: None,
+        registry_refresher=lambda tables: tables,
+        managed_roots_fn=list,
+        access_validator=lambda access, *, analysis_root: True,
+        logger=common_nwbfile.logger,
+    )
+    assert executor.execute(custom_tables=[], dry_run=False) == (set(), set())
 
 
 def test_remove_untracked_files_refuses_path_outside_analysis_dir(

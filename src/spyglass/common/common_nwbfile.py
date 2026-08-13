@@ -16,10 +16,15 @@ from pynwb.core import ScratchData
 from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
+
+# CleanupCandidate is re-exported (constructed as common_nwbfile.CleanupCandidate
+# in tests) even though this module's own code no longer references it directly.
 from spyglass.common._nwbfile_cleanup import (
     AccessSnapshot,
     CleanupCandidate,
+    CleanupExecutor,
     CleanupPlan,
+    CleanupPlanner,
     TargetSnapshot,
     _check_number,
     _PhysicalRoot,
@@ -804,75 +809,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         -------
         CleanupPlan
         """
-        now_ns = time.time_ns() if now_ns is None else now_ns
-
-        tracked_state = self._current_tracked_state(custom_tables)
-        tracked = set(tracked_state.resolved_paths)
-
-        targets: Dict[Path, Optional[TargetSnapshot]] = {}
-        accesses: Dict[Path, List[AccessSnapshot]] = {}
-        for access_path in tqdm(
-            self._walk_analysis_files(),
-            desc="Scanning analysis files  ",  # extra spaces for alignment
-        ):
-            snapped = self._snapshot_entry(access_path)
-            if snapped is None:
-                continue
-            real_path, target, access = snapped
-            accesses.setdefault(real_path, []).append(access)
-            if target is not None:
-                targets[real_path] = target
-            else:
-                targets.setdefault(real_path, None)
-
-        scanned = set(accesses)
-        candidates: Dict[Path, CleanupCandidate] = {}
-        empty: Set[Path] = set()
-        untracked: Set[Path] = set()
-        broken: Set[Path] = set()
-        deferred: Set[Path] = set()
-
-        for real_path, target in targets.items():
-            candidate = CleanupCandidate(
-                real_path=real_path,
-                target=target,
-                accesses=tuple(accesses[real_path]),
-            )
-            if tracked_state.matches(candidate):
-                # CleanupPlan's safety denominator intersects scanned and
-                # tracked PATHS. Preserve that contract when tracking matched
-                # through filesystem identity rather than path spelling.
-                tracked.add(real_path)
-                continue  # tracked wins over empty and over broken
-            if target is not None and not target.is_regular:
-                logger.warning(
-                    f"Skipping non-regular analysis path: {real_path}"
-                )
-                continue
-            if not candidate.is_old_enough(
-                now_ns=now_ns,
-                min_file_age_hours=min_file_age_hours,
-            ):
-                deferred.add(real_path)
-                continue
-            candidates[real_path] = candidate
-            if candidate.broken:
-                broken.add(real_path)
-            elif target.size == 0:
-                empty.add(real_path)
-            else:
-                untracked.add(real_path)
-
-        return CleanupPlan(
-            scanned_files=scanned,
-            tracked_files=tracked,
-            files_to_delete=set(candidates),
-            empty_files=empty,
-            untracked_files=untracked,
-            candidates=candidates,
-            deferred_recent_files=deferred,
-            broken_links=broken,
+        planner = CleanupPlanner(
+            # _walk_analysis_files is called through the bound method so its
+            # test monkeypatch still applies; the tqdm wrapper stays here to
+            # keep CleanupPlanner stdlib-only.
+            walker=lambda: tqdm(
+                self._walk_analysis_files(),
+                desc="Scanning analysis files  ",  # extra spaces for alignment
+            ),
+            snapshotter=self._snapshot_entry,
+            tracking_state_fn=self._current_tracked_state,
+            logger=logger,
+            min_file_age_hours=min_file_age_hours,
+            now_ns=now_ns,
         )
+        return planner.build(custom_tables)
 
     @staticmethod
     def _validate_cleanup_plan(
@@ -1041,44 +992,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return tracked
 
     @staticmethod
-    def _containing_managed_root(
-        path: Path, roots: List[_PhysicalRoot]
-    ) -> Optional[_PhysicalRoot]:
-        """Return the protected root physically containing ``path``.
-
-        Lexical containment is the common fast path. When spellings differ,
-        walk the target's parents once and compare each directory identity
-        with all configured roots. This recognizes case aliases and alternate
-        names of a configured root itself without confusing an outside hard
-        link to a protected file with a path inside the store.
-        """
-        if not roots:
-            return None
-
-        for root in roots:
-            if path.is_relative_to(root.path):
-                return root
-
-        roots_by_identity = {(root.dev, root.ino): root for root in roots}
-        current = path.parent
-        while True:
-            try:
-                current_stat = os.stat(current)
-            except OSError as err:
-                raise RuntimeError(
-                    "Cannot inspect ancestry of analysis target "
-                    f"{path}; refusing analysis cleanup"
-                ) from err
-            if root := roots_by_identity.get(
-                (current_stat.st_dev, current_stat.st_ino)
-            ):
-                return root
-            parent = current.parent
-            if parent == current:
-                return None
-            current = parent
-
-    @staticmethod
     def _access_still_matches(
         access: AccessSnapshot, *, analysis_root: Path
     ) -> bool:
@@ -1119,152 +1032,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         except (OSError, RuntimeError):
             return False
         return location.is_relative_to(analysis_root)
-
-    def _candidate_still_matches(
-        self,
-        candidate: CleanupCandidate,
-        *,
-        analysis_root: Path,
-        managed_roots: List[_PhysicalRoot],
-    ) -> Optional[List[AccessSnapshot]]:
-        """Re-verify a candidate during final pre-delete validation.
-
-        Returns
-        -------
-        list of AccessSnapshot or None
-            The in-root accesses that may be unlinked, or None (with a
-            warning) when anything changed since the scan, when a
-            non-regular target is involved, when the target has no in-root
-            access authorizing it, or when the target belongs to another
-            protected Spyglass store.
-
-        Notes
-        -----
-        The returned list is what the caller unlinks. Accesses outside the
-        analysis root are never returned, so an extra out-of-root access on
-        an otherwise valid candidate cannot be removed.
-        """
-        real_path = candidate.real_path
-
-        def _refuse(reason: str):
-            logger.warning(f"Skipping {real_path}: {reason}")
-            return None
-
-        # An in-root *.nwb access IS the deletion authority: a target is
-        # deletable on any volume, so at least one access must live inside
-        # analysis_root. Validate both the scanned leaf identity and its live
-        # canonical destination while every alias in a possible chain still
-        # exists. The later leaf unlink check cannot resolve the destination
-        # because the target has intentionally been removed by then.
-        in_root = []
-        for access in candidate.accesses:
-            try:
-                lst = os.lstat(access.access_path)
-            except OSError:
-                return _refuse(f"access path {access.access_path} unreadable")
-            if stat_module.S_ISLNK(lst.st_mode) != access.is_link:
-                return _refuse(f"{access.access_path} changed link type")
-            if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
-                return _refuse(f"{access.access_path} identity changed")
-            # Alias timestamps are part of identity. Without this,
-            # `os.utime(link, follow_symlinks=False)` makes a link fresh
-            # without changing dev/ino, so the age gate -- which reads the
-            # scan-time snapshot -- would still authorize deletion.
-            if (lst.st_mtime_ns, lst.st_ctime_ns) != (
-                access.mtime_ns,
-                access.ctime_ns,
-            ):
-                return _refuse(
-                    f"{access.access_path} timestamps changed since the scan"
-                )
-            # Resolve the PARENT, not the link itself -- resolving the link
-            # would follow it to the target.
-            try:
-                location = (
-                    access.access_path.parent.resolve()
-                    / access.access_path.name
-                )
-            except (OSError, RuntimeError):
-                return _refuse(
-                    f"{access.access_path} parent could not be resolved"
-                )
-            if not location.is_relative_to(analysis_root):
-                continue
-            if access.is_link:
-                try:
-                    raw = os.readlink(access.access_path)
-                except OSError:
-                    return _refuse(f"{access.access_path} readlink failed")
-                if raw != access.raw_link_target:
-                    return _refuse(f"{access.access_path} was re-pointed")
-            try:
-                live_target = Path(os.path.realpath(access.access_path))
-            except (OSError, RuntimeError):
-                return _refuse(f"{access.access_path} could not be resolved")
-            if live_target != real_path:
-                return _refuse(
-                    f"{access.access_path} no longer resolves to the "
-                    "planned target"
-                )
-            in_root.append(access)
-
-        if not in_root:
-            return _refuse("no access path inside the analysis directory")
-
-        # A target belonging to another Spyglass store is never ours to
-        # delete, however it was reached. `tracked` only knows the analysis
-        # store, so without this a symlink into the raw store would make a
-        # non-recomputable acquisition file look untracked.
-        managed = None
-        if not candidate.broken:
-            managed = self._containing_managed_root(real_path, managed_roots)
-        if managed is not None:
-            return _refuse(
-                "target belongs to another Spyglass store "
-                f"({managed.name}: {managed.path}); analysis cleanup does "
-                "not delete from it"
-            )
-
-        # Target identity is verified for EVERY live target, in-root or not,
-        # because every live target may be deleted. The access checks above
-        # separately prove that a current in-root *.nwb path still resolves
-        # to this exact target, including through intermediate symlinks.
-        if not candidate.broken:
-            try:
-                st = os.stat(real_path)
-                lst_target = os.lstat(real_path)
-            except OSError:
-                return _refuse("target unreadable")
-            if not stat_module.S_ISREG(lst_target.st_mode):
-                return _refuse("target is not a regular file")
-            if (st.st_dev, st.st_ino) != (
-                lst_target.st_dev,
-                lst_target.st_ino,
-            ):
-                return _refuse("target stat/lstat disagree")
-            snap = candidate.target
-            if (st.st_dev, st.st_ino) != (snap.dev, snap.ino):
-                return _refuse("target identity changed since the scan")
-            if st.st_size != snap.size:
-                return _refuse("target size changed since the scan")
-            if (st.st_mtime_ns, st.st_ctime_ns) != (
-                snap.mtime_ns,
-                snap.ctime_ns,
-            ):
-                return _refuse("target timestamps changed since the scan")
-            if st.st_mode != snap.mode:
-                return _refuse("target mode changed since the scan")
-        else:
-            try:
-                os.stat(real_path)
-            except FileNotFoundError:
-                pass  # still broken, as planned
-            except OSError:
-                return _refuse("broken-link target unreadable")
-            else:
-                return _refuse("broken link now resolves")
-
-        return in_root
 
     def _remove_untracked_files(
         self,
@@ -1326,201 +1093,22 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 now_ns=now_ns,
             )
 
-        if plan.deferred_recent_files:
-            logger.info(
-                f"  {len(plan.deferred_recent_files)} untracked files "
-                f"deferred because they are newer than {min_file_age_hours} "
-                "hours. Use min_file_age_hours=0 only for intentional "
-                "immediate cleanup."
-            )
-
-        if dry_run:
-            # Planned candidate LOGICAL bytes: the sum of target sizes for
-            # candidates that have a target (broken links have none and add
-            # 0). This is a planning figure, not guaranteed reclaimed bytes --
-            # act-time re-validation may refuse candidates, and hard-linked
-            # targets share physical bytes on disk.
-            planned_bytes = sum(
-                candidate.target.size
-                for candidate in plan.candidates.values()
-                if candidate.target is not None
-            )
-            logger.info(
-                f"  {len(plan.files_to_delete)} untracked or empty analysis "
-                f"files ({len(plan.untracked_files)} untracked, "
-                f"{len(plan.empty_files)} empty, "
-                f"{len(plan.broken_links)} broken links); "
-                f"{planned_bytes} planned candidate logical bytes"
-            )
-            return plan.files_to_delete, plan.tracked_files
-
-        analysis_root = Path(self._analysis_dir).expanduser().resolve()
-        act_now_ns = time.time_ns() if now_ns is None else now_ns
-        failures = []
-
-        # ---- PREFLIGHT: validate the WHOLE plan before any unlink ----
-        # A structurally malformed plan must not be partially executed:
-        # collecting per-entry problems while still deleting the valid
-        # entries would let a forged plan do real damage before it failed.
-        if set(plan.candidates) != plan.files_to_delete:
-            raise RuntimeError(
-                "Analysis file deletion failed: cleanup plan is "
-                "inconsistent, candidate keys do not match files_to_delete. "
-                "Refusing to act on a malformed plan."
-            )
-        structural = []
-        for key_path, candidate in plan.candidates.items():
-            if key_path != candidate.real_path:
-                structural.append(
-                    f"plan key {key_path} does not match candidate "
-                    f"{candidate.real_path}"
-                )
-            if (
-                candidate.target is not None
-                and candidate.target.real_path != candidate.real_path
-            ):
-                structural.append(
-                    f"{candidate.real_path}: target snapshot names a "
-                    f"different path {candidate.target.real_path}"
-                )
-            # The scanner only ever yields *.nwb entries, so any other
-            # suffix means the plan did not come from it. Enforcing the
-            # invariant here stops a forged plan using, say,
-            # analysis/voucher.txt -> /outside/victim.nwb as authority.
-            for access in candidate.accesses:
-                # Exactly the scanner's predicate, case-sensitive: a
-                # `voucher.NWB` cannot come from the scan, so accepting it
-                # here would let a forged plan authorize deletion.
-                if not access.access_path.name.endswith(".nwb"):
-                    structural.append(
-                        f"{candidate.real_path}: access path "
-                        f"{access.access_path} is not a *.nwb entry"
-                    )
-        if structural:
-            raise RuntimeError(
-                "Analysis file deletion failed: cleanup plan is malformed; "
-                "refusing to delete anything:\n  " + "\n  ".join(structural)
-            )
-
-        # Snapshot every protected root before the first unlink. A missing or
-        # unreadable configured store must disable the whole destructive pass,
-        # not fail only after earlier candidates have already been removed.
-        managed_roots = self._other_managed_roots() if plan.candidates else []
-
-        # ---- ACT ----
-        # Accumulator, not the original snapshot: a table can appear in the
-        # registry while one candidate is processed and be gone before the
-        # next. Re-unioning against `custom_tables` each time would forget
-        # it and delete its tracked files, defeating the "never dropped"
-        # guarantee _current_custom_tables provides within a single call.
-        known_tables = list(custom_tables)
-        deleted_external = []
-        for candidate in plan.candidates.values():
-            # Tracking and registry membership are re-read for EVERY
-            # candidate, not once up front: a file can be registered through
-            # a new alias, or a whole custom table declared, while an earlier
-            # candidate is being deleted. Resolving every current external
-            # path and comparing filesystem identities is intentionally
-            # conservative; an exact query on scan-time names cannot discover
-            # a new alias to this target. The deferred cleanup/writer lease
-            # would let this be hoisted or indexed safely.
-            known_tables = self._current_custom_tables(known_tables)
-            if self._current_tracked_state(known_tables).matches(candidate):
-                logger.warning(
-                    f"Skipping {candidate.real_path}: became tracked since "
-                    "the scan"
-                )
-                continue
-            # Age is re-checked at act time against the frozen scan-time
-            # snapshot, so with a later clock it can only read older: this
-            # cannot newly defer a candidate that already passed planning, but
-            # it does honor a min_file_age_hours raised between building a
-            # plan and applying it. A file whose bytes actually changed during
-            # a long scan is caught instead by _candidate_still_matches, which
-            # refuses any candidate whose target or alias timestamps moved.
-            if not candidate.is_old_enough(
-                now_ns=act_now_ns,
-                min_file_age_hours=min_file_age_hours,
-            ):
-                logger.warning(
-                    f"Skipping {candidate.real_path}: newer than "
-                    f"{min_file_age_hours}h at deletion time"
-                )
-                continue
-            in_root = self._candidate_still_matches(
-                candidate,
-                analysis_root=analysis_root,
-                managed_roots=managed_roots,
-            )
-            if not in_root:
-                continue
-            # Validation and unlink cannot be one atomic filesystem operation.
-            # The caller must exclude concurrent writers from eligible paths;
-            # a shared cleanup/writer lease is the tracked follow-up.
-            try:
-                if not candidate.broken:
-                    is_external = not candidate.real_path.is_relative_to(
-                        analysis_root
-                    )
-                    candidate.real_path.unlink()
-                    if is_external:
-                        # Record only after unlink succeeds. Emit an immediate
-                        # durable audit entry as well as the end-of-run summary:
-                        # a later registry/DB failure must not erase evidence
-                        # of an irreversible cross-volume deletion.
-                        record = (candidate.real_path, candidate.target.size)
-                        deleted_external.append(record)
-                        logger.warning(
-                            "Deleted external analysis target "
-                            f"{record[0]} ({record[1]} bytes)"
-                        )
-                # Each leaf is re-checked immediately before its own
-                # unlink, never batched: a link approved earlier in the
-                # pass could be replaced by a regular file that a blind
-                # unlink would then destroy. unlink() operates on the leaf
-                # and never follows it, so removal order does not matter
-                # even for chained aliases.
-                for access in in_root:
-                    if not access.is_link:
-                        continue
-                    if not self._access_still_matches(
-                        access, analysis_root=analysis_root
-                    ):
-                        logger.warning(
-                            f"Skipping link {access.access_path}: changed "
-                            "since it was validated"
-                        )
-                        continue
-                    access.access_path.unlink()
-            except OSError as e:
-                failures.append(f"{candidate.real_path}: {e}")
-
-        if deleted_external:
-            total = sum(size for _, size in deleted_external)
-            roots = sorted({str(p.parent) for p, _ in deleted_external})
-            logger.warning(
-                f"  {len(deleted_external)} symlink targets deleted OUTSIDE "
-                f"the analysis directory ({total} bytes reclaimed). An "
-                "in-root *.nwb symlink authorizes deletion of the "
-                "non-protected external target it resolved to during "
-                "final validation. "
-                f"Roots touched: {roots}"
-            )
-            for path, size in sorted(deleted_external):
-                logger.info(f"    deleted external {path} ({size} bytes)")
-
-        if failures:
-            # Raise rather than log: cleanup() runs database cleanup after
-            # this, and the maintenance driver gates later analysis-storage
-            # phases on a failure escaping here. A logged-and-swallowed
-            # error would let both proceed with storage in an unknown state.
-            raise RuntimeError(
-                f"Analysis file deletion failed for {len(failures)} "
-                "candidates; refusing to continue with analysis storage in "
-                "an unknown state:\n  " + "\n  ".join(failures)
-            )
-
-        return plan.files_to_delete, plan.tracked_files
+        # Wire the DataJoint-coupled pieces into the schema-agnostic executor:
+        # tracked-state and registry refreshes, the protected-root snapshot,
+        # and per-leaf re-validation. _other_managed_roots and
+        # _access_still_matches stay methods here so their test seams hold.
+        executor = CleanupExecutor(
+            plan,
+            analysis_dir=self._analysis_dir,
+            tracking_refresher=self._current_tracked_state,
+            registry_refresher=self._current_custom_tables,
+            managed_roots_fn=self._other_managed_roots,
+            access_validator=self._access_still_matches,
+            logger=logger,
+            min_file_age_hours=min_file_age_hours,
+            now_ns=now_ns,
+        )
+        return executor.execute(custom_tables, dry_run=dry_run)
 
     def _cleanup_custom_table(
         self,
