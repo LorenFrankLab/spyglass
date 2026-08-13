@@ -1,5 +1,6 @@
 import inspect
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -270,54 +271,145 @@ def test_validate_rejects_nonfinite_limits(common_nwbfile):
             )
 
 
-def test_cleanup_planner_builds_with_injected_fakes(common_nwbfile):
-    """CleanupPlanner.build runs entirely on injected callables.
+def test_cleanup_planner_classifies_via_injected_interfaces(common_nwbfile):
+    """CleanupPlanner.build classifies through its injected interfaces.
 
-    Locks the module's DataJoint-import-free contract: an empty walk with a
-    faked tracking-state function yields an empty plan without any DataJoint
-    access, so a future accidental schema/DB dependency inside the planner is
-    caught by a fast, DB-free unit test rather than only by integration.
+    Runs through the injected walker/snapshotter/tracking interfaces (no
+    filesystem): one tracked entry, one old untracked entry, and one recent
+    entry newer than the age gate. Confirms the snapshotter is called per
+    walked path and that the three land in tracked / untracked / deferred.
     """
+    TargetSnapshot = common_nwbfile.TargetSnapshot
+    AccessSnapshot = common_nwbfile.AccessSnapshot
+
+    now_ns = 100 * 3600 * 10**9  # 100h; age gate is 24h below
+    reg_mode = stat.S_IFREG | 0o644
+
+    def _snap(path, mtime_ns, ino):
+        target = TargetSnapshot(
+            real_path=path,
+            dev=1,
+            ino=ino,
+            size=7,
+            mtime_ns=mtime_ns,
+            ctime_ns=mtime_ns,
+            mode=reg_mode,
+        )
+        access = AccessSnapshot(
+            access_path=path,
+            is_link=False,
+            raw_link_target=None,
+            dev=1,
+            ino=ino,
+            mtime_ns=mtime_ns,
+            ctime_ns=mtime_ns,
+        )
+        return (path, target, access)
+
+    tracked_p = Path("/analysis/tracked.nwb")
+    old_p = Path("/analysis/old.nwb")
+    recent_p = Path("/analysis/recent.nwb")
+    snaps = {
+        tracked_p: _snap(tracked_p, 0, 11),
+        old_p: _snap(old_p, 0, 12),
+        recent_p: _snap(recent_p, now_ns, 13),  # too new -> deferred
+    }
+    snapshotted = []
+
+    def walker():
+        yield from (tracked_p, old_p, recent_p)
+
+    def snapshotter(path):
+        snapshotted.append(path)
+        return snaps[path]
+
+    tracking = common_nwbfile._TrackedFileState({tracked_p}, set(), set())
     planner = common_nwbfile.CleanupPlanner(
-        walker=lambda: iter(()),
-        snapshotter=lambda path: None,
-        tracking_state_fn=lambda tables: common_nwbfile._TrackedFileState(
-            set(), set(), set()
-        ),
+        walker=walker,
+        snapshotter=snapshotter,
+        tracking_state_fn=lambda tables: tracking,
         logger=common_nwbfile.logger,
+        min_file_age_hours=24.0,
+        now_ns=now_ns,
     )
     plan = planner.build(custom_tables=[])
-    assert plan.scanned_files == set()
-    assert plan.files_to_delete == set()
+
+    assert snapshotted == [tracked_p, old_p, recent_p]
+    assert plan.tracked_files == {tracked_p}
+    assert plan.untracked_files == {old_p}
+    assert plan.deferred_recent_files == {recent_p}
+    assert plan.files_to_delete == {old_p}
 
 
-def test_cleanup_executor_runs_with_injected_fakes(common_nwbfile, tmp_path):
-    """CleanupExecutor.execute runs entirely on injected callables.
+def test_cleanup_executor_callback_contract(common_nwbfile, tmp_path):
+    """CleanupExecutor.execute drives its injected callbacks in order.
 
-    Companion to the planner test: an empty plan drives the destructive path
-    with faked refreshers/validators and no DataJoint access, returning the
-    empty ``(files_to_delete, tracked_files)`` tuple.
+    Runs through the injected refresher/root/validator interfaces on a real
+    two-candidate plan (a regular file that the fake tracking reports as
+    late-tracked, and a leaf symlink whose external target is deletable).
+    Asserts: managed-root preflight once before the loop; registry and
+    tracking refresh once per candidate; the late-tracked candidate is
+    skipped; and access validation is invoked before the surviving leaf is
+    unlinked.
     """
-    empty = common_nwbfile.CleanupPlan(
-        scanned_files=set(),
-        tracked_files=set(),
-        files_to_delete=set(),
-        empty_files=set(),
-        untracked_files=set(),
-        candidates={},
-        deferred_recent_files=set(),
-        broken_links=set(),
-    )
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    volume2 = tmp_path / "volume2"
+    volume2.mkdir()
+
+    late_tracked = analysis_dir / "a.nwb"
+    late_tracked.write_text("aaa")
+    target = volume2 / "t.nwb"
+    target.write_text("ttt")
+    leaf = analysis_dir / "b.nwb"
+    leaf.symlink_to(target)
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.files_to_delete == {late_tracked.resolve(), target.resolve()}
+
+    calls = []
+
+    def managed_roots_fn():
+        calls.append("managed_roots")
+        return []
+
+    def registry_refresher(tables):
+        calls.append("registry")
+        return tables
+
+    def tracking_refresher(tables):
+        calls.append("tracking")
+        # Report only the regular file as tracked, so it is skipped while the
+        # symlink target proceeds to deletion.
+        return common_nwbfile._TrackedFileState(
+            {late_tracked.resolve()}, set(), set()
+        )
+
+    def access_validator(access, *, analysis_root):
+        calls.append("access")
+        return True
+
     executor = common_nwbfile.CleanupExecutor(
-        empty,
-        analysis_dir=str(tmp_path),
-        tracking_refresher=lambda tables: None,
-        registry_refresher=lambda tables: tables,
-        managed_roots_fn=list,
-        access_validator=lambda access, *, analysis_root: True,
+        plan,
+        analysis_dir=str(analysis_dir),
+        tracking_refresher=tracking_refresher,
+        registry_refresher=registry_refresher,
+        managed_roots_fn=managed_roots_fn,
+        access_validator=access_validator,
         logger=common_nwbfile.logger,
+        min_file_age_hours=0,
     )
-    assert executor.execute(custom_tables=[], dry_run=False) == (set(), set())
+    executor.execute(custom_tables=[], dry_run=False)
+
+    assert calls[0] == "managed_roots", "protected-root snapshot precedes loop"
+    assert calls.count("managed_roots") == 1
+    assert calls.count("registry") == 2, "registry refresh once per candidate"
+    assert calls.count("tracking") == 2, "tracking refresh once per candidate"
+    assert calls.count("access") == 1, "leaf validated before its unlink"
+    assert late_tracked.exists(), "late-tracked candidate must be skipped"
+    assert not target.exists(), "untracked external target must be deleted"
+    assert not leaf.exists(), "authorizing leaf must be unlinked"
 
 
 def test_remove_untracked_files_refuses_path_outside_analysis_dir(

@@ -705,83 +705,23 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     # See #630, #664. Excessive key length.
 
     def _walk_analysis_files(self) -> Iterator[Path]:
-        """Yield every ``*.nwb`` entry under the analysis directory.
+        """Delegate to :meth:`CleanupPlanner._walk_analysis_files`.
 
-        Directory symlinks are not followed, matching prior behavior. A
-        walk error is re-raised rather than skipped: a destructive sweep
-        must not act on a partial view of the tree.
-
-        Yields
-        ------
-        pathlib.Path
-            Path as found by the walk, which may itself be a symlink.
+        Kept on the schema as the injection point and the test monkeypatch
+        seam (``test_custom_analysis`` patches this to fence a concurrent
+        session's files out of candidacy).
         """
-
-        def _reraise(err: OSError) -> None:
-            raise err
-
-        scan_root = str(Path(self._analysis_dir).expanduser())
-        for dirpath, _dirnames, filenames in os.walk(
-            scan_root, followlinks=False, onerror=_reraise
-        ):
-            for fname in filenames:
-                if fname.endswith(".nwb"):
-                    yield Path(dirpath) / fname
+        return CleanupPlanner._walk_analysis_files(self._analysis_dir)
 
     def _snapshot_entry(
         self, access_path: Path
     ) -> Optional[Tuple[Path, Optional[TargetSnapshot], AccessSnapshot]]:
-        """Snapshot one scanned entry.
+        """Delegate to :meth:`CleanupPlanner._snapshot_entry`.
 
-        Returns
-        -------
-        tuple or None
-            ``(real_path, target_or_None, access_snapshot)``, or None when the
-            entry cannot be snapshotted -- it vanished mid-scan, is unreadable,
-            or is unresolvable -- and should be skipped.
-
-        Notes
-        -----
-        Per-entry errors are logged and skipped, not raised: an entry that
-        cannot be stat'd never becomes a deletion candidate, so skipping can
-        only under-clean. Errors from the directory *walk* remain fatal --
-        there a partial view means unseen files, which would skew the
-        deletion-limit denominators.
+        Kept on the schema as the injected ``snapshotter``; supplies the
+        Spyglass logger so per-entry skip warnings are unchanged.
         """
-        try:
-            access = AccessSnapshot.from_path(access_path)
-        except OSError as err:
-            # Skip, don't abort (the Notes above cover why per-entry skips are
-            # safe): aborting on one bad symlink -- a loop, a 0700 parent --
-            # would wedge the periodic sweep and every later maintenance phase.
-            logger.warning(f"Skipping unreadable analysis entry: {err}")
-            return None
-
-        is_link = access.is_link
-        real_path = Path(os.path.realpath(access_path))
-
-        try:
-            st = os.stat(access_path)  # follows symlinks
-        except FileNotFoundError:
-            if is_link:
-                return real_path, None, access  # broken link
-            return None  # regular entry vanished mid-scan
-        except OSError as err:
-            # Symlink loop (ELOOP), unreadable component, or I/O error.
-            # Skip rather than abort, for the reason above.
-            logger.warning(f"Skipping unresolvable analysis entry: {err}")
-            return None
-
-        target = TargetSnapshot(
-            real_path=real_path,
-            dev=st.st_dev,
-            ino=st.st_ino,
-            size=st.st_size,
-            mtime_ns=st.st_mtime_ns,
-            ctime_ns=st.st_ctime_ns,
-            mode=st.st_mode,
-        )
-        return real_path, target, access
+        return CleanupPlanner._snapshot_entry(access_path, logger)
 
     def _build_untracked_file_plan(
         self,
@@ -995,43 +935,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     def _access_still_matches(
         access: AccessSnapshot, *, analysis_root: Path
     ) -> bool:
-        """Re-verify one leaf symlink immediately before unlinking it.
+        """Delegate to :meth:`CleanupExecutor._access_still_matches`.
 
-        Proves the leaf is still the entry that was scanned -- same type,
-        inode, timestamps, raw target, and still inside the analysis root.
-        Its canonical destination was checked while the whole alias chain
-        still existed, during the final validation before target deletion.
-        It cannot be checked here after the target has intentionally been
-        removed; requiring resolution at this point would strand chained
-        aliases.
+        Kept on the schema as the injected ``access_validator`` and the
+        direct-test seam.
         """
-        try:
-            lst = os.lstat(access.access_path)
-        except (OSError, RuntimeError):
-            return False
-        if not stat_module.S_ISLNK(lst.st_mode):
-            return False
-        if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
-            return False
-        if (lst.st_mtime_ns, lst.st_ctime_ns) != (
-            access.mtime_ns,
-            access.ctime_ns,
-        ):
-            return False
-        try:
-            if os.readlink(access.access_path) != access.raw_link_target:
-                return False
-        except (OSError, RuntimeError):
-            return False
-        # Still inside the analysis root, resolving the PARENT so the link
-        # itself is not followed.
-        try:
-            location = (
-                access.access_path.parent.resolve() / access.access_path.name
-            )
-        except (OSError, RuntimeError):
-            return False
-        return location.is_relative_to(analysis_root)
+        return CleanupExecutor._access_still_matches(
+            access, analysis_root=analysis_root
+        )
 
     def _remove_untracked_files(
         self,

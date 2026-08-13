@@ -585,6 +585,87 @@ class CleanupPlanner:
             broken_links=broken,
         )
 
+    @staticmethod
+    def _walk_analysis_files(analysis_dir) -> Iterator[Path]:
+        """Yield every ``*.nwb`` entry under ``analysis_dir``.
+
+        Directory symlinks are not followed, matching prior behavior. A
+        walk error is re-raised rather than skipped: a destructive sweep
+        must not act on a partial view of the tree.
+
+        Yields
+        ------
+        pathlib.Path
+            Path as found by the walk, which may itself be a symlink.
+        """
+
+        def _reraise(err: OSError) -> None:
+            raise err
+
+        scan_root = str(Path(analysis_dir).expanduser())
+        for dirpath, _dirnames, filenames in os.walk(
+            scan_root, followlinks=False, onerror=_reraise
+        ):
+            for fname in filenames:
+                if fname.endswith(".nwb"):
+                    yield Path(dirpath) / fname
+
+    @staticmethod
+    def _snapshot_entry(
+        access_path: Path, logger: logging.Logger
+    ) -> Optional[Tuple[Path, Optional[TargetSnapshot], AccessSnapshot]]:
+        """Snapshot one scanned entry.
+
+        Returns
+        -------
+        tuple or None
+            ``(real_path, target_or_None, access_snapshot)``, or None when the
+            entry cannot be snapshotted -- it vanished mid-scan, is unreadable,
+            or is unresolvable -- and should be skipped.
+
+        Notes
+        -----
+        Per-entry errors are logged and skipped, not raised: an entry that
+        cannot be stat'd never becomes a deletion candidate, so skipping can
+        only under-clean. Errors from the directory *walk* remain fatal --
+        there a partial view means unseen files, which would skew the
+        deletion-limit denominators.
+        """
+        try:
+            access = AccessSnapshot.from_path(access_path)
+        except OSError as err:
+            # Skip, don't abort (the Notes above cover why per-entry skips are
+            # safe): aborting on one bad symlink -- a loop, a 0700 parent --
+            # would wedge the periodic sweep and every later maintenance phase.
+            logger.warning(f"Skipping unreadable analysis entry: {err}")
+            return None
+
+        is_link = access.is_link
+        real_path = Path(os.path.realpath(access_path))
+
+        try:
+            st = os.stat(access_path)  # follows symlinks
+        except FileNotFoundError:
+            if is_link:
+                return real_path, None, access  # broken link
+            return None  # regular entry vanished mid-scan
+        except OSError as err:
+            # Symlink loop (ELOOP), unreadable component, or I/O error.
+            # Skip rather than abort, for the reason above.
+            logger.warning(f"Skipping unresolvable analysis entry: {err}")
+            return None
+
+        target = TargetSnapshot(
+            real_path=real_path,
+            dev=st.st_dev,
+            ino=st.st_ino,
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            ctime_ns=st.st_ctime_ns,
+            mode=st.st_mode,
+        )
+        return real_path, target, access
+
 
 class CleanupExecutor:
     """Validate and unlink a :class:`CleanupPlan`'s deletion candidates.
@@ -836,9 +917,51 @@ class CleanupExecutor:
         return plan.files_to_delete, plan.tracked_files
 
     @staticmethod
+    def _access_still_matches(
+        access: AccessSnapshot, *, analysis_root: Path
+    ) -> bool:
+        """Re-verify one leaf symlink immediately before unlinking it.
+
+        Proves the leaf is still the entry that was scanned -- same type,
+        inode, timestamps, raw target, and still inside the analysis root.
+        Its canonical destination was checked while the whole alias chain
+        still existed, during the final validation before target deletion.
+        It cannot be checked here after the target has intentionally been
+        removed; requiring resolution at this point would strand chained
+        aliases.
+        """
+        try:
+            lst = os.lstat(access.access_path)
+        except (OSError, RuntimeError):
+            return False
+        if not stat_module.S_ISLNK(lst.st_mode):
+            return False
+        if (lst.st_dev, lst.st_ino) != (access.dev, access.ino):
+            return False
+        if (lst.st_mtime_ns, lst.st_ctime_ns) != (
+            access.mtime_ns,
+            access.ctime_ns,
+        ):
+            return False
+        try:
+            if os.readlink(access.access_path) != access.raw_link_target:
+                return False
+        except (OSError, RuntimeError):
+            return False
+        # Still inside the analysis root, resolving the PARENT so the link
+        # itself is not followed.
+        try:
+            location = (
+                access.access_path.parent.resolve() / access.access_path.name
+            )
+        except (OSError, RuntimeError):
+            return False
+        return location.is_relative_to(analysis_root)
+
+    @staticmethod
     def _containing_managed_root(
         path: Path, roots: List[_PhysicalRoot]
-    ) -> Optional["_PhysicalRoot"]:
+    ) -> Optional[_PhysicalRoot]:
         """Return the protected root physically containing ``path``.
 
         Lexical containment is the common fast path. When spellings differ,
