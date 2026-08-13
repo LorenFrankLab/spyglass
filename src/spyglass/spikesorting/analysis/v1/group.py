@@ -27,6 +27,13 @@ UNIT_CRITERIA_OPERATORS = {
     "isin": lambda vals, target: _isin(vals, target),
     "notin": lambda vals, target: ~_isin(vals, target) & _not_missing(vals),
 }
+# Only "isin" and "notin" are list-aware, via _isin. The rest compare a
+# unit's value as a whole, so on a column holding a list per unit (e.g. the
+# curation labels) numpy compares the list object itself to the target: a
+# list never equals a string, making "==" all-False and "!=" all-True
+# regardless of the labels. filter_units_by_criteria raises rather than
+# return such a mask
+SCALAR_ONLY_OPERATORS = frozenset(UNIT_CRITERIA_OPERATORS) - {"isin", "notin"}
 # Curation label columns, v0: "label", v1: "curation_label"
 CURATION_LABEL_COLUMNS = ("label", "curation_label")
 
@@ -195,8 +202,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            if an operator is not one of those listed above, or, when strict,
-            if a criterion names a column not in units_df
+            if an operator is not one of those listed above, if any operator
+            but "isin" or "notin" is applied to a column holding a list per
+            unit, or, when strict, if a criterion names a column not in
+            units_df
 
         Notes
         -----
@@ -242,6 +251,16 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                         f"Invalid unit criteria operator '{operator}' for "
                         + f"column '{column}'. Expected one of "
                         + f"{list(UNIT_CRITERIA_OPERATORS)}"
+                    )
+                if operator in SCALAR_ONLY_OPERATORS and _is_list_valued(
+                    values
+                ):
+                    raise ValueError(
+                        f"Unit criteria operator '{operator}' cannot filter "
+                        + f"column '{column}', which holds a list per unit. "
+                        + "Comparing a list to the criterion would mask every "
+                        + "unit in or out at once. Use 'isin' or 'notin', "
+                        + "which match any item of the list."
                     )
                 include_mask &= UNIT_CRITERIA_OPERATORS[operator](values, value)
 
@@ -546,14 +565,19 @@ def _isin(values, target):
     """
     target = np.atleast_1d(target)
 
-    if values.dtype == object and any(
-        isinstance(value, (list, tuple, np.ndarray)) for value in values
-    ):
+    if _is_list_valued(values):
         return np.array(
             [np.isin(np.atleast_1d(value), target).any() for value in values]
         )
 
     return np.isin(values, target)
+
+
+def _is_list_valued(values):
+    """True where a column holds a list per unit, rather than one value"""
+    return values.dtype == object and any(
+        isinstance(value, (list, tuple, np.ndarray)) for value in values
+    )
 
 
 def _get_spike_obj_name(nwb_file, allow_empty=False):

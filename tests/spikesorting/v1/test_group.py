@@ -179,6 +179,25 @@ def test_criteria_membership_list_column(spike_v1_group, units_df):
     ), "Unexpected mask for 'notin' on a list-valued column"
 
 
+def test_criteria_comparison_on_list_column(spike_v1_group, units_df):
+    """Only isin/notin may filter a column holding a list per unit
+
+    Comparing the whole list to the criterion masks every unit in or out at
+    once (e.g. "!=" would keep the noise unit and "==" would drop every unit)
+    so the criterion raises rather than returning a meaningless mask.
+    """
+    filter_units_by_criteria = (
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria
+    )
+
+    for operator in ("==", "!=", ">", "between"):
+        value = [0, 1] if operator == "between" else "noise"
+        with pytest.raises(ValueError, match="holds a list per unit"):
+            filter_units_by_criteria(
+                units_df, {"curation_label": {operator: value}}
+            )
+
+
 def test_skipped_criteria_error_message(spike_v1_group):
     """The error separates a typo'd column from a heterogeneous group"""
     skipped_criteria_error = spike_v1_group._skipped_criteria_error
