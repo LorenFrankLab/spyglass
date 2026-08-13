@@ -3,7 +3,6 @@ from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
 import numpy as np
-from datajoint.utils import to_camel_case
 from packaging.version import Version
 from pynwb import NWBFile
 
@@ -16,8 +15,8 @@ from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
 # typing alias compatible with Python 3.9
 IngestionEntries = dict["IngestionMixin", list[dict]]
 # How IngestionMixin handles generated entries from NWB objects
-# Dict keys are IngestionMixin table classes, or FreeTable Table objects
-# Values are lists of dicts to insert into those tables
+# Dict keys are Spyglass table classes or instances, so that every table in a
+# plan carries the mixin's properties. Values are lists of dicts to insert.
 
 
 class IngestionMixin(BaseMixin):
@@ -98,17 +97,19 @@ class IngestionMixin(BaseMixin):
         self, config: dict, base_key=None
     ) -> IngestionEntries:
         """Generates a list of table entries from a config dictionary."""
-
         base_key = base_key or dict()
         self_entries = config.get(self.camel_name, [])
         entries = self._config_entries(self, base_key, self_entries)
 
-        for part in self.parts(as_objects=True):
-            camel_part = to_camel_case(part.full_table_name.split("__")[-1])
-            part_entries = config.get(camel_part, [])
+        for part_name, part in inspect.getmembers(
+            type(self),
+            lambda member: inspect.isclass(member)
+            and issubclass(member, dj.Part),
+        ):
+            part_entries = config.get(part_name, [])
             if len(part_entries) == 0:
                 continue
-            entries[part] = self._config_entries(part, base_key, part_entries)
+            entries.update(self._config_entries(part(), base_key, part_entries))
 
         return entries
 
@@ -296,16 +297,9 @@ class IngestionMixin(BaseMixin):
         return name.lower().replace(" ", "") if name else None
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
-        """Log line for insert_from_nwbfile."""
-
-        # String formatting permits either SpyglassMixin or FreeTable objects
-        def _camel(tbl=None):
-            if tbl is None:
-                return ""
-            s = getattr(tbl, "full_table_name", str(tbl))
-            return to_camel_case(s.split(".")[-1].replace("__", ".")).strip("`")
-
-        this_tbl, self_tbl = _camel(table), _camel(self)
+        """Log line for insert_from_nwbfile. Expects an instanced table."""
+        this_tbl = table.camel_name if table is not None else ""
+        self_tbl = self.camel_name
 
         suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
         self._info_msg(
@@ -436,11 +430,11 @@ class IngestionMixin(BaseMixin):
     def _remove_null_from_dicts(self, keys: List[dict]) -> List[dict]:
         """Remove null-valued items from each key in a list.
 
-        Fallback for tables that do not implement `_adjust_keys_for_entry`
-        -- a FreeTable, or a part declared with SpyglassMixin rather than
-        SpyglassIngestion. Takes the same list-in/list-out shape as the
-        method it stands in for; it previously took a single dict and so
-        raised AttributeError for every caller.
+        Fallback for tables that do not implement `_adjust_keys_for_entry` --
+        a table declared with SpyglassMixin rather than SpyglassIngestion,
+        such as a parent generated alongside this one. Takes the same
+        list-in/list-out shape as the method it stands in for; it previously
+        took a single dict and so raised AttributeError for every caller.
 
         Parameters
         ----------
@@ -467,26 +461,27 @@ class IngestionMixin(BaseMixin):
         Removes invalid/null entries and tables with no valid entries.
         """
 
-        null_keys = []
+        null_keys = dict()  # key as emitted -> instanced, for the log line
 
         for table, table_entries in entries.items():
             # ensure instanced
             tbl = table() if inspect.isclass(table) else table
 
-            # Allow children to adjust keys before comparing
-            # Provide backup for FreeTable instances
+            # Allow children to adjust keys before comparing. A parent
+            # generated alongside this table is a plain SpyglassMixin, with no
+            # adjustment of its own.
             adjust_func = getattr(
                 tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
             )
             adjusted_entries = adjust_func(table_entries)
 
             if not any(adjusted_entries):
-                null_keys.append(table)  # mark for removal from dict
+                null_keys[table] = tbl  # mark for removal from dict
             else:
                 entries[table] = adjusted_entries
 
-        for table in null_keys:
-            self._insert_logline(nwb_file_name, 0, table)
+        for table, tbl in null_keys.items():
+            self._insert_logline(nwb_file_name, 0, tbl)
             _ = entries.pop(table)
 
         return entries if len(entries) > 0 else None
@@ -497,8 +492,8 @@ class IngestionMixin(BaseMixin):
         Each table an ingestion emits answers for itself, so a table that
         legitimately recurs across files (Task, say) can be validated while
         the table driving the ingestion is not. Tables without the flag -- a
-        FreeTable part, or a plain SpyglassMixin parent generated alongside
-        this one -- inherit this table's setting.
+        plain SpyglassMixin parent generated alongside this one -- inherit
+        this table's setting.
 
         Parameters
         ----------
@@ -512,11 +507,62 @@ class IngestionMixin(BaseMixin):
         """
         return getattr(tbl, "_expected_duplicates", self._expected_duplicates)
 
+    def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
+        """Collapse planned entries that share a primary key.
+
+        The database check in `validate1_duplicate` compares each entry to
+        what is already stored, not to its siblings in the same plan. Two
+        objects in one file can name the same novel parent -- two task tables
+        declaring the same Task, say -- and `_run_nwbfile_insert` inserts with
+        `skip_duplicates=False`, so the pair would raise and abort the file.
+
+        Parameters
+        ----------
+        tbl : dj.Table
+            The table the entries are planned for.
+        table_entries : list of dict
+            Planned entries for that table, in emission order.
+
+        Returns
+        -------
+        list of dict
+            The entries with later same-primary-key repeats removed.
+
+        Raises
+        ------
+        dj.errors.DuplicateError
+            If two planned entries share a primary key but disagree on a
+            secondary value. Neither is stored yet, so there is no existing
+            value to defer to.
+        """
+        seen = dict()
+        deduped = []
+
+        for entry in table_entries:
+            pk = tuple(entry.get(attr) for attr in tbl.primary_key)
+            if (first := seen.get(pk)) is None:
+                seen[pk] = entry
+                deduped.append(entry)
+                continue
+            for key in set(first).union(entry):
+                if self._unequal_vals(key, first, entry):
+                    raise dj.errors.DuplicateError(
+                        f"{self.camel_name} generated conflicting entries "
+                        + f"for {tbl.camel_name} key "
+                        + f"{dict(zip(tbl.primary_key, pk))}: {key} is "
+                        + f"{first.get(key)} in one and {entry.get(key)} "
+                        + "in another."
+                    )
+
+        return deduped
+
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
 
-        Only tables that expect duplicates are validated; the rest are passed
-        through, so an unexpected duplicate still raises on insert.
+        Entries are first de-duplicated against their siblings in the same
+        plan. Only tables that expect duplicates are then validated against
+        the database; the rest are passed through, so an unexpected duplicate
+        still raises on insert.
 
         Parameters
         ----------
@@ -534,6 +580,8 @@ class IngestionMixin(BaseMixin):
         for table, table_entries in entry_dict.items():
             if isinstance(table, type):
                 table = table()  # instantiate table object if class provided
+
+            table_entries = self._dedup_within_batch(table, table_entries)
 
             if not self._expects_duplicates(table):
                 entries_to_insert[table] = table_entries
@@ -564,8 +612,8 @@ class IngestionMixin(BaseMixin):
             The new entry to insert after validation, or None if the entry
             already exists and is consistent.
         """
-        # NOTE: switching from `self` to `tbl` to allow validation from
-        # FreeTable instances captured with `parts(as_objects=True)`
+        # NOTE: `tbl` rather than `self` so that a table generated alongside
+        # this one is validated against itself, not against this table.
         # Same fallback as _adjust_entries: tbl may be a plain SpyglassMixin
         # table generated alongside this one, with no adjustment of its own.
         adjust_func = getattr(
@@ -592,7 +640,7 @@ class IngestionMixin(BaseMixin):
                 adj_new_key.get(key),
                 existing.get(key),
                 self._test_mode,
-                to_camel_case(tbl.full_table_name.split(".")[-1]).strip("`"),
+                tbl.camel_name,
             ):
                 # If the user does not accept the divergence,
                 # raise an error to prevent data inconsistency

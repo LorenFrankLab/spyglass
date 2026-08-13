@@ -57,14 +57,22 @@ DLCProject().alter()
 argument only ever processed its first file. It now processes every file and
 returns one `populate_all_common` result per file, rather than a single result.
 
-#### Re-Ingestion Raises Where Duplicates Are Not Expected (#1660)
+#### Ingestion Raises Instead of Skipping (#1660)
 
-`_expected_duplicates` is now read per table rather than once for the whole
+Two cases ingestion used to pass over silently now raise.
+
+`_expected_duplicates` is read per table rather than once for the whole
 ingestion, so a table that legitimately recurs across files (`Task`) can be
 validated while the table driving the ingestion is not. `TaskEpoch`,
 `ImportedPose` and `ImportedLFP` no longer expect duplicates: re-ingesting an
-already-ingested file raises `DuplicateError` instead of silently validating and
+already-ingested file raises `DuplicateError` instead of validating and
 skipping.
+
+A `TaskEpoch` whose `camera_id` matched no `CameraDevice` in the NWB file or
+config was dropped with only an info log, and with it the `VideoFile`,
+`StateScriptFile` and `OptogeneticProtocol` rows referencing that epoch. A
+dangling camera reference now raises `ValueError`; an epoch that genuinely names
+no camera stores `camera_names = []` and is kept.
 
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
@@ -187,13 +195,6 @@ for label, interval_data in results.groupby("interval_labels"):
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507, #1614, #1660
-- Fix `TaskEpoch` camera lookup for config-declared cameras, which inverted the
-    id/name mapping and raised on the scalar `camera_id` #1660
-- Add `_source_nwb_object_description` filter to `SpyglassIngestion`, selecting
-    source objects by description as `_source_nwb_object_name` does by name
-    #1660
-- Pass the file's base key to `generate_entries_from_config`, so config-declared
-    entries carry the file they belong to #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440

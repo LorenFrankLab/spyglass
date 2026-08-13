@@ -16,7 +16,7 @@ from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
-from spyglass.settings import test_mode, video_dir
+from spyglass.settings import video_dir
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     _get_epoch_groups,
@@ -269,9 +269,7 @@ class RawPosition(SpyglassIngestion, dj.Imported):
             return column_names
 
     def make(self, key):
-        """Make without transaction
-
-        Deprecated in favor of insert_from_nwbfile."""
+        """Deprecated in favor of insert_from_nwbfile."""
         raise NotImplementedError(
             "RawPosition.make is deprecated. Use insert_from_nwbfile."
         )
@@ -486,6 +484,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
     _epoch_cache = dict()  # nwb_file_name -> {epoch: valid times}
     _failed_videos = defaultdict(list)  # reset per ingested file
     _video_count = 0  # ImageSeries seen in the file being ingested
+    _placed_videos = 0  # ImageSeries that landed in at least one epoch
 
     @property
     def _source_nwb_object_type(self):
@@ -578,6 +577,11 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             else:
                 entries.extend(rows)
 
+        # Counted per source series, not per row: one video spanning several
+        # epochs yields several rows, so a row count cannot tell whether
+        # every series was placed.
+        self._placed_videos += bool(entries)
+
         return {self: entries}
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
@@ -585,6 +589,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         self._epoch_cache = dict()
         self._failed_videos = defaultdict(list)
         self._video_count = 0
+        self._placed_videos = 0
 
         entries = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
@@ -594,13 +599,12 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             )
             return entries
 
-        imported = len(entries.get(self, [])) if entries else 0
-        if self._video_count > imported:
+        if self._placed_videos < self._video_count:
             self._report_partial_import(
                 nwb_file_name,
                 self._failed_videos,
                 self._video_count,
-                imported,
+                self._placed_videos,
             )
 
         return entries

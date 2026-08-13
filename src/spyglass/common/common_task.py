@@ -236,8 +236,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
         # Config entries are scalar per device: {camera_id: int,
         # camera_name: str}. The previous implementation zipped the two, which
-        # inverted the mapping and raised TypeError on the int -- so a
-        # config-declared camera never resolved. Fixed while moving this here.
+        # inverted the mapping and raised TypeError on the int
         for device in self._file_config.get("CameraDevice") or []:
             if (camera_id := device.get("camera_id")) is not None:
                 camera_names[camera_id] = device.get("camera_name")
@@ -277,12 +276,11 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         task_key = entries[self][0]
         nwb_file_name = task_key["nwb_file_name"]
 
-        if camera_names := self._get_valid_camera_names(
+        task_key["camera_names"] = self._get_valid_camera_names(
             nwb_obj.camera_id,
             self._camera_names(nwb_file_name),
             context=f" in NWB file {nwb_file_name}",
-        ):
-            task_key["camera_names"] = camera_names
+        )
 
         if hasattr(nwb_obj, "task_environment"):
             task_key["task_environment"] = nwb_obj.task_environment
@@ -307,7 +305,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     def generate_entries_from_config(self, config, base_key=None):
         """Generate entries for tasks declared in the config file.
 
-        The config names tasks in its own shape -- a `Tasks` list of dicts --
+        The config names tasks in its own shape. A `Tasks` list of dicts,
         rather than as ready-made table keys, so this replaces the generic
         config handling rather than extending it.
         """
@@ -321,11 +319,11 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                 task_name=task.get("task_name"),
                 task_environment=task.get("task_environment", None),
             )
-            if camera_names := self._get_valid_camera_names(
+            task_key["camera_names"] = self._get_valid_camera_names(
                 task.get("camera_id", []),
                 self._camera_names(nwb_file_name),
-            ):
-                task_key["camera_names"] = camera_names
+                context=" in the config file",
+            )
 
             entries.extend(
                 self._process_task_epochs(
@@ -340,7 +338,10 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
     @classmethod
     def _get_valid_camera_names(cls, camera_ids, camera_names, context=""):
-        """Get valid camera names for given camera IDs.
+        """Resolve camera IDs to the camera names TaskEpoch stores.
+
+        `camera_names` is a required attribute, so an epoch that names no
+        camera gets an empty list rather than no value.
 
         Parameters
         ----------
@@ -349,28 +350,34 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         camera_names : dict
             Mapping of camera ID to camera name
         context : str, optional
-            Context string for warning message
+            Context string for the error message
 
         Returns
         -------
-        list or None
-            List of camera name dicts, or None if no valid cameras found
+        list
+            List of camera name dicts, empty if no camera was named.
+
+        Raises
+        ------
+        ValueError
+            If a named camera ID has no device in the file or the config. A
+            dangling reference is a data error, not something to skip.
         """
-        valid_camera_ids = [
+        camera_ids = [] if camera_ids is None else list(camera_ids)
+
+        if unresolved := [
             camera_id
             for camera_id in camera_ids
-            if camera_id in camera_names.keys()
-        ]
-        if valid_camera_ids:
-            return [
-                {"camera_name": camera_names[camera_id]}
-                for camera_id in valid_camera_ids
-            ]
-        if camera_ids:  # Only warn if camera_ids were specified
-            logger.warning(
-                f"No camera device found with ID {camera_ids}{context}\n"
+            if camera_id not in camera_names
+        ]:
+            raise ValueError(
+                f"No camera device found with ID {unresolved}{context}. "
+                + f"Known camera IDs: {sorted(camera_names)}\n"
             )
-        return None
+
+        return [
+            {"camera_name": camera_names[camera_id]} for camera_id in camera_ids
+        ]
 
     @classmethod
     def _process_task_epochs(

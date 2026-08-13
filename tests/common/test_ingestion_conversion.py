@@ -14,11 +14,13 @@ Two shapes of assertion, because the tables come in two shapes:
   by identity: the entries the mini file contributes must be present, with
   the values it specifies.
 
-Log output is deliberately not asserted anywhere: Phase 1 may change
+Log output is deliberately not asserted anywhere: the migration may change
 ingestion's verbosity, only not its consequences. When a conversion changes
 one of the values below, that *is* a behavior change -- update it in the same
 commit and say why in the PR description.
 """
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -293,8 +295,6 @@ def test_statescript_ignores_non_script_files(
     The description filter lives in `get_nwb_objects` via the mixin's
     `_source_nwb_object_description`, so selection is what to assert on.
     """
-    from types import SimpleNamespace
-
     from ndx_franklab_novela import AssociatedFiles
 
     script = AssociatedFiles(
@@ -352,3 +352,107 @@ def test_task_epoch_config_cameras_map_by_id(common):
     assert table._get_valid_camera_names([7], mapping) == [
         {"camera_name": "cam seven"}
     ], "A task referencing a config-declared camera should resolve it"
+
+
+def test_task_epoch_camera_less_epoch_is_kept(common, mini_copy_name):
+    """An epoch naming no camera stores an empty list, not nothing.
+
+    `camera_names` is required, so omitting it drops the whole TaskEpoch
+    entry -- and with it the VideoFile, StateScriptFile and
+    OptogeneticProtocol rows that reference the epoch.
+    """
+    table = common.TaskEpoch()
+
+    assert (
+        table._get_valid_camera_names([], {1: "cam one"}) == []
+    ), "A camera-less epoch should resolve to an empty list"
+
+    key = dict(
+        nwb_file_name=mini_copy_name,
+        epoch=1,
+        task_name="Sleep",
+        interval_list_name="01_s1",
+        camera_names=[],
+    )
+
+    assert table._adjust_keys_for_entry([key]) == [
+        key
+    ], "A camera-less epoch entry should survive key adjustment"
+
+
+def test_task_epoch_unresolved_camera_raises(common):
+    """A camera id with no device is a data error, not something to skip."""
+    with pytest.raises(ValueError):
+        common.TaskEpoch()._get_valid_camera_names([9], {1: "cam one"})
+
+
+def test_validate_duplicates_collapses_repeated_keys(common):
+    """Two objects naming the same novel parent yield one insert.
+
+    Entries are checked against the database, not against each other, so a
+    repeated novel key used to reach `insert(skip_duplicates=False)` twice
+    and abort the whole file with a DuplicateError.
+    """
+    task_tbl = common.Task()
+    task = dict(task_name="_dedup test task", task_description="repeated")
+
+    validated = common.TaskEpoch().validate_duplicates(
+        {task_tbl: [dict(task), dict(task)]}
+    )
+
+    assert validated[task_tbl] == [
+        task
+    ], "Repeated identical entries should collapse to one"
+
+
+def test_validate_duplicates_conflicting_keys_raise(common):
+    """Same key, different values, neither stored: nothing to defer to."""
+    import datajoint as dj
+
+    with pytest.raises(dj.errors.DuplicateError):
+        common.TaskEpoch().validate_duplicates(
+            {
+                common.Task(): [
+                    dict(task_name="_conflict test", task_description="a"),
+                    dict(task_name="_conflict test", task_description="b"),
+                ]
+            }
+        )
+
+
+def test_video_partial_import_counts_source_series(common, monkeypatch):
+    """A multi-epoch video must not mask a series that placed nowhere.
+
+    The report used to compare source-series count with generated-row count.
+    One video spanning two epochs yields two rows, so a second video that
+    placed nowhere left the two equal and its failure went unreported.
+    """
+    from collections import defaultdict
+
+    table = common.VideoFile()
+    table._epoch_cache = {"fake_.nwb": {1: None, 2: None}}
+    table._failed_videos = defaultdict(list)
+    table._video_count = 0
+    table._placed_videos = 0
+
+    def fake_validate(video_obj, valid_times, key):
+        if video_obj.name == "spans two epochs":
+            return [dict(key, video_file_num=0)], None, 1.0
+        return [], "no timestamp overlap with epoch", 0.0
+
+    monkeypatch.setattr(table, "_validate_video_timestamps", fake_validate)
+
+    base_key = {"nwb_file_name": "fake_.nwb"}
+    placed = table.generate_entries_from_nwb_object(
+        SimpleNamespace(name="spans two epochs"), dict(base_key)
+    )
+    table.generate_entries_from_nwb_object(
+        SimpleNamespace(name="placed nowhere"), dict(base_key)
+    )
+
+    assert len(placed[table]) == 2, "The first video should land in two epochs"
+    assert table._video_count == 2, "Both source series should be counted"
+    assert table._placed_videos == 1, "Only one source series was placed"
+    assert (
+        table._placed_videos < table._video_count
+    ), "A failed series must trigger the partial-import report"
