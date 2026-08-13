@@ -632,9 +632,9 @@ class AnalysisRegistry(dj.Manual):
         for table in tables:
             error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
-                # Raise instead of continuing: given the deterministic order
-                # above, a concurrent run has claimed this same first trigger,
-                # so the rest of the loop would only create triggers to undo.
+                # Raise instead of continuing: this may be a concurrent trigger
+                # claim or another DDL failure. Continuing would add more
+                # triggers to a partial, ambiguous acquisition.
                 raise RuntimeError(
                     f"Failed to block 1 table(s):\n{error}\nSome analysis "
                     "tables may remain blocked. Another cleanup may be active, "
@@ -727,6 +727,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         dry_run: bool = True,
         plan: CleanupPlan | None = None,
         *,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
         min_file_age_hours: float = 24.0,
         now_ns: Optional[int] = None,
     ) -> tuple[Set[Path], Set[Path]]:
@@ -751,6 +753,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             Report candidates without unlinking them. Defaults to True.
         plan : CleanupPlan, optional
             A previously scanned plan.
+        max_delete_fraction : float, optional
+            Maximum fraction of eligible files that may be deleted.
+        max_delete_to_tracked_ratio : float, optional
+            Maximum ratio of deletions to tracked files found in the scan.
         min_file_age_hours : float, optional
             Defer files newer than this based on target mtime. Defaults to 24
             hours; pass 0 for intentional immediate cleanup.
@@ -768,7 +774,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 min_file_age_hours=min_file_age_hours,
                 now_ns=now_ns,
             )
-        return plan.execute(dry_run=dry_run)
+        return plan.execute(
+            dry_run=dry_run,
+            max_delete_fraction=max_delete_fraction,
+            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+        )
 
     def _cleanup_custom_table(
         self,
@@ -876,11 +886,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         max_delete_to_tracked_ratio : float
             Maximum ratio of filesystem cleanup deletions to tracked analysis
             files found in the scan. At the default ``max_delete_fraction``
-            this limit cannot bind: both guards divide by the same tracked
-            count T, and ``delete / (delete + T) <= 0.9`` forces
-            ``delete / T <= 9``, so any plan that clears the fraction limit is
-            already within the ratio limit. It becomes the operative guard
-            only when ``max_delete_fraction`` is raised above 10/11 (~0.909).
+            this limit cannot bind: writing D for deletions and T for tracked
+            files, ``D / (D + T) <= 0.9`` forces ``D / T <= 9``, so any plan
+            that clears the fraction limit is already within the ratio limit.
+            It becomes the operative guard only when
+            ``max_delete_fraction`` is raised above 10/11 (~0.909).
             This limit applies only to
             filesystem deletion of untracked or empty analysis NWB files, not
             to orphan row deletion. Defaults to 10.0.
@@ -942,16 +952,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             untracked_file_plan = self._build_untracked_file_plan(
                 custom_tables, min_file_age_hours=min_file_age_hours
             )
-            plan_ok, plan_err = untracked_file_plan.validate(
-                max_delete_fraction=max_delete_fraction,
-                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-            )
-            if not plan_ok:
-                # Dry-run previews must surface refusal; real runs must abort.
-                if dry_run:
-                    logger.warning(f"Cleanup plan would be refused: {plan_err}")
-                else:
-                    raise RuntimeError(plan_err)
 
             # Delete files before database cleanup. Files newly orphaned by
             # this run's row deletion are caught on the next invocation. The
@@ -961,6 +961,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 custom_tables,
                 dry_run=dry_run,
                 plan=untracked_file_plan,
+                max_delete_fraction=max_delete_fraction,
+                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
             )
 
             # Process each custom analysis table.

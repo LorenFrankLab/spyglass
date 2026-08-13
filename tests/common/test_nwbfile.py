@@ -62,6 +62,15 @@ def _plan(table, custom_tables=(), *, min_age=0, now_ns=None):
     )
 
 
+def _destructive_plan(common_nwbfile, analysis_dir, tracked=()):
+    """Build a deletion plan with one real tracked file as its safety anchor."""
+    tracked_anchor = analysis_dir / "tracked_anchor.nwb"
+    tracked_anchor.write_text("tracked")
+    return _plan(
+        _table(common_nwbfile, analysis_dir, [tracked_anchor, *tracked])
+    )
+
+
 def test_add_to_lock(common_nwbfile, lockfile, mini_copy_name):
     common_nwbfile.Nwbfile.add_to_lock(mini_copy_name)
     assert mini_copy_name in lockfile.read_text()
@@ -213,7 +222,7 @@ def test_leaf_symlink_deletes_cross_volume_target_and_leaf(
     leaf = analysis_dir / "external.nwb"
     leaf.symlink_to(target)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     plan.execute(dry_run=False)
 
     assert not target.exists()
@@ -246,7 +255,7 @@ def test_broken_leaf_removes_only_the_leaf(common_nwbfile, tmp_path):
     leaf = analysis_dir / "missing.nwb"
     leaf.symlink_to(missing)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     assert plan.broken_links == {missing.resolve()}
 
     plan.execute(dry_run=False)
@@ -265,7 +274,7 @@ def test_vanished_live_target_still_removes_leaf(common_nwbfile, tmp_path):
     leaf = analysis_dir / "external.nwb"
     leaf.symlink_to(target)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     target.unlink()
     plan.execute(dry_run=False)
 
@@ -284,7 +293,7 @@ def test_cyclic_leaf_symlinks_are_removed(
     for index, leaf in enumerate(leaves):
         leaf.symlink_to(leaves[(index + 1) % cycle_length].name)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     plan.execute(dry_run=False)
 
     assert not any(leaf.is_symlink() for leaf in leaves)
@@ -301,7 +310,7 @@ def test_cleanup_follows_symlinked_directories(common_nwbfile, tmp_path):
     directory_link = analysis_dir / "remote_volume"
     directory_link.symlink_to(external_dir, target_is_directory=True)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     assert plan.files_to_delete == {external_file.resolve()}
 
     plan.execute(dry_run=False)
@@ -364,7 +373,7 @@ def test_duplicate_aliases_delete_target_once_and_remove_all_leaves(
     first.symlink_to(target)
     second.symlink_to(target)
 
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
     assert plan.files_to_delete == {target.resolve()}
 
     plan.execute(dry_run=False)
@@ -389,6 +398,7 @@ def test_dry_run_reports_logical_bytes_without_deleting(
     assert files == {candidate.resolve()}
     assert candidate.exists()
     assert plan.candidate_bytes == 5
+    assert "Cleanup plan would be refused" in caplog.text
     assert "5 logical candidate bytes" in caplog.text
 
 
@@ -413,7 +423,7 @@ def test_unlink_error_is_logged_and_other_candidates_continue(
     removable = analysis_dir / "removable.nwb"
     blocked.write_text("blocked")
     removable.write_text("removable")
-    plan = _plan(_table(common_nwbfile, analysis_dir))
+    plan = _destructive_plan(common_nwbfile, analysis_dir)
 
     real_unlink = Path.unlink
 
@@ -471,6 +481,29 @@ def test_plan_refuses_deletion_with_no_local_tracked_files(
 
     assert not accepted
     assert "no tracked analysis files" in reason
+    with pytest.raises(RuntimeError, match="no tracked analysis files"):
+        plan.execute(dry_run=False)
+    assert candidate.exists()
+
+
+def test_absent_tracked_path_does_not_dilute_deletion_fraction(
+    common_nwbfile, tmp_path
+):
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    tracked = analysis_dir / "tracked.nwb"
+    tracked.write_text("tracked")
+    missing_tracked = analysis_dir / "missing.nwb"
+    for index in range(2):
+        (analysis_dir / f"candidate_{index}.nwb").write_text("candidate")
+
+    plan = _plan(
+        _table(common_nwbfile, analysis_dir, [tracked, missing_tracked])
+    )
+    accepted, reason = plan.validate(max_delete_fraction=0.5)
+
+    assert not accepted
+    assert "2/3 eligible analysis files" in reason
 
 
 @pytest.mark.parametrize(
@@ -500,13 +533,20 @@ def _configure_cleanup(
     registry,
     events,
     validation=(True, None),
+    execution_limits=None,
 ):
     class _Plan:
-        def validate(self, **kwargs):
-            events.append("validate")
-            return validation
-
-        def execute(self, *, dry_run):
+        def execute(self, *, dry_run, **kwargs):
+            if execution_limits is not None:
+                execution_limits.update(kwargs)
+            accepted, reason = validation
+            if not accepted:
+                if dry_run:
+                    common_nwbfile.logger.warning(
+                        f"Cleanup plan would be refused: {reason}"
+                    )
+                else:
+                    raise RuntimeError(reason)
             events.append("files")
             return set(), set()
 
@@ -532,6 +572,7 @@ def test_cleanup_coordinates_block_files_database_and_unblock(
     common_nwbfile, monkeypatch
 ):
     events = []
+    execution_limits = {}
 
     class _Registry:
         all_classes = []
@@ -542,20 +583,51 @@ def test_cleanup_coordinates_block_files_database_and_unblock(
         def unblock_new_inserts(self):
             events.append("unblock")
 
-    _configure_cleanup(common_nwbfile, monkeypatch, _Registry(), events)
+    _configure_cleanup(
+        common_nwbfile,
+        monkeypatch,
+        _Registry(),
+        events,
+        execution_limits=execution_limits,
+    )
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
 
-    table.cleanup(dry_run=False)
+    table.cleanup(
+        dry_run=False,
+        max_delete_fraction=0.8,
+        max_delete_to_tracked_ratio=2.0,
+    )
 
     assert events == [
         "block",
         "orphans",
         "plan",
-        "validate",
         "files",
         "external",
         "unblock",
     ]
+    assert execution_limits == {
+        "max_delete_fraction": 0.8,
+        "max_delete_to_tracked_ratio": 2.0,
+    }
+
+
+def test_cleanup_rejects_nan_before_installing_triggers(
+    common_nwbfile, monkeypatch
+):
+    events = []
+
+    class _Registry:
+        def block_new_inserts(self, dry_run):
+            events.append("block")
+
+    monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: _Registry())
+    table = object.__new__(common_nwbfile.AnalysisNwbfile)
+
+    with pytest.raises(ValueError, match="max_delete_fraction"):
+        table.cleanup(dry_run=False, max_delete_fraction=float("nan"))
+
+    assert events == []
 
 
 def test_cleanup_refuses_destructive_invalid_plan(common_nwbfile, monkeypatch):
@@ -582,7 +654,7 @@ def test_cleanup_refuses_destructive_invalid_plan(common_nwbfile, monkeypatch):
     with pytest.raises(RuntimeError, match="unsafe plan"):
         table.cleanup(dry_run=False)
 
-    assert events == ["block", "orphans", "plan", "validate", "unblock"]
+    assert events == ["block", "orphans", "plan", "unblock"]
 
 
 def test_cleanup_dry_run_warns_and_continues_invalid_plan(
@@ -616,7 +688,6 @@ def test_cleanup_dry_run_warns_and_continues_invalid_plan(
         "block",
         "orphans",
         "plan",
-        "validate",
         "files",
         "external",
     ]
@@ -751,3 +822,58 @@ def test_block_new_inserts_stops_after_partial_acquisition_failure(
         registry.block_new_inserts(dry_run=False)
 
     assert attempted == ["db.`t1`", "db.`t2`"]
+
+
+def test_unblock_new_inserts_skips_absent_and_aggregates_drop_errors(
+    common_nwbfile, monkeypatch
+):
+    registry = object.__new__(common_nwbfile.AnalysisRegistry)
+    tables = ["present", "absent", "broken_one", "broken_two", "after"]
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "fetch",
+        lambda self, *args, **kwargs: tables,
+    )
+    checked = []
+
+    def block_exists(self, table):
+        checked.append(table)
+        return table != "absent"
+
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_block_exists",
+        block_exists,
+    )
+    monkeypatch.setattr(
+        common_nwbfile.AnalysisRegistry,
+        "_get_block_info",
+        lambda self, table: ("db", f"{table}_trigger"),
+    )
+
+    drops = []
+
+    class _Connection:
+        def query(self, statement):
+            drops.append(statement)
+            if "broken_one" in statement:
+                raise RuntimeError("first drop failed")
+            if "broken_two" in statement:
+                raise RuntimeError("second drop failed")
+
+    monkeypatch.setattr(common_nwbfile.dj, "conn", lambda: _Connection())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        registry.unblock_new_inserts()
+
+    error = str(exc_info.value)
+    assert "Failed to unblock 2 table(s)" in error
+    assert "Failed to unblock broken_one: first drop failed" in error
+    assert "Failed to unblock broken_two: second drop failed" in error
+    assert checked == tables
+    assert drops == [
+        "DROP TRIGGER db.present_trigger;",
+        "DROP TRIGGER db.broken_one_trigger;",
+        "DROP TRIGGER db.broken_two_trigger;",
+        "DROP TRIGGER db.after_trigger;",
+    ]

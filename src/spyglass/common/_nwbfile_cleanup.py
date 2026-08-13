@@ -113,10 +113,10 @@ class CleanupPlan:
         walker: Optional[Callable[[], Iterable[Path]]] = None,
     ):
         self.analysis_dir = Path(analysis_dir).expanduser().resolve()
-        self.tracked_files = {
+        self.tracked_files = frozenset(
             Path(os.path.realpath(Path(path).expanduser()))
             for path in tracked_files
-        }
+        )
         self.logger = logger
         self.min_file_age_hours = _check_number(
             "min_file_age_hours", min_file_age_hours, minimum=0
@@ -126,7 +126,7 @@ class CleanupPlan:
             lambda: self.walk_analysis_files(self.analysis_dir, self.logger)
         )
 
-        self.scanned_files: Set[Path] = set()
+        self.scanned_files: frozenset[Path] = frozenset()
         self.files_to_delete: Set[Path] = set()
         self.empty_files: Set[Path] = set()
         self.untracked_files: Set[Path] = set()
@@ -151,7 +151,7 @@ class CleanupPlan:
                 continue
             grouped.setdefault(snapshot.resolved_path, []).append(snapshot)
 
-        self.scanned_files = set(grouped)
+        self.scanned_files = frozenset(grouped)
         minimum_age_ns = int(self.min_file_age_hours * 60 * 60 * 1e9)
         for resolved_path, snapshots in grouped.items():
             if resolved_path in self.tracked_files:
@@ -212,7 +212,7 @@ class CleanupPlan:
 
     @property
     def candidate_bytes(self) -> int:
-        """Logical bytes represented by unique live candidate targets."""
+        """Logical bytes recorded for unique candidate target groups."""
         return sum(
             max(item.size for item in snapshots)
             for snapshots in self._candidates.values()
@@ -234,7 +234,9 @@ class CleanupPlan:
             minimum=0,
         )
 
-        delete_count = len(self.files_to_delete)
+        # Validate the private candidate mapping consumed by ``execute()``,
+        # rather than a public reporting set that a caller could mutate.
+        delete_count = len(self._candidates)
         if delete_count == 0:
             return True, None
 
@@ -268,8 +270,19 @@ class CleanupPlan:
             )
         return True, None
 
-    def execute(self, *, dry_run: bool = True) -> Tuple[Set[Path], Set[Path]]:
+    def execute(
+        self,
+        *,
+        dry_run: bool = True,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+    ) -> Tuple[Set[Path], Set[Path]]:
         """Report or unlink the candidates captured by this plan.
+
+        Destructive execution validates the plan immediately before unlinking,
+        so callers cannot accidentally bypass the aggregate deletion limits.
+        A dry run still reports a plan that would be refused, but warns that
+        destructive execution would not proceed.
 
         The recorded target is used instead of resolving a symlink again at
         execution time.  This keeps execution deterministic without adding
@@ -277,6 +290,18 @@ class CleanupPlan:
         Ordinary unlink failures are logged and cleanup continues, matching
         existing Spyglass cleanup routines.
         """
+        plan_ok, plan_error = self.validate(
+            max_delete_fraction=max_delete_fraction,
+            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+        )
+        if not plan_ok:
+            if dry_run:
+                self.logger.warning(
+                    f"Cleanup plan would be refused: {plan_error}"
+                )
+            else:
+                raise RuntimeError(plan_error)
+
         if self.deferred_recent_files:
             self.logger.info(
                 f"  {len(self.deferred_recent_files)} untracked files "
@@ -284,11 +309,11 @@ class CleanupPlan:
                 f"{self.min_file_age_hours} hours"
             )
         self.logger.info(
-            f"  {len(self.files_to_delete)} untracked or empty analysis "
+            f"  {len(self._candidates)} untracked or empty analysis "
             f"files ({self.candidate_bytes} logical candidate bytes)"
         )
         if dry_run:
-            return set(self.files_to_delete), set(self.tracked_files)
+            return set(self._candidates), set(self.tracked_files)
 
         for target, snapshots in sorted(
             self._candidates.items(), key=lambda item: str(item[0])
@@ -304,7 +329,7 @@ class CleanupPlan:
                 if snapshot.is_link and snapshot.path != target:
                     self._unlink(snapshot.path)
 
-        return set(self.files_to_delete), set(self.tracked_files)
+        return set(self._candidates), set(self.tracked_files)
 
     def _unlink(self, path: Path) -> bool:
         try:
