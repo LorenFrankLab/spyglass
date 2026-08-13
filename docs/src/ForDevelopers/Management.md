@@ -338,7 +338,7 @@ The cleanup system handles:
 - **Uninserted files**: Files created but never added to tables
 - **Multi-table coordination**: Works across common and all custom
     `AnalysisNwbfile` tables
-- **Empty files**: Files with 0 bytes are automatically removed
+- **Empty files**: Old, untracked NWB files with 0 bytes are removed
 
 ### Running Cleanup
 
@@ -354,9 +354,8 @@ AnalysisNwbfile().cleanup(dry_run=True)
 AnalysisNwbfile().cleanup(dry_run=False)
 ```
 
-The dry run reports aggregate target counts rather than a per-path manifest.
-The destructive pass repeats its tracking, identity, and protected-store checks,
-so a candidate counted in the preview can still be skipped or refused.
+The dry run reports aggregate target counts and logical candidate bytes rather
+than a per-path manifest.
 
 **Important**: Cleanup automatically coordinates across all custom
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
@@ -368,40 +367,35 @@ operation treats the analysis directory as a managed resource.
 
 ### How It Works
 
-Cleanup discovers common and custom analysis tables, snapshots tracked paths and
-the filesystem, validates the complete deletion plan, and then rechecks each
-candidate before unlinking it. It next removes orphan rows and unused DataJoint
-external entries. Files made orphaned by that database phase are handled on the
-next run.
+Cleanup discovers common and custom analysis tables, snapshots tracked paths
+once, scans the filesystem, validates the complete deletion plan, and unlinks
+the candidates. It next removes orphan rows and unused DataJoint external
+entries. Files made orphaned by that database phase are handled on the next run.
 
 ### Safety Features
 
-- **Tracked and recent files are retained**: tracking is checked across all
-    registered common and custom tables, including filesystem aliases. Files
-    newer than `min_file_age_hours` (default 24) are deferred and reported. Pass
-    `min_file_age_hours=0` only for intentional immediate cleanup. This age gate
-    applies to the `*.nwb` filesystem sweep, not DataJoint's custom-table
-    external cleanup later in the run.
+- **Tracked and recent files are retained**: tracked paths are fetched once
+    across all registered common and custom tables. Files newer than
+    `min_file_age_hours` (default 24), based on target modification time, are
+    deferred and reported. Pass `min_file_age_hours=0` only for intentional
+    immediate cleanup. This age gate applies to the `*.nwb` filesystem sweep,
+    not DataJoint's custom-table external cleanup later in the run.
 - **Deletion limits catch a wrong directory or large unexpected backlog**:
     destructive cleanup refuses a plan above `max_delete_fraction` (default
     0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
     untracked or empty analysis NWB files; foreign keys continue to govern
     orphan-row deletion.
-- **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
-    `*.nwb` leaf symlink authorizes deletion of both its regular-file target and
-    the link. Tracked or recent links are retained, dangling links lose only the
-    link, and directory symlinks are not followed.
-- **Other configured stores are protected**: targets beneath raw, recording,
-    sorting, video, waveforms, temp, export, Kachery, DLC, or MoSeq roots are
-    refused, including access through filesystem aliases. If a configured
-    protected root cannot be resolved and inspected as a directory, destructive
-    cleanup fails closed before unlinking anything.
-- **State is rechecked at deletion time**: cleanup skips files that have become
-    tracked and requires the authorizing link and target identities to match the
-    plan. Successful external target deletions are logged with their path and
-    size. Because a leaf inside `analysis_dir` can authorize deletion of an
-    otherwise unprotected external target, restrict write access to
-    `analysis_dir`.
+- **Symlinks reclaim cross-volume analysis storage**: an old, untracked
+    `*.nwb` leaf symlink authorizes deletion of both its recorded regular-file
+    target and the link. Dangling links lose only the link. Symlinked directories
+    are traversed too, so their `*.nwb` contents join the same cleanup pass;
+    directory cycles are visited only once.
+- **The analysis directory is trusted**: cleanup intentionally follows the
+    normal Spyglass snapshot-and-delete model rather than defending against
+    concurrent filesystem or database changes. A link below `analysis_dir` can
+    authorize deletion outside that directory, including beneath another
+    configured store. Restrict write access to the analysis tree and do not run
+    cleanup concurrently with analysis writers or registration.
 - **Insert blocking refuses ambiguous ownership**: cleanup checks registered
     analysis tables for existing blockers before proceeding; a destructive run
     then installs temporary `BEFORE INSERT` triggers. If a blocker already
@@ -413,9 +407,8 @@ next run.
 
 **Concurrency limit**: the trigger check is not a database-wide cleanup lease,
 and triggers do not carry per-run ownership. Do not overlap cleanup runs.
-Tracking/identity validation and filesystem unlink are also separate operations,
-so do not concurrently mutate eligible analysis paths. A shared cleanup/writer
-protocol is required to make that check-to-unlink window atomic.
+The tracked-path and filesystem snapshots can also become stale before unlink,
+so do not concurrently register or mutate eligible analysis paths.
 
 ### Custom Tables
 

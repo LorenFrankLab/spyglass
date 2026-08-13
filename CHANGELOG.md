@@ -209,18 +209,18 @@ for label, interval_data in results.groupby("interval_labels"):
     shared/production filesystems #1573 #1574
 - `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
     targets, so analysis files spread across volumes are cleaned in one pass.
-    The sweep has a 24-hour minimum age, deletion limits, act-time tracking and
-    identity checks, and fail-closed protection for every other configured
-    Spyglass, Kachery, DLC, and MoSeq store. Successful cross-volume deletions
-    are logged; directory symlinks are not followed #1573 #1574
+    It also scans through symlinked analysis directories, with cycle detection,
+    so an external analysis tree participates in the same pass. The sweep uses
+    the same trust-the-disk model as other Spyglass cleanup routines: one
+    tracked-path/filesystem snapshot, a 24-hour `mtime` gate, aggregate deletion
+    limits, dry-run reporting, and ordinary unlink error logging #1573 #1574
 - Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
     the files the sweep was eligible to act on #1573 #1574
 - Analysis cleanup, including a dry-run preview, refuses a pre-existing
     insert-blocking trigger, which may represent an active cleanup or stale
     state. Confirm no cleanup is active before using
     `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
-    lease or per-run trigger-ownership protocol, and final filesystem validation
-    remains separate from unlink #1574
+    lease or per-run trigger-ownership protocol #1574
 - Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
     analysis file, which left a dangling DataJoint row (pre-existing)
 - Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`

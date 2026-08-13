@@ -1,9 +1,7 @@
 import os
 import re
-import stat as stat_module
-import time
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Set, Union
 
 import datajoint as dj
 import h5py
@@ -13,24 +11,14 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
-from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
 
-# CleanupCandidate is re-exported (constructed as common_nwbfile.CleanupCandidate
-# in tests) even though this module's own code no longer references it directly.
 from spyglass.common._nwbfile_cleanup import (
-    AccessSnapshot,
-    CleanupCandidate,
-    CleanupExecutor,
     CleanupPlan,
-    CleanupPlanner,
-    TargetSnapshot,
     _check_number,
-    _PhysicalRoot,
-    _TrackedFileState,
 )
-from spyglass.settings import analysis_dir, config, raw_dir
+from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -705,23 +693,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     # See #630, #664. Excessive key length.
 
     def _walk_analysis_files(self) -> Iterator[Path]:
-        """Delegate to :meth:`CleanupPlanner._walk_analysis_files`.
-
-        Kept on the schema as the injection point and the test monkeypatch
-        seam (``test_custom_analysis`` patches this to fence a concurrent
-        session's files out of candidacy).
-        """
-        return CleanupPlanner._walk_analysis_files(self._analysis_dir)
-
-    def _snapshot_entry(
-        self, access_path: Path
-    ) -> Optional[Tuple[Path, Optional[TargetSnapshot], AccessSnapshot]]:
-        """Delegate to :meth:`CleanupPlanner._snapshot_entry`.
-
-        Kept on the schema as the injected ``snapshotter``; supplies the
-        Spyglass logger so per-entry skip warnings are unchanged.
-        """
-        return CleanupPlanner._snapshot_entry(access_path, logger)
+        """Yield NWB leaves, including those under symlinked directories."""
+        yield from CleanupPlan.walk_analysis_files(
+            Path(self._analysis_dir), logger
+        )
 
     def _build_untracked_file_plan(
         self,
@@ -730,40 +705,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         min_file_age_hours: float = 24.0,
         now_ns: Optional[int] = None,
     ) -> CleanupPlan:
-        """Build a cleanup plan for untracked or empty analysis NWB files.
+        """Snapshot tracked paths once and scan the analysis directory."""
+        tracked = set()
+        for table in [self, *custom_tables]:
+            tracked.update(
+                Path(path) for _, path in table._ext_tbl.fetch_external_paths()
+            )
 
-        Parameters
-        ----------
-        custom_tables : list
-            Custom analysis table instances whose tracked files count as
-            tracked here.
-        min_file_age_hours : float, optional
-            Candidates whose target or any access alias is newer than this
-            are deferred. Defaults to 24.0. Pass 0 to disable.
-        now_ns : int, optional
-            Injected clock in nanoseconds. Defaults to ``time.time_ns()``.
-            Tests must inject: ``os.utime`` cannot backdate ``ctime``, so a
-            real file always reads as new under ``max(mtime, ctime)``.
-
-        Returns
-        -------
-        CleanupPlan
-        """
-        planner = CleanupPlanner(
-            # _walk_analysis_files is called through the bound method so its
-            # test monkeypatch still applies; the tqdm wrapper stays here to
-            # keep CleanupPlanner stdlib-only.
-            walker=lambda: tqdm(
-                self._walk_analysis_files(),
-                desc="Scanning analysis files  ",  # extra spaces for alignment
-            ),
-            snapshotter=self._snapshot_entry,
-            tracking_state_fn=self._current_tracked_state,
+        return CleanupPlan(
+            self._analysis_dir,
+            tracked,
             logger=logger,
             min_file_age_hours=min_file_age_hours,
             now_ns=now_ns,
+            walker=self._walk_analysis_files,
         )
-        return planner.build(custom_tables)
 
     @staticmethod
     def _validate_cleanup_plan(
@@ -772,176 +728,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
     ) -> tuple[bool, str | None]:
-        """Delegate to :meth:`CleanupPlan.validate`.
-
-        Retained as a thin wrapper so existing callers -- and tests that call
-        ``AnalysisNwbfile._validate_cleanup_plan(plan, ...)`` directly -- keep
-        working while the policy check itself lives on ``CleanupPlan``.
-        """
+        """Check the plan's aggregate deletion limits."""
         return plan.validate(
             max_delete_fraction=max_delete_fraction,
             max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-        )
-
-    @staticmethod
-    def _current_custom_tables(
-        snapshot: List[SpyglassAnalysis],
-    ) -> List[SpyglassAnalysis]:
-        """Re-read registry membership, unioned with the initial snapshot.
-
-        The insert-blocking triggers only cover tables that existed when the
-        triggers were installed, so a custom table declared mid-cleanup is
-        invisible to them and its files would otherwise read as untracked.
-
-        A refresh failure is **fatal**, not a fallback: falling back to the
-        snapshot is safe only if the snapshot is a superset of live
-        membership, which is exactly false in the case this refresh exists
-        to catch. Aborting leaves files in place; guessing deletes them.
-
-        The result is the union of the snapshot and live registry classes,
-        deduplicated by ``full_table_name``, so a table can only ever be
-        added to the tracked set, never dropped from it.
-        """
-        live = list(AnalysisRegistry().all_classes)  # let errors propagate
-        merged = {}
-        for tbl in list(snapshot) + live:
-            merged[tbl.full_table_name] = tbl
-        return list(merged.values())
-
-    @staticmethod
-    def _other_managed_roots() -> List[_PhysicalRoot]:
-        """Spyglass stores that analysis cleanup must never delete from.
-
-        ``tracked`` is built from the *analysis* external store only, so a
-        file belonging to another store reads as untracked. Without this,
-        a stray ``ln -s $SPYGLASS_RAW_DIR/sub-x.nwb analysis/copy.nwb``
-        would let the weekly sweep delete a raw acquisition file, which is
-        not recomputable. Every non-analysis Spyglass store is protected,
-        not only the acquisition stores: the analysis registry cannot
-        establish ownership of any of them, so each is refused regardless of
-        whether its contents are recomputable. Checked by path containment
-        rather than by unioning the other stores' externals, so it costs no
-        queries.
-
-        Every configured root is resolved and stat'd. Its directory identity
-        lets the containment check recognize case variants and alternate
-        names of the configured root itself (including a whole-root bind
-        mount), while still allowing a separate hard link outside the store
-        to be unlinked. Any resolution or inspection failure aborts cleanup.
-        A missing configured spelling can represent an unavailable mount while
-        the same storage remains reachable through another alias; silently
-        omitting it would disable the corresponding guard.
-        """
-        excluded = {"SPYGLASS_BASE_DIR", "SPYGLASS_ANALYSIS_DIR"}
-        configured_roots = sorted(
-            (key, value)
-            for key, value in config.items()
-            if isinstance(key, str)
-            and key.endswith("_DIR")
-            and key not in excluded
-            and value
-        )
-
-        roots = []
-        for setting_name, setting in configured_roots:
-            store_name = setting_name.removesuffix("_DIR").lower()
-            if store_name.startswith("spyglass_"):
-                store_name = store_name.removeprefix("spyglass_")
-            try:
-                path = Path(setting).expanduser().resolve()
-                root_stat = os.stat(path)
-                if not stat_module.S_ISDIR(root_stat.st_mode):
-                    raise NotADirectoryError(
-                        f"protected store root is not a directory: {path}"
-                    )
-                roots.append(
-                    _PhysicalRoot(
-                        name=store_name,
-                        path=path,
-                        dev=root_stat.st_dev,
-                        ino=root_stat.st_ino,
-                    )
-                )
-            except (OSError, RuntimeError, TypeError, ValueError) as err:
-                raise RuntimeError(
-                    "Cannot resolve protected Spyglass "
-                    f"{store_name} store root {setting!r}; refusing "
-                    "analysis cleanup"
-                ) from err
-        return roots
-
-    def _current_tracked_state(
-        self, custom_tables: List[SpyglassAnalysis]
-    ) -> _TrackedFileState:
-        """Re-fetch paths and identities for every tracked analysis file.
-
-        A candidate is keyed by its resolved target, while DataJoint stores
-        the access path used for registration. A file can therefore become
-        tracked after the scan through a *new* alias that is absent from the
-        candidate's access snapshots. Exact restrictions on those snapshots
-        miss that registration and can delete its target. Resolved paths
-        preserve the behavior for missing entries; target and leaf identities
-        additionally recognize hard links, case variants, and mount aliases.
-
-        Registry and external-table errors deliberately propagate. Failing
-        closed may under-clean; falling back to stale tracking can delete a
-        newly registered file. Missing paths are normal stale external state,
-        so they retain their resolved-path fallback without an identity.
-        """
-        tracked = _TrackedFileState(set(), set(), set())
-        for tbl in [self, *custom_tables]:
-            for _, path in tbl._ext_tbl.fetch_external_paths():
-                access_path = Path(path).expanduser()
-                try:
-                    resolved = access_path.resolve()
-                except (OSError, RuntimeError) as err:
-                    raise RuntimeError(
-                        "Cannot resolve tracked analysis path "
-                        f"{access_path}; refusing analysis cleanup"
-                    ) from err
-                tracked.resolved_paths.add(resolved)
-
-                try:
-                    access_stat = os.lstat(access_path)
-                except FileNotFoundError:
-                    continue
-                except OSError as err:
-                    raise RuntimeError(
-                        "Cannot inspect tracked analysis path "
-                        f"{access_path}; refusing analysis cleanup"
-                    ) from err
-                tracked.access_identities.add(
-                    (access_stat.st_dev, access_stat.st_ino)
-                )
-
-                try:
-                    target_stat = os.stat(access_path)
-                except FileNotFoundError:
-                    # A dangling tracked symlink has a live leaf identity but
-                    # no target identity. A path that vanished between lstat
-                    # and stat is likewise safe to treat as missing.
-                    continue
-                except OSError as err:
-                    raise RuntimeError(
-                        "Cannot inspect target of tracked analysis path "
-                        f"{access_path}; refusing analysis cleanup"
-                    ) from err
-                tracked.target_identities.add(
-                    (target_stat.st_dev, target_stat.st_ino)
-                )
-        return tracked
-
-    @staticmethod
-    def _access_still_matches(
-        access: AccessSnapshot, *, analysis_root: Path
-    ) -> bool:
-        """Delegate to :meth:`CleanupExecutor._access_still_matches`.
-
-        Kept on the schema as the injected ``access_validator`` and the
-        direct-test seam.
-        """
-        return CleanupExecutor._access_still_matches(
-            access, analysis_root=analysis_root
         )
 
     def _remove_untracked_files(
@@ -953,73 +743,45 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         min_file_age_hours: float = 24.0,
         now_ns: Optional[int] = None,
     ) -> tuple[Set[Path], Set[Path]]:
-        """Remove analysis files that are empty (0 bytes) or not tracked.
+        """Remove empty or untracked analysis files.
 
-        WARNING: This function makes `analysis_dir` a privileged directory.
-        An in-root ``*.nwb`` symlink authorizes deletion of its resolved target
-        on another volume when that target is not tracked in ANY schema
-        externals. Both the live alias destination and target identity are
-        re-verified during the final validation before deletion. Validation
-        and unlink are separate filesystem operations; callers must prevent
-        concurrent writers from mutating eligible paths during cleanup.
+        A lowercase *.nwb leaf inside analysis_dir is a managed pointer. For an
+        untracked symlink, cleanup deletes the target recorded during the scan
+        -- including a target on another volume -- and then removes the leaf.
+        Symlinked directories are traversed, allowing an external analysis tree
+        to participate in the same cleanup pass.
 
-        NOTE: Subprocess would be faster, but this prioritizes cross-platform
-        compatibility.
+        Cleanup follows the usual Spyglass trust-the-disk model: tracked paths
+        and filesystem candidates are each captured once. It does not defend
+        against concurrent registration or filesystem mutation between scan
+        and unlink. Do not run cleanup while analysis files are being written.
 
         Parameters
         ----------
-        dry_run : bool, optional
-            If True, return the plan's resolved candidate target paths.
-            Defaults to True. This is not an exact unlink manifest: protected-
-            store and per-candidate re-checks run only on the real deletion
-            path, so some candidates may ultimately be refused, while applying
-            an accepted symlink candidate also unlinks its authorizing leaf
-            symlink even though that access path is not in the returned set.
         custom_tables : list
-            List of custom analysis table instances to check for tracked files.
+            Custom analysis tables included in the tracked-path snapshot.
+        dry_run : bool, optional
+            Report candidates without unlinking them. Defaults to True.
         plan : CleanupPlan, optional
-            Precomputed cleanup plan. If omitted, the directory is scanned.
+            A previously scanned plan.
         min_file_age_hours : float, optional
-            Minimum age of the target and every access alias for a candidate to
-            be eligible; younger candidates are deferred. Defaults to 24.0. Pass
-            0 to disable. Re-checked at act time.
+            Defer files newer than this based on target mtime. Defaults to 24
+            hours; pass 0 for intentional immediate cleanup.
         now_ns : int, optional
-            Injected clock in nanoseconds for the act-time age recheck. Defaults
-            to ``time.time_ns()``.
+            Clock value injected by tests.
 
         Returns
         -------
-        tuple[Set[Path], Set[Path]]
-            ``(candidate_target_paths, tracked_files)``. The first set is the
-            plan's candidate targets in both modes: an over-approximation of
-            what a real run deletes (candidates can still be refused at act
-            time) and an under-approximation of the leaves unlinked (an accepted
-            symlink candidate also removes its authorizing leaf).
+        tuple[set[pathlib.Path], set[pathlib.Path]]
+            Candidate targets and the tracked-path snapshot.
         """
-
         if plan is None:
             plan = self._build_untracked_file_plan(
                 custom_tables,
                 min_file_age_hours=min_file_age_hours,
                 now_ns=now_ns,
             )
-
-        # Wire the DataJoint-coupled pieces into the schema-agnostic executor:
-        # tracked-state and registry refreshes, the protected-root snapshot,
-        # and per-leaf re-validation. _other_managed_roots and
-        # _access_still_matches stay methods here so their test seams hold.
-        executor = CleanupExecutor(
-            plan,
-            analysis_dir=self._analysis_dir,
-            tracking_refresher=self._current_tracked_state,
-            registry_refresher=self._current_custom_tables,
-            managed_roots_fn=self._other_managed_roots,
-            access_validator=self._access_still_matches,
-            logger=logger,
-            min_file_age_hours=min_file_age_hours,
-            now_ns=now_ns,
-        )
-        return executor.execute(custom_tables, dry_run=dry_run)
+        return plan.execute(dry_run=dry_run)
 
     def _cleanup_custom_table(
         self,
@@ -1088,8 +850,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         Process:
             1. Discover custom tables and snapshot filesystem/tracking state.
             2. Validate the complete untracked-file deletion plan.
-            3. Re-check tracking, age, alias authority, and target identity;
-               then delete eligible filesystem candidates.
+            3. Delete eligible filesystem candidates from that snapshot.
             4. For each custom analysis table:
                a. Delete orphaned entries (no downstream references)
                b. Clean up unused external file entries
@@ -1141,7 +902,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             rather than deleted, protecting work that exists on disk but is
             not yet registered -- notably a file written to another volume
             and symlinked in before its row is inserted. Defaults to 24.0.
-            Pass 0 only for intentional immediate cleanup.
+            The target modification time is the age basis. Pass 0 only for
+            intentional immediate cleanup.
 
         Raises
         ------
@@ -1149,9 +911,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             If a numeric safety limit is non-finite or outside its bounds.
         RuntimeError
             If insert blocking or unblocking fails, a destructive plan is
-            refused or malformed, or a filesystem deletion fails. Registry,
-            external-table, and filesystem inspection errors also propagate
-            so destructive cleanup fails closed.
+            refused, or registry/database cleanup fails.
         """
         # Validate before anything happens. An unvalidated NaN or inf would
         # make every comparison False and silently disable the guard.
@@ -1207,11 +967,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 else:
                     raise RuntimeError(plan_err)
 
-            # Delete files BEFORE database cleanup, shortening the
-            # validate-to-act window for the filesystem sweep. Files newly
-            # orphaned by this run's row deletion are caught on the next
-            # invocation. Note this deferral applies only to the untracked
-            # sweep: custom-table externals are still deleted below.
+            # Delete files before database cleanup. Files newly orphaned by
+            # this run's row deletion are caught on the next invocation.
             _ = self._remove_untracked_files(
                 custom_tables,
                 dry_run=dry_run,
