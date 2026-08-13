@@ -307,6 +307,11 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Clear a file's existing `InsertError` rows at the start of
+        `populate_all_common`, so a rerun no longer reports or rolls back on
+        failures logged by an earlier attempt #1497
     - `PositionSource` ingestion is now responsible for `RawPosition` #1660
 
 - Decoding
@@ -370,6 +375,8 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `SortGroup.set_group_by_shank` to support non-numeric
+        `electrode_group_name`s by falling back to lexicographic ordering #1624
     - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
