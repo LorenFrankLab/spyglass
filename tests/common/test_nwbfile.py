@@ -246,6 +246,26 @@ def test_analysis_cleanup_plan_accepts_ratio_at_threshold(common_nwbfile):
     assert (ok, msg) == (True, None)
 
 
+def test_validate_rejects_nonfinite_limits(common_nwbfile):
+    """CleanupPlan.validate self-guards its limits against NaN/inf/bool.
+
+    Under NaN every comparison is False, so an unguarded validate() would
+    silently pass any plan. The delegator must fail identically, since a
+    direct caller can reach validate() without cleanup()'s entry check.
+    """
+    plan = _cleanup_plan(common_nwbfile, scanned=4, tracked=3, delete=2)
+
+    for bad in (float("nan"), float("inf"), True):
+        with pytest.raises(ValueError):
+            plan.validate(max_delete_fraction=bad)
+        with pytest.raises(ValueError):
+            plan.validate(max_delete_to_tracked_ratio=bad)
+        with pytest.raises(ValueError):
+            common_nwbfile.AnalysisNwbfile._validate_cleanup_plan(
+                plan, max_delete_fraction=bad
+            )
+
+
 def test_remove_untracked_files_refuses_path_outside_analysis_dir(
     common_nwbfile, tmp_path
 ):
@@ -2221,6 +2241,38 @@ def test_dry_run_reports_target_candidate_not_leaf_unlink(
     )
     assert target.exists(), "the real pass must refuse the protected target"
     assert link.is_symlink(), "refusing a target must preserve its leaf"
+
+
+def test_dry_run_reports_candidate_bytes(common_nwbfile, tmp_path, caplog):
+    """Dry-run logs the planned candidate logical byte total.
+
+    A broken link is a candidate with no target and contributes zero, so the
+    total is the summed target size of the deletable regular files (3 + 5 = 8)
+    and the ``target is None`` skip branch is exercised, not just asserted.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    (analysis_dir / "a.nwb").write_text("abc")  # 3 bytes
+    (analysis_dir / "b.nwb").write_text("hello")  # 5 bytes
+    # A dangling *.nwb symlink: a candidate whose target is None. It must be
+    # counted as a candidate but add 0 to the logical-byte total.
+    (analysis_dir / "broken.nwb").symlink_to(analysis_dir / "missing.nwb")
+
+    table = _table(common_nwbfile, analysis_dir)
+    plan = _plan(table)
+    assert plan.broken_links, "the dangling symlink must be a broken candidate"
+
+    with caplog.at_level("INFO"):
+        table._remove_untracked_files(
+            custom_tables=[], dry_run=True, plan=plan, min_file_age_hours=0
+        )
+
+    assert any(
+        "8 planned candidate logical bytes" in r.message for r in caplog.records
+    ), "dry-run must report the planned candidate logical byte total"
+    assert (analysis_dir / "a.nwb").exists()
+    assert (analysis_dir / "b.nwb").exists(), "dry-run must not delete"
+    assert (analysis_dir / "broken.nwb").is_symlink(), "dry-run must not delete"
 
 
 def test_delete_refuses_physical_alias_of_protected_store(

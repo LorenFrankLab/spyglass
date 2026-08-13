@@ -778,23 +778,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         )
         return real_path, target, access
 
-    @staticmethod
-    def _is_old_enough(
-        candidate: CleanupCandidate,
-        *,
-        now_ns: int,
-        min_file_age_hours: float,
-    ) -> bool:
-        """Return True when every part of a candidate is old enough.
-
-        Exactly ``min_file_age_hours`` old is eligible. A future timestamp
-        yields a negative age and is therefore deferred.
-        """
-        if min_file_age_hours <= 0:
-            return True
-        threshold_ns = int(min_file_age_hours * 3600 * 10**9)
-        return (now_ns - candidate.newest_ns) >= threshold_ns
-
     def _build_untracked_file_plan(
         self,
         custom_tables: List[SpyglassAnalysis],
@@ -866,8 +849,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     f"Skipping non-regular analysis path: {real_path}"
                 )
                 continue
-            if not self._is_old_enough(
-                candidate,
+            if not candidate.is_old_enough(
                 now_ns=now_ns,
                 min_file_age_hours=min_file_age_hours,
             ):
@@ -899,62 +881,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         max_delete_fraction: float = 0.9,
         max_delete_to_tracked_ratio: float = 10.0,
     ) -> tuple[bool, str | None]:
-        """Check a cleanup plan against destructive-cleanup safety limits.
+        """Delegate to :meth:`CleanupPlan.validate`.
 
-        Returns
-        -------
-        tuple[bool, str | None]
-            ``(True, None)`` when the plan is safe to apply, otherwise
-            ``(False, reason)`` where ``reason`` explains the refusal. Callers
-            decide whether to raise (real run) or warn (dry run).
+        Retained as a thin wrapper so existing callers -- and tests that call
+        ``AnalysisNwbfile._validate_cleanup_plan(plan, ...)`` directly -- keep
+        working while the policy check itself lives on ``CleanupPlan``.
         """
-        scanned_count = len(plan.scanned_files)
-        delete_count = len(plan.files_to_delete)
-
-        if delete_count == 0:
-            return True, None
-
-        # Denominator is what this sweep was entitled to act on: the
-        # deletions plus the scanned files it recognized as tracked.
-        # Age-deferred files are excluded -- folding them in would dilute the
-        # fraction (e.g. 89 deletions against 1 tracked file is 98.9% and
-        # refused, but adding 10 deferred files to the denominator reads as
-        # 89% and passes).
-        local_tracked = plan.scanned_files & plan.tracked_files
-        tracked_count = len(local_tracked)
-        eligible_count = delete_count + tracked_count
-
-        if tracked_count == 0:
-            return False, (
-                "Analysis cleanup would delete "
-                f"{delete_count} files after scanning {scanned_count} files, "
-                "but no tracked analysis files were found. Refusing "
-                "destructive cleanup; run with dry_run=True and verify the "
-                "configured analysis directory."
-            )
-
-        delete_fraction = delete_count / max(eligible_count, 1)
-        if delete_fraction > max_delete_fraction:
-            return False, (
-                "Analysis cleanup would delete "
-                f"{delete_count}/{eligible_count} eligible analysis files "
-                f"({delete_fraction:.1%}), above the safety limit "
-                f"{max_delete_fraction:.1%}. Refusing destructive cleanup; "
-                "run with dry_run=True and verify the cleanup plan."
-            )
-
-        delete_ratio = delete_count / tracked_count
-        if delete_ratio > max_delete_to_tracked_ratio:
-            return False, (
-                "Analysis cleanup would delete "
-                f"{delete_count} files with only {tracked_count} tracked "
-                f"analysis files ({delete_ratio:.1f}x), above the safety "
-                f"limit {max_delete_to_tracked_ratio:.1f}x. Refusing "
-                "destructive cleanup; run with dry_run=True and verify the "
-                "configured analysis directory."
-            )
-
-        return True, None
+        return plan.validate(
+            max_delete_fraction=max_delete_fraction,
+            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+        )
 
     @staticmethod
     def _current_custom_tables(
@@ -1399,11 +1335,22 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             )
 
         if dry_run:
+            # Planned candidate LOGICAL bytes: the sum of target sizes for
+            # candidates that have a target (broken links have none and add
+            # 0). This is a planning figure, not guaranteed reclaimed bytes --
+            # act-time re-validation may refuse candidates, and hard-linked
+            # targets share physical bytes on disk.
+            planned_bytes = sum(
+                candidate.target.size
+                for candidate in plan.candidates.values()
+                if candidate.target is not None
+            )
             logger.info(
                 f"  {len(plan.files_to_delete)} untracked or empty analysis "
                 f"files ({len(plan.untracked_files)} untracked, "
                 f"{len(plan.empty_files)} empty, "
-                f"{len(plan.broken_links)} broken links)"
+                f"{len(plan.broken_links)} broken links); "
+                f"{planned_bytes} planned candidate logical bytes"
             )
             return plan.files_to_delete, plan.tracked_files
 
@@ -1491,8 +1438,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # plan and applying it. A file whose bytes actually changed during
             # a long scan is caught instead by _candidate_still_matches, which
             # refuses any candidate whose target or alias timestamps moved.
-            if not self._is_old_enough(
-                candidate,
+            if not candidate.is_old_enough(
                 now_ns=act_now_ns,
                 min_file_age_hours=min_file_age_hours,
             ):

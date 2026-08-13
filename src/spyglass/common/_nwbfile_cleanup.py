@@ -3,6 +3,18 @@
 This module is deliberately stdlib-only so the primary DataJoint schema can
 define its tables near the top of ``common_nwbfile.py`` without coupling these
 value objects to schema initialization.
+
+Contents
+--------
+- ``_check_number`` : validate a numeric safety limit (finite, in-bounds).
+- ``TargetSnapshot`` : identity of a real analysis file at scan time.
+- ``AccessSnapshot`` : one in-tree path (regular or symlink) reaching a target.
+- ``CleanupCandidate`` : a real target plus every access alias that reaches it,
+  and the age-eligibility check over all of them.
+- ``_TrackedFileState`` : resolved paths and filesystem identities of files the
+  DataJoint external stores currently track.
+- ``_PhysicalRoot`` : a resolved directory root plus its filesystem identity.
+- ``CleanupPlan`` : the classified filesystem-cleanup plan for analysis files.
 """
 
 import math
@@ -224,6 +236,18 @@ class CleanupCandidate:
             stamps.append(self.target.newest_ns)
         return max(stamps)
 
+    def is_old_enough(self, *, now_ns: int, min_file_age_hours: float) -> bool:
+        """Return True when every part of this candidate is old enough.
+
+        Exactly ``min_file_age_hours`` old is eligible. A future timestamp
+        yields a negative age and is therefore deferred. A non-positive
+        ``min_file_age_hours`` disables the gate.
+        """
+        if min_file_age_hours <= 0:
+            return True
+        threshold_ns = int(min_file_age_hours * 3600 * 10**9)
+        return (now_ns - self.newest_ns) >= threshold_ns
+
 
 @dataclass
 class _TrackedFileState:
@@ -306,3 +330,85 @@ class CleanupPlan:
     candidates: Dict[Path, CleanupCandidate]
     deferred_recent_files: Set[Path]
     broken_links: Set[Path]
+
+    def validate(
+        self,
+        *,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+    ) -> Tuple[bool, Optional[str]]:
+        """Check this plan against the destructive-cleanup safety limits.
+
+        The two limits are validated here as well as at the ``cleanup()``
+        entry point, so a direct call cannot smuggle a ``NaN``/``inf``/``bool``
+        limit past the comparisons -- under ``NaN`` every comparison is False
+        and the guard would silently vanish.
+
+        Returns
+        -------
+        tuple[bool, str or None]
+            ``(True, None)`` when the plan is safe to apply, otherwise
+            ``(False, reason)`` where ``reason`` explains the refusal. Callers
+            decide whether to raise (real run) or warn (dry run).
+
+        Raises
+        ------
+        ValueError
+            If either limit is non-finite, a bool, or outside its bounds.
+        """
+        max_delete_fraction = _check_number(
+            "max_delete_fraction", max_delete_fraction, minimum=0, maximum=1
+        )
+        max_delete_to_tracked_ratio = _check_number(
+            "max_delete_to_tracked_ratio",
+            max_delete_to_tracked_ratio,
+            minimum=0,
+        )
+
+        scanned_count = len(self.scanned_files)
+        delete_count = len(self.files_to_delete)
+
+        if delete_count == 0:
+            return True, None
+
+        # Denominator is what this sweep was entitled to act on: the
+        # deletions plus the scanned files it recognized as tracked.
+        # Age-deferred files are excluded -- folding them in would dilute the
+        # fraction (e.g. 89 deletions against 1 tracked file is 98.9% and
+        # refused, but adding 10 deferred files to the denominator reads as
+        # 89% and passes).
+        local_tracked = self.scanned_files & self.tracked_files
+        tracked_count = len(local_tracked)
+        eligible_count = delete_count + tracked_count
+
+        if tracked_count == 0:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count} files after scanning {scanned_count} files, "
+                "but no tracked analysis files were found. Refusing "
+                "destructive cleanup; run with dry_run=True and verify the "
+                "configured analysis directory."
+            )
+
+        delete_fraction = delete_count / max(eligible_count, 1)
+        if delete_fraction > max_delete_fraction:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count}/{eligible_count} eligible analysis files "
+                f"({delete_fraction:.1%}), above the safety limit "
+                f"{max_delete_fraction:.1%}. Refusing destructive cleanup; "
+                "run with dry_run=True and verify the cleanup plan."
+            )
+
+        delete_ratio = delete_count / tracked_count
+        if delete_ratio > max_delete_to_tracked_ratio:
+            return False, (
+                "Analysis cleanup would delete "
+                f"{delete_count} files with only {tracked_count} tracked "
+                f"analysis files ({delete_ratio:.1f}x), above the safety "
+                f"limit {max_delete_to_tracked_ratio:.1f}x. Refusing "
+                "destructive cleanup; run with dry_run=True and verify the "
+                "configured analysis directory."
+            )
+
+        return True, None
