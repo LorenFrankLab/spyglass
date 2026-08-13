@@ -721,19 +721,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             walker=self._walk_analysis_files,
         )
 
-    @staticmethod
-    def _validate_cleanup_plan(
-        plan: CleanupPlan,
-        *,
-        max_delete_fraction: float = 0.9,
-        max_delete_to_tracked_ratio: float = 10.0,
-    ) -> tuple[bool, str | None]:
-        """Check the plan's aggregate deletion limits."""
-        return plan.validate(
-            max_delete_fraction=max_delete_fraction,
-            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-        )
-
     def _remove_untracked_files(
         self,
         custom_tables: List[SpyglassAnalysis],
@@ -955,8 +942,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             untracked_file_plan = self._build_untracked_file_plan(
                 custom_tables, min_file_age_hours=min_file_age_hours
             )
-            plan_ok, plan_err = self._validate_cleanup_plan(
-                untracked_file_plan,
+            plan_ok, plan_err = untracked_file_plan.validate(
                 max_delete_fraction=max_delete_fraction,
                 max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
             )
@@ -968,12 +954,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                     raise RuntimeError(plan_err)
 
             # Delete files before database cleanup. Files newly orphaned by
-            # this run's row deletion are caught on the next invocation.
+            # this run's row deletion are caught on the next invocation. The
+            # age gate is already baked into untracked_file_plan (built above),
+            # so it is not re-passed here.
             _ = self._remove_untracked_files(
                 custom_tables,
                 dry_run=dry_run,
                 plan=untracked_file_plan,
-                min_file_age_hours=min_file_age_hours,
             )
 
             # Process each custom analysis table.
