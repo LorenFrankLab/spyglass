@@ -252,15 +252,22 @@ def test_params_round_trip(spike_v1_group):
 
 
 def test_fetch_spike_data_criteria_drops_units(
-    spike_v1_group, pop_spikes_group, mini_dict, group_name
+    spike_v1_group, pop_spikes_group, pop_spike_merge, mini_dict
 ):
     """A criterion drops units from the fetched spike data
 
     The other tests cover the mask itself; this covers the rest of the path -
     the criteria reaching each sorting's units table, and the units failing
     them being dropped from the returned spike times and unit ids.
+
+    Grouped on the metric-curated sorting alone: the session's imported
+    sorting has no metric columns, and a criterion that cannot be applied to
+    every sorting of a group raises rather than filtering only some of them.
     """
     name = "test_snr_criterion"
+    # sorts after the shared "test_group" so that fixtures fetching the first
+    # group still get theirs when a prior run left this one in the database
+    criteria_group = "test_group_criteria"
     spike_v1_group.UnitSelectionParams().insert1(
         {
             "unit_filter_params_name": name,
@@ -272,8 +279,17 @@ def test_fetch_spike_data_criteria_drops_units(
     )
 
     group_tbl = spike_v1_group.SortedSpikesGroup()
-    key = {**mini_dict, "sorted_spikes_group_name": group_name}
-    all_spikes = group_tbl.fetch_spike_data(key)
+    group_tbl.create_group(
+        group_name=criteria_group,
+        nwb_file_name=mini_dict["nwb_file_name"],
+        keys=[{"spikesorting_merge_id": pop_spike_merge["merge_id"]}],
+        unit_filter_params_name=name,
+    )
+
+    key = {**mini_dict, "sorted_spikes_group_name": criteria_group}
+    all_spikes = group_tbl.fetch_spike_data(
+        {**key, "unit_filter_params_name": "all_units"}
+    )
     kept, kept_ids = group_tbl.fetch_spike_data(
         {**key, "unit_filter_params_name": name}, return_unit_ids=True
     )
