@@ -21,12 +21,11 @@ UNIT_CRITERIA_OPERATORS = {
     "<": np.less,
     "<=": np.less_equal,
     "==": np.equal,
-    "!=": lambda vals, target: np.not_equal(vals, target)
-    & np.equal(vals, vals),
+    "!=": lambda vals, target: np.not_equal(vals, target) & _not_missing(vals),
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
     "isin": lambda vals, target: _isin(vals, target),
-    "notin": lambda vals, target: ~_isin(vals, target),
+    "notin": lambda vals, target: ~_isin(vals, target) & _not_missing(vals),
 }
 # Curation label columns, v0: "label", v1: "curation_label"
 CURATION_LABEL_COLUMNS = ("label", "curation_label")
@@ -184,8 +183,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             by default True, raise if a criterion names a column this units
             table does not have. If False, skip that criterion with a warning
             and apply the rest, which lets **every** unit of this sorting pass
-            it. `fetch_spike_data` passes False so that it can report which
-            sortings of the group were missing the column, then raises itself.
+            it. `fetch_spike_data` passes False so that it can report every
+            sorting in the group missing the column, then raises itself.
 
         Returns
         -------
@@ -201,15 +200,20 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         Notes
         -----
-        Units whose value is NaN fail every numeric comparison. "isin" and
-        "notin" also work on columns holding a list per unit (e.g. the
-        curation labels), matching if any item of the list is in the target.
+        Units missing a value (NaN, or potentially None from an imported
+        units table) fail every criterion on that column, negated ones
+        ("!=", "notin") included: a metric that was never computed is no
+        evidence that the unit is good. "isin" and "notin" also work on columns
+        holding a list per unit (e.g. the curation labels), matching if any
+        item of the list is in the target. An empty list is a value, not a
+        missing one, so a unit carrying no labels passes "notin".
 
         Each sorting in a group has its own units table, and those tables may
         not share the same columns (e.g. if they were curated differently), so
-        a criterion may apply to only some of them. Skipping a criterion is
-        fail-open - the units it should have gated pass instead - so it is an
-        error by default rather than a warning.
+        a criterion may apply to only some of them. Passing a criteria column
+        that is not in the units table raises an error. Pass strict=False to
+        skip criteria on missing columns (passing all units for that criterion)
+        with a warning instead of erroring.
         """
         include_mask = np.ones(len(units_df), dtype=bool)
 
@@ -290,12 +294,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         exclude_labels = filter_params["exclude_labels"]
         unit_criteria = filter_params.get("unit_criteria")
 
-        # which sortings each criteria column was, and was not, applied to,
-        # as criteria column -> merge_ids of the sortings whose units table
-        # has (applied_to) or lacks (skipped_by) it. Both are needed to tell
-        # a column missing everywhere (potentially a typo) from one missing
-        # from only some sortings (a result mixing gated and un-gated units),
-        # so they are checked once every sorting has been seen
+        # where each criteria column was, and was not, applied, as criteria
+        # column -> merge_id of every sorting whose units table has
+        # (applied_to) or lacks (skipped_by) it. Both are needed to tell a
+        # column missing everywhere (potentially a typo) from one missing
+        # here and there (a result mixing gated and un-gated units), so they
+        # are checked once every sorting has been seen
         criteria_columns = set(unit_criteria or {})
         applied_to = {column: [] for column in criteria_columns}
         skipped_by = {column: [] for column in criteria_columns}
@@ -473,14 +477,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
 
 def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
-    """Error naming the sortings a unit criterion could not be applied to
+    """Error naming every sorting a unit criterion could not be applied to
 
     Parameters
     ----------
     skipped_by : dict
-        criteria column -> merge_ids of the sortings whose units table lacks it
+        criteria column -> merge_id of every sorting whose units table lacks it
     applied_to : dict
-        criteria column -> merge_ids of the sortings whose units table has it
+        criteria column -> merge_id of every sorting whose units table has it
     """
     reasons = []
     for column, skipped in skipped_by.items():
@@ -495,7 +499,7 @@ def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
             continue
         reasons.append(
             f"'{column}': missing from {len(skipped)} of "
-            + f"{len(skipped) + len(applied)} sortings "
+            + f"{len(skipped) + len(applied)} units tables "
             + f"({', '.join(str(merge_id) for merge_id in skipped)}), whose "
             + "units would be returned un-gated alongside the gated ones."
         )
@@ -503,9 +507,35 @@ def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
         "Unit criteria could not be applied to every sorting in this group:\n"
         + "\n".join(f"  - {reason}" for reason in reasons)
         + "\nCorrect the column name in the group's UnitSelectionParams, drop "
-        + "the criterion, or group only the sortings whose units tables share "
-        + "the column."
+        + "the criterion, or drop each sorting whose units table lacks the "
+        + "column."
     )
+
+
+def _not_missing(values):
+    """False where a unit has no value for the column a criterion gates on
+
+    We need this check because a missing value satisfies the negated
+    operators ("!=", "notin") on its own, which fails open: a criterion
+    meant to drop bad units would instead admit the units missing the
+    metric it gates on.
+    """
+    if values.dtype.kind == "f":
+        return ~np.isnan(values)
+
+    if values.dtype == object:  # np.isnan takes neither a list nor a string
+        return np.array(
+            [
+                val is not None
+                and not (isinstance(val, float) and np.isnan(val))
+                for val in values
+            ]
+        )
+
+    # Only a float column, or an object column (what pandas falls back to for
+    # a column of mixed types), can hold a missing value. No other dtype can,
+    # so every one of their units passes.
+    return np.ones(len(values), dtype=bool)
 
 
 def _isin(values, target):

@@ -37,12 +37,29 @@ def test_criteria_comparisons(spike_v1_group, units_df):
     ), "Unexpected mask for 'not equal'"
 
 
-def test_criteria_nan_excluded(spike_v1_group, units_df):
-    """NaN fails every numeric comparison, so those units are excluded"""
-    mask = spike_v1_group.SortedSpikesGroup.filter_units_by_criteria(
-        units_df, {"snr": {"<": 1e9}}
+def test_criteria_missing_value_excluded(spike_v1_group, units_df):
+    """A missing value fails every criterion, negated operators included
+
+    A unit missing the value a criterion gates on must not pass it: "!=" and
+    "notin" would otherwise admit exactly the units a criterion meant to drop.
+    """
+    filter_units_by_criteria = (
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria
     )
-    assert not mask[3], "Unit with NaN snr was not excluded"
+
+    for criterion in ({"<": 1e9}, {"!=": 1.0}, {"notin": [1.0]}):
+        mask = filter_units_by_criteria(units_df, {"snr": criterion})
+        assert not mask[3], f"NaN snr not excluded by {criterion}"
+
+    # None only reaches us through ImportedSpikeSorting, whose units table is
+    # written by another pipeline; an empty list is a unit with no labels
+    missing = units_df.assign(curation_label=[[], ["noise"], np.nan, None])
+    assert np.array_equal(
+        filter_units_by_criteria(
+            missing, {"curation_label": {"notin": ["noise"]}}
+        ),
+        [True, False, False, False],
+    ), "Missing label not excluded by 'notin' on an object column"
 
 
 def test_criteria_range(spike_v1_group, units_df):
@@ -177,7 +194,7 @@ def test_skipped_criteria_error_message(spike_v1_group):
             {"snr": [skipped_id]}, {"snr": [applied_id, applied_id]}
         )
     )
-    assert "missing from 1 of 3 sortings" in mixed, "Wrong sorting counts"
+    assert "missing from 1 of 3 units tables" in mixed, "Wrong sorting counts"
     assert skipped_id in mixed, "Skipped sorting not named"
     assert applied_id not in mixed, "Named a sorting that was not skipped"
 

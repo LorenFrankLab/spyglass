@@ -63,7 +63,8 @@ UnitSelectionParams()
 # `"<="`, `"=="`, `"!="`), inclusive ranges (`"between"`, `"outside"`), or
 # membership tests (`"isin"`, `"notin"`). A bare value or list of values is
 # shorthand for `"isin"`. A unit is included only if it satisfies all of the
-# criteria. Units whose value is NaN fail every numeric comparison.
+# criteria. Units whose value is missing (NaN) fail every criterion on that
+# column, including the negated `"!="` and `"notin"`.
 #
 # In the example below, the `brain_region` criterion keeps only units recorded in
 # CA1, in addition to the curation label and quality criteria. This assumes "brain_region",
