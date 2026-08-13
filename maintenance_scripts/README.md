@@ -99,8 +99,8 @@ regularly as cron jobs.
 5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
-After logging is initialized, an exit trap truncates the log to
-`SPYGLASS_MAX_LOG` lines (1000 by default) on both successful and failing exits.
+Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
+lines on each run. 1000 lines should be sufficient.
 
 To enable slack notifications, you will need to create a slack app and generate
 a token following the instructions
@@ -137,20 +137,3 @@ the app password instead.
 
 [^2]: You may want to run the cronjob from a dedicated conda environment to
     avoid issues with local editable installs or other package conflicts.
-
-### Cleanup failure handling
-
-`cleanup.py` records ordinary phase failures and exits nonzero after running the
-remaining safe phases and writing any available file-issues report. An
-`AnalysisNwbfile.cleanup()` failure suppresses later analysis-storage deletion
-(`DecodingOutput` and external analysis cleanup), while raw, sorting, recording,
-temp, and file-issues checks continue. Preview a refusal with
-`AnalysisNwbfile().cleanup(dry_run=True)` before changing its safety limits.
-
-Analysis cleanup, including a dry-run preview, also refuses to start if an
-insert-blocking trigger already exists, because the trigger may belong to an
-active cleanup or may be stale. Confirm that no cleanup is running before using
-`AnalysisRegistry().unblock_new_inserts()`; that helper removes every registered
-analysis blocking trigger. This check is not a full cleanup lease or ownership
-protocol, and filesystem validation is not atomic with unlink. Run one cleanup
-at a time without concurrent mutation of eligible analysis paths.

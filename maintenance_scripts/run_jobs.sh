@@ -55,16 +55,7 @@ on_fail() { # $1: error message. Echo message and send as email
       -T <(echo "$content")
 }
 
-# Keep the log bounded on EVERY exit path, including early failures that skip
-# the end of the script (git pull, conda, db, chmod, or a nonzero cleanup).
-# Without this, a repeatedly-failing weekly run would grow the log unbounded.
-truncate_log() {
-    tail -n "${SPYGLASS_MAX_LOG:-1000}" "$SPYGLASS_LOG" \
-      > "${SPYGLASS_LOG}.tmp" && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
-}
-
 exec >> $SPYGLASS_LOG 2>&1
-trap truncate_log EXIT
 
 # print the date and time
 echo "SPYGLASS CRON JOB START: $(date +"%Y-%m-%d %H:%M:%S")"
@@ -101,24 +92,22 @@ fi
 
 # Run cleanup script; capture any file issues to a temp file for Slack reporting
 FILE_ISSUES_OUT=$(mktemp)
-cleanup_status=0
 FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py \
-  || cleanup_status=$?
+  || {
+    cleanup_status=$?
+    rm -f "$FILE_ISSUES_OUT"
+    on_fail "cleanup.py failed with exit code $cleanup_status"
+    exit "$cleanup_status"
+  }
 
-# Report available file issues BEFORE failing. cleanup.py normally writes the
-# report even when another phase exits nonzero; the file may be absent or
-# incomplete when the monitoring/report step itself failed.
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
 $(cat "$FILE_ISSUES_OUT")"
 fi
 rm -f "$FILE_ISSUES_OUT"
 
-if [[ $cleanup_status -ne 0 ]]; then
-  on_fail "cleanup.py failed with exit code $cleanup_status"
-  exit "$cleanup_status"
-fi
-
 echo "SPYGLASS CRON JOB END"
-# Log truncation runs from the EXIT trap set above, so it happens on every
-# exit path -- success or early failure -- not only here.
+
+# truncate long log file
+tail -n ${SPYGLASS_MAX_LOG:-1000} "$SPYGLASS_LOG" > "${SPYGLASS_LOG}.tmp" \
+  && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"

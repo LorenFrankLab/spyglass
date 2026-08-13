@@ -226,11 +226,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
     previously discarded the constructor/call kwargs in favor of `dj.config`
     (pre-existing) #1574
-- `maintenance_scripts/cleanup.py` runs its table cleanups independently so one
-    failure no longer skips the rest, and skips later analysis-storage phases
-    when analysis cleanup fails. `run_jobs.sh` preserves available issue reports,
-    propagates cleanup failure, and truncates its log on every exit after logging
-    is initialized #1574
+- The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
