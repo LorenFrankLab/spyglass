@@ -34,6 +34,8 @@ UNIT_CRITERIA_OPERATORS = {
 # regardless of the labels. filter_units_by_criteria raises rather than
 # return such a mask
 SCALAR_ONLY_OPERATORS = frozenset(UNIT_CRITERIA_OPERATORS) - {"isin", "notin"}
+# Operators taking a [low, high] pair rather than one value
+RANGE_OPERATORS = ("between", "outside")
 # Curation label columns, v0: "label", v1: "curation_label"
 CURATION_LABEL_COLUMNS = ("label", "curation_label")
 
@@ -202,10 +204,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            if an operator is not one of those listed above, if any operator
-            but "isin" or "notin" is applied to a column holding a list per
-            unit, or, when strict, if a criterion names a column not in
-            units_df
+            if an operator is not one of those listed above, if "between" or
+            "outside" is given anything but a [low, high] pair, if any
+            operator but "isin" or "notin" is applied to a column holding a
+            list per unit, or, when strict, if a criterion names a column not
+            in units_df
 
         Notes
         -----
@@ -251,6 +254,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                         f"Invalid unit criteria operator '{operator}' for "
                         + f"column '{column}'. Expected one of "
                         + f"{list(UNIT_CRITERIA_OPERATORS)}"
+                    )
+                if operator in RANGE_OPERATORS and (
+                    not isinstance(value, (list, tuple, np.ndarray))
+                    or len(value) != 2
+                ):
+                    raise ValueError(
+                        f"Unit criteria operator '{operator}' for column "
+                        + f"'{column}' takes a [low, high] pair, got "
+                        + f"{value!r}."
                     )
                 if operator in SCALAR_ONLY_OPERATORS and _is_list_valued(
                     values

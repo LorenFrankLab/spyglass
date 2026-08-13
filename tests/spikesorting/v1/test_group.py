@@ -32,6 +32,14 @@ def test_criteria_comparisons(spike_v1_group, units_df):
         [False, True, True, False],
     ), "Unexpected mask for 'less than or equal'"
     assert np.array_equal(
+        filter_units_by_criteria(units_df, {"snr": {">=": 4.0}}),
+        [True, False, True, False],
+    ), "Unexpected mask for 'greater than or equal'"
+    assert np.array_equal(
+        filter_units_by_criteria(units_df, {"n_spikes": {"==": 10}}),
+        [False, True, False, False],
+    ), "Unexpected mask for 'equal'"
+    assert np.array_equal(
         filter_units_by_criteria(units_df, {"n_spikes": {"!=": 10}}),
         [True, False, True, True],
     ), "Unexpected mask for 'not equal'"
@@ -76,6 +84,17 @@ def test_criteria_range(spike_v1_group, units_df):
         filter_units_by_criteria(units_df, {"snr": {"outside": [4.0, 5.0]}}),
         [False, True, False, False],
     ), "Unexpected mask for 'outside'"
+
+
+def test_criteria_range_needs_pair(spike_v1_group, units_df):
+    """A range operator given one value says so, rather than TypeError"""
+    filter_units_by_criteria = (
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria
+    )
+
+    for value in (3, [3], [1, 2, 3]):
+        with pytest.raises(ValueError, match=r"takes a \[low, high\] pair"):
+            filter_units_by_criteria(units_df, {"snr": {"between": value}})
 
 
 def test_criteria_membership(spike_v1_group, units_df):
@@ -230,6 +249,38 @@ def test_params_round_trip(spike_v1_group):
     }
     tbl.insert1(params, skip_duplicates=True)
     assert (tbl & {"unit_filter_params_name": name}).fetch1() == params
+
+
+def test_fetch_spike_data_criteria_drops_units(
+    spike_v1_group, pop_spikes_group, mini_dict, group_name
+):
+    """A criterion drops units from the fetched spike data
+
+    The other tests cover the mask itself; this covers the rest of the path -
+    the criteria reaching each sorting's units table, and the units failing
+    them being dropped from the returned spike times and unit ids.
+    """
+    name = "test_snr_criterion"
+    spike_v1_group.UnitSelectionParams().insert1(
+        {
+            "unit_filter_params_name": name,
+            "include_labels": [],
+            "exclude_labels": [],
+            "unit_criteria": {"snr": {">": np.inf}},  # no unit can pass
+        },
+        skip_duplicates=True,
+    )
+
+    group_tbl = spike_v1_group.SortedSpikesGroup()
+    key = {**mini_dict, "sorted_spikes_group_name": group_name}
+    all_spikes = group_tbl.fetch_spike_data(key)
+    kept, kept_ids = group_tbl.fetch_spike_data(
+        {**key, "unit_filter_params_name": name}, return_unit_ids=True
+    )
+
+    assert len(all_spikes) > 0, "No spike data to filter"
+    assert len(kept) == 0, "Criterion dropped no units"
+    assert len(kept_ids) == 0, "Unit ids kept a unit the spike times dropped"
 
 
 def test_fetch_spike_data_unknown_column(
