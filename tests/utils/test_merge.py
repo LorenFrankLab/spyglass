@@ -490,6 +490,23 @@ def test_merge_fetch_positional_attrs(pos_merge):
     ), "Positional arg should be an attr, not the restriction."
 
 
+def test_merge_fetch_honors_instance_restriction(graph_tables):
+    """(M & restriction).merge_fetch(attr) must honor the instance's own
+    restriction (issue 5) — merge_fetch is a classmethod internally and
+    previously always fetched from an unrestricted cls(), discarding
+    whatever restriction the caller had already applied."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    restricted = MergeOutput & {"intermediate_id": value}
+
+    result = restricted.merge_fetch("intermediate_id")
+
+    assert len(result) == matching, (
+        f"(M & restriction).merge_fetch() returned {len(result)} rows; "
+        f"expected {matching} matching the instance's own restriction."
+    )
+
+
 # ------------------- html() empty-restriction guard -------------------------
 
 
@@ -574,6 +591,10 @@ def test_populate_instance(pos_merge, monkeypatch):
     assert (
         calls["insert"][1].get("skip_duplicates") is True
     ), "insert must forward skip_duplicates=True."
+    assert calls["insert"][1].get("part_name") == "AnySource", (
+        "insert must forward part_name=source, else _merge_insert scans "
+        "every part and can insert successes into sibling parts too."
+    )
 
 
 def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
@@ -588,6 +609,10 @@ def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
 
     assert calls["insert"][0] == [{"merge_id": "fake"}], "successes inserted."
     assert "merge_populate" in caplog.text and "0.7.0" in caplog.text
+    assert calls["insert"][1].get("part_name") == "AnySource", (
+        "insert must forward part_name=source, else _merge_insert scans "
+        "every part and can insert successes into sibling parts too."
+    )
 
 
 def test_deprecated_methods_warn(pos_merge, caplog):
@@ -663,3 +688,214 @@ def test_string_restrict_and_two_part_fields(pos_merge, pos_merge_key):
     f1, f2 = part_fields[:2]
     restr = f'{f1} = "{row[f1]}" AND {f2} = "{row[f2]}"'
     assert len(pos_merge & restr) >= 1, "AND of two part fields should match."
+
+
+# ------------------- composite restrictions (issue 1) -----------------------
+#
+# `intermediate_id` is a part-only field on MergeOutput.PkNode (present via
+# `-> PkNode`'s primary-key FK, absent from the merge master). A plain dict
+# restriction on it correctly routes through part resolution; these tests
+# check that list (OrList), AndList, and Not wrappers get the same treatment
+# instead of falling straight through to the raw master-only restrict.
+#
+# graph_tables is module-scoped and shared with delete tests elsewhere in
+# this file, so row counts shrink over the module's lifetime — the target
+# value is picked from the table's *current* state rather than hardcoded.
+
+
+def _partial_match_value(MergeOutput):
+    """An intermediate_id value matching a proper subset of current rows."""
+    values = sorted(set(int(v) for v in MergeOutput.fetch("intermediate_id")))
+    full = len(MergeOutput)
+    for value in values:
+        matching = len(MergeOutput & {"intermediate_id": value})
+        if 0 < matching < full:
+            return value, matching, full
+    pytest.skip("No intermediate_id value gives a proper subset match.")
+
+
+def test_composite_restrict_list_matches_dict(graph_tables):
+    """[{part-field: val}] (OrList) should route like the bare dict form."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, _ = _partial_match_value(MergeOutput)
+    list_result = len(MergeOutput & [{"intermediate_id": value}])
+    assert list_result == matching, (
+        f"List-wrapped restriction ({list_result}) should match the "
+        f"equivalent dict restriction ({matching}), not bypass part "
+        "resolution."
+    )
+
+
+def test_composite_restrict_andlist_matches_dict(graph_tables):
+    """AndList([{part-field: val}]) should route like the bare dict form."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, _ = _partial_match_value(MergeOutput)
+    and_result = len(MergeOutput & dj.AndList([{"intermediate_id": value}]))
+    assert and_result == matching, (
+        f"AndList-wrapped restriction ({and_result}) should match the "
+        f"equivalent dict restriction ({matching}), not bypass part "
+        "resolution."
+    )
+
+
+def test_composite_restrict_not_dict_excludes_matches(graph_tables):
+    """Not({part-field: val}) should exclude exactly the matching rows."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    not_result = len(MergeOutput & dj.Not({"intermediate_id": value}))
+    assert not_result == full - matching, (
+        "Not(dict) on a part-only field should exclude exactly the "
+        "matching rows, not bypass part resolution."
+    )
+
+
+def test_composite_restrict_not_string_excludes_matches(graph_tables):
+    """Not('part-field = val') should exclude exactly the matching rows."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    not_result = len(MergeOutput & dj.Not(f"intermediate_id = {value}"))
+    assert not_result == full - matching, (
+        "Not(str) on a part-only field should exclude exactly the "
+        "matching rows, not bypass part resolution."
+    )
+
+
+def test_composite_restrict_delete_scoped_to_match(graph_tables):
+    """A list-wrapped part-field restriction must not delete the whole table."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    (MergeOutput & [{"intermediate_id": value}]).delete(
+        safemode=False, force_permission=True
+    )
+    assert len(graph_tables["MergeOutput"]()) == full - matching, (
+        "Deleting via a list-wrapped restriction should remove only the "
+        "matching rows, not the whole table."
+    )
+
+
+# ------------------- delete_upstream(dry_run=False) (issue 2) ---------------
+
+
+def test_delete_upstream_removes_source_row(graph_tables):
+    """delete_upstream(dry_run=False) deletes the merge row and its upstream
+    source row, without crashing on FreeTable having no cautious_delete."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    PkNode = graph_tables["PkNode"]()
+
+    # Restrict by merge_id alone (not the full super_fetch dict, which also
+    # carries the master-only `source` field — see test_fetch1_source_field
+    # below for that separate, pre-existing bug).
+    mid = MergeOutput.super_fetch("merge_id")[0]
+    row = (MergeOutput & {"merge_id": mid}).fetch1()
+    source_key = {
+        "pk_id": row["pk_id"],
+        "intermediate_id": row["intermediate_id"],
+    }
+    assert len(PkNode & source_key) == 1, "Test setup: source row must exist."
+
+    (MergeOutput & {"merge_id": mid}).delete_upstream(
+        dry_run=False, safemode=False, force_permission=True
+    )
+
+    assert (
+        len(MergeOutput & {"merge_id": mid}) == 0
+    ), "Merge row should be deleted."
+    assert (
+        len(PkNode & source_key) == 0
+    ), "Upstream source row should also be deleted, not left orphaned."
+
+
+def test_fetch1_source_field_in_restriction(graph_tables):
+    """Restricting by {merge_id, source} together (super_fetch()'s own
+    output shape) must not silently drop part-walked fetch results.
+
+    ``source`` is a master-only secondary field, absent from every part's
+    heading; compiling it into the restriction before part-resolution
+    causes every part to raise "Attribute not found" and be dropped.
+    """
+    MergeOutput = graph_tables["MergeOutput"]()
+    key = MergeOutput.super_fetch(as_dict=True)[0]
+    row = (MergeOutput & key).fetch1()
+    assert "pk_id" in row, (
+        "fetch1 should still walk parts when `source` is included "
+        "alongside `merge_id` in the restriction."
+    )
+
+
+# ------------------- multi-part fetch contract (issue 4) --------------------
+#
+# merge_repro is a dependency-free, isolated 2-part merge table (SourceA: 2
+# rows, SourceB: 1 row) — no optional packages (e.g. deeplabcut) and no FK
+# ties to graph_schema, so limit/offset/order_by bugs that only manifest
+# with >1 populated part are exercisable without any environment gating.
+
+
+def test_fetch_no_attrs_heterogeneous_parts_raises_clear_error(merge_repro):
+    """fetch() with no attrs across heterogeneous parts must not crash with
+    an opaque numpy dtype error; it should explain the ambiguity clearly."""
+    M = merge_repro["MergeRepro"]()
+    with pytest.raises(dj.errors.DataJointError, match="as_dict"):
+        M.fetch()
+
+
+def test_fetch_no_attrs_as_dict_tolerates_heterogeneous_parts(merge_repro):
+    """as_dict=True naturally tolerates differing per-part columns."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True)
+    assert len(rows) == len(
+        M
+    ), "as_dict=True fetch should return one dict per row across all parts."
+
+
+def test_fetch_limit_applies_globally(merge_repro):
+    """fetch(limit=1) should return 1 row total, not 1 per part."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True, limit=1)
+    assert len(rows) == 1, (
+        f"fetch(limit=1) returned {len(rows)} rows; limit must apply across "
+        "all parts combined, not once per part."
+    )
+
+
+def test_fetch_offset_applies_globally(merge_repro):
+    """fetch(offset=1) should skip 1 row total, not 1 per part."""
+    M = merge_repro["MergeRepro"]()
+    full = len(M)
+    rows = M.fetch(as_dict=True, offset=1)
+    assert len(rows) == full - 1, (
+        f"fetch(offset=1) returned {len(rows)} of {full} rows; offset must "
+        "apply across all parts combined, not once per part."
+    )
+
+
+def test_fetch_order_by_merge_id_applies_globally(merge_repro):
+    """fetch(order_by='merge_id') should pick a global first row, honored
+    across parts — not each part independently self-ordering."""
+    M = merge_repro["MergeRepro"]()
+    asc = M.fetch(as_dict=True, limit=1, order_by="merge_id")[0]
+    desc = M.fetch(as_dict=True, limit=1, order_by="merge_id DESC")[0]
+    assert asc["merge_id"] != desc["merge_id"], (
+        "Ascending vs descending order_by should select different rows "
+        "from the globally ordered set."
+    )
+    all_ids = sorted(r["merge_id"] for r in M.fetch(as_dict=True))
+    assert (
+        asc["merge_id"] == all_ids[0]
+    ), "order_by='merge_id' should select the global min."
+    assert (
+        desc["merge_id"] == all_ids[-1]
+    ), "order_by='merge_id DESC' should select the global max."
+
+
+def test_fetch1_key_plus_attr(merge_repro):
+    """fetch1('KEY', <part attr>) should build KEY into the returned tuple,
+    not raise KeyError from an unhandled 'KEY' entry."""
+    M = merge_repro["MergeRepro"]()
+    one = M & {"part_attr": 2}  # matches exactly 1 SourceA row
+    assert len(one) == 1, "Test setup: part_attr=2 must match exactly 1 row."
+    key, part_attr = one.fetch1("KEY", "part_attr")
+    assert isinstance(key, dict) and "merge_id" in key, (
+        "fetch1('KEY', ...) should return the primary key dict as the "
+        "'KEY' element."
+    )
+    assert part_attr == 2

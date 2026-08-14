@@ -214,7 +214,7 @@ Migrate to the instance-method equivalents shown in the table below.
 | `MergeTable.merge_delete_parent(restriction, dry_run=True)` | `(MergeTable & restriction).delete_upstream(dry_run=True)` |
 | `MergeTable.merge_get_part(restriction, ...)`               | `(MergeTable & restriction).get_part_table(...)`           |
 | `MergeTable.merge_get_parent(restriction, ...)`             | `(MergeTable & restriction).get_parent_table(...)`         |
-| `MergeTable.merge_fetch(restriction, *attrs)`               | `(MergeTable & restriction).fetch(*attrs)`                 |
+| `MergeTable.merge_fetch(*attrs, restriction=...)`           | `(MergeTable & restriction).fetch(*attrs)`                 |
 | `MergeTable.merge_populate(source, keys)`                   | `MergeTable.populate(source, keys)`                        |
 
 ## Example

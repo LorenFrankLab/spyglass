@@ -124,7 +124,7 @@ LFPOutput.insert([lfp_key], skip_duplicates=True)
 # | `T.merge_view(r)` | `(T & r).view()` |
 # | `T.merge_html(r)` | `(T & r).html()` |
 # | `T.merge_restrict(r)` | `T & r` |
-# | `T.merge_fetch(r, *attrs)` | `(T & r).fetch(*attrs)` |
+# | `T.merge_fetch(*attrs, restriction=r)` | `(T & r).fetch(*attrs)` |
 # | `T.merge_get_part(r, ...)` | `(T & r).get_part_table(...)` |
 # | `T.merge_get_parent(r, ...)` | `(T & r).get_parent_table(...)` |
 # | `T.merge_delete(r)` | `(T & r).delete()` |

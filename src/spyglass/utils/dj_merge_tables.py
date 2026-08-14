@@ -115,6 +115,64 @@ class Merge(ExportMixin, dj.Manual):
             return False
         return any(k not in self.heading.names for k in restriction)
 
+    # Composite restriction wrappers whose elements should be checked
+    # recursively for part-only fields, mirroring how DataJoint's own
+    # ``make_condition`` recurses through them (see datajoint/condition.py).
+    _COMPOSITE_RESTRICTION_TYPES = (list, tuple, set)
+
+    def _restriction_has_part_field(self, restriction) -> bool:
+        """True if any leaf of a (possibly composite) restriction is part-only.
+
+        Recurses through ``Not``, ``AndList``, and plain sequences (the
+        ``list``/``tuple``/``set`` OrList convention) so composite
+        restrictions get the same part-table resolution as a bare dict or
+        string — without this, e.g. ``M & [{"part_field": 1}]`` or
+        ``M & dj.Not({"part_field": 1})`` would fall straight through to a
+        master-only restrict and silently match every row.
+        """
+        if isinstance(restriction, dj.condition.Not):
+            return self._restriction_has_part_field(restriction.restriction)
+        if isinstance(restriction, dict):
+            return self._has_non_master_fields(restriction)
+        if isinstance(restriction, str):
+            return self._string_has_part_field(restriction)
+        if isinstance(
+            restriction,
+            (dj.condition.AndList, *self._COMPOSITE_RESTRICTION_TYPES),
+        ):
+            return any(
+                self._restriction_has_part_field(item) for item in restriction
+            )
+        return False
+
+    def _raise_if_unknown_dict_fields(self, restriction) -> None:
+        """Recursively raise if a dict leaf references an unknown field.
+
+        Mirrors ``_restriction_has_part_field``'s traversal so composite
+        restrictions (list/AndList/Not) get the same unknown-field guard as
+        a bare dict restriction.
+        """
+        if isinstance(restriction, dj.condition.Not):
+            self._raise_if_unknown_dict_fields(restriction.restriction)
+        elif isinstance(restriction, dict):
+            unknown = [
+                k
+                for k in restriction
+                if k not in self._get_all_heading_fields()
+            ]
+            if unknown:
+                raise DataJointError(
+                    f"Unknown field(s) {unknown} in restriction "
+                    f"{restriction!r}: not attributes of the merge master "
+                    "or any part table."
+                )
+        elif isinstance(
+            restriction,
+            (dj.condition.AndList, *self._COMPOSITE_RESTRICTION_TYPES),
+        ):
+            for item in restriction:
+                self._raise_if_unknown_dict_fields(item)
+
     def _resolve_restriction_to_merge_ids(self, restriction) -> list:
         """Return merge_ids matching a part-table-field restriction."""
         parts = self._merge_restrict_parts(
@@ -192,17 +250,37 @@ class Merge(ExportMixin, dj.Manual):
                 has_part_field = True
         return has_part_field
 
-    def _resolve_top_restriction(self):
-        """Return restriction for part-walking, materializing _top if set.
+    def _resolve_top_restriction(self, limit=None, offset=0, order_by=None):
+        """Return a merge_id-only restriction for part-walking.
 
-        When _top is set (via ``T & dj.Top(limit=n)``), DataJoint applies the
-        LIMIT/ORDER BY at the SQL level in super().fetch().  We materialize the
-        resulting merge_ids so part-walking honours the same limit.
+        Always materializes ``self``'s current restriction (honoring any
+        ``_top`` LIMIT/ORDER BY, applied at the SQL level by DataJoint) into
+        a list of merge_id keys via a plain master-table fetch, rather than
+        reusing ``self.restriction`` directly. This matters whenever the
+        restriction references a master-only field such as ``source``
+        (e.g. ``M & {"merge_id": mid, "source": "X"}``, the exact shape
+        ``super_fetch()`` returns): compiled directly, it would be replayed
+        against every part's heading, which never includes ``source``, and
+        every part would raise and be dropped. Resolving it against the
+        master first — where ``source`` is valid — then handing part-walking
+        nothing but merge_id keys sidesteps that entirely.
+
+        ``limit``/``offset``/``order_by`` (from a plain ``fetch(limit=...)``
+        call, as opposed to ``M & dj.Top(...)``) are applied here too, at the
+        master level, for the same reason: applied per-part instead, each
+        part would independently limit/offset/order its own rows rather
+        than the merged whole. Passed straight through to ``super().fetch()``
+        — DataJoint only applies a ``Top`` restriction when at least one is
+        truthy (see ``datajoint.fetch.Fetch.__call__``), so there's no need
+        to sparsify these into a conditionally-built kwargs dict first.
         """
-        top = getattr(self, "_top", None)
-        if top is None:
-            return self.restriction or True
-        limited_ids = super().fetch(RESERVED_PRIMARY_KEY, log_export=False)
+        limited_ids = super().fetch(
+            RESERVED_PRIMARY_KEY,
+            log_export=False,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+        )
         return (
             [{RESERVED_PRIMARY_KEY: mid} for mid in limited_ids]
             if len(limited_ids)
@@ -237,23 +315,9 @@ class Merge(ExportMixin, dj.Manual):
             the master and every part table. Without this, an unknown field
             would resolve to no parts and silently return an empty table.
         """
-        should_resolve = self._has_non_master_fields(restriction) or (
-            isinstance(restriction, str)
-            and self._string_has_part_field(restriction)
-        )
+        should_resolve = self._restriction_has_part_field(restriction)
         if should_resolve:
-            if isinstance(restriction, dict):
-                unknown = [
-                    k
-                    for k in restriction
-                    if k not in self._get_all_heading_fields()
-                ]
-                if unknown:
-                    raise DataJointError(
-                        f"Unknown field(s) {unknown} in restriction "
-                        f"{restriction!r}: not attributes of the merge master "
-                        "or any part table."
-                    )
+            self._raise_if_unknown_dict_fields(restriction)
             merge_ids = self._resolve_restriction_to_merge_ids(restriction)
             restriction = (
                 [{RESERVED_PRIMARY_KEY: mid} for mid in merge_ids]
@@ -314,9 +378,19 @@ class Merge(ExportMixin, dj.Manual):
             return super().fetch(*attrs, log_export=log_export, **kwargs)
         if not attrs and kwargs.get("format") == "array":
             return super().fetch(*attrs, log_export=log_export, **kwargs)
+
+        # limit/offset/order_by must apply once, globally, before part-
+        # walking — forwarding them to each part's own fetch() call (as
+        # **kwargs would) applies them independently per part instead.
+        limit = kwargs.pop("limit", None)
+        offset = kwargs.pop("offset", 0)
+        order_by = kwargs.pop("order_by", None)
+        restriction = self._resolve_top_restriction(
+            limit=limit, offset=offset, order_by=order_by
+        )
         return self._merge_fetch_impl(
             *attrs,
-            restriction=self._resolve_top_restriction(),
+            restriction=restriction,
             log_export=log_export,
             **kwargs,
         )
@@ -369,8 +443,15 @@ class Merge(ExportMixin, dj.Manual):
                 f"fetch1 expected exactly 1 entry, but found {n}."
             )
 
+        # 'KEY' mixed with a genuine part attr (e.g. fetch1("KEY", "attr"))
+        # can't be requested from the part table directly — DataJoint's own
+        # fetch(as_dict=True) absorbs 'KEY' into the primary-key attribute
+        # names instead of a literal "KEY" entry, and a plain-name attr not
+        # in this table's own primary key wouldn't survive that flattening.
+        # Fetch it separately from the master, where "KEY" is well-defined.
+        fetch_attrs = tuple(a for a in attrs if a not in self._DJ_SPECIAL_ATTRS)
         rows = self.fetch(
-            *attrs,
+            *fetch_attrs,
             log_export=log_export,
             as_dict=True,
             **kwargs,
@@ -382,6 +463,8 @@ class Merge(ExportMixin, dj.Manual):
                 "Verify that the attributes exist in the relevant part table."
             )
         row = rows[0]
+        if "KEY" in attrs:
+            row = {**row, "KEY": super().fetch1("KEY")}
         if not attrs:
             return row
         if len(attrs) == 1:
@@ -665,20 +748,25 @@ class Merge(ExportMixin, dj.Manual):
         for row in rows:
             keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
-                part_name = cls._part_name(part)
+                # Local name for *this* part — must not shadow the
+                # `part_name` filter parameter above, or a later row with no
+                # matching part would silently reuse the previous row's name.
+                this_part_name = cls._part_name(part)
                 part_parent = part.parents(as_objects=True)[-1]
                 if part_parent & row:  # if row is in part parent
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
                             "Ambiguous entry. Data has mult rows in "
-                            + f"{part_name}:\n\tData:{row}\n\t{keys}"
+                            + f"{this_part_name}:\n\tData:{row}\n\t{keys}"
                         )
                     key = keys[0]
                     if part & key:
-                        logger.info(f"Key already in part {part_name}: {key}")
+                        logger.info(
+                            f"Key already in part {this_part_name}: {key}"
+                        )
                         continue
-                    master_sk = {cls()._reserved_sk: part_name}
+                    master_sk = {cls()._reserved_sk: this_part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
                     master_pk = {cls()._reserved_pk: uuid}
 
@@ -843,8 +931,19 @@ class Merge(ExportMixin, dj.Manual):
         if cls & merge_ids:
             return
 
+        # part_parent is a raw dj.FreeTable (from Table.parents()), not a
+        # SpyglassMixin instance — it has no cautious_delete, so the
+        # super()-unbound-dispatch trick used above (which relies on the
+        # MRO's CautiousDeleteMixin.delete) doesn't apply here. Use
+        # DataJoint's own Table.delete directly, forwarding only the kwargs
+        # it recognizes (e.g. dropping Spyglass-only ``force_permission``).
+        table_delete_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in ("transaction", "safemode", "force_parts", "force_masters")
+        }
         for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)
+            dj.Table.delete(part_parent, **table_delete_kwargs)
 
     # -------------------- Deprecated merge_X classmethods -------------------
 
@@ -1205,9 +1304,8 @@ class Merge(ExportMixin, dj.Manual):
         parent_class = self.merge_get_parent_class(parent)
         return parent_class & parent_key
 
-    @classmethod
     def merge_fetch(
-        cls, *attrs, restriction: str = True, log_export=True, **kwargs
+        self, *attrs, restriction: str = True, log_export=True, **kwargs
     ) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
@@ -1215,6 +1313,8 @@ class Merge(ExportMixin, dj.Manual):
         ----------
         restriction: str
             Optional restriction to apply before determining parent to return.
+            Combined (AND) with any restriction already applied to this
+            instance, e.g. via ``(T & restriction).merge_fetch(...)``.
             Default True.
         log_export: bool
             Default True. During export, log this fetch an export event.
@@ -1226,10 +1326,10 @@ class Merge(ExportMixin, dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
-        cls._deprecate("merge_fetch", "(T & restriction).fetch(*attrs)")
-        return cls()._merge_fetch_impl(
+        self._deprecate("merge_fetch", "(T & restriction).fetch(*attrs)")
+        return self._merge_fetch_impl(
             *attrs,
-            restriction=restriction,
+            restriction=dj.AndList([self.restriction or True, restriction]),
             log_export=log_export,
             **kwargs,
         )
@@ -1289,7 +1389,21 @@ class Merge(ExportMixin, dj.Manual):
         # Multiple parts — merge preserving the return type of each fetch
         first = results[0]
         if isinstance(first, np.ndarray):
-            # Single-attr fetch (no as_dict): list of arrays → concatenate
+            # No-attrs fetch (no as_dict): each result is a structured array
+            # named after that part's own heading. Parts with heterogeneous
+            # headings (different field names) can't be concatenated into a
+            # single structured array — surface a clear, actionable error
+            # instead of numpy's opaque DTypePromotionError.
+            if first.dtype.names is not None and any(
+                r.dtype.names != first.dtype.names for r in results[1:]
+            ):
+                raise DataJointError(
+                    "Cannot fetch() all columns across parts with "
+                    "heterogeneous headings "
+                    f"({[r.dtype.names for r in results]}) as a single "
+                    "array. Use fetch(as_dict=True), or specify explicit "
+                    "attrs common to every part."
+                )
             return np.concatenate(results)
         if isinstance(first, list):
             if first and isinstance(first[0], np.ndarray):
@@ -1326,7 +1440,7 @@ class Merge(ExportMixin, dj.Manual):
         else:
             parent_class.populate(**kwargs)
             successes = parent_class().fetch("KEY", as_dict=True)
-        self.insert(successes, skip_duplicates=True)
+        self.insert(successes, part_name=source, skip_duplicates=True)
 
     # -------------------- Instance-method replacements ----------------------
 
@@ -1485,7 +1599,7 @@ class Merge(ExportMixin, dj.Manual):
         else:
             parent_class.populate(**kwargs)
             successes = parent_class().fetch("KEY", as_dict=True)
-        self.insert(successes, skip_duplicates=True)
+        self.insert(successes, part_name=source, skip_duplicates=True)
 
     def delete(self, force_permission=False, *args, **kwargs):
         """Delete master and all part entries for current restriction.
