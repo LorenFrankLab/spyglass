@@ -17,6 +17,126 @@ def Nwbfile(pos_merge_tables):
 
 
 @pytest.fixture(scope="module")
+def merge_repro_schema(SpyglassMixin, _Merge):
+    """Two-part merge table, isolated from graph_schema and every real
+    pipeline — no FK ties to ParentNode/IntermediateNode/etc. (which would
+    perturb TableChain graph traversal elsewhere, as reusing PkNode/SkNode
+    did) and no optional dependencies like deeplabcut (which pos_merge's
+    DLCPosV1 part needs, and isn't installed in every dev env).
+
+    ``part_attr`` is part of each source's primary key so it propagates into
+    the merge Part table's own heading — a bare ``-> Source`` FK only pulls
+    primary-key attributes. Sources are heterogeneous (``a_id`` vs ``b_id``)
+    so multi-part fetch has to reconcile differing field names. ``SourceA``/
+    ``SourceB`` are ``Computed`` so ``populate()`` is exercisable.
+    """
+
+    class SourceALookup(SpyglassMixin, dj.Lookup):
+        definition = """
+        a_id: int
+        part_attr: int
+        """
+        contents = [(1, 1), (2, 2)]
+
+    class SourceBLookup(SpyglassMixin, dj.Lookup):
+        definition = """
+        b_id: int
+        part_attr: int
+        """
+        contents = [(1, 1)]
+
+    class SourceA(SpyglassMixin, dj.Computed):
+        definition = """
+        -> SourceALookup
+        ---
+        a_computed: int
+        """
+
+        def make(self, key):
+            self.insert1(dict(key, a_computed=key["a_id"] * 10))
+
+    class SourceB(SpyglassMixin, dj.Computed):
+        definition = """
+        -> SourceBLookup
+        ---
+        b_computed: int
+        """
+
+        def make(self, key):
+            self.insert1(dict(key, b_computed=key["b_id"] * 100))
+
+    class MergeRepro(_Merge, SpyglassMixin):
+        definition = """
+        merge_id: uuid
+        ---
+        source: varchar(32)
+        """
+
+        class SourceA(SpyglassMixin, dj.Part):
+            definition = """
+            -> master
+            ---
+            -> SourceA
+            """
+
+        class SourceB(SpyglassMixin, dj.Part):
+            definition = """
+            -> master
+            ---
+            -> SourceB
+            """
+
+    yield {
+        "SourceALookup": SourceALookup,
+        "SourceBLookup": SourceBLookup,
+        "SourceA": SourceA,
+        "SourceB": SourceB,
+        "MergeRepro": MergeRepro,
+    }
+
+
+@pytest.fixture(scope="module")
+def merge_repro_activated(dj_conn, merge_repro_schema):
+    """Declare and activate the merge_repro schema once per test module."""
+    schema = dj.Schema(context=merge_repro_schema)
+    for table in merge_repro_schema.values():
+        schema(table)
+    schema.activate("test_merge_repro", connection=dj_conn)
+
+    yield merge_repro_schema
+
+    schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
+def merge_repro(merge_repro_activated):
+    """Reset merge_repro to a deterministic 3-row/2-part populated state.
+
+    2 SourceA rows + 1 SourceB row; ``part_attr=1`` matches one row of each
+    part, mirroring the reviewer's original repro counts.
+    """
+    SourceA = merge_repro_activated["SourceA"]
+    SourceB = merge_repro_activated["SourceB"]
+    MergeRepro = merge_repro_activated["MergeRepro"]
+
+    MergeRepro().super_delete(warn=False, safemode=False)
+    SourceA().delete_quick()
+    SourceB().delete_quick()
+
+    SourceA().populate()
+    SourceB().populate()
+
+    MergeRepro().insert(
+        SourceA().fetch("KEY", as_dict=True), part_name="SourceA"
+    )
+    MergeRepro().insert(
+        SourceB().fetch("KEY", as_dict=True), part_name="SourceB"
+    )
+
+    yield merge_repro_activated
+
+
+@pytest.fixture(scope="module")
 def schema_test(teardown, dj_conn):
     """This fixture is used to create a schema
 
@@ -252,9 +372,7 @@ def graph_tables(dj_conn, graph_schema):
     # Merge inserts after declaring tables
     merge_keys = graph_schema["PkNode"].fetch("KEY", offset=1, as_dict=True)
     graph_schema["MergeOutput"].insert(merge_keys, skip_duplicates=True)
-    merge_child_keys = graph_schema["MergeOutput"]().merge_fetch(
-        "merge_id", restriction=True, offset=1
-    )
+    merge_child_keys = graph_schema["MergeOutput"]().fetch("merge_id", offset=1)
     merge_child_inserts = [
         (i, j, k + 10)
         for i, j, k in zip(merge_child_keys, range(4), range(10, 15))
