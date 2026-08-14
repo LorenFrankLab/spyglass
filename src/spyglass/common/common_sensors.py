@@ -31,9 +31,7 @@ class SensorData(SpyglassIngestion, dj.Imported):
     _source_nwb_object_name = "analog"
     _only_ingest_first = True  # first match wins, as get_data_interface did
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.behavior.BehavioralEvents
+    _source_nwb_object_type = pynwb.behavior.BehavioralEvents
 
     @property
     def table_key_to_obj_attr(self):

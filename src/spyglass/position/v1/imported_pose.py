@@ -43,16 +43,12 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
 
         table_key_to_obj_attr = {"self": {"part_object_id": "object_id"}}
 
-    @property
-    def _source_nwb_object_type(self):
-        return ndx_pose.PoseEstimation
+    _source_nwb_object_type = ndx_pose.PoseEstimation
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {
-            "self": {"pose_object_id": "object_id"},
-            "skeleton": {"skeleton_object_id": "object_id"},
-        }
+    table_key_to_obj_attr = {
+        "self": {"pose_object_id": "object_id"},
+        "skeleton": {"skeleton_object_id": "object_id"},
+    }
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Generate the interval, the pose entry, and one entry per body part.

@@ -34,9 +34,7 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
     _planned_groups = dict()  # electrode ids -> group key resolved this run
     _planned_names = set()  # group names planned this run, not yet written
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.ecephys.LFP
+    _source_nwb_object_type = pynwb.ecephys.LFP
 
     @property
     def table_key_to_obj_attr(self):

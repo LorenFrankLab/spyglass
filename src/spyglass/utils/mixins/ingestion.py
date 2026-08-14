@@ -49,15 +49,13 @@ class IngestionMixin(BaseMixin):
 
     """
 
-    _expected_duplicates = False  # If True, entries in this table are valid to be shared across sessions
+    _expected_duplicates = False  # If True, rows to be shared across sessions
     _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
     _source_nwb_object_description = None  # Optional filter on description
-    _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
-    _extension_requirements = (
-        dict()
-    )  # Optional dict of {extension_name: min_version} to check before ingesting
+    _single_entry_per_table = False  # If False, DynamicTables 1:1 per row
+    _extension_requirements = dict()  # Opt: {ext_name: min_version} to check
 
     @property
     def table_key_to_obj_attr(
@@ -293,7 +291,7 @@ class IngestionMixin(BaseMixin):
 
     @staticmethod
     def sanitize_nwb_object_name(name: Optional[str]) -> Optional[str]:
-        """Sanitize NWB object name for case-insensitive and space-insensitive matching."""
+        """Sanitize NWB object name for case- and space-insensitive matching."""
         return name.lower().replace(" ", "") if name else None
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
@@ -510,11 +508,11 @@ class IngestionMixin(BaseMixin):
     def _dedup_within_batch(self, tbl, table_entries: List[dict]) -> List[dict]:
         """Collapse planned entries that share a primary key.
 
-        The database check in `validate1_duplicate` compares each entry to
-        what is already stored, not to its siblings in the same plan. Two
-        objects in one file can name the same novel parent -- two task tables
-        declaring the same Task, say -- and `_run_nwbfile_insert` inserts with
-        `skip_duplicates=False`, so the pair would raise and abort the file.
+        The database check in `validate1_duplicate` compares each entry to what
+        is already stored, not to its siblings in the same plan. Two objects in
+        one file can name the same novel parent and `_run_nwbfile_insert`
+        inserts with `skip_duplicates=False`, so the pair would raise and abort
+        the file.
 
         Parameters
         ----------
@@ -684,7 +682,7 @@ class IngestionMixin(BaseMixin):
         Returns
         -------
         bool
-            True if the NWB file meets the extension requirements, False otherwise.
+            True if the NWB file meets the extension requirements.
         """
         # early exit if no extension requirements specified
         if not self._extension_requirements:
@@ -703,8 +701,8 @@ class IngestionMixin(BaseMixin):
                     f"NWB file {nwb_file_name} can not be ingested into "
                     + f"{self.camel_name} due to unmet extension requirement:"
                     + f"{extension} >= {min_version} \n"
-                    + "Please submit feature request or contact the Spyglass team"
-                    + " for assistance."
+                    + "Please submit feature request or contact the Spyglass "
+                    + "team for assistance."
                 )
                 return False
         return True

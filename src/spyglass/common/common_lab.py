@@ -44,10 +44,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
     _admin = []
     _expected_duplicates = True
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.NWBFile
+    _source_nwb_object_type = pynwb.NWBFile
 
     def generate_entries_from_nwb_object(
         self, nwb_obj: pynwb.NWBFile, base_key=None
@@ -176,10 +173,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
     _shared_teams = {}
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.NWBFile
+    _source_nwb_object_type = pynwb.NWBFile
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         base_key = base_key or dict()
@@ -291,13 +285,9 @@ class Institution(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {"self": {"institution_name": "institution"}}
+    table_key_to_obj_attr = {"self": {"institution_name": "institution"}}
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.NWBFile
+    _source_nwb_object_type = pynwb.NWBFile
 
     def _adjust_keys_for_entry(self, keys):
         """Ensure that institution_name is not None."""
@@ -313,13 +303,9 @@ class Lab(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {"self": {"lab_name": "lab"}}
+    table_key_to_obj_attr = {"self": {"lab_name": "lab"}}
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.NWBFile
+    _source_nwb_object_type = pynwb.NWBFile
 
     def insert_from_nwbfile(
         self,

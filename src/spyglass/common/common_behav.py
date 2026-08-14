@@ -56,14 +56,10 @@ class PositionSource(SpyglassIngestion, dj.Manual):
 
         _expected_duplicates = True  # follows the master
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.behavior.Position
+    _source_nwb_object_type = pynwb.behavior.Position
 
-    @property
-    def table_key_to_obj_attr(self):
-        """Entries are grouped by epoch in the override, not per column."""
-        return {"self": dict()}
+    # Entries are grouped by epoch in the override, not per column.
+    table_key_to_obj_attr = {"self": dict()}
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """The file's Position interface holds every spatial series.
@@ -322,9 +318,7 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
     _nwb_table = Nwbfile
     _compass_import_enumerator = 1
 
-    @property
-    def _source_nwb_object_type(self):
-        return CompassDirection
+    _source_nwb_object_type = CompassDirection
 
     @property
     def table_key_to_obj_attr(self):
@@ -420,9 +414,7 @@ class StateScriptFile(SpyglassIngestion, dj.Imported):
     # Matching ignores case and spaces, so "STATE SCRIPT" is covered too.
     _source_nwb_object_description = ("state script", "state_script")
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {"self": {"file_object_id": "object_id"}}
+    table_key_to_obj_attr = {"self": {"file_object_id": "object_id"}}
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Expand one associated file into an entry per task epoch.
@@ -486,14 +478,10 @@ class VideoFile(SpyglassIngestion, dj.Imported):
     _video_count = 0  # ImageSeries seen in the file being ingested
     _placed_videos = 0  # ImageSeries that landed in at least one epoch
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.image.ImageSeries
+    _source_nwb_object_type = pynwb.image.ImageSeries
 
-    @property
-    def table_key_to_obj_attr(self):
-        """Entries are built per epoch in the override, not per column."""
-        return {"self": dict()}
+    # Entries are built per epoch in the override, not per column.
+    table_key_to_obj_attr = {"self": dict()}
 
     def _epoch_intervals(self, nwb_file_name) -> dict:
         """Return the valid times of each task epoch, fetched once per file.

@@ -138,14 +138,10 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
     _camera_cache = dict()  # nwb_file_name -> {camera id: camera name}
     _interval_cache = dict()  # nwb_file_name -> interval names in IntervalList
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.core.DynamicTable
+    _source_nwb_object_type = pynwb.core.DynamicTable
 
-    @property
-    def table_key_to_obj_attr(self):
-        """Only the task name comes straight off a row; see the override."""
-        return {"self": {"task_name": "task_name"}}
+    # Only the task name comes straight off a row; see the override.
+    table_key_to_obj_attr = {"self": {"task_name": "task_name"}}
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Hold the caller's config, which `get_nwb_objects` also needs.

@@ -39,10 +39,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.ecephys.ElectrodeGroup
+    _source_nwb_object_type = pynwb.ecephys.ElectrodeGroup
 
     @property
     def table_key_to_obj_attr(self):
@@ -105,10 +102,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
 
     _single_entry_per_table = False
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.ecephys.ElectrodesTable
+    _source_nwb_object_type = pynwb.ecephys.ElectrodesTable
 
     @property
     def table_key_to_obj_attr(self):
@@ -291,9 +285,7 @@ class Raw(SpyglassIngestion, dj.Imported):
         "electrophysiology",
     ]
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.ecephys.ElectricalSeries
+    _source_nwb_object_type = pynwb.ecephys.ElectricalSeries
 
     @property
     def table_key_to_obj_attr(self):
@@ -386,17 +378,13 @@ class SampleCount(SpyglassIngestion, dj.Imported):
     _source_nwb_object_name = "sample_count"
     _only_ingest_first = True  # first match wins, as get_data_interface did
 
-    @property
-    def _source_nwb_object_type(self):
-        # The enclosing ProcessingModule carries this name too, and is itself
-        # an NWBDataInterface, so a broader type here matches the module and
-        # stores its object id instead of the series'. The previous lookup
-        # searched module.data_interfaces, which never holds modules.
-        return pynwb.base.TimeSeries
+    # The enclosing ProcessingModule carries this name too, and is itself
+    # an NWBDataInterface, so a broader type here matches the module and
+    # stores its object id instead of the series'. The previous lookup
+    # searched module.data_interfaces, which never holds modules.
+    _source_nwb_object_type = pynwb.base.TimeSeries
 
-    @property
-    def table_key_to_obj_attr(self):
-        return {"self": {"sample_count_object_id": "object_id"}}
+    table_key_to_obj_attr = {"self": {"sample_count_object_id": "object_id"}}
 
     def make(self, key):
         """Deprecated in favor of insert_from_nwbfile."""
