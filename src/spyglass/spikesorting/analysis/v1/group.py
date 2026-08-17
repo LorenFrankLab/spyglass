@@ -204,11 +204,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            if an operator is not one of those listed above, if "between" or
-            "outside" is given anything but a [low, high] pair, if any
-            operator but "isin" or "notin" is applied to a column holding a
-            list per unit, or, when strict, if a criterion names a column not
-            in units_df
+            if a criterion holds no operator at all, if an operator is not one
+            of those listed above, if "between" or "outside" is given anything
+            but a [low, high] pair, if any operator but "isin" or "notin" is
+            applied to a column holding a list per unit, or, when strict, if a
+            criterion names a column not in units_df
 
         Notes
         -----
@@ -246,6 +246,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             if not isinstance(criterion, dict):  # shorthand for membership
                 criterion = {"isin": criterion}
+            if not criterion:
+                raise ValueError(
+                    f"Empty criterion for column '{column}': no operator to "
+                    + "apply. Drop the column from the criteria to include "
+                    + "every unit."
+                )
             values = units_df[column].to_numpy()
 
             for operator, value in criterion.items():

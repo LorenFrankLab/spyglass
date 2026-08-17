@@ -180,6 +180,14 @@ def test_criteria_invalid_operator(spike_v1_group, units_df):
         )
 
 
+def test_criteria_empty_operator_dict(spike_v1_group, units_df):
+    """A criterion with no operator raises rather than passing every unit"""
+    with pytest.raises(ValueError, match="Empty criterion for column 'snr'"):
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria(
+            units_df, {"snr": {}}
+        )
+
+
 def test_criteria_membership_list_column(spike_v1_group, units_df):
     """Membership matches any item of a column holding a list per unit"""
     filter_units_by_criteria = (
