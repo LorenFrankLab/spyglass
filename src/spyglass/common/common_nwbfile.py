@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, Iterator, List, Optional, Set, Union
 
 import datajoint as dj
 import h5py
@@ -11,9 +11,13 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
-from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
+
+from spyglass.common._nwbfile_cleanup import (
+    CleanupPlan,
+    _check_number,
+)
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -549,18 +553,23 @@ class AnalysisRegistry(dj.Manual):
         Returns
         -------
         error_msg : str or None
-            An error message if blocking fails, otherwise None.
+            A message when the table could not be blocked -- trigger creation
+            failed, or a blocker already exists -- otherwise None.
         """
-        if dry_run:
-            logger.info(f"Dry run: would block inserts into {table}")
-            return None
-
         try:
             database, trigger = self._get_block_info(table)
             kwargs = dict(database=database, trigger=trigger, table=table)
 
             if self._block_exists(table):
-                return
+                return (
+                    f"Failed to block {table}: blocking trigger already "
+                    "exists; another cleanup may be active or the trigger "
+                    "may be stale"
+                )
+
+            if dry_run:
+                logger.info(f"Dry run: would block inserts into {table}")
+                return None
 
             # Create trigger
             dj.conn().query(SQL_BLOCK_TEMPLATE.format(**kwargs))
@@ -574,7 +583,8 @@ class AnalysisRegistry(dj.Manual):
         """Block new inserts into all registered analysis tables.
 
         Creates BEFORE INSERT triggers on all registered custom analysis tables
-        to prevent data modifications during maintenance operations.
+        to prevent data modifications during maintenance operations. Refuses
+        to adopt an existing trigger because it may belong to another cleanup.
 
         Parameters
         ----------
@@ -584,18 +594,56 @@ class AnalysisRegistry(dj.Manual):
         Raises
         ------
         RuntimeError
-            If any trigger creation fails.
+            If blocker inspection or trigger creation fails, or if any blocker
+            already exists. A partial creation failure may leave some tables
+            blocked because triggers do not carry per-run ownership.
         """
-        errors = []
-        for table in self.fetch("full_table_name"):
+        # Freeze one deterministic acquisition order. Concurrent acquisitions
+        # with the same stable registry snapshot then contend on the same first
+        # trigger rather than each creating a different prefix of the set.
+        tables = sorted(set(self.fetch("full_table_name")))
+
+        # Inspect every table before any DDL. A pre-existing trigger is either
+        # owned by an active cleanup or stale after a failed one; adopting it
+        # would let this call later remove a trigger it did not create.
+        existing = []
+        for table in tables:
+            try:
+                if self._block_exists(table):
+                    existing.append(table)
+            except Exception as err:
+                raise RuntimeError(
+                    f"Failed to inspect insert blocker for {table}; refusing "
+                    f"cleanup before creating any triggers: {err}"
+                ) from err
+
+        if existing:
+            blocked = "\n".join(f"  - {table}" for table in existing)
+            raise RuntimeError(
+                "Refusing cleanup because insert-blocking triggers already "
+                f"exist for:\n{blocked}\nAnother cleanup may be active, or "
+                "the triggers may be stale. Confirm that no cleanup is active "
+                "and inspect the blockers before removing them. Use "
+                "AnalysisRegistry().unblock_new_inserts() only after confirming "
+                "every blocker is stale; that helper removes all registered "
+                "analysis blocking triggers."
+            )
+
+        for table in tables:
             error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
-                errors.append(error)
-
-        if errors:
-            raise RuntimeError(
-                f"Failed to block {len(errors)} table(s):\n" + "\n".join(errors)
-            )
+                # Raise instead of continuing: this may be a concurrent trigger
+                # claim or another DDL failure. Continuing would add more
+                # triggers to a partial, ambiguous acquisition.
+                raise RuntimeError(
+                    f"Failed to block 1 table(s):\n{error}\nSome analysis "
+                    "tables may remain blocked. Another cleanup may be active, "
+                    "or a trigger may be stale. Confirm that no cleanup is "
+                    "active, then inspect the blocking triggers before using "
+                    "AnalysisRegistry().unblock_new_inserts(). That helper "
+                    "removes all registered analysis blocking triggers; use "
+                    "it only after confirming every such trigger is stale."
+                )
 
     def unblock_new_inserts(self) -> None:
         """Unblock new inserts into all registered analysis tables.
@@ -644,63 +692,93 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
+    def _walk_analysis_files(self) -> Iterator[Path]:
+        """Yield NWB leaves, including those under symlinked directories."""
+        yield from CleanupPlan.walk_analysis_files(
+            Path(self._analysis_dir), logger
+        )
+
+    def _build_untracked_file_plan(
+        self,
+        custom_tables: List[SpyglassAnalysis],
+        *,
+        min_file_age_hours: float = 24.0,
+        now_ns: Optional[int] = None,
+    ) -> CleanupPlan:
+        """Snapshot tracked paths once and scan the analysis directory."""
+        tracked = set()
+        for table in [self, *custom_tables]:
+            tracked.update(
+                Path(path) for _, path in table._ext_tbl.fetch_external_paths()
+            )
+
+        return CleanupPlan(
+            self._analysis_dir,
+            tracked,
+            logger=logger,
+            min_file_age_hours=min_file_age_hours,
+            now_ns=now_ns,
+            walker=self._walk_analysis_files,
+        )
+
     def _remove_untracked_files(
-        self, custom_tables: List[SpyglassAnalysis], dry_run: bool = True
+        self,
+        custom_tables: List[SpyglassAnalysis],
+        dry_run: bool = True,
+        plan: CleanupPlan | None = None,
+        *,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+        min_file_age_hours: float = 24.0,
+        now_ns: Optional[int] = None,
     ) -> tuple[Set[Path], Set[Path]]:
-        """Remove analysis files that are empty (0 bytes) or not tracked.
+        """Remove empty or untracked analysis files.
 
-        WARNING: This function makes `analysis_dir` a privileged directory and
-        will delete files in it that are not tracked in ANY schema externals.
+        A lowercase *.nwb leaf inside analysis_dir is a managed pointer. For an
+        untracked symlink, cleanup deletes the target recorded during the scan
+        -- including a target on another volume -- and then removes the leaf.
+        Symlinked directories are traversed, allowing an external analysis tree
+        to participate in the same cleanup pass.
 
-        NOTE: Subprocess would be faster, but this prioritizes cross-platform
-        compatibility.
+        Cleanup follows the usual Spyglass trust-the-disk model: tracked paths
+        and filesystem candidates are each captured once. It does not defend
+        against concurrent registration or filesystem mutation between scan
+        and unlink. Do not run cleanup while analysis files are being written.
 
         Parameters
         ----------
-        dry_run : bool, optional
-            If True, return the files that would be deleted. Defaults to True.
         custom_tables : list
-            List of custom analysis table instances to check for tracked files.
-            If None, only checks common table. Defaults to None.
+            Custom analysis tables included in the tracked-path snapshot.
+        dry_run : bool, optional
+            Report candidates without unlinking them. Defaults to True.
+        plan : CleanupPlan, optional
+            A previously scanned plan.
+        max_delete_fraction : float, optional
+            Maximum fraction of eligible files that may be deleted.
+        max_delete_to_tracked_ratio : float, optional
+            Maximum ratio of deletions to tracked files found in the scan.
+        min_file_age_hours : float, optional
+            Defer files newer than this based on target mtime. Defaults to 24
+            hours; pass 0 for intentional immediate cleanup.
+        now_ns : int, optional
+            Clock value injected by tests.
 
         Returns
         -------
-        tuple[Set[Path], Set[Path]]
-            (files_to_delete, all_files_scanned) - The second set can be reused
-            to avoid re-scanning the directory.
+        tuple[set[pathlib.Path], set[pathlib.Path]]
+            Candidate targets and the tracked-path snapshot.
         """
-
-        def paths_from_external(tbl) -> Set[Path]:
-            return set([fp[1] for fp in tbl._ext_tbl.fetch_external_paths()])
-
-        # Collect tracked files from common table, then custom tables
-        tracked = paths_from_external(self)
-        for tbl in custom_tables:
-            tracked.update(paths_from_external(tbl))
-
-        to_delete = set()
-        for path in tqdm(
-            Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files  ",  # Note extra spaces for alignment
-        ):
-            is_empty_file = path.is_file() and path.stat().st_size == 0
-            is_empty_dir = path.is_dir() and not any(path.iterdir())
-            if is_empty_file or is_empty_dir:
-                to_delete.add(path)
-            elif path not in tracked:
-                to_delete.add(path)
-
-        if dry_run:
-            logger.info(f"  {len(to_delete)} untracked or empty analysis files")
-            return to_delete, tracked
-
-        for path in to_delete:
-            try:
-                path.unlink()
-            except Exception as e:
-                self._logger.error(f"Error deleting file {path}: {e}")
-
-        return to_delete, tracked
+        if plan is None:
+            plan = self._build_untracked_file_plan(
+                custom_tables,
+                min_file_age_hours=min_file_age_hours,
+                now_ns=now_ns,
+            )
+        return plan.execute(
+            dry_run=dry_run,
+            max_delete_fraction=max_delete_fraction,
+            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+        )
 
     def _cleanup_custom_table(
         self,
@@ -751,7 +829,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return common_orphans
 
-    def cleanup(self, dry_run: bool = False) -> None:
+    def cleanup(
+        self,
+        dry_run: bool = False,
+        *,
+        max_delete_fraction: float = 0.9,
+        max_delete_to_tracked_ratio: float = 10.0,
+        min_file_age_hours: float = 24.0,
+    ) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -760,13 +845,15 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         custom AnalysisNwbfile tables to prevent premature deletion.
 
         Process:
-            1. For each custom analysis table:
+            1. Discover custom tables and snapshot filesystem/tracking state.
+            2. Validate the complete untracked-file deletion plan.
+            3. Delete eligible filesystem candidates from that snapshot.
+            4. For each custom analysis table:
                a. Delete orphaned entries (no downstream references)
                b. Clean up unused external file entries
                c. Remove valid entries from common orphan list
-            2. Delete remaining common orphans
-            3. Clean up common external entries
-            4. Delete empty files (0 bytes)
+            5. Delete remaining common orphans.
+            6. Clean up common external entries without deleting their files.
 
         Example:
             from spyglass.common import AnalysisNwbfile
@@ -789,21 +876,95 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             cleanup actions without deleting database entries or files.
             If False, apply the cleanup changes, including deleting orphaned
             entries and associated files.
+        max_delete_fraction : float
+            Maximum fraction of eligible analysis NWB files that may be
+            deleted by filesystem cleanup. The eligible set is the planned
+            deletions plus scanned files recognized as tracked; age-deferred
+            files are excluded. Set high by default (0.9) so it catches a
+            catastrophically misconfigured analysis directory rather than
+            routine large cleanups. Defaults to 0.9.
+        max_delete_to_tracked_ratio : float
+            Maximum ratio of filesystem cleanup deletions to tracked analysis
+            files found in the scan. At the default ``max_delete_fraction``
+            this limit cannot bind: writing D for deletions and T for tracked
+            files, ``D / (D + T) <= 0.9`` forces ``D / T <= 9``, so any plan
+            that clears the fraction limit is already within the ratio limit.
+            It becomes the operative guard only when
+            ``max_delete_fraction`` is raised above 10/11 (~0.909).
+            This limit applies only to
+            filesystem deletion of untracked or empty analysis NWB files, not
+            to orphan row deletion. Defaults to 10.0.
+        min_file_age_hours : float
+            Untracked files newer than this are deferred to the next cleanup
+            rather than deleted, protecting work that exists on disk but is
+            not yet registered -- notably a file written to another volume
+            and symlinked in before its row is inserted. Defaults to 24.0.
+            The target modification time is the age basis. Pass 0 only for
+            intentional immediate cleanup.
+
+        Raises
+        ------
+        ValueError
+            If a numeric safety limit is non-finite or outside its bounds.
+        RuntimeError
+            If insert blocking or unblocking fails, a destructive plan is
+            refused, or registry/database cleanup fails.
         """
+        # Validate before anything happens. An unvalidated NaN or inf would
+        # make every comparison False and silently disable the guard.
+        max_delete_fraction = _check_number(
+            "max_delete_fraction", max_delete_fraction, minimum=0, maximum=1
+        )
+        max_delete_to_tracked_ratio = _check_number(
+            "max_delete_to_tracked_ratio",
+            max_delete_to_tracked_ratio,
+            minimum=0,
+        )
+        min_file_age_hours = _check_number(
+            "min_file_age_hours", min_file_age_hours, minimum=0
+        )
+
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
         self._info_msg(heading + suffix)
 
         registry = AnalysisRegistry()
-
+        # Stays OUTSIDE the try. Moving it inside would let a partial
+        # acquisition fall into `finally: unblock_new_inserts()`, which
+        # drops EVERY trigger including ones owned by a concurrent run.
+        # Full ownership tracking needs a cleanup lease (follow-up).
         registry.block_new_inserts(dry_run=dry_run)
 
-        # Get all custom tables first so we can check their tracked files
-        custom_tables = list(registry.all_classes)
-        num_tables = len(custom_tables) + 1  # +1 for common table
-        common_orphans = self.get_orphans().proj()
-
+        # An explicit flag, not sys.exc_info(): that returns the exception
+        # being handled ANYWHERE up the calling stack, so a caller shaped
+        # `except Exception: cleanup()` would make it non-None even when the
+        # body succeeded -- silently downgrading an unblock failure that
+        # leaves inserts blocked database-wide.
+        body_failed = False
         try:
+            # Inside the try: a throw from get_orphans() previously landed
+            # between block and try, leaving insert triggers installed
+            # database-wide with no unblock.
+            custom_tables = list(registry.all_classes)
+            num_tables = len(custom_tables) + 1  # +1 for common table
+            common_orphans = self.get_orphans().proj()
+
+            untracked_file_plan = self._build_untracked_file_plan(
+                custom_tables, min_file_age_hours=min_file_age_hours
+            )
+
+            # Delete files before database cleanup. Files newly orphaned by
+            # this run's row deletion are caught on the next invocation. The
+            # age gate is already baked into untracked_file_plan (built above),
+            # so it is not re-passed here.
+            _ = self._remove_untracked_files(
+                custom_tables,
+                dry_run=dry_run,
+                plan=untracked_file_plan,
+                max_delete_fraction=max_delete_fraction,
+                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+            )
+
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans
             for i, analysis_tbl in enumerate(custom_tables, start=1):
@@ -827,12 +988,29 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 f"orphans, {len(unused)} unused externals"
             )
 
-            # Remove untracked files
-            _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
+        except BaseException:
+            body_failed = True
+            raise
 
         finally:
             if not dry_run:
-                registry.unblock_new_inserts()
+                try:
+                    registry.unblock_new_inserts()
+                except Exception as unblock_err:
+                    # A failed unblock halts ALL inserts across the database
+                    # until manually cleared, so this must be loud regardless
+                    # of whether another exception is already propagating.
+                    logger.critical(
+                        "Failed to unblock inserts after cleanup: "
+                        f"{unblock_err}. Analysis inserts remain BLOCKED "
+                        "database-wide until restored; run "
+                        "AnalysisRegistry().unblock_new_inserts() manually."
+                    )
+                    # Re-raise only when the body itself succeeded;
+                    # otherwise we would mask the original cleanup error
+                    # (the critical log above is the signal).
+                    if not body_failed:
+                        raise
 
     def check_all_files(
         self, resolve_tables: bool = False, verbose: bool = False
@@ -841,8 +1019,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         Iterates through common and all custom AnalysisNwbfile tables,
         checking file existence and readability. Populates AnalysisFileIssues
-        table with any problems found. This is a read-only monitoring operation
-        that can be run independently of cleanup at different frequencies.
+        with any problems found. This monitoring operation does not delete
+        files, but it does write issue rows and can be run independently of
+        cleanup at different frequencies.
 
         Parameters
         ----------
