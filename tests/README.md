@@ -284,6 +284,15 @@ concurrent runs on different branches do not share data. The directory is
 created if it does not exist. Without the flag, storage is left to Docker
 exactly as before.
 
+Unless `--no-teardown` is passed, this directory is deleted along with the
+container at the end of the run, so a later run that reuses the same
+`--container-name` always starts from an empty data dir rather than rebooting
+MySQL onto stale, partially-cleaned-up data. With `--no-teardown`, both the
+container and its data dir are left in place. Note that `--container-vol-dir`
+only takes effect when the container is (re)created — if a container with the
+matching name is already running (e.g. from a prior `--no-teardown` run), the
+flag has no effect on it; a warning is logged in that case.
+
 ### Debugging Options
 
 ```bash
