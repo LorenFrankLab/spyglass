@@ -325,8 +325,41 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         return restr_graph
 
+    @staticmethod
+    def _condense_restrictions(table_name: str, restr_list) -> str:
+        """OR a table's logged restrictions into one condition.
+
+        Sorted and de-duplicated so the same selection always produces the same
+        text. The fetch that supplies `restr_list` has no `order_by`, so its row
+        order is not guaranteed, and OR-ing the same conditions in a different
+        order yields an equivalent restriction that reads differently. Stable
+        text keeps `Export.Table.restriction` comparable across reruns.
+
+        Parameters
+        ----------
+        table_name : str
+            Full name of the table the restrictions apply to.
+        restr_list : Iterable[str]
+            Restrictions logged for that table, in any order, possibly with
+            repeats.
+
+        Returns
+        -------
+        str
+            One condition matching the union of the inputs.
+        """
+        return make_condition(
+            dj.FreeTable(dj.conn(), table_name),
+            sorted(set(restr_list)),
+            set(),
+        )
+
     def get_restr_graph(
-        self, key: dict, verbose=False, cascade=True, included_nwb_files=None
+        self,
+        key: dict,
+        verbose=False,
+        cascade=True,
+        included_nwb_files=None,
     ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
@@ -344,23 +377,25 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         cascade : bool, optional
             Propagate restrictions to upstream tables. Default True.
         included_nwb_files : list, optional
-            A whitelist of nwb files to include in the export. Default None applies
-            no whitelist restriction.
+            A whitelist of nwb files to include in the export. Default None
+            applies no whitelist restriction.
         """
         selection_tables = self * self.Table & key
         tracked_tables = set(selection_tables.fetch("table_name"))
         leaves = []
         # Condense to single restriction per table (OR of all restrictions).
         # Large performance boost for large exports with many logged entries
-        for table_name in tracked_tables:
+        for table_name in sorted(tracked_tables):
             restr_list = (selection_tables & dict(table_name=table_name)).fetch(
                 "restriction"
             )
-            restriction = make_condition(
-                dj.FreeTable(dj.conn(), table_name), restr_list, set()
-            )
             leaves.append(
-                {"table_name": table_name, "restriction": restriction}
+                {
+                    "table_name": table_name,
+                    "restriction": self._condense_restrictions(
+                        table_name, restr_list
+                    ),
+                }
             )
 
         restr_graph = RestrGraph(
@@ -369,6 +404,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             verbose=verbose,
             cascade=False,
             include_files=True,
+            skip_external=False,
         )
 
         if included_nwb_files is None:
@@ -551,7 +587,9 @@ class Export(SpyglassMixin, dj.Computed):
 
         logger.debug(f"Building restr graph for {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
-            paper_key, included_nwb_files=included_nwb_files, verbose=debug_mode
+            paper_key,
+            included_nwb_files=included_nwb_files,
+            verbose=debug_mode,
         )
         # Original plus upstream files
         logger.debug("Collecting file paths from export selection")

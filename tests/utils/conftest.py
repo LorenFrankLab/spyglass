@@ -297,6 +297,161 @@ def graph_tables_many_to_one(graph_tables):
 
 
 @pytest.fixture(scope="module")
+def two_parent_tables(SpyglassMixin, dj_conn):
+    """Tables where an attr name is shared without being the linking foreign key.
+
+    `TpChild` reaches `TpParent` two ways: directly, and via `TpMid`. Because
+    `tp_parent_id` is secondary on `TpMid` but primary on `TpChild`, a
+    restriction on `TpMid.tp_parent_id` cascading down to `TpChild` must join on
+    `tp_mid_id` (the actual foreign key) rather than reuse `tp_parent_id` by
+    name. Contents are chosen so the two answers differ in length.
+
+    Declared in a dedicated schema so the extra edges cannot perturb the
+    path-finding of tests built on `graph_tables`.
+    """
+    schema = dj.Schema("test_two_parent", connection=dj_conn)
+
+    @schema
+    class TpParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        tp_parent_id: int
+        ---
+        tp_parent_attr: int
+        """
+        contents = [(i, i + 10) for i in range(10)]
+
+    @schema
+    class TpMid(SpyglassMixin, dj.Lookup):
+        definition = """
+        tp_mid_id: int
+        ---
+        -> TpParent
+        tp_mid_attr: int
+        """
+        contents = [(i, i - 1, i + 12) for i in range(2, 10)]
+
+    @schema
+    class TpChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> TpMid
+        -> TpParent
+        ---
+        tp_child_attr: int
+        """
+        # tp_mid_id=4 maps to tp_parent_id=3 via TpMid. Rows below intentionally
+        # disagree with that mapping so a name-based shortcut is detectable:
+        #   join on tp_mid_id=4 -> 3 rows; copy of `tp_parent_id = 3` -> 2 rows
+        contents = [
+            (4, 3, 30),  # both
+            (5, 3, 31),  # only a `tp_parent_id = 3` copy
+            (4, 8, 32),  # only the correct join
+            (6, 8, 33),  # neither
+            (4, 9, 34),  # only the correct join
+        ]
+
+    yield {"TpParent": TpParent(), "TpMid": TpMid(), "TpChild": TpChild()}
+
+    schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
+def mutable_graph_tables(SpyglassMixin, dj_conn):
+    """Small parent/child schema that tests may insert into.
+
+    Function-scoped and dropped on teardown so row-count assertions elsewhere
+    are unaffected by the inserts.
+    """
+    schema = dj.Schema("test_mutable_graph", connection=dj_conn)
+
+    @schema
+    class MutParent(SpyglassMixin, dj.Lookup):
+        definition = """
+        mut_id: int
+        ---
+        mut_attr: int
+        """
+        contents = [(i, i + 10) for i in range(3)]
+
+    @schema
+    class MutChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> MutParent
+        ---
+        mut_child_attr: int
+        """
+        contents = [(i, i + 20) for i in range(3)]
+
+    yield {"MutParent": MutParent(), "MutChild": MutChild()}
+
+    schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
+def redeclare_table(SpyglassMixin, dj_conn):
+    """Factory declaring the same table name with a caller-supplied definition.
+
+    Used to prove that dropping and re-creating a table is not served a stale
+    heading from any FreeTable cache.
+    """
+    schema_name = "test_redeclare_graph"
+    made = []
+
+    def _make(definition, contents):
+        schema = dj.Schema(schema_name, connection=dj_conn)
+
+        class Redeclared(SpyglassMixin, dj.Lookup):
+            pass
+
+        Redeclared.definition = definition
+        Redeclared.contents = contents
+        schema(Redeclared)
+        made.append(schema)
+        return schema, Redeclared()
+
+    yield _make
+
+    for schema in made:
+        schema.drop(force=True)
+
+
+@pytest.fixture(scope="function")
+def query_counter(dj_conn):
+    """Count SQL statements issued on the shared connection.
+
+    Turns 'is the cascade cheaper?' into an assertion that does not depend on
+    wall-clock timing.
+    """
+
+    class Counter:
+        def __init__(self):
+            self.queries = []
+
+        def __len__(self):
+            return len(self.queries)
+
+        def reset(self):
+            self.queries = []
+
+        def matching(self, substring):
+            """Return queries containing substring, case-insensitive."""
+            low = substring.lower()
+            return [q for q in self.queries if low in q.lower()]
+
+    counter = Counter()
+    original = dj_conn.query
+
+    def counting_query(query, *args, **kwargs):
+        counter.queries.append(str(query))
+        return original(query, *args, **kwargs)
+
+    dj_conn.query = counting_query  # instance attr shadows the bound method
+
+    yield counter
+
+    del dj_conn.query  # restore the class-level method
+
+
+@pytest.fixture(scope="module")
 def add_graph_tables(SpyglassMixin):
     schema = dj.Schema("test_add_graphs")
 

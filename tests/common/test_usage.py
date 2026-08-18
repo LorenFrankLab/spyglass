@@ -228,6 +228,54 @@ def test_export_selection_joins(
     ).fetch1("restriction"), "Export join not captured correctly"
 
 
+def test_condense_restrictions_normalizes(export_tbls, common):
+    """Order and repeats in the logged restrictions must not change the result.
+
+    The fetch that supplies these has no `order_by`, so the same selection can
+    come back in a different order on a later run. Reverting the sort or the
+    dedupe has to make this fail, which two identical calls would not catch.
+    """
+    ExportSelection, _ = export_tbls
+    table_name = common.Nwbfile.full_table_name
+
+    restrs = ["nwb_file_name = 'a.nwb'", "nwb_file_name = 'b.nwb'"]
+
+    forward = ExportSelection._condense_restrictions(table_name, restrs)
+    reverse = ExportSelection._condense_restrictions(
+        table_name, list(reversed(restrs))
+    )
+    repeated = ExportSelection._condense_restrictions(
+        table_name, restrs + [restrs[0]]
+    )
+
+    assert forward == reverse, "Condensed restriction depends on input order."
+    assert forward == repeated, "Condensed restriction kept a duplicate."
+    assert all(r in forward for r in restrs), "Condensing dropped a condition."
+
+
+def test_export_selection_restr_deterministic(
+    gen_export_selection, export_tbls
+):
+    """The same selection yields the same leaf restrictions end to end."""
+    ExportSelection, _ = export_tbls
+    paper_key = {"paper_id": gen_export_selection["paper_id"]}
+
+    def leaf_restrictions(graph):
+        return {table: graph._get_restr(table) for table in graph.leaves}
+
+    first = leaf_restrictions(
+        ExportSelection.get_restr_graph(paper_key, cascade=False)
+    )
+    second = leaf_restrictions(
+        ExportSelection.get_restr_graph(paper_key, cascade=False)
+    )
+
+    assert first == second, "Leaf restrictions differed between identical runs."
+    assert all(
+        isinstance(restr, str) for restr in first.values()
+    ), "Leaf restrictions should be plain conditions."
+
+
 def test_export_selection_merge_fetch(
     gen_export_selection, export_tbls, trodes_pos_v1
 ):
@@ -332,6 +380,32 @@ def test_export_populate(populate_export, custom_analysis_file):
 
     assert len(file) == 5, "Export files not captured correctly"
     assert len(table) == 39, "Export tables not captured correctly"
+
+
+@pytest.mark.slow
+def test_export_populate_identity(populate_export, dj_conn):
+    """The exported tables must be a valid, distinct set of spyglass tables.
+
+    A cascade that reaches the wrong tables can still reach the right *number*
+    of them, so check identity rather than count alone.
+    """
+    table, _ = populate_export
+    names = list(table.fetch("table_name"))
+
+    assert len(set(names)) == len(names), "Export captured duplicate tables"
+
+    dj_conn.dependencies.load()
+    known = set(dj_conn.dependencies.nodes)
+    # External tables are legitimately exported but never appear in the
+    # dependency graph: `Dependencies.load` filters `table_name NOT LIKE "~%"`.
+    unknown = {
+        name
+        for name in set(names) - known
+        if not name.split(".")[-1].strip("`").startswith("~")
+    }
+    assert (
+        not unknown
+    ), f"Export captured tables absent from the graph: {unknown}"
 
 
 def test_intersect_export_populate(populate_intersect_export, common):
