@@ -201,14 +201,45 @@ class DandiPath(SpyglassMixin, dj.Manual):
     def has_raw_path(self, file_path: Union[str, Path]) -> bool:
         return bool(self & self.raw_from_path(file_path))
 
-    def fetch_file_from_dandi(
+    def _resolve_key(
         self, key: Optional[dict] = None, nwb_file_path: Optional[str] = None
-    ):
-        """Fetch the file from Dandi and return the NWB file object."""
+    ) -> dict:
+        """Return a restriction key from either an explicit key or a path.
+
+        Parameters
+        ----------
+        key : dict, optional
+            Restriction on this table. Takes precedence over nwb_file_path.
+        nwb_file_path : str, optional
+            Path whose file name identifies the entry.
+
+        Returns
+        -------
+        dict
+            Key suitable for restricting this table.
+
+        Raises
+        ------
+        ValueError
+            If neither argument is given.
+        """
         if key is None and nwb_file_path is None:
             raise ValueError("Must provide either key or nwb_file_path")
-        key = key or self.key_from_path(nwb_file_path)
+        return key or self.key_from_path(nwb_file_path)
 
+    def _asset_url(self, key: dict) -> str:
+        """Resolve a key to a direct S3 content URL for the asset.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction identifying exactly one entry in this table.
+
+        Returns
+        -------
+        str
+            S3 URL of the asset, with redirects followed and query stripped.
+        """
         dandiset_id, dandi_path, dandi_instance = (self & key).fetch1(
             "dandiset_id", "dandi_path", "dandi_instance"
         )
@@ -220,7 +251,59 @@ class DandiPath(SpyglassMixin, dj.Manual):
             asset = client.get_dandiset(dandiset_id).get_asset_by_path(
                 dandi_path
             )
-            s3_url = asset.get_content_url(follow_redirects=1, strip_query=True)
+            return asset.get_content_url(follow_redirects=1, strip_query=True)
+
+    def download_file_from_dandi(
+        self,
+        key: Optional[dict] = None,
+        nwb_file_path: Optional[str] = None,
+        dest: Optional[str] = None,
+    ) -> bool:
+        """Download the file from Dandi to local disk.
+
+        Used when a user prefers a whole-file transfer over streaming. Writes
+        to a temporary sibling path and renames on success, so an interrupted
+        transfer never leaves a partial file that later looks local.
+
+        Parameters
+        ----------
+        key : dict, optional
+            Restriction on this table. Takes precedence over nwb_file_path.
+        nwb_file_path : str, optional
+            Path identifying the file, and the download destination unless
+            dest is given.
+        dest : str, optional
+            Destination path. Defaults to nwb_file_path.
+
+        Returns
+        -------
+        bool
+            True if the file is present locally after the call.
+        """
+        key = self._resolve_key(key, nwb_file_path)
+        dest = Path(dest or nwb_file_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temp = dest.with_suffix(dest.suffix + ".part")
+
+        s3_url = self._asset_url(key)
+
+        logger.info(f"Downloading {dest.name} from Dandi")
+        fs = fsspec.filesystem("http")
+        try:
+            fs.get_file(s3_url, str(temp))
+            temp.replace(dest)
+        finally:
+            temp.unlink(missing_ok=True)
+
+        return dest.exists()
+
+    def fetch_file_from_dandi(
+        self, key: Optional[dict] = None, nwb_file_path: Optional[str] = None
+    ):
+        """Fetch the file from Dandi and return the NWB file object."""
+        key = self._resolve_key(key, nwb_file_path)
+
+        s3_url = self._asset_url(key)
 
         # stream the file from s3
         # first, create a virtual filesystem based on the http protocol
