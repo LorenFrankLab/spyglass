@@ -1,16 +1,5 @@
 # Position pipeline environment — SLEAP (sleap-nn / PyTorch backend)
 #
-# SLEAP needs its OWN environment, separate from DeepLabCut: the modern
-# sleap-nn stack targets NumPy 2.x / Python >=3.11, while DeepLabCut 3.x pins
-# numpy<2. The two cannot coexist in one environment. Use this file for SLEAP
-# and environments/environment_dlc.yml for DeepLabCut.
-#
-# MIGRATING FROM POSITION V1: create a FRESH environment from this file — do
-# NOT reuse, clone, or `env update` onto a Position-V1 environment. A leftover
-# TensorFlow install (V1's DeepLabCut backend) collides with V2's jax stack
-# (via non_local_detector) on the GPU. Check an existing environment with
-# `python src/spyglass/position/v2/env_check.py`.
-#
 # 1. Install the correct GPU driver for your machine.
 #    See https://stackoverflow.com/a/30820690
 # 2. Create the environment:
@@ -20,11 +9,17 @@
 # 3. Activate:
 #      conda activate spyglass-sleap
 #
-# Note: torch/torchvision are installed via pip by sleap-nn (do NOT add a
-#       conda pytorch pin here — it conflicts with sleap-nn's torch wheels).
+#
+# Note: SLEAP cannot share this environment due to conflicts with DLC 3.X
+#       For DLC, use the separate environments/environment_dlc.yml
+#
+# MIGRATING FROM POSITION V1: create a FRESH environment from this file — do
+#       NOT reuse, clone, or `env update` onto a Position-V1 environment.
 name: spyglass-sleap
 channels:
+  # - defaults # DLC only
   - conda-forge
+  # - pytorch # DLC only
   - franklab
   - edeno
 dependencies:
@@ -34,16 +29,22 @@ dependencies:
   - jupyterlab>=3.*
   - matplotlib
   - non_local_detector
+  # - numpy # DLC only
   - pip>=20.2.*
+  # - scipy<1.13
   - position_tools
   - pybind11
   - pydotplus>=2.0.*
   - pyfftw<=0.12.0
   - python>=3.11,<3.14
+  - pytorch>=2.0 # DLC only
   - ripple_detection
   - seaborn
+  - torchvision # DLC only
   - track_linearization>=2.3
   - pip:
-      - ghostipy
-      - mountainsort4
-      - ..[sleap]
+      # - jax>=0.4.38,<0.5 # DLC only
+      # - jaxlib>=0.4.38,<0.5 # DLC only
+      # - ghostipy # LFP only
+      # - mountainsort4 # spike-sorting only
+      - ..[sleap] # responsible for installing torch(vision). Do not add
