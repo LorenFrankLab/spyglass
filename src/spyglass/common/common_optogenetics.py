@@ -30,45 +30,21 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
     _source_nwb_object_name = "optogenetic_epochs"
     # Exact class name: ndx_franklab_novela may not be importable
     _source_nwb_object_type = "FrankLabOptogeneticEpochsTable"
-    # Master fields drawn straight from a row of the epochs table
-    _master_fields = (
-        "epoch",
-        "description",
-        "pulse_length",
-        "pulses_per_train",
-        "period",
-        "intertrain_interval",
-        "stimulus_power",
-    )
-
-    table_key_to_obj_map = dict(
-        epoch="epoch_number",
-        description="convenience_code",
-        pulse_length="pulse_length_in_ms",
-        pulses_per_train="number_pulses_per_pulse_train",
-        period="period_in_ms",
-        intertrain_interval="intertrain_interval_in_ms",
-        stimulus_power="power_in_mW",
-        threshold_sd="ripple_filter_threshold_sd",
-        n_above_threshold="ripple_filter_num_above_threshold",
-        ripple_lockout_period="ripple_filter_lockout_period_in_samples",
-        filter_phase="theta_filter_phase_in_deg",
-        reference_ntrode="theta_filter_reference_ntrode",
-        theta_lockout_period="theta_filter_lockout_period_in_samples",
-        speed_threshold="speed_filter_threshold_in_cm_per_s",
-        active_above_threshold="speed_filter_on_above_threshold",
-    )
-
-    @property
-    def table_key_to_obj_attr(self):
-        """Map master columns to attributes of a row of the epochs table."""
-        return {
-            "self": {
-                key: self.table_key_to_obj_map[key]
-                for key in self._master_fields
-            },
-            "stimulus_signal": {"stimulus_object_id": "object_id"},
-        }
+    # Master columns, read straight off a row of the epochs table. Each part
+    # declares its own columns the same way, so every mapping is visible to
+    # the ingestion-mapping doc generator.
+    table_key_to_obj_attr = {
+        "self": {
+            "epoch": "epoch_number",
+            "description": "convenience_code",
+            "pulse_length": "pulse_length_in_ms",
+            "pulses_per_train": "number_pulses_per_pulse_train",
+            "period": "period_in_ms",
+            "intertrain_interval": "intertrain_interval_in_ms",
+            "stimulus_power": "power_in_mW",
+        },
+        "stimulus_signal": {"stimulus_object_id": "object_id"},
+    }
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Generate a master entry plus whichever conditional parts apply.
@@ -121,6 +97,10 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
     def _part_fields(self, row, part) -> dict:
         """Read a part table's own columns off a row of the epochs table.
 
+        The part declares which row attribute each of its columns comes from,
+        so the mapping lives on the table it describes rather than in a shared
+        dict on the master.
+
         Parameters
         ----------
         row : namedtuple
@@ -134,8 +114,8 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
             Attribute values keyed by part table column name.
         """
         return {
-            name: getattr(row, self.table_key_to_obj_map[name])
-            for name in part.heading.secondary_attributes
+            name: getattr(row, attr)
+            for name, attr in part.table_key_to_obj_attr["self"].items()
         }
 
     def make(self, key):
@@ -178,6 +158,16 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
         ripple_lockout_period: int  # minimum number of samples between ripple-triggered stimulations
         """
 
+        table_key_to_obj_attr = {
+            "self": {
+                "threshold_sd": "ripple_filter_threshold_sd",
+                "n_above_threshold": "ripple_filter_num_above_threshold",
+                "ripple_lockout_period": (
+                    "ripple_filter_lockout_period_in_samples"
+                ),
+            }
+        }
+
     class ThetaTrigger(SpyglassIngestion, dj.Part):
         definition = """
         # Parameters for detecting LFP theta-phase to trigger optogenetic stimulation
@@ -188,6 +178,16 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
         theta_lockout_period: int # lockout period in sample steps
         """
 
+        table_key_to_obj_attr = {
+            "self": {
+                "filter_phase": "theta_filter_phase_in_deg",
+                "reference_ntrode": "theta_filter_reference_ntrode",
+                "theta_lockout_period": (
+                    "theta_filter_lockout_period_in_samples"
+                ),
+            }
+        }
+
     class SpeedConditional(SpyglassIngestion, dj.Part):
         definition = """
         # Speed-related condition gating optogenetic stimulation
@@ -196,6 +196,13 @@ class OptogeneticProtocol(SpyglassIngestion, dj.Manual):
         speed_threshold: float # speed threshold for optogenetic stimulation (cm/s)
         active_above_threshold: bool # whether the stimulation is active above or below the threshold
         """
+
+        table_key_to_obj_attr = {
+            "self": {
+                "speed_threshold": "speed_filter_threshold_in_cm_per_s",
+                "active_above_threshold": "speed_filter_on_above_threshold",
+            }
+        }
 
     class SpatialConditional(SpyglassIngestion, dj.Part):
         definition = """
