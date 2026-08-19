@@ -71,7 +71,6 @@ dependencies = [
 
 optional-dependencies.dlc = [
   "deeplabcut>=3", # 3.0+ drops TF and uses PyTorch backend
-  "ffmpeg",
   "ndx-pose>=0.2,<0.4",
 ]
 optional-dependencies.docs = [

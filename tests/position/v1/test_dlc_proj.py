@@ -74,9 +74,16 @@ def test_failed_name_insert(
 
 @skip_if_no_pose
 def test_failed_team_insert(dlc_project_tbl, insert_dlc_proj_kwargs):
-    insert_dlc_proj_kwargs["lab_team"] = "non_existent_team"
+    # Fresh project name: insert_new_project short-circuits on an existing
+    # project, returning before the lab team is validated. Copy the kwargs
+    # so the session-scoped fixture is not mutated for later tests.
+    kwargs = {
+        **insert_dlc_proj_kwargs,
+        "project_name": "pytest_bad_team_proj",
+        "lab_team": "non_existent_team",
+    }
     with pytest.raises(ValueError):
-        dlc_project_tbl.insert_new_project(**insert_dlc_proj_kwargs)
+        dlc_project_tbl.insert_new_project(**kwargs)
 
 
 def test_dlc_project_insert_type_error(dlc_project_tbl):
