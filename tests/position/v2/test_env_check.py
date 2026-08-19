@@ -15,10 +15,15 @@ def _fake_installed(versions):
     return _installed
 
 
-def _patch(monkeypatch, versions):
+def _patch(monkeypatch, versions, ffmpeg_present=True):
     from spyglass.position.v2 import env_check
 
     monkeypatch.setattr(env_check, "_installed", _fake_installed(versions))
+    monkeypatch.setattr(
+        env_check.shutil,
+        "which",
+        lambda name: "/usr/bin/ffmpeg" if ffmpeg_present else None,
+    )
     return env_check
 
 
@@ -59,6 +64,15 @@ class TestCheckEnvironment:
         problems = env_check.check_environment(verbose=False)
         # Only the missing-PyTorch problem fires (no tf+jax conflict here).
         assert len(problems) == 1 and "PyTorch" in problems[0]
+
+    def test_missing_ffmpeg_flagged(self, monkeypatch):
+        env_check = _patch(
+            monkeypatch,
+            {"jax": "0.5.0", "torch": "2.10.0"},
+            ffmpeg_present=False,
+        )
+        problems = env_check.check_environment(verbose=False)
+        assert len(problems) == 1 and "ffmpeg" in problems[0]
 
     def test_raise_on_error(self, monkeypatch):
         env_check = _patch(
