@@ -13,6 +13,7 @@ database connection::
 """
 
 import importlib.metadata as _md
+import shutil
 
 # Packages that make up the legacy TensorFlow DeepLabCut backend. Position V1's
 # DeepLabCut used TensorFlow; V2's DeepLabCut 3.x uses PyTorch and does not need
@@ -49,6 +50,11 @@ def check_environment(raise_on_error: bool = False, verbose: bool = True):
     GPU -- the tell-tale ``Unable to register cuDNN factory ... already
     registered`` -- and TensorFlow's ``ml-dtypes`` pin holds jax at an old
     version. DeepLabCut 3.x runs on PyTorch, so TensorFlow is not needed.
+
+    This also checks for the ``ffmpeg`` CLI binary: Position V2 shells out to
+    it (video clipping, frame extraction/stitching, NWB re-encoding) rather
+    than using a pip package, so it is easy to miss -- pip metadata never
+    reflects whether the binary is on ``PATH``.
 
     Parameters
     ----------
@@ -89,6 +95,16 @@ def check_environment(raise_on_error: bool = False, verbose: bool = True):
             "A pose tool (DeepLabCut/SLEAP) is installed but PyTorch (torch) "
             "is not. Position V2 uses the PyTorch backend for both. Install "
             "from environments/environment_dlc.yml or environment_sleap.yml."
+        )
+
+    if not shutil.which("ffmpeg"):
+        problems.append(
+            "The ffmpeg CLI binary was not found on PATH. Position V2 calls "
+            "it via subprocess for video clipping/stitching and NWB "
+            "re-encoding. It is not a pip package.\n"
+            "    Fix -- install it via conda (already listed in "
+            "environments/environment_dlc.yml and environment_sleap.yml):\n"
+            "      conda install -c conda-forge ffmpeg"
         )
 
     if verbose:
