@@ -101,6 +101,61 @@ def test_convert_mp4_error(sgp):
         )
 
 
+def test_convert_mp4_collision_raises(monkeypatch, tmp_path):
+    """Legacy skip-on-exists now raises when the mp4 is a different video.
+
+    Guards the silent video-filename collision (issue #1651): a
+    pre-existing mp4 whose frame count differs from the source it is asked to
+    convert is a collision, not a cache hit.
+    """
+    from spyglass.position.utils import general
+
+    (tmp_path / "clip.mp4").write_text("stub")  # dest pre-exists -> skip branch
+
+    # source has a different frame count than the existing dest -> collision
+    counts = {"clip.h264": 500, "clip.mp4": 270}
+    monkeypatch.setattr(
+        general,
+        "_check_packets",
+        lambda f, count_frames=False: counts[Path(f).name],
+    )
+
+    with pytest.raises(ValueError, match="collision"):
+        general._convert_mp4("clip.h264", str(tmp_path), str(tmp_path))
+
+
+def test_convert_mp4_correspondence_ok(monkeypatch, tmp_path):
+    """Matching frame counts on an existing mp4 are a legitimate cache hit."""
+    from spyglass.position.utils import general
+
+    (tmp_path / "clip.mp4").write_text("stub")
+    monkeypatch.setattr(
+        general, "_check_packets", lambda f, count_frames=False: 270
+    )
+
+    out = general._convert_mp4("clip.h264", str(tmp_path), str(tmp_path))
+    assert Path(out).name == "clip.mp4"
+
+
+def test_convert_mp4_deterministic_skips_correspondence(monkeypatch, tmp_path):
+    """The V2 deterministic path trusts its name and never probes counts."""
+    from spyglass.position.utils import general
+
+    stem = general._deterministic_video_stem(
+        "clip.h264", str(tmp_path / "clip.h264")
+    )
+    (tmp_path / f"{stem}.mp4").write_text("stub")
+
+    def _boom(*a, **k):
+        raise AssertionError("_check_packets must not run when deterministic")
+
+    monkeypatch.setattr(general, "_check_packets", _boom)
+    out = general._convert_mp4(
+        "clip.h264", str(tmp_path), str(tmp_path), deterministic=True
+    )
+    assert Path(out).name == f"{stem}.mp4"
+
+
 def test_videofile_frames(common, sgp, video_keys):
     key = video_keys[0]
     path = common.VideoFile().get_abs_path(key)
@@ -213,7 +268,7 @@ def test_recent_files(sgp):
 def test_suppress_print(sgp, monkeypatch, capsys):
     import inspect
 
-    suppress_print_from_package = sgp.utils_dlc.suppress_print_from_package
+    suppress_print_from_package = sgp.utils.dlc_io.suppress_print_from_package
 
     def fake_deeplabcut_function():
         print("This should be suppressed")
@@ -234,7 +289,7 @@ def test_suppress_print(sgp, monkeypatch, capsys):
 
 @pytest.fixture(scope="module")
 def estim_class(sgp, centroid_key):
-    estim_class = sgp.v1.dlc_reader.PoseEstimation
+    estim_class = sgp.utils.dlc_io.DLCProjectReader
     infer_dir = sgp.v1.dlc_utils.infer_output_dir
 
     yield estim_class(infer_dir(centroid_key))

@@ -13,6 +13,62 @@ from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
+def _check_not_pose_model(nwb_abs_path: Path) -> None:
+    """Raise if the file looks like a pose-model artifact rather than a session.
+
+    Pose model NWB files (produced by tools like DeepLabCut or SLEAP and
+    imported via ``Model.import_model()``) contain ndx-pose objects
+    (``PoseEstimation`` / ``Skeletons``) but carry no session structure —
+    no electrode groups, no task epochs.  Passing them to
+    ``insert_sessions`` would register an incomplete ``Nwbfile`` entry and
+    could inadvertently trigger V1 ``ImportedPose`` population.
+
+    Parameters
+    ----------
+    nwb_abs_path : Path
+        Absolute path to the NWB file to inspect.
+
+    Raises
+    ------
+    ValueError
+        If the file contains ndx-pose objects but no electrode groups.
+    """
+    try:
+        import ndx_pose  # noqa: F401 — only needed for isinstance checks
+        from ndx_pose import PoseEstimation, Skeletons
+    except ImportError:
+        return  # ndx-pose not installed; skip detection
+
+    with pynwb.NWBHDF5IO(
+        str(nwb_abs_path), mode="r", load_namespaces=True
+    ) as io:
+        nwbf = io.read()
+        behavior = nwbf.processing.get("behavior")
+        if behavior is None:
+            return
+
+        has_pose_objects = any(
+            isinstance(obj, (PoseEstimation, Skeletons))
+            for obj in behavior.data_interfaces.values()
+        )
+        if not has_pose_objects:
+            return
+
+        # A real session NWB always has at least one electrode group.
+        # A pose-model artifact has pose data but nothing else.
+        if not nwbf.electrode_groups:
+            raise ValueError(
+                f"'{nwb_abs_path.name}' appears to be a pose-model artifact "
+                "(ndx-pose objects present, no electrode groups). "
+                "Model files should not be passed to insert_sessions — "
+                "they have no session structure and would create incomplete "
+                "Nwbfile entries.\n\n"
+                "To register an ndx-pose model in Position V2 use:\n"
+                "    from spyglass.position.v2 import Model\n"
+                "    Model().import_model('<path to nwb>')"
+            )
+
+
 def insert_sessions(
     nwb_file_names: Union[str, List[str]],
     rollback_on_fail: bool = False,
@@ -63,6 +119,9 @@ def insert_sessions(
                     + f"{len(possible_matches)} possible matches:"
                     + f"{possible_matches}"
                 )
+
+        # Reject pose-model artifacts before any file operations.
+        _check_not_pose_model(nwb_file_abs_path)
 
         # file name for the copied raw data
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)

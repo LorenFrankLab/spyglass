@@ -1,43 +1,65 @@
-# 1. INSTALL CORRECT DRIVER for your GPU-equipped machine.
-#    see https://stackoverflow.com/questions/30820513/what-is-the-correct-version-of-cuda-for-my-nvidia-driver/30820690
-# 2. install: mamba env create -f environment_dlc.yml
-#    update existing install:  mamba env update -f environment_dlc.yml
-# 2. After installing...
-#    run: conda activate spyglass-dlc
-#    run: mamba env config vars set LD_LIBRARY_PATH=~/path/to/<anaconda3 or mambaforge>/envs/spyglass-position/lib/
-#    run: mamba install -c conda-forge wxpython
+# Position pipeline environment — DeepLabCut (DLC 3.0+ / PyTorch backend)
+#
+# 1. Install the correct GPU driver for your machine.
+#    See https://stackoverflow.com/a/30820690
+# 2. Create the environment:
+#      mamba env create -f environments/environment_dlc.yml
+#    Update an existing install:
+#      mamba env update -f environments/environment_dlc.yml
+# 3. Activate and configure:
+#      conda activate spyglass-dlc
+#      mamba env config vars set LD_LIBRARY_PATH=~/path/to/mambaforge/envs/spyglass-dlc/lib/
+#
+# Note: SLEAP cannot share this environment — its NumPy-2 / Python >=3.11
+#       stack conflicts with DeepLabCut 3.x (numpy<2). For SLEAP, use the
+#       separate environments/environment_sleap.yml.
+#
+# MIGRATING FROM POSITION V1: create a FRESH environment from this file — do
+#       NOT reuse, clone, or `env update` onto a Position-V1 environment.
+#       V1's DeepLabCut used the TensorFlow backend; V2's DeepLabCut 3.x uses
+#       PyTorch and pulls in jax (via non_local_detector). A leftover
+#       TensorFlow install collides with jax on the GPU ("Unable to register
+#       cuDNN factory ... already registered") and pins jax to an old version.
+#       Check an existing environment with:
+#         python src/spyglass/position/v2/env_check.py
+#       and, if flagged, remove the leftover TensorFlow stack:
+#         pip uninstall -y tensorflow tensorflow-estimator \
+#           tensorflow-io-gcs-filesystem keras tf-keras tf-slim tensorpack
 name: spyglass-dlc
 channels:
+  - defaults
   - conda-forge
-  # - defaults # deprecated
+  - pytorch
   - franklab
   - edeno
-  - pytorch   # dlc-only
-  - anaconda  # dlc-only, for cudatoolkit
 dependencies:
   - bottleneck
-  - cudatoolkit=11.3   # dlc-only
-  - ffmpeg   # dlc-only
+  - ffmpeg
   - ipympl
   - jupyterlab>=3.*
-  - libgcc   # dlc-only
   - matplotlib
   - non_local_detector
   - numpy
   - pip>=20.2.*
   - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - position_tools
-  - pybind11  # req by mountainsort4 -> isosplit5
+  - pybind11
   - pydotplus>=2.0.*
-  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
+  - pyfftw<=0.12.0
   - python>=3.10,<3.13
-  - pytorch<1.12.0
+  - pytorch>=2.0
   - ripple_detection
   - seaborn
-  - torchaudio  # dlc-only
-  - torchvision  # dlc-only
+  - torchvision
   - track_linearization>=2.3
   - pip:
-      - ghostipy # for common_filter
+      # jax/jaxlib pulled in by non_local_detector. Constrain to the
+      # NumPy-1.26-compatible line (DeepLabCut 3.x requires numpy<2); the jax
+      # 0.5 series moves to NumPy 2. The lower bound keeps the resolver off the
+      # old wedged builds; the upper bound keeps it off the NumPy-2 ones.
+      - jax>=0.4.38,<0.5
+      - jaxlib>=0.4.38,<0.5
+      - ghostipy
       - mountainsort4
+      - ndx-pose>=0.2.0
       - ..[dlc]
