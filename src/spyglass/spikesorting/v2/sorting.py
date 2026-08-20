@@ -927,6 +927,20 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # cannot take within the lifecycle timeout raises AdvisoryLockError and
         # aborts the selection rather than linking it unserialized; no lock for
         # an artifact-free sort.
+        #
+        # SCOPE: this serialization holds only when insert_selection OWNS the
+        # transaction (the standalone call, where transaction_or_noop opens AND
+        # commits inside the ``with`` below). The lock is released when this
+        # method RETURNS. If a caller wraps the call in its own open transaction,
+        # transaction_or_noop is a no-op, so the rows stay uncommitted until the
+        # caller commits -- after the lock is released -- and the advisory lock
+        # does NOT cover that commit window. There the ``ArtifactDetectionSource
+        # -> ArtifactDetectionOutput`` foreign key is the net: a concurrent
+        # detection delete either blocks on this sort's uncommitted FK child and
+        # then fails, or the caller's commit fails on the deleted merge -- either
+        # way no committed sort references a deleted detection (see
+        # test_insert_selection_lock_releases_before_outer_commit and
+        # test_artifact_source_fk_rejects_dangling_detection).
         from contextlib import ExitStack
 
         from spyglass.spikesorting.v2._db_locking import required_advisory_lock

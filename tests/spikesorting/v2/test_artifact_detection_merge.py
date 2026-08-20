@@ -911,3 +911,106 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
                 (ArtifactDetectionOutput & {"merge_id": mid}).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+def test_insert_selection_lock_releases_before_outer_commit(ingested_recording):
+    """Inside a caller-owned OPEN transaction, insert_selection releases the
+    detection lock when it RETURNS -- before the caller commits -- so the lock
+    does not cover the commit window (there the FK is the net, not the lock).
+
+    Deterministic: a second connection observes the detection lock is FREE while
+    the outer transaction is still open.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._db_locking import _lock_name
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_pk = ingested_recording["rec_pk"]
+    art = _second_detection(rec_pk)
+    art_id = art["artifact_detection_id"]
+    lock_name = _lock_name(
+        ArtifactDetectionOutput, {"artifact_detection_id": art_id}
+    )
+    conn_a = dj.conn()  # the connection insert_selection uses
+    conn_b = dj.Connection(
+        dj.config["database.host"],
+        dj.config["database.user"],
+        dj.config["database.password"],
+        port=dj.config["database.port"],
+    )
+    sel = {
+        "recording_id": rec_pk["recording_id"],
+        "sorter": "clusterless_thresholder",
+        "sorter_params_name": "default",
+        "artifact_detection_id": art_id,
+    }
+    sort_pk = None
+    try:
+        conn_a.start_transaction()
+        try:
+            sort_pk = SortingSelection.insert_selection(sel)
+            # Outer transaction still open (uncommitted), yet the lock
+            # insert_selection took is already released -> a SEPARATE session
+            # sees it FREE. This is exactly why the FK, not the lock, guards the
+            # nested-transaction case.
+            free = conn_b.query(
+                "SELECT IS_FREE_LOCK(%s)", args=(lock_name,)
+            ).fetchone()[0]
+            assert free == 1, (
+                "insert_selection still held the detection lock during the "
+                "caller's open transaction"
+            )
+        finally:
+            conn_a.commit_transaction()
+        assert SortingSelection & sort_pk
+    finally:
+        conn_b.close()
+        if sort_pk is not None and (SortingSelection & sort_pk):
+            (SortingSelection & sort_pk).super_delete(warn=False)
+        if RecordingArtifactDetection & art:
+            (RecordingArtifactDetection & art).cascade_delete(safemode=False)
+        (RecordingArtifactSelection & art).super_delete(warn=False)
+
+
+def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
+    """The ``SortingSelection.ArtifactDetectionSource -> ArtifactDetectionOutput``
+    foreign key rejects a row referencing a non-existent merge -- so no committed
+    sort can carry an artifact link to a missing/deleted detection. This is the
+    net that protects the nested-transaction case (where the advisory lock does
+    not cover the caller's commit window).
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2.utils import _is_fk_violation
+
+    rec_pk = ingested_recording["rec_pk"]
+    # An artifact-FREE master to hang a bogus artifact part on.
+    sort_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": rec_pk["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        }
+    )
+    try:
+        with pytest.raises(Exception) as excinfo:
+            SortingSelection.ArtifactDetectionSource.insert1(
+                {
+                    "sorting_id": sort_pk["sorting_id"],
+                    "artifact_detection_merge_id": uuid.uuid4(),
+                }
+            )
+        assert _is_fk_violation(excinfo.value) or isinstance(
+            excinfo.value, dj.errors.IntegrityError
+        ), f"expected an FK/integrity error, got {excinfo.value!r}"
+    finally:
+        (SortingSelection & sort_pk).super_delete(warn=False)
