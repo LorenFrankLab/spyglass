@@ -24,7 +24,15 @@ SHARED_MODULES = [
     "spikesorting",
     # EDIT: waveform not used as a spyglass schema prefix
 ]
+# Privileges granted to `dj_user` on shared schema prefixes: everything
+# except CREATE, so only an admin can declare new shared tables. See issue
+# #1065. Order matches MySQL's own ordering in `SHOW GRANTS` output.
+SHARED_PRIVILEGES = (
+    "SELECT, INSERT, UPDATE, DELETE, DROP, REFERENCES, INDEX, ALTER, "
+    "LOCK TABLES"
+)
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
+GRANT_SHARED = f"GRANT {SHARED_PRIVILEGES} ON "
 GRANT_SEL = "GRANT SELECT ON "
 GRANT_SHOW = "GRANT SHOW DATABASES ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
@@ -49,8 +57,12 @@ class DatabaseSettings:
         Roles:
         - dj_guest:  select for all prefix
         - dj_collab: select for all prefix, all for user prefix
-        - dj_user:   select for all prefix, all for user prefix, all for shared
+        - dj_user:   select for all prefix, all for user prefix, all but
+          create for shared prefix
         - dj_admin:     all for all prefix
+
+        Note: dj_user cannot create tables in shared prefixes. An admin must
+        declare new shared tables. See issue #1065.
 
         Note: To add dj_user role to all those with common access, run...
 
@@ -106,7 +118,7 @@ class DatabaseSettings:
                 f"{GRANT_SEL}`%`.* TO `dj_user`;\n",
             ]
             + [
-                f"{GRANT_ALL}`{module}`.* TO `dj_user`;\n"
+                f"{GRANT_SHARED}`{module}`.* TO `dj_user`;\n"
                 for module in self.shared_modules
             ],  # also gets own prefix below
             admin=[
@@ -150,7 +162,8 @@ class DatabaseSettings:
         return self._create_user_sql("dj_admin") + self._user_prefix_sql
 
     def _add_module_sql(self, module_name):
-        return [f"{GRANT_ALL}`{module_name}{ESC}`.* TO dj_user;\n"]
+        """Grant dj_user shared-module privileges on a new module prefix"""
+        return [f"{GRANT_SHARED}`{module_name}{ESC}`.* TO dj_user;\n"]
 
     def add_guest(self, *args, **kwargs):
         """Add guest user with select permissions to shared modules"""
