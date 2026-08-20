@@ -34,7 +34,7 @@
 #
 # ```bash
 # git clone https://github.com/LorenFrankLab/spyglass.git
-# cd spyglass
+# # cd spyglass
 # python scripts/install.py
 # ```
 #
@@ -206,7 +206,7 @@
 #
 # ```bash
 # git clone https://github.com/LorenFrankLab/spyglass.git
-# cd spyglass
+# # cd spyglass
 # python scripts/install.py
 # ```
 #
@@ -233,9 +233,9 @@
 # Commands for the steps above:
 #
 # ```bash
-# cd /your/project/directory/             # 1
+# # cd /your/project/directory/             # 1
 # git clone https://github.com/LorenFrankLab/spyglass/  # 2
-# cd spyglass                             # 3
+# # cd spyglass                             # 3
 # mamba env create -f environments/environment_min.yml # 4 (or environments/environment.yml for full)
 # code notebooks/00_Setup.ipynb           # 5
 # ```
@@ -305,23 +305,32 @@
 # their conda installation steps
 # [here](https://jax.readthedocs.io/en/latest/installation.html#conda-installation).
 #
-# #### Deep Lab Cut (DLC)
+# #### Pose estimation (DeepLabCut / SLEAP)
 #
-# Spyglass provides an environment build for using the DLC pipeline. To create an
-# environment with these features, please:
+# > **Note**: `spyglass.position.v1` (DLC V1) is legacy. New projects should
+# > use `spyglass.position.v2`. See the Position V2 tutorials
+# > (`23_PositionV2_DLC_2D` and `25_PositionV2_SLEAP_2D`).
+#
+# Position V2 supports two pose-estimation tools, **DeepLabCut** and
+# **SLEAP**, which require **separate environments** (SLEAP's NumPy-2 /
+# Python >=3.11 stack conflicts with DeepLabCut 3.x). To create one:
 # 1. navigate to your cloned spyglass repo.
-# 2. build the environment from the dlc version
+# 2. build the environment for the tool you use.
 # 3. activate the environment to use
 #
 # ```bash
-# # cd /path/to/spyglass # 1
-# mamba env create -f environments/environment_dlc.yml # 2
-# mamba activate spyglass-dlc # 3
+# # cd /path/to/spyglass                                  # 1
+# mamba env create -f environments/environment_dlc.yml    # 2a (DeepLabCut)
+# mamba activate spyglass-dlc                              # 3a
+# # -- or --
+# mamba env create -f environments/environment_sleap.yml  # 2b (SLEAP)
+# mamba activate spyglass-sleap                            # 3b
 # ```
 #
 # Alternatively, you can pip install using
 # ```bash
-# pip install spyglass[dlc]
+# pip install spyglass-neuro[dlc]    # DeepLabCut
+# pip install spyglass-neuro[sleap]  # SLEAP
 # ```
 #
 # #### Keypoint-Moseq
@@ -340,7 +349,7 @@
 #
 # Alternatively, you can pip install using
 # ```bash
-# pip install spyglass[moseq-cpu]
+# pip install spyglass-neuro[moseq-cpu]
 # ```
 #
 # To use a GPU enabled version of the package, replace `cpu` with `gpu` in the above
@@ -393,7 +402,7 @@
 #
 # This uses the included `docker-compose.yml` file to create a properly configured
 # MySQL container with persistent storage. To customize settings (port, password),
-# copy `example.env` to `.env` and edit as needed.
+# # copy `example.env` to `.env` and edit as needed.
 #
 # **Or use the installer:**
 # ```bash

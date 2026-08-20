@@ -280,19 +280,6 @@ Spyglass tables.
 
 </details>
 
-## Populate Calls
-
-The mixin also overrides the default `populate` function to provide additional
-functionality for non-daemon process pools and disabling transaction protection.
-
-### Non-Daemon Process Pools
-
-To allow the `make` function to spawn a new process pool, the mixin overrides
-the default `populate` function for tables with `_parallel_make` set to `True`.
-See [issue #1000](https://github.com/LorenFrankLab/spyglass/issues/1000) and
-[PR #1001](https://github.com/LorenFrankLab/spyglass/pull/1001) for more
-information.
-
 ## Miscellaneous Helper functions
 
 `file_like` allows you to restrict a table using a substring of a file name.
