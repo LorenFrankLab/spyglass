@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
-# Upper bound on how long a racing run waits for the run holding a stage's
-# advisory lock to finish before falling through to compute itself (a MySQL
-# GET_LOCK timeout, in seconds). Longer than any realistic single stage so the
-# waiter almost always skips a completed row; finite so a pathologically stuck
-# (but not crashed) holder can never wedge the waiter forever.
-_POPULATE_LOCK_TIMEOUT_S = 8 * 3600
+# The best-effort advisory lock now lives in the DB-free ``_db_locking`` leaf
+# (so domain tables can serialize without importing this orchestration module);
+# re-exported under the private names this module's callers + tests already use.
+from spyglass.spikesorting.v2._db_locking import (
+    POPULATE_LOCK_TIMEOUT_S as _POPULATE_LOCK_TIMEOUT_S,
+)
+from spyglass.spikesorting.v2._db_locking import (
+    advisory_key_lock as _advisory_key_lock,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -134,53 +136,6 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
         # failure) propagates.
         if not (_is_duplicate_key_error(exc) and (table & key)):
             raise
-
-
-@contextmanager
-def _advisory_key_lock(
-    table, key, *, timeout_s: int = _POPULATE_LOCK_TIMEOUT_S
-):
-    """Serialize populate of one content-addressed ``key`` via a MySQL lock.
-
-    Yields ``True`` if the lock was acquired, ``False`` on timeout/error.
-
-    Uses a MySQL *named* (advisory) lock -- ``GET_LOCK`` / ``RELEASE_LOCK`` --
-    keyed on a hash of the table + key, so it serializes ONLY runs computing the
-    same key (different keys populate in parallel). Unlike DataJoint's
-    ``reserve_jobs`` ``~jobs`` table, a named lock is bound to the DB *session*
-    and is released automatically when that session ends, so a crashed or
-    killed run leaves NO stale reservation to clean up. It lives on the shared
-    server, so it coordinates across processes AND hosts (a local ``FileLock``
-    would not). Acquisition failure is non-fatal: the caller falls through to
-    populate and the duplicate-tolerance keeps a residual race from failing.
-    """
-    from datajoint.hash import key_hash
-
-    # MySQL lock names are capped at 64 chars; "sgv2pop:" + a 32-char hash fits.
-    lock_name = "sgv2pop:" + key_hash(
-        {"__table__": table.full_table_name, **key}
-    )
-    connection = table.connection
-    acquired = False
-    try:
-        try:
-            result = connection.query(
-                "SELECT GET_LOCK(%s, %s)", args=(lock_name, int(timeout_s))
-            ).fetchone()
-            acquired = bool(result and result[0] == 1)
-        except Exception:  # noqa: BLE001 - lock is best-effort; fall through
-            # The lock is an optimization, not a correctness requirement (the
-            # duplicate-tolerance is the net). A GET_LOCK failure must never
-            # fail the pipeline -- proceed as if unacquired; any real DB problem
-            # resurfaces on the populate below.
-            acquired = False
-        yield acquired
-    finally:
-        if acquired:
-            try:
-                connection.query("SELECT RELEASE_LOCK(%s)", args=(lock_name,))
-            except Exception:  # noqa: BLE001 - session close frees it anyway
-                pass
 
 
 def _populate_once(table, key) -> None:
@@ -382,7 +337,7 @@ def run_v2_pipeline(
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Single-session mode adds:
             ``recording_id``             : RecordingSelection PK
-            ``artifact_detection_id``    : ArtifactDetectionSelection PK, or
+            ``artifact_detection_id``    : RecordingArtifactSelection PK, or
                 ``None`` when the preset runs no artifact detection
                 (``artifact_detection_params_name`` is ``None``)
         Concat mode adds instead (no artifact stage):
@@ -556,8 +511,8 @@ def run_v2_pipeline(
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
@@ -648,14 +603,14 @@ def run_v2_pipeline(
         run_summary["recording_id"] = recording_key["recording_id"]
 
         # A None artifact name means the preset runs no artifact detection: skip
-        # the ArtifactDetectionSelection/populate stage and sort straight off the
+        # the RecordingArtifactSelection/populate stage and sort straight off the
         # recording (no ArtifactDetectionSource row), the form concat also uses.
         if bundle.artifact_detection_params_name is None:
             artifact_detection_id = None
             run_summary["artifact_detection_status"] = "skipped"
             stage_seconds["artifact_detection"] = 0.0
         else:
-            artifact_detection_key = ArtifactDetectionSelection.insert_selection(
+            artifact_detection_key = RecordingArtifactSelection.insert_selection(
                 {
                     "recording_id": recording_key["recording_id"],
                     "artifact_detection_params_name": bundle.artifact_detection_params_name,
@@ -667,9 +622,9 @@ def run_v2_pipeline(
                 stage_seconds["artifact_detection"],
             ) = _run_stage(
                 "artifact_detection",
-                bool(ArtifactDetection & artifact_detection_key),
+                bool(RecordingArtifactDetection & artifact_detection_key),
                 lambda: _populate_once(
-                    ArtifactDetection, artifact_detection_key
+                    RecordingArtifactDetection, artifact_detection_key
                 ),
                 run_summary,
             )

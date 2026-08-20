@@ -28,10 +28,10 @@ connection at import: all numpy / SpikeInterface / spyglass dependencies
 are imported lazily inside the functions. The persistence functions
 (``read_artifact_removed_intervals``, ``collect_artifact_interval_rows_to_remove``,
 ``remove_artifact_interval_rows``) DO touch the DB at call time -- they
-lazy-import ``common.IntervalList``, the v2 ``recording.RecordingSelection``,
-plus ``ArtifactDetection`` / ``ArtifactDetectionSelection`` /
-``SharedArtifactGroup`` back from ``artifact`` (a backward import that is
-cycle-free because ``artifact`` is fully imported by call time). The pure-compute kernels live in
+lazy-import ``common.IntervalList`` plus the split result tables
+``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection`` back from
+``artifact`` (a backward import that is cycle-free because ``artifact`` is
+fully imported by call time). The pure-compute kernels live in
 ``_artifact_compute``; ``scan_artifact_frames`` drives them through
 SpikeInterface's ``ChunkRecordingExecutor``.
 """
@@ -567,7 +567,7 @@ def build_artifact_interval_rows(
 
 
 def build_artifact_interval_part_rows(key, interval_rows):
-    """Build ``ArtifactDetection.ArtifactRemovedInterval`` ownership rows.
+    """Build the ``*ArtifactDetection.RemovedInterval`` ownership rows.
 
     Parameters
     ----------
@@ -580,7 +580,7 @@ def build_artifact_interval_part_rows(key, interval_rows):
     -------
     list[dict]
         One part row per generated ``IntervalList`` row. Each row carries
-        only the ``ArtifactDetection`` PK plus the ``IntervalList`` PK, so
+        only the ``artifact_detection_id`` (detection PK) plus the ``IntervalList`` PK, so
         it is safe to pass to the part table without relying on
         ``ignore_extra_fields``.
     """
@@ -634,106 +634,118 @@ def read_artifact_removed_intervals(key, as_dict=False):
         ``as_dict=True``, a dict mapping each member ``nwb_file_name``
         to its ``(n_intervals, 2)`` array.
     """
-    from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionSelection,
-        SharedArtifactGroup,
+        RecordingArtifactDetection,
+        SharedGroupArtifactDetection,
     )
-    from spyglass.spikesorting.v2.recording import RecordingSelection
 
-    # Validate the key BEFORE resolving the source so a missing
-    # ``artifact_detection_id`` surfaces this clear ValueError rather than a
-    # source-resolution / SchemaBypassError from ``resolve_source``.
+    # Validate the key BEFORE routing so a missing ``artifact_detection_id``
+    # surfaces this clear ValueError.
     if "artifact_detection_id" not in key:
         raise ValueError(
-            "ArtifactDetection.get_artifact_removed_intervals: key "
+            "get_artifact_removed_intervals: key must include "
+            "'artifact_detection_id'."
+        )
+    # Route by which split result table content-addresses the id (the id is
+    # unique across the two sources, so it lives in exactly one). Each table's
+    # get_artifact_removed_intervals shapes the return: a bare array for the
+    # single-recording source (unless as_dict), the per-member dict for the
+    # shared-group source. The merge_id is exposed only at the SortingSelection
+    # boundary; this reader stays keyed on the per-source artifact_detection_id.
+    if RecordingArtifactDetection & key:
+        return RecordingArtifactDetection().get_artifact_removed_intervals(
+            key, as_dict=as_dict
+        )
+    if SharedGroupArtifactDetection & key:
+        return SharedGroupArtifactDetection().get_artifact_removed_intervals(
+            key, as_dict=as_dict
+        )
+    raise ValueError(
+        "get_artifact_removed_intervals: artifact_detection_id "
+        f"{key['artifact_detection_id']!r} is not in RecordingArtifactDetection "
+        "or SharedGroupArtifactDetection. Populate the artifact detection "
+        "before reading its removed intervals."
+    )
+
+
+def read_owned_artifact_intervals(detection_cls, key):
+    """Return the artifact-removed ``valid_times`` a detection row owns.
+
+    Source-agnostic reader for the split ``*ArtifactDetection`` result
+    tables: reads the detection row's OWN ``RemovedInterval`` part rows and
+    the ``IntervalList`` rows they own, keyed by ``nwb_file_name``. Because
+    the source kind is now structural (a ``RecordingArtifactDetection`` owns
+    exactly one row; a ``SharedGroupArtifactDetection`` owns one per distinct
+    member ``nwb_file_name``), this reader stays uniform -- the per-table
+    ``get_artifact_removed_intervals`` shapes the return (a bare array for a
+    single-recording source, the dict for a shared-group source).
+
+    Reads only OWNED part rows, so the returned set is exactly what
+    ``make_insert`` wrote -- a missing part-row IntervalList row surfaces
+    loudly through ``fetch1`` (a partially-deleted detection) rather than
+    being silently dropped.
+
+    Parameters
+    ----------
+    detection_cls : dj.Computed
+        The split result table whose ownership part rows to read
+        (``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``).
+    key : dict
+        Restriction selecting a single detection row; must include
+        ``artifact_detection_id``.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        ``{nwb_file_name: (n_intervals, 2) valid_times}`` for every owned
+        ``RemovedInterval`` row.
+    """
+    from spyglass.common import IntervalList
+
+    if "artifact_detection_id" not in key:
+        raise ValueError(
+            f"{detection_cls.__name__}.get_artifact_removed_intervals: key "
             "must include 'artifact_detection_id'."
         )
-    source = ArtifactDetectionSelection.resolve_source(key)
-    part_rows = (ArtifactDetection.ArtifactRemovedInterval & key).fetch(
+    part_rows = (detection_cls.RemovedInterval & key).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True
     )
     if not part_rows:
         raise ValueError(
-            "ArtifactDetection.get_artifact_removed_intervals: "
-            f"{key!r} has no ArtifactRemovedInterval part rows. "
-            "ArtifactDetection rows must own their generated IntervalList "
-            "rows through the part table; re-populate this artifact "
-            "detection."
+            f"{detection_cls.__name__}.get_artifact_removed_intervals: "
+            f"{key!r} has no RemovedInterval part rows. Detection "
+            "rows must own their generated IntervalList rows through the part "
+            "table; re-populate this artifact detection."
         )
-
-    if source.kind == "recording":
-        if len(part_rows) != 1:
-            raise ValueError(
-                "ArtifactDetection.get_artifact_removed_intervals: "
-                f"recording-backed {key!r} has {len(part_rows)} "
-                "ArtifactRemovedInterval part rows; expected exactly one."
-            )
-        nwb_file_name = part_rows[0]["nwb_file_name"]
-        interval_list_name = part_rows[0]["interval_list_name"]
+    result = {}
+    for part_row in part_rows:
         valid_times = (
             IntervalList
             & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_list_name,
+                "nwb_file_name": part_row["nwb_file_name"],
+                "interval_list_name": part_row["interval_list_name"],
             }
         ).fetch1("valid_times")
-        # as_dict wraps the single array as a one-key dict so callers
-        # can treat both source kinds uniformly (see Parameters).
-        return {nwb_file_name: valid_times} if as_dict else valid_times
-
-    # shared_artifact_group source: collect the member
-    # nwb_file_names through the Member -> RecordingSelection
-    # join, fetch each member's IntervalList row, return a
-    # name->valid_times dict.
-    members = (
-        SharedArtifactGroup.Member * RecordingSelection
-        & {
-            "shared_artifact_group_name": source.key[
-                "shared_artifact_group_name"
-            ]
-        }
-    ).fetch("nwb_file_name", as_dict=True)
-    member_nwb_files = list(dict.fromkeys(m["nwb_file_name"] for m in members))
-    rows = (IntervalList & part_rows).fetch(
-        "nwb_file_name", "valid_times", as_dict=True
-    )
-    result = {row["nwb_file_name"]: row["valid_times"] for row in rows}
-    # Match the single-recording ``fetch1`` loudness: a member whose
-    # artifact-removed IntervalList row is absent would otherwise be
-    # SILENTLY dropped from the dict, and a source-agnostic caller
-    # (especially one relying on ``as_dict=True``) would treat the
-    # short dict as complete. A missing row means a partially-deleted
-    # ArtifactDetection, so raise naming the member(s) instead.
-    missing = [nwb for nwb in member_nwb_files if nwb not in result]
-    if missing:
-        raise ValueError(
-            "ArtifactDetection.get_artifact_removed_intervals: shared "
-            f"artifact group {source.key['shared_artifact_group_name']!r}"
-            f" is missing artifact-removed IntervalList row(s) for "
-            f"member(s) {missing} "
-            f"(part rows={part_rows!r}). The "
-            "ArtifactDetection row may be partially deleted; "
-            "re-populate it."
-        )
+        result[part_row["nwb_file_name"]] = valid_times
     return result
 
 
-def collect_artifact_interval_rows_to_remove(rows):
+def collect_artifact_interval_rows_to_remove(rows, detection_cls):
     """Resolve the artifact ``IntervalList`` rows paired with master rows.
 
-    Layer-2 delete-cleanup helper: fetches the owned
-    ``ArtifactRemovedInterval`` part rows BEFORE the master delete, while
-    they still exist, and returns the matching
-    ``{nwb_file_name, interval_list_name}`` restrictions. The caller removes
-    those ``IntervalList`` rows after the master delete succeeds.
+    Layer-2 delete-cleanup helper: fetches the owned ``RemovedInterval`` part
+    rows BEFORE the master delete, while they still exist, and returns the
+    matching ``{nwb_file_name, interval_list_name}`` restrictions. The caller
+    removes those ``IntervalList`` rows after the master delete succeeds.
 
     Parameters
     ----------
     rows : list of dict
-        ``ArtifactDetection`` master row dicts, fetched before the
-        master delete while the ownership part rows still exist.
+        Detection master row dicts, fetched before the master delete while
+        the ownership part rows still exist.
+    detection_cls : dj.Computed
+        The split result table owning the part rows
+        (``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``).
 
     Returns
     -------
@@ -741,17 +753,16 @@ def collect_artifact_interval_rows_to_remove(rows):
         ``{nwb_file_name, interval_list_name}`` restrictions to remove
         after the master delete commits.
     """
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
-
     interval_rows_to_remove = []
+    part_table = detection_cls.RemovedInterval
     for row in rows:
-        part_rows = (ArtifactDetection.ArtifactRemovedInterval & row).fetch(
+        part_rows = (part_table & row).fetch(
             "nwb_file_name", "interval_list_name", as_dict=True
         )
         if not part_rows:
             raise ValueError(
-                "ArtifactDetection.delete: "
-                f"{row!r} has no ArtifactRemovedInterval part rows. "
+                f"{detection_cls.__name__}.delete: "
+                f"{row!r} has no RemovedInterval part rows. "
                 "Refusing to guess interval ownership from naming; repair "
                 "or re-populate the artifact detection before deleting it."
             )

@@ -240,8 +240,8 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
     import datajoint as dj
 
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -258,21 +258,15 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        ArtifactDetectionSelection.insert1(
+        RecordingArtifactSelection.insert1(
             {
                 "artifact_detection_id": artifact_detection_id,
                 "artifact_detection_params_name": "v2_a26_cross_artifact_params",
-            },
-            allow_direct_insert=True,
-        )
-        ArtifactDetectionSelection.RecordingSource.insert1(
-            {
-                "artifact_detection_id": artifact_detection_id,
                 "recording_id": rid_artifact,
             },
             allow_direct_insert=True,
         )
-        ArtifactDetection.insert1(
+        RecordingArtifactDetection.insert1(
             {"artifact_detection_id": artifact_detection_id},
             allow_direct_insert=True,
         )
@@ -290,9 +284,16 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
                     "artifact_detection_id": artifact_detection_id,
                 }
             )
+        # insert_selection rejected before eager-registering the artifact into
+        # the ArtifactDetectionOutput merge, so no ArtifactDetectionSource row
+        # (which now carries the merge id) can reference it.
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
         assert (
             len(
-                SortingSelection.ArtifactDetectionSource
+                ArtifactDetectionOutput.RecordingSource
                 & {"artifact_detection_id": artifact_detection_id}
             )
             == 0
@@ -313,15 +314,11 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
                 ).delete_quick()
                 (SortingSelection & sort_keys).delete_quick()
             (
-                ArtifactDetection
+                RecordingArtifactDetection
                 & {"artifact_detection_id": artifact_detection_id}
             ).delete_quick()
             (
-                ArtifactDetectionSelection.RecordingSource
-                & {"artifact_detection_id": artifact_detection_id}
-            ).delete_quick()
-            (
-                ArtifactDetectionSelection
+                RecordingArtifactSelection
                 & {"artifact_detection_id": artifact_detection_id}
             ).delete_quick()
         finally:

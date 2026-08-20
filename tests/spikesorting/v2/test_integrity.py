@@ -4,15 +4,18 @@ Tests verify cross-table invariants and transactional atomicity that
 the per-table tests in the ``single_session/`` suite do not
 exercise as a focused gate:
 
-- **Tri-part dispatch active**: ``Recording`` / ``ArtifactDetection``
-  / ``Sorting`` / ``UnitMatch`` use DataJoint's tri-part ``make_fetch`` /
+- **Tri-part dispatch active**: ``Recording`` /
+  ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection`` /
+  ``Sorting`` / ``UnitMatch`` use DataJoint's tri-part ``make_fetch`` /
   ``make_compute`` / ``make_insert`` rather than a monolithic
   ``make``. The reason is to move the long-running compute step
   OUTSIDE the framework transaction so it does not hold row locks.
-- **Source-part FK consistency**: every ``ArtifactDetectionSelection`` and
-  ``SortingSelection`` master row has EXACTLY one source-part row (the
-  source of the selection is recorded in exactly one source-part table,
-  never zero and never more than one).
+- **Selection FK consistency**: every ``SortingSelection`` master row has
+  EXACTLY one source-part row (recording XOR concatenated), and an
+  artifact-backed sort's ``artifact_detection_id`` maps back to exactly one
+  ``RecordingArtifactSelection`` master. (The split artifact selection is
+  structural single-source -- the recording source is a required master FK on
+  ``RecordingArtifactSelection``, not an XOR source part.)
 - **Merge-table CurationV2 part is correctly wired**:
   ``SpikeSortingOutput.CurationV2`` is the only v2 routing entry;
   v1's ``CurationV1`` and v0's ``CuratedSpikeSorting`` keep their
@@ -24,7 +27,7 @@ exercise as a focused gate:
   ``Sorting``, no ``SharedArtifactGroup.Member`` row without a
   parent ``SharedArtifactGroup``.
 
-The source-part and no-orphan tests share the package-scoped
+The selection-FK and no-orphan tests share the package-scoped
 ``populated_sorting`` fixture from ``conftest.py`` so they have at
 least one master row to exercise; without the fixture an empty test DB
 would let the iteration loops pass vacuously. The fixture is resolved
@@ -44,7 +47,8 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
 def test_tripart_dispatch_active_on_all_v2_computed_tables():
-    """``Recording`` / ``ArtifactDetection`` / ``Sorting`` / ``UnitMatch``
+    """``Recording`` / ``RecordingArtifactDetection`` /
+    ``SharedGroupArtifactDetection`` / ``Sorting`` / ``UnitMatch``
     route through DataJoint's tri-part dispatch.
 
     DataJoint fires tri-part dispatch only when
@@ -70,7 +74,10 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     work OUT of the transaction) buys nothing there -- a monolithic make is the
     honest shape for both.
     """
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        SharedGroupArtifactDetection,
+    )
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
     from spyglass.spikesorting.v2.recompute import (
         RecordingArtifactRecompute,
@@ -85,7 +92,8 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
 
     for cls in (
         Recording,
-        ArtifactDetection,
+        RecordingArtifactDetection,
+        SharedGroupArtifactDetection,
         Sorting,
         UnitMatch,
         ConcatenatedRecording,
@@ -154,26 +162,25 @@ def test_v2_dispatch_classes_wired_into_merge_table():
     )
 
 
-def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
+def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
     populated_sorting,
 ):
-    """Every ``ArtifactDetectionSelection`` / ``SortingSelection`` master
-    reachable from the populated fixture has EXACTLY one source-
-    part row.
+    """A ``SortingSelection`` master reachable from the populated fixture has
+    EXACTLY one source-part row (recording XOR concatenated) and, when
+    artifact-backed, its ``artifact_detection_id`` maps back to exactly one
+    ``RecordingArtifactSelection`` master.
 
-    Each selection master records its source in exactly one source-part
-    table -- never zero, never more than one. The
-    iteration is scoped to masters reachable from ``populated_
-    sorting`` so other tests that intentionally inject orphans
-    (e.g. ``test_prune_orphaned_selections_finds_master_without_part``
-    exercising the prune helper) do not register as integrity
-    violations here. A master with zero parts in this scoped
-    iteration is still a real bug (the insert_selection path
-    failed atomicity); a master with multiple parts is always a
-    logical contradiction.
+    The sort source is recorded in exactly one of the two XOR source parts --
+    never zero (the insert_selection path failed atomicity) and never more than
+    one (a logical contradiction). The artifact selection is structural
+    single-source: the recording is a required FK on the
+    ``RecordingArtifactSelection`` master, so on that side the FK chain is what
+    remains to guard -- an artifact-backed sort's ``artifact_detection_id``
+    points at exactly one master (never zero: insert_selection would have failed
+    atomicity).
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionSelection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -185,6 +192,8 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
         f"SortingSelection master row matching {sort_master_pk}; "
         "fixture setup is broken."
     )
+    # A sort's source is recorded in exactly one of the two XOR source parts
+    # (recording XOR concatenated): never zero, never more than one.
     sid = sort_master_pk["sorting_id"]
     rec_parts = SortingSelection.RecordingSource & {"sorting_id": sid}
     concat_parts = SortingSelection.ConcatenatedRecordingSource & {
@@ -197,28 +206,15 @@ def test_source_part_pattern_holds_for_artifact_and_sorting_selection(
     )
 
     # Artifact master reachable via SortingSelection -> artifact_detection_id.
-    # The artifact pass is recorded on the zero-or-one ArtifactDetectionSource
-    # part now (the master no longer carries a nullable artifact_detection_id FK).
+    # The recording-backed fixture's detection lives in the split
+    # RecordingArtifactSelection master (recording is a required FK on it).
     art_id = SortingSelection.resolve_artifact_detection(sort_master_pk)
-    art_master_rows = ArtifactDetectionSelection & {
+    art_master_rows = RecordingArtifactSelection & {
         "artifact_detection_id": art_id
     }
     assert len(art_master_rows) == 1, (
         f"populated_sorting points at artifact_detection_id={art_id!r} but no "
-        "ArtifactDetectionSelection master row exists for it; FK chain broken."
-    )
-    rec_parts = ArtifactDetectionSelection.RecordingSource & {
-        "artifact_detection_id": art_id
-    }
-    shared_parts = ArtifactDetectionSelection.SharedGroupSource & {
-        "artifact_detection_id": art_id
-    }
-    total = len(rec_parts) + len(shared_parts)
-    assert total == 1, (
-        f"ArtifactDetectionSelection artifact_detection_id={art_id!r} has {total} source-"
-        f"part rows (expected 1: {len(rec_parts)} RecordingSource + "
-        f"{len(shared_parts)} SharedGroupSource). "
-        "Source-part invariant violated."
+        "RecordingArtifactSelection master row exists for it; FK chain broken."
     )
 
 
@@ -374,22 +370,6 @@ def test_audit_source_part_integrity(populated_sorting):
             "valid Recording+Artifact sorting wrongly flagged -- the artifact "
             "part must be excluded from the recording-source count"
         )
-
-        # The artifact-selection side uses the [RecordingSource, SharedGroupSource]
-        # XOR pair; the real artifact selection has exactly one and is not flagged.
-        from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
-
-        art_id = SortingSelection.resolve_artifact_detection(populated_sorting)
-        art_flagged = audit_source_part_integrity(
-            ArtifactDetectionSelection,
-            [
-                ArtifactDetectionSelection.RecordingSource,
-                ArtifactDetectionSelection.SharedGroupSource,
-            ],
-        )
-        assert art_id not in {
-            row["artifact_detection_id"] for row in art_flagged
-        }
     finally:
         for sid in (orphan, single, ambiguous):
             (SortingSelection & {"sorting_id": sid}).delete(safemode=False)

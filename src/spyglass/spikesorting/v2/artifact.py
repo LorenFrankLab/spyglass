@@ -1,28 +1,35 @@
 """Artifact detection over a preprocessed Recording.
 
-Tables (all final-shape under the zero-migration policy):
+Tables (source-specific split; unified downstream by the
+``ArtifactDetectionOutput`` merge in ``artifact_output.py``):
     ArtifactDetectionParameters       -- threshold detection parameters.
-    SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection.
-    ArtifactDetectionSelection        -- source parts encode input shape.
-        .RecordingSource              -- single-recording path (default).
-        .SharedGroupSource          -- cross-recording path (#928).
-    ArtifactDetection                 -- writes IntervalList rows.
-        .ArtifactRemovedInterval      -- relational owner of each written row.
+    SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection (#928).
+    RecordingArtifactSelection        -- single-recording request (Recording FK).
+    SharedGroupArtifactSelection      -- cross-recording request (+ member_set_hash).
+    RecordingArtifactDetection        -- single-recording result; writes IntervalList.
+        .RemovedInterval              -- relational owner of each written row.
+    SharedGroupArtifactDetection      -- cross-recording result; one row per member.
+        .RemovedInterval              -- relational owner of each written row.
+
+The recording source is a required FK on each selection master, so
+"exactly one source" is STRUCTURAL (a row cannot exist with zero or two
+sources) rather than a runtime-asserted XOR. ``insert_artifact_detection``
+dispatches a single-entry request to the matching selection.
 
 Artifact-removed valid times live in ``common.IntervalList`` (the
 UUID-suffixed name prevents collision with human-authored session intervals,
 and downstream IntervalList-querying code consumes them through the standard
-interface); the ``ArtifactDetection.ArtifactRemovedInterval`` part table owns
-each generated row relationally so generic IntervalList cleanup treats them
-as live children, not orphans.
+interface); each detection's ``RemovedInterval`` part table owns its generated
+rows relationally so generic IntervalList cleanup treats them as live children,
+not orphans.
 
-``ArtifactDetectionParameters.insert1`` Pydantic-validates the
-``params`` blob. ``insert_selection`` resolves a selection to a single
-``artifact_detection_id``, ``make`` runs threshold detection and
-writes the artifact-removed ``IntervalList`` rows,
-``get_artifact_removed_intervals`` reads them back, ``delete`` removes
-them, and ``SharedArtifactGroup.insert_group`` declares a cross-recording
-detection bundle.
+``ArtifactDetectionParameters.insert1`` Pydantic-validates the ``params`` blob.
+Each detection's ``make`` runs threshold detection and writes the
+artifact-removed ``IntervalList`` rows, ``get_artifact_removed_intervals`` reads
+them back, ``delete`` removes them, and ``SharedArtifactGroup.insert_group``
+declares a cross-recording detection bundle. The source-agnostic machinery (the
+scan, the IntervalList write, the read-back, the delete cleanup) lives on the
+shared ``_ArtifactDetectionMixin`` both result tables inherit.
 """
 
 from __future__ import annotations
@@ -54,7 +61,7 @@ from spyglass.spikesorting.v2._artifact_intervals import (
     build_artifact_interval_rows,
     collect_artifact_interval_rows_to_remove,
     detect_artifacts,
-    read_artifact_removed_intervals,
+    read_owned_artifact_intervals,
     remove_artifact_interval_rows,
     scan_artifact_frames,
 )
@@ -68,9 +75,7 @@ from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
-    SourceResolution,
     _validate_params,
-    find_orphaned_masters,
     reject_duplicate_parameter_content,
     split_leading_restrictions,
     transaction_or_noop,
@@ -79,26 +84,6 @@ from spyglass.spikesorting.v2.utils import (
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("spikesorting_v2_artifact")
-
-
-class ArtifactFetched(NamedTuple):
-    """DB-side inputs gathered by :meth:`ArtifactDetection.make_fetch`.
-
-    For ``source.kind == "recording"`` only the single-recording
-    fields are populated and ``member_recording_ids`` /
-    ``member_nwb_file_names`` are ``None``. For
-    ``source.kind == "shared_artifact_group"`` the per-recording
-    fields are populated as ordered tuples (length n_members) and
-    the single-recording ``nwb_file_name`` is the common parent
-    session validated at ``insert_group`` time.
-    """
-
-    source: SourceResolution
-    validated: ArtifactDetectionParamsSchema
-    nwb_file_name: str
-    artifact_job_kwargs: dict | None
-    member_recording_ids: tuple | None = None
-    member_nwb_file_names: tuple | None = None
 
 
 class ArtifactComputed(NamedTuple):
@@ -440,338 +425,638 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             cls.Member.insert(member_rows)
 
 
+def _insert_artifact_selection(
+    selection_cls,
+    *,
+    artifact_detection_params_name,
+    recording_id=None,
+    shared_artifact_group_name=None,
+    supplied_id=None,
+    extra_row,
+) -> dict:
+    """Idempotently insert one split artifact-detection selection row.
+
+    Shared body for ``RecordingArtifactSelection.insert_selection`` and
+    ``SharedGroupArtifactSelection.insert_selection``. Derives the
+    content-addressed ``artifact_detection_id`` from the same
+    ``artifact_detection_identity_payload`` + ``deterministic_id`` -- so the id
+    is content-addressed purely by params + source (keeping artifact-backed
+    ``sorting_id`` parity and the ``artifact_detection_{id}`` IntervalList name
+    stable) -- validates any caller-supplied id, ensures the params row exists,
+    and inserts the single selection row.
+
+    Because the recording source is now a required FK on the master row (not
+    an XOR part), a selection cannot exist with zero or two sources: the
+    orphan / ambiguous states the pre-split ``_find_existing_pk`` /
+    ``resolve_source`` guarded against are structurally unrepresentable, so
+    this insert only handles the concurrent duplicate-id race.
+
+    Parameters
+    ----------
+    selection_cls : dj.Manual
+        The split selection table to insert into.
+    artifact_detection_params_name : str
+        The ``ArtifactDetectionParameters`` row name.
+    recording_id : uuid or str, optional
+        Single-recording source id (mutually exclusive with
+        ``shared_artifact_group_name``).
+    shared_artifact_group_name : str, optional
+        Shared-group source name (mutually exclusive with ``recording_id``).
+    supplied_id : optional
+        A caller-supplied ``artifact_detection_id`` to validate against the
+        derived one, or ``None``.
+    extra_row : dict
+        Source-specific columns to add to the inserted row (the source FK,
+        plus ``member_set_hash`` for the shared-group table).
+
+    Returns
+    -------
+    dict
+        ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
+    """
+    from spyglass.spikesorting.v2._selection_identity import (
+        artifact_detection_identity_payload,
+        assert_supplied_id_matches,
+        deterministic_id,
+    )
+    from spyglass.spikesorting.v2.utils import (
+        _ensure_lookup_row_exists,
+        _is_duplicate_key_error,
+    )
+
+    payload = artifact_detection_identity_payload(
+        artifact_detection_params_name=artifact_detection_params_name,
+        recording_id=recording_id,
+        shared_artifact_group_name=shared_artifact_group_name,
+    )
+    artifact_detection_id = deterministic_id("artifact_detection", payload)
+    assert_supplied_id_matches(
+        supplied_id, artifact_detection_id, field="artifact_detection_id"
+    )
+    pk = {"artifact_detection_id": artifact_detection_id}
+    if selection_cls & pk:
+        return pk
+
+    _ensure_lookup_row_exists(
+        ArtifactDetectionParameters,
+        {"artifact_detection_params_name": artifact_detection_params_name},
+        helper_name=f"{selection_cls.__name__}.insert_selection",
+        insert_default_path="ArtifactDetectionParameters.insert_default()",
+    )
+    row = {
+        **pk,
+        "artifact_detection_params_name": artifact_detection_params_name,
+        **extra_row,
+    }
+    try:
+        with transaction_or_noop(selection_cls.connection):
+            # allow_direct_insert: insert_selection IS the validation boundary.
+            selection_cls.insert1(row, allow_direct_insert=True)
+    except Exception as exc:  # noqa: BLE001 -- re-raised unless a dup-PK race
+        if not _is_duplicate_key_error(exc):
+            raise
+        # A concurrent caller won the deterministic-id race; its row is the
+        # same content-addressed selection, so return the shared PK.
+        logger.debug(
+            "%s.insert_selection: lost deterministic-id race on %s; "
+            "returning the existing row.",
+            selection_cls.__name__,
+            artifact_detection_id,
+        )
+    return pk
+
+
 @schema
-class ArtifactDetectionSelection(
+class RecordingArtifactSelection(
     SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
 ):
-    """One row per (parameters, source) artifact detection request.
+    """Single-recording artifact-detection request.
 
-    Source part rows make the input shape explicit: exactly one of
-    ``RecordingSource`` (single-recording, default) or
-    ``SharedGroupSource`` (cross-recording, opt-in) must exist
-    for each selection row. Enforced by ``insert_selection`` and
-    re-checked at the start of ``ArtifactDetection.make()`` so a row
-    inserted via raw ``insert1`` (bypassing ``insert_selection``) is
-    caught before populate proceeds.
+    Source-specific split of the former
+    ``ArtifactDetectionSelection.RecordingSource``: the recording source is a
+    required FK on the master row, so "exactly one recording source" is
+    structural (a row cannot exist with zero or two sources) rather than a
+    runtime-asserted invariant.
     """
 
     definition = """
     artifact_detection_id: uuid
     ---
     -> ArtifactDetectionParameters
+    -> Recording
     """
-
-    class RecordingSource(SpyglassMixinPart):
-        """Single-recording source for an artifact-detection selection."""
-
-        definition = """
-        -> master
-        ---
-        -> Recording
-        """
-
-    class SharedGroupSource(SpyglassMixinPart):
-        """Shared-group source for an artifact-detection selection.
-
-        ``member_set_hash`` snapshots the group's ordered member ``recording_id``
-        set at selection time (``shared_group_member_set_hash``). The artifact
-        identity is ``{params, group_name}`` only, so without this snapshot the
-        LIVE ``SharedArtifactGroup.Member`` set could change under a fixed
-        ``artifact_detection_id``; ``ArtifactDetection.make_fetch`` re-derives the
-        hash from the current members and rejects a drift.
-        """
-
-        definition = """
-        -> master
-        ---
-        -> SharedArtifactGroup
-        member_set_hash: char(64)   # frozen sha256 of the ordered member recording_id set
-        """
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Insert master + exactly one source part; return PK-only dict.
+        """Idempotently register a single-recording artifact selection.
 
-        Reads exactly one source key from ``key`` (``recording_id`` xor
-        ``shared_artifact_group_name``), finds an existing master row
-        that matches both the master fields and the source row, or, if
-        absent, inserts master + source part keyed by a deterministic,
-        content-addressed ``artifact_detection_id`` derived from the params + source
-        identity. A concurrent caller that wins the duplicate-PK race is
-        handled by refetching the winner's row.
+        Parameters
+        ----------
+        key : dict
+            Must carry ``artifact_detection_params_name`` and
+            ``recording_id``. An explicit ``artifact_detection_id`` is
+            validated against the derived deterministic id.
 
-        The find step joins the master to the chosen source part so a
-        prior ``ArtifactDetectionSelection`` with a different source is not
-        silently reused. Source-part atomicity is enforced via the
-        ``SchemaBypassError`` re-check at the top of
-        ``ArtifactDetection.make()`` (Layer 2 of the source-part
-        pattern).
-
-        Raises
-        ------
-        ValueError
-            If zero or two source keys are supplied in ``key``.
-        DuplicateSelectionError
-            If any matching master has a non-deterministic ``artifact_detection_id``
-            (a raw ``insert`` bypass or a pre-determinism legacy row) --
-            even a single one; an integrity bug, not user error.
-        SchemaBypassError
-            If a deterministic master exists but its expected source part
-            is missing/mismatched (a raw-insert orphan).
+        Returns
+        -------
+        dict
+            ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
         """
-        from spyglass.spikesorting.v2._selection_plan import (
-            build_artifact_detection_selection_plan,
+        recording_id = key["recording_id"]
+        return _insert_artifact_selection(
+            cls,
+            artifact_detection_params_name=key[
+                "artifact_detection_params_name"
+            ],
+            recording_id=recording_id,
+            supplied_id=key.get("artifact_detection_id"),
+            extra_row={"recording_id": recording_id},
         )
 
-        # Pure half: validate inputs, derive the deterministic
-        # artifact_detection_id, and shape the master + source part rows.
-        plan = build_artifact_detection_selection_plan(key)
-        source_part = (
-            cls.RecordingSource
-            if plan.source_kind == "recording"
-            else cls.SharedGroupSource
-        )
 
-        existing = cls._find_existing_pk(
-            plan.master_restriction,
-            source_part,
-            plan.source_restriction,
-            plan.artifact_detection_id,
-        )
-        if existing is not None:
-            return existing
+@schema
+class SharedGroupArtifactSelection(
+    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+):
+    """Cross-recording (shared-group) artifact-detection request.
 
-        # Translate the would-be DataJoint FK IntegrityError into a
-        # clear "missing default row" message before the inserts attempt.
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-        from spyglass.spikesorting.v2.utils import (
-            _ensure_lookup_row_exists,
-            _is_duplicate_key_error,
-        )
+    Source-specific split of the former
+    ``ArtifactDetectionSelection.SharedGroupSource``. ``member_set_hash``
+    snapshots the group's ordered member ``recording_id`` set at selection
+    time; ``SharedGroupArtifactDetection.make_fetch`` re-derives it from the
+    current members and rejects a drift (the identity is ``{params, group}``
+    only, so a live member edit could otherwise change the scanned set under a
+    fixed ``artifact_detection_id``).
+    """
 
-        _ensure_lookup_row_exists(
-            ArtifactDetectionParameters,
-            plan.master_restriction,
-            helper_name="ArtifactDetectionSelection.insert_selection",
-            insert_default_path="ArtifactDetectionParameters.insert_default()",
-        )
-
-        # Snapshot the shared group's member set onto the source part so a later
-        # SharedArtifactGroup.Member edit cannot change the scanned set under this
-        # fixed artifact_detection_id (the identity is params+group only). The
-        # recording source has no member set, so it inserts the plan row as-is.
-        source_row = dict(plan.source_row)
-        if plan.source_kind == "shared_artifact_group":
-            source_row["member_set_hash"] = cls._current_member_set_hash(
-                key["shared_artifact_group_name"]
-            )
-
-        try:
-            with transaction_or_noop(cls.connection):
-                # allow_direct_insert: this helper IS the validation boundary.
-                cls.insert1(plan.master_row, allow_direct_insert=True)
-                source_part.insert1(source_row)
-        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
-            if not _is_duplicate_key_error(exc):
-                raise
-            # Lost a concurrent race on the same deterministic artifact_detection_id;
-            # refetch and return the winner's master+source row.
-            # (Top-level recovery only -- see transaction_or_noop.)
-            logger.debug(
-                "ArtifactDetectionSelection.insert_selection: lost deterministic-id "
-                "race on %s; returning the existing row.",
-                plan.artifact_detection_id,
-            )
-            existing = cls._find_existing_pk(
-                plan.master_restriction,
-                source_part,
-                plan.source_restriction,
-                plan.artifact_detection_id,
-            )
-            if existing is not None:
-                return existing
-            # The deterministic master exists (that is the duplicate key)
-            # but the expected source part is missing/mismatched -- a
-            # raw-insert orphan. Surface a clear schema-bypass error
-            # instead of the opaque duplicate-key error.
-            raise SchemaBypassError(
-                f"ArtifactDetectionSelection master {plan.artifact_detection_id} exists but has no "
-                f"matching {source_part.__name__} row for "
-                f"{plan.source_restriction}: the master was inserted without "
-                "insert_selection (raw-insert orphan). Use insert_selection() "
-                "to create master+source atomically, or drop the orphan "
-                "master."
-            ) from exc
-        return {k: plan.master_row[k] for k in cls.primary_key}
+    definition = """
+    artifact_detection_id: uuid
+    ---
+    -> ArtifactDetectionParameters
+    -> SharedArtifactGroup
+    member_set_hash: char(64)   # frozen sha256 of the ordered member recording_id set
+    """
 
     @classmethod
-    def _current_member_set_hash(cls, shared_artifact_group_name) -> str:
-        """Hash the shared group's CURRENT member ``recording_id`` set.
+    def insert_selection(cls, key: dict) -> dict:
+        """Idempotently register a shared-group artifact selection.
 
-        Snapshotted onto ``SharedGroupSource`` at ``insert_selection`` and
-        re-derived in ``make_fetch`` to detect a ``SharedArtifactGroup.Member``
-        edit under a fixed ``artifact_detection_id``.
+        Snapshots the group's CURRENT member set onto ``member_set_hash`` so a
+        later ``SharedArtifactGroup.Member`` edit cannot silently change the
+        scanned set under this fixed ``artifact_detection_id``.
+
+        Parameters
+        ----------
+        key : dict
+            Must carry ``artifact_detection_params_name`` and
+            ``shared_artifact_group_name``. An explicit
+            ``artifact_detection_id`` is validated against the derived id.
+
+        Returns
+        -------
+        dict
+            ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
         """
         from spyglass.spikesorting.v2._selection_identity import (
             shared_group_member_set_hash,
         )
 
+        group_name = key["shared_artifact_group_name"]
         member_recording_ids = (
             SharedArtifactGroup.Member
-            & {"shared_artifact_group_name": shared_artifact_group_name}
+            & {"shared_artifact_group_name": group_name}
         ).fetch("recording_id")
-        return shared_group_member_set_hash(member_recording_ids)
-
-    @classmethod
-    def _find_existing_pk(
-        cls,
-        master_restriction,
-        source_part,
-        source_restriction,
-        deterministic_id,
-    ) -> dict | None:
-        """Return the canonical master PK for this master+source, or None.
-
-        Joins the master to the chosen source part (so a prior selection
-        with a DIFFERENT source is not reused) and splits the matches by
-        primary key:
-
-        * the master at ``deterministic_id`` is the canonical, content-
-          addressed selection -> return ``{"artifact_detection_id": ...}``;
-        * ANY master with a different ``artifact_detection_id`` is non-deterministic
-          (a raw ``insert`` bypass or pre-determinism legacy row) and
-          violates the content-addressed-identity invariant -> raise
-          ``DuplicateSelectionError`` so it is reset rather than silently
-          returned.
-
-        Used by ``insert_selection`` for both the pre-insert lookup and
-        the post-duplicate-key refetch.
-        """
-        from spyglass.spikesorting.v2.exceptions import (
-            DuplicateSelectionError,
-        )
-
-        joined = (cls * source_part) & master_restriction & source_restriction
-        master_ids = {
-            row["artifact_detection_id"]
-            for row in joined.fetch("KEY", as_dict=True)
-        }
-        bypassed = [aid for aid in master_ids if aid != deterministic_id]
-        if bypassed:
-            raise DuplicateSelectionError(
-                f"ArtifactDetectionSelection has {len(master_ids)} master rows for "
-                f"{master_restriction | source_restriction} whose artifact_detection_id "
-                f"is not the deterministic id {deterministic_id}: {bypassed}. "
-                "This is a non-deterministic selection row (a raw insert or "
-                "pre-determinism legacy row); drop it and re-insert via "
-                "insert_selection."
-            )
-        return (
-            {"artifact_detection_id": deterministic_id} if master_ids else None
-        )
-
-    @classmethod
-    def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
-        """Find or delete master rows that have no source-part row.
-
-        The source-part pattern's transactional ``insert_selection``
-        guarantees every master is born with exactly one source row,
-        but DataJoint cannot enforce that invariant across two part
-        tables -- if a maintenance script cascade-deletes from
-        ``Recording`` or ``SharedArtifactGroup`` it leaves a master row
-        with zero source children. This helper finds and (optionally)
-        removes those orphans via cautious_delete so downstream
-        ``ArtifactDetection`` / ``Sorting`` / ``CurationV2`` rows are
-        reviewed by the normal cascade preview.
-
-        Parameters
-        ----------
-        dry_run
-            If True (default), return the orphan master PKs without
-            deleting. If False, cautious_delete the orphans.
-
-        Returns
-        -------
-        list of dict
-            Orphan master PKs (``{"artifact_detection_id": ...}``). Empty when
-            no orphans remain.
-        """
-        orphans = find_orphaned_masters(
+        member_set_hash = shared_group_member_set_hash(member_recording_ids)
+        return _insert_artifact_selection(
             cls,
-            [cls.RecordingSource, cls.SharedGroupSource],
-        )
-        if dry_run or not orphans:
-            return orphans
-        for orphan in orphans:
-            (cls & orphan).cautious_delete()
-        return orphans
-
-    @classmethod
-    def resolve_source(cls, key: dict) -> SourceResolution:
-        """Return the source-resolution record for an artifact selection.
-
-        Layer 2 of the source-part pattern: fetches source part rows for
-        the master key and asserts exactly one exists. Called at the top
-        of ``ArtifactDetection.make()`` to catch rows inserted via raw
-        ``dj.Manual.insert1()`` that bypassed ``insert_selection``.
-
-        Raises
-        ------
-        SchemaBypassError
-            If zero or multiple source part rows exist for ``key``.
-        """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rec_rows = (cls.RecordingSource & master_key).fetch(as_dict=True)
-        shared_rows = (cls.SharedGroupSource & master_key).fetch(as_dict=True)
-        total = len(rec_rows) + len(shared_rows)
-        if total != 1:
-            raise SchemaBypassError(
-                f"ArtifactDetectionSelection {master_key} has {total} source part "
-                "rows; expected exactly one. Use "
-                "ArtifactDetectionSelection.insert_selection() to add or remove "
-                "this selection."
-            )
-        if rec_rows:
-            return SourceResolution(
-                kind="recording",
-                key={"recording_id": rec_rows[0]["recording_id"]},
-            )
-        return SourceResolution(
-            kind="shared_artifact_group",
-            key={
-                "shared_artifact_group_name": shared_rows[0][
-                    "shared_artifact_group_name"
-                ]
+            artifact_detection_params_name=key[
+                "artifact_detection_params_name"
+            ],
+            shared_artifact_group_name=group_name,
+            supplied_id=key.get("artifact_detection_id"),
+            extra_row={
+                "shared_artifact_group_name": group_name,
+                "member_set_hash": member_set_hash,
             },
         )
 
 
-@schema
-class ArtifactDetection(SpyglassMixin, dj.Computed):
-    """Artifact-removed valid times for a Recording or SharedArtifactGroup.
+def insert_artifact_detection(key: dict) -> dict:
+    """Insert an artifact-detection selection, dispatching on source kind.
 
-    The valid times are written to ``common.IntervalList`` under name
-    ``f"artifact_detection_{artifact_detection_id}"`` at the end of ``make()`` -- one row per
-    affected session. Single-recording detections write exactly one row;
-    cross-recording detections write one row per distinct member
-    ``nwb_file_name``. The ``ArtifactRemovedInterval`` part table owns those
-    generated ``IntervalList`` rows relationally so Spyglass cleanup sees them
-    as live children rather than generic orphan intervals.
+    Single-entry UX over the two split selections: a single-recording key
+    (``recording_id``) routes to :class:`RecordingArtifactSelection`, a
+    cross-recording key (``shared_artifact_group_name``) to
+    :class:`SharedGroupArtifactSelection`. Preserves the call shape of the
+    former ``ArtifactDetectionSelection.insert_selection``.
+
+    Parameters
+    ----------
+    key : dict
+        Carries ``artifact_detection_params_name`` plus exactly one of
+        ``recording_id`` or ``shared_artifact_group_name``.
+
+    Returns
+    -------
+    dict
+        ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
+
+    Raises
+    ------
+    ValueError
+        If neither or both source keys are supplied.
+    """
+    has_recording = "recording_id" in key
+    has_shared = "shared_artifact_group_name" in key
+    if has_recording == has_shared:
+        raise ValueError(
+            "insert_artifact_detection requires exactly one source key: "
+            "recording_id (single-recording) xor shared_artifact_group_name "
+            "(cross-recording), not both and not neither."
+        )
+    if has_recording:
+        return RecordingArtifactSelection.insert_selection(key)
+    return SharedGroupArtifactSelection.insert_selection(key)
+
+
+class RecordingArtifactFetched(NamedTuple):
+    """DB-side inputs for :meth:`RecordingArtifactDetection.make_fetch`.
+
+    The single-recording source is structural, so the fetched shape carries
+    just the resolved ``recording_id`` + its parent ``nwb_file_name`` (no
+    source-kind branch, no member tuples).
+    """
+
+    validated: ArtifactDetectionParamsSchema
+    recording_id: object
+    nwb_file_name: str
+    artifact_job_kwargs: dict | None
+
+
+class SharedGroupArtifactFetched(NamedTuple):
+    """DB-side inputs for :meth:`SharedGroupArtifactDetection.make_fetch`.
+
+    The per-member fields are ordered tuples (length n_members) so
+    ``make_compute`` can union their channels without further DB I/O.
+    ``nwb_file_name`` is the common parent session (``insert_group``
+    validated single-session).
+    """
+
+    validated: ArtifactDetectionParamsSchema
+    shared_artifact_group_name: str
+    member_recording_ids: tuple
+    member_nwb_file_names: tuple
+    nwb_file_name: str
+    artifact_job_kwargs: dict | None
+
+
+class _ArtifactDetectionMixin:
+    """Shared source-agnostic detection machinery for the split result tables.
+
+    ``RecordingArtifactDetection`` and ``SharedGroupArtifactDetection`` differ
+    only in how ``make_fetch`` / ``make_compute`` resolve and LOAD their source
+    (a single cached recording vs the channel-union of a shared group's
+    members). Everything downstream of the loaded recording -- the chunked
+    threshold scan, the ``IntervalList`` write + ownership part rows, the
+    read-back, and the delete-time cleanup -- is identical, so it lives here
+    and both tables inherit it. The scan itself is the source-agnostic helper
+    both ``make_compute``s funnel through (:meth:`_run_artifact_scan`).
+
+    ``_single_source`` records whether the table owns exactly one
+    ``IntervalList`` row (recording source) so
+    :meth:`get_artifact_removed_intervals` can return a bare array for the
+    single-recording case while the shared-group case always returns the
+    per-member dict.
+    """
+
+    # Tri-part dispatch moves the long-running detection loop OUTSIDE the
+    # framework transaction (see the pre-split ``ArtifactDetection`` for the
+    # DataJoint #1170 / Spyglass #1030 background).
+    _parallel_make = True
+    _single_source: bool = True
+
+    @staticmethod
+    def _scan_artifact_frames(recording, validated, job_kwargs=None):
+        """Flag contiguous artifact-frame RUNS via a chunked executor.
+
+        Thin delegator to
+        :func:`._artifact_intervals.scan_artifact_frames`; kept as a
+        staticmethod for the public/tested chunked artifact-scan boundary.
+        """
+        return scan_artifact_frames(recording, validated, job_kwargs)
+
+    @staticmethod
+    def _detect_artifacts(recording, validated, context="", job_kwargs=None):
+        """Run amplitude / z-score artifact scan on a SI recording.
+
+        Thin delegator to :func:`._artifact_intervals.detect_artifacts`; kept
+        as a staticmethod because ``make_compute`` calls
+        ``self._detect_artifacts(...)`` and the v2 tests call it on the class.
+        """
+        return detect_artifacts(
+            recording, validated, context=context, job_kwargs=job_kwargs
+        )
+
+    def _run_artifact_scan(
+        self, recording, validated, artifact_job_kwargs, context
+    ):
+        """Resolve job kwargs and scan a loaded recording for artifacts.
+
+        The source-agnostic detection helper both ``make_compute``s call once
+        their (single or unioned) recording is loaded: merges the per-row
+        ``job_kwargs`` over the SI-global and DataJoint-config defaults, then
+        runs the chunked threshold scan.
+
+        Parameters
+        ----------
+        recording : si.BaseRecording
+            The loaded single or channel-unioned recording to scan.
+        validated : ArtifactDetectionParamsSchema
+            Validated detection parameters.
+        artifact_job_kwargs : dict or None
+            Per-row SI job-kwargs blob.
+        context : str
+            Diagnostic suffix identifying the selection for empty-scan logs.
+
+        Returns
+        -------
+        np.ndarray
+            Artifact-removed ``valid_times``, shape ``(n_intervals, 2)``.
+        """
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
+        return self._detect_artifacts(
+            recording,
+            validated,
+            context=context,
+            job_kwargs=resolved_job_kwargs,
+        )
+
+    def make_insert(
+        self, key, valid_times, nwb_file_name, per_member_nwb_files=()
+    ):
+        """Write the artifact ``IntervalList`` + master + part rows atomically.
+
+        Source-agnostic: writes ONE ``IntervalList`` row per distinct member
+        ``nwb_file_name`` (one row for the single-recording path), registers
+        the master row, and records ownership through
+        ``RemovedInterval`` so generic ``IntervalList`` cleanup treats
+        the generated intervals as live children. The inner
+        ``transaction_or_noop`` is a no-op under the framework transaction the
+        tri-part dispatch already opened; kept so an out-of-populate caller
+        still gets atomic registration.
+
+        Parameters
+        ----------
+        key : dict
+            Primary-key restriction for the row being inserted.
+        valid_times : np.ndarray
+            Artifact-removed valid times, shape ``(n_intervals, 2)``.
+        nwb_file_name : str
+            Fallback ``IntervalList`` target when ``per_member_nwb_files`` is
+            empty.
+        per_member_nwb_files : tuple, optional
+            Distinct member ``nwb_file_name`` s to write one row each.
+        """
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
+        interval_rows = build_artifact_interval_rows(
+            key, valid_times, nwb_file_name, per_member_nwb_files
+        )
+        part_rows = build_artifact_interval_part_rows(key, interval_rows)
+        detection_key = {"artifact_detection_id": key["artifact_detection_id"]}
+        with transaction_or_noop(self.connection):
+            IntervalList.insert(interval_rows)
+            self.insert1(key)
+            self.RemovedInterval.insert(part_rows)
+            # Producer-owned registration: a materialized detection registers
+            # itself into the ArtifactDetectionOutput merge as an available
+            # source, so a later SortingSelection just resolves its merge id and
+            # never has to register (no merge insert inside the sorting
+            # transaction). Idempotent + inside this atomic block, so a detection
+            # is registered iff it is materialized.
+            ArtifactDetectionOutput.insert_detection(detection_key)
+
+    def get_artifact_removed_intervals(self, key, as_dict=False):
+        """Return the artifact-removed ``valid_times`` for ``key``.
+
+        Reads the detection row's OWN ``RemovedInterval`` part rows.
+        A single-recording source (``_single_source``) owns exactly one row,
+        returned as a plain ``(n_intervals, 2)`` array (or a one-key dict with
+        ``as_dict=True``); a shared-group source returns the
+        ``{nwb_file_name: array}`` dict (values equal across members -- the
+        scan ran ONCE over the unioned channels).
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one detection row; must include
+            ``artifact_detection_id``.
+        as_dict : bool, optional
+            Force the dict shape even for a single-recording source.
+
+        Returns
+        -------
+        np.ndarray or dict[str, np.ndarray]
+            The ``valid_times`` array (single-recording, ``as_dict=False``)
+            or the per-member dict otherwise.
+        """
+        result = read_owned_artifact_intervals(type(self), key)
+        if self._single_source:
+            if len(result) != 1:
+                raise ValueError(
+                    f"{type(self).__name__}.get_artifact_removed_intervals: "
+                    f"recording-backed {key!r} has {len(result)} "
+                    "RemovedInterval part rows; expected exactly one."
+                )
+            if not as_dict:
+                return next(iter(result.values()))
+        return result
+
+    def _merge_registration(self, row):
+        """Return ``(merge_id, n_referencing_sortings)`` for a detection row.
+
+        ``(None, 0)`` when the detection is not registered in
+        ``ArtifactDetectionOutput`` (so nothing references it through the merge).
+        """
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+
+        det_key = {"artifact_detection_id": row["artifact_detection_id"]}
+        try:
+            merge_id = ArtifactDetectionOutput.get_merge_id(det_key)
+        except KeyError:
+            return None, 0
+        n = len(
+            SortingSelection.ArtifactDetectionSource
+            & {"artifact_detection_merge_id": merge_id}
+        )
+        return merge_id, n
+
+    def delete(self, *args, safemode=None, _cascade_sorts=False, **kwargs):
+        """Delete detection rows, their ``ArtifactDetectionOutput`` registration,
+        and their owned ``IntervalList`` rows -- coordinated with the merge.
+
+        Deletion is REFUSED (``ValueError``) when a detection is referenced by a
+        ``SortingSelection`` through the merge, so an existing sort does not
+        silently lose its artifact pass. Delete the dependent sorts first, or use
+        :meth:`cascade_delete` to remove them too. A per-detection advisory lock
+        (the same one ``SortingSelection.insert_selection`` takes when it links
+        an artifact) serializes delete-vs-select on a detection, so a CONCURRENT
+        ``insert_selection`` cannot slip a new referrer between the check and the
+        cascade -- it either commits first (and is refused) or blocks until the
+        detection is gone (and fails on the FK). The lock is FAIL-CLOSED: a lock
+        it cannot take within the short lifecycle timeout aborts the delete with
+        ``AdvisoryLockError`` rather than proceeding unserialized. The per-
+        detection locks are taken in a deterministic (``artifact_detection_id``-
+        sorted) order, so two overlapping bulk deletes acquire them in the same
+        order and cannot deadlock.
+
+        For an unreferenced detection, the cautious cascade (which sets
+        ``force_masters`` on modern DataJoint) removes the detection together
+        with its ``ArtifactDetectionOutput`` source part + merge master -- gated
+        by ``safemode``, so a cancelled delete leaves both in place (no orphaned
+        merge row). In ``cascade`` mode the same cascade continues on through
+        ``SortingSelection.ArtifactDetectionSource`` to the dependent sorts.
+        DataJoint does not cascade through ``interval_list_name``-keyed
+        dependencies, so the owned artifact ``IntervalList`` rows are collected
+        up front and dropped for masters the cascade actually removed. A leading
+        positional restriction is accepted for the easy-to-mistype
+        ``Table().delete(restriction)`` form.
+        """
+        restriction_args, args = split_leading_restrictions(args)
+        if restriction_args:
+            target = self
+            for restriction in restriction_args:
+                target = target & restriction
+            return target.delete(
+                *args,
+                safemode=safemode,
+                _cascade_sorts=_cascade_sorts,
+                **kwargs,
+            )
+
+        from contextlib import ExitStack
+
+        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
+        detection_cls = type(self)
+        # Sort by artifact_detection_id so the per-detection locks below are
+        # acquired in a deterministic order: two overlapping bulk deletes then
+        # take them in the SAME order and cannot deadlock (A->B vs B->A).
+        rows = sorted(
+            self.fetch(as_dict=True),
+            key=lambda r: str(r["artifact_detection_id"]),
+        )
+
+        # Serialize delete-vs-insert_selection on each detection with the same
+        # advisory lock insert_selection takes when it links an artifact, keyed
+        # on ArtifactDetectionOutput + artifact_detection_id so both sides derive
+        # the same lock name. This closes the check-then-cascade race: a
+        # concurrent insert_selection linking one of these detections either runs
+        # fully BEFORE the referrer check (so it is seen and refused) or fully
+        # AFTER the cascade (so it fails on the deleted merge FK), never in
+        # between where the force_masters cascade would silently drop its sort.
+        # FAIL-CLOSED: required_advisory_lock RAISES AdvisoryLockError if it
+        # cannot take the lock within the lifecycle timeout, so a delete never
+        # proceeds unserialized (ExitStack releases any locks already taken).
+        with ExitStack() as locks:
+            for row in rows:
+                locks.enter_context(
+                    required_advisory_lock(
+                        ArtifactDetectionOutput,
+                        {"artifact_detection_id": row["artifact_detection_id"]},
+                    )
+                )
+
+            # Refuse to delete a detection a sorting references (unless
+            # cascading): a sort must not silently lose its artifact pass.
+            # ``_merge_registration`` returns the referencing-sort count via the
+            # merge; under the lock the count is stable through the cascade.
+            if not _cascade_sorts:
+                referenced = [
+                    str(row["artifact_detection_id"])
+                    for row in rows
+                    if self._merge_registration(row)[1]
+                ]
+                if referenced:
+                    raise ValueError(
+                        f"{detection_cls.__name__}.delete: refusing to delete "
+                        "artifact detection(s) referenced by a SortingSelection:"
+                        f" {referenced}. Delete those sorts first, or call "
+                        "cascade_delete() to remove them too."
+                    )
+
+            delete_targets = [
+                (
+                    {k: row[k] for k in self.primary_key},
+                    collect_artifact_interval_rows_to_remove(
+                        [row], detection_cls=detection_cls
+                    ),
+                )
+                for row in rows
+            ]
+
+            # The cautious cascade (force_masters on modern DataJoint) walks
+            # detection -> ArtifactDetectionOutput source part -> merge master
+            # (and, when cascading, on to the dependent sorts), so the merge
+            # registration is removed WITH the detection -- atomically and
+            # safemode-gated.
+            if safemode is None:
+                super().delete(*args, **kwargs)
+            else:
+                super().delete(*args, safemode=safemode, **kwargs)
+
+        for master_key, interval_rows_to_remove in delete_targets:
+            if not (detection_cls & master_key):
+                remove_artifact_interval_rows(interval_rows_to_remove)
+
+    def cascade_delete(self, *args, safemode=None, **kwargs):
+        """Delete these detections AND every sorting that references them.
+
+        The explicit force path for :meth:`delete`'s refuse-if-referenced
+        default: removes the dependent ``SortingSelection`` rows (and their
+        downstream ``Sorting`` / ``CurationV2`` / ``SpikeSortingOutput``
+        cascade), then the merge registration, then the detection.
+        """
+        return self.delete(
+            *args, safemode=safemode, _cascade_sorts=True, **kwargs
+        )
+
+
+@schema
+class RecordingArtifactDetection(
+    _ArtifactDetectionMixin, SpyglassMixin, dj.Computed
+):
+    """Artifact-removed valid times for a single ``Recording``.
+
+    Source-specific split of the pre-split ``ArtifactDetection`` recording
+    branch. The recording source is structural (the selection master carries a
+    required ``Recording`` FK), so ``make_fetch`` resolves it directly without
+    a source-kind branch. Writes exactly one ``IntervalList`` row keyed by the
+    recording's parent ``nwb_file_name``.
     """
 
     definition = """
-    -> ArtifactDetectionSelection
+    -> RecordingArtifactSelection
     """
 
-    class ArtifactRemovedInterval(SpyglassMixinPart):
-        """Generated artifact-removed ``IntervalList`` row.
+    _single_source = True
 
-        One part row is inserted for each ``IntervalList`` row written by
-        ``make_insert``. The FK gives the otherwise name-addressed artifact
-        intervals a relational owner, so generic ``IntervalList.cleanup`` does
-        not delete live artifact intervals.
+    class RemovedInterval(SpyglassMixinPart):
+        """Generated artifact-removed ``IntervalList`` row (relational owner).
+
+        Named ``RemovedInterval`` (not ``ArtifactRemovedInterval``) so the
+        derived part-table + FK identifier stays under MySQL's 64-char limit
+        for the long ``shared_group_artifact_detection`` sibling master.
         """
 
         definition = """
@@ -779,242 +1064,207 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
         -> IntervalList
         """
 
-    # Tri-part dispatch enables non-daemon parallel populate via
-    # Spyglass's ``PopulateMixin`` and -- more importantly -- moves
-    # the long-running detection loop OUTSIDE the framework
-    # transaction. See ``Recording`` for the same pattern and the
-    # background on DataJoint #1170 / Spyglass #1030.
-    _parallel_make = True
-
     def make_fetch(self, key):
-        """Read every DB input the compute step needs.
-
-        Layer-2 source re-check happens here so a row whose source
-        part was deleted (cascade orphan) fails fast inside
-        ``make_fetch``; raising here is cheap and deterministic.
-        For the shared-artifact-group source, fetch the ordered
-        member ``recording_id`` + ``nwb_file_name`` tuples so
-        ``make_compute`` can union their channels without further
-        DB I/O.  Tuple return is DeepHash-stable across the two
-        calls DataJoint makes (before compute and again inside the
-        transaction).
-
-        Parameters
-        ----------
-        key : dict
-            Primary-key restriction selecting one
-            ``ArtifactDetectionSelection`` row to populate.
+        """Read the params blob, resolved recording, and parent session.
 
         Returns
         -------
-        ArtifactFetched
-            The resolved source, validated params, parent
-            ``nwb_file_name``, per-row job kwargs, and -- for the
-            shared-group source -- the ordered member
-            ``recording_id`` / ``nwb_file_name`` tuples.
+        RecordingArtifactFetched
+            Validated params, the resolved ``recording_id``, its parent
+            ``nwb_file_name``, and the per-row job kwargs.
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        source = ArtifactDetectionSelection.resolve_source(key)
-
         params_blob, artifact_job_kwargs = (
-            ArtifactDetectionParameters * (ArtifactDetectionSelection & key)
+            ArtifactDetectionParameters * (RecordingArtifactSelection & key)
+        ).fetch1("params", "job_kwargs")
+        validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
+        recording_id = (RecordingArtifactSelection & key).fetch1("recording_id")
+        nwb_file_name = (
+            RecordingSelection & {"recording_id": recording_id}
+        ).fetch1("nwb_file_name")
+        return RecordingArtifactFetched(
+            validated=validated,
+            recording_id=recording_id,
+            nwb_file_name=nwb_file_name,
+            artifact_job_kwargs=artifact_job_kwargs,
+        )
+
+    def make_compute(
+        self, key, validated, recording_id, nwb_file_name, artifact_job_kwargs
+    ):
+        """Load the single recording and scan it for artifacts.
+
+        Returns
+        -------
+        ArtifactComputed
+            The ``valid_times`` plus the one-element per-member target list.
+        """
+        recording = Recording().get_recording({"recording_id": recording_id})
+        valid_times = self._run_artifact_scan(
+            recording,
+            validated,
+            artifact_job_kwargs,
+            context=(
+                f" for artifact_detection_id={key['artifact_detection_id']}, "
+                f"recording_id={recording_id}"
+            ),
+        )
+        return ArtifactComputed(
+            valid_times=valid_times,
+            nwb_file_name=nwb_file_name,
+            per_member_nwb_files=(nwb_file_name,),
+        )
+
+
+@schema
+class SharedGroupArtifactDetection(
+    _ArtifactDetectionMixin, SpyglassMixin, dj.Computed
+):
+    """Artifact-removed valid times for a ``SharedArtifactGroup``.
+
+    Source-specific split of the pre-split ``ArtifactDetection`` shared-group
+    branch. ``make_fetch`` re-derives the group's member set and rejects a
+    drift from the ``member_set_hash`` frozen on the selection (the identity is
+    ``{params, group}`` only). ``make_compute`` unions the members' channels
+    (``si.aggregate_channels``) and scans ONCE; ``make_insert`` writes the same
+    ``valid_times`` into every distinct member session's ``IntervalList``.
+    """
+
+    definition = """
+    -> SharedGroupArtifactSelection
+    """
+
+    _single_source = False
+
+    class RemovedInterval(SpyglassMixinPart):
+        """Generated artifact-removed ``IntervalList`` row (relational owner).
+
+        Named ``RemovedInterval`` (not ``ArtifactRemovedInterval``) so the
+        derived part-table + FK identifier stays under MySQL's 64-char limit
+        for this long ``shared_group_artifact_detection`` master.
+        """
+
+        definition = """
+        -> master
+        -> IntervalList
+        """
+
+    def make_fetch(self, key):
+        """Read params, resolve members, and reject a member-set drift.
+
+        Returns
+        -------
+        SharedGroupArtifactFetched
+            Validated params, the group name, the ordered member
+            ``recording_id`` / ``nwb_file_name`` tuples, the canonical parent
+            ``nwb_file_name``, and the per-row job kwargs.
+
+        Raises
+        ------
+        SharedArtifactGroupMemberDriftError
+            If the live member set differs from the ``member_set_hash`` frozen
+            on the selection (scanning it would silently change the result
+            under a fixed ``artifact_detection_id``).
+        """
+        from spyglass.spikesorting.v2._selection_identity import (
+            shared_group_member_set_hash,
+        )
+        from spyglass.spikesorting.v2.exceptions import (
+            SharedArtifactGroupMemberDriftError,
+        )
+        from spyglass.spikesorting.v2.recording import RecordingSelection
+
+        group_name, frozen_hash = (SharedGroupArtifactSelection & key).fetch1(
+            "shared_artifact_group_name", "member_set_hash"
+        )
+        params_blob, artifact_job_kwargs = (
+            ArtifactDetectionParameters * (SharedGroupArtifactSelection & key)
         ).fetch1("params", "job_kwargs")
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
 
-        if source.kind == "recording":
-            nwb_file_name = (
-                RecordingSelection
-                & {"recording_id": source.key["recording_id"]}
-            ).fetch1("nwb_file_name")
-            return ArtifactFetched(
-                source=source,
-                validated=validated,
-                nwb_file_name=nwb_file_name,
-                artifact_job_kwargs=artifact_job_kwargs,
-                member_recording_ids=None,
-                member_nwb_file_names=None,
+        # Members ordered by recording_id so the tuple shape is DeepHash-stable
+        # across the two make_fetch calls; the per-member nwb_file_name is
+        # bulk-fetched through the join.
+        members = (
+            SharedArtifactGroup.Member * RecordingSelection
+            & {"shared_artifact_group_name": group_name}
+        ).fetch(
+            "recording_id",
+            "nwb_file_name",
+            as_dict=True,
+            order_by="recording_id",
+        )
+        if not members:
+            raise RuntimeError(
+                "SharedGroupArtifactDetection.make: SharedArtifactGroup "
+                f"{group_name!r} has zero members; insert_group should have "
+                "rejected the empty case."
             )
-
-        if source.kind == "shared_artifact_group":
-            # Members come from SharedArtifactGroup.Member ordered by
-            # ``recording_id`` so the deterministic tuple shape is
-            # DeepHash-stable across both make_fetch calls. The
-            # per-member ``nwb_file_name`` lookup is bulk-fetched
-            # via a join.
-            members = (
-                SharedArtifactGroup.Member * RecordingSelection
-                & {
-                    "shared_artifact_group_name": source.key[
-                        "shared_artifact_group_name"
-                    ]
-                }
-            ).fetch(
-                "recording_id",
-                "nwb_file_name",
-                as_dict=True,
-                order_by="recording_id",
+        member_recording_ids = tuple(str(m["recording_id"]) for m in members)
+        # Reject a member-set drift: the artifact_detection_id was minted for
+        # the set frozen on member_set_hash. Hashing the set just resolved
+        # (rather than re-querying) yields the same digest insert_selection
+        # minted (the helper sorts; every member has a RecordingSelection so
+        # the join is total).
+        current_hash = shared_group_member_set_hash(member_recording_ids)
+        if current_hash != frozen_hash:
+            raise SharedArtifactGroupMemberDriftError(
+                "SharedGroupArtifactDetection.make: SharedArtifactGroup "
+                f"{group_name!r} member set changed since "
+                f"artifact_detection_id={key['artifact_detection_id']} was "
+                f"created (frozen member_set_hash {frozen_hash[:12]} != "
+                f"current {current_hash[:12]}). The artifact_detection_id "
+                "identity is params+group only, so insert_selection() returns "
+                "this same id with its stale snapshot -- to scan the new "
+                "membership, DELETE this selection and re-run "
+                "insert_selection() (which re-snapshots the current members), "
+                "or restore the group's members."
             )
-            if not members:
-                raise RuntimeError(
-                    "ArtifactDetection.make: SharedArtifactGroup "
-                    f"{source.key['shared_artifact_group_name']!r} has "
-                    "zero members; insert_group should have rejected "
-                    "the empty case."
-                )
-            member_recording_ids = tuple(
-                str(m["recording_id"]) for m in members
-            )
-            # Reject a member-set drift: the artifact_detection_id was minted for
-            # the member set frozen on SharedGroupSource.member_set_hash. If the
-            # LIVE set differs (a SharedArtifactGroup.Member added/removed since),
-            # scanning it would silently change the result under a fixed id.
-            # ``member_recording_ids`` is the set just resolved above; hashing it
-            # here -- rather than re-querying the members -- yields the same digest
-            # insert_selection minted (the helper sorts, and every member has a
-            # RecordingSelection so the join above is total).
-            from spyglass.spikesorting.v2._selection_identity import (
-                shared_group_member_set_hash,
-            )
-            from spyglass.spikesorting.v2.exceptions import (
-                SharedArtifactGroupMemberDriftError,
-            )
-
-            frozen_hash = (
-                ArtifactDetectionSelection.SharedGroupSource & key
-            ).fetch1("member_set_hash")
-            current_hash = shared_group_member_set_hash(member_recording_ids)
-            if current_hash != frozen_hash:
-                raise SharedArtifactGroupMemberDriftError(
-                    "ArtifactDetection.make: SharedArtifactGroup "
-                    f"{source.key['shared_artifact_group_name']!r} member set "
-                    f"changed since artifact_detection_id={key['artifact_detection_id']} "
-                    "was created (frozen member_set_hash "
-                    f"{frozen_hash[:12]} != current {current_hash[:12]}). The "
-                    "artifact_detection_id identity is params+group only, so "
-                    "insert_selection() returns this same id with its stale "
-                    "snapshot -- to scan the new membership, DELETE this selection "
-                    "and re-run insert_selection() (which re-snapshots the current "
-                    "members), or restore the group's members."
-                )
-            member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
-            # ``insert_group`` validated single-session, so the
-            # ``nwb_file_name`` is unique; surface the canonical one
-            # so callers that only need the master nwb_file_name
-            # (single-recording-shaped consumers) keep working.
-            nwb_file_name = member_nwb_file_names[0]
-            return ArtifactFetched(
-                source=source,
-                validated=validated,
-                nwb_file_name=nwb_file_name,
-                artifact_job_kwargs=artifact_job_kwargs,
-                member_recording_ids=member_recording_ids,
-                member_nwb_file_names=member_nwb_file_names,
-            )
-
-        raise RuntimeError(
-            f"ArtifactDetection.make: unexpected source kind {source.kind!r}."
+        member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
+        return SharedGroupArtifactFetched(
+            validated=validated,
+            shared_artifact_group_name=group_name,
+            member_recording_ids=member_recording_ids,
+            member_nwb_file_names=member_nwb_file_names,
+            nwb_file_name=member_nwb_file_names[0],
+            artifact_job_kwargs=artifact_job_kwargs,
         )
 
     def make_compute(
         self,
         key,
-        source,
         validated,
+        shared_artifact_group_name,
+        member_recording_ids,
+        member_nwb_file_names,
         nwb_file_name,
         artifact_job_kwargs,
-        member_recording_ids=None,
-        member_nwb_file_names=None,
     ):
-        """Run artifact detection outside any DB transaction.
-
-        For ``source.kind == "recording"``: load the single cached
-        preprocessed recording and scan it.
-
-        For ``source.kind == "shared_artifact_group"``: load each
-        member's preprocessed recording, ``si.aggregate_channels``
-        them into a single recording (column-stack along the
-        channel axis -- the union of channels), then scan the
-        unioned recording ONCE. The same ``valid_times`` array
-        gets written into every member's ``IntervalList`` so each
-        member session sees the artifact times in its own
-        namespace.
-
-        Parameters
-        ----------
-        key : dict
-            Primary-key restriction for the populating row.
-        source : SourceResolution
-            Resolved source record (``recording`` or
-            ``shared_artifact_group`` kind) from ``make_fetch``.
-        validated : ArtifactDetectionParamsSchema
-            Validated detection parameters.
-        nwb_file_name : str
-            Parent session for the single-recording path; the
-            canonical member session for the shared-group path.
-        artifact_job_kwargs : dict or None
-            Per-row SI job-kwargs blob, merged over the global and
-            config defaults before the chunked scan.
-        member_recording_ids : tuple, optional
-            Ordered member ``recording_id`` s for the shared-group
-            source; ``None`` for the single-recording source.
-        member_nwb_file_names : tuple, optional
-            Ordered member ``nwb_file_name`` s for the shared-group
-            source; ``None`` for the single-recording source.
+        """Union the members' channels and scan the union ONCE.
 
         Returns
         -------
         ArtifactComputed
-            The artifact-removed ``valid_times`` plus the
-            per-member ``nwb_file_name`` target list that
-            ``make_insert`` writes one ``IntervalList`` row per.
+            The shared ``valid_times`` plus the distinct member
+            ``nwb_file_name`` target list ``make_insert`` writes one row per.
         """
-        # Merge the SI-global, DataJoint-config, and per-row job_kwargs so
-        # the chunked ``_scan_artifact_frames`` pass honors ``n_jobs`` /
-        # ``chunk_duration`` overrides. The stored per-row ``job_kwargs``
-        # blob is honored here, merged over the global and config defaults.
-        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
-
-        resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
-
-        if source.kind == "recording":
-            recording = Recording().get_recording(
-                {"recording_id": source.key["recording_id"]}
-            )
-            valid_times = self._detect_artifacts(
-                recording,
-                validated,
-                context=(
-                    f" for artifact_detection_id={key['artifact_detection_id']}, "
-                    f"recording_id={source.key['recording_id']}"
-                ),
-                job_kwargs=resolved_job_kwargs,
-            )
-            return ArtifactComputed(
-                valid_times=valid_times,
-                nwb_file_name=nwb_file_name,
-                per_member_nwb_files=(nwb_file_name,),
-            )
-
-        # shared_artifact_group source.
         import spikeinterface as si
 
         if not member_recording_ids:
             raise RuntimeError(
-                "ArtifactDetection.make_compute: shared-group source "
-                "has no member_recording_ids; make_fetch contract "
+                "SharedGroupArtifactDetection.make_compute: shared-group "
+                "source has no member_recording_ids; make_fetch contract "
                 "violated."
             )
         per_member_recordings = [
             Recording().get_recording({"recording_id": rid})
             for rid in member_recording_ids
         ]
-        # ``aggregate_channels`` column-stacks along the channel axis (column =
-        # channel). All members must share session + n_samples + fs + dtype +
-        # timestamps, which ``insert_group`` enforces -- but a direct insert of
-        # a SharedGroupSource part can bypass that, so re-assert the invariants
-        # over the loaded recordings here and raise ``SchemaBypassError`` rather
-        # than letting ``aggregate_channels`` build a silently-wrong union.
+        # aggregate_channels column-stacks along the channel axis. insert_group
+        # enforces session + n_samples + fs + dtype + timestamp equality, but a
+        # direct SharedGroupArtifactSelection insert can bypass that, so
+        # re-assert the invariants over the loaded recordings here.
         from spyglass.spikesorting.v2._shared_artifact_group import (
             assert_shared_group_recordings_aggregatable,
         )
@@ -1025,210 +1275,20 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             member_nwb_file_names,
         )
         unioned = si.aggregate_channels(per_member_recordings)
-        valid_times = self._detect_artifacts(
+        valid_times = self._run_artifact_scan(
             unioned,
             validated,
+            artifact_job_kwargs,
             context=(
                 f" for artifact_detection_id={key['artifact_detection_id']}, "
-                f"shared_artifact_group="
-                f"{source.key['shared_artifact_group_name']}"
+                f"shared_artifact_group={shared_artifact_group_name}"
             ),
-            job_kwargs=resolved_job_kwargs,
         )
-        # One IntervalList row per distinct member nwb_file_name;
-        # ``insert_group`` enforces single-session, so the distinct
-        # set has length 1 today, but keep the tuple shape so a
-        # future cross-session relaxation does not need a make-body
-        # change.
+        # One IntervalList row per distinct member nwb_file_name (single-session
+        # today, so length 1, but keep the tuple shape for a future relaxation).
         per_member_nwb_files = tuple(dict.fromkeys(member_nwb_file_names))
         return ArtifactComputed(
             valid_times=valid_times,
             nwb_file_name=nwb_file_name,
             per_member_nwb_files=per_member_nwb_files,
         )
-
-    def make_insert(
-        self,
-        key,
-        valid_times,
-        nwb_file_name,
-        per_member_nwb_files=(),
-    ):
-        """Write the artifact ``IntervalList`` + master row atomically.
-
-        DataJoint's tri-part dispatch opens the framework transaction
-        around this method; the inner ``transaction_or_noop`` is a
-        no-op (yields without re-opening when a transaction is
-        already active). Kept defensively so an out-of-populate
-        caller still gets atomic registration.
-
-        Writes ONE ``IntervalList`` row per distinct member
-        ``nwb_file_name`` so each session sees the artifact times.
-        For the single-recording path this is one row keyed by the
-        master's ``nwb_file_name``. The IntervalList row contents are
-        built by :func:`._artifact_intervals.build_artifact_interval_rows`;
-        the transaction + master ``self.insert1`` stay here because they
-        are the table's Computed-make contract.
-
-        Parameters
-        ----------
-        key : dict
-            Primary-key restriction for the row being inserted.
-        valid_times : np.ndarray
-            Artifact-removed valid times, shape ``(n_intervals, 2)``.
-        nwb_file_name : str
-            Parent session used as the fallback IntervalList target
-            when ``per_member_nwb_files`` is empty.
-        per_member_nwb_files : tuple, optional
-            Distinct member ``nwb_file_name`` s to write one
-            ``IntervalList`` row each. Default ``()`` falls back to
-            ``(nwb_file_name,)``.
-        """
-        from spyglass.spikesorting.v2.utils import transaction_or_noop
-
-        interval_rows = build_artifact_interval_rows(
-            key, valid_times, nwb_file_name, per_member_nwb_files
-        )
-        part_rows = build_artifact_interval_part_rows(key, interval_rows)
-        # no-op when framework transaction is active; kept defensively
-        # so an out-of-populate caller still gets atomic registration.
-        with transaction_or_noop(self.connection):
-            IntervalList.insert(interval_rows)
-            self.insert1(key)
-            self.ArtifactRemovedInterval.insert(part_rows)
-
-    @staticmethod
-    def _scan_artifact_frames(recording, validated, job_kwargs=None):
-        """Flag contiguous artifact-frame RUNS via a chunked ``ChunkRecordingExecutor``.
-
-        Thin delegator to
-        :func:`._artifact_intervals.scan_artifact_frames`; kept as an
-        ``ArtifactDetection`` staticmethod for the public/tested chunked
-        artifact-scan boundary. Returns an ascending ``(n_runs, 2)`` array of
-        ``(start, end_inclusive)`` flagged-frame RUN ranges -- NOT one index per
-        flagged frame -- so the result stays O(artifact events), not O(artifact
-        samples); ``detect_artifacts`` joins runs across chunk seams and splits
-        them at wall-clock gaps. The chunked-scan memory contract (default 1 s
-        chunk, ``ChunkRecordingExecutor`` over the ``_artifact_compute`` kernels)
-        lives in the service module.
-        """
-        return scan_artifact_frames(recording, validated, job_kwargs)
-
-    @staticmethod
-    def _detect_artifacts(recording, validated, context="", job_kwargs=None):
-        """Run amplitude / z-score artifact scan on a SI recording.
-
-        Thin delegator to
-        :func:`._artifact_intervals.detect_artifacts`; kept as an
-        ``ArtifactDetection`` staticmethod because ``make_compute`` calls
-        ``self._detect_artifacts(...)`` and the v2 tests call
-        ``ArtifactDetection._detect_artifacts(...)`` directly. The chunked
-        scan, gap-aware span join, removal-window clamp, per-chunk
-        subtraction, and min-length sliver filter live in the service
-        module.
-        """
-        return detect_artifacts(
-            recording, validated, context=context, job_kwargs=job_kwargs
-        )
-
-    def get_artifact_removed_intervals(
-        self, key: dict, as_dict: bool = False
-    ) -> "np.ndarray | dict[str, np.ndarray]":
-        """Return the artifact-removed ``valid_times`` for ``key``.
-
-        Single-recording source: one ``IntervalList`` row keyed by
-        the recording's parent ``nwb_file_name`` -- returned as a
-        plain ``(n_intervals, 2)`` ndarray (or, with ``as_dict=True``,
-        a one-key ``{nwb_file_name: ndarray}`` dict).
-
-        Shared-artifact-group source: ``make_insert`` writes one
-        ``IntervalList`` row per distinct member ``nwb_file_name``
-        (today single-session, so length 1). Returns a dict
-        keyed by ``nwb_file_name`` mapping to the per-member
-        ``valid_times`` array. All values are equal across keys
-        (the detection ran ONCE over the unioned channels and
-        ``make_insert`` wrote the same array per member), so a
-        caller that wants a single array can ``next(iter(d.values()))``.
-
-        Parameters
-        ----------
-        key : dict
-            Restriction selecting a single ``ArtifactDetection`` row;
-            must include ``artifact_detection_id``.
-        as_dict : bool, optional
-            If ``False`` (default), the return type depends on the
-            source: a plain ``(n_intervals, 2)`` ndarray for a
-            single-recording source, a ``{nwb_file_name: ndarray}`` dict
-            for a shared-artifact-group source. If ``True``, BOTH sources
-            return the dict shape (a single-recording result is wrapped
-            as a one-key dict), so source-agnostic callers can avoid
-            branching on the return type.
-
-        Returns
-        -------
-        np.ndarray or dict[str, np.ndarray]
-            For a single-recording source with ``as_dict=False``, the
-            ``(n_intervals, 2)`` artifact-removed ``valid_times`` array.
-            For a shared-artifact-group source, or any source with
-            ``as_dict=True``, a dict mapping each member ``nwb_file_name``
-            to its ``(n_intervals, 2)`` array.
-
-        Thin delegator to
-        :func:`._artifact_intervals.read_artifact_removed_intervals`; kept
-        as an ``ArtifactDetection`` method because the v2 tests call
-        ``ArtifactDetection().get_artifact_removed_intervals(...)`` on
-        instances. Source resolution, the per-session ``IntervalList``
-        reads, and the missing-member loudness live in the service module.
-        """
-        return read_artifact_removed_intervals(key, as_dict=as_dict)
-
-    def delete(self, *args, safemode=None, **kwargs):
-        """Override that also removes the matching IntervalList rows.
-
-        DataJoint does not cascade through ``interval_list_name``-keyed
-        dependencies, so the cleanup is explicit. We collect the artifact
-        ``IntervalList`` rows up front (via
-        :func:`._artifact_intervals.collect_artifact_interval_rows_to_remove`,
-        BEFORE the master delete, while the ownership part rows still
-        resolve), delete the master row(s) via ``super().delete``, then --
-        only if the cascade actually removed the masters -- drop the
-        matching IntervalList rows via
-        :func:`._artifact_intervals.remove_artifact_interval_rows`.
-
-        A leading positional restriction is accepted for the
-        easy-to-mistype ``ArtifactDetection().delete(restriction)`` form.
-        DataJoint's own ``delete`` does not take restrictions positionally,
-        and Spyglass's cautious-delete layer would otherwise treat that dict
-        as ``force_permission``.
-        """
-        restriction_args, args = split_leading_restrictions(args)
-        if restriction_args:
-            target = self
-            for restriction in restriction_args:
-                target = target & restriction
-            return target.delete(*args, safemode=safemode, **kwargs)
-
-        # Collect the IntervalList rows to clean up BEFORE we delete the
-        # master rows -- the ownership part rows no longer resolve after the
-        # master is gone. Keep the rows paired with their master PK, so cleanup
-        # follows the rows that actually disappeared rather than the post-delete
-        # length of ``self``.
-        delete_targets = [
-            (
-                {k: row[k] for k in self.primary_key},
-                collect_artifact_interval_rows_to_remove([row]),
-            )
-            for row in self.fetch(as_dict=True)
-        ]
-
-        if safemode is None:
-            super().delete(*args, **kwargs)
-        else:
-            super().delete(*args, safemode=safemode, **kwargs)
-
-        # Remove IntervalList rows only for masters that were actually deleted.
-        # A cancelled safemode prompt or a no-match restriction leaves the
-        # master row in place; preserving its IntervalList keeps the DB coherent.
-        for master_key, interval_rows_to_remove in delete_targets:
-            if not (ArtifactDetection & master_key):
-                remove_artifact_interval_rows(interval_rows_to_remove)

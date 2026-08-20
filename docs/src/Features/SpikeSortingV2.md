@@ -24,21 +24,33 @@ SortGroupV2
    v
 RecordingSelection --> Recording          (bandpass + common reference)
                           |
-                          v
-                       ArtifactDetectionSelection --> ArtifactDetection
-                                                  |
-                                                  v
-                                              SortingSelection --> Sorting
-                                                                       |
-                                                                       v
-                                                                   CurationV2 -+--> SpikeSortingOutput.CurationV2
-                                                                        |
-                                                                        v
-                                                        CurationEvaluationSelection --> CurationEvaluation
+                          |   ConcatenatedRecording  (same-day chronic concat)
+                          |            |
+   Recording -> RecordingArtifactSelection -> RecordingArtifactDetection --+
+   SharedArtifactGroup                                                     |
+        -> SharedGroupArtifactSelection -> SharedGroupArtifactDetection ---+--> ArtifactDetectionOutput (merge)
+                                                                                          |
+   SortingSelection (recording XOR concat source part + optional ArtifactDetectionOutput) --> Sorting
+                                                                                                          |
+                                                                                                          v
+                                                                             CurationV2 -+--> SpikeSortingOutput.CurationV2
+                                                                                  |
+                                                                                  v
+                                                                  CurationEvaluationSelection --> CurationEvaluation
 ```
 
+`SortingSelection` takes its recording source through one of two
+mutually-exclusive source part tables -- `RecordingSource` (a single-session
+`Recording`) or `ConcatenatedRecordingSource` (a same-day chronic
+`ConcatenatedRecording`) -- plus an optional artifact-detection pass through the
+internal `ArtifactDetectionOutput` merge (a single-recording
+`RecordingArtifactDetection` or a cross-recording `SharedGroupArtifactDetection`).
+The artifact merge is internal to the sorting stage -- user workflows never
+import it; recording access stays `SpikeSortingOutput.get_recording`.
+
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
-`spikesorting_v2_artifact`, `spikesorting_v2_sorting`,
+`spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
+`spikesorting_v2_sorting`,
 `spikesorting_v2_curation`, `spikesorting_v2_metric_curation`,
 `spikesorting_v2_figpack_curation`, `spikesorting_v2_session_group`,
 `spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`), so the v0/v1
@@ -72,14 +84,35 @@ coexist under one merge surface.
     flagged. It is **never applied** to the traces or the sort -- drift
     correction stays deferred to the sorter. See
     [Drift QC](#drift-qc-motion-estimate-never-applied) below.
-- **`ArtifactDetectionSelection` / `ArtifactDetection`** -- amplitude-threshold artifact
-    intervals. Uses the source-part pattern (`SharedGroupSource`) so
-    multiple recordings can share a single artifact-detection result.
+- **`RecordingArtifactSelection` / `RecordingArtifactDetection`** and
+    **`SharedGroupArtifactSelection` / `SharedGroupArtifactDetection`** --
+    amplitude-threshold artifact intervals, split by source: a single
+    `Recording` or a `SharedArtifactGroup` (so multiple recordings in a session
+    can share one artifact-detection result, e.g. chewing/licking artifacts
+    visible on every probe). The recording/group source is a required foreign
+    key on each selection master, so "exactly one source" is structural. Both
+    result tables write their artifact-removed valid times to
+    `common.IntervalList` (owned relationally through a `RemovedInterval` part)
+    and are unified by the internal **`ArtifactDetectionOutput`** merge, which
+    `SortingSelection` references for its optional artifact pass. Each result
+    table registers itself into the merge at materialization (producer-owned),
+    so a later `SortingSelection` only resolves the merge id.
+- **`ArtifactDetectionOutput`** -- an internal merge table over the two artifact
+    result tables (`RecordingArtifactDetection` / `SharedGroupArtifactDetection`).
+    `SortingSelection.ArtifactDetectionSource` carries one optional foreign key
+    to it. Deleting a registered result is refused while a `SortingSelection`
+    references it (use `cascade_delete` to remove the dependent sorts too). It
+    stays internal to the sorting stage -- user code never imports it.
 - **`SortingSelection` / `Sorting`** -- runs the configured sorter through
-    SpikeInterface. Dispatches `clusterless_thresholder` (peak detection
-    only) vs the SI sorter registry (`mountainsort4`, `mountainsort5`, ...).
-    The Unit part table stores per-unit summary stats (n_spikes,
-    peak_amplitude_uv) so quick filtering does not require loading the NWB.
+    SpikeInterface over the selection's recording source part (`RecordingSource`
+    for a single session or `ConcatenatedRecordingSource` for a same-day chronic
+    concatenation), plus an optional artifact pass through the
+    `ArtifactDetectionOutput` merge. Dispatches
+    `clusterless_thresholder` (peak
+    detection only) vs the SI sorter registry (`mountainsort4`,
+    `mountainsort5`, ...). The Unit part table stores per-unit summary stats
+    (n_spikes, peak_amplitude_uv) so quick filtering does not require loading
+    the NWB.
 - **`CurationV2`** -- versioned curation rows (labels + merge groups) chained
     by `parent_curation_id`. `insert_curation` is the single entry point;
     every row is automatically registered on `SpikeSortingOutput.CurationV2`
@@ -767,7 +800,7 @@ from spyglass.spikesorting.v2.recording import (
     Recording, RecordingSelection,
 )
 from spyglass.spikesorting.v2.artifact import (
-    ArtifactDetection, ArtifactDetectionSelection,
+    RecordingArtifactDetection, RecordingArtifactSelection,
 )
 from spyglass.spikesorting.v2.sorting import (
     Sorting, SortingSelection,
@@ -785,11 +818,15 @@ recording_key = RecordingSelection.insert_selection({
 })
 Recording.populate(recording_key)
 
-artifact_detection_key = ArtifactDetectionSelection.insert_selection({
+# Single-recording artifact detection. (For a cross-recording pass, declare a
+# SharedArtifactGroup and use SharedGroupArtifactSelection /
+# SharedGroupArtifactDetection instead -- or route either through the
+# insert_artifact_detection(key) dispatch.)
+artifact_detection_key = RecordingArtifactSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
     "artifact_detection_params_name": "default",
 })
-ArtifactDetection.populate(artifact_detection_key)
+RecordingArtifactDetection.populate(artifact_detection_key)
 
 sorting_key = SortingSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
@@ -1390,15 +1427,16 @@ concurrent use:
   `spikesorting.v2._nwb_iterators` (port of v1's
   `SpikeInterfaceRecordingDataChunkIterator` and
   `TimestampsDataChunkIterator`).
-- **Tri-part `make` + `_parallel_make = True`** on `Recording`,
-  `ArtifactDetection`, and `Sorting`. The compute step runs outside
+- **Tri-part `make` + `_parallel_make = True`** on `Recording`, the
+  artifact-detection result tables (`RecordingArtifactDetection` /
+  `SharedGroupArtifactDetection`), and `Sorting`. The compute step runs outside
   DataJoint's framework transaction, so a 20-minute sort no longer
   holds the row locks that would block other users from declaring or
   modifying tables on the same database. Set
   `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}`
   to thread N workers through every compute stage (the resolver is
-  wired into Recording, ArtifactDetection, and Sorting; v1's pattern
-  applied only on the sorter call).
+  wired into Recording, the artifact-detection tables, and Sorting; v1's
+  pattern applied only on the sorter call).
 
 v2 also matches v1 behavior on a long list of points; see the v0.5.6
 CHANGELOG for the full list. Key user-visible items:

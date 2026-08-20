@@ -253,9 +253,7 @@ def test_recording_missing_probe_info_detects_absence(dj_conn):
 def _recording_key(sorting_key):
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rid = (SortingSelection.RecordingSource & sorting_key).fetch1(
-        "recording_id"
-    )
+    rid = SortingSelection.resolve_source(sorting_key).key["recording_id"]
     return {"recording_id": rid}
 
 

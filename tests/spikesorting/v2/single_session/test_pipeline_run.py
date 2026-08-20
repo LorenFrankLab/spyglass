@@ -218,7 +218,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -277,22 +277,22 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     rec_logical = {k: v for k, v in rec_row.items() if k != "recording_id"}
 
     art_row = (
-        ArtifactDetectionSelection * ArtifactDetectionSelection.RecordingSource
+        RecordingArtifactSelection
         & {"artifact_detection_id": run_summary["artifact_detection_id"]}
     ).fetch1()
 
+    # sorter / sorter_params_name live on the SortingSelection master; the
+    # recording lives on the RecordingSource part and the artifact on the
+    # ArtifactDetectionOutput merge (resolved via resolve_artifact_detection).
     sort_row = (
-        SortingSelection
-        * SortingSelection.RecordingSource
-        * SortingSelection.ArtifactDetectionSource
+        SortingSelection * SortingSelection.RecordingSource
         & {"sorting_id": run_summary["sorting_id"]}
     ).fetch1()
 
     stage_counts = {
         "RecordingSelection": len(RecordingSelection & rec_logical),
-        "ArtifactDetectionSelection": len(
-            ArtifactDetectionSelection
-            * ArtifactDetectionSelection.RecordingSource
+        "RecordingArtifactSelection": len(
+            RecordingArtifactSelection
             & {
                 "recording_id": art_row["recording_id"],
                 "artifact_detection_params_name": art_row[
@@ -300,16 +300,22 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
                 ],
             }
         ),
-        "SortingSelection": len(
-            SortingSelection
-            * SortingSelection.RecordingSource
-            * SortingSelection.ArtifactDetectionSource
-            & {
-                "sorter": sort_row["sorter"],
-                "sorter_params_name": sort_row["sorter_params_name"],
-                "recording_id": sort_row["recording_id"],
-                "artifact_detection_id": sort_row["artifact_detection_id"],
-            }
+        # Count SortingSelection rows on this recording (via the XOR source
+        # part) with this sorter recipe, keeping only those whose resolved
+        # artifact matches -- so a re-run that minted a second logical row
+        # under a different sorting_id would push this above 1.
+        "SortingSelection": sum(
+            1
+            for k in (
+                SortingSelection * SortingSelection.RecordingSource
+                & {
+                    "sorter": sort_row["sorter"],
+                    "sorter_params_name": sort_row["sorter_params_name"],
+                    "recording_id": sort_row["recording_id"],
+                }
+            ).fetch("KEY", as_dict=True)
+            if str(SortingSelection.resolve_artifact_detection(k))
+            == str(run_summary["artifact_detection_id"])
         ),
         # A re-run must NOT mint a second ROOT curation for the sorting.
         "CurationV2_root": len(

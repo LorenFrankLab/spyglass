@@ -107,8 +107,8 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
     root CurationV2 on one sort group; return (sort_pk, merge_id, rec_pk)."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
@@ -129,14 +129,14 @@ def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {

@@ -1,13 +1,14 @@
 """Pure builders for the v2 selection insert plans.
 
-``RecordingSelection`` / ``SortingSelection`` /
-``ArtifactDetectionSelection`` ``insert_selection`` are split into a pure
-half (here) and a DB half (the orchestrator). The builders validate the
-selection request, normalize ids, compute the deterministic content-
+``RecordingSelection`` / ``SortingSelection`` ``insert_selection`` are split
+into a pure half (here) and a DB half (the orchestrator). The builders validate
+the selection request, normalize ids, compute the deterministic content-
 addressed primary key, and assemble the master + source part rows to
 insert. The orchestrator then runs find-existing, the FK pre-checks, and
 the atomic insert transaction (with duplicate-PK race recovery) on the
-returned plan.
+returned plan. (The split artifact selections derive their content-addressed
+id inline in ``_insert_artifact_selection``, so they need no plan builder
+here.)
 
 Isolating the pure half makes the input-validation + identity + row-shaping
 logic unit-testable without a DataJoint transaction -- so the
@@ -28,7 +29,6 @@ import uuid
 from typing import Literal, NamedTuple
 
 from spyglass.spikesorting.v2._selection_identity import (
-    artifact_detection_identity_payload,
     assert_supplied_id_matches,
     deterministic_id,
     recording_identity_payload,
@@ -60,12 +60,12 @@ class SortingSelectionPlan(NamedTuple):
     re-deriving the source shape. ``source_restriction`` carries
     ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}`` accordingly.
 
-    ``artifact_source_row`` is ``None`` when no artifact-detection pass was
-    requested (``artifact_detection_id`` absent) -- always the case for a
-    concat source, which has no artifact pass; otherwise it is the
-    ``ArtifactDetectionSource`` part row. ``artifact_detection_id`` is the
-    normalized (``uuid.UUID``) value, threaded for find-existing and the
-    artifact source part.
+    ``artifact_detection_id`` is the normalized (``uuid.UUID``) value threaded
+    for find-existing; it is ``None`` when no artifact-detection pass was
+    requested -- always the case for a concat source, which has no artifact
+    pass. The ``ArtifactDetectionSource`` part row itself is built by
+    ``insert_selection`` (it carries the merge id resolved DB-side after the
+    detection is registered into ``ArtifactDetectionOutput``), not here.
 
     Note: ``source_kind`` here is ``"concat"`` (the plan/identity vocabulary),
     which deliberately differs from ``utils.SourceResolution.kind``'s
@@ -80,24 +80,7 @@ class SortingSelectionPlan(NamedTuple):
     master_row: dict
     recording_source_row: dict | None
     concat_source_row: dict | None
-    artifact_source_row: dict | None
     artifact_detection_id: uuid.UUID | None
-
-
-class ArtifactDetectionSelectionPlan(NamedTuple):
-    """The rows + restrictions an ``ArtifactDetectionSelection`` insert needs.
-
-    ``source_kind`` is ``"recording"`` or ``"shared_artifact_group"``; the
-    orchestrator maps it to the matching source part table (the table class
-    is a DB object and so stays out of this pure plan).
-    """
-
-    artifact_detection_id: uuid.UUID
-    source_kind: Literal["recording", "shared_artifact_group"]
-    master_restriction: dict
-    source_restriction: dict
-    master_row: dict
-    source_row: dict
 
 
 def build_recording_selection_plan(
@@ -234,7 +217,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             master_row=master_row,
             recording_source_row=None,
             concat_source_row=concat_source_row,
-            artifact_source_row=None,
             artifact_detection_id=None,
         )
 
@@ -258,14 +240,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
 
     master_row = {**master_restriction, "sorting_id": sorting_id}
     recording_source_row = {"sorting_id": sorting_id, **source_restriction}
-    artifact_source_row = (
-        {
-            "sorting_id": sorting_id,
-            "artifact_detection_id": artifact_detection_id,
-        }
-        if artifact_detection_id is not None
-        else None
-    )
     return SortingSelectionPlan(
         sorting_id=sorting_id,
         source_kind="recording",
@@ -274,88 +248,5 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         master_row=master_row,
         recording_source_row=recording_source_row,
         concat_source_row=None,
-        artifact_source_row=artifact_source_row,
         artifact_detection_id=artifact_detection_id,
-    )
-
-
-def build_artifact_detection_selection_plan(
-    key: dict,
-) -> ArtifactDetectionSelectionPlan:
-    """Validate an ``ArtifactDetectionSelection`` request and build its plan.
-
-    Reads exactly one source key (``recording_id`` xor
-    ``shared_artifact_group_name``); ``artifact_detection_params_name`` is
-    required. ``source_kind`` is explicit so a recording source and a
-    shared-group source never alias even if their source-identifier strings
-    collide.
-
-    Raises
-    ------
-    ValueError
-        If zero or both source keys are supplied, if
-        ``artifact_detection_params_name`` is missing, or if an explicit
-        ``artifact_detection_id`` does not equal the derived deterministic
-        id.
-    """
-    has_recording = "recording_id" in key
-    has_shared = "shared_artifact_group_name" in key
-    if has_recording == has_shared:
-        raise ValueError(
-            "ArtifactDetectionSelection.insert_selection requires exactly one "
-            "source key. Provide either recording_id (single-recording "
-            "path) or shared_artifact_group_name (cross-recording "
-            "path), not both and not neither. Got: "
-            f"recording_id={'set' if has_recording else 'unset'}, "
-            f"shared_artifact_group_name="
-            f"{'set' if has_shared else 'unset'}."
-        )
-
-    master_field = "artifact_detection_params_name"
-    if master_field not in key:
-        raise ValueError(
-            "ArtifactDetectionSelection.insert_selection requires "
-            f"{master_field!r} in key."
-        )
-    master_restriction = {master_field: key[master_field]}
-
-    if has_recording:
-        source_kind = "recording"
-        source_restriction = {"recording_id": key["recording_id"]}
-    else:
-        source_kind = "shared_artifact_group"
-        source_restriction = {
-            "shared_artifact_group_name": key["shared_artifact_group_name"]
-        }
-
-    # Deterministic, content-addressed artifact_detection_id from the logical
-    # identity (params + source), via the shared payload helper so preflight
-    # derives the identical id.
-    identity = artifact_detection_identity_payload(
-        artifact_detection_params_name=key[master_field],
-        recording_id=key.get("recording_id"),
-        shared_artifact_group_name=key.get("shared_artifact_group_name"),
-    )
-    artifact_detection_id = deterministic_id("artifact_detection", identity)
-    assert_supplied_id_matches(
-        key.get("artifact_detection_id"),
-        artifact_detection_id,
-        field="artifact_detection_id",
-    )
-
-    master_row = {
-        **master_restriction,
-        "artifact_detection_id": artifact_detection_id,
-    }
-    source_row = {
-        "artifact_detection_id": artifact_detection_id,
-        **source_restriction,
-    }
-    return ArtifactDetectionSelectionPlan(
-        artifact_detection_id=artifact_detection_id,
-        source_kind=source_kind,
-        master_restriction=master_restriction,
-        source_restriction=source_restriction,
-        master_row=master_row,
-        source_row=source_row,
     )

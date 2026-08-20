@@ -742,7 +742,7 @@ def test_preflight_is_read_only(preflight_inputs):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -756,7 +756,7 @@ def test_preflight_is_read_only(preflight_inputs):
 
     tables = [
         RecordingSelection,
-        ArtifactDetectionSelection,
+        RecordingArtifactSelection,
         SortingSelection,
         PreprocessingParameters,
         ArtifactDetectionParameters,

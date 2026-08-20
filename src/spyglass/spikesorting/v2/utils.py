@@ -99,9 +99,13 @@ def transaction_or_noop(connection):
     safe in practice because (a) the selection helpers are only invoked at
     top level (``run_v2_pipeline``), and (b) the deterministic PK makes the
     duplicate collide on the FIRST statement (the master insert), so no
-    part row is ever written and there is nothing to roll back. Do not call
-    ``insert_selection`` from inside an outer transaction without revisiting
-    this.
+    part row is ever written and there is nothing to roll back. (The artifact
+    merge registration is NOT done here: a detection registers itself into
+    ``ArtifactDetectionOutput`` at materialization, and any lazy fallback in
+    ``insert_selection`` runs OUTSIDE this transaction, so no merge insert ever
+    executes inside the selection block -- the "collide on the master first"
+    invariant holds.) Do not call ``insert_selection`` from inside an outer
+    transaction without revisiting this.
     """
     if connection.in_transaction:
         yield
@@ -113,11 +117,11 @@ def transaction_or_noop(connection):
 def _is_duplicate_key_error(exc: BaseException) -> bool:
     """Return whether ``exc`` is a duplicate-PRIMARY-KEY violation.
 
-    The deterministic-id selection helpers
-    (``RecordingSelection``/``ArtifactDetectionSelection``/``SortingSelection``
-    ``insert_selection``) derive each master PK from the selection's
-    logical identity, then insert. Two callers racing on the same logical
-    selection compute the SAME PK, so the loser's insert violates the PK
+    The deterministic-id selection helpers (``RecordingSelection`` /
+    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
+    ``SortingSelection`` ``insert_selection``) derive each master PK from the
+    selection's logical identity, then insert. Two callers racing on the same
+    logical selection compute the SAME PK, so the loser's insert violates the PK
     uniqueness constraint; the helper catches that, refetches the winner's
     row, and returns it. This predicate decides whether a caught exception
     is that benign race (refetch + return) or a different integrity
@@ -146,6 +150,31 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     return False
 
 
+def _is_fk_violation(exc: BaseException) -> bool:
+    """Return whether ``exc`` is a foreign-key (no-referenced-row) violation.
+
+    ``SortingSelection.insert_selection`` resolves the artifact merge id BEFORE
+    its transaction, so the transaction inserts only the master + a recording
+    source part (``-> Recording`` / ``-> ConcatenatedRecording``) + an optional
+    ``ArtifactDetectionSource`` part (``-> ArtifactDetectionOutput``). The
+    reachable no-referenced-row violation is therefore a raw insert or a
+    concurrent delete of one of those referenced rows (in practice the recording
+    source-part FK for an unpopulated recording -- the common case is pre-checked
+    and raises a clearer ``ValueError`` first). This predicate lets the helper
+    translate the residual case into an actionable natural-key message.
+
+    This is a DISTINCT predicate from :func:`_is_duplicate_key_error`, NOT an
+    errno test. DataJoint's ``translate_query_error`` STRIPS the errno
+    (``datajoint/connection.py``), so ``exc.args[0] == 1452`` never matches a
+    translated error -- the pattern ``_is_duplicate_key_error`` uses for 1062
+    does not transfer. On an INSERT the only ``dj.errors.IntegrityError`` is the
+    no-referenced-row (errno 1452) case -- a duplicate PK is a sibling
+    ``DuplicateError``, and 1451 is delete-time -- so the type check is the
+    correct predicate here.
+    """
+    return isinstance(exc, dj.errors.IntegrityError)
+
+
 def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     """Peel leading restriction positionals off a ``delete`` arg tuple.
 
@@ -153,8 +182,10 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     cautious-delete layer reads the first positional as the truthy
     ``force_permission`` and would then cascade-delete EVERY row of the
     unrestricted instance. The v2 table ``delete`` overrides
-    (``Sorting`` / ``ArtifactDetection``, each guarding a 5-50 GB
-    per-row on-disk artifact) defend against the easy-to-mistype
+    (``Sorting``, guarding a 5-50 GB per-row analyzer folder; the split
+    ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, guarding
+    owned ``IntervalList`` rows + the merge registration) defend against the
+    easy-to-mistype
     ``Table().delete(restriction)`` form by peeling every leading
     ``dict`` / ``list`` / ``str`` positional into a restriction list and
     re-dispatching ``(self & r1 & r2 & ...).delete(*rest)``.
@@ -185,17 +216,18 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
 class SelectionMasterInsertGuard:
     """Reject a direct ``insert`` into a deterministic-id selection master.
 
-    The three v2 selection masters
-    (``RecordingSelection`` / ``ArtifactDetectionSelection`` / ``SortingSelection``)
-    derive their primary key from the selection's FULL logical identity, and
-    ``insert_selection`` is the only entry point that holds that full
-    payload: it computes the deterministic PK, pre-checks the lookup-row
-    FKs, and -- for the part-bearing masters (``ArtifactDetectionSelection`` /
-    ``SortingSelection``) -- inserts the master + source parts atomically.
-    Those two masters genuinely CANNOT be verified from a master row alone
-    (their source identity lives in a part table, not the master's own
-    columns); ``RecordingSelection`` is not part-bearing, but routing it
-    through the same boundary keeps one consistent create path.
+    The v2 deterministic-id selection masters (``RecordingSelection`` /
+    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
+    ``SortingSelection``) derive their primary key from the selection's FULL
+    logical identity, and ``insert_selection`` is the only entry point that
+    holds that full payload: it computes the deterministic PK, pre-checks the
+    lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
+    part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
+    CANNOT be verified from the master row alone (it lives in a part table). The
+    two split artifact selections carry their source as a REQUIRED FK on the
+    master (structural exactly-one-source), and ``RecordingSelection`` has no
+    source part either; routing all of them through the same boundary keeps one
+    consistent create path.
 
     This guard is a guard-RAIL, not the integrity boundary: it rejects the
     easy mistake (calling ``insert`` / ``insert1`` instead of
@@ -469,20 +501,18 @@ class ImmutableParamsLookup:
 def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     """Return master PKs whose source-part counts sum to zero.
 
-    Shared implementation of ``ArtifactDetectionSelection.prune_orphaned_selections``
-    and ``SortingSelection.prune_orphaned_selections``. ``part_tables``
-    is the list of source-part tables to count against the master --
-    e.g. ``[RecordingSource, SharedGroupSource]`` for artifact
-    selection, ``[RecordingSource, ConcatenatedRecordingSource]`` for
-    sorting selection.
+    Backs ``SortingSelection.prune_orphaned_selections`` (its only caller):
+    ``part_tables`` is that master's XOR source-part set
+    ``[RecordingSource, ConcatenatedRecordingSource]``. (The split artifact
+    selections carry their source as a REQUIRED FK on the master, so they cannot
+    be orphaned and have no ``prune_orphaned_selections``.)
 
-    Source-part atomicity is enforced at insert time by the
-    transactional ``insert_selection`` helpers, but DataJoint cannot
-    enforce "exactly one source per master" across two part tables;
-    an upstream cascade-delete from ``Recording`` or
-    ``SharedArtifactGroup`` / ``ConcatenatedRecording`` can leave the
-    master row without any source children. This helper finds those
-    orphans so a maintenance script can review or remove them.
+    Source-part atomicity is enforced at insert time by the transactional
+    ``insert_selection`` helper, but DataJoint cannot enforce "exactly one
+    source per master" across two part tables; an upstream cascade-delete from
+    ``Recording`` / ``ConcatenatedRecording`` can leave the master row without
+    any source children. This helper finds those orphans so a maintenance
+    script can review or remove them.
 
     Parameters
     ----------
@@ -513,14 +543,14 @@ def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
     (ambiguous) here for a maintenance script to review.
 
     ``part_tables`` must be the recording-source parts ONLY -- the
-    exactly-one-of XOR set. For ``SortingSelection`` that is
+    exactly-one-of XOR set. For ``SortingSelection`` (its only user) that is
     ``[RecordingSource, ConcatenatedRecordingSource]``; ``ArtifactDetectionSource``
     is deliberately EXCLUDED because it is an independent zero-or-one part (a
     valid artifact-backed sorting carries one, so including it would falsely
-    flag every artifact-bearing sorting as ``count == 2``). For
-    ``ArtifactDetectionSelection`` the XOR set is
-    ``[RecordingSource, SharedGroupSource]``. These are the same part lists
-    ``find_orphaned_masters`` / ``prune_orphaned_selections`` already pass.
+    flag every artifact-bearing sorting as ``count == 2``). This is the same
+    part list ``find_orphaned_masters`` / ``prune_orphaned_selections`` pass.
+    (The ``ArtifactDetectionOutput`` merge has its OWN, separate
+    ``audit_source_part_integrity`` classmethod for its two source parts.)
 
     Parameters
     ----------

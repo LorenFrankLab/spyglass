@@ -1,9 +1,9 @@
 """Unit tests for the pure selection-plan builders.
 
-``SortingSelection`` / ``ArtifactDetectionSelection`` ``insert_selection``
-delegate their pure half to ``_selection_plan``: validate the request,
-normalize ids, derive the deterministic content-addressed PK, and shape the
-master + source part rows. These tests drive those builders directly -- no
+``SortingSelection.insert_selection`` delegates its pure half to
+``_selection_plan``: validate the request, normalize ids, derive the
+deterministic content-addressed PK, and shape the master + source part rows.
+These tests drive those builders directly -- no
 DataJoint, no transaction -- so the user-misconfiguration paths (bad source
 combinations, missing required keys, supplied-id mismatch, str-vs-UUID
 normalization) are pinned cheaply.
@@ -21,7 +21,6 @@ import uuid
 import pytest
 
 from spyglass.spikesorting.v2._selection_plan import (
-    build_artifact_detection_selection_plan,
     build_recording_selection_plan,
     build_sorting_selection_plan,
 )
@@ -161,21 +160,18 @@ def test_sorting_plan_recording_only_shapes_rows():
         "recording_id": _REC,
     }
     assert plan.concat_source_row is None
-    assert plan.artifact_source_row is None
     assert plan.artifact_detection_id is None
 
 
 def test_sorting_plan_with_artifact_normalizes_str_to_uuid():
     """A str ``artifact_detection_id`` is normalized to UUID and threaded into
-    the artifact source row; the artifact-backed id differs from the
-    artifact-free id for the same (recording, sorter)."""
+    the plan; the artifact-backed id differs from the artifact-free id for the
+    same (recording, sorter). (The ``ArtifactDetectionSource`` part row itself
+    is built DB-side in ``insert_selection`` from the resolved merge id, not in
+    the pure plan.)"""
     base = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}
     plan = build_sorting_selection_plan({**base, "artifact_detection_id": _ART})
     assert plan.artifact_detection_id == uuid.UUID(_ART)
-    assert plan.artifact_source_row == {
-        "sorting_id": plan.sorting_id,
-        "artifact_detection_id": uuid.UUID(_ART),
-    }
     # The "no artifact pass" form is a distinct, non-aliasing identity.
     no_art = build_sorting_selection_plan(base)
     assert no_art.sorting_id != plan.sorting_id
@@ -247,7 +243,6 @@ def test_sorting_plan_concat_only_shapes_rows():
         "concat_recording_id": _CONCAT,
     }
     assert plan.recording_source_row is None
-    assert plan.artifact_source_row is None
     assert plan.artifact_detection_id is None
 
 
@@ -334,93 +329,3 @@ def test_sorting_plan_supplied_id_mismatch_raises_but_match_ok():
     # A wrong id is rejected.
     with pytest.raises(ValueError, match="sorting_id"):
         build_sorting_selection_plan({**key, "sorting_id": _ART})
-
-
-# ---------- build_artifact_detection_selection_plan ------------------------
-
-
-def test_artifact_plan_recording_source_shapes_rows():
-    """A recording-source request yields source_kind='recording' + rows."""
-    plan = build_artifact_detection_selection_plan(
-        {"recording_id": _REC, "artifact_detection_params_name": "default"}
-    )
-    assert plan.source_kind == "recording"
-    assert isinstance(plan.artifact_detection_id, uuid.UUID)
-    assert plan.master_restriction == {
-        "artifact_detection_params_name": "default"
-    }
-    assert plan.source_restriction == {"recording_id": _REC}
-    assert plan.master_row == {
-        "artifact_detection_params_name": "default",
-        "artifact_detection_id": plan.artifact_detection_id,
-    }
-    assert plan.source_row == {
-        "artifact_detection_id": plan.artifact_detection_id,
-        "recording_id": _REC,
-    }
-
-
-def test_artifact_plan_shared_group_source_shapes_rows():
-    """A shared-group request yields source_kind='shared_artifact_group'."""
-    plan = build_artifact_detection_selection_plan(
-        {
-            "shared_artifact_group_name": "grp1",
-            "artifact_detection_params_name": "default",
-        }
-    )
-    assert plan.source_kind == "shared_artifact_group"
-    assert plan.source_restriction == {"shared_artifact_group_name": "grp1"}
-    assert plan.source_row == {
-        "artifact_detection_id": plan.artifact_detection_id,
-        "shared_artifact_group_name": "grp1",
-    }
-
-
-def test_artifact_plan_recording_and_shared_group_dont_alias():
-    """The two source kinds never collide even on identical id strings."""
-    rec = build_artifact_detection_selection_plan(
-        {"recording_id": "x", "artifact_detection_params_name": "p"}
-    )
-    grp = build_artifact_detection_selection_plan(
-        {
-            "shared_artifact_group_name": "x",
-            "artifact_detection_params_name": "p",
-        }
-    )
-    assert rec.artifact_detection_id != grp.artifact_detection_id
-
-
-def test_artifact_plan_requires_exactly_one_source():
-    """Zero or both source keys raise ValueError."""
-    with pytest.raises(ValueError, match="exactly one"):
-        build_artifact_detection_selection_plan(
-            {"artifact_detection_params_name": "default"}
-        )
-    with pytest.raises(ValueError, match="exactly one"):
-        build_artifact_detection_selection_plan(
-            {
-                "recording_id": _REC,
-                "shared_artifact_group_name": "g",
-                "artifact_detection_params_name": "default",
-            }
-        )
-
-
-def test_artifact_plan_requires_params_name():
-    """Missing ``artifact_detection_params_name`` raises ValueError."""
-    with pytest.raises(ValueError, match="artifact_detection_params_name"):
-        build_artifact_detection_selection_plan({"recording_id": _REC})
-
-
-def test_artifact_plan_supplied_id_mismatch_raises_but_match_ok():
-    """A supplied artifact_detection_id must equal the derived id."""
-    key = {"recording_id": _REC, "artifact_detection_params_name": "default"}
-    derived = build_artifact_detection_selection_plan(key).artifact_detection_id
-    again = build_artifact_detection_selection_plan(
-        {**key, "artifact_detection_id": str(derived)}
-    )
-    assert again.artifact_detection_id == derived
-    with pytest.raises(ValueError, match="artifact_detection_id"):
-        build_artifact_detection_selection_plan(
-            {**key, "artifact_detection_id": _ART}
-        )

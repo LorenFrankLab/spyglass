@@ -34,8 +34,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -76,13 +76,13 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         }
     )
     Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
@@ -316,8 +316,8 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -388,13 +388,13 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
             }
         )
         Recording.populate(rec_pk, reserve_jobs=False)
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = RecordingArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
                 "artifact_detection_params_name": "none",
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
         sort_pk = SortingSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
@@ -749,8 +749,8 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -837,13 +837,13 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
         }
     )
     Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
@@ -920,8 +920,8 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -998,13 +998,13 @@ def test_v2_sorting_nwb_excludes_parent_units(dj_conn, tmp_path, monkeypatch):
         }
     )
     Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],

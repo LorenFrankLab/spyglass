@@ -523,7 +523,7 @@ def test_get_restricted_merge_ids_default_sources_includes_v2():
 
 
 def test_make_compute_is_pure():
-    """make_compute on Recording / ArtifactDetection / Sorting writes no DB rows.
+    """make_compute on Recording / RecordingArtifactDetection / Sorting writes no DB rows.
 
     Static AST guard. The forbidden surface is:
 
@@ -556,7 +556,7 @@ def test_make_compute_is_pure():
 
     for mod, cls_name in [
         (recording, "Recording"),
-        (artifact, "ArtifactDetection"),
+        (artifact, "RecordingArtifactDetection"),
         (sorting, "Sorting"),
     ]:
         cls = getattr(mod, cls_name)

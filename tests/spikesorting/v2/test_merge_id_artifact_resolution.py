@@ -132,6 +132,113 @@ def test_merge_ids_artifact_restriction_is_exclusive(two_sorts_one_recording):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_merge_ids_distinguish_two_artifact_backed_sorts(
+    two_sorts_one_recording,
+):
+    """Two artifact-backed sorts on one recording with DIFFERENT artifact ids:
+    restricting by one ``artifact_detection_id`` returns ONLY that sort.
+
+    Regression for the ``CurationV2.resolve_restriction`` bug where the
+    ``ArtifactDetectionSource`` part was restricted by ``artifact_detection_id``
+    -- a key dropped after the merge-FK rename to ``artifact_detection_merge_id``
+    -- collapsing the filter to "any artifact-backed sort". The base
+    ``two_sorts_one_recording`` fixture (one artifact + one no-artifact sort)
+    masks the bug because "all artifact-backed" then coincides with "the one
+    artifact"; this test adds a SECOND, differently-detected artifact sort so a
+    dropped-key restriction returns two merge ids where one is required.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.utils import get_spike_sorting_v2_merge_ids
+
+    ctx = two_sorts_one_recording
+    recording_id = ctx["recording_id"]
+    id_none = ctx["artifact_detection_id"]  # the fixture's "none" artifact
+    sorter, sorter_params_name = (
+        SortingSelection & {"sorting_id": ctx["sorting_id_artifact"]}
+    ).fetch1("sorter", "sorter_params_name")
+
+    # A SECOND artifact detection on the same recording, different params ->
+    # a distinct artifact_detection_id -> a second artifact-backed sort.
+    ArtifactDetectionParameters.insert_default()
+    art2 = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "artifact_detection_params_name": "default",
+        }
+    )
+    id_default = art2["artifact_detection_id"]
+    assert str(id_default) != str(id_none)
+    if not (RecordingArtifactDetection & art2):
+        RecordingArtifactDetection.populate(art2, reserve_jobs=False)
+    sort2 = SortingSelection.insert_selection(
+        {
+            "recording_id": recording_id,
+            "sorter": sorter,
+            "sorter_params_name": sorter_params_name,
+            "artifact_detection_id": id_default,
+        }
+    )
+    try:
+        if not (Sorting & sort2):
+            Sorting.populate(sort2, reserve_jobs=False)
+        _clear_curations_for(sort2)
+        cur2 = CurationV2.insert_curation(sorting_key=sort2)
+        merge_id_default = (SpikeSortingOutput.CurationV2 & cur2).fetch1(
+            "merge_id"
+        )
+
+        # Restricting by the "none" artifact must return ONLY its sort -- the
+        # dropped-key bug would also return the "default" sort.
+        by_none = set(
+            get_spike_sorting_v2_merge_ids(
+                {
+                    "recording_id": recording_id,
+                    "artifact_detection_id": id_none,
+                }
+            )
+        )
+        assert ctx["merge_id_artifact"] in by_none
+        assert merge_id_default not in by_none, (
+            "resolve_restriction matched a DIFFERENT artifact's sort -- the "
+            "ArtifactDetectionSource restriction is keyed on the wrong column"
+        )
+        # ...and restricting by "default" returns ONLY the default sort.
+        by_default = set(
+            get_spike_sorting_v2_merge_ids(
+                {
+                    "recording_id": recording_id,
+                    "artifact_detection_id": id_default,
+                }
+            )
+        )
+        assert by_default == {merge_id_default}
+    finally:
+        _clear_curations_for(sort2)
+        (Sorting & sort2).super_delete(warn=False)
+        (SortingSelection & sort2).super_delete(warn=False)
+        try:
+            _mid = ArtifactDetectionOutput.get_merge_id(art2)
+            (ArtifactDetectionOutput & {"merge_id": _mid}).super_delete(
+                warn=False, force_masters=True
+            )
+        except KeyError:
+            pass
+        (RecordingArtifactDetection & art2).super_delete(warn=False)
+        (RecordingArtifactSelection & art2).super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_merge_ids_restrict_by_artifact_interval_name(
     two_sorts_one_recording,
 ):

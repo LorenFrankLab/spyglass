@@ -182,11 +182,12 @@ def test_build_artifact_interval_part_rows_owns_interval_rows():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_value_error():
-    """Missing ``artifact_detection_id`` raises a clear ValueError before source-resolve.
+    """Missing ``artifact_detection_id`` raises a clear ValueError before routing.
 
-    The guard runs BEFORE ``ArtifactDetectionSelection.resolve_source(key)``, so a key
-    with no ``artifact_detection_id`` surfaces this targeted message rather than a
-    source-resolution / ``SchemaBypassError`` from walking the source parts.
+    The guard runs BEFORE the key is routed by ``artifact_detection_id`` to
+    ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, so a key
+    with no ``artifact_detection_id`` surfaces this targeted message rather than
+    a missing-id routing failure.
     """
     from spyglass.spikesorting.v2._artifact_intervals import (
         read_artifact_removed_intervals,

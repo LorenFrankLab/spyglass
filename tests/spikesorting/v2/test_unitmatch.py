@@ -983,9 +983,9 @@ def _plant_two_unit_sort_on_first_member(grp):
         SortingSelection,
     )
 
-    rec_id = (SortingSelection.RecordingSource & grp["sort_pks"][0]).fetch1(
+    rec_id = SortingSelection.resolve_source(grp["sort_pks"][0]).key[
         "recording_id"
-    )
+    ]
     two_unit_params = "minirec_ms5_two_unit"
     default_ms5 = (
         SorterParameters

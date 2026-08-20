@@ -40,8 +40,8 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -57,14 +57,14 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
     # Ensure a no-op artifact detection is in place so the sort uses
     # the full recording.
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -273,32 +273,15 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
     """
     import uuid
 
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         SortingSelection,
     )
 
-    ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
-    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
-    AnalyzerWaveformParameters.insert_default()
-
-    # Inject orphans directly via dj.Manual.insert1 (bypassing
-    # insert_selection -- this is what an upstream cascade-delete leaves
-    # behind in production).
-    orphan_artifact = uuid.uuid4()
-    ArtifactDetectionSelection().insert1(
-        {
-            "artifact_detection_id": orphan_artifact,
-            "artifact_detection_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
+    # Inject an orphan directly via insert1 (bypassing insert_selection --
+    # this is what an upstream cascade-delete leaves behind in production).
     orphan_sorting = uuid.uuid4()
     # The SortingSelection master has no artifact_detection_id FK (artifact state
     # lives on the ArtifactDetectionSource part); a master row with no source part
@@ -310,17 +293,6 @@ def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
             "sorter_params_name": "franklab_30khz_ms5_2026_06",
         },
         allow_direct_insert=True,
-    )
-
-    dry = ArtifactDetectionSelection.prune_orphaned_selections(dry_run=True)
-    assert {"artifact_detection_id": orphan_artifact} in dry
-    # Non-dry-run removes the orphan and returns it for review.
-    deleted = ArtifactDetectionSelection.prune_orphaned_selections(
-        dry_run=False
-    )
-    assert {"artifact_detection_id": orphan_artifact} in deleted
-    assert not (
-        ArtifactDetectionSelection & {"artifact_detection_id": orphan_artifact}
     )
 
     dry = SortingSelection.prune_orphaned_selections(dry_run=True)
@@ -344,9 +316,9 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -409,13 +381,13 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -499,8 +471,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -538,13 +510,13 @@ def test_sorting_make_rollback_cleans_units_nwb(
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -1180,9 +1152,9 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     exactly one recording source.
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -1194,14 +1166,14 @@ def test_sorting_selection_artifact_detection_source_part_shape(
 
     AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sorter_kwargs = {
         "recording_id": populated_recording["recording_id"],

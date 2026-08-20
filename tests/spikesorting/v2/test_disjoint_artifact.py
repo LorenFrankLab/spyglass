@@ -180,7 +180,7 @@ def test_detect_artifacts_valid_times_never_cross_gap():
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
     # Plant a supra-threshold transient at frame 50 (chunk 1).
@@ -197,7 +197,7 @@ def test_detect_artifacts_valid_times_never_cross_gap():
         join_window_ms=1.0,
         min_length_s=0.001,
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, validated)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, validated)
 
     assert len(valid_times) >= 1
     for start, end in valid_times:
@@ -266,7 +266,7 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
     # Transient on the 3rd-to-last frame of chunk 1; the 1 ms removal
@@ -285,7 +285,7 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
         join_window_ms=0.0,
         min_length_s=0.001,
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, validated)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, validated)
 
     starts = [s for s, _ in valid_times]
     assert any(abs(s - chunk2_start) <= 1.0 / fs for s in starts), (
@@ -309,7 +309,7 @@ def test_detect_artifacts_join_does_not_bridge_gap():
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
     # Artifact 20 frames before chunk 1's end, and one at chunk 2's first
@@ -328,7 +328,7 @@ def test_detect_artifacts_join_does_not_bridge_gap():
         join_window_ms=1.0,  # 30 frames -> would bridge the 20-frame gap
         min_length_s=1e-5,
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, validated)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, validated)
 
     # The chunk-1 tail just before the gap (beyond artifact's own 15-frame
     # window) must remain valid -- it must not be removed by a span that

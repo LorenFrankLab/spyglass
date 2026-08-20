@@ -185,9 +185,9 @@ def populated_sorting(populated_recording):
     short-circuits.
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -199,14 +199,14 @@ def populated_sorting(populated_recording):
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],

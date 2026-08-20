@@ -24,9 +24,9 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
 
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -78,13 +78,13 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
             }
         )
         Recording.populate(rec_pk, reserve_jobs=False)
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = RecordingArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
                 "artifact_detection_params_name": "none",
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
         sort_pk = SortingSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
@@ -298,9 +298,9 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -349,13 +349,13 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
             }
         )
         Recording.populate(rec_pk, reserve_jobs=False)
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = RecordingArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
                 "artifact_detection_params_name": "none",
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
         sort_pk = SortingSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
@@ -719,9 +719,9 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -830,13 +830,13 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     # same ``"default"`` artifact-params name with the same
     # semantics.
     artifact_name_meta = meta.get("artifact_param_name", "default")
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": artifact_name_meta,
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # --- v1↔v2 invariant fingerprint check ---
     # Reconstruct the same fingerprints from v2 tables and assert
@@ -1266,9 +1266,9 @@ def test_v2_real_data_v1_parity_mountainsort4(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -1343,13 +1343,13 @@ def test_v2_real_data_v1_parity_mountainsort4(
     Recording.populate(rec_pk, reserve_jobs=False)
 
     artifact_name_meta = meta.get("artifact_param_name", "default")
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": artifact_name_meta,
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # --- v1↔v2 invariant fingerprint check (same shape as clusterless) ---
     import hashlib
@@ -1587,9 +1587,9 @@ def test_mountainsort4_ground_truth(
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -1638,13 +1638,13 @@ def test_mountainsort4_ground_truth(
             }
         )
         Recording.populate(rec_pk, reserve_jobs=False)
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = RecordingArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
                 "artifact_detection_params_name": "none",
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
         sort_pk = SortingSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
@@ -1804,9 +1804,9 @@ def test_clusterless_thresholder_ground_truth(
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -1887,13 +1887,13 @@ def test_clusterless_thresholder_ground_truth(
             }
         )
         Recording.populate(rec_pk, reserve_jobs=False)
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = RecordingArtifactSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],
                 "artifact_detection_params_name": "none",
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
         sort_pk = SortingSelection.insert_selection(
             {
                 "recording_id": rec_pk["recording_id"],

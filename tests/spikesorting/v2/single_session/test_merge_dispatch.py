@@ -29,11 +29,11 @@ def test_tripart_dispatch_active(dj_conn):
     """
     import inspect
 
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    for cls in (Recording, ArtifactDetection, Sorting):
+    for cls in (Recording, RecordingArtifactDetection, Sorting):
         assert inspect.isgeneratorfunction(cls.make), (
             f"{cls.__name__}.make must remain the inherited generator "
             "from AutoPopulate so tri-part dispatch fires; a regular-"
@@ -104,9 +104,9 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     rec = Recording().get_recording({"recording_id": recording_id})
     rec_t_start = float(rec.get_times()[0])
     rec_t_end = float(rec.get_times()[-1])
@@ -475,9 +475,9 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
         "nwb_file_name"
     )

@@ -42,8 +42,8 @@ def planted_sort(dj_conn):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -77,14 +77,14 @@ def planted_sort(dj_conn):
     )
     if not (Recording & rec_pk):
         Recording.populate(rec_pk, reserve_jobs=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
@@ -156,42 +156,71 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
 def test_cancelled_artifact_delete_preserves_interval_list(
     planted_sort, monkeypatch
 ):
-    """A cancelled ArtifactDetection.delete must NOT remove the artifact
-    IntervalList rows (the twin of the Sorting.delete cancel guard)."""
+    """A cancelled RecordingArtifactDetection.delete must NOT remove the
+    artifact IntervalList rows (the twin of the Sorting.delete cancel guard).
+
+    Exercised on an UNREFERENCED detection so the delete reaches the safemode
+    prompt: a detection a sort references is REFUSED outright (a stronger guard).
+    """
     from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.utils import (
         artifact_detection_interval_list_name,
     )
 
-    art_id = SortingSelection.resolve_artifact_detection(planted_sort)
-    assert art_id is not None, "planted sort must be artifact-backed"
     rec_id = SortingSelection.resolve_source(planted_sort).key["recording_id"]
     nwb = (RecordingSelection & {"recording_id": rec_id}).fetch1(
         "nwb_file_name"
     )
+    # A fresh detection NO sort references (distinct 'default' params vs the
+    # planted sort's 'none'), so the delete reaches the safemode prompt.
+    ArtifactDetectionParameters.insert_default()
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {"recording_id": rec_id, "artifact_detection_params_name": "default"}
+    )
+    art_id = art_pk["artifact_detection_id"]
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     il_restr = {
         "nwb_file_name": nwb,
         "interval_list_name": artifact_detection_interval_list_name(art_id),
     }
     assert (
         IntervalList & il_restr
-    ), "fixture should have an artifact IntervalList"
+    ), "populated detection should have an artifact IntervalList"
 
-    monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
-    (ArtifactDetection & {"artifact_detection_id": art_id}).delete(
-        safemode=True
-    )
+    try:
+        monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
+        (RecordingArtifactDetection & {"artifact_detection_id": art_id}).delete(
+            safemode=True
+        )
 
-    assert ArtifactDetection & {
-        "artifact_detection_id": art_id
-    }, "cancelled delete removed the ArtifactDetection master row"
-    assert IntervalList & il_restr, (
-        "cancelled artifact delete removed the IntervalList row for a master "
-        "the user chose to keep"
-    )
+        assert RecordingArtifactDetection & {
+            "artifact_detection_id": art_id
+        }, "cancelled delete removed the RecordingArtifactDetection master row"
+        assert IntervalList & il_restr, (
+            "cancelled artifact delete removed the IntervalList row for a "
+            "master the user chose to keep"
+        )
+        # The merge registration must also survive the cancel (the delete
+        # docstring's "no orphaned merge row" is symmetric under cancel).
+        assert ArtifactDetectionOutput.get_merge_id(
+            {"artifact_detection_id": art_id}
+        ), "cancelled delete removed the ArtifactDetectionOutput registration"
+    finally:
+        (
+            RecordingArtifactDetection & {"artifact_detection_id": art_id}
+        ).super_delete(warn=False, force_masters=True)
+        (RecordingArtifactSelection & art_pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
@@ -199,7 +228,8 @@ def test_cancelled_artifact_delete_preserves_interval_list(
 def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     planted_sort,
 ):
-    """``ArtifactDetection().delete(restr)`` cleans only actually-deleted rows.
+    """``RecordingArtifactDetection().delete(restr)`` cleans only
+    actually-deleted rows.
 
     Regression for the cleanup bypass where ``delete`` checked ``len(self)``
     after the cascade. When ``self`` is the unrestricted table instance, that
@@ -208,8 +238,8 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -224,7 +254,7 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
         "nwb_file_name"
     )
 
-    target_pk = ArtifactDetectionSelection.insert_selection(
+    target_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_id,
             "artifact_detection_params_name": "default",
@@ -243,12 +273,12 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     # Use super_delete because the strict ownership invariant means a broken
     # master without its part row should not be cleaned through the public
     # delete override.
-    if ArtifactDetection & target_pk:
-        (ArtifactDetection & target_pk).super_delete(warn=False)
+    if RecordingArtifactDetection & target_pk:
+        (RecordingArtifactDetection & target_pk).super_delete(warn=False)
     (IntervalList & interval_restr).delete_quick()
 
     try:
-        ArtifactDetection.insert1(target_pk, allow_direct_insert=True)
+        RecordingArtifactDetection.insert1(target_pk, allow_direct_insert=True)
         IntervalList.insert1(
             {
                 **interval_restr,
@@ -256,30 +286,33 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
             },
             allow_direct_insert=True,
         )
-        ArtifactDetection.ArtifactRemovedInterval.insert1(
+        RecordingArtifactDetection.RemovedInterval.insert1(
             {**target_pk, **interval_restr}
         )
-        assert ArtifactDetection & {"artifact_detection_id": original_art_id}, (
-            "fixture should leave an unrelated ArtifactDetection row in the "
-            "unrestricted table"
+        assert RecordingArtifactDetection & {
+            "artifact_detection_id": original_art_id
+        }, (
+            "fixture should leave an unrelated RecordingArtifactDetection row "
+            "in the unrestricted table"
         )
 
-        ArtifactDetection().delete(
+        RecordingArtifactDetection().delete(
             {"artifact_detection_id": target_art_id}, safemode=False
         )
 
-        assert not (ArtifactDetection & target_pk)
+        assert not (RecordingArtifactDetection & target_pk)
         assert not (IntervalList & interval_restr), (
-            "unrestricted ArtifactDetection().delete(restr) left the deleted "
-            "row's artifact IntervalList behind"
+            "unrestricted RecordingArtifactDetection().delete(restr) left the "
+            "deleted row's artifact IntervalList behind"
         )
-        assert ArtifactDetection & {"artifact_detection_id": original_art_id}
+        assert RecordingArtifactDetection & {
+            "artifact_detection_id": original_art_id
+        }
     finally:
-        if ArtifactDetection & target_pk:
-            (ArtifactDetection & target_pk).super_delete(warn=False)
+        if RecordingArtifactDetection & target_pk:
+            (RecordingArtifactDetection & target_pk).super_delete(warn=False)
         (IntervalList & interval_restr).delete_quick()
-        (ArtifactDetectionSelection.RecordingSource & target_pk).delete_quick()
-        (ArtifactDetectionSelection & target_pk).delete_quick()
+        (RecordingArtifactSelection & target_pk).delete_quick()
 
 
 @pytest.mark.slow
@@ -295,7 +328,7 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
     ``Sorting().delete({...}, safemode=False)`` on the UNRESTRICTED instance
     passes the dict through as a truthy ``force_permission``, bypasses the
     permission check, and deletes EVERY ``Sorting`` row -- destroying each
-    row's 5-50 GB analyzer folder. Mirrors ``ArtifactDetection.delete``'s
+    row's 5-50 GB analyzer folder. Mirrors ``RecordingArtifactDetection.delete``'s
     positional-restriction guard: a restriction that matches NOTHING must
     delete nothing, so the planted row and its analyzer folder survive.
     """
