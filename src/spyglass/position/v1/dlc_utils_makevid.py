@@ -4,6 +4,7 @@
 import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
+from fractions import Fraction
 from pathlib import Path
 
 import matplotlib
@@ -166,7 +167,7 @@ class VideoMaker:
 
         stats = ret.stdout.strip().split("x")
         self.width, self.height = tuple(map(int, stats[:2]))
-        self.frame_rate = eval(stats[2])
+        self.frame_rate = float(Fraction(stats[2]))
 
         self.frame_size = (
             (self.width, self.height)
