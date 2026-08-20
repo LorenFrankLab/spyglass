@@ -27,14 +27,13 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 
 # ## Imports
 #
 
 # +
-import os
 import copy
 import datajoint as dj
 import numpy as np
@@ -120,7 +119,7 @@ lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & {
 # ## `IntervalList`
 #
 
-# Recall from the [previous notebook](./02_Spike_Sorting.ipynb) that
+# Recall from the [Spike Sorting V0 notebook](./10_Spike_SortingV0.ipynb) that
 # `IntervalList` selects time frames from the experiment. We can select the
 # interval and subset to the first `n` seconds...
 #
@@ -370,5 +369,5 @@ plt.ylabel("Amplitude (AD units)")
 
 # ## Next Steps
 #
-# Next, we'll use look at [Theta](./14_Theta.ipynb) bands within LFP data.
+# Next, we'll use look at [Theta](./31_Theta.ipynb) bands within LFP data.
 #

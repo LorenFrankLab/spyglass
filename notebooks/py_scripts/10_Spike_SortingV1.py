@@ -19,12 +19,11 @@
 # - it has more streamlined curation pipelines
 # - it uses UUIDs as the primary key for important tables (e.g. `SpikeSorting`) to reduce the number of keys that make up the composite primary key
 #
-# The output of both versions of the pipeline are saved in a [merge table](./03_Merge_Tables.ipynb) called `SpikeSortingOutput`.
+# The output of both versions of the pipeline are saved in a [merge table](./04_Merge_Tables.ipynb) called `SpikeSortingOutput`.
 
 # To start, connect to the database. See instructions in [Setup](./00_Setup.ipynb).
 
 # +
-import os
 import datajoint as dj
 import numpy as np
 
@@ -227,7 +226,7 @@ sgs.CurationV1()
 
 # Next we will do manual curation. this is done with figurl. to incorporate info from other stages of processing (e.g. metrics) we have to store that with kachery cloud and get curation uri referring to it. it can be done with `generate_curation_uri`.
 #
-# _Note_: This step is dependent on setting up a kachery sharing system as described in [02_Data_Sync.ipynb](02_Data_Sync.ipynb)
+# _Note_: This step is dependent on setting up a kachery sharing system as described in [03_Data_Sync.ipynb](03_Data_Sync.ipynb)
 # and will likely not work correctly on the spyglass-demo server.
 #
 
