@@ -329,8 +329,8 @@
 #
 # Alternatively, you can pip install using
 # ```bash
-# pip install spyglass[dlc]    # DeepLabCut
-# pip install spyglass[sleap]  # SLEAP
+# pip install spyglass-neuro[dlc]    # DeepLabCut
+# pip install spyglass-neuro[sleap]  # SLEAP
 # ```
 #
 # #### Keypoint-Moseq
@@ -349,7 +349,7 @@
 #
 # Alternatively, you can pip install using
 # ```bash
-# pip install spyglass[moseq-cpu]
+# pip install spyglass-neuro[moseq-cpu]
 # ```
 #
 # To use a GPU enabled version of the package, replace `cpu` with `gpu` in the above
