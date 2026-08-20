@@ -33,3 +33,50 @@ def test_nwbfile_cleanup(common_nwbfile):
     common_nwbfile.Nwbfile.cleanup(delete_files=False)
     after = len(common_nwbfile.Nwbfile.fetch())
     assert before == after, "Nwbfile cleanup changed table entry count."
+
+
+# ------------------------------------------------------------------ #
+# AnalysisRegistry._parse_table_name
+# ------------------------------------------------------------------ #
+
+
+def test_parse_table_name_basic(common_nwbfile):
+    """Parses a standard full table name into components."""
+    parse = common_nwbfile.AnalysisRegistry._parse_table_name
+    db, table, prefix, suffix = parse("`user_nwbfile`.`analysis_nwbfile`")
+    assert db == "user_nwbfile"
+    assert table == "analysis_nwbfile"
+    assert prefix == "user"
+    assert suffix == "nwbfile"
+
+
+def test_parse_table_name_no_backticks(common_nwbfile):
+    """Backtick-free names are also parsed correctly."""
+    parse = common_nwbfile.AnalysisRegistry._parse_table_name
+    db, table, prefix, suffix = parse("myteam_nwbfile.analysis_nwbfile")
+    assert db == "myteam_nwbfile"
+    assert table == "analysis_nwbfile"
+    assert prefix == "myteam"
+    assert suffix == "nwbfile"
+
+
+def test_parse_table_name_multi_underscore_prefix(common_nwbfile):
+    """Prefix with multiple underscores splits at the last one."""
+    parse = common_nwbfile.AnalysisRegistry._parse_table_name
+    db, table, prefix, suffix = parse(
+        "`first_second_nwbfile`.`analysis_nwbfile`"
+    )
+    assert db == "first_second_nwbfile"
+    assert prefix == "first_second"
+    assert suffix == "nwbfile"
+
+
+# ------------------------------------------------------------------ #
+# Nwbfile.get_abs_path error case
+# ------------------------------------------------------------------ #
+
+
+def test_get_abs_path_no_match_raises(common_nwbfile):
+    """get_abs_path raises ValueError if entry not found in table."""
+    with pytest.raises(ValueError):
+        common_nwbfile.Nwbfile.get_abs_path("nonexistent_file.nwb")

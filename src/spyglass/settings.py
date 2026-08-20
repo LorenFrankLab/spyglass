@@ -161,7 +161,7 @@ class SpyglassConfig:
         dj_custom = dj.config.get("custom", {})
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
-        dj_dlc = dj_custom.get("dlc_dirs", {})
+        dj_pose = dj_custom.get("pose_dirs", {})
         dj_moseq = dj_custom.get("moseq_dirs", {})
 
         self._debug_mode = dj_custom.get("debug_mode", False)
@@ -201,13 +201,13 @@ class SpyglassConfig:
             self.load_failed = True
             return
 
-        self._dlc_base = (
-            dj_dlc.get("base")
+        self._pose_base = (
+            dj_pose.get("base")
             or os.environ.get("DLC_BASE_DIR")
             or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
+        Path(self._pose_base).mkdir(parents=True, exist_ok=True)
 
         self._moseq_base = (
             dj_moseq.get("base")
@@ -218,11 +218,11 @@ class SpyglassConfig:
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
-            "dlc": dj_dlc,
+            "pose": dj_pose,
             "moseq": dj_moseq,
             "kachery": dj_kachery,
         }
-        base_lookup = {"dlc": self._dlc_base, "moseq": self._moseq_base}
+        base_lookup = {"pose": self._pose_base, "moseq": self._moseq_base}
         for prefix, dirs in self.relative_dirs.items():
             this_base = base_lookup.get(prefix, resolved_base)
             for dir, dir_str in dirs.items():
@@ -526,11 +526,11 @@ class SpyglassConfig:
                     ),
                     "temp": self.config.get(self.dir_to_var("temp", "kachery")),
                 },
-                "dlc_dirs": {
-                    "base": self._dlc_base,
-                    "project": self.dlc_project_dir,
-                    "video": self.dlc_video_dir,
-                    "output": self.dlc_output_dir,
+                "pose_dirs": {
+                    "base": str(self._pose_base),
+                    "project": self.pose_project_dir,
+                    "video": self.pose_video_dir,
+                    "output": self.pose_output_dir,
                 },
                 "moseq_dirs": {
                     "base": self._moseq_base,
@@ -610,19 +610,34 @@ class SpyglassConfig:
         return self._test_mode
 
     @property
+    def pose_project_dir(self) -> str:
+        """Pose project directory as a string."""
+        return self.config.get(self.dir_to_var("project", "pose"))
+
+    @property
+    def pose_video_dir(self) -> str:
+        """Pose video directory as a string."""
+        return self.config.get(self.dir_to_var("video", "pose"))
+
+    @property
+    def pose_output_dir(self) -> str:
+        """Pose output directory as a string."""
+        return self.config.get(self.dir_to_var("output", "pose"))
+
+    @property
     def dlc_project_dir(self) -> str:
-        """DLC project directory as a string."""
-        return self.config.get(self.dir_to_var("project", "dlc"))
+        """DLC project directory as a string (deprecated, use pose_project_dir)."""
+        return self.pose_project_dir
 
     @property
     def dlc_video_dir(self) -> str:
-        """DLC video directory as a string."""
-        return self.config.get(self.dir_to_var("video", "dlc"))
+        """DLC video directory as a string (deprecated, use pose_video_dir)."""
+        return self.pose_video_dir
 
     @property
     def dlc_output_dir(self) -> str:
-        """DLC output directory as a string."""
-        return self.config.get(self.dir_to_var("output", "dlc"))
+        """DLC output directory as a string (deprecated, use pose_output_dir)."""
+        return self.pose_output_dir
 
     @property
     def moseq_project_dir(self) -> str:
@@ -652,6 +667,9 @@ if sg_config.load_failed:  # Failed to load
     waveforms_dir = None
     video_dir = None
     export_dir = None
+    pose_project_dir = None
+    pose_video_dir = None
+    pose_output_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -671,6 +689,9 @@ else:
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)
+    pose_project_dir = sg_config.pose_project_dir
+    pose_video_dir = sg_config.pose_video_dir
+    pose_output_dir = sg_config.pose_output_dir
     dlc_project_dir = sg_config.dlc_project_dir
     dlc_video_dir = sg_config.dlc_video_dir
     dlc_output_dir = sg_config.dlc_output_dir

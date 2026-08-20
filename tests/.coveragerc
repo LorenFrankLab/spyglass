@@ -14,7 +14,10 @@ omit =
     # */linearization/*
     */lock/*
     */mua/*
-    */position/* # gh-action differs from local run
+    # Include position v2 for coverage - exclude only legacy v1 utils
+    */position/v1/*
+    */position/utils/make_video.py
+    */position/utils/tool_strategies.py
     */ripple/*
     */sharing/*
     # */spikesorting/*
@@ -28,3 +31,6 @@ exclude_lines =
     if __name__ == .__main__.:
     raise NotImplementedError
     pass
+
+# Show missing lines to help identify uncovered code
+show_missing = True

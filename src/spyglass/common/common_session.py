@@ -53,6 +53,20 @@ class Session(SpyglassIngestion, dj.Imported):
             "subject": {"subject_id": "subject_id"},
         }
 
+    @property
+    def with_date_str(self):
+        """Project session_date_str (YYYYMMDD) from session_start_time.
+
+        Returns a query expression with the primary key plus a computed
+        ``session_date_str`` column, useful for date-based restriction::
+
+            Session().with_date_str & {"session_date_str": "20230101"}
+        """
+        return (self & self.restriction).proj(
+            subject_id="subject_id",
+            session_date_str="DATE_FORMAT(session_start_time, '%%Y%%m%%d')",
+        )
+
     class DataAcquisitionDevice(SpyglassIngestion, dj.Part):  # noqa: F811
         definition = """
         # Part table linking Session to multiple DataAcquisitionDevice entries.
