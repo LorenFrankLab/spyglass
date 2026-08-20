@@ -157,16 +157,58 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
     delete calls from upstream tables to downstream tables.
     """
 
-    def delete(self, *args, **kwargs):
-        """Delete master and part entries."""
+    def delete(self, *args, force: bool = False, **kwargs):
+        """Delete master and part entries.
+
+        By default, the part's restriction is promoted to its master and the
+        delete runs from the master, cascading back to this part. If the
+        restriction cannot be applied to the master - e.g. it names an
+        attribute that only the part has - the delete is refused, mirroring
+        ``datajoint.user_tables.Part.delete``, which prohibits direct part
+        deletes unless forced.
+
+        Parameters
+        ----------
+        force : bool, optional
+            If True, delete only the matching entries of this part table,
+            leaving the master untouched. Mirrors
+            ``dj.Part.delete(force=True)``, which calls
+            ``Table.delete(force_parts=True)``. As in DataJoint, other
+            ``Table.delete`` keywords (e.g. ``safemode``) are not forwarded on
+            this path. Default False.
+        *args, **kwargs : Any
+            Passed to the master's delete when ``force`` is False.
+
+        Raises
+        ------
+        DataJointError
+            If ``force`` is False and the restriction cannot be applied to the
+            master table.
+        """
+        if force:  # part-only delete, mirroring dj.Part.delete(force=True)
+            return super().delete(*args, force=True, **kwargs)
+
         restriction = self.restriction or True  # for (tbl & restr).delete()
+        master_name = dj.utils.get_master(self.full_table_name)
+        part_only = set(self.restriction_attributes) - set(
+            self.master.heading.names
+        )
 
-        try:  # try restriction on master
+        no_master_err = DataJointError(
+            "Cannot delete from a Part directly with a part-only restriction: "
+            + f"{restriction}\nDelete from the master {master_name} instead, "
+            + "or pass force=True to delete only the matching part entries."
+        )
+
+        if part_only:
+            raise no_master_err
+
+        try:  # restriction may still be invalid on the master
             restricted = self.master & restriction
-        except DataJointError:  # if error, assume restr of self
-            restricted = self & restriction
+        except DataJointError as err:
+            raise no_master_err from err
 
-        restricted.delete(*args, **kwargs)
+        return restricted.delete(*args, **kwargs)
 
 
 class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
@@ -194,7 +236,9 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         """Initialize SpyglassAnalysis.
 
         Enforces ...
-        - Database conforms to `{prefix}_nwbfile` naming convention, one '_'
+        - Database conforms to `{prefix}_nwbfile` naming convention, one '_',
+          where prefix is `custom.database.prefix`, defaulting to the
+          `database.user`
         - Table conforms to AnalysisNwbfile class name
         - Exact definition match for common AnalysisNwbfile table
         - Not a part table (part tables cannot be AnalysisNwbfile)
@@ -206,7 +250,12 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         if self.is_declared:
             return
 
-        user_prefix = dj.config.get("custom", dict()).get("database.prefix")
+        # Mirror spyglass.common.custom_nwbfile: fall back to the database
+        # user when no custom prefix is configured. See #1510.
+        db_prefix = dj.config.get("custom", dict()).get("database.prefix")
+        username = dj.config.get("database.user")
+        user_prefix = db_prefix or username
+        prefix_src = "custom.database.prefix" if db_prefix else "database.user"
 
         if not self.database:
             raise ValueError("Database must be set for Analysis tables")
@@ -225,7 +274,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         elif prefix != user_prefix:
             raise ValueError(
                 f"Schema prefix {prefix} does not match "
-                + f"configured prefix: {user_prefix}"
+                + f"configured prefix: {user_prefix} (from {prefix_src})"
             )
         if suffix != "nwbfile":
             raise ValueError(
