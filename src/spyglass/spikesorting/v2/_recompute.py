@@ -23,7 +23,12 @@ import numpy as np
 # ``noise_levels`` is intentionally excluded -- it is an unseeded random-chunk
 # noise estimate, not reproducible run-to-run, so including it would make every
 # recompute report a spurious mismatch.
-ANALYZER_RECOMPUTE_EXTENSIONS = ("random_spikes", "templates", "waveforms")
+ANALYZER_RECOMPUTE_EXTENSIONS = (
+    "random_spikes",
+    "noise_levels",
+    "templates",
+    "waveforms",
+)
 
 
 def hash_extension_data(
@@ -53,9 +58,10 @@ def hash_extension_data(
 
 
 #: Base analyzer extensions ``Sorting.make`` computes, in build order. Used to
-#: report each extension's seed mode in the recompute manifest (a superset of
-#: ``ANALYZER_RECOMPUTE_EXTENSIONS``, which is only the seed-pinned content the
-#: recompute hash covers).
+#: report each extension's seed mode in the recompute manifest. Every base
+#: extension is now seed-pinned, so this equals ``ANALYZER_RECOMPUTE_EXTENSIONS``
+#: (the content the recompute hash covers); kept as a named list because the
+#: manifest reports seed modes in this build order.
 BASE_ANALYZER_EXTENSIONS = (
     "random_spikes",
     "noise_levels",
@@ -68,9 +74,10 @@ def analyzer_seed_modes(analyzer) -> dict[str, object]:
     """Map each present base extension to its effective seed provenance.
 
     Returns ``{extension: seed}`` when the extension's stored params carry an
-    explicit, non-``None`` ``seed`` (e.g. the seed-pinned ``random_spikes``
-    subsample), and ``{extension: "unseeded"}`` otherwise -- e.g. ``noise_levels``
-    (computed without an explicit seed) or any extension whose params hold no
+    explicit, non-``None`` seed (e.g. the seed-pinned ``random_spikes``
+    subsample, or ``noise_levels`` whose seed is threaded through
+    ``random_slices_kwargs`` per SI's ``get_noise_levels`` signature), and
+    ``{extension: "unseeded"}`` otherwise -- any extension whose params hold no
     seed. Surfacing this in the recompute manifest stops it from silently
     implying a pinned seed for an extension that has none. Absent extensions are
     omitted.
@@ -81,6 +88,10 @@ def analyzer_seed_modes(analyzer) -> dict[str, object]:
             continue
         params = analyzer.get_extension(name).params or {}
         seed = params.get("seed")
+        if seed is None:
+            # ``noise_levels`` carries its seed under ``random_slices_kwargs``
+            # (SI's ``get_noise_levels`` signature), not a top-level ``seed``.
+            seed = (params.get("random_slices_kwargs") or {}).get("seed")
         modes[name] = "unseeded" if seed is None else seed
     return modes
 

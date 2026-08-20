@@ -30,11 +30,11 @@ class _FakeAnalyzer:
         return _FakeExtension(self._extensions[name])
 
 
-def test_analyzer_seed_modes_marks_noise_levels_unseeded():
-    """Each present base extension is mapped to its effective seed, with an
-    extension that carries no explicit seed (noise_levels) -- or an explicit
-    ``None`` seed -- marked ``"unseeded"``, so the manifest never silently
-    implies a pinned seed for an extension that has none."""
+def test_analyzer_seed_modes_classifies_seed_provenance():
+    """Each present base extension is mapped to its effective seed: a top-level
+    ``seed`` (random_spikes), a seed nested under ``random_slices_kwargs``
+    (noise_levels), or ``"unseeded"`` when no seed is present -- so the manifest
+    never silently implies a pinned seed for an extension that has none."""
     from spyglass.spikesorting.v2._recompute import analyzer_seed_modes
 
     analyzer = _FakeAnalyzer(
@@ -47,9 +47,16 @@ def test_analyzer_seed_modes_marks_noise_levels_unseeded():
     )
     modes = analyzer_seed_modes(analyzer)
     assert modes["random_spikes"] == 0
+    # Empty params -> no seed -> unseeded.
     assert modes["noise_levels"] == "unseeded"
     assert modes["templates"] == "unseeded"
     assert modes["waveforms"] == "unseeded"
+    # noise_levels threads its seed through ``random_slices_kwargs`` (SI's
+    # get_noise_levels signature), not a top-level ``seed``; detected there too.
+    nested = _FakeAnalyzer(
+        {"noise_levels": {"random_slices_kwargs": {"seed": 0}}}
+    )
+    assert analyzer_seed_modes(nested)["noise_levels"] == 0
     # An explicit seed=None is also "unseeded", not a spurious pinned seed.
     none_seeded = _FakeAnalyzer({"random_spikes": {"seed": None}})
     assert analyzer_seed_modes(none_seeded)["random_spikes"] == "unseeded"
@@ -500,13 +507,14 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
 
 
-def test_analyzer_manifest_marks_noise_levels_unseeded(
+def test_analyzer_manifest_records_noise_levels_seed(
     populated_sorting, clean_recompute
 ):
-    """The analyzer manifest records each base extension's seed mode, marking
-    noise_levels unseeded; the content-addressed analyzer_hash is derived from
-    the extension content hashes ONLY, so the seed-mode provenance does not shift
-    the recompute identity."""
+    """The analyzer manifest records each base extension's seed mode. Every base
+    extension is seed-pinned (random_spikes AND noise_levels), so none is
+    "unseeded", and noise_levels joins the recompute content set. The
+    content-addressed analyzer_hash is derived from the extension content hashes
+    ONLY, so the seed-mode provenance does not shift the recompute identity."""
     from spyglass.spikesorting.v2._recompute import combined_hash
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
 
@@ -514,9 +522,12 @@ def test_analyzer_manifest_marks_noise_levels_unseeded(
     row = (SortingAnalyzerVersions & populated_sorting).fetch1()
     manifest = row["analyzer_manifest"]
     seed_modes = manifest["base_extension_seed_modes"]
-    assert seed_modes["noise_levels"] == "unseeded"
-    # random_spikes records its effective (pinned) seed, not "unseeded".
+    # noise_levels is now seed-pinned (via random_slices_kwargs), recording its
+    # effective seed (0), not "unseeded".
+    assert seed_modes["noise_levels"] == 0
     assert seed_modes["random_spikes"] != "unseeded"
+    # ...and it now joins the recompute content set.
+    assert "noise_levels" in manifest["extension_content_hashes"]
     # analyzer_hash is the combined hash of the extension CONTENT hashes only --
     # the seed modes are secondary provenance, not identity.
     assert row["analyzer_hash"] == combined_hash(

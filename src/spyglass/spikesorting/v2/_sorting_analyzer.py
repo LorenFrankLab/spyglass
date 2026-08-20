@@ -808,12 +808,11 @@ def build_analyzer(
         # region-specific (hippocampus 0.5/0.5, cortex 1.0/2.0) and the
         # subsample is the lab's 20000.
         # Default base set computes ``noise_levels`` (needed by downstream
-        # quality/template metrics on the STORED analyzer). The recompute-verify
-        # path passes ``extensions=ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes
-        # / templates / waveforms -- the only extensions it hashes) to skip the
-        # unseeded ``noise_levels`` estimate it would compute then discard;
-        # noise_levels is not a dependency of templates/waveforms, and the hashed
-        # extensions are byte-identical with or without it (verified).
+        # quality/template metrics -- SNR -- on the STORED analyzer). It is
+        # seed-pinned (see the noise_levels extension_params below), so it
+        # rebuilds identically and is part of ``ANALYZER_RECOMPUTE_EXTENSIONS``:
+        # the recompute-verify path hashes it alongside random_spikes /
+        # templates / waveforms.
         base_extensions = (
             list(extensions)
             if extensions is not None
@@ -840,6 +839,19 @@ def build_analyzer(
                 # gets a consistent seed across the sort AND the analyzer
                 # subsample.
                 "seed": (job_kwargs or {}).get("random_seed", 0),
+            },
+            "noise_levels": {
+                # Pin the stochastic noise estimate. ``get_noise_levels`` reads
+                # random recording chunks (via ``random_slices_kwargs``), which
+                # SI leaves UNSEEDED by default -- so each build samples
+                # different chunks and the per-channel noise, and any SNR /
+                # SNR-based curation rule computed from it, drifts run-to-run.
+                # Same seed source as the random_spikes / whitening pins, so
+                # noise_levels rebuilds identically and can join the recompute
+                # comparison (ANALYZER_RECOMPUTE_EXTENSIONS).
+                "random_slices_kwargs": {
+                    "seed": (job_kwargs or {}).get("random_seed", 0)
+                },
             },
             "waveforms": {
                 "ms_before": float(waveform_params["ms_before"]),
