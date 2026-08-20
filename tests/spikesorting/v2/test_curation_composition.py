@@ -597,3 +597,47 @@ def test_insert_curation_retry_reuses_concurrent_winner(
         assert not (CurationV2 & {**sort_pk, "curation_id": 2})
     finally:
         clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_curation_delete_refuses_to_orphan_descendant(planted_three_unit_sort):
+    """A direct ``CurationV2.delete`` REFUSES to remove a parent while a
+    descendant still references it via ``parent_curation_id`` (which the schema
+    cannot self-FK), naming the offending (parent, child) pair -- so a child's
+    lineage pointer is never silently orphaned. A leaf curation, or a parent
+    whose descendant has been removed, is not refused.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sort_pk)
+        child = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            parent_curation_id=root["curation_id"],
+            description="lineage-delete guard test",
+        )
+        # Deleting the parent ALONE while the child references it is REFUSED,
+        # with a message naming the offending (parent, child) pair; both survive.
+        with pytest.raises(ValueError, match="descendant curations") as excinfo:
+            (CurationV2 & root).delete(safemode=False)
+        assert f"({root['curation_id']}, {child['curation_id']})" in str(
+            excinfo.value
+        )
+        assert CurationV2 & root
+        assert CurationV2 & child
+
+        # A leaf child (no descendants of its own) is NOT refused by the guard
+        # (it raises no descendant-orphan error). Physical removal of a
+        # merge-registered curation goes through the merge-aware
+        # clear_curations_for; the guard only governs the orphan refusal.
+        (CurationV2 & child).delete(safemode=False)
+        clear_curations_for(child)
+        assert not (CurationV2 & child)
+
+        # With the descendant gone, the parent is no longer refused either.
+        (CurationV2 & root).delete(safemode=False)
+    finally:
+        clear_curations_for(sort_pk)

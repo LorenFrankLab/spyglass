@@ -323,6 +323,61 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                         "reference a unit in the immediate parent's namespace."
                     )
 
+    def delete(self, *args, safemode=None, **kwargs):
+        """Delete curations, refusing to orphan a child's lineage pointer.
+
+        A child curation records its parent via ``parent_curation_id`` -- a
+        validation-only int, because DataJoint cannot express a nullable
+        self-referential FK across the renamed column cleanly, so the schema
+        does not enforce the edge. To keep the lineage consistent anyway, a
+        DIRECT ``delete`` is REFUSED when a row being removed still has a
+        descendant curation (same sorting, ``parent_curation_id`` equal to its
+        ``curation_id``) that is not itself in the delete set -- removing the
+        parent would leave that descendant pointing at a missing curation.
+        Delete descendants first (leaf-up). A leading positional restriction is
+        accepted for the ``Table().delete(restriction)`` form.
+
+        Only a direct ``CurationV2.delete`` is guarded: a cascade from an
+        upstream delete (e.g. deleting the ``Sorting``) removes the whole
+        lineage together, so no orphan results there, and the raw
+        ``super_delete`` / ``delete_quick`` paths are intentionally unaffected.
+        """
+        from spyglass.spikesorting.v2.utils import split_leading_restrictions
+
+        restriction_args, args = split_leading_restrictions(args)
+        if restriction_args:
+            target = self
+            for restriction in restriction_args:
+                target = target & restriction
+            return target.delete(*args, safemode=safemode, **kwargs)
+
+        cls = type(self)
+        pk = self.primary_key
+        rows = self.fetch("KEY")
+        in_delete_set = {tuple(sorted(row.items())) for row in rows}
+        orphaned: list[tuple[int, int]] = []
+        for row in rows:
+            sorting_key = {k: row[k] for k in pk if k != "curation_id"}
+            descendants = (
+                cls & {**sorting_key, "parent_curation_id": row["curation_id"]}
+            ).fetch("KEY")
+            for child in descendants:
+                if tuple(sorted(child.items())) not in in_delete_set:
+                    orphaned.append(
+                        (int(row["curation_id"]), int(child["curation_id"]))
+                    )
+        if orphaned:
+            raise ValueError(
+                f"{cls.__name__}.delete: refusing to delete curation(s) that "
+                "still have descendant curations -- removing a parent would "
+                "orphan the child's parent_curation_id lineage. Offending "
+                f"(parent_curation_id, child_curation_id) pairs: {orphaned}. "
+                "Delete the descendant curations first (leaf-up)."
+            )
+        if safemode is None:
+            return super().delete(*args, **kwargs)
+        return super().delete(*args, safemode=safemode, **kwargs)
+
     @classmethod
     def insert_curation(
         cls,
