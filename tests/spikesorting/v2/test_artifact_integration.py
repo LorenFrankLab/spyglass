@@ -135,9 +135,9 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
         ArtifactDetectionParamsSchema,
     )
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import (
@@ -150,8 +150,8 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     recording_id = artifact_e2e_session["recording_id"]
 
     # Substitute the loaded preprocessed recording with the synthetic one
-    # carrying a known transient. Both ArtifactDetection and Sorting load
-    # via Recording().get_recording, so one patch covers both populates.
+    # carrying a known transient. Both RecordingArtifactDetection and Sorting
+    # load via Recording().get_recording, so one patch covers both populates.
     monkeypatch.setattr(
         Recording,
         "get_recording",
@@ -182,13 +182,13 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
 
     AnalyzerWaveformParameters.insert_default()
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": recording_id,
             "artifact_detection_params_name": params_name,
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # ---- Assertion (a): the persisted valid_times exclude the transient ----
     artifact_detection_id = art_pk["artifact_detection_id"]
@@ -361,9 +361,9 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         ArtifactDetectionParamsSchema,
     )
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -431,13 +431,13 @@ def test_artifact_masking_preserves_clean_gt_spikes(
         },
         skip_duplicates=True,
     )
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": recording_id,
             "artifact_detection_params_name": params_name,
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     valid_times = (
         IntervalList
@@ -518,8 +518,8 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -566,13 +566,13 @@ def test_parallel_artifact_detection_matches_serial(dj_conn):
         results = {}
         for name, n_jobs in (("v2_njobs_serial", 1), ("v2_njobs_parallel", 2)):
             _insert_artifact_params(name, n_jobs=n_jobs)
-            art_pk = ArtifactDetectionSelection.insert_selection(
+            art_pk = RecordingArtifactSelection.insert_selection(
                 {
                     "recording_id": rec_pk["recording_id"],
                     "artifact_detection_params_name": name,
                 }
             )
-            ArtifactDetection.populate(art_pk, reserve_jobs=False)
+            RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
             results[name] = (
                 IntervalList
                 & {
@@ -628,7 +628,7 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
 
     fs = 30_000.0
     n_samples = 5000
@@ -668,9 +668,9 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
 
     # Reference: single pass (the default 1 s chunk == 30000 frames spans the
     # whole 5000-sample recording), serial.
-    reference = ArtifactDetection._detect_artifacts(rec_mem, params)
+    reference = RecordingArtifactDetection._detect_artifacts(rec_mem, params)
     # Test: chunk boundary at frame 1100 (inside the transient), multi-process.
-    parallel = ArtifactDetection._detect_artifacts(
+    parallel = RecordingArtifactDetection._detect_artifacts(
         rec_disk, params, job_kwargs={"chunk_size": 1100, "n_jobs": 2}
     )
 
@@ -732,15 +732,15 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
     strict ownership helper (read_artifact_removed_intervals, as_dict=True).
 
     The prior direct ``IntervalList & reconstructed_name`` fetch would accept a
-    partially-deleted artifact whose ownership ArtifactRemovedInterval part rows
+    partially-deleted artifact whose ownership RemovedInterval part rows
     are gone (the IntervalList row itself still resolves by name). Routing
     through the helper makes that case fail loudly instead of feeding a stale /
     foreign same-name interval list into the sort.
     """
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -754,14 +754,14 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": recording_id,
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": recording_id,
@@ -776,17 +776,31 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
         assert fetched.obs_intervals is not None
 
         # Simulate a partially-deleted artifact: drop ONLY the ownership part
-        # row (delete_quick -> no cascade, so the ArtifactDetection master, the
-        # SortingSelection, and the IntervalList row all survive -- the old
-        # by-name fetch would still "succeed"). The helper-routed make_fetch
-        # must now raise on the missing ownership parts.
-        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
-        with pytest.raises(ValueError, match="ArtifactRemovedInterval"):
+        # row (delete_quick -> no cascade, so the RecordingArtifactDetection
+        # master, the SortingSelection, and the IntervalList row all survive --
+        # the old by-name fetch would still "succeed"). The helper-routed
+        # make_fetch must now raise on the missing ownership parts.
+        (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
+        with pytest.raises(ValueError, match="RemovedInterval"):
             Sorting().make_fetch(sort_pk)
     finally:
-        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
+        (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         (SortingSelection & sort_pk).super_delete(warn=False)
-        (ArtifactDetection & art_pk).super_delete(warn=False)
+        # Drop the ArtifactDetectionOutput merge master (force_masters) before
+        # its RecordingArtifactDetection part-parent, else the detection delete
+        # cascades to the merge part before its master.
+        try:
+            _art_mid = ArtifactDetectionOutput.get_merge_id(art_pk)
+            (ArtifactDetectionOutput & {"merge_id": _art_mid}).super_delete(
+                warn=False, force_masters=True
+            )
+        except KeyError:
+            pass
+        (RecordingArtifactDetection & art_pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
@@ -798,9 +812,9 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
     per-nwb dict and raises clearly when the key is absent (rather than feeding
     a dict to the mask)."""
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -818,14 +832,14 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
         SortingSelection.RecordingSource & {"recording_id": recording_id}
     ).fetch("sorting_id"):
         (SortingSelection & {"sorting_id": sid}).super_delete(warn=False)
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": recording_id,
             "artifact_detection_params_name": "none",
         }
     )
-    if not (ArtifactDetection & art_pk):
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": recording_id,
@@ -847,6 +861,20 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
         with pytest.raises(ValueError, match="not found among"):
             Sorting().make_fetch(sort_pk)
     finally:
-        (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
+        (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         (SortingSelection & sort_pk).super_delete(warn=False)
-        (ArtifactDetection & art_pk).super_delete(warn=False)
+        # Drop the ArtifactDetectionOutput merge master (force_masters) before
+        # its RecordingArtifactDetection part-parent, else the detection delete
+        # cascades to the merge part before its master.
+        try:
+            _art_mid = ArtifactDetectionOutput.get_merge_id(art_pk)
+            (ArtifactDetectionOutput & {"merge_id": _art_mid}).super_delete(
+                warn=False, force_masters=True
+            )
+        except KeyError:
+            pass
+        (RecordingArtifactDetection & art_pk).super_delete(warn=False)

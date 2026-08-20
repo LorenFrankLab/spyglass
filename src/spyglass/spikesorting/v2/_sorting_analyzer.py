@@ -505,7 +505,7 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         # Route the artifact mask through the ownership-validated helper -- the
         # same one Sorting.make_fetch uses -- NOT a direct IntervalList-by-name
         # fetch. The direct fetch would accept a partially-deleted artifact (no
-        # ArtifactRemovedInterval part rows owning the IntervalList) or a
+        # RemovedInterval part rows owning the IntervalList) or a
         # hand-inserted same-name IntervalList that populate rejects, so a
         # rebuilt analyzer would diverge from what Sorting.make wrote.
         from spyglass.spikesorting.v2._artifact_intervals import (

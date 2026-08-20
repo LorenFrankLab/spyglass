@@ -191,9 +191,9 @@ def test_v2_artifacts_not_world_writable(populated_sorting):
 
     # SortingSelection is source-polymorphic: recording_id lives on the
     # RecordingSource part, not the master.
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     analysis_file_name = (Recording & {"recording_id": recording_id}).fetch1(
         "analysis_file_name"
     )

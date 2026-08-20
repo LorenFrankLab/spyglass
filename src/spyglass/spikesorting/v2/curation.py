@@ -2243,9 +2243,27 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     - SortingSelection.ArtifactDetectionSource.proj()
                 )
             else:
+                # ``ArtifactDetectionSource`` now stores the
+                # ``artifact_detection_merge_id`` (the ArtifactDetectionOutput
+                # merge PK), NOT the natural ``artifact_detection_id`` -- a dict
+                # restriction with the natural id would be a dropped (unknown)
+                # key that matches EVERY artifact-backed sort. Resolve the id to
+                # its merge id and restrict on the real column. An id that no
+                # sort registered yields ``None`` -> the non-nullable merge-id
+                # column matches nothing -> the correct empty result.
+                from spyglass.spikesorting.v2.artifact_output import (
+                    ArtifactDetectionOutput,
+                )
+
+                try:
+                    art_merge_id = ArtifactDetectionOutput.get_merge_id(
+                        {"artifact_detection_id": plan.artifact_detection_id}
+                    )
+                except KeyError:
+                    art_merge_id = None
                 artifact_detection_source = (
                     SortingSelection.ArtifactDetectionSource
-                    & {"artifact_detection_id": plan.artifact_detection_id}
+                    & {"artifact_detection_merge_id": art_merge_id}
                 )
                 sort_master = sort_master & artifact_detection_source.proj()
 

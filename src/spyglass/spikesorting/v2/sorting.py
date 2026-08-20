@@ -69,7 +69,9 @@ from spyglass.spikesorting.v2._units_nwb import (
     recording_timestamps,
     write_sorting_units_nwb,
 )
-from spyglass.spikesorting.v2.artifact import ArtifactDetection  # noqa: F401
+from spyglass.spikesorting.v2.artifact_output import (
+    ArtifactDetectionOutput,
+)
 from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
@@ -765,7 +767,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         definition = """
         -> master
         ---
-        -> ArtifactDetection
+        -> ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
         """
 
     @classmethod
@@ -848,6 +850,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
             _is_duplicate_key_error,
+            _is_fk_violation,
         )
 
         _ensure_lookup_row_exists(
@@ -865,48 +868,132 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 artifact_detection_id=plan.artifact_detection_id,
             )
 
-        try:
-            with transaction_or_noop(cls.connection):
-                # allow_direct_insert: this helper IS the validation boundary.
-                cls.insert1(plan.master_row, allow_direct_insert=True)
-                source_part.insert1(source_row)
-                if plan.artifact_source_row is not None:
-                    cls.ArtifactDetectionSource.insert1(
-                        plan.artifact_source_row
+        # Pre-check the recording source exists so the most common mistake --
+        # selecting a sort before the recording is populated -- gives an
+        # actionable "populate first" message. The master no longer FKs the
+        # recording (the FK lives on the source part), so a missing recording
+        # would otherwise surface only as a source-part FK violation classified
+        # as a schema-bypass, which mis-frames a routine populate-first error.
+        if plan.source_kind == "recording":
+            if not (Recording & plan.source_restriction):
+                raise ValueError(
+                    "SortingSelection.insert_selection: recording_id "
+                    f"{plan.source_restriction['recording_id']} is not in "
+                    "Recording. Populate the Recording (e.g. via "
+                    "run_v2_pipeline or Recording.populate) before selecting a "
+                    "sort on it."
+                )
+        elif not (ConcatenatedRecording & plan.source_restriction):
+            raise ValueError(
+                "SortingSelection.insert_selection: concat_recording_id "
+                f"{plan.source_restriction['concat_recording_id']} is not in "
+                "ConcatenatedRecording. Populate the ConcatenatedRecording "
+                "before selecting a sort on it."
+            )
+
+        # Resolve the artifact merge id BEFORE opening the sorting transaction.
+        # A materialized detection registers itself into ArtifactDetectionOutput
+        # (producer-owned, in RecordingArtifactDetection/SharedGroupArtifactDetection
+        # make_insert), so the common path is a pure lookup. The lazy fallback
+        # (register-if-absent) covers a detection materialized out-of-band; it
+        # runs OUTSIDE the sorting transaction, so its own merge-master
+        # concurrency never strands sorting rows -- and the sorting transaction
+        # then contains NO merge insert, so a deterministic-id duplicate collides
+        # on the master insert (the transaction's first statement) with nothing
+        # written to roll back. Hence a single try + refetch, no retry loop.
+        art_merge_id = None
+        if plan.artifact_detection_id is not None:
+            art_key = {"artifact_detection_id": plan.artifact_detection_id}
+            try:
+                art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
+            except KeyError:
+                try:
+                    ArtifactDetectionOutput.insert_detection(art_key)
+                except KeyError as key_exc:
+                    raise SchemaBypassError(
+                        "SortingSelection: artifact_detection_id "
+                        f"{plan.artifact_detection_id} is not materialized in "
+                        "the split detection tables (or was concurrently "
+                        "deleted). Populate the artifact detection before "
+                        "linking it to a sort."
+                    ) from key_exc
+                art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
+
+        # Hold the artifact detection's advisory lock -- the same one
+        # ``_ArtifactDetectionMixin.delete`` takes -- across the transaction that
+        # links it, so a concurrent delete of that detection cannot cascade to
+        # this sort between our commit and its referrer check: it blocks until we
+        # commit, then sees us as a referrer and refuses. FAIL-CLOSED: a lock we
+        # cannot take within the lifecycle timeout raises AdvisoryLockError and
+        # aborts the selection rather than linking it unserialized; no lock for
+        # an artifact-free sort.
+        from contextlib import ExitStack
+
+        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
+
+        with ExitStack() as art_lock:
+            if art_merge_id is not None:
+                art_lock.enter_context(
+                    required_advisory_lock(
+                        ArtifactDetectionOutput,
+                        {"artifact_detection_id": plan.artifact_detection_id},
                     )
-        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
-            if not _is_duplicate_key_error(exc):
+                )
+            try:
+                with transaction_or_noop(cls.connection):
+                    # allow_direct_insert: this helper IS the validation
+                    # boundary.
+                    cls.insert1(plan.master_row, allow_direct_insert=True)
+                    source_part.insert1(source_row)
+                    if art_merge_id is not None:
+                        cls.ArtifactDetectionSource.insert1(
+                            {
+                                "sorting_id": plan.master_row["sorting_id"],
+                                "artifact_detection_merge_id": art_merge_id,
+                            }
+                        )
+                return {k: plan.master_row[k] for k in cls.primary_key}
+            except Exception as exc:  # noqa: BLE001 -- classified below
+                # Duplicate PK (1062 / DuplicateError) is the recoverable race:
+                # the deterministic sorting_id collides on the master insert (the
+                # first statement, before any part is written), so refetch and
+                # return the winner. Checked FIRST so a defensive
+                # untranslated-1062 is not mis-read as an FK violation.
+                if _is_duplicate_key_error(exc):
+                    existing = cls._find_existing_pk(
+                        plan.master_restriction,
+                        plan.source_restriction,
+                        plan.artifact_detection_id,
+                        plan.sorting_id,
+                        source_part,
+                    )
+                    if existing is not None:
+                        return existing
+                    raise SchemaBypassError(
+                        f"SortingSelection master {plan.sorting_id} exists but "
+                        "its source/artifact parts do not match this selection: "
+                        "the master was inserted without insert_selection (a "
+                        "raw-insert orphan). Use insert_selection(), or drop the "
+                        "orphan master."
+                    ) from exc
+                # FK-violation catch is a TYPE check, NOT an errno test:
+                # translate_query_error strips the errno, so args[0]==1452 never
+                # matches. The reachable no-referenced-row case is the recording
+                # source part FK (-> Recording / ConcatenatedRecording) for an
+                # unpopulated recording -- the artifact merge id was already
+                # resolved above -- or a concurrent delete of a referenced row.
+                if _is_fk_violation(exc):
+                    raise SchemaBypassError(
+                        "SortingSelection: an input foreign key is unsatisfied "
+                        f"for source {plan.source_restriction} / "
+                        f"artifact_detection_id={plan.artifact_detection_id} -- "
+                        "the referenced Recording / ConcatenatedRecording or "
+                        "ArtifactDetectionOutput row is missing (a raw insert "
+                        "bypassing insert_selection, or a concurrent delete "
+                        "mid-insert). Populate the input, or retry if a "
+                        "transient race."
+                    ) from exc
                 raise
-            # Lost a concurrent race on the same deterministic sorting_id;
-            # refetch and return the winner's master+source row.
-            # (Top-level recovery only -- see transaction_or_noop.)
-            logger.debug(
-                "SortingSelection.insert_selection: lost deterministic-id "
-                "race on %s; returning the existing row.",
-                plan.sorting_id,
-            )
-            existing = cls._find_existing_pk(
-                plan.master_restriction,
-                plan.source_restriction,
-                plan.artifact_detection_id,
-                plan.sorting_id,
-                source_part,
-            )
-            if existing is not None:
-                return existing
-            # The deterministic master exists (that is the duplicate key)
-            # but its recording/artifact-detection source parts are missing or
-            # do not match the requested selection -- a raw-insert orphan. Surface
-            # a clear schema-bypass error instead of the opaque duplicate.
-            raise SchemaBypassError(
-                f"SortingSelection master {plan.sorting_id} exists but its "
-                "recording/artifact-detection source parts are missing or do not match "
-                "the requested selection: the master was inserted without "
-                "insert_selection (raw-insert orphan). Use insert_selection() "
-                "to create master+source atomically, or drop the orphan "
-                "master."
-            ) from exc
-        return {k: plan.master_row[k] for k in cls.primary_key}
 
     @classmethod
     def _find_existing_pk(
@@ -990,27 +1077,27 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             return
 
         from spyglass.spikesorting.v2.artifact import (
-            ArtifactDetectionSelection,
+            RecordingArtifactDetection,
+            RecordingArtifactSelection,
             SharedArtifactGroup,
+            SharedGroupArtifactDetection,
+            SharedGroupArtifactSelection,
         )
 
         artifact_detection_key = {
             "artifact_detection_id": artifact_detection_id
         }
-        if not (ArtifactDetection & artifact_detection_key):
-            raise ValueError(
-                "SortingSelection.insert_selection: artifact_detection_id "
-                f"{artifact_detection_id!r} is not in ArtifactDetection. Populate "
-                "ArtifactDetection before linking an artifact-detection pass "
-                "to a sort."
-            )
-
-        source = ArtifactDetectionSelection.resolve_source(
-            artifact_detection_key
-        )
         target_recording_id = str(recording_id)
-        if source.kind == "recording":
-            artifact_recording_id = str(source.key["recording_id"])
+        # Route by which split result table content-addresses the id (it lives
+        # in exactly one). Require the detection POPULATED: a detection must be
+        # materialized before it can be linked (it registers itself into
+        # ArtifactDetectionOutput at materialization).
+        if RecordingArtifactDetection & artifact_detection_key:
+            artifact_recording_id = str(
+                (RecordingArtifactSelection & artifact_detection_key).fetch1(
+                    "recording_id"
+                )
+            )
             if artifact_recording_id != target_recording_id:
                 raise ValueError(
                     "SortingSelection.insert_selection: artifact_detection_id "
@@ -1020,8 +1107,10 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 )
             return
 
-        if source.kind == "shared_artifact_group":
-            group_name = source.key["shared_artifact_group_name"]
+        if SharedGroupArtifactDetection & artifact_detection_key:
+            group_name = (
+                SharedGroupArtifactSelection & artifact_detection_key
+            ).fetch1("shared_artifact_group_name")
             if not (
                 SharedArtifactGroup.Member
                 & {
@@ -1039,18 +1128,21 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         raise ValueError(
             "SortingSelection.insert_selection: artifact_detection_id "
-            f"{artifact_detection_id!r} has unsupported source kind {source.kind!r}."
+            f"{artifact_detection_id!r} is not in RecordingArtifactDetection or "
+            "SharedGroupArtifactDetection. Populate the artifact detection "
+            "before linking an artifact-detection pass to a sort."
         )
 
     @classmethod
     def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
         """Find or delete master rows that have no source-part row.
 
-        See ``ArtifactDetectionSelection.prune_orphaned_selections`` for the full
-        rationale. Same contract: dry-run by default; with
-        ``dry_run=False`` runs cautious_delete on each orphan so the
-        cascade preview shows downstream ``Sorting`` / ``CurationV2`` /
-        ``SpikeSortingOutput.CurationV2`` impact.
+        DataJoint cannot enforce "exactly one recording source per master"
+        across the two XOR source parts, so an upstream cascade-delete from
+        ``Recording`` / ``ConcatenatedRecording`` can leave a master row with no
+        source child. Dry-run by default; with ``dry_run=False`` runs
+        cautious_delete on each orphan so the cascade preview shows downstream
+        ``Sorting`` / ``CurationV2`` / ``SpikeSortingOutput.CurationV2`` impact.
         """
         orphans = find_orphaned_masters(
             cls,
@@ -1106,11 +1198,15 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def resolve_artifact_detection(cls, key: dict):
         """Return the ``artifact_detection_id`` for a selection, or ``None``.
 
-        Reads the optional ``ArtifactDetectionSource`` part row. Returns the
-        ``artifact_detection_id`` when an artifact-detection pass was
-        configured, else ``None`` (no ``ArtifactDetectionSource`` row = no
-        artifact-detection pass). This is the single accessor every reader uses
-        instead of a nullable-FK column lookup.
+        Reads the optional ``ArtifactDetectionSource`` part row -- which stores
+        the ``ArtifactDetectionOutput`` ``artifact_detection_merge_id`` -- and
+        resolves it back to the per-source ``artifact_detection_id`` (the
+        id-of-record folded into ``sorting_id`` and naming the IntervalList).
+        Returns ``None`` (no ``ArtifactDetectionSource`` row) when no
+        artifact-detection pass was configured. This is the single accessor
+        every reader uses instead of a nullable-FK column lookup; its
+        natural-key contract (return the ``artifact_detection_id`` or ``None``)
+        is unchanged by the merge hop.
 
         Raises
         ------
@@ -1122,14 +1218,16 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
         rows = (cls.ArtifactDetectionSource & master_key).fetch(
-            "artifact_detection_id"
+            "artifact_detection_merge_id"
         )
         if len(rows) > 1:
             raise SchemaBypassError(
                 f"SortingSelection {master_key} has {len(rows)} "
                 "ArtifactDetectionSource rows; expected zero or one."
             )
-        return rows[0] if len(rows) == 1 else None
+        if len(rows) == 0:
+            return None
+        return ArtifactDetectionOutput.resolve_artifact_detection_id(rows[0])
 
     @classmethod
     def resolve_source_preprocessing_params_name(cls, key: dict) -> str:
@@ -1315,7 +1413,7 @@ class Sorting(SpyglassMixin, dj.Computed):
                 # direct fetch would accept a partially-deleted artifact (no
                 # ownership part rows) or a hand-inserted same-name IntervalList;
                 # read_artifact_removed_intervals validates the
-                # ArtifactRemovedInterval part rows own the IntervalList and
+                # RemovedInterval part rows own the IntervalList and
                 # raises otherwise. as_dict=True so a shared-group source returns
                 # the per-nwb dict uniformly; select this recording's array (and
                 # raise clearly if absent rather than feeding a dict to the mask).

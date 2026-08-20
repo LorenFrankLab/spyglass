@@ -276,7 +276,7 @@ def test_ux_smoke_idempotent(first_hour):
     Equal run_summary modulo ``stage_seconds`` / ``*_status`` (now ``reused``),
     inserting no duplicate selection rows.
     """
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -285,7 +285,7 @@ def test_ux_smoke_idempotent(first_hour):
 
     counts_before = [
         len(RecordingSelection()),
-        len(ArtifactDetectionSelection()),
+        len(RecordingArtifactSelection()),
         len(SortingSelection()),
     ]
     second_run_summary = run_v2_pipeline(
@@ -293,7 +293,7 @@ def test_ux_smoke_idempotent(first_hour):
     )
     counts_after = [
         len(RecordingSelection()),
-        len(ArtifactDetectionSelection()),
+        len(RecordingArtifactSelection()),
         len(SortingSelection()),
     ]
     assert counts_after == counts_before, "re-run inserted duplicate rows"

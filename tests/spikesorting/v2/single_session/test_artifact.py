@@ -9,121 +9,6 @@ from tests.spikesorting.v2.single_session._helpers import (
     _build_synthetic_rec,
 )
 
-# ---------- ArtifactDetectionSelection source-part pattern -------------------------
-
-
-@pytest.mark.slow
-def test_artifact_detection_selection_inserts_master_and_source_part(
-    populated_recording,
-):
-    """``insert_selection`` writes exactly one master + one source row."""
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-
-    ArtifactDetectionParameters.insert_default()
-    key = {
-        "recording_id": populated_recording["recording_id"],
-        "artifact_detection_params_name": "default",
-    }
-    # Clean any prior selection so we can assert on the count.
-    existing = (
-        ArtifactDetectionSelection.RecordingSource
-        & {"recording_id": populated_recording["recording_id"]}
-    ).fetch("KEY", as_dict=True)
-    for row in existing:
-        (
-            ArtifactDetectionSelection
-            & {"artifact_detection_id": row["artifact_detection_id"]}
-        ).super_delete(warn=False)
-
-    pk = ArtifactDetectionSelection.insert_selection(key)
-    assert isinstance(pk, dict)
-    assert set(pk.keys()) == {"artifact_detection_id"}
-    assert len(ArtifactDetectionSelection & pk) == 1
-    assert len(ArtifactDetectionSelection.RecordingSource & pk) == 1
-    assert len(ArtifactDetectionSelection.SharedGroupSource & pk) == 0
-
-
-@pytest.mark.slow
-def test_artifact_detection_selection_is_idempotent(populated_recording):
-    """Repeat ``insert_selection`` calls return the same PK; no duplicates."""
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-
-    ArtifactDetectionParameters.insert_default()
-    key = {
-        "recording_id": populated_recording["recording_id"],
-        "artifact_detection_params_name": "default",
-    }
-    pk1 = ArtifactDetectionSelection.insert_selection(key)
-    pk2 = ArtifactDetectionSelection.insert_selection(key)
-    assert pk1 == pk2
-    assert (
-        len(
-            ArtifactDetectionSelection.RecordingSource
-            & {"recording_id": populated_recording["recording_id"]}
-            & {"artifact_detection_id": pk1["artifact_detection_id"]}
-        )
-        == 1
-    )
-
-
-@pytest.mark.slow
-def test_artifact_detection_selection_rejects_zero_and_two_sources(
-    populated_recording,
-):
-    """``insert_selection`` requires exactly one source key."""
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-
-    ArtifactDetectionParameters.insert_default()
-
-    with pytest.raises(ValueError, match="exactly one source key"):
-        ArtifactDetectionSelection.insert_selection(
-            {"artifact_detection_params_name": "default"}  # no source
-        )
-
-    with pytest.raises(ValueError, match="exactly one source key"):
-        ArtifactDetectionSelection.insert_selection(
-            {
-                "recording_id": populated_recording["recording_id"],
-                "shared_artifact_group_name": "fake",
-                "artifact_detection_params_name": "default",
-            }
-        )
-
-
-@pytest.mark.slow
-def test_artifact_detection_selection_resolve_source_returns_recording_kind(
-    populated_recording,
-):
-    """``resolve_source`` returns kind='recording' for a single-rec selection."""
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-    from spyglass.spikesorting.v2.utils import SourceResolution
-
-    ArtifactDetectionParameters.insert_default()
-    pk = ArtifactDetectionSelection.insert_selection(
-        {
-            "recording_id": populated_recording["recording_id"],
-            "artifact_detection_params_name": "default",
-        }
-    )
-    resolution = ArtifactDetectionSelection.resolve_source(pk)
-    assert isinstance(resolution, SourceResolution)
-    assert resolution.kind == "recording"
-    assert resolution.key == {
-        "recording_id": populated_recording["recording_id"]
-    }
-
 
 @pytest.mark.slow
 def test_shared_artifact_group_insert_validates_inputs(populated_recording):
@@ -409,42 +294,41 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
 def test_artifact_detection_populates_and_writes_interval_list(
     populated_recording,
 ):
-    """``ArtifactDetection.make`` writes one ``IntervalList`` row under
-    ``f"artifact_detection_{artifact_detection_id}"`` and the row is fetchable via
-    ``get_artifact_removed_intervals``."""
+    """``RecordingArtifactDetection.make`` writes one ``IntervalList`` row
+    under ``f"artifact_detection_{artifact_detection_id}"`` and the row is
+    fetchable via ``get_artifact_removed_intervals``."""
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     ArtifactDetectionParameters.insert_default()
     # Clean any prior selection / detection.
     existing = (
-        ArtifactDetectionSelection.RecordingSource
+        RecordingArtifactSelection
         & {"recording_id": populated_recording["recording_id"]}
     ).fetch("KEY", as_dict=True)
     for row in existing:
-        ArtifactDetection & row  # noqa: B018 -- silence linter on unused expr
         (
-            ArtifactDetection
+            RecordingArtifactDetection
             & {"artifact_detection_id": row["artifact_detection_id"]}
         ).delete()
         (
-            ArtifactDetectionSelection
+            RecordingArtifactSelection
             & {"artifact_detection_id": row["artifact_detection_id"]}
         ).super_delete(warn=False)
 
-    pk = ArtifactDetectionSelection.insert_selection(
+    pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(pk, reserve_jobs=False)
-    assert len(ArtifactDetection & pk) == 1
+    RecordingArtifactDetection.populate(pk, reserve_jobs=False)
+    assert len(RecordingArtifactDetection & pk) == 1
 
     nwb_file_name = (RecordingSelection & populated_recording).fetch1(
         "nwb_file_name"
@@ -462,14 +346,16 @@ def test_artifact_detection_populates_and_writes_interval_list(
     assert saved.shape[0] == 1
     assert saved[0][0] < saved[0][-1]
 
-    retrieved = ArtifactDetection().get_artifact_removed_intervals(pk)
+    retrieved = RecordingArtifactDetection().get_artifact_removed_intervals(pk)
     assert (retrieved == saved).all()
 
     # as_dict=True wraps the single-recording array as a one-key dict
     # keyed by nwb_file_name, so source-agnostic callers can avoid
     # branching on the return type (single ndarray vs shared-group dict).
-    retrieved_dict = ArtifactDetection().get_artifact_removed_intervals(
-        pk, as_dict=True
+    retrieved_dict = (
+        RecordingArtifactDetection().get_artifact_removed_intervals(
+            pk, as_dict=True
+        )
     )
     assert isinstance(retrieved_dict, dict)
     assert set(retrieved_dict) == {nwb_file_name}
@@ -480,39 +366,39 @@ def test_artifact_detection_populates_and_writes_interval_list(
 def test_artifact_detection_delete_removes_interval_list_row(
     populated_recording,
 ):
-    """``ArtifactDetection.delete()`` cleans up the matching
+    """``RecordingArtifactDetection.delete()`` cleans up the matching
     ``IntervalList`` row (DataJoint does not cascade through
     ``interval_list_name``-keyed dependencies)."""
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     ArtifactDetectionParameters.insert_default()
     existing = (
-        ArtifactDetectionSelection.RecordingSource
+        RecordingArtifactSelection
         & {"recording_id": populated_recording["recording_id"]}
     ).fetch("KEY", as_dict=True)
     for row in existing:
         (
-            ArtifactDetection
+            RecordingArtifactDetection
             & {"artifact_detection_id": row["artifact_detection_id"]}
         ).delete()
         (
-            ArtifactDetectionSelection
+            RecordingArtifactSelection
             & {"artifact_detection_id": row["artifact_detection_id"]}
         ).super_delete(warn=False)
 
-    pk = ArtifactDetectionSelection.insert_selection(
+    pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(pk, reserve_jobs=False)
 
     nwb_file_name = (RecordingSelection & populated_recording).fetch1(
         "nwb_file_name"
@@ -523,9 +409,9 @@ def test_artifact_detection_delete_removes_interval_list_row(
         "interval_list_name": interval_list_name,
     }
 
-    (ArtifactDetection & pk).delete()
+    (RecordingArtifactDetection & pk).delete()
 
-    assert not (ArtifactDetection & pk)
+    assert not (RecordingArtifactDetection & pk)
     assert not (
         IntervalList
         & {
@@ -533,45 +419,6 @@ def test_artifact_detection_delete_removes_interval_list_row(
             "interval_list_name": interval_list_name,
         }
     )
-
-
-@pytest.mark.slow
-def test_artifact_detection_selection_resolve_source_detects_bypass(
-    populated_recording,
-):
-    """``resolve_source`` raises ``SchemaBypassError`` when a master has
-    zero source part rows (an integrity bug, e.g. from direct dj
-    insert1 bypassing ``insert_selection``)."""
-    import uuid
-
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-    ArtifactDetectionParameters.insert_default()
-    orphan_id = uuid.uuid4()
-    # Insert master with NO source part to simulate bypass. The master
-    # insert guard requires allow_direct_insert=True for this deliberate
-    # raw insert (the bypass the resolve_source check exists to catch).
-    dj_table = ArtifactDetectionSelection()
-    dj_table.insert1(
-        {
-            "artifact_detection_id": orphan_id,
-            "artifact_detection_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
-    try:
-        with pytest.raises(SchemaBypassError, match="0 source part"):
-            ArtifactDetectionSelection.resolve_source(
-                {"artifact_detection_id": orphan_id}
-            )
-    finally:
-        (
-            ArtifactDetectionSelection & {"artifact_detection_id": orphan_id}
-        ).super_delete(warn=False)
 
 
 # ---------- Artifact masking at the signal level -------------------------
@@ -712,7 +559,7 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
 
 
 def test_detect_artifacts_finds_known_transient(dj_conn):
-    """``ArtifactDetection._detect_artifacts`` runs its amplitude-
+    """``RecordingArtifactDetection._detect_artifacts`` runs its amplitude-
     threshold scan body and produces the expected valid-time
     complement of a known synthetic transient.
 
@@ -745,7 +592,9 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     # Build a synthetic 4-channel, 5000-sample recording with a
     # 200 uV transient at frames 1000-1199 across all channels.
@@ -776,7 +625,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
 
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     # half_window_frames = ceil(0.05 ms * 30 kHz / 2 / 1000) = 1.
@@ -834,7 +683,9 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     # Recording with all-zero traces -- nothing can exceed any
     # positive threshold.
@@ -850,7 +701,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
         zscore_threshold=None,
         proportion_above_threshold=0.5,
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (1, 2)
@@ -877,7 +728,9 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     rng = np.random.default_rng(42)
     # 32 channels so the cross-channel z-score on a single-channel
@@ -906,7 +759,7 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (2, 2), (
@@ -949,7 +802,9 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     rng = np.random.default_rng(42)
     n_samples, n_channels = 5000, 32
@@ -974,7 +829,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     def _covered(t):
@@ -1017,7 +872,9 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     n_samples, n_channels = 5000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -1027,7 +884,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
 
     # join_window_ms = 1.0 -> join_window_frames = ceil(1 * 30 / 1) =
     # 30 frames. Gap between A and B is 10 frames, so they merge.
-    merged = ArtifactDetection._detect_artifacts(
+    merged = RecordingArtifactDetection._detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
@@ -1053,7 +910,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     # sliver filter eats the middle interval. The middle sliver is
     # ``(10 frames gap) - 2*half_window_frames(=1) = 8 frames``
     # = ~0.27 ms at 30 kHz. Use 0.0001 s (0.1 ms) to keep it.
-    unmerged = ArtifactDetection._detect_artifacts(
+    unmerged = RecordingArtifactDetection._detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
             detect=True,
@@ -1130,7 +987,9 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     n_samples, n_channels = 5000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -1149,7 +1008,7 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     assert valid_times.shape == (1, 2), (
@@ -1166,46 +1025,38 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
 
 @pytest.mark.slow
 def test_artifact_detection_delete_uses_interval_ownership_part_rows(
-    populated_recording, monkeypatch
+    populated_recording,
 ):
-    """``ArtifactDetection.delete`` cleans via owned IntervalList part rows.
+    """``RecordingArtifactDetection.delete`` cleans via owned part rows.
 
-    Delete cleanup should not reconstruct artifact interval ownership from the
-    source selector or interval naming convention. The generated
-    ``ArtifactRemovedInterval`` rows are the contract. Patching source
-    resolution to fail makes this test a regression pin for that boundary.
+    Delete cleanup should not reconstruct artifact interval ownership from
+    the source selector or interval naming convention. The generated
+    ``RemovedInterval`` rows are the contract.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
 
     ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    part_rows = (ArtifactDetection.ArtifactRemovedInterval & art_pk).fetch(
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True
     )
-    assert part_rows, "ArtifactDetection.populate must insert ownership rows"
+    assert (
+        part_rows
+    ), "RecordingArtifactDetection.populate must insert ownership rows"
 
-    def _unexpected_resolve(cls, key):
-        raise RuntimeError("delete cleanup must not resolve source rows")
-
-    monkeypatch.setattr(
-        ArtifactDetectionSelection,
-        "resolve_source",
-        classmethod(_unexpected_resolve),
-    )
-
-    (ArtifactDetection & art_pk).delete(safemode=False)
-    assert len(ArtifactDetection & art_pk) == 0
+    (RecordingArtifactDetection & art_pk).delete(safemode=False)
+    assert len(RecordingArtifactDetection & art_pk) == 0
     assert len(IntervalList & part_rows) == 0
 
 
@@ -1221,33 +1072,40 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
 
     ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    part_rows = (ArtifactDetection.ArtifactRemovedInterval & art_pk).fetch(
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True
     )
-    assert part_rows, "ArtifactDetection.populate must insert ownership rows"
+    assert (
+        part_rows
+    ), "RecordingArtifactDetection.populate must insert ownership rows"
 
-    (ArtifactDetection.ArtifactRemovedInterval & art_pk).delete_quick()
+    (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
 
     try:
-        with pytest.raises(ValueError, match="no ArtifactRemovedInterval"):
-            (ArtifactDetection & art_pk).delete(safemode=False)
-        assert len(ArtifactDetection & art_pk) == 1
+        with pytest.raises(ValueError, match="no RemovedInterval part rows"):
+            (RecordingArtifactDetection & art_pk).delete(safemode=False)
+        assert len(RecordingArtifactDetection & art_pk) == 1
     finally:
-        if ArtifactDetection & art_pk:
-            (ArtifactDetection & art_pk).super_delete(warn=False)
+        # force_masters: the detection registers itself into the
+        # ArtifactDetectionOutput merge at populate, so a raw super_delete must
+        # force through the merge part to reach the detection master.
+        if RecordingArtifactDetection & art_pk:
+            (RecordingArtifactDetection & art_pk).super_delete(
+                warn=False, force_masters=True
+            )
         (IntervalList & part_rows).delete_quick()
 
 
@@ -1269,7 +1127,9 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
-    from spyglass.spikesorting.v2.artifact import ArtifactDetection
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+    )
 
     n_samples, n_channels = 1000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
@@ -1286,7 +1146,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
         join_window_ms=0.0,
         min_length_s=0.001,  # default 1.0 would wipe synthetic-recording intervals
     )
-    valid_times = ArtifactDetection._detect_artifacts(rec, params)
+    valid_times = RecordingArtifactDetection._detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
     # The artifact runs from frame 990 to the end. The clamp
@@ -1325,10 +1185,10 @@ def test_shared_artifact_group_populate_end_to_end(
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
         SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
     )
     from spyglass.spikesorting.v2.utils import (
         artifact_detection_interval_list_name,
@@ -1347,7 +1207,7 @@ def test_shared_artifact_group_populate_end_to_end(
         [{"recording_id": populated_recording["recording_id"]}],
     )
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = SharedGroupArtifactSelection.insert_selection(
         {
             "shared_artifact_group_name": group_name,
             "artifact_detection_params_name": "none",
@@ -1355,7 +1215,7 @@ def test_shared_artifact_group_populate_end_to_end(
     )
     # ``none`` preset writes a full-window valid interval so the test
     # is amplitude-fixture-independent.
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # Exactly one IntervalList row (one member), keyed by the
     # member's nwb_file_name with the canonical artifact-named
@@ -1373,11 +1233,11 @@ def test_shared_artifact_group_populate_end_to_end(
     ).fetch(as_dict=True)
     assert len(rows) == 1
     assert rows[0]["pipeline"] == "spikesorting_artifact_detection_v2"
-    assert ArtifactDetection.ArtifactRemovedInterval & {
+    assert SharedGroupArtifactDetection.RemovedInterval & {
         "artifact_detection_id": art_pk["artifact_detection_id"],
         "nwb_file_name": nwb_file_name,
         "interval_list_name": interval_name,
-    }, "ArtifactDetection.populate did not insert the IntervalList ownership part row"
+    }, "SharedGroupArtifactDetection.populate did not insert the ownership part row"
 
     # ``get_artifact_removed_intervals`` returns a dict keyed by
     # member nwb_file_name for shared-group sources. Today single
@@ -1385,8 +1245,8 @@ def test_shared_artifact_group_populate_end_to_end(
     # the IntervalList row's valid_times.
     import numpy as np
 
-    shared_intervals = ArtifactDetection().get_artifact_removed_intervals(
-        art_pk
+    shared_intervals = (
+        SharedGroupArtifactDetection().get_artifact_removed_intervals(art_pk)
     )
     assert isinstance(shared_intervals, dict), (
         f"get_artifact_removed_intervals returned {type(shared_intervals)}; "
@@ -1397,10 +1257,10 @@ def test_shared_artifact_group_populate_end_to_end(
         shared_intervals[nwb_file_name], rows[0]["valid_times"]
     )
 
-    # ``ArtifactDetection.delete()`` cleans up the matching
+    # ``SharedGroupArtifactDetection.delete()`` cleans up the matching
     # IntervalList rows for ALL member nwb_file_names, not just
     # the recording-source case.
-    (ArtifactDetection & art_pk).delete(safemode=False)
+    (SharedGroupArtifactDetection & art_pk).delete(safemode=False)
     remaining = (
         IntervalList
         & {
@@ -1409,7 +1269,7 @@ def test_shared_artifact_group_populate_end_to_end(
         }
     ).fetch(as_dict=True)
     assert len(remaining) == 0, (
-        "ArtifactDetection.delete() left an orphan IntervalList "
+        "SharedGroupArtifactDetection.delete() left an orphan IntervalList "
         "row for a shared-group artifact; the delete-cleanup "
         "branch for shared sources is broken."
     )
@@ -1440,50 +1300,12 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
     validated = ArtifactDetectionParamsSchema(
         detect=True, amplitude_threshold_uv=500.0
     )
-    out = artifact_mod.ArtifactDetection._detect_artifacts(
+    out = artifact_mod.RecordingArtifactDetection._detect_artifacts(
         rec, validated, context=" for artifact_detection_id=abc-123"
     )
     assert out.shape == (1, 2)  # full window returned on zero artifacts
     assert any("abc-123" in m for m in captured), captured
     assert any("amplitude_threshold_uv" in m for m in captured)
-
-
-@pytest.mark.slow
-def test_artifact_read_aborts_on_unexpected_resolve_error(
-    populated_recording, monkeypatch
-):
-    """An unexpected source-resolution error during read propagates.
-
-    Delete cleanup uses ``ArtifactRemovedInterval`` ownership rows and does
-    not resolve the source anymore. Reading still resolves the source to
-    choose the return shape, so unexpected resolver failures should remain
-    visible to the caller.
-    """
-    from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
-    )
-
-    ArtifactDetectionParameters.insert_default()
-    art_pk = ArtifactDetectionSelection.insert_selection(
-        {
-            "recording_id": populated_recording["recording_id"],
-            "artifact_detection_params_name": "default",
-        }
-    )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
-    assert len(ArtifactDetection & art_pk) == 1
-
-    def _boom(cls, key):
-        raise RuntimeError("boom-unexpected-resolve")
-
-    monkeypatch.setattr(
-        ArtifactDetectionSelection, "resolve_source", classmethod(_boom)
-    )
-    with pytest.raises(RuntimeError, match="boom-unexpected-resolve"):
-        ArtifactDetection().get_artifact_removed_intervals(art_pk)
-    assert len(ArtifactDetection & art_pk) == 1
 
 
 @pytest.mark.slow
@@ -1516,10 +1338,10 @@ def test_shared_artifact_group_multi_member_union(
         ArtifactDetectionParamsSchema,
     )
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
         SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -1614,21 +1436,20 @@ def test_shared_artifact_group_multi_member_union(
     group_name = "v2_multi_member_union_group"
 
     def _clear_shared_group():
-        # Master-first cleanup: drop any ArtifactDetection +
-        # ArtifactDetectionSelection whose source part references this group BEFORE
-        # the group itself. An interrupted prior run can leave a
-        # SharedGroupSource part whose master must go first;
-        # deleting the group ahead of it would orphan/block on that part.
+        # Master-first cleanup: drop any SharedGroupArtifactDetection +
+        # SharedGroupArtifactSelection referencing this group BEFORE the group
+        # itself, so deleting the group does not block on the selection's
+        # SharedArtifactGroup FK left by an interrupted prior run.
         stale_art_ids = (
-            ArtifactDetectionSelection.SharedGroupSource
+            SharedGroupArtifactSelection
             & {"shared_artifact_group_name": group_name}
         ).fetch("artifact_detection_id")
         for aid in stale_art_ids:
-            (ArtifactDetection & {"artifact_detection_id": aid}).delete(
-                safemode=False
-            )
             (
-                ArtifactDetectionSelection & {"artifact_detection_id": aid}
+                SharedGroupArtifactDetection & {"artifact_detection_id": aid}
+            ).delete(safemode=False)
+            (
+                SharedGroupArtifactSelection & {"artifact_detection_id": aid}
             ).super_delete(warn=False)
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
@@ -1648,13 +1469,13 @@ def test_shared_artifact_group_multi_member_union(
             == 2
         )
 
-        art_pk = ArtifactDetectionSelection.insert_selection(
+        art_pk = SharedGroupArtifactSelection.insert_selection(
             {
                 "shared_artifact_group_name": group_name,
                 "artifact_detection_params_name": params_name,
             }
         )
-        ArtifactDetection.populate(art_pk, reserve_jobs=False)
+        SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
 
         interval_name = artifact_detection_interval_list_name(
             art_pk["artifact_detection_id"]
@@ -1694,7 +1515,9 @@ def test_shared_artifact_group_multi_member_union(
 
         # Every member resolves to the SAME artifact-removed times (single
         # shared row; the per-member dict has one session entry equal to it).
-        shared = ArtifactDetection().get_artifact_removed_intervals(art_pk)
+        shared = SharedGroupArtifactDetection().get_artifact_removed_intervals(
+            art_pk
+        )
         assert isinstance(shared, dict) and nwb_file_name in shared
         np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
     finally:

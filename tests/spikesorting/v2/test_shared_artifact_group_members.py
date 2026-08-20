@@ -77,11 +77,11 @@ def test_validate_shared_group_members_rejects_differing_sampling_frequency():
 # --------------------------------------------------------------------------- #
 # Compute-boundary re-assertion of the channel-aggregation invariants.
 #
-# ``ArtifactDetection.make_compute`` aggregates the shared-group members with
-# ``si.aggregate_channels``; a direct insert of a SharedGroupSource part can
-# bypass ``insert_group``'s check, so the same invariants (one session, fs,
-# n_samples, dtype, timestamp vector) are re-asserted over the loaded
-# recordings and raise ``SchemaBypassError`` on a corrupted member set.
+# ``SharedGroupArtifactDetection.make_compute`` aggregates the shared-group
+# members with ``si.aggregate_channels``; a direct ``SharedArtifactGroup.Member``
+# insert can bypass ``insert_group``'s check, so the same invariants (one
+# session, fs, n_samples, dtype, timestamp vector) are re-asserted over the
+# loaded recordings and raise ``SchemaBypassError`` on a corrupted member set.
 # --------------------------------------------------------------------------- #
 
 

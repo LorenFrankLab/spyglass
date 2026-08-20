@@ -153,7 +153,7 @@ def test_first_run_computed_second_reused(first_run):
 @pytest.mark.slow
 def test_idempotent_run_summary_modulo_timing(first_run):
     """Two identical runs are equal modulo timing/status, inserting no dups."""
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -161,13 +161,13 @@ def test_idempotent_run_summary_modulo_timing(first_run):
 
     counts_before = [
         len(RecordingSelection()),
-        len(ArtifactDetectionSelection()),
+        len(RecordingArtifactSelection()),
         len(SortingSelection()),
     ]
     second_run_summary = run_v2_pipeline(**inputs)
     counts_after = [
         len(RecordingSelection()),
-        len(ArtifactDetectionSelection()),
+        len(RecordingArtifactSelection()),
         len(SortingSelection()),
     ]
     assert counts_after == counts_before, "re-run inserted duplicate rows"

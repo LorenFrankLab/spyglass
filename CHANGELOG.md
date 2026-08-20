@@ -56,6 +56,22 @@ DLCProject().alter()
 Importing `spyglass.spikesorting.v2` registers its schemas against whatever
 database host `dj.config` points at (previously restricted to `localhost`).
 
+#### Spike Sorting v2: source-specific artifact tables behind an ArtifactDetectionOutput merge
+
+v2's artifact-detection stage uses source-specific selection/detection tables
+(`RecordingArtifact*` / `SharedGroupArtifact*`) behind an
+`ArtifactDetectionOutput` merge; a sort links its artifact pass through a
+`SortingSelection.ArtifactDetectionSource` part carrying
+`artifact_detection_merge_id`.
+
+- **Coordinated artifact lifecycle.** A detection registers itself into
+  `ArtifactDetectionOutput` at materialization; deleting a detection that a sort
+  references is refused (use `cascade_delete` to remove those sorts too), and
+  the delete-vs-select race is serialized by a fail-closed advisory lock.
+- **Merge integrity.** `ArtifactDetectionOutput.get_merge_id` fails closed on a
+  corrupt (multi-part) registration, and `audit_source_part_integrity()` flags
+  any master with zero or multiple source parts.
+
 #### Spike Sorting v2: pipeline orchestrator, preset tuning, FigPack curation, and canonical notebooks
 
 Adds the full pipeline-orchestrator, preset-tuning, and FigPack-curation surface

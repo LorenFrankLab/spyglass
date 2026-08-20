@@ -666,9 +666,9 @@ def preflight_v2_pipeline(
         sorting_identity_payload,
     )
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -1005,7 +1005,7 @@ def preflight_v2_pipeline(
         # A None artifact name means no artifact-detection pass: the sort's
         # identity carries artifact_detection_id=None (matching
         # build_sorting_selection_plan), so the expected sorting_id derives from
-        # None and there is no ArtifactDetectionSelection PK to expect.
+        # None and there is no RecordingArtifactSelection PK to expect.
         if bundle.artifact_detection_params_name is None:
             artifact_detection_id = None
         else:
@@ -1046,11 +1046,11 @@ def preflight_v2_pipeline(
                 else {
                     "id": artifact_detection_id,
                     "exists": bool(
-                        ArtifactDetectionSelection
+                        RecordingArtifactSelection
                         & {"artifact_detection_id": artifact_detection_id}
                     ),
                     "computed_exists": bool(
-                        ArtifactDetection
+                        RecordingArtifactDetection
                         & {"artifact_detection_id": artifact_detection_id}
                     ),
                 }

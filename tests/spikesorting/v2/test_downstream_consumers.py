@@ -256,9 +256,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
         DecodingParameters.contents, skip_duplicates=True
     )
 
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
         "nwb_file_name"
     )
@@ -374,9 +374,9 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     _, merge_id = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
 
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
         "nwb_file_name"
     )
@@ -520,9 +520,9 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
         skip_duplicates=True,
     )
 
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
     nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
         "nwb_file_name"
     )
@@ -637,9 +637,9 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
         },
         skip_duplicates=True,
     )
-    recording_id = (SortingSelection.RecordingSource & sorting_key).fetch1(
+    recording_id = SortingSelection.resolve_source(sorting_key).key[
         "recording_id"
-    )
+    ]
     nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
         "nwb_file_name"
     )

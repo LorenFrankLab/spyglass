@@ -28,9 +28,7 @@ def _recording_key(sort_pk: dict) -> dict:
     """Derive the ``Recording`` PK from a ``populated_sorting`` ``sort_pk``."""
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    recording_id = (SortingSelection.RecordingSource & sort_pk).fetch1(
-        "recording_id"
-    )
+    recording_id = SortingSelection.resolve_source(sort_pk).key["recording_id"]
     return {"recording_id": recording_id}
 
 

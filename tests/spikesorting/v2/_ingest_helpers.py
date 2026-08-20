@@ -150,18 +150,20 @@ def configure_v2_run_inputs(
 def _clean_session_v2(session_key):
     """Cascade-aware cleanup of every v2 row for a session.
 
-    The v2 source-polymorphic source-part pattern leaves
-    ``ArtifactDetectionSelection`` and ``SortingSelection`` MASTERS with no
-    direct FK to upstream tables (only their ``RecordingSource`` PARTS
-    carry the FK). DataJoint's cascade can't traverse that gap: a
-    ``super_delete(SortGroupV2 & session_key)`` raises ``Attempt to
-    delete part table ... before deleting from its master`` once the
-    cascade reaches ``ArtifactDetectionSelection.RecordingSource`` because
-    DataJoint refuses to drop a part without its master.
+    The recording source is a ``SortingSelection`` XOR source part
+    (``RecordingSource`` / ``ConcatenatedRecordingSource``) FK'ing the upstream
+    ``Recording`` / ``ConcatenatedRecording``, and the artifact pass is an
+    ``ArtifactDetectionSource`` part FK'ing the ``ArtifactDetectionOutput``
+    merge, whose parts FK the split-detection rows. DataJoint's cascade can't
+    traverse the merge master cleanly, and a plain
+    ``super_delete(SortGroupV2 & session_key)`` raises ``Attempt to delete part
+    table ... before deleting from its master`` once the cascade reaches a
+    ``SortingSelection`` source part (or a merge part) because DataJoint refuses
+    to drop a part without its master.
 
     Tests historically worked around this with an order-of-declaration
-    convention (SortGroup tests run before tests that populate
-    ArtifactDetectionSelection, so the cascade chain stays empty). Anything that
+    convention (SortGroup tests run before tests that populate the artifact /
+    sorting selections, so the cascade chain stays empty). Anything that
     runs the suite in a different order (``-k``, parallel sharding,
     rerun-failed) tripped the same DataJoint error. This helper makes
     the cleanup order-independent by walking the dependency graph
@@ -176,9 +178,12 @@ def _clean_session_v2(session_key):
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
         SharedArtifactGroup,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -188,10 +193,10 @@ def _clean_session_v2(session_key):
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    # Step 1: drop any merge-master rows whose CurationV2 part points
-    # to a sorting derived from this session. The merge insert wraps
-    # the part FK in a transaction with the master, so cleanup must
-    # take the master first to satisfy the master-before-part rule.
+    # Step 1: drop any SpikeSortingOutput / CurationV2 / Sorting rows for a
+    # sorting derived from this session, then the SortingSelection master. The
+    # recording source is a ``RecordingSource`` XOR part FK'ing Recording, so the
+    # master must go before Recording to satisfy the master-before-part rule.
     rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
     if rec_keys:
         sorting_keys = (
@@ -213,14 +218,29 @@ def _clean_session_v2(session_key):
             # delete the orphan RecordingSource part and fails.
             (SortingSelection & sorting_keys).super_delete(warn=False)
 
-        # Step 3: same pattern for ArtifactDetection / ArtifactDetectionSelection.
-        artifact_keys = (
-            ArtifactDetectionSelection.RecordingSource
+        # Step 3: the split RecordingArtifactSelection/Detection + the
+        # ArtifactDetectionOutput merge. Drop the merge MASTER first
+        # (force_masters) so the later Recording cascade never hits the merge's
+        # RecordingSource part before its master; SortingSelection's
+        # ArtifactDetectionSource part (which FKs the merge) is already gone
+        # with the SortingSelection masters above.
+        split_artifact_keys = (
+            RecordingArtifactSelection
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
         ).fetch("KEY", as_dict=True)
-        if artifact_keys:
-            (ArtifactDetection & artifact_keys).super_delete(warn=False)
-            (ArtifactDetectionSelection & artifact_keys).super_delete(
+        if split_artifact_keys:
+            art_merge_ids = (
+                ArtifactDetectionOutput.RecordingSource & split_artifact_keys
+            ).fetch("merge_id")
+            if len(art_merge_ids):
+                (
+                    ArtifactDetectionOutput
+                    & [{"merge_id": m} for m in art_merge_ids]
+                ).super_delete(warn=False, force_masters=True)
+            (RecordingArtifactDetection & split_artifact_keys).super_delete(
+                warn=False
+            )
+            (RecordingArtifactSelection & split_artifact_keys).super_delete(
                 warn=False
             )
 
@@ -235,12 +255,11 @@ def _clean_session_v2(session_key):
         "KEY", as_dict=True
     )
     if shared_groups:
-        # force_masters=True: the cascade reaches the source-polymorphic
-        # ``ArtifactDetectionSelection.SharedGroupSource`` part, whose master
-        # is ``ArtifactDetectionSelection`` (not ``SharedArtifactGroup``); without it
-        # DataJoint raises "delete part before master". Mirrors the other
-        # master-before-part super_deletes here (the Recording/RecordingSource
-        # analog).
+        # force_masters=True: the cascade can reach a
+        # ``SharedGroupArtifactSelection`` (which FKs ``SharedArtifactGroup``)
+        # or another part whose master is not ``SharedArtifactGroup``; without
+        # it DataJoint raises "delete part before master". Mirrors the other
+        # master-before-part super_deletes here.
         (SharedArtifactGroup & shared_groups).super_delete(
             warn=False, force_masters=True
         )
@@ -325,6 +344,8 @@ def clean_session_groups_for_owner(owner: str) -> None:
                 )
             (CurationV2 & sort_keys).super_delete(warn=False)
             (Sorting & sort_keys).super_delete(warn=False)
+            # Drop SortingSelection masters BEFORE ConcatenatedRecording so its
+            # cascade never hits the orphan ConcatenatedRecordingSource part.
             (SortingSelection & sort_keys).super_delete(warn=False)
         (ConcatenatedRecording & concat_id_restr).super_delete(warn=False)
         (ConcatenatedRecordingSelection & owner_key).super_delete(warn=False)
@@ -604,14 +625,16 @@ def write_processed_recording_nwb(
 
 
 def _plant_concat_sorting_selection(sid):
-    """Land a minimal concat-source ``SortingSelection`` (no ``RecordingSource``).
+    """Land a minimal concat-source ``SortingSelection`` via FK-checks-off.
 
-    ``insert_selection`` now accepts a concat source, but it requires a real,
-    populated ``ConcatenatedRecording`` (the part's FK target). This bypass
-    plants a ``ConcatenatedRecordingSource`` part pointing at a fake
-    ``concat_recording_id`` via FK-checks-off, so source-dispatch tests that
+    ``insert_selection`` accepts a concat source, but it requires a real,
+    populated ``ConcatenatedRecording`` (the ``ConcatenatedRecordingSource``
+    part's FK target). This bypass plants a ``SortingSelection`` master + a
+    ``ConcatenatedRecordingSource`` part pointing at a fake
+    ``concat_recording_id`` via FK-checks-off -- so source-dispatch tests that
     don't need a materialized concat recording (e.g. the concat brain-region
-    raise, the key_source membership check) stay cheap. The caller cleans up
+    raise, the key_source membership check) stay cheap and ``resolve_source``
+    still reports a concat source. The caller cleans up
     ``SortingSelection & {sid}``.
     """
     import uuid
@@ -624,20 +647,24 @@ def _plant_concat_sorting_selection(sid):
     )
 
     SorterParameters.insert_default()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
-            allow_direct_insert=True,
+        # dj.Table.insert bypasses the SelectionMasterInsertGuard insert
+        # override so a fake master + source part can be planted directly.
+        dj.Table.insert(
+            SortingSelection(),
+            [
+                {
+                    "sorting_id": sid,
+                    "sorter": "clusterless_thresholder",
+                    "sorter_params_name": "default",
+                }
+            ],
+        )
+        dj.Table.insert(
+            SortingSelection.ConcatenatedRecordingSource(),
+            [{"sorting_id": sid, "concat_recording_id": uuid.uuid4()}],
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")

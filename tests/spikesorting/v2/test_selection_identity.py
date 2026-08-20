@@ -325,6 +325,35 @@ def test_is_duplicate_key_error_ignores_unrelated_exception():
     assert not _is_duplicate_key_error(ValueError("unrelated"))
 
 
+def test_is_fk_violation_classifies_datajoint_exceptions():
+    """``_is_fk_violation`` is True for a (FK) IntegrityError and nothing else.
+
+    ``translate_query_error`` maps only errno 1452/1451/1217 to
+    ``IntegrityError`` (all FK-related) and 1062 to the SIBLING
+    ``DuplicateError``, and strips the errno -- so a bare *type* check is the
+    correct predicate, and a duplicate (even a defensively-untranslated
+    errno-1062 ``IntegrityError``, which ``insert_selection`` classifies as a
+    duplicate FIRST) must not be read here as an FK violation.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.utils import _is_fk_violation
+
+    # Any IntegrityError is an FK violation by type (errno stripped, so a
+    # message/args check would be wrong). On an INSERT the only IntegrityError
+    # is the no-referenced-row (1452) case.
+    assert _is_fk_violation(
+        dj.errors.IntegrityError("a foreign key constraint fails")
+    )
+    assert _is_fk_violation(dj.errors.IntegrityError(1452, "no referenced row"))
+    assert _is_fk_violation(dj.errors.IntegrityError())
+    # A duplicate is a SIBLING of IntegrityError, never an FK violation.
+    assert not _is_fk_violation(dj.errors.DuplicateError("Duplicate entry"))
+    # Unrelated exceptions are not FK violations.
+    assert not _is_fk_violation(ValueError("unrelated"))
+    assert not _is_fk_violation(KeyError("x"))
+
+
 def test_bool_not_collapsed_to_int_in_identity():
     """``bool`` must not canonicalize to the equivalent ``int`` (the
     bool-before-int branch ordering in _canonical_scalar is load-bearing)."""
@@ -804,7 +833,12 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
         ),
         (
             "spyglass.spikesorting.v2.artifact",
-            "ArtifactDetectionSelection",
+            "RecordingArtifactSelection",
+            {"artifact_detection_params_name": "none"},
+        ),
+        (
+            "spyglass.spikesorting.v2.artifact",
+            "SharedGroupArtifactSelection",
             {"artifact_detection_params_name": "none"},
         ),
         (
@@ -835,7 +869,7 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
     ],
 )
 def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
-    """All FIVE selection masters reject a no-flag direct insert. The guard
+    """All SIX selection masters reject a no-flag direct insert. The guard
     is a shared mixin, but a per-class regression (a class dropping the mixin
     from its MRO, or a future per-class insert override that forgets to
     forward allow_direct_insert) must surface. The guard raises BEFORE any DB
@@ -852,86 +886,6 @@ def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
     with pytest.raises(dj.errors.DataJointError, match="is not supported"):
         cls.insert1(row)
     assert len(cls & {pk_field: row[pk_field]}) == 0
-
-
-@pytest.mark.slow
-@pytest.mark.integration
-def test_artifact_detection_selection_duplicate_pk_race_refetches(
-    populated_sorting,
-):
-    """ArtifactDetectionSelection duplicate-PK race loser refetches the winner's
-    master+source row (no new row, no error)."""
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
-    key = {"recording_id": rec_id, "artifact_detection_params_name": "none"}
-    pk = ArtifactDetectionSelection.insert_selection(
-        key
-    )  # the populated selection
-
-    with mock.patch.object(
-        ArtifactDetectionSelection, "_find_existing_pk", side_effect=[None, pk]
-    ) as patched:
-        raced = ArtifactDetectionSelection.insert_selection(dict(key))
-
-    assert raced == pk
-    assert patched.call_count == 2
-    assert (
-        len(
-            ArtifactDetectionSelection
-            & {"artifact_detection_id": pk["artifact_detection_id"]}
-        )
-        == 1
-    )
-
-
-@pytest.mark.slow
-@pytest.mark.integration
-def test_artifact_detection_selection_orphan_master_raises_schema_bypass(
-    populated_sorting,
-):
-    """A deterministic ArtifactDetectionSelection master with NO source part (a
-    raw-insert orphan) surfaces a SchemaBypassError on the duplicate-PK
-    refetch, not the opaque duplicate-key error."""
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionSelection
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
-    # "default" params exist (insert_default) but are unused by the fixture,
-    # so this (recording, "default") identity has no real master yet.
-    det_id = deterministic_id(
-        "artifact_detection",
-        {
-            "source_kind": "recording",
-            "artifact_detection_params_name": "default",
-            "recording_id": rec_id,
-        },
-    )
-    ArtifactDetectionSelection.insert1(
-        {
-            "artifact_detection_id": det_id,
-            "artifact_detection_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
-    try:
-        with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
-            ArtifactDetectionSelection.insert_selection(
-                {
-                    "recording_id": rec_id,
-                    "artifact_detection_params_name": "default",
-                }
-            )
-    finally:
-        (ArtifactDetectionSelection & {"artifact_detection_id": det_id}).delete(
-            safemode=False
-        )
 
 
 @pytest.mark.slow
@@ -1022,13 +976,13 @@ def test_sorting_selection_orphan_master_raises_schema_bypass(
 def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
     populated_sorting,
 ):
-    """The shared-group (cross-recording) source branch of
-    ArtifactDetectionSelection.insert_selection also writes the deterministic PK,
-    is idempotent, and does NOT alias the recording-source id for the same
-    params + recording (source_kind disambiguates)."""
+    """``SharedGroupArtifactSelection.insert_selection`` (the cross-recording
+    source branch) writes the deterministic PK, is idempotent, and does NOT
+    alias the recording-source id for the same params + recording (source_kind
+    disambiguates)."""
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetectionSelection,
         SharedArtifactGroup,
+        SharedGroupArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -1055,11 +1009,12 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         "artifact_detection_params_name": "default",
     }
     try:
-        pk = ArtifactDetectionSelection.insert_selection(dict(select_key))
+        pk = SharedGroupArtifactSelection.insert_selection(dict(select_key))
         assert pk == {"artifact_detection_id": expected}
         # Idempotent re-call returns the same id.
         assert (
-            ArtifactDetectionSelection.insert_selection(dict(select_key)) == pk
+            SharedGroupArtifactSelection.insert_selection(dict(select_key))
+            == pk
         )
         # source_kind keeps it distinct from the recording-source id for the
         # same params + the member recording.
@@ -1074,7 +1029,7 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         assert expected != rec_source_id
     finally:
         (
-            ArtifactDetectionSelection & {"artifact_detection_id": expected}
+            SharedGroupArtifactSelection & {"artifact_detection_id": expected}
         ).delete(safemode=False)
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
@@ -1093,7 +1048,8 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
 
 _MASTER_UPDATE1_CASES = [
     ("spyglass.spikesorting.v2.recording", "RecordingSelection"),
-    ("spyglass.spikesorting.v2.artifact", "ArtifactDetectionSelection"),
+    ("spyglass.spikesorting.v2.artifact", "RecordingArtifactSelection"),
+    ("spyglass.spikesorting.v2.artifact", "SharedGroupArtifactSelection"),
     ("spyglass.spikesorting.v2.sorting", "SortingSelection"),
     ("spyglass.spikesorting.v2.unit_matching", "UnitMatchSelection"),
     (

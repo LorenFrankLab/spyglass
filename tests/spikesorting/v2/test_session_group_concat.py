@@ -683,9 +683,19 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
 
     SorterParameters.insert_default()
     sid = uuid.uuid4()
+    art_id = uuid.uuid4()
+    art_merge_id = uuid.uuid4()
+    concat_id = uuid.uuid4()
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
+        from spyglass.spikesorting.v2.artifact import (
+            RecordingArtifactDetection,
+        )
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
+
         SortingSelection.insert1(
             {
                 "sorting_id": sid,
@@ -695,11 +705,26 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
             allow_direct_insert=True,
         )
         SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()}
+            {"sorting_id": sid, "concat_recording_id": concat_id}
         )
-        # The bypass: a concat source must NOT carry an artifact pass.
+        # The bypass: a concat source must NOT carry an artifact pass. The
+        # ArtifactDetectionSource FK is the ArtifactDetectionOutput merge, so
+        # register a (bypass) recording artifact into the merge and point the
+        # part at that merge id -- resolve_artifact_detection then recovers a
+        # non-None artifact_detection_id and the concat re-check fires.
+        RecordingArtifactDetection().insert(
+            [{"artifact_detection_id": art_id}], allow_direct_insert=True
+        )
+        dj.Table.insert(
+            ArtifactDetectionOutput(),
+            [{"merge_id": art_merge_id, "source": "RecordingSource"}],
+        )
+        dj.Table.insert(
+            ArtifactDetectionOutput.RecordingSource(),
+            [{"merge_id": art_merge_id, "artifact_detection_id": art_id}],
+        )
         SortingSelection.ArtifactDetectionSource.insert1(
-            {"sorting_id": sid, "artifact_detection_id": uuid.uuid4()}
+            {"sorting_id": sid, "artifact_detection_merge_id": art_merge_id}
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -710,7 +735,24 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
-            (SortingSelection & {"sorting_id": sid}).super_delete(warn=False)
+            (
+                SortingSelection.ArtifactDetectionSource & {"sorting_id": sid}
+            ).delete_quick()
+            (
+                SortingSelection.ConcatenatedRecordingSource
+                & {"sorting_id": sid}
+            ).delete_quick()
+            (SortingSelection & {"sorting_id": sid}).delete_quick()
+            (
+                ArtifactDetectionOutput.RecordingSource
+                & {"merge_id": art_merge_id}
+            ).delete_quick()
+            (
+                ArtifactDetectionOutput & {"merge_id": art_merge_id}
+            ).delete_quick()
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": art_id}
+            ).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 

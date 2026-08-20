@@ -45,8 +45,8 @@ def test_boundary_spike_round_trip_does_not_raise(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -84,13 +84,13 @@ def test_boundary_spike_round_trip_does_not_raise(
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -200,8 +200,8 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
@@ -258,13 +258,13 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     sort_pk = SortingSelection.insert_selection(
         {
@@ -753,7 +753,7 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     """End-to-end: artifact-removed valid_times never span a gap.
 
     Builds a disjoint Recording (two chunks separated by a wall-clock
-    gap), runs ``ArtifactDetection`` with the ``none`` preset
+    gap), runs ``RecordingArtifactDetection`` with the ``none`` preset
     (detect=False), and asserts the persisted artifact ``IntervalList``
     valid_times split at the gap rather than returning one envelope
     spanning it. Subtracting/returning over a single
@@ -770,9 +770,9 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
+        RecordingArtifactDetection,
         ArtifactDetectionParameters,
-        ArtifactDetectionSelection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -828,15 +828,17 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-    valid_times = ArtifactDetection().get_artifact_removed_intervals(art_pk)
+    valid_times = RecordingArtifactDetection().get_artifact_removed_intervals(
+        art_pk
+    )
 
     assert len(valid_times) >= 2, (
         "disjoint recording must yield >= 2 artifact valid intervals "
@@ -870,8 +872,8 @@ def test_disjoint_multi_gap_readback_and_artifact(
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
-        ArtifactDetection,
-        ArtifactDetectionSelection,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -930,13 +932,13 @@ def test_disjoint_multi_gap_readback_and_artifact(
     )
     Recording.populate(rec_pk, reserve_jobs=False)
 
-    art_pk = ArtifactDetectionSelection.insert_selection(
+    art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
             "artifact_detection_params_name": "none",
         }
     )
-    ArtifactDetection.populate(art_pk, reserve_jobs=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     # Artifact valid_times: detect=False ("none") returns the recorded
     # window(s) split per chunk -> exactly 3 intervals, none spanning a gap.
