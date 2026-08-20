@@ -62,8 +62,8 @@ class SensorData(SpyglassMixin, dj.Imported):
         columns = sensor.time_series["analog"].description.split()
         columns = [col for col in columns if col not in ["time", "timestamps"]]
         n_cols = sensor.time_series["analog"].data.shape[1]
-        if len(columns) != n_cols:
-            raise ValueError(
+        if len(columns) != n_cols:  # pragma: no cover
+            raise ValueError(  # pragma: no cover
                 f"Number of columns in description ({len(columns)}) "
                 f"does not match number of columns in data ({n_cols}). "
                 f"Columns: {sensor.time_series['analog'].description}. "
