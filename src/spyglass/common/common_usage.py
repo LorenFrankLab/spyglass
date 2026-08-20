@@ -635,6 +635,30 @@ class Export(SpyglassMixin, dj.Computed):
             f"{table_count} tables, {file_count} files"
         )
 
+    @staticmethod
+    def protected_update(file, function, **kwargs):
+        """Run a function with error handling and logging.
+
+        Parameters
+        ----------
+        file : str
+            The file to process.
+        function : callable
+            The function to run on the file.
+        **kwargs : dict
+            Keyword arguments to pass to the function.
+        """
+        try:
+            return function(file, **kwargs)
+        except Exception as e:
+            ExportErrorLog().insert1(
+                {
+                    "file": file,
+                    "source": function.__name__,
+                },
+                skip_duplicates=True,
+            )
+
     def prepare_files_for_export(self, key, n_processes=1, **kwargs):
         """Resolve common known errors to make a set of analysis
         files dandi compliant
@@ -653,8 +677,9 @@ class Export(SpyglassMixin, dj.Computed):
                 update_analysis_for_dandi_standard(file, **kwargs)
             return
         with Pool(processes=n_processes) as pool:
-            list(pool.imap_unordered(make_file_obj_id_unique, file_list))
-            update_fn = partial(update_analysis_for_dandi_standard, **kwargs)
+            id_update_fn = partial(self.protected_update, function = make_file_obj_id_unique)
+            list(pool.imap_unordered(id_update_fn, file_list))
+            update_fn = partial(self.protected_update, function = update_analysis_for_dandi_standard, **kwargs)
             list(pool.imap_unordered(update_fn, file_list))
 
     def _make_fileset_ids_unique(self, key, n_processes=1):
