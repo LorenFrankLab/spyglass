@@ -320,20 +320,19 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
 
 
 def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
-    """insert_selection is safe under
-    an ambient transaction.
+    """An artifact-FREE insert_selection is safe under an ambient transaction.
 
-    The producer-owned redesign removes the merge insert from the sorting
-    transaction, so calling insert_selection inside an outer transaction opens no
-    nested transaction and strands no partial rows -- the master, recording
-    source part, and artifact source part all land together.
+    An artifact-free sort takes no advisory lock and touches no merge, so calling
+    it inside an outer transaction opens no nested transaction and strands no
+    partial rows -- the master and recording source part land together on commit.
+    (An artifact-BOUND selection is refused inside an ambient transaction; see
+    test_insert_selection_rejects_artifact_link_in_ambient_transaction.)
     """
     import datajoint as dj
 
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_pk = ingested_recording["rec_pk"]
-    art_pk = ingested_recording["art_pk"]
     conn = dj.conn()
     sort_pk = None
     try:
@@ -343,13 +342,13 @@ def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
                     "recording_id": rec_pk["recording_id"],
                     "sorter": "clusterless_thresholder",
                     "sorter_params_name": "default",
-                    "artifact_detection_id": art_pk["artifact_detection_id"],
                 }
             )
-        # After the outer transaction commits, all three rows are present.
+        # After the outer transaction commits, the master + recording part are
+        # present and there is no artifact part.
         assert SortingSelection & sort_pk
         assert SortingSelection.RecordingSource & sort_pk
-        assert SortingSelection.ArtifactDetectionSource & sort_pk
+        assert not (SortingSelection.ArtifactDetectionSource & sort_pk)
     finally:
         if sort_pk is not None:
             (SortingSelection & sort_pk).super_delete(warn=False)
@@ -913,68 +912,49 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
-def test_insert_selection_lock_releases_before_outer_commit(ingested_recording):
-    """Inside a caller-owned OPEN transaction, insert_selection releases the
-    detection lock when it RETURNS -- before the caller commits -- so the lock
-    does not cover the commit window (there the FK is the net, not the lock).
+def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
+    ingested_recording,
+):
+    """An artifact-bound insert_selection inside a caller-owned transaction is
+    REFUSED, and writes nothing.
 
-    Deterministic: a second connection observes the detection lock is FREE while
-    the outer transaction is still open.
+    The delete-vs-select advisory lock would be released when insert_selection
+    returns -- before the caller commits -- so it could not serialize a
+    concurrent artifact deletion against the uncommitted selection (and a
+    force_masters detection delete could then consume the sort). So the call
+    fails fast instead of linking the artifact unsafely. An artifact-FREE
+    selection in a transaction is unaffected (see
+    test_insert_selection_safe_inside_outer_transaction).
     """
     import datajoint as dj
 
-    from spyglass.spikesorting.v2._db_locking import _lock_name
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_pk = ingested_recording["rec_pk"]
     art = _second_detection(rec_pk)
-    art_id = art["artifact_detection_id"]
-    lock_name = _lock_name(
-        ArtifactDetectionOutput, {"artifact_detection_id": art_id}
-    )
-    conn_a = dj.conn()  # the connection insert_selection uses
-    conn_b = dj.Connection(
-        dj.config["database.host"],
-        dj.config["database.user"],
-        dj.config["database.password"],
-        port=dj.config["database.port"],
-    )
     sel = {
         "recording_id": rec_pk["recording_id"],
         "sorter": "clusterless_thresholder",
         "sorter_params_name": "default",
-        "artifact_detection_id": art_id,
+        "artifact_detection_id": art["artifact_detection_id"],
     }
-    sort_pk = None
+    conn = dj.conn()
+    n_before = len(SortingSelection())
     try:
-        conn_a.start_transaction()
+        conn.start_transaction()
         try:
-            sort_pk = SortingSelection.insert_selection(sel)
-            # Outer transaction still open (uncommitted), yet the lock
-            # insert_selection took is already released -> a SEPARATE session
-            # sees it FREE. This is exactly why the FK, not the lock, guards the
-            # nested-transaction case.
-            free = conn_b.query(
-                "SELECT IS_FREE_LOCK(%s)", args=(lock_name,)
-            ).fetchone()[0]
-            assert free == 1, (
-                "insert_selection still held the detection lock during the "
-                "caller's open transaction"
-            )
+            with pytest.raises(ValueError, match="caller-owned transaction"):
+                SortingSelection.insert_selection(sel)
         finally:
-            conn_a.commit_transaction()
-        assert SortingSelection & sort_pk
+            conn.cancel_transaction()
+        # The fail-fast fires before any insert, so nothing is written.
+        assert len(SortingSelection()) == n_before
     finally:
-        conn_b.close()
-        if sort_pk is not None and (SortingSelection & sort_pk):
-            (SortingSelection & sort_pk).super_delete(warn=False)
-        if RecordingArtifactDetection & art:
-            (RecordingArtifactDetection & art).cascade_delete(safemode=False)
+        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 

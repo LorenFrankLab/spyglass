@@ -891,6 +891,30 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "before selecting a sort on it."
             )
 
+        # Fail fast: an artifact-bound selection cannot be safely linked inside a
+        # CALLER-owned transaction. The delete-vs-select advisory lock below is
+        # released when this method RETURNS -- before the caller commits -- so it
+        # cannot serialize a concurrent artifact deletion against the still-
+        # uncommitted selection, and a ``force_masters`` detection delete could
+        # then cascade through the freshly committed ArtifactDetectionSource and
+        # consume the sort. Require insert_selection to OWN the transaction for an
+        # artifact-bound sort (it does on the standalone call); an artifact-FREE
+        # sort takes no lock and touches no merge, so it is unaffected.
+        if (
+            plan.artifact_detection_id is not None
+            and cls.connection.in_transaction
+        ):
+            raise ValueError(
+                "SortingSelection.insert_selection: refusing to link an "
+                "artifact detection while a caller-owned transaction is open. "
+                "The delete-vs-select advisory lock is released when this call "
+                "returns -- before your transaction commits -- so it cannot "
+                "serialize a concurrent artifact deletion against the "
+                "uncommitted selection. Call insert_selection OUTSIDE the "
+                "transaction (it manages its own), or link the artifact in a "
+                "separate committed step."
+            )
+
         # Resolve the artifact merge id BEFORE opening the sorting transaction.
         # A materialized detection registers itself into ArtifactDetectionOutput
         # (producer-owned, in RecordingArtifactDetection/SharedGroupArtifactDetection
@@ -928,19 +952,13 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         # aborts the selection rather than linking it unserialized; no lock for
         # an artifact-free sort.
         #
-        # SCOPE: this serialization holds only when insert_selection OWNS the
-        # transaction (the standalone call, where transaction_or_noop opens AND
-        # commits inside the ``with`` below). The lock is released when this
-        # method RETURNS. If a caller wraps the call in its own open transaction,
-        # transaction_or_noop is a no-op, so the rows stay uncommitted until the
-        # caller commits -- after the lock is released -- and the advisory lock
-        # does NOT cover that commit window. There the ``ArtifactDetectionSource
-        # -> ArtifactDetectionOutput`` foreign key is the net: a concurrent
-        # detection delete either blocks on this sort's uncommitted FK child and
-        # then fails, or the caller's commit fails on the deleted merge -- either
-        # way no committed sort references a deleted detection (see
-        # test_insert_selection_lock_releases_before_outer_commit and
-        # test_artifact_source_fk_rejects_dangling_detection).
+        # This is sound because insert_selection OWNS the transaction for an
+        # artifact-bound sort: the fail-fast check above REFUSES an artifact-bound
+        # call inside a caller's open transaction, so ``transaction_or_noop`` here
+        # always opens AND commits the rows before this method returns and
+        # releases the lock. The lock therefore always covers the commit window
+        # (see test_insert_selection_rejects_artifact_link_in_ambient_transaction
+        # and test_artifact_source_fk_rejects_dangling_detection).
         from contextlib import ExitStack
 
         from spyglass.spikesorting.v2._db_locking import required_advisory_lock
