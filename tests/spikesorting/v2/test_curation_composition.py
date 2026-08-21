@@ -641,3 +641,45 @@ def test_curation_delete_refuses_to_orphan_descendant(planted_three_unit_sort):
         (CurationV2 & root).delete(safemode=False)
     finally:
         clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_audit_orphaned_lineage_flags_bypass_orphan(planted_three_unit_sort):
+    """audit_orphaned_lineage is empty for intact lineage and flags a child whose
+    parent was removed by an administrative bypass (super_delete) -- the detector
+    for the lineage boundary documented on CurationV2.delete.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    def _flags(audit, curation_key):
+        return any(
+            o["sorting_id"] == curation_key["sorting_id"]
+            and o["curation_id"] == curation_key["curation_id"]
+            for o in audit
+        )
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sort_pk)
+        child = CurationV2.insert_curation(
+            sorting_key=sort_pk,
+            parent_curation_id=root["curation_id"],
+            description="orphan-audit test",
+        )
+        # Intact lineage: the child's parent exists, so it is not flagged.
+        assert not _flags(CurationV2.audit_orphaned_lineage(), child)
+
+        # Administrative bypass: super_delete the parent (merge-aware), leaving
+        # the child pointing at a now-missing parent.
+        clear_curations_for(root)
+        assert not (CurationV2 & root)
+        audit = CurationV2.audit_orphaned_lineage()
+        assert _flags(audit, child)
+        entry = next(
+            o for o in audit if o["curation_id"] == child["curation_id"]
+        )
+        assert entry["parent_curation_id"] == root["curation_id"]
+    finally:
+        clear_curations_for(sort_pk)

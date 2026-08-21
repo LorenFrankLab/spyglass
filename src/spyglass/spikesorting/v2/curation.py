@@ -326,21 +326,27 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     def delete(self, *args, safemode=None, **kwargs):
         """Delete curations, refusing to orphan a child's lineage pointer.
 
-        A child curation records its parent via ``parent_curation_id`` -- a
-        validation-only int, because DataJoint cannot express a nullable
-        self-referential FK across the renamed column cleanly, so the schema
-        does not enforce the edge. To keep the lineage consistent anyway, a
-        DIRECT ``delete`` is REFUSED when a row being removed still has a
-        descendant curation (same sorting, ``parent_curation_id`` equal to its
-        ``curation_id``) that is not itself in the delete set -- removing the
-        parent would leave that descendant pointing at a missing curation.
-        Delete descendants first (leaf-up). A leading positional restriction is
-        accepted for the ``Table().delete(restriction)`` form.
+        LINEAGE BOUNDARY. A child curation records its parent via
+        ``parent_curation_id`` -- a validation-only int. DataJoint cannot express
+        the nullable self-referential foreign key that would enforce it (a true
+        self-FK is not declarable; an equivalent two-FK edge table breaks
+        DataJoint's delete cascade), so lineage integrity is a bounded
+        APPLICATION-level invariant, guaranteed only through the supported
+        workflows: ``insert_curation`` (the sole writer) and this
+        ``CurationV2.delete``, which REFUSES to remove a row whose descendant
+        (same sorting, ``parent_curation_id`` == its ``curation_id``) is not
+        itself in the delete set. Deleting a parent leaf-up, or deleting the whole
+        ``Sorting`` lineage, is always safe.
 
-        Only a direct ``CurationV2.delete`` is guarded: a cascade from an
-        upstream delete (e.g. deleting the ``Sorting``) removes the whole
-        lineage together, so no orphan results there, and the raw
-        ``super_delete`` / ``delete_quick`` paths are intentionally unaffected.
+        ADMINISTRATIVE BYPASSES that may violate lineage (leaving a child pointing
+        at a missing parent): the raw ``super_delete`` / ``delete_quick`` paths,
+        and a targeted upstream cascade (e.g. deleting a parent curation's
+        ``AnalysisNwbfile``, which cascades to the curation through DataJoint's
+        generic cascade without invoking this guard). These are intentionally
+        unaffected; :meth:`audit_orphaned_lineage` detects any orphan they leave.
+
+        A leading positional restriction is accepted for the
+        ``Table().delete(restriction)`` form.
         """
         from spyglass.spikesorting.v2.utils import split_leading_restrictions
 
@@ -377,6 +383,35 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         if safemode is None:
             return super().delete(*args, **kwargs)
         return super().delete(*args, safemode=safemode, **kwargs)
+
+    @classmethod
+    def audit_orphaned_lineage(cls) -> list[dict]:
+        """Return child curations whose ``parent_curation_id`` names a missing parent.
+
+        The lineage-integrity audit for the boundary documented on :meth:`delete`:
+        because ``parent_curation_id`` is a validation-only int the database
+        cannot enforce, an administrative bypass (``super_delete`` /
+        ``delete_quick``, or a targeted upstream cascade such as deleting a parent
+        curation's ``AnalysisNwbfile``) can remove a parent while leaving a child
+        pointing at it. This flags exactly those orphans: non-root rows
+        (``parent_curation_id != -1``) whose ``(sorting_id, parent_curation_id)``
+        is not itself a ``CurationV2`` row. An empty list means every recorded
+        lineage edge resolves -- run it as a strict/maintenance gate.
+
+        Returns
+        -------
+        list of dict
+            One ``{sorting_id, curation_id, parent_curation_id}`` per orphaned
+            child (its ``parent_curation_id`` has no matching curation).
+        """
+        # Antijoin: children whose (sorting_id, parent_curation_id) has no
+        # matching (sorting_id, curation_id) among existing curations.
+        children = cls & "parent_curation_id != -1"
+        existing_parents = cls.proj(parent_curation_id="curation_id")
+        orphaned = children - existing_parents
+        return orphaned.fetch(
+            "sorting_id", "curation_id", "parent_curation_id", as_dict=True
+        )
 
     @classmethod
     def insert_curation(
