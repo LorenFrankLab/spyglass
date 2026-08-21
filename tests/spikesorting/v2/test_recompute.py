@@ -510,9 +510,10 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
 def test_analyzer_manifest_records_noise_levels_seed(
     populated_sorting, clean_recompute
 ):
-    """The analyzer manifest records each base extension's seed mode. Every base
-    extension is seed-pinned (random_spikes AND noise_levels), so none is
-    "unseeded", and noise_levels joins the recompute content set. The
+    """The analyzer manifest records each base extension's seed mode. Every
+    STOCHASTIC base extension is seed-pinned (random_spikes AND noise_levels each
+    record a seed); the deterministic templates / waveforms carry no seed and are
+    reported "unseeded". noise_levels joins the recompute content set. The
     content-addressed analyzer_hash is derived from the extension content hashes
     ONLY, so the seed-mode provenance does not shift the recompute identity."""
     from spyglass.spikesorting.v2._recompute import combined_hash

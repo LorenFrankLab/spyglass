@@ -1160,9 +1160,9 @@ def _recompute_analyzer_hashes(
         # Rebuild from the SAME sorting + recording with build_analyzer's exact
         # seed/param logic, to a temp folder, so the comparison is a genuine
         # regeneration rather than the stored folder compared to itself. Build
-        # only the extensions this verify actually hashes -- noise_levels is not
-        # hashed (and not a dependency of templates/waveforms), so computing it
-        # would be wasted work on every recompute.
+        # only the extensions this verify hashes (ANALYZER_RECOMPUTE_EXTENSIONS)
+        # -- every one is seed-pinned, noise_levels included, so the rebuild is
+        # content-identical.
         build_analyzer(
             sorting,
             recording,

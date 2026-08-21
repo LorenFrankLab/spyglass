@@ -8,9 +8,9 @@ helpers therefore hash reproducible CONTENT: the preprocessed
 SortingAnalyzer extension data. ``hash_recording_traces`` is the ``traces``
 building block of the recording ``content_hash`` (see
 :mod:`._recording_fingerprint`); ``hash_extension_data`` backs the analyzer
-recompute comparison. ``noise_levels`` is excluded from the analyzer comparison
-because it estimates noise from unseeded random chunks and is genuinely
-stochastic run-to-run.
+recompute comparison, which covers every base extension: ``noise_levels`` is
+seed-pinned (its ``random_slices_kwargs`` seed) so it rebuilds identically and is
+hashed alongside random_spikes / templates / waveforms.
 """
 
 from __future__ import annotations
