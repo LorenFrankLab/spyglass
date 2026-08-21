@@ -19,10 +19,11 @@ import hashlib
 
 import numpy as np
 
-# Deterministic, sort-time analyzer extensions used for recompute comparison.
-# ``noise_levels`` is intentionally excluded -- it is an unseeded random-chunk
-# noise estimate, not reproducible run-to-run, so including it would make every
-# recompute report a spurious mismatch.
+# Sort-time analyzer extensions hashed for the recompute comparison. All are
+# either seed-pinned (random_spikes via its seed, noise_levels via its
+# random_slices_kwargs seed) or intrinsically deterministic (templates,
+# waveforms), so a rebuild is content-identical and the comparison never reports
+# a spurious mismatch.
 ANALYZER_RECOMPUTE_EXTENSIONS = (
     "random_spikes",
     "noise_levels",
@@ -58,10 +59,11 @@ def hash_extension_data(
 
 
 #: Base analyzer extensions ``Sorting.make`` computes, in build order. Used to
-#: report each extension's seed mode in the recompute manifest. Every base
-#: extension is now seed-pinned, so this equals ``ANALYZER_RECOMPUTE_EXTENSIONS``
-#: (the content the recompute hash covers); kept as a named list because the
-#: manifest reports seed modes in this build order.
+#: report each extension's seed mode in the recompute manifest. Every STOCHASTIC
+#: base extension (random_spikes, noise_levels) is seed-pinned; templates and
+#: waveforms are intrinsically deterministic and carry no seed. This equals
+#: ``ANALYZER_RECOMPUTE_EXTENSIONS`` (the content the recompute hash covers);
+#: kept as a named list because the manifest reports seed modes in build order.
 BASE_ANALYZER_EXTENSIONS = (
     "random_spikes",
     "noise_levels",

@@ -960,10 +960,9 @@ def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
 
 def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
     """The ``SortingSelection.ArtifactDetectionSource -> ArtifactDetectionOutput``
-    foreign key rejects a row referencing a non-existent merge -- so no committed
-    sort can carry an artifact link to a missing/deleted detection. This is the
-    net that protects the nested-transaction case (where the advisory lock does
-    not cover the caller's commit window).
+    foreign key rejects a row referencing a non-existent merge -- a database-level
+    integrity net so no committed sort can ever carry an artifact link to a
+    missing/deleted detection, independent of the advisory lock.
     """
     import uuid
 

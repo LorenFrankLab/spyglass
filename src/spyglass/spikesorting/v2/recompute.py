@@ -826,7 +826,8 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             # The content hashes drive the recompute identity (analyzer_hash);
             # the seed modes are SECONDARY provenance recorded alongside them, so
             # the manifest does not silently imply a pinned seed for an unseeded
-            # base extension (e.g. noise_levels).
+            # base extension (e.g. the intrinsically deterministic templates /
+            # waveforms, which carry no seed).
             content_hashes = hash_extension_data(analyzer)
             manifest = {
                 "extension_content_hashes": content_hashes,
