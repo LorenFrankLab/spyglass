@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import datajoint as dj
+from dandi.upload import UploadExisting, UploadValidation
 import fsspec
 import h5py
 import pynwb
@@ -359,6 +360,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
             [dandiset_dir],
             dandi_instance=dandi_instance,
             jobs=n_upload_processes,
+            existing=UploadExisting.SKIP,
+            validation=UploadValidation.SKIP,
         )
         logger.info(f"Dandiset {dandiset_id} uploaded")
 
@@ -518,7 +521,12 @@ def validate_dandiset(
             f"Using multiprocessing to validate dandi export. {n_processes} processes"
         )
         with Pool(processes=n_processes) as pool:
-            per_file_results = pool.map(validate_1, files_to_validate)
+            per_file_results = list(
+                tqdm(
+                    pool.imap_unordered(validate_1, files_to_validate),
+                    total=len(files_to_validate),
+                )
+            )
         validator_result = [item for sub in per_file_results for item in sub]
     min_severity_value = Severity[min_severity].value
 
