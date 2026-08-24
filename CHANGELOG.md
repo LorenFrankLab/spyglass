@@ -255,6 +255,8 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Prevent errors during update for dandi standard from propagating to other
+  files #1677
 
 ### Pipelines
 
