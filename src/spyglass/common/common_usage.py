@@ -651,6 +651,7 @@ class Export(SpyglassMixin, dj.Computed):
         try:
             return function(file, **kwargs)
         except Exception as e:
+            logger.error(f"Failed {function.__name__} for file {file}: {e!r}")
             ExportErrorLog().insert1(
                 {
                     "file": file,
@@ -677,9 +678,15 @@ class Export(SpyglassMixin, dj.Computed):
                 update_analysis_for_dandi_standard(file, **kwargs)
             return
         with Pool(processes=n_processes) as pool:
-            id_update_fn = partial(self.protected_update, function = make_file_obj_id_unique)
+            id_update_fn = partial(
+                self.protected_update, function=make_file_obj_id_unique
+            )
             list(pool.imap_unordered(id_update_fn, file_list))
-            update_fn = partial(self.protected_update, function = update_analysis_for_dandi_standard, **kwargs)
+            update_fn = partial(
+                self.protected_update,
+                function=update_analysis_for_dandi_standard,
+                **kwargs,
+            )
             list(pool.imap_unordered(update_fn, file_list))
 
     def _make_fileset_ids_unique(self, key, n_processes=1):

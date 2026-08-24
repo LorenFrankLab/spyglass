@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional, Union
 
 import datajoint as dj
-from dandi.upload import UploadExisting, UploadValidation
 import fsspec
 import h5py
 import pynwb
@@ -27,6 +26,7 @@ try:
     from dandi.organize import CopyMode, FileOperationMode, OrganizeInvalid
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
+    from dandi.upload import UploadExisting, UploadValidation
 
     MIN_ERROR_SEVERITY = Severity["ERROR"].value
     MIN_WARNING_SEVERITY = Severity["WARNING"].value
@@ -44,7 +44,9 @@ except (ImportError, ModuleNotFoundError) as e:
         nwb_has_external_links,
         MIN_ERROR_SEVERITY,
         MIN_WARNING_SEVERITY,
-    ) = [None] * 11
+        UploadExisting,
+        UploadValidation,
+    ) = [None] * 13
     logger.warning(e)
 
 
