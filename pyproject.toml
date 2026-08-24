@@ -52,7 +52,7 @@ dependencies = [
   "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
-  "ndx-pose",
+  "ndx-pose<0.4",                  # 0.4 needs pynwb>=4 / hdmf>=6
   "non-local-detector",
   "numpy",
   "opencv-python",
@@ -70,8 +70,8 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
-  "ffmpeg",
+  "deeplabcut>=3", # 3.0+ drops TF and uses PyTorch backend
+  "ndx-pose>=0.2,<0.4",
 ]
 optional-dependencies.docs = [
   "hatch",                  # Get version from env
@@ -102,6 +102,11 @@ optional-dependencies.moseq-gpu = [
   "jax-moseq[cuda12]",
   "keypoint-moseq",
 ]
+optional-dependencies.sleap = [
+  "ndx-pose>=0.2,<0.4",
+  "sleap-io>=0.7",      # read/write .slp and export analysis.h5
+  "sleap-nn>=0.2",      # PyTorch inference backend (SLEAP >= 1.5)
+]
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container
@@ -115,6 +120,7 @@ optional-dependencies.test = [
   "pytest",                 # unit testing
   "pytest-cov",             # code coverage
   "pytest-xvfb",            # for headless testing of Qt
+  "tables",                 # pytables for DLC HDF5 support in tests
 ]
 urls."Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 urls."Homepage" = "https://github.com/LorenFrankLab/spyglass"
@@ -143,9 +149,19 @@ line-length = 80
 lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude/*'
+ignore-words = './docs/spellcheck_words.txt'
 ignore-words-list = 'nevers'
 # Nevers - name in Citation
+
+[tool.cspell] # CB: Recommended as VSCode extension
+language = "en"
+ignorePaths = [
+    ".git,","*.pdf,","*.svg,","*.ipynb,","./docs/site/**,","temp*",".claude/*"
+]
+dictionaryDefinitions = [
+    { name = "project-words", path = "./docs/spellcheck_words.txt" }
+]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -157,7 +173,7 @@ addopts = [
   "-p no:warnings",
   # "--no-teardown",  # don't teardown the database after tests
   # "--quiet-spy",   # don't show logging from spyglass
-  # "--no-dlc",      # don't run DLC tests
+  # "--no-pose",      # don't run DLC tests
   "--show-capture=no",
   "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
   "--doctest-modules",                              # run doctests in all modules

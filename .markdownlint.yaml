@@ -1,5 +1,7 @@
 # https://github.com/DavidAnson/markdownlint
 # https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+ignores:
+    - ".claude/**"
 MD007: # permit indenting 4 spaces instead of 2
   indent: 4
   start_indent: 4
