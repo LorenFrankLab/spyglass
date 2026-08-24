@@ -155,16 +155,19 @@ def ensure_weight_units(file: h5py.File, intended_unit: str = "g"):
 
     valid_units = ("kg", "g", "mg", "ug", "g", "ng", "pg")
 
-    pattern = rf"^(.+?)(?:\s*)({'|'.join(valid_units)})$"
+    numeric_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    pattern = rf"^({numeric_pattern})\s*({'|'.join(valid_units)})$"
+    stripped_weight = weight.strip()
 
-    match = re.match(pattern, weight)
+    match = re.fullmatch(pattern, stripped_weight)
 
     if match:
         value, unit = match.groups()
-        new_weight = f"{value.strip()} {unit}"
-
+        new_weight = f"{value} {unit}"
+    elif re.fullmatch(numeric_pattern, stripped_weight):
+        new_weight = f"{stripped_weight} {intended_unit}"
     else:
-        new_weight = f"{weight.strip()} {intended_unit}"
+        return
 
     if new_weight == weight:
         return
