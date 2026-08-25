@@ -57,6 +57,7 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
@@ -436,6 +437,15 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    # Stash the session so pytest_unconfigure (which only receives ``config``)
+    # can escalate the exit status if teardown fails. wrap_session returns
+    # ``session.exitstatus`` after pytest_unconfigure runs, so a value set
+    # there is reflected in the process exit code.
+    global SESSION
+    SESSION = session
+
+
 def pytest_unconfigure(config):
     server = globals().get("SERVER")
     if server is None:
@@ -465,6 +475,7 @@ def pytest_unconfigure(config):
         print("pytest teardown failures:")
         for failure in failures:
             print(f"  - {failure}")
+        escalate_exit_on_teardown_failure(globals().get("SESSION"))
 
 
 def _teardown_test_data(base_dir, data_root=None):

@@ -12,7 +12,13 @@ harness when this module is run through the full suite.
 
 import pytest
 
+from tests._teardown_exit import escalate_exit_on_teardown_failure
 from tests.conftest import _teardown_test_data
+
+
+class _FakeSession:
+    def __init__(self, exitstatus):
+        self.exitstatus = exitstatus
 
 
 @pytest.fixture
@@ -126,3 +132,31 @@ def test_failures_are_aggregated_across_children(base, monkeypatch):
 def test_none_base_dir_is_a_noop():
     """A missing base dir must not raise."""
     _teardown_test_data(None, data_root=None)
+
+
+def test_teardown_failure_escalates_clean_exit():
+    """A teardown failure turns a passing run (exit 0) into a nonzero exit."""
+    session = _FakeSession(pytest.ExitCode.OK)
+    escalate_exit_on_teardown_failure(session)
+    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        pytest.ExitCode.TESTS_FAILED,
+        pytest.ExitCode.INTERRUPTED,
+        pytest.ExitCode.INTERNAL_ERROR,
+        pytest.ExitCode.USAGE_ERROR,
+    ],
+)
+def test_teardown_failure_does_not_downgrade_existing_status(status):
+    """An existing failure/interrupt status is preserved, never overwritten."""
+    session = _FakeSession(status)
+    escalate_exit_on_teardown_failure(session)
+    assert session.exitstatus == status
+
+
+def test_escalation_is_a_noop_without_a_session():
+    """No stashed session (e.g. session never started) must not raise."""
+    escalate_exit_on_teardown_failure(None)
