@@ -703,7 +703,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         self,
         custom_tables: List[SpyglassAnalysis],
         *,
-        policy: Optional[CleanupPolicy] = None,
+        policy: CleanupPolicy,
         now_ns: Optional[int] = None,
     ) -> CleanupPlan:
         """Snapshot tracked paths once and scan the analysis directory."""
@@ -721,57 +721,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             now_ns=now_ns,
             walker=self._walk_analysis_files,
         )
-
-    def _remove_untracked_files(
-        self,
-        custom_tables: List[SpyglassAnalysis],
-        dry_run: bool = True,
-        plan: CleanupPlan | None = None,
-        *,
-        policy: Optional[CleanupPolicy] = None,
-        now_ns: Optional[int] = None,
-    ) -> tuple[Set[Path], Set[Path]]:
-        """Remove empty or untracked analysis files.
-
-        A lowercase *.nwb leaf inside analysis_dir is a managed pointer. For an
-        untracked symlink, cleanup deletes the target recorded during the scan
-        -- including a target on another volume -- and then removes the leaf.
-        Directory symlinks are NOT traversed, so cleanup cannot follow a
-        symlinked subdirectory out of analysis_dir and delete files in an
-        unrelated store.
-
-        Cleanup follows the usual Spyglass trust-the-disk model: tracked paths
-        and filesystem candidates are each captured once. It does not defend
-        against concurrent registration or filesystem mutation between scan
-        and unlink. Do not run cleanup while analysis files are being written.
-
-        Parameters
-        ----------
-        custom_tables : list
-            Custom analysis tables included in the tracked-path snapshot.
-        dry_run : bool, optional
-            Report candidates without unlinking them. Defaults to True.
-        plan : CleanupPlan, optional
-            A previously scanned plan. When given, its own policy governs the
-            deletion limits and ``policy`` here is ignored.
-        policy : CleanupPolicy, optional
-            Validated deletion-safety limits (fraction, ratio, and age gate)
-            used when this method builds the plan itself.
-        now_ns : int, optional
-            Clock value injected by tests.
-
-        Returns
-        -------
-        tuple[set[pathlib.Path], set[pathlib.Path]]
-            Candidate targets and the tracked-path snapshot.
-        """
-        if plan is None:
-            plan = self._build_untracked_file_plan(
-                custom_tables,
-                policy=policy,
-                now_ns=now_ns,
-            )
-        return plan.execute(dry_run=dry_run)
 
     def _cleanup_custom_table(
         self,
@@ -948,11 +897,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             # this run's row deletion are caught on the next invocation. The
             # plan already carries the validated policy (age gate and deletion
             # limits), so no limits are re-passed here.
-            _ = self._remove_untracked_files(
-                custom_tables,
-                dry_run=dry_run,
-                plan=untracked_file_plan,
-            )
+            untracked_file_plan.execute(dry_run=dry_run)
 
             # Process each custom analysis table.
             # Subtract valid entries from common_orphans

@@ -17,17 +17,28 @@ import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Optional, Set, Tuple, Union
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
+
+_HOUR_NS = 60 * 60 * 1_000_000_000
 
 
-def _check_number(
+def _validate_number(
     name: str,
     value: Union[int, float],
     *,
     minimum: float,
     maximum: Optional[float] = None,
-) -> float:
-    """Return ``value`` as a float after validating its bounds."""
+) -> None:
+    """Validate that ``value`` is finite and within the requested bounds."""
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
@@ -41,18 +52,17 @@ def _check_number(
             else f">= {minimum}"
         )
         raise ValueError(f"{name} must be {bounds}, got {value!r}")
-    return float(value)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CleanupPolicy:
     """Validated, immutable deletion-safety limits for one cleanup run.
 
     Construct this once -- before any insert-blocking trigger is acquired --
     so an out-of-bounds or non-finite argument raises immediately, without
-    leaving triggers installed. Because the values are validated (and coerced
-    to ``float``) here, ``CleanupPlan`` applies them at the deletion boundary
-    without repeating the raw numeric checks.
+    leaving triggers installed. Because the values are validated here,
+    ``CleanupPlan`` applies them at the deletion boundary without repeating
+    the raw numeric checks.
     """
 
     max_delete_fraction: float = 0.9
@@ -60,37 +70,25 @@ class CleanupPolicy:
     min_file_age_hours: float = 24.0
 
     def __post_init__(self) -> None:
-        # frozen=True forbids normal attribute assignment, so write the
-        # validated/coerced values back through object.__setattr__.
-        object.__setattr__(
-            self,
+        _validate_number(
             "max_delete_fraction",
-            _check_number(
-                "max_delete_fraction",
-                self.max_delete_fraction,
-                minimum=0,
-                maximum=1,
-            ),
+            self.max_delete_fraction,
+            minimum=0,
+            maximum=1,
         )
-        object.__setattr__(
-            self,
+        _validate_number(
             "max_delete_to_tracked_ratio",
-            _check_number(
-                "max_delete_to_tracked_ratio",
-                self.max_delete_to_tracked_ratio,
-                minimum=0,
-            ),
+            self.max_delete_to_tracked_ratio,
+            minimum=0,
         )
-        object.__setattr__(
-            self,
+        _validate_number(
             "min_file_age_hours",
-            _check_number(
-                "min_file_age_hours", self.min_file_age_hours, minimum=0
-            ),
+            self.min_file_age_hours,
+            minimum=0,
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FileSnapshot:
     """One ``*.nwb`` path and the target it named during the scan."""
 
@@ -154,36 +152,33 @@ class CleanupPlan:
         tracked_files: Set[Path],
         *,
         logger: logging.Logger,
-        policy: Optional[CleanupPolicy] = None,
+        policy: CleanupPolicy,
         now_ns: Optional[int] = None,
         walker: Optional[Callable[[], Iterable[Path]]] = None,
-    ):
+    ) -> None:
         self.analysis_dir = Path(analysis_dir).expanduser().resolve()
         self.tracked_files = frozenset(
             Path(os.path.realpath(Path(path).expanduser()))
             for path in tracked_files
         )
         self.logger = logger
-        # Already validated at construction; no raw re-check here.
-        self.policy = policy if policy is not None else CleanupPolicy()
-        self.min_file_age_hours = self.policy.min_file_age_hours
+        self.policy = policy
         self.now_ns = time.time_ns() if now_ns is None else now_ns
-        self._walker = walker or (
+        scan_walker = walker or (
             lambda: self.walk_analysis_files(self.analysis_dir, self.logger)
         )
 
         self.scanned_files: frozenset[Path] = frozenset()
-        self.files_to_delete: Set[Path] = set()
         self.empty_files: Set[Path] = set()
         self.untracked_files: Set[Path] = set()
         self.deferred_recent_files: Set[Path] = set()
         self.broken_links: Set[Path] = set()
         self._candidates: Dict[Path, Tuple[FileSnapshot, ...]] = {}
-        self._scan()
+        self._scan(scan_walker)
 
-    def _scan(self) -> None:
+    def _scan(self, walker: Callable[[], Iterable[Path]]) -> None:
         grouped: Dict[Path, list[FileSnapshot]] = {}
-        for path in self._walker():
+        for path in walker():
             try:
                 snapshot = FileSnapshot.from_path(path)
             except (OSError, RuntimeError) as error:
@@ -198,14 +193,15 @@ class CleanupPlan:
             grouped.setdefault(snapshot.resolved_path, []).append(snapshot)
 
         self.scanned_files = frozenset(grouped)
-        minimum_age_ns = int(self.min_file_age_hours * 60 * 60 * 1e9)
+        min_file_age_hours = self.policy.min_file_age_hours
+        minimum_age_ns = int(min_file_age_hours * _HOUR_NS)
         for resolved_path, snapshots in grouped.items():
             if resolved_path in self.tracked_files:
                 continue  # Tracked wins, including for empty or dangling files.
 
             newest_mtime_ns = max(item.mtime_ns for item in snapshots)
             if (
-                self.min_file_age_hours > 0
+                min_file_age_hours > 0
                 and self.now_ns - newest_mtime_ns < minimum_age_ns
             ):
                 self.deferred_recent_files.add(resolved_path)
@@ -213,7 +209,6 @@ class CleanupPlan:
 
             candidate = tuple(snapshots)
             self._candidates[resolved_path] = candidate
-            self.files_to_delete.add(resolved_path)
 
             if all(item.broken for item in candidate):
                 self.broken_links.add(resolved_path)
@@ -223,7 +218,9 @@ class CleanupPlan:
                 self.untracked_files.add(resolved_path)
 
     @staticmethod
-    def walk_analysis_files(analysis_dir: Path, logger: logging.Logger):
+    def walk_analysis_files(
+        analysis_dir: Path, logger: logging.Logger
+    ) -> Iterator[Path]:
         """Yield ``*.nwb`` leaves within the analysis tree.
 
         Directory symlinks are NOT traversed. Cleanup deletes files, so it
@@ -250,6 +247,11 @@ class CleanupPlan:
             for filename in files:
                 if filename.endswith(".nwb"):
                     yield Path(root) / filename
+
+    @property
+    def files_to_delete(self) -> Set[Path]:
+        """Candidate targets captured by this plan."""
+        return set(self._candidates)
 
     @property
     def candidate_bytes(self) -> int:
@@ -336,7 +338,7 @@ class CleanupPlan:
             self.logger.info(
                 f"  {len(self.deferred_recent_files)} untracked files "
                 f"deferred because they are newer than "
-                f"{self.min_file_age_hours} hours"
+                f"{self.policy.min_file_age_hours} hours"
             )
         self.logger.info(
             f"  {len(self._candidates)} untracked or empty analysis "
