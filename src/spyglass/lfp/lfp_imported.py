@@ -160,7 +160,17 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
             logger.warning(
                 f"Skipping lfp without timestamps: {nwb_obj.object_id}"
             )
-            return {self: []}
+            # Emit the parent keys, empty, for the same reason they are always
+            # present below: emission order is insert order and is fixed by
+            # the first series generated. Returning only {self: []} would make
+            # self the plan's first key whenever the first series is skipped,
+            # inserting ImportedLFP before a later series' group and interval.
+            return {
+                LFPElectrodeGroup: [],
+                LFPElectrodeGroup.LFPElectrode: [],
+                IntervalList: [],
+                self: [],
+            }
 
         entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
         self_key = entries[self][0]
