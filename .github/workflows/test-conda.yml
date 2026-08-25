@@ -157,6 +157,7 @@ jobs:
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/
     - name: Upload coverage reports to Codecov
+      if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
