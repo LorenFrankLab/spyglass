@@ -456,3 +456,14 @@ def test_video_partial_import_counts_source_series(common, monkeypatch):
     assert (
         table._placed_videos < table._video_count
     ), "A failed series must trigger the partial-import report"
+
+    # Only the video that landed nowhere is a failure. A placed video fails
+    # the overlap check for every epoch it does not belong to, and those are
+    # not diagnostics anyone should see.
+    # The unplaced video failed in both epochs, so both are recorded.
+    reported = {
+        item["name"] for item in table._failed_videos["timestamp_mismatch"]
+    }
+    assert reported == {
+        "placed nowhere"
+    }, "A placed video must not report its non-owning epochs as mismatches"

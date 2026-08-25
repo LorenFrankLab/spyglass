@@ -525,6 +525,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         base_key = base_key or dict()
         self._video_count += 1
         entries = []
+        mismatches = []  # kept only if the video places in no epoch
 
         for epoch, valid_times in self._epoch_intervals(
             base_key["nwb_file_name"]
@@ -555,7 +556,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
                 break
 
             if failure_reason:
-                self._failed_videos["timestamp_mismatch"].append(
+                mismatches.append(
                     {
                         "name": nwb_obj.name,
                         "reason": failure_reason,
@@ -569,6 +570,12 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         # epochs yields several rows, so a row count cannot tell whether
         # every series was placed.
         self._placed_videos += bool(entries)
+
+        # Every epoch a video does *not* belong to fails the overlap check, so
+        # a placed video would otherwise report a mismatch for each of its
+        # non-owning epochs. Only a video that landed nowhere has failed.
+        if not entries:
+            self._failed_videos["timestamp_mismatch"].extend(mismatches)
 
         return {self: entries}
 
@@ -822,8 +829,6 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         if failed_videos["timestamp_mismatch"]:
             msg_parts.append("\nTimestamp mismatches:")
             for item in failed_videos["timestamp_mismatch"]:
-                if item["overlap_percent"] == 0:
-                    continue  # Don't report videos for other epochs as errors
                 msg_parts.append(f"  - {item['name']}: {item['reason']}")
 
         if failed_videos["missing_camera"]:
