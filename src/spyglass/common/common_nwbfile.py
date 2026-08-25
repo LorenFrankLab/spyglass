@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 
 import datajoint as dj
 import h5py
@@ -41,6 +41,15 @@ BEGIN
     SET MESSAGE_TEXT = 'Inserts disabled during maintenance: {table}';
 END
 """
+
+# Shared operator guidance appended to both insert-blocker refusal messages.
+STALE_BLOCKER_GUIDANCE = (
+    "Another cleanup may be active, or a trigger may be stale. Confirm that no "
+    "cleanup is active, then inspect the blocking triggers before using "
+    "AnalysisRegistry().unblock_new_inserts(). That helper removes all "
+    "registered analysis blocking triggers; use it only after confirming every "
+    "such trigger is stale."
+)
 
 schema = dj.schema("common_nwbfile")
 
@@ -621,12 +630,7 @@ class AnalysisRegistry(dj.Manual):
             blocked = "\n".join(f"  - {table}" for table in existing)
             raise RuntimeError(
                 "Refusing cleanup because insert-blocking triggers already "
-                f"exist for:\n{blocked}\nAnother cleanup may be active, or "
-                "the triggers may be stale. Confirm that no cleanup is active "
-                "and inspect the blockers before removing them. Use "
-                "AnalysisRegistry().unblock_new_inserts() only after confirming "
-                "every blocker is stale; that helper removes all registered "
-                "analysis blocking triggers."
+                f"exist for:\n{blocked}\n{STALE_BLOCKER_GUIDANCE}"
             )
 
         for table in tables:
@@ -637,12 +641,7 @@ class AnalysisRegistry(dj.Manual):
                 # triggers to a partial, ambiguous acquisition.
                 raise RuntimeError(
                     f"Failed to block 1 table(s):\n{error}\nSome analysis "
-                    "tables may remain blocked. Another cleanup may be active, "
-                    "or a trigger may be stale. Confirm that no cleanup is "
-                    "active, then inspect the blocking triggers before using "
-                    "AnalysisRegistry().unblock_new_inserts(). That helper "
-                    "removes all registered analysis blocking triggers; use "
-                    "it only after confirming every such trigger is stale."
+                    f"tables may remain blocked. {STALE_BLOCKER_GUIDANCE}"
                 )
 
     def unblock_new_inserts(self) -> None:
@@ -692,13 +691,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
-    def _walk_analysis_files(self) -> Iterator[Path]:
-        """Yield NWB leaves within analysis_dir (directory symlinks not
-        followed; leaf ``*.nwb`` symlinks still yielded)."""
-        yield from CleanupPlan.walk_analysis_files(
-            Path(self._analysis_dir), logger
-        )
-
     def _build_untracked_file_plan(
         self,
         custom_tables: List[SpyglassAnalysis],
@@ -719,7 +711,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             logger=logger,
             policy=policy,
             now_ns=now_ns,
-            walker=self._walk_analysis_files,
         )
 
     def _cleanup_custom_table(

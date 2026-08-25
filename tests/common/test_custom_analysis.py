@@ -434,13 +434,16 @@ class TestCleanupAndRegistry:
         # files mistaken for this session's cleanup candidates.
         discovered_paths = tuple(sorted(created_paths.values()))
 
-        def _walk_created_analysis_files(_self):
+        # cleanup() discovers files via CleanupPlan.walk_analysis_files; patch
+        # that static method (signature: analysis_dir, logger) so discovery is
+        # restricted to this test's own files.
+        def _walk_created_analysis_files(analysis_dir, logger):
             yield from discovered_paths
 
         monkeypatch.setattr(
-            common.common_nwbfile.AnalysisNwbfile,
-            "_walk_analysis_files",
-            _walk_created_analysis_files,
+            common.common_nwbfile.CleanupPlan,
+            "walk_analysis_files",
+            staticmethod(_walk_created_analysis_files),
         )
 
         expected_deleted_paths = {

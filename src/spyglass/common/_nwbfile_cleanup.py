@@ -17,16 +17,7 @@ import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import (
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Dict, Iterator, Optional, Set, Tuple, Union
 
 _HOUR_NS = 60 * 60 * 1_000_000_000
 
@@ -154,7 +145,6 @@ class CleanupPlan:
         logger: logging.Logger,
         policy: CleanupPolicy,
         now_ns: Optional[int] = None,
-        walker: Optional[Callable[[], Iterable[Path]]] = None,
     ) -> None:
         self.analysis_dir = Path(analysis_dir).expanduser().resolve()
         self.tracked_files = frozenset(
@@ -164,9 +154,6 @@ class CleanupPlan:
         self.logger = logger
         self.policy = policy
         self.now_ns = time.time_ns() if now_ns is None else now_ns
-        scan_walker = walker or (
-            lambda: self.walk_analysis_files(self.analysis_dir, self.logger)
-        )
 
         self.scanned_files: frozenset[Path] = frozenset()
         self.empty_files: Set[Path] = set()
@@ -174,11 +161,11 @@ class CleanupPlan:
         self.deferred_recent_files: Set[Path] = set()
         self.broken_links: Set[Path] = set()
         self._candidates: Dict[Path, Tuple[FileSnapshot, ...]] = {}
-        self._scan(scan_walker)
+        self._scan()
 
-    def _scan(self, walker: Callable[[], Iterable[Path]]) -> None:
+    def _scan(self) -> None:
         grouped: Dict[Path, list[FileSnapshot]] = {}
-        for path in walker():
+        for path in self.walk_analysis_files(self.analysis_dir, self.logger):
             try:
                 snapshot = FileSnapshot.from_path(path)
             except (OSError, RuntimeError) as error:

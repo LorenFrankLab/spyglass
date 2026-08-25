@@ -237,6 +237,18 @@ class SpyglassConfig:
         dict
             list of relative_dirs and other settings (e.g., prepopulate).
         """
+        # Fast path for the common cached read (every directory property
+        # routes here with no kwargs). A mode-change request (explicit
+        # test_mode=) still falls through to _resolve_test_mode's binding /
+        # rejection, and a mode-wedged instance has _config == {} (falsy) so it
+        # also falls through and re-raises.
+        if (
+            not force_reload
+            and self._config
+            and kwargs.get("test_mode", _UNSET) is _UNSET
+        ):
+            return self._config
+
         dj_custom = dj.config.get("custom", {})
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
