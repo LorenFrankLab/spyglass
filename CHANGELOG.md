@@ -206,7 +206,12 @@ for label, interval_data in results.groupby("interval_labels"):
     `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
     every path before creating anything, and under `test_mode` requires each
     resolved directory to sit inside the base dir, keeping destructive tests off
-    shared/production filesystems #1573 #1574
+    shared/production filesystems. A config instance binds `test_mode` before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574
 - `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
     targets, so analysis files spread across volumes are cleaned in one pass.
     Directory symlinks are not traversed (`followlinks=False`), so cleanup

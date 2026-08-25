@@ -920,8 +920,9 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg.load_failed, "test_mode must not adopt SPYGLASS_BASE_DIR"
         assert cfg._config == {}
-        # The call-level kwarg is absent on property access. The failed-mode
-        # latch must still prevent the environment path from loading.
+        assert cfg._test_mode is True
+        # The call-level kwarg is absent on property access. Binding the mode
+        # before validation must still prevent the environment path from loading.
         with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
             _ = cfg.base_dir
 
@@ -941,66 +942,80 @@ class TestTestModeEnvVarIgnore:
 
         assert cfg.load_failed
         assert cfg._config == {}
+        assert cfg._test_mode is True
         with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
             _ = cfg.base_dir
 
-    def test_failed_test_mode_reload_discards_cached_production_config(
-        self, monkeypatch, tmp_path, no_dj_test_config
+    @pytest.mark.parametrize("force_reload", [False, True])
+    @pytest.mark.parametrize(
+        "initial_mode,requested_mode", [(False, True), (True, False)]
+    )
+    def test_loaded_mode_change_invalidates_instance(
+        self,
+        tmp_path,
+        no_dj_test_config,
+        initial_mode,
+        requested_mode,
+        force_reload,
     ):
-        """A failed forced transition cannot leave production paths usable."""
+        """A loaded config cannot change mode or retain usable old paths."""
         from spyglass.settings import SpyglassConfig
 
         production = tmp_path / "production_base"
-        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
+        test_base = tmp_path / "tests" / "safe_base"
+        initial_base = test_base if initial_mode else production
+        requested_base = test_base if requested_mode else production
+
         cfg = SpyglassConfig()
-        cfg.load_config(test_mode=False, force_reload=True)
-        assert cfg.analysis_dir == str(production / "analysis")
+        cfg.load_config(
+            base_dir=str(initial_base),
+            test_mode=initial_mode,
+            force_reload=True,
+        )
+        assert cfg.test_mode is initial_mode
 
-        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
-            cfg.load_config(test_mode=True, force_reload=True)
-
-        assert cfg.load_failed
-        assert cfg.test_mode
-        assert cfg._config == {}
-        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
-            _ = cfg.analysis_dir
-
-        # Supplying a valid test base recovers the object without allowing the
-        # ambient production path back into resolution.
-        safe = tmp_path / "tests" / "safe_base"
-        cfg.load_config(base_dir=str(safe), force_reload=True)
-        assert not cfg.load_failed
-        assert cfg.test_mode
-        assert cfg.analysis_dir == str(safe / "analysis")
-
-    def test_invalid_test_mode_reload_discards_cached_production_config(
-        self, monkeypatch, tmp_path, no_dj_test_config
-    ):
-        """Every failed production-to-test transition remains fail-closed."""
-        from spyglass.settings import SpyglassConfig
-
-        production = tmp_path / "production_base"
-        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
-        cfg = SpyglassConfig()
-        cfg.load_config(test_mode=False, force_reload=True)
-        assert cfg.analysis_dir == str(production / "analysis")
-
-        outside = tmp_path / "another_production_base"
-        with pytest.raises(ValueError, match="does not contain a 'tests'"):
+        with pytest.raises(ValueError, match="cannot change"):
             cfg.load_config(
-                base_dir=str(outside), test_mode=True, force_reload=True
+                base_dir=str(requested_base),
+                test_mode=requested_mode,
+                force_reload=force_reload,
             )
 
         assert cfg.load_failed
-        assert cfg.test_mode
         assert cfg._config == {}
-        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
+        assert cfg._mode_error is not None
+        with pytest.raises(ValueError, match="cannot change"):
             _ = cfg.analysis_dir
 
-    def test_ambient_test_mode_forced_reload_discards_cached_production(
+        # Changing mode requires an object with a fresh lifecycle.
+        replacement = SpyglassConfig(base_dir=str(requested_base))
+        replacement.load_config(
+            test_mode=requested_mode,
+            force_reload=True,
+        )
+        assert replacement.test_mode is requested_mode
+        assert replacement.analysis_dir == str(requested_base / "analysis")
+
+    def test_force_reload_refreshes_paths_within_bound_mode(
+        self, tmp_path, no_dj_test_config
+    ):
+        """force_reload remains available without changing safety mode."""
+        from spyglass.settings import SpyglassConfig
+
+        first = tmp_path / "tests" / "first"
+        second = tmp_path / "tests" / "second"
+        cfg = SpyglassConfig()
+        cfg.load_config(base_dir=str(first), test_mode=True, force_reload=True)
+
+        cfg.load_config(base_dir=str(second), test_mode=True, force_reload=True)
+
+        assert cfg.test_mode
+        assert cfg.analysis_dir == str(second / "analysis")
+
+    def test_bound_mode_ignores_ambient_dj_mode_change(
         self, monkeypatch, tmp_path, no_dj_test_config
     ):
-        """A forced ambient production-to-test transition must fail closed."""
+        """A DataJoint edit cannot change an already-bound instance mode."""
         import datajoint as dj
 
         from spyglass.settings import SpyglassConfig
@@ -1008,24 +1023,18 @@ class TestTestModeEnvVarIgnore:
         production = tmp_path / "production_base"
         monkeypatch.setenv("SPYGLASS_BASE_DIR", str(production))
         cfg = SpyglassConfig()
-        cfg.load_config(test_mode=False, force_reload=True)
+        cfg.load_config(force_reload=True)
         assert cfg.analysis_dir == str(production / "analysis")
 
-        # No call- or constructor-level test_mode is supplied. The forced
-        # reload must nevertheless honor the new ambient mode without leaving
-        # the already-cached production paths available after refusal.
+        # Ambient configuration participates only before mode is bound.
         monkeypatch.setitem(
             dj.config.setdefault("custom", {}), "test_mode", True
         )
-        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
-            cfg.load_config(force_reload=True)
+        cfg.load_config(force_reload=True)
 
-        assert cfg.load_failed
-        assert cfg.test_mode
-        assert cfg._failed_test_mode
-        assert cfg._config == {}
-        with pytest.raises(ValueError, match="SPYGLASS_BASE_DIR is ignored"):
-            _ = cfg.analysis_dir
+        assert not cfg.load_failed
+        assert not cfg.test_mode
+        assert cfg.analysis_dir == str(production / "analysis")
 
     def test_fresh_ambient_test_mode_startup_without_base_is_graceful(
         self, monkeypatch, no_dj_test_config
@@ -1033,7 +1042,7 @@ class TestTestModeEnvVarIgnore:
         """An ordinary implicit startup load must still return, not raise."""
         import datajoint as dj
 
-        from spyglass.settings import SpyglassConfig
+        from spyglass.settings import SpyglassConfig, _UNSET
 
         monkeypatch.setitem(
             dj.config.setdefault("custom", {}), "test_mode", True
@@ -1043,11 +1052,42 @@ class TestTestModeEnvVarIgnore:
         assert cfg.load_config(on_startup=True) is None
         assert cfg.load_failed
         assert cfg._config == {}
-        assert not cfg._failed_test_mode
+        assert cfg._test_mode is _UNSET
+
+    def test_ambient_test_mode_with_bad_base_is_graceful_not_fatal(
+        self, monkeypatch, tmp_path, no_dj_test_config
+    ):
+        """An unbound ambient test_mode load with a resolvable non-tests base
+        degrades gracefully instead of crashing an implicit/startup load, and
+        must not commit a test-mode config whose base escapes the sandbox.
+        A deliberate load of the same bad base still fails loud."""
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig, _UNSET
+
+        production = tmp_path / "production_base"
+        custom = dj.config.setdefault("custom", {})
+        monkeypatch.setitem(custom, "test_mode", True)
+        monkeypatch.setitem(custom, "spyglass_dirs", {"base": str(production)})
+
+        cfg = SpyglassConfig()
+
+        # Implicit/startup load returns gracefully instead of raising, and
+        # never binds the mode to the out-of-sandbox base.
+        assert cfg.load_config(on_startup=True) is None
+        assert cfg.load_failed
+        assert cfg._config == {}
+        assert cfg._test_mode is _UNSET
+
+        # A deliberate (bound) load of the same bad base still fails loud.
+        with pytest.raises(ValueError, match="does not contain a 'tests'"):
+            cfg.load_config(
+                base_dir=str(production), test_mode=True, force_reload=True
+            )
 
 
 class TestModePrecedence:
-    """test_mode/debug_mode resolution order in SpyglassConfig.load_config.
+    """First-load mode resolution in SpyglassConfig.load_config.
 
     dj.config['custom']['test_mode'] is True for the whole pytest session
     (tests/container.py sets it in the credentials applied by
@@ -1078,7 +1118,7 @@ class TestModePrecedence:
     def test_call_false_overrides_constructor_true(
         self, tmp_path, no_dj_test_mode
     ):
-        """An explicit False at call time must beat constructor True."""
+        """A call value must beat the constructor before mode is bound."""
         from spyglass.settings import SpyglassConfig
 
         outside = tmp_path / "production_data"
