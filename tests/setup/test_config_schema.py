@@ -741,7 +741,9 @@ def _restore_global_config():
         dj.config.pop("stores", None)
     else:
         dj.config["stores"] = saved_stores
-    if saved_custom is not None:
+    if saved_custom is None:
+        dj.config.pop("custom", None)
+    else:
         dj.config["custom"] = saved_custom
 
     for key in [
@@ -879,12 +881,8 @@ class TestTestModeEnvVarIgnore:
         from spyglass.settings import SpyglassConfig
         import datajoint as dj
 
-        # Use monkeypatch.setitem on dj.config["custom"] so the original
-        # kachery_zone (if any) is restored after the test runs.
         custom = dj.config.setdefault("custom", {})
-        if "kachery_zone" in custom:
-            monkeypatch.setitem(custom, "kachery_zone", custom["kachery_zone"])
-            del custom["kachery_zone"]
+        monkeypatch.delitem(custom, "kachery_zone", raising=False)
 
         evil = "evil.production.zone"
         monkeypatch.setenv("KACHERY_ZONE", evil)

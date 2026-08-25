@@ -401,7 +401,7 @@ def pytest_configure(config):
             stacklevel=2,
         )
 
-    BASE_DIR = Path(config.option.base_dir).expanduser().resolve()
+    BASE_DIR = _requested_base
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
 

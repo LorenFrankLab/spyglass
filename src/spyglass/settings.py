@@ -193,7 +193,7 @@ class SpyglassConfig:
         force_reload=False,
         on_startup: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> dict | None:
         """
         Loads the configuration settings for the object.
 

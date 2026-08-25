@@ -310,7 +310,7 @@ class CleanupPlan:
         self,
         *,
         dry_run: bool = True,
-    ) -> Tuple[Set[Path], Set[Path]]:
+    ) -> None:
         """Report or unlink the candidates captured by this plan.
 
         Destructive execution validates the plan against this plan's
@@ -345,7 +345,7 @@ class CleanupPlan:
             f"files ({self.candidate_bytes} logical candidate bytes)"
         )
         if dry_run:
-            return set(self._candidates), set(self.tracked_files)
+            return
 
         for target, snapshots in sorted(
             self._candidates.items(), key=lambda item: str(item[0])
@@ -360,8 +360,6 @@ class CleanupPlan:
             for snapshot in snapshots:
                 if snapshot.is_link and snapshot.path != target:
                     self._unlink(snapshot.path)
-
-        return set(self._candidates), set(self.tracked_files)
 
     def _unlink(self, path: Path) -> bool:
         try:

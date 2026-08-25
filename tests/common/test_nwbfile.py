@@ -419,9 +419,9 @@ def test_dry_run_reports_logical_bytes_without_deleting(
 
     plan = _plan(_table(common_nwbfile, analysis_dir))
     with caplog.at_level("INFO"):
-        files, _ = plan.execute(dry_run=True)
+        plan.execute(dry_run=True)
 
-    assert files == {candidate.resolve()}
+    assert plan.files_to_delete == {candidate.resolve()}
     assert candidate.exists()
     assert plan.candidate_bytes == 5
     assert "Cleanup plan would be refused" in caplog.text
@@ -576,7 +576,6 @@ def _configure_cleanup(
                 else:
                     raise RuntimeError(reason)
             events.append("files")
-            return set(), set()
 
     def _fake_build_plan(self, custom_tables, **kwargs):
         events.append("plan")
