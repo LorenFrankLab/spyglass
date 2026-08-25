@@ -284,6 +284,8 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
+    - Separate `PositionVideo` to tri-part `make`, and close the video NWB file
+        handle it left open #XXXX
 
 - Decoding
 
@@ -324,6 +326,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
     - Add option to bound output of DLC to defined spatial region #1570
+    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #XXXX
 
 - Spikesorting
 

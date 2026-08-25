@@ -19,7 +19,7 @@ from position_tools import get_distance
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
-from spyglass.utils.logging import logger, stream_handler
+from spyglass.utils.logging import logger
 
 
 def validate_option(
@@ -151,14 +151,26 @@ def file_log(logger, console=False):
             )
             file_handler.setFormatter(file_fmt)
             logger.addHandler(file_handler)
-            if not console:
-                logger.removeHandler(logger.handlers[0])
+
+            # Suppress console output by removing whatever handlers are
+            # present, then restoring those same objects. Removing
+            # handlers[0] by position and restoring the module-level
+            # stream_handler instead duplicated handlers when these calls
+            # nested, and dropped any handler another caller had added.
+            suppressed = (
+                []
+                if console
+                else [h for h in logger.handlers if h is not file_handler]
+            )
+            for handler in suppressed:
+                logger.removeHandler(handler)
+
             try:
                 return func(self, *args, **kwargs)
             finally:
-                if not console:
-                    logger.addHandler(stream_handler)
                 logger.removeHandler(file_handler)
+                for handler in suppressed:
+                    logger.addHandler(handler)
                 file_handler.close()
 
         return wrapper

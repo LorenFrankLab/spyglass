@@ -559,11 +559,19 @@ class PositionVideo(SpyglassMixin, dj.Computed):
     -> IntervalPositionInfo
     """
 
-    def make(self, key):
-        """Populates the PositionVideo table.
+    def make_fetch(self, key):
+        """Fetch the position and video data needed to render the video.
 
-        The video is created by overlaying the head position and orientation
-        on the video of the animal.
+        Parameters
+        ----------
+        key : dict
+            primary key of IntervalPositionInfo
+
+        Returns
+        -------
+        list
+            raw_position_df, position_info_df, epoch, video_filename,
+            video_time, cm_per_pixel
         """
         M_TO_CM = 100
 
@@ -590,11 +598,51 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             key["nwb_file_name"], key["interval_list_name"]
         )
         video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
-        io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
-        nwb_file = io.read()
-        nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filename = nwb_video.external_file[0]
 
+        # Read every needed value out of the file so nothing downstream holds
+        # a handle to it, and so the returned data can be hashed.
+        with pynwb.NWBHDF5IO(
+            raw_dir + "/" + video_info["nwb_file_name"], "r"
+        ) as io:
+            nwb_video = io.read().objects[video_info["video_file_object_id"]]
+            video_filename = nwb_video.external_file[0]
+            video_time = np.asarray(nwb_video.timestamps)
+            cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
+
+        return [
+            raw_position_df,
+            position_info_df,
+            epoch,
+            video_filename,
+            video_time,
+            cm_per_pixel,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        raw_position_df,
+        position_info_df,
+        epoch,
+        video_filename,
+        video_time,
+        cm_per_pixel,
+    ):
+        """Create the video by overlaying head position and orientation.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of IntervalPositionInfo
+        raw_position_df, position_info_df, epoch, video_filename, video_time,
+        cm_per_pixel
+            output of make_fetch
+
+        Returns
+        -------
+        list
+            empty; nothing beyond the key is inserted
+        """
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = (
             f"{nwb_base_filename}_{epoch:02d}_"
@@ -620,9 +668,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         head_orientation_mean = np.asarray(
             position_info_df[["head_orientation"]]
         )
-        video_time = np.asarray(nwb_video.timestamps)
         position_time = np.asarray(position_info_df.index)
-        cm_per_pixel = nwb_video.device.meters_per_pixel * M_TO_CM
 
         self._info_msg("Making video...")
         self.make_video(
@@ -636,6 +682,11 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             cm_to_pixels=cm_per_pixel,
             disable_progressbar=False,
         )
+
+        return []
+
+    def make_insert(self, key):
+        """Insert the key once the video has been written."""
         self.insert1(key)
 
     def make_video(

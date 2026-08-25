@@ -402,17 +402,27 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     ---
     """
 
-    def make(self, key):
-        """Populate the DLCPosVideo table.
+    _parallel_make = True  # make_compute spawns a process pool per video
+
+    def make_fetch(self, key):
+        """Fetch the inputs needed to render the position video.
 
         1. Fetches parameters from the DLCPosVideoParams table.
-        2. Fetches position interval name from epoch name.
-        3. Fetches pose estimation data and video information.
+        2. Fetches pose estimation data and video information.
+        3. Fetches position info from DLCPosV1.
         4. Fetches centroid and likelihood data for each bodypart.
-        5. Calls make_video to create the video with the above data.
-        """
-        M_TO_CM = 100
 
+        Parameters
+        ----------
+        key : dict
+            primary key of DLCPosVideoSelection
+
+        Returns
+        -------
+        list
+            params, pose_estimation_params, video_filename, output_dir,
+            meters_per_pixel, pos_info_df, pos_est_df
+        """
         params = (DLCPosVideoParams & key).fetch1("params")
         epoch = key["epoch"]
 
@@ -453,6 +463,50 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
+
+        return [
+            params,
+            pose_estimation_params,
+            video_filename,
+            output_dir,
+            meters_per_pixel,
+            pos_info_df,
+            pos_est_df,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        params,
+        pose_estimation_params,
+        video_filename,
+        output_dir,
+        meters_per_pixel,
+        pos_info_df,
+        pos_est_df,
+    ):
+        """Render the video with the position and orientation overlaid.
+
+        1. Assembles the centroid and likelihood arrays per bodypart.
+        2. Determines the output video path.
+        3. Calls make_video to create the video with the above data.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of DLCPosVideoSelection
+        params, pose_estimation_params, video_filename, output_dir,
+        meters_per_pixel, pos_info_df, pos_est_df
+            output of make_fetch
+
+        Returns
+        -------
+        list
+            output_video_filename, video_maker
+        """
+        M_TO_CM = 100
+        epoch = key["epoch"]
+
         if not len(pos_est_df) == len(pos_info_df):
             raise ValueError(  # pragma: no cover
                 "Dataframes are not the same length\n"
@@ -516,8 +570,21 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             **params.get("video_params", {}),
         )
 
-        if output_video_filename.exists():
-            self.insert1(key)
+        return [output_video_filename, video_maker]
 
-        if limit:
-            return video_maker
+    def make_insert(self, key, output_video_filename, video_maker):
+        """Insert the key if the video was successfully written.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of DLCPosVideoSelection
+        output_video_filename : str or Path
+            path of the video written by make_compute
+        video_maker : VideoMaker
+            the VideoMaker used, retained for debugging
+        """
+        self._video_maker = video_maker  # retained for debugging
+
+        if Path(output_video_filename).exists():
+            self.insert1(key)
