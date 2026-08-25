@@ -507,6 +507,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         Returns
         -------
         sorting : si.BaseSorting
+            Sorting read from the analysis NWB file. A sorting with no spikes
+            yields a valid zero-unit sorting rather than raising, matching
+            ``CurationV1.get_sorting``.
 
         """
 
@@ -529,11 +532,16 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
         recording_times = recording.get_times()
         n_samples = recording.get_num_samples()
+        # Iterate rows rather than indexing the "spike_times" column: an empty
+        # units table (a sorting with no spikes, see #1154) carries no columns
+        # at all, so the column lookup would raise a bare KeyError. Iterating
+        # yields an empty dict instead, and so an empty NumpySorting -- the
+        # same construction CurationV1.get_sorting uses.
         units_dict = {
-            unit_id: spike_times_to_valid_samples(
-                recording_times, spike_times, n_samples, unit_id
+            unit.Index: spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
             )
-            for unit_id, spike_times in zip(units.index, units["spike_times"])
+            for unit in units.itertuples()
         }
 
         sorting = si.NumpySorting.from_unit_dict(
