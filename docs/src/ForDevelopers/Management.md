@@ -385,16 +385,19 @@ entries. Files made orphaned by that database phase are handled on the next run.
     0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
     untracked or empty analysis NWB files; foreign keys continue to govern
     orphan-row deletion.
-- **Symlinks reclaim cross-volume analysis storage**: an old, untracked
+- **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
     `*.nwb` leaf symlink authorizes deletion of both its recorded regular-file
-    target and the link. Dangling links lose only the link. Symlinked directories
-    are traversed too, so their `*.nwb` contents join the same cleanup pass;
-    directory cycles are visited only once.
+    target and the link. Dangling links lose only the link. Directory symlinks
+    are **not** traversed (`followlinks=False`): cleanup deletes files, so it
+    must not follow a symlinked subdirectory out of `analysis_dir` into an
+    unrelated store. Only leaf `*.nwb` symlinks are eligible, and a symlinked
+    `analysis_dir` root is still scanned.
 - **The analysis directory is trusted**: cleanup intentionally follows the
     normal Spyglass snapshot-and-delete model rather than defending against
-    concurrent filesystem or database changes. A link below `analysis_dir` can
-    authorize deletion outside that directory, including beneath another
-    configured store. Restrict write access to the analysis tree and do not run
+    concurrent filesystem or database changes. A leaf `*.nwb` symlink below
+    `analysis_dir` can authorize deletion outside that directory, including
+    beneath another configured store, because there is no protected-store
+    denylist. Restrict write access to the analysis tree and do not run
     cleanup concurrently with analysis writers or registration.
 - **Insert blocking refuses ambiguous ownership**: cleanup checks registered
     analysis tables for existing blockers before proceeding; a destructive run

@@ -209,11 +209,12 @@ for label, interval_data in results.groupby("interval_labels"):
     shared/production filesystems #1573 #1574
 - `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
     targets, so analysis files spread across volumes are cleaned in one pass.
-    It also scans through symlinked analysis directories, with cycle detection,
-    so an external analysis tree participates in the same pass. The sweep uses
-    the same trust-the-disk model as other Spyglass cleanup routines: one
-    tracked-path/filesystem snapshot, a 24-hour `mtime` gate, aggregate deletion
-    limits, dry-run reporting, and ordinary unlink error logging #1573 #1574
+    Directory symlinks are not traversed (`followlinks=False`), so cleanup
+    cannot follow a symlinked subdirectory out of `analysis_dir`; only leaf
+    `*.nwb` symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour `mtime` gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574
 - Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
     the files the sweep was eligible to act on #1573 #1574
 - Analysis cleanup, including a dry-run preview, refuses a pre-existing
