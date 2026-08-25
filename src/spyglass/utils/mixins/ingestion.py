@@ -398,13 +398,15 @@ class IngestionMixin(BaseMixin):
         """Run insert on compiled Dict[TableObject, inserts]."""
         # An integrity here probably means a parallel insert was dropped
         # check debug_backup in parent func for entries that were dropped
-        for table, table_entries in entries.items():
-            table.insert(
-                table_entries,
-                skip_duplicates=False,
-                allow_direct_insert=True,
-            )
-            self._insert_logline(nwb_file_name, len(table_entries), table)
+        # One transaction for the whole plan
+        with self._safe_context():
+            for table, table_entries in entries.items():
+                table.insert(
+                    table_entries,
+                    skip_duplicates=False,
+                    allow_direct_insert=True,
+                )
+                self._insert_logline(nwb_file_name, len(table_entries), table)
 
     def _key_has_required_attrs(self, key):
         """Check that all non-nullable attributes are present in the key."""
@@ -445,9 +447,16 @@ class IngestionMixin(BaseMixin):
             The same entries, without null or empty values.
         """
         return [
-            {k: v for k, v in key.items() if v not in [None, ""]}
+            {k: v for k, v in key.items() if not self._is_null(v)}
             for key in keys
         ]
+
+    @staticmethod
+    def _is_null(value) -> bool:
+        """Whether a planned value is null, for tables with no adjustment."""
+        if isinstance(value, np.ndarray):
+            return value.size == 0
+        return value is None or value == ""
 
     def _adjust_entries(
         self, entries: IngestionEntries, nwb_file_name: str = None
