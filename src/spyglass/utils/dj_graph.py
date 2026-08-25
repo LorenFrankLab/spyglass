@@ -28,9 +28,14 @@ from networkx import (
 from tqdm import tqdm
 
 from spyglass.utils import logger
-from spyglass.utils.database_settings import SHARED_MODULES
+from spyglass.utils.database_settings import table_is_shared
 from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES  # is_nonempty,
-from spyglass.utils.dj_helper_fn import ensure_names, fuzzy_get, unique_dicts
+from spyglass.utils.dj_helper_fn import (
+    ensure_names,
+    fuzzy_get,
+    is_trivially_true,
+    unique_dicts,
+)
 
 
 def dj_topo_sort(graph: DiGraph) -> List[str]:
@@ -377,6 +382,37 @@ class AbstractGraph(ABC):
         # dict/list → condition (fallback)
         return make_condition(ft, r, set())
 
+    def _warn_if_trivially_true(self, table, restriction) -> None:
+        """Warn when a shared table is about to be restricted to everything.
+
+        Restrictions here are combined with OR, so one that matches every row
+        makes its table's restriction the whole table, and the cascade then
+        carries that breadth outward. Arriving at a shared table it means
+        either a whole-table restriction was logged upstream or a bridge
+        produced one, and in both cases the result reaches data the caller
+        never asked for.
+
+        A table under a user's own prefix is left alone: exporting all of it
+        can be the intent.
+
+        Parameters
+        ----------
+        table : str
+            Table the restriction is being set on.
+        restriction : str | QueryExpression
+            The restriction, already coerced to a condition.
+        """
+        if not is_trivially_true(restriction) or not table_is_shared(table):
+            return
+        self._log_truncate(  # verbose graphs say where it came from
+            f"Whole-table restriction on {self._camel(table)}"
+        )
+        logger.warning(
+            f"Restriction on shared table {ensure_names(table)} matches every "
+            "row. Whatever depends on this graph -- an export, a delete -- "
+            "will cover the whole table."
+        )
+
     def _set_restr(
         self, table, restriction, replace=False
     ) -> Union[str, QueryExpression]:
@@ -400,6 +436,7 @@ class AbstractGraph(ABC):
         """
         ft = self._get_ft(table)
         restriction = self._coerce_to_condition(ft, restriction)
+        self._warn_if_trivially_true(table, restriction)
         existing = self._get_restr(table)
 
         if (not existing) or replace:
@@ -455,9 +492,7 @@ class AbstractGraph(ABC):
         return bool(self._get_ft(table))
 
     def _has_out_prefix(self, table):
-        return (
-            table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
-        )
+        return not table_is_shared(table)
 
     def _spawn_virtual_module(self, table):
         """Add the tables of a table's schema to the graph, if not imported.

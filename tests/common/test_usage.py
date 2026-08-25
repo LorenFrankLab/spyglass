@@ -333,6 +333,64 @@ def test_export_selection_compound(
     ), "Export compound did not capture outer restriction correctly"
 
 
+def test_unrestricted_fetch_logs_keys(gen_export_selection, export_tbls):
+    """An unrestricted fetch logs the keys it read, not a whole-table match.
+
+    A leaf is the OR of its table's logged restrictions, so a restriction
+    matching everything would widen that leaf to the entire table at export
+    time -- including rows the analysis never touched.
+    """
+    ExportSelection, _ = export_tbls
+    paper_key = {"paper_id": gen_export_selection["paper_id"]}
+
+    shared = (
+        ExportSelection * ExportSelection.Table
+        & paper_key
+        & "table_name LIKE '`%common%'"
+    ).fetch("restriction")
+    trivial = [
+        r for r in shared if str(r).strip() in ("(True)", "True", "(1)", "1")
+    ]
+    assert not trivial, f"Whole-table restrictions logged: {trivial}"
+
+    # The fixture fetches TrackGraph unrestricted, so its log entry should
+    # name the key it read rather than match everything.
+    track_restr = (
+        ExportSelection * ExportSelection.Table
+        & paper_key
+        & "table_name LIKE '%track_graph%'"
+    ).fetch("restriction")
+    assert track_restr, "No TrackGraph entry logged"
+    assert any(
+        "track_graph_name" in str(r) for r in track_restr
+    ), f"TrackGraph fetch not logged as keys: {track_restr}"
+
+
+def test_reject_trivially_true(export_tbls):
+    """A shared table's whole-table restriction raises instead of exporting."""
+    ExportSelection, _ = export_tbls
+    shared = "`common_position`.`track_graph`"
+
+    for form in ("(True)", "True", "(1)", "1"):
+        with pytest.raises(ValueError) as err:
+            ExportSelection._reject_trivially_true(
+                shared, ["track_graph_name = 'a'", form], key={"export_id": 1}
+            )
+        assert shared in str(err.value), "Error should name the table"
+
+    ExportSelection._reject_trivially_true(  # clean list must not raise
+        shared, ["track_graph_name = 'a'", "track_graph_name = 'b'"]
+    )
+
+
+def test_allow_trivially_true_custom(export_tbls):
+    """A user's own table may be exported whole -- that can be the intent."""
+    ExportSelection, _ = export_tbls
+    custom = "`testexport_nwbfile`.`analysis_nwbfile`"
+
+    ExportSelection._reject_trivially_true(custom, ["(True)"])
+
+
 def tests_export_selection_max_id(gen_export_selection, export_tbls):
     ExportSelection, _ = export_tbls
     _ = gen_export_selection

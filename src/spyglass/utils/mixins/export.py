@@ -12,6 +12,7 @@ from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
+from spyglass.utils.dj_helper_fn import is_trivially_true
 from spyglass.utils.mixins.fetch import FetchMixin
 from spyglass.utils.sql_helper_fn import bash_escape_sql
 
@@ -101,7 +102,7 @@ class ExportMixin(FetchMixin):
 
     def _export_id_cleanup(self):
         """Cleanup export ID."""
-        self._export_cache = dict()
+        self._export_cache = defaultdict(set)
         if environ.get(EXPORT_ENV_VAR):
             del environ[EXPORT_ENV_VAR]
         exit_unregister(self._export_id_cleanup)  # Remove exit hook
@@ -274,6 +275,7 @@ class ExportMixin(FetchMixin):
                 (len(restr_str) > self._maximum_export_restriction_size)
                 or "SELECT" in restr_str
                 or self._is_projected()
+                or (is_trivially_true(restr_str) and self._is_shared_schema)
             )
         ):
             self._insert_log(restr_str)
@@ -282,6 +284,21 @@ class ExportMixin(FetchMixin):
         if "SELECT" in restr_str:
             self._logger.debug(
                 "Restriction contains subquery. Exporting entry restrictions instead"
+            )
+
+        elif is_trivially_true(restr_str):
+            # An unrestricted fetch of a shared table. Logging the condition
+            # verbatim would store a restriction that matches everything, and
+            # export leaves are the OR of a table's logged restrictions -- so
+            # one of these widens its leaf to the whole table, at whatever
+            # size that table has grown to by export time, sweeping in other
+            # people's rows. Log the keys actually fetched instead, which is
+            # both narrower and a true record of what the analysis used.
+            # Tables outside the shared schemas are left alone: they hold one
+            # user's own data, where exporting all of it may be the intent.
+            self._logger.debug(
+                "Unrestricted fetch of a shared table. "
+                "Exporting entry restrictions instead"
             )
 
         else:
@@ -301,9 +318,45 @@ class ExportMixin(FetchMixin):
             # No export entry needed if no selected entries
             return
 
+        if is_trivially_true(restr_str):
+            self._warn_unrestricted_fetch(restricted_table)
+
         restricted_entries = self._get_restricted_entries(restricted_table)
         self._insert_entries_log(restricted_entries)
         return
+
+    @cached_property
+    def _is_shared_schema(self):
+        """Whether this table lives in a spyglass-managed schema.
+
+        Fetching a shared table unrestricted sweeps in rows belonging to
+        everyone else on the server, so those fetches are logged as keys. A
+        table under a user's own prefix holds only their data, and exporting
+        all of it can be exactly what was meant.
+        """
+        from spyglass.utils.database_settings import table_is_shared
+
+        return table_is_shared(self)
+
+    def _warn_unrestricted_fetch(self, restricted_table):
+        """Warn that a whole table was fetched while export logging was on.
+
+        The fetch is logged as explicit keys, so the export stays correct,
+        but sweeping in every row of a table shared with everyone else on the
+        server is nearly always accidental, and worth saying out loud however
+        few rows it is today.
+
+        Parameters
+        ----------
+        restricted_table : Table
+            The table as fetched, i.e. unrestricted.
+        """
+        self._logger.warning(
+            f"Unrestricted fetch of shared table {self.full_table_name} "
+            f"logged for export {self.export_id} as {len(restricted_table)} "
+            "keys. If the export does not need the whole table, restrict the "
+            "fetch and remove this export's log entries for it."
+        )
 
     def _insert_entries_log(self, entries):
         """Inserts table access log given list of entry keys.
@@ -359,9 +412,14 @@ class ExportMixin(FetchMixin):
         if isinstance(restr_str, str):
             restr_str = bash_escape_sql(restr_str, add_newline=False)
 
-        if restr_str in self._export_cache[self.full_table_name]:
+        # Keyed by export as well as table: each export's log has to stand
+        # on its own, so the same restriction seen under a later export_id is
+        # not a duplicate. `_export_id_cleanup` cannot be relied on to scope
+        # this -- it only reaches the instance that ended the export.
+        cache_key = (self.export_id, self.full_table_name)
+        if restr_str in self._export_cache[cache_key]:
             return
-        self._export_cache[self.full_table_name].add(restr_str)
+        self._export_cache[cache_key].add(restr_str)
 
         self._export_table.Table.insert1(
             dict(
