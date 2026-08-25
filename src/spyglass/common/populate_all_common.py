@@ -78,16 +78,6 @@ def log_insert_error(
     )
 
 
-def _get_config_name(table_obj):
-    """Given a table object, return its config name for entries.yaml
-
-    Returns Master.Part for part tables, otherwise just the table name.
-    """
-    if hasattr(table_obj, "_master"):
-        return f"{table_obj._master.__name__}.{table_obj.__class__.__name__}"
-    return table_obj.__class__.__name__
-
-
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
@@ -103,19 +93,27 @@ def single_transaction_make(
     """
 
     # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
-    # file. Resolved here, with the file's own config under the global one, so
-    # a table is handed its config rather than reloading it (see #1660).
-    file_config = get_config(
-        Nwbfile.get_abs_path(nwb_file_name), calling_table="populate_all_common"
+    # file. Both configs share the {TableName: [rows]} shape that
+    # `generate_entries_from_config` indexes by name, so each table is handed
+    # the whole merged mapping -- a per-table lookup would yield a row list.
+    # The file's own config wins: `entries.yaml` holds lab-wide defaults,
+    # while the sidecar describes this session. Before this PR the sidecar was
+    # the only config any table that read one consulted.
+    # `or dict()`: yaml.safe_load returns None for an empty file, and the
+    # config argument is optional.
+    file_config = (
+        get_config(
+            Nwbfile.get_abs_path(nwb_file_name),
+            calling_table="populate_all_common",
+        )
+        or dict()
     )
+    merged_config = {**(config or dict()), **file_config}
 
     with Nwbfile._safe_context():
         for table in tables:
-            config_name = _get_config_name(table())
-            table_config = {**file_config, **config.get(config_name, dict())}
-
             try:
-                table().insert_from_nwbfile(nwb_file_name, config=table_config)
+                table().insert_from_nwbfile(nwb_file_name, config=merged_config)
             except Exception as err:
                 if raise_err:
                     raise err
