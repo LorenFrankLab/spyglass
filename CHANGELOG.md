@@ -157,6 +157,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
 
 ### Infrastructure
 
@@ -255,6 +258,14 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
 
 ### Pipelines
 
@@ -290,10 +301,12 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
-    - Bypass delete permission check when removing null `PositionIntervalMap` entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
     - Clear a file's existing `InsertError` rows at the start of
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
 
 - Decoding
 
@@ -320,6 +333,7 @@ for label, interval_data in results.groupby("interval_labels"):
         needs. Temporary, pending #1609 #1619
     - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
         every call, and stop `insert` from mutating the caller's rows #1619
+    - Pair waveform-feature units with spike times by label, not position #1678
 
 - LFP
 
@@ -360,12 +374,12 @@ for label, interval_data in results.groupby("interval_labels"):
         `electrode_group_name`s by falling back to lexicographic ordering #1624
     - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
         `curation_label` column #1626
-    - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
-        #1626
-    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be
-        selected on arbitrary units table columns with numeric, range, and
-        membership criteria. A criterion naming a column a sorting's units
-        table does not have raises an error #1670
+    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
+    - Add `unit_criteria` to `UnitSelectionParams` #1670
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - Add `all_electrodes` option to `get_sort_group_info` #1678
+    - `SpikeSorting.get_sorting` returns an empty string when no spikes #1678
 
 ## [0.5.5] (Aug 6, 2025)
 

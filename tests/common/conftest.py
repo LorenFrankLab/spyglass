@@ -72,8 +72,10 @@ def common_ephys(common):
 
 
 @pytest.fixture(scope="session")
-def pop_common_electrode_group(common_ephys):
-    common_ephys.ElectrodeGroup.populate()
+def pop_common_electrode_group(mini_insert, common_ephys):
+    # ElectrodeGroup is ingested by insert_sessions. Its make is deprecated
+    # and raises NotImplementedError, so populate() must not be called: any
+    # session without ephys (e.g. the video-only mock file) is a pending key.
     yield common_ephys.ElectrodeGroup()
 
 

@@ -19,8 +19,6 @@ import numpy as np
 import pytest
 from scipy.signal import freqz
 
-from spyglass.common import _fir_filter as fir
-
 FS = 30000.0  # spyglass raw ephys rate
 
 
@@ -70,7 +68,14 @@ def reference_filter(
 # Fixtures
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="module")
-def lfp_lowpass():
+def fir():
+    from spyglass.common import _fir_filter as fir
+
+    yield fir
+
+
+@pytest.fixture(scope="module")
+def lfp_lowpass(fir):
     """0-400 Hz lowpass spyglass uses (transition 400->425), spline_power=2."""
     numtaps = fir.estimate_taps(FS, 25)
     return fir.firdesign(
@@ -89,20 +94,20 @@ def rng():
 # FIR design
 # --------------------------------------------------------------------------- #
 class TestFirDesign:
-    def test_estimate_taps_is_odd(self):
+    def test_estimate_taps_is_odd(self, fir):
         for tw in (5, 25, 100, 250):
             assert fir.estimate_taps(FS, tw) % 2 == 1
 
-    def test_estimate_taps_scales_inversely_with_transition_width(self):
+    def test_estimate_taps_scales_inversely_with_transition_width(self, fir):
         # narrower transition band -> more taps
         assert fir.estimate_taps(FS, 10) > fir.estimate_taps(FS, 100)
 
-    def test_group_delay(self):
+    def test_group_delay(self, fir):
         assert fir.group_delay(np.zeros(101)) == 50
         with pytest.raises(ValueError, match="group delay"):
             fir.group_delay(np.zeros(100))  # even length has no integer delay
 
-    def test_firdesign_multiband_unequal_endpoints(self):
+    def test_firdesign_multiband_unequal_endpoints(self, fir):
         # Exercises the desired[0] != desired[-1] multiband branch, which the
         # other design tests (equal endpoints) never reach.
         numtaps = fir.estimate_taps(FS, 5)
@@ -133,7 +138,7 @@ class TestFirDesign:
         ],
     )
     def test_firdesign_symmetry_and_band_shaping(
-        self, band_edges, desired, tw, passband_hz, stopband_hz
+        self, fir, band_edges, desired, tw, passband_hz, stopband_hz
     ):
         # Every filter type must be Type I (symmetric) AND actually shape its
         # bands -- symmetry alone would pass for a filter that passes the wrong
@@ -151,7 +156,7 @@ class TestFirDesign:
         for f in stopband_hz:
             assert mag[np.argmin(np.abs(w - f))] < 1e-2  # stopband rejected
 
-    def test_firdesign_is_deterministic(self):
+    def test_firdesign_is_deterministic(self, fir):
         numtaps = fir.estimate_taps(FS, 25)
         b1 = fir.firdesign(
             numtaps, [400, 425], [1, 0], sampling_freq=FS, spline_power=2
@@ -201,7 +206,9 @@ class TestFirDesign:
             (101, [], [], "at least two band edges"),  # empty edges
         ],
     )
-    def test_firdesign_validation(self, numtaps, band_edges, desired, match):
+    def test_firdesign_validation(
+        self, fir, numtaps, band_edges, desired, match
+    ):
         # match= ensures each case fails for the INTENDED reason, so a future
         # reorder of the validation checks can't let one pass on the wrong branch.
         with pytest.raises(ValueError, match=match):
@@ -210,12 +217,12 @@ class TestFirDesign:
             )
 
     @pytest.mark.parametrize("bad_tw", [0, -5])
-    def test_estimate_taps_rejects_nonpositive_tw(self, bad_tw):
+    def test_estimate_taps_rejects_nonpositive_tw(self, fir, bad_tw):
         # tw <= 0 previously gave a negative tap count / opaque OverflowError.
         with pytest.raises(ValueError, match="transition_width"):
             fir.estimate_taps(FS, bad_tw)
 
-    def test_estimate_taps_rejects_nonpositive_fs(self):
+    def test_estimate_taps_rejects_nonpositive_fs(self, fir):
         with pytest.raises(ValueError, match="sampling_freq"):
             fir.estimate_taps(0, 25)
 
@@ -232,21 +239,21 @@ class TestFirDesign:
             (FS, 25, 1e-3, np.inf),
         ],
     )
-    def test_estimate_taps_rejects_nonfinite_values(self, fs, tw, d1, d2):
+    def test_estimate_taps_rejects_nonfinite_values(self, fir, fs, tw, d1, d2):
         with pytest.raises(ValueError, match="finite"):
             fir.estimate_taps(
                 fs, tw, passband_deviation=d1, stopband_deviation=d2
             )
 
     @pytest.mark.parametrize("d1, d2", [(0, 1e-6), (1e-3, 0), (-1e-3, 1e-6)])
-    def test_estimate_taps_rejects_nonpositive_deviations(self, d1, d2):
+    def test_estimate_taps_rejects_nonpositive_deviations(self, fir, d1, d2):
         # d1/d2 <= 0 previously escaped as ZeroDivisionError / NaN-conversion.
         with pytest.raises(ValueError, match="deviations"):
             fir.estimate_taps(
                 FS, 25, passband_deviation=d1, stopband_deviation=d2
             )
 
-    def test_estimate_taps_rejects_too_loose_deviations(self):
+    def test_estimate_taps_rejects_too_loose_deviations(self, fir):
         # 10 * d1 * d2 >= 1 -> log10 <= 0 -> a nonsensical numtaps < 1.
         with pytest.raises(ValueError, match="too loose"):
             fir.estimate_taps(
@@ -254,7 +261,7 @@ class TestFirDesign:
             )
 
     @pytest.mark.parametrize("bad_p", [0, -1])
-    def test_firdesign_rejects_nonpositive_p(self, bad_p):
+    def test_firdesign_rejects_nonpositive_p(self, bad_p, fir):
         # p <= 0 previously "succeeded", silently collapsing the spline
         # transition to a rectangular truncation (nan ** 0 == 1).
         with pytest.raises(ValueError, match="spline_power must be positive"):
@@ -272,7 +279,7 @@ class TestFilterCorrectness:
     @pytest.mark.parametrize("time_axis", [0, 1])
     @pytest.mark.parametrize("decimation_factor", [None, 4, 15])
     def test_delay_compensated_filter(
-        self, lfp_lowpass, rng, time_axis, decimation_factor
+        self, lfp_lowpass, rng, time_axis, decimation_factor, fir
     ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
@@ -309,6 +316,7 @@ class TestFilterCorrectness:
     )
     def test_restriction_input_bounds_decimation(
         self,
+        fir,
         lfp_lowpass,
         rng,
         time_axis,
@@ -354,7 +362,7 @@ class TestFilterCorrectness:
         assert out.shape == ref.shape
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
-    def test_interval_shorter_than_filter(self, lfp_lowpass, rng):
+    def test_interval_shorter_than_filter(self, fir, lfp_lowpass, rng):
         # A valid_times interval can be shorter than the filter (N < M); the
         # single-block overlap-save still matches the direct convolution.
         b = lfp_lowpass
@@ -367,7 +375,7 @@ class TestFilterCorrectness:
         assert out.shape == ref.shape
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
-    def test_single_electrode_restriction(self, lfp_lowpass, rng):
+    def test_single_electrode_restriction(self, fir, lfp_lowpass, rng):
         # A length-1 restriction (one electrode) must keep the axis, giving a
         # (1, n_time) result rather than collapsing the dimension.
         b = lfp_lowpass
@@ -414,7 +422,7 @@ class TestStreaming:
         ],
     )
     def test_multi_interval_stream_into_preallocated(
-        self, lfp_lowpass, rng, time_axis, N, valid_times
+        self, lfp_lowpass, rng, time_axis, N, valid_times, fir
     ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
@@ -482,7 +490,9 @@ class TestStreaming:
         assert outarray.shape == ref.shape
         np.testing.assert_allclose(outarray, ref, atol=1e-9, rtol=1e-9)
 
-    def test_h5py_on_disk_signal_and_output(self, lfp_lowpass, rng, tmp_path):
+    def test_h5py_on_disk_signal_and_output(
+        self, fir, lfp_lowpass, rng, tmp_path
+    ):
         # The module's reason to exist: filter an on-disk h5py signal into an
         # on-disk h5py output. Exercises real h5py read/write semantics (fancy
         # index must be increasing-order, slice assignment) that the in-memory
@@ -540,7 +550,7 @@ class TestDescribeOutput:
     @pytest.mark.parametrize("time_axis", [0, 1])
     @pytest.mark.parametrize("decimation_factor", [None, 7])
     def test_describe_output_matches_actual_output(
-        self, lfp_lowpass, rng, time_axis, decimation_factor
+        self, fir, lfp_lowpass, rng, time_axis, decimation_factor
     ):
         b = lfp_lowpass
         delay = (len(b) - 1) // 2
@@ -587,7 +597,7 @@ class TestDescribeOutputParity:
         ],
     )
     def test_rejects_what_filtering_rejects(
-        self, lfp_lowpass, rng, kwargs, match
+        self, fir, lfp_lowpass, rng, kwargs, match
     ):
         # The sizing and filtering passes share _plan_osconvolve, so anything
         # one rejects the other must reject. Before the split these were one
@@ -601,7 +611,7 @@ class TestDescribeOutputParity:
         with pytest.raises((ValueError, IndexError), match=match):
             fir.filter_data_fir(x, b, axis=0, **kwargs)
 
-    def test_signature_omits_arguments_that_cannot_affect_the_answer(self):
+    def test_signature_omits_arguments_that_cannot_affect_the_answer(self, fir):
         # threads/outarray/output_offset do not change the shape or dtype, so
         # describe_output does not take them. Passing one is a caller error and
         # must say so, rather than being accepted and ignored as the old
@@ -619,7 +629,7 @@ class TestDescribeOutputParity:
 
 class TestConvolveModes:
     @pytest.mark.parametrize("mode", ["full", "same", "valid"])
-    def test_mode_matches_numpy(self, lfp_lowpass, rng, mode):
+    def test_mode_matches_numpy(self, lfp_lowpass, rng, mode, fir):
         b = lfp_lowpass
         x = rng.standard_normal(
             20_000
@@ -636,7 +646,7 @@ class TestConvolveModes:
 class TestEdgeCasesAndValidation:
     N = 30_000
 
-    def test_full_length_input_bounds_accepted(self, lfp_lowpass, rng):
+    def test_full_length_input_bounds_accepted(self, lfp_lowpass, fir, rng):
         # upstream rejected input_index_bounds=[0, N]; here it must equal no-bounds
         b = lfp_lowpass
         data = rng.standard_normal((3, self.N))
@@ -646,7 +656,7 @@ class TestEdgeCasesAndValidation:
         no_bounds = fir.filter_data_fir(data, b, axis=1)
         np.testing.assert_array_equal(with_bounds, no_bounds)
 
-    def test_full_output_bounds_accepted(self, lfp_lowpass, rng):
+    def test_full_output_bounds_accepted(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         tot = self.N + len(b) - 1
@@ -655,7 +665,7 @@ class TestEdgeCasesAndValidation:
             out, np.convolve(x, b, "full"), atol=1e-9, rtol=1e-9
         )
 
-    def test_complex_input_runs_and_matches(self, lfp_lowpass, rng):
+    def test_complex_input_runs_and_matches(self, lfp_lowpass, rng, fir):
         # upstream raised UnboundLocalError for complex input; port handles it
         b = lfp_lowpass
         x = rng.standard_normal(self.N) + 1j * rng.standard_normal(self.N)
@@ -666,7 +676,7 @@ class TestEdgeCasesAndValidation:
         )
 
     def test_complex_input_multiblock_decimation_restriction(
-        self, lfp_lowpass, rng
+        self, lfp_lowpass, rng, fir
     ):
         # The complex fallback path shares the block/decimation/restriction
         # machinery with the real (rfft) path, but the suite otherwise only
@@ -696,7 +706,7 @@ class TestEdgeCasesAndValidation:
 
     @pytest.mark.parametrize("bad_factor", [0, -3, 4.0])
     def test_decimation_below_one_or_noninteger_fails_closed(
-        self, lfp_lowpass, rng, bad_factor
+        self, lfp_lowpass, rng, bad_factor, fir
     ):
         # decimation_factor must be an integer >= 1 (consistent with nfft and
         # output_offset).
@@ -705,7 +715,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="decimation_factor"):
             fir.filter_data_fir(x, b, axis=0, decimation_factor=bad_factor)
 
-    def test_decimation_one_is_noop(self, lfp_lowpass, rng):
+    def test_decimation_one_is_noop(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         np.testing.assert_array_equal(
@@ -713,7 +723,7 @@ class TestEdgeCasesAndValidation:
             fir.filter_data_fir(x, b, axis=0),
         )
 
-    def test_input_bounds_out_of_range_raise(self, lfp_lowpass, rng):
+    def test_input_bounds_out_of_range_raise(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         with pytest.raises(IndexError, match="out of range"):
@@ -723,20 +733,20 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(IndexError, match="out of range"):
             fir.filter_data_fir(x, b, axis=0, input_index_bounds=[-1, self.N])
 
-    def test_input_bounds_not_increasing_raise(self, lfp_lowpass, rng):
+    def test_input_bounds_not_increasing_raise(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         with pytest.raises(ValueError, match="not strictly increasing"):
             fir.filter_data_fir(x, b, axis=0, input_index_bounds=[100, 100])
 
-    def test_output_bounds_out_of_range_raise(self, lfp_lowpass, rng):
+    def test_output_bounds_out_of_range_raise(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         tot = self.N + len(b) - 1
         with pytest.raises(ValueError, match="out of range"):
             fir.filter_data_fir(x, b, axis=0, output_index_bounds=[0, tot + 1])
 
-    def test_bad_mode_and_kernel_shape_raise(self, lfp_lowpass, rng):
+    def test_bad_mode_and_kernel_shape_raise(self, lfp_lowpass, rng, fir):
         b = lfp_lowpass
         x = rng.standard_normal(self.N)
         with pytest.raises(ValueError, match="invalid value"):
@@ -748,7 +758,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="at least one thread"):
             fir.filter_data_fir(x, b, axis=0, threads=0)  # need >= 1 thread
 
-    def test_negative_output_offset_rejected(self, lfp_lowpass, rng):
+    def test_negative_output_offset_rejected(self, lfp_lowpass, rng, fir):
         # A negative offset silently misplaces the write via NumPy negative
         # indexing; it must fail loudly instead.
         b = lfp_lowpass
@@ -757,7 +767,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="output_offset"):
             fir.filter_data_fir(x, b, axis=0, outarray=out, output_offset=-10)
 
-    def test_output_offset_past_end_rejected(self, lfp_lowpass, rng):
+    def test_output_offset_past_end_rejected(self, lfp_lowpass, rng, fir):
         # An offset that pushes the write past the end of a supplied outarray
         # must raise clearly rather than fail with an opaque broadcast error.
         b = lfp_lowpass
@@ -774,7 +784,7 @@ class TestEdgeCasesAndValidation:
                 output_offset=100,
             )
 
-    def test_noninteger_output_offset_rejected(self, lfp_lowpass, rng):
+    def test_noninteger_output_offset_rejected(self, lfp_lowpass, rng, fir):
         # A float offset (within range) previously slipped past validation and
         # failed later with "slice indices must be integers".
         b = lfp_lowpass
@@ -783,7 +793,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="output_offset.*integer"):
             fir.filter_data_fir(x, b, axis=0, outarray=out, output_offset=1.0)
 
-    def test_noninteger_nfft_rejected(self, lfp_lowpass, rng):
+    def test_noninteger_nfft_rejected(self, lfp_lowpass, rng, fir):
         # A non-integer nfft must be rejected in BOTH the sizing and filtering
         # passes -- previously the sizing pass accepted it and the real call
         # died with a raw TypeError. describe_output shares _plan_osconvolve
@@ -796,7 +806,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="nfft.*integer"):
             fir.filter_data_fir(x, b, axis=0, nfft=big_nfft)
 
-    def test_complex_output_into_real_outarray_rejected(self):
+    def test_complex_output_into_real_outarray_rejected(self, fir):
         # A complex result must not be silently written into a real outarray;
         # the dtype guard rejects it (checks the outarray's dtype, no data read).
         x = np.arange(60.0) + 1j * np.arange(60.0)  # complex -> complex output
@@ -805,7 +815,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(TypeError, match="complex"):
             fir._osconvolve(x, b, mode="full", outarray=real_out)
 
-    def test_integer_outarray_truncates_toward_zero(self, rng):
+    def test_integer_outarray_truncates_toward_zero(self, rng, fir):
         # Production writes into an int16 ElectricalSeries: filter_data_nwb
         # allocates the output with the RAW dtype, so the float64 filter result
         # is cast into it. Every other numeric test here is float64-in/out, so
@@ -821,7 +831,7 @@ class TestEdgeCasesAndValidation:
         # Compared against np.rint the two differ, which is the point.
         assert not np.array_equal(int_out, np.rint(float_out).astype(np.int16))
 
-    def test_integer_outarray_amplifies_roundoff_to_one_count(self, rng):
+    def test_integer_outarray_amplifies_roundoff_to_one_count(self, rng, fir):
         # Truncation is discontinuous at every integer, so the ~1e-15 difference
         # between this FFT convolution and a direct np.convolve lands on either
         # side of a boundary for a small fraction of samples -- turning
@@ -843,7 +853,7 @@ class TestEdgeCasesAndValidation:
         assert diff.max() == 1
         assert 0 < np.count_nonzero(diff) < 0.05 * diff.size
 
-    def test_kernel_accepts_python_list(self, rng):
+    def test_kernel_accepts_python_list(self, rng, fir):
         # b is documented array-like and converted internally, so a plain list
         # must work (spyglass passes a numpy array, but the contract is broader).
         x = rng.standard_normal(2000)
@@ -852,7 +862,7 @@ class TestEdgeCasesAndValidation:
             out, np.convolve(x, [1.0, 2.0, 1.0], "full"), atol=1e-9, rtol=1e-9
         )
 
-    def test_slice_restriction_rejected(self, lfp_lowpass, rng):
+    def test_slice_restriction_rejected(self, lfp_lowpass, rng, fir):
         # input_dim_restrictions entries must be integer-index arrays, not slices
         b = lfp_lowpass
         data = rng.standard_normal((6, self.N))
@@ -863,7 +873,7 @@ class TestEdgeCasesAndValidation:
 
     @pytest.mark.parametrize("electrodes", [np.array([2, 0]), np.array([1, 1])])
     def test_in_memory_restriction_allows_any_order(
-        self, lfp_lowpass, rng, electrodes
+        self, lfp_lowpass, rng, electrodes, fir
     ):
         # NumPy fancy-indexes an in-memory array in any order, and the public
         # FirFilterParameters.filter_data documents no ordering requirement for
@@ -880,7 +890,7 @@ class TestEdgeCasesAndValidation:
 
     @pytest.mark.parametrize("electrodes", [np.array([2, 0]), np.array([1, 1])])
     def test_lazy_restriction_allows_any_order(
-        self, lfp_lowpass, rng, electrodes, tmp_path
+        self, lfp_lowpass, rng, electrodes, tmp_path, fir
     ):
         # h5py cannot fancy-index out of order or with duplicates, so an
         # unsorted selection is read as sorted unique indices and gathered back.
@@ -911,7 +921,9 @@ class TestEdgeCasesAndValidation:
         assert out.shape == ref.shape
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
-    def test_restriction_indices_out_of_range_raise(self, lfp_lowpass, rng):
+    def test_restriction_indices_out_of_range_raise(
+        self, lfp_lowpass, rng, fir
+    ):
         b = lfp_lowpass
         data = rng.standard_normal((6, self.N))
         with pytest.raises(IndexError, match="out of range"):
@@ -922,7 +934,7 @@ class TestEdgeCasesAndValidation:
                 input_dim_restrictions=[np.array([0, 6]), None],
             )
 
-    def test_multiple_restricted_axes_rejected(self, lfp_lowpass, rng):
+    def test_multiple_restricted_axes_rejected(self, lfp_lowpass, rng, fir):
         # Only one non-filtered axis may be restricted (NumPy paired advanced
         # indexing would otherwise not do the intended Cartesian selection).
         b = lfp_lowpass
@@ -931,7 +943,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(ValueError, match="at most one non-filtered axis"):
             fir.filter_data_fir(data, b, axis=2, input_dim_restrictions=idr)
 
-    def test_boundary_output_no_read_past_data_end(self):
+    def test_boundary_output_no_read_past_data_end(self, fir):
         # When the (exclusive) output stop lands exactly on an overlap-save block
         # boundary, the module must NOT process an empty trailing block that
         # reads one block past the needed data -- wasteful, and unsafe for a
@@ -956,7 +968,7 @@ class TestEdgeCasesAndValidation:
             out, np.convolve(np.arange(10.0), b, "full"), atol=1e-9
         )
 
-    def test_overlap_read_error_propagates_not_zero_filled(self):
+    def test_overlap_read_error_propagates_not_zero_filled(self, fir):
         # An error reading the M-1 overlap segment of a block (e.g. a real h5py
         # I/O failure on an on-disk signal) must propagate, NOT be swallowed and
         # silently zero-filled -- which would corrupt the filtered output with no
@@ -974,7 +986,7 @@ class TestEdgeCasesAndValidation:
         with pytest.raises(RuntimeError, match="overlap read failed"):
             fir._osconvolve(x, b, mode="full", nfft=8)
 
-    def test_h5py_interval_starting_at_sample_zero(self, rng, tmp_path):
+    def test_h5py_interval_starting_at_sample_zero(self, rng, tmp_path, fir):
         # An interval starting at sample 0 has nothing before it, so the first
         # block's M-1 overlap window is empty. h5py rejects an empty slice
         # combined with a fancy index of >= 16 elements ("Dataspaces don't have
@@ -1011,7 +1023,7 @@ class TestEdgeCasesAndValidation:
         assert out.shape == ref.shape
         np.testing.assert_allclose(out, ref, atol=1e-9, rtol=1e-9)
 
-    def test_h5py_tail_block_starting_past_data_end(self, rng, tmp_path):
+    def test_h5py_tail_block_starting_past_data_end(self, rng, tmp_path, fir):
         # The main block read signal[start:stop] is empty whenever a tail block
         # begins at or past the end of the data -- which happens when the output
         # stop lands just past a block boundary. Same h5py failure as the empty
@@ -1061,7 +1073,9 @@ class TestEdgeCasesAndValidation:
             ([1.0, 2.0, 3.0], [1.0, -1.0, 2.0, 0.5, 3.0, 1.0, -2.0], 8),
         ],
     )
-    def test_tight_nfft_short_signal_matches_numpy(self, signal, kernel, nfft):
+    def test_tight_nfft_short_signal_matches_numpy(
+        self, signal, kernel, nfft, fir
+    ):
         # nfft >= kernel length is the documented contract, so every accepted
         # nfft must give the true convolution. Placing the clipped overlap from
         # its LENGTH (rather than from where the read actually starts) used to
@@ -1073,7 +1087,7 @@ class TestEdgeCasesAndValidation:
             out, np.convolve(x, b, "full"), atol=1e-9, rtol=1e-9
         )
 
-    def test_tight_nfft_oracle_sweep(self):
+    def test_tight_nfft_oracle_sweep(self, fir):
         # Randomized sweep over the whole accepted (signal length, kernel
         # length, nfft) region, against the np.convolve oracle. Fixed seed ->
         # reproducible.

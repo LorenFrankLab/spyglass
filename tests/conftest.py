@@ -5,6 +5,8 @@ conftest.py files in subdirectories have fixtures that are only available to
 tests in that subdirectory.
 """
 
+import importlib
+import logging
 import os
 
 # ---------------------------------------------------------------------------
@@ -59,6 +61,37 @@ from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
+
+# --------- Fix DeepLabCut's reload of the logging module ---------------------
+# deeplabcut.pose_estimation_tensorflow.training.train_network runs
+# `importlib.reload(logging); logging.shutdown()`. The reload installs a fresh
+# Manager and root logger, so every logger already held by an imported module
+# (spyglass's included) keeps emitting into the orphaned old hierarchy while
+# pytest's caplog attaches to the new root -- silently capturing nothing. Any
+# later test asserting on log output then fails purely because a DLC test ran
+# earlier in the session. Both calls are patched here rather than repaired
+# afterwards: DLC does the reload from a function-local `import importlib`, so
+# replacing the attribute is enough, and shutdown() must go too -- with the
+# reload blocked it would otherwise close pytest's and spyglass's live
+# handlers instead of the fresh module's empty handler list.
+_orig_importlib_reload = importlib.reload
+_orig_logging_shutdown = logging.shutdown
+
+
+def _reload_except_logging(module, *args, **kwargs):
+    """importlib.reload that leaves the logging module alone."""
+    if module is logging:
+        return logging
+    return _orig_importlib_reload(module, *args, **kwargs)
+
+
+def _no_shutdown(*args, **kwargs):
+    """No-op logging.shutdown; the real one runs at interpreter exit."""
+    return None
+
+
+importlib.reload = _reload_except_logging
+logging.shutdown = _no_shutdown
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -332,6 +365,15 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # Keeps MySQL data off a potentially small root disk
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help="Parent dir for the container's MySQL data, bind-mounted as "
+        + "<vol-dir>/<container-name> -> /var/lib/mysql. Default: "
+        + "Docker-managed storage.",
+    )
 
 
 def pytest_configure(config):
@@ -356,6 +398,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
@@ -567,6 +610,41 @@ def load_config(dj_conn, base_dir):
     )
 
 
+def _repair_raw_checksum(nwbfile_tbl, mini_dict):
+    """Realign the raw external-table checksum with the file on disk.
+
+    The docker container and BASE_DIR are independent state. Reusing a
+    container (--no-teardown) after the raw file has been regenerated leaves
+    the external table holding the previous size and contents_hash, and every
+    later fetch of that file fails with "downloaded but size did not match" --
+    a failure that looks like a code bug but is only stale metadata. Rewrite
+    the row to match what is actually on disk.
+    """
+    from spyglass.common.common_nwbfile import schema as common_schema
+    from spyglass.utils.dj_helper_fn import _write_external_checksum
+
+    file_name = mini_dict["nwb_file_name"]
+    abs_path = Path(nwbfile_tbl.get_abs_path(file_name))
+    if not abs_path.exists():
+        return
+
+    query = common_schema.external["raw"] & f"filepath LIKE '%{file_name}'"
+    if len(query) != 1:
+        return
+
+    row = query.fetch1()
+    on_disk_size = abs_path.stat().st_size
+    on_disk_hash = _dj_hash.uuid_from_file(abs_path)
+    if row["size"] == on_disk_size and row["contents_hash"] == on_disk_hash:
+        return
+
+    dj_logger.warning(
+        f"Stale external checksum for {file_name}; updating to match disk. "
+        "The container was reused after the raw file was regenerated."
+    )
+    _write_external_checksum(abs_path, common_schema.external["raw"], row)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
     dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
@@ -590,6 +668,7 @@ def mini_insert(
 
     if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
+        _repair_raw_checksum(Nwbfile, mini_dict)
 
     else:
         # Useful try/except for avoiding a full run on insert failure
