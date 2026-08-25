@@ -208,6 +208,12 @@ class SpyglassConfig:
         directory path, and the resolved base_dir must contain a 'tests' path
         component.
 
+        ``test_mode`` binds to the instance on the first deliberate or
+        successful load and is then immutable. Passing a ``test_mode`` that
+        differs from the bound value (even without ``force_reload``) does not
+        transition the instance -- it invalidates it and raises. To switch
+        modes, construct a new ``SpyglassConfig``.
+
         Parameters
         ----------
         base_dir: str

@@ -557,6 +557,28 @@ def test_policy_rejects_bad_limits(common_nwbfile, name, value):
         _make_policy(**{name: value})
 
 
+def test_plan_defaults_to_24h_policy_when_none_given(common_nwbfile, tmp_path):
+    """With no policy, CleanupPlan falls back to the default CleanupPolicy.
+
+    The default 24-hour age gate then defers a just-created untracked file
+    rather than deleting it.
+    """
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir()
+    tracked = analysis_dir / "tracked.nwb"
+    tracked.write_text("tracked")
+    fresh = analysis_dir / "fresh.nwb"
+    fresh.write_text("fresh")
+
+    plan = _table(
+        common_nwbfile, analysis_dir, [tracked]
+    )._build_untracked_file_plan([], policy=None)
+
+    assert plan.policy.min_file_age_hours == 24.0
+    assert fresh.resolve() in plan.deferred_recent_files
+    assert plan.files_to_delete == set()
+
+
 def _configure_cleanup(
     common_nwbfile,
     monkeypatch,

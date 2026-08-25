@@ -77,6 +77,9 @@ def _run_isolated_pytest(tmp_path, *, escalate):
         capture_output=True,
         text=True,
         env=child_env,
+        # Trivial single-test project with no plugins; a bound timeout keeps a
+        # hung child from stalling the whole outer suite.
+        timeout=120,
     )
     return completed
 
