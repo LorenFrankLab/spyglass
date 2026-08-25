@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 
 import datajoint as dj
+import numpy as np
 import pytest
 from pandas import DataFrame, Index
+
+from spyglass.common.common_interval import IntervalList
 
 
 @pytest.fixture(scope="module")
@@ -200,9 +203,53 @@ def test_imported_lfp_skipped_series_keeps_file_position(lfp, monkeypatch):
     series = table.get_nwb_objects(nwb_file)
 
     assert series == [empty, valid], "Both series should be selected"
-    assert table.generate_entries_from_nwb_object(empty, dict()) == {
-        table: []
-    }, "A series with no timestamps yields no entry"
+
+    skipped = table.generate_entries_from_nwb_object(empty, dict())
+    assert not any(
+        skipped.values()
+    ), "A series with no timestamps yields no entry"
     assert (
         table.enumerated_interval_name(valid) == "imported lfp 1 valid times"
     ), "The second series keeps its file position after the first is skipped"
+
+    # A skipped first series still has to seat the parents ahead of `self`:
+    # emission order is insert order, and it is fixed by the first series.
+    group_tbl = lfp.lfp_imported.LFPElectrodeGroup
+    keys = list(skipped)
+    assert keys.index(table) == len(keys) - 1, "self must be emitted last"
+    for parent in (group_tbl, group_tbl.LFPElectrode, IntervalList):
+        assert keys.index(parent) < keys.index(
+            table
+        ), f"{parent.__name__} must precede ImportedLFP in insert order"
+
+
+def test_remove_null_from_dicts_keeps_arrays(lfp):
+    """A blob-valued parent row must survive the no-adjustment fallback.
+
+    `v not in [None, ""]` compares an array elementwise and then coerces the
+    result to bool, raising "truth value of an array is ambiguous". Only
+    tables without `_adjust_keys_for_entry` take this path, so no live plan
+    reaches it with an array today -- but ImportedLFP emits an IntervalList
+    row whose valid_times is exactly such an array.
+    """
+    valid_times = np.array([[0.0, 1.0], [2.0, 3.0]])
+    row = {
+        "nwb_file_name": "fake_.nwb",
+        "valid_times": valid_times,
+        "pipeline": "imported_lfp",
+        "dropped": None,
+        "also_dropped": "",
+        "kept_empty_list": [],
+    }
+
+    (cleaned,) = lfp.lfp_imported.ImportedLFP()._remove_null_from_dicts([row])
+
+    assert np.array_equal(
+        cleaned["valid_times"], valid_times
+    ), "An array value should pass through unchanged"
+    assert set(cleaned) == {
+        "nwb_file_name",
+        "valid_times",
+        "pipeline",
+        "kept_empty_list",
+    }, "None and empty-string values should still be dropped"
