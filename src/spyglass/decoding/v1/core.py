@@ -1,13 +1,6 @@
 import datajoint as dj
 import numpy as np
 import pandas as pd
-from non_local_detector import (
-    ContFragClusterlessClassifier,
-    ContFragSortedSpikesClassifier,
-    NonLocalClusterlessDetector,
-    NonLocalSortedSpikesDetector,
-)
-from non_local_detector import __version__ as non_local_detector_version
 
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.dj_decoder_conversion import (
@@ -45,38 +38,92 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     pk = "decoding_param_name"
     sk = "decoding_params"
 
-    contents = [
-        {
-            pk: f"contfrag_clusterless_{non_local_detector_version}",
-            sk: ContFragClusterlessClassifier(),
-        },
-        {
-            pk: f"nonlocal_clusterless_{non_local_detector_version}",
-            sk: NonLocalClusterlessDetector(),
-        },
-        {
-            pk: f"contfrag_sorted_{non_local_detector_version}",
-            sk: ContFragSortedSpikesClassifier(),
-        },
-        {
-            pk: f"nonlocal_sorted_{non_local_detector_version}",
-            sk: NonLocalSortedSpikesDetector(),
-        },
-    ]
+    _n_defaults = 4  # number of rows _default_contents() returns
+
+    @classmethod
+    def _default_contents(cls) -> list[dict]:
+        """Build the default paramsets, one per non_local_detector model.
+
+        Imports ``non_local_detector`` (and, transitively, ``jax``), so callers
+        should avoid this on paths that must work without it.
+
+        Returns
+        -------
+        list of dict
+            Rows suitable for ``insert``, keyed on the classifier name and the
+            installed ``non_local_detector`` version.
+        """
+        from non_local_detector import (
+            ContFragClusterlessClassifier,
+            ContFragSortedSpikesClassifier,
+            NonLocalClusterlessDetector,
+            NonLocalSortedSpikesDetector,
+        )
+        from non_local_detector import __version__ as version
+
+        return [
+            {
+                cls.pk: f"contfrag_clusterless_{version}",
+                cls.sk: ContFragClusterlessClassifier(),
+            },
+            {
+                cls.pk: f"nonlocal_clusterless_{version}",
+                cls.sk: NonLocalClusterlessDetector(),
+            },
+            {
+                cls.pk: f"contfrag_sorted_{version}",
+                cls.sk: ContFragSortedSpikesClassifier(),
+            },
+            {
+                cls.pk: f"nonlocal_sorted_{version}",
+                cls.sk: NonLocalSortedSpikesDetector(),
+            },
+        ]
+
+    @property
+    def contents(self) -> list[dict]:
+        """Defaults DataJoint auto-inserts at declaration.
+
+        DataJoint only inserts when ``len(contents) > len(instance)``, so a
+        database that already holds the defaults short-circuits here and never
+        imports ``non_local_detector``. It also evaluates this property twice
+        (once via ``hasattr``, once via ``list``), so the populated path must
+        stay cheap.
+
+        On a fresh database the import is unavoidable -- that is exactly when
+        the defaults are needed -- but a broken ``non_local_detector`` warns
+        and skips rather than killing schema declaration. Declaring against a
+        broken install is self-healing: the check re-runs on every import, so
+        the defaults appear once the environment is fixed.
+        """
+        if len(self) >= self._n_defaults:
+            return []  # populated: nothing to insert, nothing to import
+
+        try:  # TODO(#1609): drop once the dependency conflict is resolved
+            return self._default_contents()
+        except Exception as err:
+            logger.warning(
+                "Skipping default decoding paramsets: 'non_local_detector' "
+                f"could not be imported ({err!r})."
+            )
+            return []
 
     @classmethod
     def insert_default(cls):
         """Insert default decoding parameters"""
-        cls.super().insert(cls.contents, skip_duplicates=True)
+        cls().insert(cls._default_contents(), skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
         """Override insert to convert classes to dict before inserting"""
-        for row in rows:
+        converted = []
+        for row in rows:  # build new rows: insert must not mutate the caller's
             params = row["decoding_params"]
             if hasattr(params, "__dict__"):
                 params = vars(params)
-            row["decoding_params"] = convert_classes_to_dict(params)
-        super().insert(rows, *args, **kwargs)
+            converted.append(
+                {**row, "decoding_params": convert_classes_to_dict(params)}
+            )
+        super().insert(converted, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
         """Return decoding parameters as a list of classes."""
