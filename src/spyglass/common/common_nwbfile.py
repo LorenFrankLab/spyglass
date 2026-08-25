@@ -16,7 +16,7 @@ from spyglass import __version__ as sg_version
 
 from spyglass.common._nwbfile_cleanup import (
     CleanupPlan,
-    _check_number,
+    CleanupPolicy,
 )
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
@@ -693,7 +693,8 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     # See #630, #664. Excessive key length.
 
     def _walk_analysis_files(self) -> Iterator[Path]:
-        """Yield NWB leaves, including those under symlinked directories."""
+        """Yield NWB leaves within analysis_dir (directory symlinks not
+        followed; leaf ``*.nwb`` symlinks still yielded)."""
         yield from CleanupPlan.walk_analysis_files(
             Path(self._analysis_dir), logger
         )
@@ -702,7 +703,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         self,
         custom_tables: List[SpyglassAnalysis],
         *,
-        min_file_age_hours: float = 24.0,
+        policy: Optional[CleanupPolicy] = None,
         now_ns: Optional[int] = None,
     ) -> CleanupPlan:
         """Snapshot tracked paths once and scan the analysis directory."""
@@ -716,7 +717,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             self._analysis_dir,
             tracked,
             logger=logger,
-            min_file_age_hours=min_file_age_hours,
+            policy=policy,
             now_ns=now_ns,
             walker=self._walk_analysis_files,
         )
@@ -727,9 +728,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         dry_run: bool = True,
         plan: CleanupPlan | None = None,
         *,
-        max_delete_fraction: float = 0.9,
-        max_delete_to_tracked_ratio: float = 10.0,
-        min_file_age_hours: float = 24.0,
+        policy: Optional[CleanupPolicy] = None,
         now_ns: Optional[int] = None,
     ) -> tuple[Set[Path], Set[Path]]:
         """Remove empty or untracked analysis files.
@@ -737,8 +736,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         A lowercase *.nwb leaf inside analysis_dir is a managed pointer. For an
         untracked symlink, cleanup deletes the target recorded during the scan
         -- including a target on another volume -- and then removes the leaf.
-        Symlinked directories are traversed, allowing an external analysis tree
-        to participate in the same cleanup pass.
+        Directory symlinks are NOT traversed, so cleanup cannot follow a
+        symlinked subdirectory out of analysis_dir and delete files in an
+        unrelated store.
 
         Cleanup follows the usual Spyglass trust-the-disk model: tracked paths
         and filesystem candidates are each captured once. It does not defend
@@ -752,14 +752,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         dry_run : bool, optional
             Report candidates without unlinking them. Defaults to True.
         plan : CleanupPlan, optional
-            A previously scanned plan.
-        max_delete_fraction : float, optional
-            Maximum fraction of eligible files that may be deleted.
-        max_delete_to_tracked_ratio : float, optional
-            Maximum ratio of deletions to tracked files found in the scan.
-        min_file_age_hours : float, optional
-            Defer files newer than this based on target mtime. Defaults to 24
-            hours; pass 0 for intentional immediate cleanup.
+            A previously scanned plan. When given, its own policy governs the
+            deletion limits and ``policy`` here is ignored.
+        policy : CleanupPolicy, optional
+            Validated deletion-safety limits (fraction, ratio, and age gate)
+            used when this method builds the plan itself.
         now_ns : int, optional
             Clock value injected by tests.
 
@@ -771,14 +768,10 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         if plan is None:
             plan = self._build_untracked_file_plan(
                 custom_tables,
-                min_file_age_hours=min_file_age_hours,
+                policy=policy,
                 now_ns=now_ns,
             )
-        return plan.execute(
-            dry_run=dry_run,
-            max_delete_fraction=max_delete_fraction,
-            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-        )
+        return plan.execute(dry_run=dry_run)
 
     def _cleanup_custom_table(
         self,
@@ -910,18 +903,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             If insert blocking or unblocking fails, a destructive plan is
             refused, or registry/database cleanup fails.
         """
-        # Validate before anything happens. An unvalidated NaN or inf would
-        # make every comparison False and silently disable the guard.
-        max_delete_fraction = _check_number(
-            "max_delete_fraction", max_delete_fraction, minimum=0, maximum=1
-        )
-        max_delete_to_tracked_ratio = _check_number(
-            "max_delete_to_tracked_ratio",
-            max_delete_to_tracked_ratio,
-            minimum=0,
-        )
-        min_file_age_hours = _check_number(
-            "min_file_age_hours", min_file_age_hours, minimum=0
+        # Validate every limit into an immutable policy BEFORE any
+        # insert-blocking trigger is acquired. An unvalidated NaN or inf would
+        # make every comparison False and silently disable the guard; worse,
+        # validating only later (inside the plan) would leave triggers
+        # installed on a bad argument. The plan reuses this validated policy
+        # at the deletion boundary without repeating the raw numeric checks.
+        policy = CleanupPolicy(
+            max_delete_fraction=max_delete_fraction,
+            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
+            min_file_age_hours=min_file_age_hours,
         )
 
         heading = "============== Analysis Cleanup "
@@ -950,19 +941,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             common_orphans = self.get_orphans().proj()
 
             untracked_file_plan = self._build_untracked_file_plan(
-                custom_tables, min_file_age_hours=min_file_age_hours
+                custom_tables, policy=policy
             )
 
             # Delete files before database cleanup. Files newly orphaned by
             # this run's row deletion are caught on the next invocation. The
-            # age gate is already baked into untracked_file_plan (built above),
-            # so it is not re-passed here.
+            # plan already carries the validated policy (age gate and deletion
+            # limits), so no limits are re-passed here.
             _ = self._remove_untracked_files(
                 custom_tables,
                 dry_run=dry_run,
                 plan=untracked_file_plan,
-                max_delete_fraction=max_delete_fraction,
-                max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
             )
 
             # Process each custom analysis table.

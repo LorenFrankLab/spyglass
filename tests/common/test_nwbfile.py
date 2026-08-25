@@ -54,10 +54,24 @@ def _table(common_nwbfile, analysis_dir, tracked=()):
     return table
 
 
-def _plan(table, custom_tables=(), *, min_age=0, now_ns=None):
+def _make_policy(*, min_file_age_hours=0, **kwargs):
+    """Build a CleanupPolicy for tests (immediate cleanup by default).
+
+    Imported lazily: importing ``spyglass.common`` at module scope needs a
+    live database, so this runs only once the ``common`` fixtures have set the
+    package up.
+    """
+    from spyglass.common._nwbfile_cleanup import CleanupPolicy
+
+    return CleanupPolicy(min_file_age_hours=min_file_age_hours, **kwargs)
+
+
+def _plan(table, custom_tables=(), *, policy=None, min_age=0, now_ns=None):
+    if policy is None:
+        policy = _make_policy(min_file_age_hours=min_age)
     return table._build_untracked_file_plan(
         list(custom_tables),
-        min_file_age_hours=min_age,
+        policy=policy,
         now_ns=now_ns,
     )
 
@@ -299,7 +313,10 @@ def test_cyclic_leaf_symlinks_are_removed(
     assert not any(leaf.is_symlink() for leaf in leaves)
 
 
-def test_cleanup_follows_symlinked_directories(common_nwbfile, tmp_path):
+def test_symlinked_directories_are_not_traversed(common_nwbfile, tmp_path):
+    # Cleanup deletes files, so it must not follow a directory symlink out of
+    # analysis_dir and delete untracked files in an unrelated tree. Leaf
+    # symlinks are the only cross-volume mechanism (tested separately).
     external_dir = tmp_path / "volume_b" / "analysis"
     external_dir.mkdir(parents=True)
     external_file = external_dir / "remote.nwb"
@@ -311,17 +328,20 @@ def test_cleanup_follows_symlinked_directories(common_nwbfile, tmp_path):
     directory_link.symlink_to(external_dir, target_is_directory=True)
 
     plan = _destructive_plan(common_nwbfile, analysis_dir)
-    assert plan.files_to_delete == {external_file.resolve()}
+    assert external_file.resolve() not in plan.scanned_files
+    assert plan.files_to_delete == set()
 
     plan.execute(dry_run=False)
 
-    assert not external_file.exists()
+    assert external_file.exists()
     assert directory_link.is_symlink()
 
 
-def test_tracked_file_below_symlinked_directory_is_preserved(
+def test_file_below_symlinked_directory_is_not_scanned(
     common_nwbfile, tmp_path
 ):
+    # Even a tracked file behind a directory symlink is simply never reached,
+    # so nothing in that external tree is touched.
     external_dir = tmp_path / "volume_b" / "analysis"
     external_dir.mkdir(parents=True)
     external_file = external_dir / "tracked.nwb"
@@ -337,10 +357,15 @@ def test_tracked_file_below_symlinked_directory_is_preserved(
     plan.execute(dry_run=False)
 
     assert external_file.exists()
+    assert external_file.resolve() not in plan.scanned_files
     assert plan.files_to_delete == set()
 
 
-def test_directory_symlink_cycle_is_visited_once(common_nwbfile, tmp_path):
+def test_directory_symlink_cycle_does_not_hang_or_delete(
+    common_nwbfile, tmp_path
+):
+    # With directory symlinks unfollowed, the walk cannot loop (no cycle
+    # detection needed) and never reaches the external tree.
     analysis_dir = tmp_path / "analysis"
     analysis_dir.mkdir()
     external_dir = tmp_path / "external"
@@ -355,8 +380,9 @@ def test_directory_symlink_cycle_is_visited_once(common_nwbfile, tmp_path):
 
     plan = _plan(_table(common_nwbfile, analysis_dir))
 
-    assert plan.scanned_files == {external_file.resolve()}
-    assert plan.files_to_delete == {external_file.resolve()}
+    assert plan.scanned_files == set()
+    assert plan.files_to_delete == set()
+    assert external_file.exists()
 
 
 def test_duplicate_aliases_delete_target_once_and_remove_all_leaves(
@@ -449,21 +475,26 @@ def test_plan_validation_limits(common_nwbfile, tmp_path):
     candidate = analysis_dir / "candidate.nwb"
     tracked.write_text("tracked")
     candidate.write_text("candidate")
-    plan = _plan(_table(common_nwbfile, analysis_dir, [tracked]))
 
-    assert plan.validate(max_delete_fraction=0.5) == (True, None)
-    accepted, reason = plan.validate(max_delete_fraction=0.49)
+    def plan_with(**limits):
+        return _plan(
+            _table(common_nwbfile, analysis_dir, [tracked]),
+            policy=_make_policy(**limits),
+        )
+
+    assert plan_with(max_delete_fraction=0.5).validate() == (True, None)
+    accepted, reason = plan_with(max_delete_fraction=0.49).validate()
     assert not accepted
     assert "above the safety limit" in reason
 
-    assert plan.validate(
+    assert plan_with(
         max_delete_fraction=1.0,
         max_delete_to_tracked_ratio=1.0,
-    ) == (True, None)
-    accepted, reason = plan.validate(
+    ).validate() == (True, None)
+    accepted, reason = plan_with(
         max_delete_fraction=1.0,
         max_delete_to_tracked_ratio=0.99,
-    )
+    ).validate()
     assert not accepted
     assert "1.0x" in reason
 
@@ -498,9 +529,10 @@ def test_absent_tracked_path_does_not_dilute_deletion_fraction(
         (analysis_dir / f"candidate_{index}.nwb").write_text("candidate")
 
     plan = _plan(
-        _table(common_nwbfile, analysis_dir, [tracked, missing_tracked])
+        _table(common_nwbfile, analysis_dir, [tracked, missing_tracked]),
+        policy=_make_policy(max_delete_fraction=0.5),
     )
-    accepted, reason = plan.validate(max_delete_fraction=0.5)
+    accepted, reason = plan.validate()
 
     assert not accepted
     assert "2/3 eligible analysis files" in reason
@@ -514,17 +546,15 @@ def test_absent_tracked_path_does_not_dilute_deletion_fraction(
         ("max_delete_fraction", 1.1),
         ("max_delete_to_tracked_ratio", float("inf")),
         ("max_delete_to_tracked_ratio", -1),
+        ("min_file_age_hours", float("nan")),
+        ("min_file_age_hours", -1),
     ],
 )
-def test_plan_validation_rejects_bad_limits(
-    common_nwbfile, tmp_path, name, value
-):
-    analysis_dir = tmp_path / "analysis"
-    analysis_dir.mkdir()
-    plan = _plan(_table(common_nwbfile, analysis_dir))
-
+def test_policy_rejects_bad_limits(common_nwbfile, name, value):
+    # The limits are validated once, when the immutable CleanupPolicy is
+    # constructed -- before any insert-blocking trigger is acquired.
     with pytest.raises(ValueError, match=name):
-        plan.validate(**{name: value})
+        _make_policy(**{name: value})
 
 
 def _configure_cleanup(
@@ -533,12 +563,10 @@ def _configure_cleanup(
     registry,
     events,
     validation=(True, None),
-    execution_limits=None,
+    plan_kwargs=None,
 ):
     class _Plan:
-        def execute(self, *, dry_run, **kwargs):
-            if execution_limits is not None:
-                execution_limits.update(kwargs)
+        def execute(self, *, dry_run):
             accepted, reason = validation
             if not accepted:
                 if dry_run:
@@ -550,6 +578,12 @@ def _configure_cleanup(
             events.append("files")
             return set(), set()
 
+    def _fake_build_plan(self, custom_tables, **kwargs):
+        events.append("plan")
+        if plan_kwargs is not None:
+            plan_kwargs.update(kwargs)
+        return _Plan()
+
     monkeypatch.setattr(common_nwbfile, "AnalysisRegistry", lambda: registry)
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -559,7 +593,7 @@ def _configure_cleanup(
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
         "_build_untracked_file_plan",
-        lambda self, custom_tables, **kwargs: events.append("plan") or _Plan(),
+        _fake_build_plan,
     )
     monkeypatch.setattr(
         common_nwbfile.AnalysisNwbfile,
@@ -572,7 +606,7 @@ def test_cleanup_coordinates_block_files_database_and_unblock(
     common_nwbfile, monkeypatch
 ):
     events = []
-    execution_limits = {}
+    plan_kwargs = {}
 
     class _Registry:
         all_classes = []
@@ -588,7 +622,7 @@ def test_cleanup_coordinates_block_files_database_and_unblock(
         monkeypatch,
         _Registry(),
         events,
-        execution_limits=execution_limits,
+        plan_kwargs=plan_kwargs,
     )
     table = object.__new__(common_nwbfile.AnalysisNwbfile)
 
@@ -606,10 +640,11 @@ def test_cleanup_coordinates_block_files_database_and_unblock(
         "external",
         "unblock",
     ]
-    assert execution_limits == {
-        "max_delete_fraction": 0.8,
-        "max_delete_to_tracked_ratio": 2.0,
-    }
+    # The validated policy is threaded into the plan builder, carrying the
+    # caller's limits without re-validating at the deletion boundary.
+    policy = plan_kwargs["policy"]
+    assert policy.max_delete_fraction == 0.8
+    assert policy.max_delete_to_tracked_ratio == 2.0
 
 
 def test_cleanup_rejects_nan_before_installing_triggers(

@@ -45,6 +45,52 @@ def _check_number(
 
 
 @dataclass(frozen=True)
+class CleanupPolicy:
+    """Validated, immutable deletion-safety limits for one cleanup run.
+
+    Construct this once -- before any insert-blocking trigger is acquired --
+    so an out-of-bounds or non-finite argument raises immediately, without
+    leaving triggers installed. Because the values are validated (and coerced
+    to ``float``) here, ``CleanupPlan`` applies them at the deletion boundary
+    without repeating the raw numeric checks.
+    """
+
+    max_delete_fraction: float = 0.9
+    max_delete_to_tracked_ratio: float = 10.0
+    min_file_age_hours: float = 24.0
+
+    def __post_init__(self) -> None:
+        # frozen=True forbids normal attribute assignment, so write the
+        # validated/coerced values back through object.__setattr__.
+        object.__setattr__(
+            self,
+            "max_delete_fraction",
+            _check_number(
+                "max_delete_fraction",
+                self.max_delete_fraction,
+                minimum=0,
+                maximum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "max_delete_to_tracked_ratio",
+            _check_number(
+                "max_delete_to_tracked_ratio",
+                self.max_delete_to_tracked_ratio,
+                minimum=0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "min_file_age_hours",
+            _check_number(
+                "min_file_age_hours", self.min_file_age_hours, minimum=0
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class FileSnapshot:
     """One ``*.nwb`` path and the target it named during the scan."""
 
@@ -108,7 +154,7 @@ class CleanupPlan:
         tracked_files: Set[Path],
         *,
         logger: logging.Logger,
-        min_file_age_hours: float = 24.0,
+        policy: Optional[CleanupPolicy] = None,
         now_ns: Optional[int] = None,
         walker: Optional[Callable[[], Iterable[Path]]] = None,
     ):
@@ -118,9 +164,9 @@ class CleanupPlan:
             for path in tracked_files
         )
         self.logger = logger
-        self.min_file_age_hours = _check_number(
-            "min_file_age_hours", min_file_age_hours, minimum=0
-        )
+        # Already validated at construction; no raw re-check here.
+        self.policy = policy if policy is not None else CleanupPolicy()
+        self.min_file_age_hours = self.policy.min_file_age_hours
         self.now_ns = time.time_ns() if now_ns is None else now_ns
         self._walker = walker or (
             lambda: self.walk_analysis_files(self.analysis_dir, self.logger)
@@ -178,34 +224,29 @@ class CleanupPlan:
 
     @staticmethod
     def walk_analysis_files(analysis_dir: Path, logger: logging.Logger):
-        """Yield NWB leaves, including those below symlinked directories."""
-        seen_directories = set()
+        """Yield ``*.nwb`` leaves within the analysis tree.
+
+        Directory symlinks are NOT traversed. Cleanup deletes files, so it
+        must not be able to follow a symlinked subdirectory out of
+        ``analysis_dir`` into an unrelated store (a raw/recording root, another
+        user's tree) and delete untracked ``*.nwb`` there -- there is no
+        protected-store denylist to stop it. Leaf ``*.nwb`` symlinks (managed
+        pointers, including to another volume) are still yielded: ``os.walk``
+        lists file symlinks in ``files`` regardless of ``followlinks``, and a
+        symlinked ``analysis_dir`` root is still scanned because ``os.walk``
+        descends into its top directory either way. Because symlinked
+        subdirectories are never followed, no cycle can arise and no
+        cycle-detection is needed.
+        """
 
         def warn(error):
             logger.warning(f"Skipping analysis directory: {error}")
 
-        for root, directories, files in os.walk(
+        for root, _directories, files in os.walk(
             analysis_dir,
-            followlinks=True,
+            followlinks=False,
             onerror=warn,
         ):
-            try:
-                resolved_root = Path(root).resolve()
-            except (OSError, RuntimeError) as error:
-                logger.warning(
-                    f"Skipping analysis directory that cannot be resolved "
-                    f"{root}: {error}"
-                )
-                directories[:] = []
-                continue
-
-            # ``os.walk(followlinks=True)`` does not detect symlink cycles.
-            # Resolve each directory once so a loop cannot make cleanup hang.
-            if resolved_root in seen_directories:
-                directories[:] = []
-                continue
-            seen_directories.add(resolved_root)
-
             for filename in files:
                 if filename.endswith(".nwb"):
                     yield Path(root) / filename
@@ -218,21 +259,14 @@ class CleanupPlan:
             for snapshots in self._candidates.values()
         )
 
-    def validate(
-        self,
-        *,
-        max_delete_fraction: float = 0.9,
-        max_delete_to_tracked_ratio: float = 10.0,
-    ) -> Tuple[bool, Optional[str]]:
-        """Check the inexpensive aggregate deletion backstops."""
-        max_delete_fraction = _check_number(
-            "max_delete_fraction", max_delete_fraction, minimum=0, maximum=1
-        )
-        max_delete_to_tracked_ratio = _check_number(
-            "max_delete_to_tracked_ratio",
-            max_delete_to_tracked_ratio,
-            minimum=0,
-        )
+    def validate(self) -> Tuple[bool, Optional[str]]:
+        """Check the inexpensive aggregate deletion backstops.
+
+        Uses this plan's already-validated ``CleanupPolicy`` limits; the raw
+        numeric checks ran once when the policy was constructed.
+        """
+        max_delete_fraction = self.policy.max_delete_fraction
+        max_delete_to_tracked_ratio = self.policy.max_delete_to_tracked_ratio
 
         # Validate the private candidate mapping consumed by ``execute()``,
         # rather than a public reporting set that a caller could mutate.
@@ -274,15 +308,14 @@ class CleanupPlan:
         self,
         *,
         dry_run: bool = True,
-        max_delete_fraction: float = 0.9,
-        max_delete_to_tracked_ratio: float = 10.0,
     ) -> Tuple[Set[Path], Set[Path]]:
         """Report or unlink the candidates captured by this plan.
 
-        Destructive execution validates the plan immediately before unlinking,
-        so callers cannot accidentally bypass the aggregate deletion limits.
-        A dry run still reports a plan that would be refused, but warns that
-        destructive execution would not proceed.
+        Destructive execution validates the plan against this plan's
+        ``CleanupPolicy`` immediately before unlinking, so callers cannot
+        accidentally bypass the aggregate deletion limits. A dry run still
+        reports a plan that would be refused, but warns that destructive
+        execution would not proceed.
 
         The recorded target is used instead of resolving a symlink again at
         execution time.  This keeps execution deterministic without adding
@@ -290,10 +323,7 @@ class CleanupPlan:
         Ordinary unlink failures are logged and cleanup continues, matching
         existing Spyglass cleanup routines.
         """
-        plan_ok, plan_error = self.validate(
-            max_delete_fraction=max_delete_fraction,
-            max_delete_to_tracked_ratio=max_delete_to_tracked_ratio,
-        )
+        plan_ok, plan_error = self.validate()
         if not plan_ok:
             if dry_run:
                 self.logger.warning(
