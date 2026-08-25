@@ -276,7 +276,8 @@ def pytest_addoption(parser):
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
-    --container-name (str): Default 'spyglass-pytest'. Docker container name.
+    --container-name (str): Default None (derived from git branch as
+        'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
@@ -321,9 +322,12 @@ def pytest_addoption(parser):
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
         action="store",
-        default="spyglass-pytest",
+        default=None,
         dest="container_name",
-        help="Docker container name for MySQL server.",
+        help="Docker container name for MySQL server. Default: derived from "
+        + "the current git branch, so concurrent runs on different branches "
+        + "don't share a container (or, with --container-vol-dir, a data "
+        + "dir).",
     )
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-port",

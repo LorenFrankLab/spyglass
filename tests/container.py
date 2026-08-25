@@ -176,7 +176,7 @@ class DockerMySQLManager:
         Returns
         -------
         Path or None
-            `<vol_dir>/<container_name>`, created if needed, else None.
+            `<vol_dir>/<container_name>`, else None.
         """
         if not vol_dir or self.null_server:
             return None
@@ -187,7 +187,6 @@ class DockerMySQLManager:
         safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", self.container_name)
         safe_name = safe_name.strip(".") or "_"  # reject bare "." / ".."
         path = Path(vol_dir).expanduser().absolute() / safe_name
-        path.mkdir(parents=True, exist_ok=True)
         self.logger.info(f"{self.msg}data dir: {path}")
 
         return path
@@ -258,11 +257,15 @@ class DockerMySQLManager:
             self.container.restart()
 
         else:
-            volumes = (
-                {str(self.vol_dir): {"bind": "/var/lib/mysql", "mode": "rw"}}
-                if self.vol_dir
-                else None
-            )
+            volumes = None
+            if self.vol_dir:
+                self.vol_dir.mkdir(parents=True, exist_ok=True)
+                volumes = {
+                    str(self.vol_dir): {
+                        "bind": "/var/lib/mysql",
+                        "mode": "rw",
+                    }
+                }
             self._ran_container = self.client.containers.run(
                 image=f"{self.image_name}:{self.mysql_version}",
                 name=self.container_name,
@@ -387,14 +390,20 @@ class DockerMySQLManager:
         though its on-disk artifacts (NWB files, DLC projects, etc.) were
         already deleted by that earlier run's teardown. Clearing `vol_dir`
         here whenever the container is removed keeps the two in sync.
+
+        An "exited" container is already stopped, but still gets removed
+        when `remove` is True -- otherwise `start()`'s restart branch would
+        bring it back on the old mount/port after its data dir was cleared.
         """
         if self.null_server:
             return None
 
-        if self.container_status and self.container_status != "exited":
-            container_name = self.container_name
-            self.container.stop()  # Logger I/O closes during teardown
-            logline = f"Container {container_name} stopped"
+        if self.container_status:  # present, whether running or exited
+            if self.container_status != "exited":
+                self.container.stop()  # Logger I/O closes during teardown
+                logline = f"Container {self.container_name} stopped"
+            else:
+                logline = f"Container {self.container_name} (exited)"
 
             if remove:
                 self.container.remove()
@@ -406,14 +415,7 @@ class DockerMySQLManager:
             self._clear_vol_dir()
 
     def _clear_vol_dir(self) -> None:
-        """Empty `vol_dir`'s contents so a later run starts from scratch.
-
-        MySQL's entrypoint writes the data dir as its own container-internal
-        uid (commonly 999), not the host user running pytest, so a plain
-        host-side delete (e.g. `shutil.rmtree`) typically has no permission
-        and silently no-ops. A short-lived container's root user bypasses
-        that, same as the MySQL container itself did to create the files.
-        """
+        """Remove `vol_dir` so a later run starts from scratch."""
         if not self.vol_dir.exists():
             return
         try:
@@ -424,5 +426,6 @@ class DockerMySQLManager:
                 remove=True,
                 detach=False,
             )
+            self.vol_dir.rmdir()
         except Exception as e:
             self.logger.warning(f"{self.msg}failed to clear vol_dir: {e}")
