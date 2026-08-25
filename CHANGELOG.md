@@ -47,6 +47,12 @@ LFPBandV1().fix_1481()
 from spyglass.position.v1.position_dlc_project import DLCProject
 
 DLCProject().alter()
+
+# Add unit_criteria to UnitSelectionParams. Only needed to use that option;
+# existing filters work against the un-altered table
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
+UnitSelectionParams().alter()
 ```
 
 ### Breaking Changes
@@ -284,8 +290,13 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Clear a file's existing `InsertError` rows at the start of
+        `populate_all_common`, so a rerun no longer reports or rolls back on
+        failures logged by an earlier attempt #1497
     - Separate `PositionVideo` to tri-part `make`, and close the video NWB file
-        handle it left open #XXXX
+        handle it left open #1679
 
 - Decoding
 
@@ -349,10 +360,16 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `SortGroup.set_group_by_shank` to support non-numeric
+        `electrode_group_name`s by falling back to lexicographic ordering #1624
     - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be selected
+        on arbitrary units table columns with numeric, range, and membership
+        criteria. A criterion naming a column a sorting's units table does not
+        have raises an error #1670
 
 ## [0.5.5] (Aug 6, 2025)
 
