@@ -260,7 +260,38 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 
 --no-dlc            # Skip DeepLabCut tests and downloads
 # Useful for: systems without DLC, faster test runs
+
+--container-name NAME  # Docker container name (default: branch-derived)
+--container-port PORT  # Host port mapped to MySQL's 3306
+
+--container-vol-dir PATH  # Host dir for the container's MySQL data
+# Useful for: keeping a populated test database off a small root disk
 ```
+
+#### Container Data Directory
+
+By default Docker stores the test database on its own root filesystem, which on
+a shared machine is often the smallest disk available. A populated test database
+is not small, so `--container-vol-dir` bind-mounts the container's
+`/var/lib/mysql` onto a directory you choose:
+
+```bash
+pytest --container-vol-dir /path/to/roomy-disk/docker-vols/
+```
+
+Each container gets its own subdirectory, `<vol-dir>/<container-name>`, so
+concurrent runs on different branches do not share data. The directory is
+created if it does not exist. Without the flag, storage is left to Docker
+exactly as before.
+
+Unless `--no-teardown` is passed, this directory is deleted along with the
+container at the end of the run, so a later run that reuses the same
+`--container-name` always starts from an empty data dir rather than rebooting
+MySQL onto stale, partially-cleaned-up data. With `--no-teardown`, both the
+container and its data dir are left in place. Note that `--container-vol-dir`
+only takes effect when the container is (re)created — if a container with the
+matching name is already running (e.g. from a prior `--no-teardown` run), the
+flag has no effect on it; a warning is logged in that case.
 
 ### Debugging Options
 

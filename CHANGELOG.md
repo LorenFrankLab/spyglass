@@ -258,6 +258,9 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Add `--container-vol-dir` pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    `--container-name`/`--container-port` options #1661
 - Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
 - Grant `dj_user` all but `CREATE` on shared prefixes #1678
 - Default analysis schema prefix to `database.user` when unset #1678
