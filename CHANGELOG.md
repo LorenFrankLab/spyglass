@@ -57,6 +57,29 @@ UnitSelectionParams().alter()
 
 ### Breaking Changes
 
+#### `insert_sessions` Returns a List (#1660)
+
+`insert_sessions` returned from inside its loop over `nwb_file_names`, so a list
+argument only ever processed its first file. It now processes every file and
+returns one `populate_all_common` result per file, rather than a single result.
+
+#### Ingestion Raises Instead of Skipping (#1660)
+
+Two cases ingestion used to pass over silently now raise.
+
+`_expected_duplicates` is read per table rather than once for the whole
+ingestion, so a table that legitimately recurs across files (`Task`) can be
+validated while the table driving the ingestion is not. `TaskEpoch`,
+`ImportedPose` and `ImportedLFP` no longer expect duplicates: re-ingesting an
+already-ingested file raises `DuplicateError` instead of validating and
+skipping.
+
+A `TaskEpoch` whose `camera_id` matched no `CameraDevice` in the NWB file or
+config was dropped with only an info log, and with it the `VideoFile`,
+`StateScriptFile` and `OptogeneticProtocol` rows referencing that epoch. A
+dangling camera reference now raises `ValueError`; an epoch that genuinely names
+no camera stores `camera_names = []` and is kept.
+
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
 `NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
@@ -177,7 +200,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507, #1614
+    #1484, #1489, #1507, #1614, #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
@@ -287,6 +310,9 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Add `--container-vol-dir` pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    `--container-name`/`--container-port` options #1661
 
 ### Pipelines
 
@@ -322,10 +348,12 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
-    - Bypass delete permission check when removing null `PositionIntervalMap` entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
     - Clear a file's existing `InsertError` rows at the start of
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
+    - `PositionSource` ingestion is now responsible for `RawPosition` #1660
 
 - Decoding
 

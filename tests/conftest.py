@@ -279,7 +279,8 @@ def pytest_addoption(parser):
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
-    --container-name (str): Default 'spyglass-pytest'. Docker container name.
+    --container-name (str): Default None (derived from git branch as
+        'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
@@ -325,9 +326,12 @@ def pytest_addoption(parser):
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
         action="store",
-        default="spyglass-pytest",
+        default=None,
         dest="container_name",
-        help="Docker container name for MySQL server.",
+        help="Docker container name for MySQL server. Default: derived from "
+        + "the current git branch, so concurrent runs on different branches "
+        + "don't share a container (or, with --container-vol-dir, a data "
+        + "dir).",
     )
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-port",
@@ -335,6 +339,15 @@ def pytest_addoption(parser):
         default=None,
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
+    )
+    parser.addoption(  # Keeps MySQL data off a potentially small root disk
+        "--container-vol-dir",
+        action="store",
+        default=None,
+        dest="container_vol_dir",
+        help="Parent dir for the container's MySQL data, bind-mounted as "
+        + "<vol-dir>/<container-name> -> /var/lib/mysql. Default: "
+        + "Docker-managed storage.",
     )
 
 
@@ -411,6 +424,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
+        vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,

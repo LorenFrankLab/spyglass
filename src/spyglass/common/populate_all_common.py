@@ -3,12 +3,10 @@ from typing import List, Union
 
 import datajoint as dj
 import yaml
-from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
     PositionSource,
     RawCompassDirection,
-    RawPosition,
     StateScriptFile,
     VideoFile,
 )
@@ -43,8 +41,9 @@ from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
-from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
+from spyglass.utils.nwb_helper_fn import get_config
 
 
 def log_insert_error(
@@ -79,16 +78,6 @@ def log_insert_error(
     )
 
 
-def _get_config_name(table_obj):
-    """Given a table object, return its config name for entries.yaml
-
-    Returns Master.Part for part tables, otherwise just the table name.
-    """
-    if hasattr(table_obj, "_master"):
-        return f"{table_obj._master.__name__}.{table_obj.__class__.__name__}"
-    return table_obj.__class__.__name__
-
-
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
@@ -96,64 +85,41 @@ def single_transaction_make(
     error_constants: dict = None,
     config: dict = None,
 ):
-    """For each table, run the `make` method directly instead of `populate`.
+    """Ingest each table from the NWB file, inside one transaction.
 
-    Requires `allow_direct_insert` set to True within each method. Uses
-    nwb_file_name search table key_source for relevant key. Currently assumes
-    all tables will have exactly one key_source entry per nwb file.
+    Every table here is a SpyglassIngestion table, so each parses the file
+    once via `insert_from_nwbfile` rather than running `make` per key_source
+    key. Failures are logged per table unless `raise_err` is set.
     """
 
-    nwbfile_tbl = Nwbfile()
+    # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
+    # file. Both configs share the {TableName: [rows]} shape that
+    # `generate_entries_from_config` indexes by name, so each table is handed
+    # the whole merged mapping -- a per-table lookup would yield a row list.
+    # The file's own config wins: `entries.yaml` holds lab-wide defaults,
+    # while the sidecar describes this session. Before this PR the sidecar was
+    # the only config any table that read one consulted.
+    # `or dict()`: yaml.safe_load returns None for an empty file, and the
+    # config argument is optional.
+    file_config = (
+        get_config(
+            Nwbfile.get_abs_path(nwb_file_name),
+            calling_table="populate_all_common",
+        )
+        or dict()
+    )
+    merged_config = {**(config or dict()), **file_config}
 
-    file_restr = {"nwb_file_name": nwb_file_name}
     with Nwbfile._safe_context():
         for table in tables:
-            config_name = _get_config_name(table())
-            table_config = config.get(config_name, dict())
-
-            if isinstance(table(), SpyglassIngestion):
-                try:
-                    table().insert_from_nwbfile(
-                        nwb_file_name, config=table_config
-                    )
-                except Exception as err:
-                    if raise_err:
-                        raise err
-                    log_insert_error(
-                        table=table, err=err, error_constants=error_constants
-                    )
-                continue
-
-            # If imported/computed table, get key from key_source
-            nwbfile_tbl._info_msg(f"Populating {table.__name__}...")
-            key_source = getattr(table, "key_source", None)
-            if key_source is None:  # Generate key from parents
-                parents = table.parents(as_objects=True)
-                key_source = parents[0].proj()
-                for parent in parents[1:]:
-                    key_source *= parent.proj()
-
-            table_name = to_camel_case(table.table_name)
-            if table_name == "PositionSource":
-                # PositionSource only uses nwb_file_name - full calls redundant
-                key_source = dj.U("nwb_file_name") & key_source
-            if table_name in [
-                "ImportedPose",
-                "ImportedLFP",
-                "OptogeneticProtocol",
-            ]:
-                key_source = Nwbfile()
-
-            query = key_source & file_restr
-            for pop_key in query.fetch("KEY"):
-                try:
-                    table().make(pop_key)
-                except Exception as err:
-                    if raise_err:
-                        raise err
-                    log_insert_error(
-                        table=table, err=err, error_constants=error_constants
-                    )
+            try:
+                table().insert_from_nwbfile(nwb_file_name, config=merged_config)
+            except Exception as err:
+                if raise_err:
+                    raise err
+                log_insert_error(
+                    table=table, err=err, error_constants=error_constants
+                )
 
 
 def populate_all_common(
@@ -236,7 +202,7 @@ def populate_all_common(
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
-            PositionSource,  # Depends on Session
+            PositionSource,  # Depends on Session. Also fills RawPosition
             RawCompassDirection,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
@@ -245,9 +211,6 @@ def populate_all_common(
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
-        ],
-        [
-            RawPosition,  # Depends on PositionSource
         ],
     ]
 
