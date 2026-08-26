@@ -57,6 +57,16 @@ on_fail() { # $1: error message. Echo message and send as email
 
 exec >> $SPYGLASS_LOG 2>&1
 
+# Truncate the log on EVERY exit, not just the success path. A cron that
+# fails on the same persistent condition every night (e.g. a refused
+# cleanup) would otherwise grow the log without bound, since the failure
+# branches below `exit` before any tail-based truncation could run.
+truncate_log() {
+    tail -n "${SPYGLASS_MAX_LOG:-1000}" "$SPYGLASS_LOG" \
+      > "${SPYGLASS_LOG}.tmp" && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
+}
+trap truncate_log EXIT
+
 # print the date and time
 echo "SPYGLASS CRON JOB START: $(date +"%Y-%m-%d %H:%M:%S")"
 
@@ -92,7 +102,13 @@ fi
 
 # Run cleanup script; capture any file issues to a temp file for Slack reporting
 FILE_ISSUES_OUT=$(mktemp)
-FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py \
+  || {
+    cleanup_status=$?
+    rm -f "$FILE_ISSUES_OUT"
+    on_fail "cleanup.py failed with exit code $cleanup_status"
+    exit "$cleanup_status"
+  }
 
 if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
   send_slack_message "Spyglass file issues found:
@@ -101,7 +117,4 @@ fi
 rm -f "$FILE_ISSUES_OUT"
 
 echo "SPYGLASS CRON JOB END"
-
-# truncate long log file
-tail -n ${SPYGLASS_MAX_LOG:-1000} "$SPYGLASS_LOG" > "${SPYGLASS_LOG}.tmp" \
-  && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
+# Log truncation happens in the truncate_log EXIT trap installed above.

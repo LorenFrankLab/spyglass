@@ -5,7 +5,7 @@ import pandas as pd
 import pynwb
 
 from spyglass.common import IntervalList, Nwbfile
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_mixin import SpyglassIngestion, SpyglassMixin
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_valid_intervals,
@@ -15,7 +15,7 @@ schema = dj.schema("position_v1_imported_pose")
 
 
 @schema
-class ImportedPose(SpyglassMixin, dj.Manual):
+class ImportedPose(SpyglassIngestion, dj.Manual):
     """
     Table to ingest pose data generated prior to spyglass.
     Each entry corresponds to on ndx_pose.PoseEstimation object in an NWB file.
@@ -33,7 +33,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
     skeleton_object_id: varchar(80) # unique identifier for the skeleton object
     """
 
-    class BodyPart(SpyglassMixin, dj.Part):
+    class BodyPart(SpyglassIngestion, dj.Part):
         definition = """
         -> master
         part_name: varchar(80)
@@ -41,71 +41,67 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         part_object_id: varchar(80)
         """
 
-    def make(self, key):
-        self.insert_from_nwbfile(key["nwb_file_name"])  # pragma: no cover
+        table_key_to_obj_attr = {"self": {"part_object_id": "object_id"}}
 
-    def insert_from_nwbfile(self, nwb_file_name, **kwargs):
-        file_path = Nwbfile().get_abs_path(nwb_file_name)
-        interval_keys = []
-        master_keys = []
-        part_keys = []
-        with pynwb.NWBHDF5IO(file_path, mode="r") as io:
-            nwb = io.read()
-            pose_objects = [
-                obj
-                for obj in nwb.objects.values()
-                if isinstance(obj, ndx_pose.PoseEstimation)
-            ]
+    _source_nwb_object_type = ndx_pose.PoseEstimation
 
-            # Loop through all the PoseEstimation objects in the behavior module
-            for obj in pose_objects:
-                name = obj.name
-                # use the timestamps from the first body part to define valid times
-                timestamps = list(obj.pose_estimation_series.values())[
-                    0
-                ].get_timestamps()
-                sampling_rate = estimate_sampling_rate(
-                    timestamps, filename=nwb_file_name
-                )
-                valid_intervals = get_valid_intervals(
-                    timestamps,
-                    sampling_rate=sampling_rate,
-                    min_valid_len=sampling_rate,
-                    warn=not self._test_mode,
-                )
-                interval_pk = {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": f"pose_{name}_valid_intervals",
+    table_key_to_obj_attr = {
+        "self": {"pose_object_id": "object_id"},
+        "skeleton": {"skeleton_object_id": "object_id"},
+    }
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Generate the interval, the pose entry, and one entry per body part.
+
+        The interval comes first: it is this table's parent, derived from the
+        timestamps of the object's first body part.
+        """
+        nwb_file_name = base_key["nwb_file_name"]
+
+        # use the timestamps from the first body part to define valid times
+        timestamps = list(nwb_obj.pose_estimation_series.values())[
+            0
+        ].get_timestamps()
+        sampling_rate = estimate_sampling_rate(
+            timestamps, filename=nwb_file_name
+        )
+        valid_intervals = get_valid_intervals(
+            timestamps,
+            sampling_rate=sampling_rate,
+            min_valid_len=sampling_rate,
+            warn=not self._test_mode,
+        )
+
+        interval_pk = {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": f"pose_{nwb_obj.name}_valid_intervals",
+        }
+        part_attr = self.BodyPart.table_key_to_obj_attr["self"]
+
+        return {
+            IntervalList: [
+                {
+                    **interval_pk,
+                    "valid_times": valid_intervals,
+                    "pipeline": "ImportedPose",
                 }
-                interval_keys.append(
-                    {
-                        **interval_pk,
-                        "valid_times": valid_intervals,
-                        "pipeline": "ImportedPose",
-                    }
+            ],
+            **super().generate_entries_from_nwb_object(nwb_obj, interval_pk),
+            self.BodyPart: [
+                dict(
+                    interval_pk,
+                    part_name=part,
+                    **{k: getattr(part_obj, v) for k, v in part_attr.items()},
                 )
-                master_keys.append(
-                    {
-                        **interval_pk,
-                        "pose_object_id": obj.object_id,
-                        "skeleton_object_id": obj.skeleton.object_id,
-                    }
-                )
-                part_keys.extend(
-                    [
-                        {
-                            **interval_pk,
-                            "part_name": part,
-                            "part_object_id": part_obj.object_id,
-                        }
-                        for part, part_obj in obj.pose_estimation_series.items()
-                    ]
-                )
+                for part, part_obj in nwb_obj.pose_estimation_series.items()
+            ],
+        }
 
-        with self._safe_context():
-            IntervalList().insert(interval_keys, **kwargs)
-            self.insert(master_keys, **kwargs)
-            self.BodyPart().insert(part_keys, **kwargs)
+    def make(self, key):
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ImportedPose.make is deprecated. Use insert_from_nwbfile."
+        )
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
