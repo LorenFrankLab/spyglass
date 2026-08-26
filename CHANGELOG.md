@@ -2,6 +2,9 @@
 
 ## [0.5.6] (Unreleased)
 
+- Add metric curation after manual FigURL curation to the SpikeSortingV1 tutorial,
+  including handling labels for merged units #XXXX
+
 ### Release Notes
 
 Running draft to be removed immediately prior to release. When altering tables,
