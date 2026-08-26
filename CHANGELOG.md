@@ -426,6 +426,12 @@ for label, interval_data in results.groupby("interval_labels"):
         selected on arbitrary units table columns with numeric, range, and
         membership criteria. A criterion naming a column a sorting's units
         table does not have raises an error #1670
+    - Fix `SpikeSorting.populate` raising `AttributeError: Bad parameters:
+        ['tempdir']` for SpikeInterface-native sorters (e.g. `spykingcircus2`,
+        `tridesclous2`). `_run_spike_sorter` now injects the `tempdir`
+        scratch-dir param only for sorters that declare it (only
+        `mountainsort4`), instead of injecting it into every sorter and
+        maintaining hardcoded removal lists #1655
 
 ## [0.5.5] (Aug 6, 2025)
 
