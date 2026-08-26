@@ -404,6 +404,33 @@ pytest --no-teardown  # Run once to start container
 Note that the container process will try to use the branch name as the database
 suffix. If your branch name has special characters, consider renaming.
 
+### Fixture Teardown and `--no-teardown`
+
+`--no-teardown` exists to skip **expensive** rebuilds - the Docker container and
+the ingestion of the shared test NWB file - so that repeated runs are fast. It
+is not a license to leave state behind.
+
+A fixture whose leftover rows or files would break a *subsequent* run must clean
+up unconditionally, without consulting the `teardown` fixture:
+
+```python
+@pytest.fixture
+def some_fixture(raw_dir, common):
+    ...
+    yield file_name
+
+    # Not guarded by `teardown`: this entry would give populate() phantom
+    # work on the next run, and the file is cheap to rebuild.
+    (common.SomeTable & {"some_field": file_name}).delete(safemode=False)
+```
+
+The common case is a fixture that registers a new `Nwbfile` entry. Its Session
+has no rows in the ingestion tables, so any later `populate()` call finds work
+to do for it and fails. If a fixture cannot be written to survive
+`--no-teardown`, it should tear itself down instead.
+
+______________________________________________________________________
+
 ### Slow Test Runs
 
 ```bash
