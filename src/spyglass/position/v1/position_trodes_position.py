@@ -379,7 +379,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         Generates a video using VideoMaker class. Returns has_video=False
         without rendering when there is no video to overlay, or when the
-        position data was upsampled.
+        position data was upsampled. Returns has_video=None after rendering
+        on the `limit` debug path, where the insert is intentionally skipped.
 
         Parameters
         ----------
@@ -392,7 +393,10 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            has_video, vid_maker. vid_maker is None when no video was made.
+            has_video, vid_maker. has_video is True when a video was rendered
+            and should be inserted, False when rendering was skipped, and None
+            on the `limit` debug path, where make_insert skips the insert.
+            vid_maker is None when no video was made.
         """
         M_TO_CM = 100
         params_pk = "trodes_pos_params_name"

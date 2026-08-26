@@ -296,7 +296,7 @@ for label, interval_data in results.groupby("interval_labels"):
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
     - Separate `PositionVideo` to tri-part `make`, and close the video NWB file
-        handle it left open #1679
+        handle it previously left open #1679
 
 - Decoding
 
@@ -337,7 +337,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
     - Add option to bound output of DLC to defined spatial region #1570
-    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #XXXX
+    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #1679
 
 - Spikesorting
 
