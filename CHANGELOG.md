@@ -382,7 +382,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - Add `all_electrodes` option to `get_sort_group_info` #1678
-    - `SpikeSorting.get_sorting` returns an empty string when no spikes #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes #1678
 
 ## [0.5.5] (Aug 6, 2025)
 

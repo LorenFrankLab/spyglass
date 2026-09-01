@@ -173,9 +173,9 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
             If True, delete only the matching entries of this part table,
             leaving the master untouched. Mirrors
             ``dj.Part.delete(force=True)``, which calls
-            ``Table.delete(force_parts=True)``. As in DataJoint, other
-            ``Table.delete`` keywords (e.g. ``safemode``) are not forwarded on
-            this path. Default False.
+            ``Table.delete(force_parts=True)``. As in DataJoint, this path
+            deletes only from the part table (it does not promote the restriction
+            to the master). Default False.
         *args, **kwargs : Any
             Passed to the master's delete when ``force`` is False.
 
