@@ -57,6 +57,29 @@ UnitSelectionParams().alter()
 
 ### Breaking Changes
 
+#### `insert_sessions` Returns a List (#1660)
+
+`insert_sessions` returned from inside its loop over `nwb_file_names`, so a list
+argument only ever processed its first file. It now processes every file and
+returns one `populate_all_common` result per file, rather than a single result.
+
+#### Ingestion Raises Instead of Skipping (#1660)
+
+Two cases ingestion used to pass over silently now raise.
+
+`_expected_duplicates` is read per table rather than once for the whole
+ingestion, so a table that legitimately recurs across files (`Task`) can be
+validated while the table driving the ingestion is not. `TaskEpoch`,
+`ImportedPose` and `ImportedLFP` no longer expect duplicates: re-ingesting an
+already-ingested file raises `DuplicateError` instead of validating and
+skipping.
+
+A `TaskEpoch` whose `camera_id` matched no `CameraDevice` in the NWB file or
+config was dropped with only an info log, and with it the `VideoFile`,
+`StateScriptFile` and `OptogeneticProtocol` rows referencing that epoch. A
+dangling camera reference now raises `ValueError`; an epoch that genuinely names
+no camera stores `camera_names = []` and is kept.
+
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
 `NwbfileHasher` previously discarded the return value of `hash_dataset()`, so
@@ -177,7 +200,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507, #1614
+    #1484, #1489, #1507, #1614, #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
@@ -208,6 +231,38 @@ for label, interval_data in results.groupby("interval_labels"):
     `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Tests default `--base-dir` to `./tests/_data/` and ignore an exported
+    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
+    every path before creating anything, and under `test_mode` requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems. A config instance binds `test_mode` before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574
+- `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Directory symlinks are not traversed (`followlinks=False`), so cleanup
+    cannot follow a symlinked subdirectory out of `analysis_dir`; only leaf
+    `*.nwb` symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour `mtime` gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574
+- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
+    the files the sweep was eligible to act on #1573 #1574
+- Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol #1574
+- Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)
+- Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
+    previously discarded the constructor/call kwargs in favor of `dj.config`
+    (pre-existing) #1574
+- The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
@@ -255,6 +310,9 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
+- Add `--container-vol-dir` pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    `--container-name`/`--container-port` options #1661
 - Prevent errors during update for dandi standard from propagating to other
   files #1677
 
@@ -292,10 +350,12 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
-    - Bypass delete permission check when removing null `PositionIntervalMap` entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
     - Clear a file's existing `InsertError` rows at the start of
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
+    - `PositionSource` ingestion is now responsible for `RawPosition` #1660
 
 - Decoding
 
@@ -368,6 +428,12 @@ for label, interval_data in results.groupby("interval_labels"):
         selected on arbitrary units table columns with numeric, range, and
         membership criteria. A criterion naming a column a sorting's units
         table does not have raises an error #1670
+    - Fix `SpikeSorting.populate` raising `AttributeError: Bad parameters:
+        ['tempdir']` for SpikeInterface-native sorters (e.g. `spykingcircus2`,
+        `tridesclous2`). `_run_spike_sorter` now injects the `tempdir`
+        scratch-dir param only for sorters that declare it (only
+        `mountainsort4`), instead of injecting it into every sorter and
+        maintaining hardcoded removal lists #1655
 
 ## [0.5.5] (Aug 6, 2025)
 
