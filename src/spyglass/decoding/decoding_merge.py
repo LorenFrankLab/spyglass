@@ -2,8 +2,6 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-from non_local_detector.visualization.figurl_1D import create_1D_decode_view
-from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
 from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1  # noqa: F401
@@ -14,6 +12,27 @@ from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, _Merge, logger
 
 schema = dj.schema("decoding_merge")
+
+
+# Passthroughs, so that importing this module does not import
+# non_local_detector. figurl_1D/figurl_2D additionally pull in sortingview and
+# kachery, so a failure there surfaces here rather than disabling all decoding.
+def create_1D_decode_view(*args, **kwargs):
+    """Lazily dispatch to non_local_detector's 1D figurl view."""
+    from non_local_detector.visualization.figurl_1D import (
+        create_1D_decode_view as _view,
+    )
+
+    return _view(*args, **kwargs)
+
+
+def create_2D_decode_view(*args, **kwargs):
+    """Lazily dispatch to non_local_detector's 2D figurl view."""
+    from non_local_detector.visualization.figurl_2D import (
+        create_2D_decode_view as _view,
+    )
+
+    return _view(*args, **kwargs)
 
 
 @schema

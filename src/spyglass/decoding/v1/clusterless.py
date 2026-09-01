@@ -9,15 +9,16 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+from __future__ import annotations
+
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import datajoint as dj
-import non_local_detector.analysis as analysis
 import numpy as np
 import pandas as pd
 import xarray as xr
-from non_local_detector.models.base import ClusterlessDetector
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -38,6 +39,9 @@ from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
+
+if TYPE_CHECKING:  # annotations only: never import non_local_detector eagerly
+    from non_local_detector.models.base import ClusterlessDetector
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -285,6 +289,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
+        from non_local_detector.models.base import ClusterlessDetector
+
         classifier = ClusterlessDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
@@ -466,10 +472,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         coordinate instead of separate ``intervals`` dimension. See CHANGELOG.md
         for migration guide.
         """
+        from non_local_detector.models.base import ClusterlessDetector
+
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
         """Retrieve the decoding model"""
+        from non_local_detector.models.base import ClusterlessDetector
+
         return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
 
     @classmethod
@@ -486,6 +496,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         List[TrackGraph]
             list of track graphs in the trained model
         """
+        from non_local_detector.models.base import ClusterlessDetector
+
         key = cls.get_fully_defined_key(
             key, required_fields=["decoding_param_name"]
         )
@@ -740,6 +752,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: allow specification of specific time interval
         # TODO: allow specification of track graph
         # TODO: Handle decode intervals, store in table
+
+        import non_local_detector.analysis as analysis
 
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)
