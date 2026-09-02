@@ -14,6 +14,13 @@ import pytest
 # ---------- DB-free comparison logic ----------------------------------------
 
 
+def test_v2_recompute_schema_name_literal(dj_conn):
+    """Keep the lazy common-file-tracking schema guard synchronized."""
+    from spyglass.spikesorting.v2 import recompute
+
+    assert recompute.schema.database == "spikesorting_v2_recompute"
+
+
 class _FakeExtension:
     def __init__(self, params):
         self.params = params

@@ -492,6 +492,21 @@ def test_batch_resolve_paths_hash_map(file_tracking_module, tmp_path):
 # ======================= _get_recompute_deleted ==========================
 
 
+def test_check_all_files_does_not_declare_v2_schema(file_tracking_module):
+    """A common file scan leaves an absent optional v2 schema absent."""
+    schema_name = "spikesorting_v2_recompute"
+    before = set(dj.list_schemas())
+    assert schema_name not in before
+
+    assert file_tracking_module._get_v2_deleted_files() == set()
+
+    after = set(dj.list_schemas())
+    assert schema_name not in after
+    assert not {
+        name for name in after - before if name.startswith("spikesorting_v2_")
+    }
+
+
 def test_get_recompute_deleted_returns_set(file_tracking_module):
     """_get_recompute_deleted always returns a set, even on import failure."""
     with patch.dict(

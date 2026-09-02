@@ -121,6 +121,12 @@ class AnalysisFileIssues(dj.Manual):
             v2 analysis file names that were intentionally deleted.
         """
         deleted = set()
+
+        # Literal on purpose: importing the v2 module to read its schema name
+        # would itself declare the schema on a v1-only database.
+        if "spikesorting_v2_recompute" not in dj.list_schemas():
+            return deleted
+
         try:
             from spyglass.spikesorting.v2.recompute import (
                 RecordingArtifactRecompute as V2RecordingArtifactRecompute,
