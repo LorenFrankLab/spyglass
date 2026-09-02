@@ -23,6 +23,38 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+
+@pytest.mark.parametrize(("spike_width", "n_baseline"), [(18, 4), (90, 22)])
+def test_zero_center_window_scales_with_spike_width(spike_width, n_baseline):
+    """Baseline length scales without reaching the centered spike peak."""
+    from spyglass.spikesorting.v2._unitmatch_backend import _zero_center
+
+    waveform = np.zeros((2, spike_width, 3, 2), dtype=float)
+    waveform[:, :n_baseline, :, :] = np.linspace(-1.0, 1.0, n_baseline)[
+        None, :, None, None
+    ]
+    # This sentinel would perturb the baseline if the window were one sample
+    # too long. The true spike peak is farther away, at the symmetric midpoint.
+    waveform[:, n_baseline, :, :] = 100.0
+    peak_sample = spike_width // 2
+    waveform[:, peak_sample, :, :] = -7.0
+
+    centered = _zero_center(waveform)
+
+    expected = (
+        waveform - waveform[:, :n_baseline, :, :].mean(axis=1)[:, None, :, :]
+    )
+    np.testing.assert_array_equal(centered, expected)
+    np.testing.assert_array_equal(
+        centered[:, peak_sample, :, :], waveform[:, peak_sample, :, :]
+    )
+
+    dc_offset = np.full_like(waveform, 8.0)
+    np.testing.assert_array_equal(
+        _zero_center(dc_offset), np.zeros_like(dc_offset)
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Pure graph logic: pair canonicalization (goal 7, no DB) and strict-clique     #
 # tracked-unit derivation (goals 8/9/10, no DB).                                #

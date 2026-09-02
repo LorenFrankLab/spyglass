@@ -235,18 +235,16 @@ def extract_unitmatch_bundle(
 
 
 def _zero_center(waveform: np.ndarray) -> np.ndarray:
-    """Subtract the mean of the first 15 samples (SI templates carry a DC offset).
+    """Subtract each template's pre-spike baseline (SI templates carry a DC offset).
 
-    The 15-sample window assumes the pre-spike baseline occupies at least the
-    first 15 samples, i.e. the peak sits well after sample 15. This holds for the
-    bundles written here -- the default symmetric ``ms_before`` (~1.5 ms) at the
-    recording's sampling rate puts the trough tens of samples in. ``ms_before``
-    is not user-configurable today; if it ever is, derive this window from the
-    peak location / ``ms_before`` instead of the literal 15.
+    The bundle is written with ``ms_before == ms_after`` so the peak sits at
+    ``spike_width // 2``; the first quarter of the window is guaranteed
+    pre-spike for any user ``ms_before``. ``waveform`` is
+    ``(n_units, spike_width, n_channels, 2)``.
     """
-    return waveform - np.broadcast_to(
-        waveform[:, :15, :, :].mean(axis=1)[:, np.newaxis, :, :], waveform.shape
-    )
+    n_baseline = max(1, waveform.shape[1] // 4)
+    baseline = waveform[:, :n_baseline, :, :].mean(axis=1)
+    return waveform - baseline[:, np.newaxis, :, :]
 
 
 def assert_consistent_channel_geometry(named_positions) -> None:
