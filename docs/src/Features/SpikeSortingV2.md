@@ -1106,9 +1106,11 @@ Key behaviors and caveats:
 - **No concat artifact detection.** A concat `SortingSelection` may not carry an
   artifact-detection pass; artifact detection remains a single-recording (or
   shared-recording-group) input.
-- **Merge restriction.** `SpikeSortingOutput.get_restricted_merge_ids` accepts
-  `concat_recording_id` / `session_group_owner` / `session_group_name` for v2
-  concat sorts, alongside the usual sorter / curation fields.
+- **Downstream merge gate.** Concat sorts are not registered in
+  `SpikeSortingOutput` yet: their spike times use a synthetic gap-free timeline
+  that is unsafe for session-scoped consumers. Use
+  `ConcatenatedRecording.split_sorting_by_session` for local member frames;
+  per-member decodable rows are a planned addition.
 
 ### Cross-session unit tracking
 
@@ -1252,13 +1254,15 @@ Key behaviors and caveats:
 
 ### Downstream consumers
 
-Both v1 (`CurationV1`) and v2 (`CurationV2`) curations register on the same
-`SpikeSortingOutput` merge table, so existing downstream code (decoding,
-ripple detection, etc.) keeps working unchanged. **`run_summary["root_merge_id"]`
-is the uncurated root** — for downstream science, use
-`run_summary["analysis_merge_id"]` instead: it is `None` on a root-only run (so
-you can't silently decode the root) and points at the analysis-ready curation
-once you curate. The fastest way to fill it is
+v1 (`CurationV1`) and single-session v2 (`CurationV2`) curations register on the
+same `SpikeSortingOutput` merge table, so existing downstream code (decoding,
+ripple detection, etc.) keeps working unchanged. Concat v2 curations remain
+behind the [downstream merge gate](#chronic-same-day-recordings) described
+above. **`run_summary["root_merge_id"]` is the uncurated root** — for downstream
+science, use `run_summary["analysis_merge_id"]` instead: it is `None` on a
+root-only or concat run (so you can't silently decode the root or a synthetic
+concat timeline) and points at the analysis-ready single-session curation once
+you curate. For a single-session run, the fastest way to fill it is
 `run_v2_pipeline(..., auto_curate=True)`, whose summary sets `analysis_merge_id`
 (equal to `auto_merge_id`, the auto-curated child); or build a curation by hand
 and carry its `merge_id` (see the [evaluate → accept →

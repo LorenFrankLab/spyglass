@@ -44,6 +44,16 @@ from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
 UnitAnnotation.audit_positional_unit_ids()  # inspect candidates
 UnitAnnotation.migrate_positional_unit_ids(dry_run=False)  # apply once
 
+# Remove unsafe concat CurationV2 merge rows created by trial v2 deployments.
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2.curation import CurationV2
+
+concat_merge_rows = CurationV2.audit_concat_merge_rows()  # inspect first
+for row in concat_merge_rows:
+    (SpikeSortingOutput & {"merge_id": row["merge_id"]}).super_delete(
+        warn=False
+    )
+
 
 # Fix LFPBandV1 issue #1481
 from spyglass.lfp.analysis.v1 import LFPBandV1
@@ -57,6 +67,15 @@ DLCProject().alter()
 ```
 
 ### Breaking Changes
+
+#### Concat v2 curations stay out of `SpikeSortingOutput`
+
+`CurationV2` rows backed by a `ConcatenatedRecording` are no longer registered
+in `SpikeSortingOutput`: their spike times use the concatenation's synthetic
+timeline and are unsafe for a downstream consumer scoped to one NWB session.
+Concat pipeline summaries therefore return `None` for merge IDs and include an
+actionable warning. Trial databases should run `audit_concat_merge_rows()` and
+delete the rows it lists using the release-note commands above.
 
 #### UnitAnnotation now stores NWB unit ids
 
@@ -677,8 +696,9 @@ guide.
 - A concat sort's analysis NWB and per-unit `Electrode` FK anchor to the first
   member; `get_unit_brain_regions` raises `ConcatBrainRegionAmbiguousError`
   unless `allow_anchor_member=True`. Concat sorts carry no artifact-detection
-  pass. `SpikeSortingOutput.get_restricted_merge_ids` resolves concat sorts by
-  `concat_recording_id` / `session_group_owner` / `session_group_name`.
+  pass. Concat curations are not registered in `SpikeSortingOutput`; use
+  `CurationV2.audit_concat_merge_rows()` to find and remove unsafe rows created
+  by trial deployments.
 
 #### Spike Sorting v2: cross-session unit tracking via UnitMatch
 

@@ -1385,7 +1385,7 @@ def test_motion_correction_preset_auto_rejects_multi_day(
 
 
 @pytest.mark.slow
-def test_concat_sort_end_to_end_and_split(same_day_group):
+def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     """A concat-backed Sorting.populate runs end-to-end: it finds units,
     anchors its analysis NWB + per-unit electrodes to the first member,
     raises on concat brain regions without the anchor opt-in (and returns the
@@ -1474,31 +1474,35 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
                 assert int(frames.min()) >= 0
                 assert int(frames.max()) < member_samples[nwb_file_name]
 
-    # Merge-id resolution: a concat-backed curation resolves through
-    # SortingSelection.ConcatenatedRecordingSource by concat_recording_id and
-    # by the session-group fields, and combines with curation_id.
+    # Concat curations stay out of the session-scoped merge table: their spike
+    # times use the synthetic concat timeline. Trial rows are discoverable by
+    # the migration audit, demonstrated by force-registering one temporarily.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation import (
+        CONCAT_MERGE_GATE_MESSAGE,
+        CurationV2,
+    )
 
+    caplog.clear()
     curation_key = CurationV2.insert_curation(sorting_key=sort_pk)
+    assert not (SpikeSortingOutput.CurationV2 & curation_key)
+    assert (
+        CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=sort_pk["sorting_id"])
+        in caplog.text
+    )
+
+    assert CurationV2.audit_concat_merge_rows() == []
+    SpikeSortingOutput._merge_insert(
+        [curation_key], part_name="CurationV2", skip_duplicates=True
+    )
     merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1("merge_id")
-    by_concat = SpikeSortingOutput().get_restricted_merge_ids(
-        {"concat_recording_id": concat_pk["concat_recording_id"]},
-        sources=["v2"],
+    audit_rows = CurationV2.audit_concat_merge_rows()
+    assert sum(row["merge_id"] == merge_id for row in audit_rows) == 1
+    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
+    assert all(
+        row["merge_id"] != merge_id
+        for row in CurationV2.audit_concat_merge_rows()
     )
-    assert merge_id in by_concat
-    by_group = SpikeSortingOutput().get_restricted_merge_ids(
-        {**grp["group_key"], "curation_id": curation_key["curation_id"]},
-        sources=["v2"],
-    )
-    assert merge_id in by_group
-    # A restriction with NO source key (only curation_id) must still include
-    # the concat-backed curation -- a broad v2 query unions both source
-    # families, it does not silently default to recording-source only.
-    by_curation = SpikeSortingOutput().get_restricted_merge_ids(
-        {"curation_id": curation_key["curation_id"]}, sources=["v2"]
-    )
-    assert merge_id in by_curation
 
     # Session-scoped downstream provenance resolves through the anchor member
     # for concat sorts (instead of raising): get_sort_metadata yields the first
@@ -1512,29 +1516,10 @@ def test_concat_sort_end_to_end_and_split(same_day_group):
     sg_nwbs = set((sg_info).fetch("nwb_file_name"))
     assert sg_nwbs == {first_nwb}
 
-    # Curated readback is source-aware: CurationV2.get_sorting reconstructs the
-    # sorting against the concat timeline, and the merge dispatch's
-    # get_recording returns the materialized ConcatenatedRecording cache (the
-    # timeline the curated spike times live in) -- not a per-member Recording.
+    # Curated readback remains source-aware inside CurationV2 and reconstructs
+    # the sorting against the concat timeline.
     curated_sorting = CurationV2.get_sorting(curation_key)
     assert set(curated_sorting.unit_ids) == all_unit_ids
-    merge_recording = SpikeSortingOutput().get_recording({"merge_id": merge_id})
-    concat_recording = ConcatenatedRecording().get_recording(concat_pk)
-    assert (
-        merge_recording.get_num_samples() == concat_recording.get_num_samples()
-    )
-    assert list(merge_recording.get_channel_ids()) == list(
-        concat_recording.get_channel_ids()
-    )
-
-    # The concat brain-region anchor opt-in is reachable through the merge API:
-    # default raises, allow_anchor_member=True returns anchor-member regions.
-    with pytest.raises(ConcatBrainRegionAmbiguousError):
-        SpikeSortingOutput().get_unit_brain_regions({"merge_id": merge_id})
-    merge_regions = SpikeSortingOutput().get_unit_brain_regions(
-        {"merge_id": merge_id}, allow_anchor_member=True
-    )
-    assert (merge_regions["region_resolution"] == "anchor_member").all()
 
     # Reporting / analyzer-curation provenance is concat-aware (no crash on the
     # empty RecordingSource join): the CurationEvaluation NWB anchor resolves to
@@ -1703,17 +1688,14 @@ def test_unit_match_rejects_concat_backed_curation_member(same_day_group):
 
 
 @pytest.mark.slow
-def test_preproc_restriction_includes_concat_and_recording_curations(
+def test_preproc_restriction_excludes_concat_and_includes_recording_curations(
     same_day_group,
 ):
-    """A ``{preprocessing_params_name}`` restriction matches BOTH source families.
+    """A preprocessing restriction returns only merge-registered curations.
 
-    ``preprocessing_params_name`` lives on both ``RecordingSelection`` and
-    ``ConcatenatedRecordingSelection``, so a bare preprocessing-recipe query
-    must surface a recording-backed AND a concat-backed curation that share the
-    recipe (the recording-only routing silently dropped the concat one), and
-    ``{concat_recording_id, preprocessing_params_name}`` must be accepted as a
-    valid concat restriction rather than rejected as contradictory.
+    Concat-backed CurationV2 rows are deliberately gated from
+    SpikeSortingOutput, while a recording-backed curation under the same recipe
+    remains discoverable. Concat-shaped restrictions therefore return no ids.
     """
     import uuid
 
@@ -1741,9 +1723,7 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
     )
     Sorting.populate(concat_sort, reserve_jobs=False)
     concat_curation = CurationV2.insert_curation(sorting_key=concat_sort)
-    concat_merge_id = (SpikeSortingOutput.CurationV2 & concat_curation).fetch1(
-        "merge_id"
-    )
+    assert not (SpikeSortingOutput.CurationV2 & concat_curation)
 
     # A single-recording sort + curation on a member, SAME preproc recipe.
     rec_sort = SortingSelection.insert_selection(
@@ -1759,13 +1739,12 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
         rec_merge_id = (SpikeSortingOutput.CurationV2 & rec_curation).fetch1(
             "merge_id"
         )
-        assert concat_merge_id != rec_merge_id
 
-        # The bare preprocessing-recipe restriction surfaces BOTH families.
+        # The bare preprocessing-recipe restriction surfaces only the
+        # merge-registered recording-backed curation.
         by_preproc = SpikeSortingOutput().get_restricted_merge_ids(
             {"preprocessing_params_name": preproc}, sources=["v2"]
         )
-        assert concat_merge_id in by_preproc
         assert rec_merge_id in by_preproc
 
         # The cross-source branch genuinely FILTERS (rather than falling through
@@ -1774,14 +1753,10 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
             {"preprocessing_params_name": "no_such_preproc_recipe"},
             sources=["v2"],
         )
-        assert concat_merge_id not in by_absent_preproc
         assert rec_merge_id not in by_absent_preproc
 
-        # {concat_recording_id, preprocessing_params_name} is a valid pair (no
-        # contradiction). The concat branch must APPLY the shared preproc filter,
-        # not merely route on concat_recording_id: the matching recipe returns
-        # the concat curation, a mismatched recipe excludes it, and it never
-        # surfaces the recording-backed one.
+        # Concat-shaped restrictions remain valid query shapes, but there is no
+        # merge row to return until per-member wall-clock rows exist.
         by_concat_and_preproc = SpikeSortingOutput().get_restricted_merge_ids(
             {
                 "concat_recording_id": concat_pk["concat_recording_id"],
@@ -1789,8 +1764,7 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
             },
             sources=["v2"],
         )
-        assert concat_merge_id in by_concat_and_preproc
-        assert rec_merge_id not in by_concat_and_preproc
+        assert len(by_concat_and_preproc) == 0
         by_concat_wrong_preproc = SpikeSortingOutput().get_restricted_merge_ids(
             {
                 "concat_recording_id": concat_pk["concat_recording_id"],
@@ -1798,7 +1772,7 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
             },
             sources=["v2"],
         )
-        assert concat_merge_id not in by_concat_wrong_preproc
+        assert len(by_concat_wrong_preproc) == 0
 
         # The post-union artifact filter still applies in the cross-source
         # branch: an artifact id neither (artifact-free) sort has excludes both,
@@ -1812,7 +1786,6 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
                 sources=["v2"],
             )
         )
-        assert concat_merge_id not in by_preproc_unknown_artifact
         assert rec_merge_id not in by_preproc_unknown_artifact
         by_preproc_no_artifact = SpikeSortingOutput().get_restricted_merge_ids(
             {
@@ -1821,7 +1794,6 @@ def test_preproc_restriction_includes_concat_and_recording_curations(
             },
             sources=["v2"],
         )
-        assert concat_merge_id in by_preproc_no_artifact
         assert rec_merge_id in by_preproc_no_artifact
     finally:
         # ``same_day_group`` teardown only follows concat lineage, so the
@@ -1954,12 +1926,12 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
 
 
 @pytest.mark.slow
-def test_concat_applied_merge_through_downstream_and_evaluation(
+def test_concat_applied_merge_through_curation_and_evaluation(
     same_day_group, curation_evaluation_defaults
 ):
     """A committed APPLIED-MERGE on a CONCAT-backed sort flows through
-    ``CurationV2.get_sorting``, ``SpikeSortingOutput.get_spike_times``, and
-    ``CurationEvaluation`` carrying its MERGED unit set.
+    ``CurationV2.get_sorting`` and ``CurationEvaluation`` carrying its MERGED
+    unit set, without creating an unsafe SpikeSortingOutput row.
 
     Pins concat reconstruction + merged namespace together (the prior concern):
     the concat clusterless sort's unit count is data-dependent, so plant a
@@ -2070,13 +2042,7 @@ def test_concat_applied_merge_through_downstream_and_evaluation(
             len(sorting.get_unit_spike_train(unit_id=merged_uid)) == expected_n
         )
 
-        # SpikeSortingOutput downstream consumer dispatches on merge_id.
-        merge_id = (SpikeSortingOutput.CurationV2 & merged).fetch1("merge_id")
-        spike_times = SpikeSortingOutput().get_spike_times(
-            {"merge_id": merge_id}
-        )
-        assert len(spike_times) == 1
-        assert len(spike_times[0]) == n_spikes
+        assert not (SpikeSortingOutput.CurationV2 & merged)
 
         # CurationEvaluation over the MERGED CONCAT curation exercises the concat
         # reconstruction + merged-namespace analyzer together; metrics index the
@@ -2108,12 +2074,13 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     With a concat preset (motion pinned -> concat-mode, no artifact stage), the
     orchestrator populates each member's Recording, concatenates them, sorts,
     and curates -- returning a concat-shaped manifest (concat_recording_id +
-    member_recording_ids, no recording_id / artifact keys) registered on the
-    merge table, and idempotent on rerun.
+    member_recording_ids, no recording_id / artifact keys), no unsafe merge
+    registration, and an actionable warning. The run is idempotent on rerun.
     """
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
     from spyglass.spikesorting.v2.pipeline import (
         register_pipeline_preset,
         run_v2_pipeline,
@@ -2159,11 +2126,18 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert summary["member_recording_status"] in {"computed", "reused"}
         assert "member_recording" in summary["stage_seconds"]
         assert "concat_recording" in summary["stage_seconds"]
-        # Sorted + curated + registered on the merge table.
+        # Sorted + curated, but deliberately not registered on the merge table.
         assert summary["n_units"] >= 0
-        assert SpikeSortingOutput.CurationV2 & {
-            "merge_id": summary["root_merge_id"]
+        assert summary["root_merge_id"] is None
+        curation_key = {
+            "sorting_id": summary["sorting_id"],
+            "curation_id": summary["root_curation_id"],
         }
+        assert not (SpikeSortingOutput.CurationV2 & curation_key)
+        assert (
+            CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=summary["sorting_id"])
+            in summary["warnings"]
+        )
 
         # Idempotent: a rerun reuses the concat sort + curation.
         rerun = run_v2_pipeline(
@@ -2172,7 +2146,39 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             pipeline_preset=preset_name,
         )
         assert rerun["sorting_id"] == summary["sorting_id"]
-        assert rerun["root_merge_id"] == summary["root_merge_id"]
+        assert rerun["root_merge_id"] is None
+        assert (
+            CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=summary["sorting_id"])
+            in rerun["warnings"]
+        )
         assert rerun["concat_recording_status"] == "reused"
+
+        # Auto-curation still materializes an analysis-ready child curation,
+        # but neither that child nor the root is exposed on the unsafe merge
+        # timeline. The repeated gate is represented by one warning entry.
+        auto_summary = run_v2_pipeline(
+            concat_session_group_owner=grp["group_key"]["session_group_owner"],
+            concat_session_group_name=grp["group_key"]["session_group_name"],
+            pipeline_preset=preset_name,
+            auto_curate=True,
+        )
+        assert (
+            auto_summary["analysis_curation_id"]
+            == auto_summary["auto_curation_id"]
+        )
+        assert auto_summary["root_merge_id"] is None
+        assert auto_summary["auto_merge_id"] is None
+        assert auto_summary["analysis_merge_id"] is None
+        assert not (
+            SpikeSortingOutput.CurationV2
+            & {
+                "sorting_id": auto_summary["sorting_id"],
+                "curation_id": auto_summary["auto_curation_id"],
+            }
+        )
+        gate_message = CONCAT_MERGE_GATE_MESSAGE.format(
+            sorting_id=summary["sorting_id"]
+        )
+        assert auto_summary["warnings"].count(gate_message) == 1
     finally:
         presets_mod._PIPELINE_PRESETS.pop(preset_name, None)

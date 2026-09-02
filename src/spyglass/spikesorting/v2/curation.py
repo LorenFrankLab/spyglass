@@ -9,12 +9,13 @@ Tables (all final-shape under the zero-migration policy):
 the enum for back-compat). External or ground-truth NWB Units continue to use
 ``ImportedSpikeSorting``; v2 does NOT duplicate them into ``CurationV2``.
 
-``insert_curation`` registers each curation atomically across the
-master, ``Unit``, and ``UnitLabel`` parts plus the
-``SpikeSortingOutput.CurationV2`` merge-table row. The curated-units
-NWB is staged first; the AnalysisNwbfile DB-row registration moves
-inside the transaction so a later failure rolls the row back and the
-staged file is cleaned up in the except path.
+``insert_curation`` writes each curation atomically across the master,
+``Unit``, and ``UnitLabel`` parts and, for single-recording sorts, the
+``SpikeSortingOutput.CurationV2`` merge-table row. Concat-backed curations are
+not registered because their synthetic timeline is unsafe for session-scoped
+consumers. The curated-units NWB is staged first; the AnalysisNwbfile DB-row
+registration moves inside the transaction so a later failure rolls the row
+back and the staged file is cleaned up in the except path.
 """
 
 from __future__ import annotations
@@ -72,6 +73,15 @@ schema = dj.schema("spikesorting_v2_curation")
 #: sorting can collide). Small: the contention window is brief and each retry
 #: just re-reads ``max(curation_id) + 1``.
 _CURATION_ID_RACE_RETRIES = 5
+
+CONCAT_MERGE_GATE_MESSAGE = (
+    "CurationV2 for concat-backed sorting {sorting_id} was NOT registered in "
+    "SpikeSortingOutput: its spike times are on the concatenated recording's "
+    "synthetic 0-based timeline (member wall-clock gaps are dropped), so a "
+    "downstream consumer keyed by nwb_file_name would misalign them. Use "
+    "ConcatenatedRecording.split_sorting_by_session for per-member frames; "
+    "per-member decodable rows are a planned addition."
+)
 
 
 @schema
@@ -414,6 +424,23 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
+    def audit_concat_merge_rows(cls) -> list[dict]:
+        """Return merge rows whose CurationV2 sorting is concat-backed."""
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        concat_sortings = SortingSelection.ConcatenatedRecordingSource.fetch(
+            "sorting_id"
+        )
+        if not len(concat_sortings):
+            return []
+        return (
+            SpikeSortingOutput.CurationV2
+            & [{"sorting_id": sorting_id} for sorting_id in concat_sortings]
+        ).fetch("KEY")
+
+    @classmethod
     def insert_curation(
         cls,
         sorting_key: dict,
@@ -430,10 +457,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> dict:
         """Insert master + Unit + UnitLabel rows; stage curated-units NWB.
 
-        Atomically inserts the CurationV2 master, ``Unit`` and
-        ``UnitLabel`` part rows, and the ``SpikeSortingOutput.CurationV2``
-        merge-table registration in one transaction. The curated-units
-        NWB is staged separately and deleted on any later failure
+        Atomically inserts the CurationV2 master, ``Unit`` and ``UnitLabel``
+        part rows and, for a single-recording sort, the
+        ``SpikeSortingOutput.CurationV2`` merge-table registration in one
+        transaction. A concat-backed curation is not registered because its
+        synthetic timeline cannot safely serve a session-scoped consumer. The
+        curated-units NWB is staged separately and deleted on any later failure
         (DataJoint cannot roll back filesystem side effects).
 
         Parameters
@@ -1284,10 +1313,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         staged AnalysisNwbfile row, inserts the CurationV2 master + part
         rows (including raw ``MergeGroup`` and, for a child,
         ``ParentMergeGroup``), and registers the
-        ``SpikeSortingOutput.CurationV2`` merge row. The curated-units NWB was
-        staged OUTSIDE this transaction (see :meth:`_stage_curation_artifact`)
-        so the transaction stays short; on failure the caller removes the
-        staged file (the DB rows roll back here).
+        ``SpikeSortingOutput.CurationV2`` merge row for a single-recording
+        sort. A concat-backed curation deliberately omits that row. The
+        curated-units NWB was staged OUTSIDE this transaction (see
+        :meth:`_stage_curation_artifact`) so the transaction stays short; on
+        failure the caller removes the staged file (the DB rows roll back here).
 
         ``merge_group_rows`` (raw ``MergeGroup`` rows) and
         ``parent_merge_group_rows`` (the immediate parent operation in the
@@ -1336,19 +1366,18 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                         "curation_label": normalized,
                     }
                 )
-        # Auto-register into SpikeSortingOutput.CurationV2 so
-        # downstream consumers (SortedSpikesGroup, decoding, etc.)
-        # see the curation without the user having to call the
-        # merge insert manually. Imported lazily to keep curation.py
-        # free of the merge-table dependency at module load. The
-        # merge insert MUST go through ``_merge_insert``, not direct
-        # ``insert1`` on the master + part -- the master row's
-        # ``merge_id`` is generated by ``_merge_insert`` from the
-        # part-row identity hash, and a hand-rolled UUID would fail
-        # the master FK referenced by the part.
+        # Auto-register single-recording curations so downstream consumers see
+        # them without a manual merge insert. Concat curations are gated below
+        # because their synthetic timeline is not session-safe. The lazy import
+        # keeps curation.py free of the merge-table dependency at module load.
+        # Registration MUST go through ``_merge_insert``: it derives the master
+        # merge_id from the part-row identity hash.
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
         )
+
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
+        register_merge = source.kind == "recording"
 
         # ``merge_group_rows`` / ``parent_merge_group_rows`` are built once by
         # the caller (before staging) and reused here, so the NWB merge lineage
@@ -1380,16 +1409,21 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 cls.MergeGroup.insert(merge_group_rows)
             if parent_merge_group_rows:
                 cls.ParentMergeGroup.insert(parent_merge_group_rows)
-            SpikeSortingOutput._merge_insert(
-                [
-                    {
-                        "sorting_id": sorting_id,
-                        "curation_id": curation_id,
-                    }
-                ],
-                part_name="CurationV2",
-                skip_duplicates=True,
-            )
+            if register_merge:
+                SpikeSortingOutput._merge_insert(
+                    [
+                        {
+                            "sorting_id": sorting_id,
+                            "curation_id": curation_id,
+                        }
+                    ],
+                    part_name="CurationV2",
+                    skip_duplicates=True,
+                )
+            else:
+                logger.warning(
+                    CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=sorting_id)
+                )
 
     @classmethod
     def _cleanup_staged_curation_file(cls, analysis_file_name: str) -> None:

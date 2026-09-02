@@ -261,12 +261,11 @@ def run_v2_pipeline(
         Free-text description passed to ``CurationV2.insert_curation``.
     require_units
         If False (default), a sort that finds zero units still produces
-        an EMPTY (but real) curation + merge row, with a loud warning --
-        zero units is a legitimate result on a quiet shank, and the empty
-        row lets downstream code treat it like any other
-        ``SpikeSortingOutput`` row. If True, a zero-unit sort raises
-        ``ZeroUnitSortError`` instead (for callers that treat zero units
-        as a hard error).
+        an EMPTY (but real) curation, with a loud warning -- zero units is a
+        legitimate result on a quiet shank. A single-session curation also gets
+        an empty merge row; a concat curation stays behind the timeline-safety
+        gate. If True, a zero-unit sort raises ``ZeroUnitSortError`` instead
+        (for callers that treat zero units as a hard error).
     auto_curate
         If False (default), the run stops at the root curation, so a
         convenience call never silently commits suggested labels. If True,
@@ -277,10 +276,11 @@ def run_v2_pipeline(
         ``curation_evaluation_id`` (the suggestion selection PK),
         ``auto_curation_id`` / ``auto_merge_id`` (the materialized child
         curation), and ``auto_curation_status`` (these keys are absent when
-        ``auto_curate=False``); the always-present ``analysis_curation_id`` /
-        ``analysis_merge_id`` are set to that child (they stay ``None`` on a
-        root-only run). ``CurationEvaluation`` builds a whitened PCA analyzer,
-        so this adds the heaviest populate of the run.
+        ``auto_curate=False``). The always-present ``analysis_curation_id`` is
+        set to that child; ``analysis_merge_id`` is also set for a
+        single-session run and remains ``None`` for concat. Both stay ``None``
+        on a root-only run. ``CurationEvaluation`` builds a whitened PCA
+        analyzer, so this adds the heaviest populate of the run.
     preflight
         If True (default), run a fast, read-only prerequisite check before any
         populate; a failure raises ``PreflightError`` (with the exact fix). The
@@ -318,8 +318,9 @@ def run_v2_pipeline(
     RunV2PipelineSummary
         Run summary -- a ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``
         (the two arms of the ``RunV2PipelineSummary`` union). The sort / curation
-        / merge keys are always present; the source-stage keys depend on the
-        input mode, discriminated by ``source_mode``.
+        / merge keys are always present; concat merge-id values are ``None``
+        until per-member rows are supported. The source-stage keys depend on
+        the input mode, discriminated by ``source_mode``.
 
         Always present:
             ``pipeline_preset``          : the pipeline-preset name
@@ -327,13 +328,14 @@ def run_v2_pipeline(
                 (the discriminant for the mode-specific source keys below)
             ``sorting_id``               : SortingSelection PK
             ``root_curation_id``         : the ROOT (uncurated) CurationV2 PK
-            ``root_merge_id``            : the root's SpikeSortingOutput PK
+            ``root_merge_id``            : the root's SpikeSortingOutput PK;
+                ``None`` for a concat run
             ``analysis_curation_id``     : the analysis-ready CurationV2 PK, or
                 ``None`` on a root-only run (curate first); equals
                 ``auto_curation_id`` when ``auto_curate=True``
             ``analysis_merge_id``        : the analysis-ready SpikeSortingOutput
-                PK, or ``None`` on a root-only run; equals ``auto_merge_id``
-                when ``auto_curate=True``
+                PK, or ``None`` on a root-only or concat run; equals
+                ``auto_merge_id`` when single-session ``auto_curate=True``
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Single-session mode adds:
             ``recording_id``             : RecordingSelection PK
@@ -349,9 +351,9 @@ def run_v2_pipeline(
         For downstream science key off ``analysis_merge_id`` (the curated,
         analysis-ready handle) -- NOT ``root_merge_id``, the uncurated root.
         There is deliberately no bare ``merge_id``: a default run has no
-        analysis-ready id to copy. A zero-unit sort yields an empty (but real)
-        root curation/merge row, not ``None``, so the root is always
-        merge-keyable.
+        analysis-ready id to copy. A zero-unit single-session sort yields an
+        empty (but real) root curation/merge row. A concat run leaves merge ids
+        ``None`` because its synthetic timeline is not session-safe.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
@@ -514,7 +516,10 @@ def run_v2_pipeline(
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation import (
+        CONCAT_MERGE_GATE_MESSAGE,
+        CurationV2,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         PreflightError,
         ZeroUnitSortError,
@@ -577,6 +582,30 @@ def run_v2_pipeline(
     # an empty dict.
     run_summary["stage_seconds"] = stage_seconds
     warnings_list: list[str] = list(preflight_warnings)
+
+    def _curation_merge_id(curation_key):
+        """Return one merge id, or the intentional concat ``None``."""
+        merge_ids = (SpikeSortingOutput.CurationV2 & curation_key).fetch(
+            "merge_id"
+        )
+        if len(merge_ids) == 1:
+            return merge_ids[0]
+        if len(merge_ids) > 1:
+            raise ValueError(
+                "run_v2_pipeline: CurationV2 has multiple "
+                f"SpikeSortingOutput rows for {curation_key}."
+            )
+        if not is_concat:
+            raise ValueError(
+                "run_v2_pipeline: single-session CurationV2 is missing its "
+                f"SpikeSortingOutput registration for {curation_key}."
+            )
+        warning = CONCAT_MERGE_GATE_MESSAGE.format(
+            sorting_id=curation_key["sorting_id"]
+        )
+        if warning not in warnings_list:
+            warnings_list.append(warning)
+        return None
 
     if is_single:
         # Single-session: recording (+ optional artifact detection) -> sort.
@@ -736,9 +765,9 @@ def run_v2_pipeline(
     )
     run_summary["sorting_id"] = sorting_key["sorting_id"]
 
-    # Zero units is a legitimate result on a quiet shank. Unless the
-    # caller set require_units=True, proceed to build an empty (but real)
-    # curation + merge row so the result is merge-keyable like any other.
+    # Zero units is a legitimate result on a quiet shank. Unless the caller set
+    # require_units=True, proceed to build an empty (but real) curation. A
+    # single-session curation remains merge-keyable; a concat curation is gated.
     n_units = int((Sorting & sorting_key).fetch1("n_units"))
     if n_units == 0:
         sorting_id = sorting_key["sorting_id"]
@@ -795,15 +824,12 @@ def run_v2_pipeline(
             ),
             reuse_existing=True,
         )
-        # The CurationV2 part on the merge table is auto-registered inside
-        # insert_curation (atomically), so the merge_id read-back is part of
-        # the curation stage: a reused root whose registration is missing
-        # (e.g. deleted out-of-band) then surfaces as a stage-aware
-        # PipelineStageError carrying the partial run summary, not a raw
-        # fetch1.
-        merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1(
-            "merge_id"
-        )
+        # A single-session curation is registered atomically. A concat curation
+        # deliberately is not: its synthetic timeline is unsafe for a
+        # session-scoped merge consumer, so its merge id is None and the gate
+        # advisory is recorded in the run summary. Any missing single-session
+        # registration remains a stage-aware failure.
+        merge_id = _curation_merge_id(curation_key)
         return curation_key, merge_id
 
     (curation_key, merge_id), curation_status, curation_seconds = _run_stage(
@@ -866,9 +892,7 @@ def run_v2_pipeline(
                 ),
                 reuse_existing=True,
             )
-            auto_merge_id = (SpikeSortingOutput.CurationV2 & child).fetch1(
-                "merge_id"
-            )
+            auto_merge_id = _curation_merge_id(child)
         except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
             raise PipelineStageError(
                 "auto_curation",

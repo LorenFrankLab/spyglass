@@ -118,12 +118,15 @@ class _RunV2SummaryBase(TypedDict):
     # called simply ``merge_id`` to copy downstream by mistake (the root is
     # uncurated and not analysis-ready).
     root_curation_id: int
-    root_merge_id: UUID
+    # Concat curations stay out of SpikeSortingOutput until per-member,
+    # wall-clock-safe rows are materialized.
+    root_merge_id: "UUID | None"
     # The ANALYSIS-ready (downstream-science) curation. Always present, so a
     # consumer can branch on it: ``None`` on a root-only run
     # (``auto_curate=False``) -- there is no analysis-ready id yet, curate first
-    # -- and equal to ``auto_curation_id`` / ``auto_merge_id`` when
-    # ``auto_curate=True``.
+    # -- and equal to ``auto_curation_id`` / ``auto_merge_id`` when a
+    # single-session run uses ``auto_curate=True``. Concat carries the child
+    # curation id but leaves the merge id None.
     analysis_curation_id: "int | None"
     analysis_merge_id: "UUID | None"
     n_units: int
@@ -133,12 +136,12 @@ class _RunV2SummaryBase(TypedDict):
     warnings: list[str]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
-    # CurationV2 (its curation_id + merge table id) whose labels are the
-    # evaluation's verdict. ``analysis_curation_id`` / ``analysis_merge_id``
-    # mirror these when auto-curation ran.
+    # CurationV2 (its curation_id + optional merge table id) whose labels are
+    # the evaluation's verdict. ``analysis_curation_id`` /
+    # ``analysis_merge_id`` mirror these when auto-curation ran.
     curation_evaluation_id: NotRequired[UUID]
     auto_curation_id: NotRequired[int]
-    auto_merge_id: NotRequired[UUID]
+    auto_merge_id: NotRequired["UUID | None"]
     auto_curation_status: NotRequired[StageStatus]
     # FigPack keys, present only when
     # ``run_v2_pipeline(build_figpack_view=True)``: the published curation-view
