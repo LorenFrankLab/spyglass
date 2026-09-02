@@ -907,6 +907,7 @@ class DLCStrategy(PoseToolStrategy):
         bodyparts: list,
         numframes2pick: int,
         sanitize,
+        experimenter: str,
         create_kwargs: dict = None,
         model_instance=None,
     ) -> Path:
@@ -934,8 +935,14 @@ class DLCStrategy(PoseToolStrategy):
         numframes2pick : int
             Frames-per-video budget for extraction.
         sanitize : callable
-            Function mapping *project_name* to a filesystem-safe experimenter
-            name (matches the folder naming used at creation time).
+            Filesystem-safety sanitizer applied to *experimenter* (matches
+            the folder naming used at creation time).
+        experimenter : str
+            Name recorded as the project's experimenter -- the middle
+            component of the ``{project_name}-{experimenter}-{date}`` folder
+            DLC creates. Must be a real identifier (e.g. the calling user),
+            not derived from *project_name* -- doing so used to duplicate
+            the project name into the folder (see issue #1676).
         create_kwargs : dict, optional
             Extra keyword args forwarded to ``create_new_project``.
         model_instance : optional
@@ -980,7 +987,7 @@ class DLCStrategy(PoseToolStrategy):
             config_path = Path(
                 create_new_project(
                     project=project_name,
-                    experimenter=sanitize(project_name),
+                    experimenter=sanitize(experimenter),
                     videos=list(videos),
                     working_directory=project_directory,
                     copy_videos=True,

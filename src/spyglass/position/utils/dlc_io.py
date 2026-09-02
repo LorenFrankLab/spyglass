@@ -415,6 +415,55 @@ def suppress_print_from_package(package: str = "deeplabcut"):
         sys.stderr = old_stderr
 
 
+@contextlib.contextmanager
+def dedupe_warnings(pattern: str = r"\"[^\"]*\"|'[^']*'"):
+    """Emit each distinct warning raised in the block only once.
+
+    Python's own duplicate filtering keys on the exact message text, so a
+    library that interpolates a changing value into an otherwise identical
+    warning defeats it. Reading one NWB file through hdmf emits, e.g.::
+
+        Device.model was detected as a string ... Remapping "unknown" ...
+        Device.model was detected as a string ... Remapping "unknown2" ...
+
+    -- two warnings about one schema-migration fact, neither actionable by
+    the caller. This collapses them to one by ignoring quoted literals
+    when deciding whether two warnings are "the same".
+
+    Warnings are re-emitted after the block with their original filename
+    and line number, so ``-W`` settings and pytest's warning capture still
+    behave normally; only the repeats are dropped.
+
+    Parameters
+    ----------
+    pattern : str, optional
+        Regex for the varying parts to mask before comparing messages. By
+        default, single- and double-quoted literals.
+
+    Yields
+    ------
+    list
+        The captured ``warnings.WarningMessage`` records, populated on
+        exit. Useful for asserting in tests.
+    """
+    import re
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield caught
+
+    seen = set()
+    for w in caught:
+        key = (w.category, re.sub(pattern, "", str(w.message)))
+        if key in seen:
+            continue
+        seen.add(key)
+        # warn_explicit rather than warn: keeps the blame on the code that
+        # actually raised it instead of reattributing every warning here.
+        warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+
+
 # Test mode conditional for compatibility
 from spyglass.settings import test_mode
 

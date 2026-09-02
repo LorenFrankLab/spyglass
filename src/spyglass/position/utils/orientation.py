@@ -312,8 +312,13 @@ def interp_orientation(
             ],
         )
 
-        # Apply interpolated values
-        df.loc[idx[span_times[0] : span_times[-1]], "orientation"] = orient_new
+        # Apply interpolated values. np.interp always returns float64, which
+        # would upcast a float32 'orientation' column via a bare .loc
+        # assignment (pandas FutureWarning); cast back to the column's own
+        # dtype first.
+        df.loc[idx[span_times[0] : span_times[-1]], "orientation"] = (
+            orient_new.astype(df["orientation"].dtype)
+        )
 
     def get_error_context(ind, error_type):
         """Generate error messages for orientation interpolation."""

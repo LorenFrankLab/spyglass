@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from hashlib import sha1
 from pathlib import Path, PosixPath
 from typing import Union
@@ -360,6 +361,33 @@ def _deterministic_video_stem(filename: str, source_path: str) -> str:
     return f"{stem}__{digest}"
 
 
+@lru_cache(maxsize=1)
+def ffmpeg_fps_mode_flag() -> str:
+    """Return the ffmpeg CLI flag for frame-sync/frame-rate mode.
+
+    ffmpeg renamed the global ``-vsync`` option to ``-fps_mode`` in version
+    5, then removed ``-vsync`` entirely in version 9 (hard error:
+    ``Unrecognized option 'vsync'``). Older ffmpeg builds (<5, e.g. Ubuntu
+    22.04's system package) don't recognize ``-fps_mode`` either -- there is
+    no single flag that works everywhere. Probing ``-h full`` for the modern
+    flag name is more robust than parsing ``ffmpeg -version`` output, since
+    version-string format varies across distributions/build variants.
+    Cached: the ffmpeg binary resolved via PATH doesn't change mid-process.
+
+    Returns
+    -------
+    str
+        ``"-fps_mode"`` if the running ffmpeg supports it (>=5), else the
+        legacy ``"-vsync"``.
+    """
+    probe = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-h", "full"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return "-fps_mode" if b"-fps_mode" in probe.stdout else "-vsync"
+
+
 def _convert_mp4(
     filename: str,
     video_path: str,
@@ -418,7 +446,7 @@ def _convert_mp4(
             dest_filename = os.path.splitext(dest_filename)[0]
     dest_path = Path(f"{dest_path}/{dest_filename}.{videotype}")
     if dest_path.exists():
-        logger.info(f"{dest_path} already exists, skipping conversion")
+        logger.debug(f"{dest_path} already exists, skipping conversion")
         # Unsilence the collision bug: under the legacy naming, a *different*
         # source can reduce to this same name, so the existing mp4 may not be
         # this source's video. Raise instead of silently returning the wrong
@@ -433,12 +461,12 @@ def _convert_mp4(
         convert_process = subprocess.Popen(
             [
                 "ffmpeg",
-                "-vsync",
-                "passthrough",
                 "-i",
                 f"{video_path.as_posix()}",
                 "-codec",
                 "copy",
+                ffmpeg_fps_mode_flag(),
+                "passthrough",
                 f"{dest_path.as_posix()}",
             ],
             stdout=subprocess.PIPE,
@@ -449,6 +477,11 @@ def _convert_mp4(
             f"Video convert errored: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = convert_process.communicate()
+    if convert_process.returncode != 0:
+        raise RuntimeError(
+            f"Video convert errored: Code {convert_process.returncode}, "
+            f"{out.decode(errors='replace')}"
+        )
     logger.info_msg(f"Finished converting {filename}")
 
     # check packets match orig file
