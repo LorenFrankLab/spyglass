@@ -2,6 +2,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Optional, Union
+from uuid import uuid4
 
 import datajoint as dj
 import fsspec
@@ -265,6 +266,13 @@ class DandiPath(SpyglassMixin, dj.Manual):
         to a temporary sibling path and renames on success, so an interrupted
         transfer never leaves a partial file that later looks local.
 
+        The staging path carries a random token, so two workers downloading
+        the same missing file cannot write, rename, or unlink each other's
+        partial copy. Each `replace` promotes a file that worker downloaded in
+        full. A hard kill can leave an orphan `.part` behind; a fixed name
+        would instead leave a half-written file two workers both believe is
+        theirs.
+
         Parameters
         ----------
         key : dict, optional
@@ -279,11 +287,23 @@ class DandiPath(SpyglassMixin, dj.Manual):
         -------
         bool
             True if the file is present locally after the call.
+
+        Raises
+        ------
+        ValueError
+            If neither dest nor nwb_file_path is given. A key alone names the
+            file on the archive, not where it should land locally.
         """
         key = self._resolve_key(key, nwb_file_path)
+
+        if dest is None and nwb_file_path is None:
+            raise ValueError(
+                "Must provide dest or nwb_file_path when downloading by key."
+            )
+
         dest = Path(dest or nwb_file_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        temp = dest.with_suffix(dest.suffix + ".part")
+        temp = dest.with_suffix(f"{dest.suffix}.{uuid4().hex[:8]}.part")
 
         s3_url = self._asset_url(key)
 

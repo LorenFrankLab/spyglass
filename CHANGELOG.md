@@ -159,6 +159,8 @@ for label, interval_data in results.groupby("interval_labels"):
     with local, kachery, and DANDI as backends #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote`, and report streaming
     from the backend that opened the file rather than from HDF5 internals #1662
+- Add `prefer_download` custom config, making stream-capable backends fetch the
+    whole file instead of streaming it #1662
 - Add cross-platform installer script with Docker support, input validation, and
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
@@ -254,7 +256,6 @@ for label, interval_data in results.groupby("interval_labels"):
     type and arguments that cannot affect the sizing answer are rejected rather
     than ignored #1635
 - Remove items scheduled for 0.6.0 deprecation #1633
-- Refactor remote file resolution to uniform `FileBackend` protocol #1662
 
 ### Pipelines
 
@@ -356,6 +357,11 @@ for label, interval_data in results.groupby("interval_labels"):
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. Rows written
+        before this have a null hash; a recompute of one warns and is accepted,
+        since there is no baseline to compare against. Run
+        `SpikeSortingRecording().update_ids()` to backfill them #1662
 
 ## [0.5.5] (Aug 6, 2025)
 
