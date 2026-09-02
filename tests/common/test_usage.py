@@ -343,7 +343,7 @@ def test_intersect_export_populate(populate_intersect_export, common):
     ), "Intersection failed to censor entries"
 
 
-def test_export_file_rows_removed_on_overwrite(common, teardown):
+def test_reexport_deletes_unreferenced_files(common, teardown):
     """A superseded export's parts are fully removed -- including its
     ``Export.File`` rows (the leak was a duplicated ``Table`` delete) -- and
     only the *processed* lesser ids are considered superseded (the overlap
@@ -395,6 +395,85 @@ def test_export_file_rows_removed_on_overwrite(common, teardown):
             len(export.File & {"export_id": e1}) == 0
         ), "stale Export.File row leaked after overwrite"
     finally:
+        if teardown:
+            (export & {"paper_id": paper}).super_delete(
+                warn=False, safemode=False
+            )
+            (sel & {"paper_id": paper}).super_delete(warn=False, safemode=False)
+
+
+def test_reexport_keeps_dandi_referenced_files(common, teardown, caplog):
+    """A superseded file with DANDI provenance survives part cleanup."""
+    import logging
+
+    from spyglass.common.common_dandi import DandiPath
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    sel, export = ExportSelection(), Export()
+    paper = "export_dandi_retention_test"
+    selection_ids = []
+
+    try:
+        for analysis_id in ("a1", "a2"):
+            sel.insert1(
+                {
+                    "paper_id": paper,
+                    "analysis_id": analysis_id,
+                    "spyglass_version": "test",
+                }
+            )
+            selection_ids.append(
+                (sel & {"paper_id": paper, "analysis_id": analysis_id}).fetch1(
+                    "export_id"
+                )
+            )
+        old_id, new_id = selection_ids
+
+        export.insert1(
+            {"export_id": old_id, "paper_id": paper},
+            allow_direct_insert=True,
+        )
+        export.Table.insert1(
+            {
+                "export_id": old_id,
+                "table_id": 0,
+                "table_name": "x",
+                "restriction": "x",
+            },
+            allow_direct_insert=True,
+        )
+        file_key = {
+            "export_id": old_id,
+            "file_id": 0,
+            "file_path": "/tmp/dandi-referenced.nwb",
+        }
+        export.File.insert1(file_key, allow_direct_insert=True)
+        DandiPath.insert1(
+            {
+                **file_key,
+                "dandiset_id": "000001",
+                "filename": "dandi-referenced.nwb",
+                "dandi_path": "sub-test/dandi-referenced.nwb",
+                "dandi_instance": "dandi",
+            },
+            ignore_extra_fields=True,
+        )
+
+        with caplog.at_level(logging.INFO):
+            overlap = export._delete_superseded_exports(
+                selection_ids, max_export_id=new_id
+            )
+
+        assert overlap == {old_id}
+        assert len(export.Table & {"export_id": old_id}) == 0
+        assert len(export.File & file_key) == 1
+        assert len(DandiPath & file_key) == 1
+        assert DandiPath.full_table_name in caplog.text
+    finally:
+        if selection_ids:
+            (DandiPath & [{"export_id": i} for i in selection_ids]).delete(
+                safemode=False
+            )
         if teardown:
             (export & {"paper_id": paper}).super_delete(
                 warn=False, safemode=False

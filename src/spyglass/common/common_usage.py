@@ -526,10 +526,11 @@ class Export(SpyglassMixin, dj.Computed):
         export; its parts are removed so it collapses to a null (master-only)
         entry.
 
-        Both parts are deleted. A ``File``-only or ``Table``-only delete would
-        leave stale rows in the other part pointing at the superseded export.
+        ``Table`` rows are always removed. ``File`` rows are removed only when
+        no downstream table still references them; DANDI validation and path
+        rows are provenance and must survive a re-export.
 
-        Returns the set of export ids whose parts were removed.
+        Returns the set of export ids processed as superseded.
         """
         processed_ids = set(
             list(self.Table.fetch("export_id"))
@@ -544,7 +545,19 @@ class Export(SpyglassMixin, dj.Computed):
             for export_id in overlap:
                 id_dict = {"export_id": export_id}
                 (self.Table & id_dict).delete_quick()
-                (self.File & id_dict).delete_quick()
+                files = self.File & id_dict
+                referenced = [
+                    child.full_table_name
+                    for child in self.File().children(as_objects=True)
+                    if child & files
+                ]
+                if referenced:
+                    logger.info(
+                        "Keeping Export.File rows for superseded export_id "
+                        f"{export_id}: still referenced by {referenced}"
+                    )
+                    continue
+                files.delete_quick()
         return overlap
 
     def make(self, key):
