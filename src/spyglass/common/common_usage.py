@@ -20,7 +20,10 @@ from spyglass.settings import debug_mode, test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dandi_file_updates import update_analysis_for_dandi_standard
 from spyglass.utils.dj_graph import RestrGraph
-from spyglass.utils.dj_helper_fn import make_file_obj_id_unique
+from spyglass.utils.dj_helper_fn import (
+    is_trivially_true,
+    make_file_obj_id_unique,
+)
 from spyglass.utils.nwb_helper_fn import get_linked_nwbs
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
@@ -325,8 +328,102 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         return restr_graph
 
+    @staticmethod
+    def _reject_trivially_true(
+        table_name: str, restr_list, key: dict = None
+    ) -> None:
+        """Raise if a shared table's logged restriction matches every row.
+
+        A leaf is the OR of every restriction logged for its table, so one
+        restriction that matches everything makes the leaf the whole table --
+        at whatever size that table has grown to by export time, which for a
+        shared table means other people's data. `_log_fetch` no longer writes
+        these, but entries logged before that fix are still in the table, and
+        an export built from them would silently be far too broad.
+
+        Tables outside the spyglass-managed schemas are exempt: those hold
+        one user's own data, and exporting all of it can be the intent.
+
+        Parameters
+        ----------
+        table_name : str
+            Full name of the table the restrictions were logged for.
+        restr_list : Iterable[str]
+            Restrictions logged for that table.
+        key : dict, optional
+            Restriction identifying the export, quoted in the error to make
+            the offending rows easy to find.
+
+        Raises
+        ------
+        ValueError
+            If a shared table has a restriction matching the whole table.
+        """
+        from spyglass.utils.database_settings import table_is_shared
+
+        # As stored: `bash_escape_sql` parenthesizes, and "1" is the older
+        # form from before the bool was converted to a string on the way in.
+        trivial = sorted({r for r in restr_list if is_trivially_true(r)})
+        if not trivial:
+            return
+
+        if not table_is_shared(table_name):
+            logger.warning(
+                f"Exporting all of {table_name}: its logged restriction "
+                "matches every row. Allowed for a table outside the shared "
+                "schemas, but note the cascade will follow those rows up "
+                "into shared tables."
+            )
+            return
+        raise ValueError(
+            f"Export selection for {table_name} contains {len(trivial)} "
+            f"restriction(s) matching the whole table: {trivial}.\n"
+            "These come from a fetch made with no restriction while export "
+            "logging was active, and would export the entire table.\n"
+            "Inspect with:\n"
+            f"    ExportSelection.Table & {key or '<export key>'} "
+            f"& {{'table_name': '{table_name}'}}\n"
+            "Then either remove those rows and re-log the fetch with a "
+            "restriction, or, if the whole table really is wanted, replace "
+            "them with the explicit keys."
+        )
+
+    @staticmethod
+    def _condense_restrictions(table_name: str, restr_list) -> str:
+        """OR a table's logged restrictions into one condition.
+
+        Sorted and de-duplicated so the same selection always produces the same
+        text. The fetch that supplies `restr_list` has no `order_by`, so its row
+        order is not guaranteed, and OR-ing the same conditions in a different
+        order yields an equivalent restriction that reads differently. Stable
+        text keeps `Export.Table.restriction` comparable across reruns.
+
+        Parameters
+        ----------
+        table_name : str
+            Full name of the table the restrictions apply to.
+        restr_list : Iterable[str]
+            Restrictions logged for that table, in any order, possibly with
+            repeats.
+
+        Returns
+        -------
+        str
+            One condition matching the union of the inputs.
+        """
+        ExportSelection._reject_trivially_true(table_name, restr_list)
+        return make_condition(
+            dj.FreeTable(dj.conn(), table_name),
+            sorted(set(restr_list)),
+            set(),
+        )
+
     def get_restr_graph(
-        self, key: dict, verbose=False, cascade=True, included_nwb_files=None
+        self,
+        key: dict,
+        verbose=False,
+        cascade=True,
+        included_nwb_files=None,
     ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
@@ -344,23 +441,25 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         cascade : bool, optional
             Propagate restrictions to upstream tables. Default True.
         included_nwb_files : list, optional
-            A whitelist of nwb files to include in the export. Default None applies
-            no whitelist restriction.
+            A whitelist of nwb files to include in the export. Default None
+            applies no whitelist restriction.
         """
         selection_tables = self * self.Table & key
         tracked_tables = set(selection_tables.fetch("table_name"))
         leaves = []
         # Condense to single restriction per table (OR of all restrictions).
         # Large performance boost for large exports with many logged entries
-        for table_name in tracked_tables:
+        for table_name in sorted(tracked_tables):
             restr_list = (selection_tables & dict(table_name=table_name)).fetch(
                 "restriction"
             )
-            restriction = make_condition(
-                dj.FreeTable(dj.conn(), table_name), restr_list, set()
-            )
             leaves.append(
-                {"table_name": table_name, "restriction": restriction}
+                {
+                    "table_name": table_name,
+                    "restriction": self._condense_restrictions(
+                        table_name, restr_list
+                    ),
+                }
             )
 
         restr_graph = RestrGraph(
@@ -369,6 +468,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             verbose=verbose,
             cascade=False,
             include_files=True,
+            skip_external=False,
         )
 
         if included_nwb_files is None:
@@ -525,7 +625,17 @@ class Export(SpyglassMixin, dj.Computed):
         paper_id = paper_key["paper_id"]
         query = ExportSelection & paper_key
 
-        included_nwb_files = self._nwb_whitelist_paper_cache.get(paper_id, None)
+        # Compare versions first
+        version_ids = query.fetch("spyglass_version")
+        if len(set(version_ids)) > 1:
+            raise ValueError(
+                "Multiple versions in ExportSelection\n"
+                + "Please rerun all analyses with the same version"
+            )
+        self.compare_versions(
+            version_ids[0],
+            msg="Must use same Spyglass version for analysis and export",
+        )
 
         # Null insertion if export_id is not the maximum for the paper
         all_export_ids = ExportSelection()._max_export_id(paper_key, True)
@@ -550,8 +660,12 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
 
         logger.debug(f"Building restr graph for {key['export_id']}")
+
+        included_nwb_files = self._nwb_whitelist_paper_cache.get(paper_id, None)
         restr_graph = ExportSelection().get_restr_graph(
-            paper_key, included_nwb_files=included_nwb_files, verbose=debug_mode
+            paper_key,
+            included_nwb_files=included_nwb_files,
+            verbose=True,
         )
         # Original plus upstream files
         logger.debug("Collecting file paths from export selection")
@@ -609,17 +723,6 @@ class Export(SpyglassMixin, dj.Computed):
             {**key, "file_path": fp, "file_id": i}
             for i, fp in enumerate(file_paths)
         ]
-
-        version_ids = query.fetch("spyglass_version")
-        if len(set(version_ids)) > 1:
-            raise ValueError(
-                "Multiple versions in ExportSelection\n"
-                + "Please rerun all analyses with the same version"
-            )
-        self.compare_versions(
-            version_ids[0],
-            msg="Must use same Spyglass version for analysis and export",
-        )
 
         logger.debug("Writing MySQL dump for export")
         sql_helper = SQLDumpHelper(**paper_key, spyglass_version=version_ids[0])

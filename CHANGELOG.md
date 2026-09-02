@@ -1,5 +1,19 @@
 # Change Log
 
+## [0.6.1] (Unreleased)
+
+<!--
+### Release Notes
+
+```python
+# add table alters here
+```
+-->
+
+## Infrastructure
+
+- Optimize `RestrGraph` generation during export #1673
+
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes

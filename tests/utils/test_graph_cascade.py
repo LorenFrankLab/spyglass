@@ -1,0 +1,1094 @@
+"""Regression suite guarding the `dj_graph` cascade optimizations.
+
+These tests characterize current cascade behavior so that performance work on
+`RestrGraph` cannot silently change which rows a restriction reaches. They are
+deliberately independent of the NWB data pipeline: every fixture is a small,
+self-contained DataJoint schema.
+"""
+
+import pytest
+
+
+@pytest.fixture(scope="session")
+def RestrGraph():
+    from spyglass.utils.dj_graph import RestrGraph
+
+    return RestrGraph
+
+
+@pytest.fixture(scope="session")
+def AbstractGraph():
+    from spyglass.utils.dj_graph import AbstractGraph
+
+    return AbstractGraph
+
+
+def cascade_signature(graph):
+    """Return {table_name: sorted primary keys} for every restricted table.
+
+    A stronger equality check than row counts: two cascades agree only if they
+    reach the same rows of the same tables.
+    """
+    return {
+        ft.full_table_name: sorted(
+            tuple(sorted(row.items())) for row in ft.fetch("KEY")
+        )
+        for ft in graph.restr_ft
+    }
+
+
+def assert_cascade_parity(AbstractGraph, build, msg=""):
+    """Assert a cascade yields identical rows with and without `_fast_bridge`.
+
+    `build` is a zero-argument callable returning a cascaded graph. Until a
+    short-circuit is added to `_bridge_restr`, both runs exercise the same code
+    and this asserts determinism; afterwards it asserts optimized == legacy.
+    """
+    fast = cascade_signature(build())
+
+    original = AbstractGraph._fast_bridge
+    AbstractGraph._fast_bridge = False
+    try:
+        legacy = cascade_signature(build())
+    finally:
+        AbstractGraph._fast_bridge = original
+
+    assert fast.keys() == legacy.keys(), (
+        f"Fast and legacy cascades restricted different tables. {msg}\n"
+        + f"\tFast only: {set(fast) - set(legacy)}\n"
+        + f"\tLegacy only: {set(legacy) - set(fast)}"
+    )
+    for table in fast:
+        assert (
+            fast[table] == legacy[table]
+        ), f"Fast and legacy cascades disagree on {table}. {msg}"
+
+
+# ------------------------------ Bridge rule matrix ------------------------------
+# (leaf, restriction, direction, target, expected rows, description)
+BRIDGE_CASES = [
+    (
+        "PkNode",
+        "intermediate_id = 5",
+        "up",
+        "IntermediateNode",
+        1,
+        "pk attr up",
+    ),
+    (
+        "PkNode",
+        "intermediate_id = 5",
+        "up",
+        "ParentNode",
+        1,
+        "pk attr up 2 hop",
+    ),
+    ("PkNode", "pk_attr > 18", "up", "IntermediateNode", 2, "sec attr up"),
+    ("PkNode", "pk_attr > 18", "up", "ParentNode", 2, "sec attr up 2 hop"),
+    ("PkAliasNode", "pk_alias_id < 2", "up", "PkNode", 2, "aliased up"),
+    ("IntermediateNode", "intermediate_id = 5", "down", "PkNode", 1, "pk down"),
+    (
+        "ParentNode",
+        "parent_attr > 19",
+        "down",
+        "IntermediateNode",
+        1,
+        "sec down",
+    ),
+    ("MergeChild", "merge_child_attr > 21", "up", "MergeOutput", 2, "merge up"),
+]
+
+
+@pytest.mark.parametrize(
+    "leaf, restr, direction, target, expect_n, msg", BRIDGE_CASES
+)
+def test_bridge_rule_matrix(
+    RestrGraph, graph_tables, leaf, restr, direction, target, expect_n, msg
+):
+    """Exact row counts for each shape of edge a bridge must handle.
+
+    Unlike `test_restr_from_upstream`/`_downstream`, which reach the graph via
+    `>>`/`<<` (the `TableChain` path, using `_get_adjacent_path_item`), these
+    drive `RestrGraph` directly so `_get_next_tables` is the code under test.
+    """
+    graph = RestrGraph(
+        seed_table=graph_tables[leaf](),
+        leaves=[
+            {
+                "table_name": graph_tables[leaf].full_table_name,
+                "restriction": restr,
+            }
+        ],
+        direction=direction,
+        cascade=True,
+        verbose=False,
+    )
+    ft = graph._get_ft(graph_tables[target].full_table_name, with_restr=True)
+    assert len(ft) == expect_n, f"Unexpected cascade result for {msg}."
+
+
+@pytest.mark.parametrize(
+    "leaf, restr, direction, target, expect_n, msg", BRIDGE_CASES
+)
+def test_bridge_rule_matrix_parity(
+    AbstractGraph,
+    RestrGraph,
+    graph_tables,
+    leaf,
+    restr,
+    direction,
+    target,
+    expect_n,
+    msg,
+):
+    """Every bridge shape must survive the fast/legacy toggle unchanged."""
+    _ = target, expect_n
+
+    def build():
+        return RestrGraph(
+            seed_table=graph_tables[leaf](),
+            leaves=[
+                {
+                    "table_name": graph_tables[leaf].full_table_name,
+                    "restriction": restr,
+                }
+            ],
+            direction=direction,
+            cascade=True,
+            verbose=False,
+        )
+
+    assert_cascade_parity(AbstractGraph, build, msg=f"Case: {msg}.")
+
+
+def test_bridge_query_expression_restr(RestrGraph, graph_tables):
+    """A leaf restricted by a QueryExpression, as later hops supply."""
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": PkNode & "pk_attr > 18",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    ft = graph._get_ft(
+        graph_tables["IntermediateNode"].full_table_name, with_restr=True
+    )
+    assert len(ft) == 2, "QueryExpression restriction did not cascade."
+
+
+def test_bridge_false_restr(RestrGraph, graph_tables):
+    """A False restriction must stop the cascade, not propagate everything."""
+    graph = RestrGraph(
+        seed_table=graph_tables["PkNode"](),
+        leaves=[
+            {
+                "table_name": graph_tables["PkNode"].full_table_name,
+                "restriction": False,
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    ft = graph._get_ft(
+        graph_tables["IntermediateNode"].full_table_name, with_restr=True
+    )
+    assert len(ft) == 0, "False restriction leaked rows into the cascade."
+
+
+def test_bridge_shared_attr_not_foreign_key(RestrGraph, two_parent_tables):
+    """A shared attribute name must not be mistaken for the linking key.
+
+    `TpChild.tp_parent_id` is primary but is its own foreign key to `TpParent`,
+    not the key linking it to `TpMid`. Cascading a `tp_parent_id` restriction
+    from `TpMid` must join on `tp_mid_id`. Copying the condition by name would
+    return the two rows where `tp_parent_id = 3` instead of the three rows
+    reachable through `tp_mid_id`.
+    """
+    TpMid, TpChild = two_parent_tables["TpMid"], two_parent_tables["TpChild"]
+
+    graph = RestrGraph(
+        seed_table=TpMid,
+        leaves=[
+            {
+                "table_name": TpMid.full_table_name,
+                "restriction": "tp_parent_id = 3",
+            }
+        ],
+        direction="down",
+        cascade=True,
+        verbose=False,
+    )
+    got = graph._get_ft(TpChild.full_table_name, with_restr=True)
+
+    assert len(TpChild & "tp_parent_id = 3") == 2, "Fixture assumption changed."
+    assert len(got) == 3, (
+        "Cascade must join on the foreign key, not reuse `tp_parent_id` by "
+        + "name. Got the rows a name-based copy would return."
+    )
+
+
+def test_bridge_copies_restr_downward(RestrGraph, graph_tables):
+    """A qualifying downward edge reuses the condition instead of joining.
+
+    Asserts the optimization is actually engaged: a copied restriction stays
+    the original string, where a join would leave a QueryExpression that nests
+    another subquery into every later hop.
+    """
+    Intermediate = graph_tables["IntermediateNode"]()
+    restr = "intermediate_id = 5"
+
+    graph = RestrGraph(
+        seed_table=Intermediate,
+        leaves=[
+            {"table_name": Intermediate.full_table_name, "restriction": restr}
+        ],
+        direction="down",
+        cascade=True,
+        verbose=False,
+    )
+    got = graph._get_restr(graph_tables["PkNode"].full_table_name)
+
+    # Equality, not containment: a flattened restriction is also a string, but
+    # restates the target's keys rather than reusing the source's condition.
+    assert got == restr, f"Expected the condition copied verbatim, got {got}"
+
+
+def test_can_copy_restr_direction(RestrGraph, graph_tables):
+    """The copy shortcut engages parent -> child and never child -> parent.
+
+    Asserted on the predicate rather than on the resulting restriction: a
+    flattened restriction is also a plain string, so the two mechanisms are
+    not distinguishable from the cascade's output alone.
+    """
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    inter = graph_tables["IntermediateNode"].full_table_name
+    pk_node = graph_tables["PkNode"].full_table_name
+    restr = "intermediate_id = 5"
+    attr_map = {"intermediate_id": "intermediate_id"}
+
+    assert graph._can_copy_restr(
+        inter,
+        pk_node,
+        restr,
+        attr_map,
+        graph._get_ft(inter),
+        graph._get_ft(pk_node),
+    ), "Copy shortcut did not engage parent -> child."
+
+    assert not graph._can_copy_restr(
+        pk_node,
+        inter,
+        restr,
+        attr_map,
+        graph._get_ft(pk_node),
+        graph._get_ft(inter),
+    ), "Copy shortcut engaged child -> parent, which over-includes."
+
+
+def test_bridge_up_excludes_unreferenced_parents(RestrGraph, graph_tables):
+    """Cascading up must not reach parent rows no restricted child references.
+
+    This is what makes a copy-the-condition shortcut unsound in the upward
+    direction: `parent_id > 7` matches two `ParentNode` rows, but only one of
+    them is referenced by an `IntermediateNode` row, and a cascade up may only
+    reach that one. Downward the shortcut is safe -- every child row has a
+    parent by referential integrity -- but upward it would over-include.
+    """
+    Intermediate = graph_tables["IntermediateNode"]()
+    Parent = graph_tables["ParentNode"]()
+
+    graph = RestrGraph(
+        seed_table=Intermediate,
+        leaves=[
+            {
+                "table_name": Intermediate.full_table_name,
+                "restriction": "parent_id > 7",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    got = graph._get_ft(Parent.full_table_name, with_restr=True)
+
+    assert len(Parent & "parent_id > 7") == 2, "Fixture assumption changed."
+    assert len(got) == 1, (
+        "Cascade up reached a parent row with no restricted child. Copying "
+        + "the condition instead of joining would return both parent rows."
+    )
+
+
+# --------------------------- Restriction flattening -----------------------------
+
+
+def test_cascade_flattens_nested_restr(RestrGraph, graph_tables):
+    """Each hop must not leave a subquery nested inside the next hop's input.
+
+    Left alone, hop N carries N nested derived tables and every evaluation of
+    it gets more expensive. Replacing a derived restriction with the literal
+    keys it selects keeps each hop's input flat.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+    got = graph._get_restr(graph_tables["IntermediateNode"].full_table_name)
+    assert isinstance(got, str), f"Restriction left nested, got {type(got)}"
+    assert (
+        len(
+            graph._get_ft(
+                graph_tables["IntermediateNode"].full_table_name,
+                with_restr=True,
+            )
+        )
+        == 4
+    ), "Flattening changed which rows the cascade reached."
+
+
+def test_flatten_respects_row_cap(RestrGraph, graph_tables):
+    """Restrictions selecting more rows than the cap keep their subquery.
+
+    Inlining an unbounded key list would trade a nested query for an enormous
+    literal one.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=False,
+        verbose=False,
+    )
+    graph.max_flat_rows = 1  # every restriction here selects more than this
+    graph.cascade()
+
+    intermediate = graph_tables["IntermediateNode"].full_table_name
+    got = graph._get_restr(intermediate)
+
+    assert not isinstance(got, str), "Cap ignored; large key list was inlined."
+    assert (
+        len(graph._get_ft(intermediate, with_restr=True)) == 4
+    ), "Row cap changed which rows the cascade reached."
+
+
+def test_enforce_restr_strings(RestrGraph, graph_tables):
+    """Every restriction becomes a string, selecting the same rows.
+
+    Built with flattening disabled so there are derived restrictions left to
+    convert; with it enabled most are already strings.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=False,
+        verbose=False,
+    )
+    graph.max_flat_rows = 0  # leave restrictions derived
+    graph.cascade()
+
+    before = {ft.full_table_name: len(ft) for ft in graph.restr_ft}
+    assert any(
+        not isinstance(graph._get_restr(t), str) for t in before
+    ), "Nothing to convert; test would be vacuous."
+
+    graph.enforce_restr_strings()
+
+    for table, count in before.items():
+        assert isinstance(
+            graph._get_restr(table), str
+        ), f"{table} restriction is not a string."
+        assert (
+            len(graph._get_ft(table, with_restr=True)) == count
+        ), f"{table} changed row count when converted to a string."
+
+
+# ------------------------ Restriction list accumulation -------------------------
+
+
+def test_merged_string_restrs_stay_strings(RestrGraph, graph_tables):
+    """OR-ing plain conditions must not build a subquery to express the union.
+
+    `make_condition` already combines a list of string conditions into one
+    string, so the union needs no derived table.
+    """
+    Parent = graph_tables["ParentNode"]()
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    graph._set_restr(Parent.full_table_name, "parent_id = 1")
+    graph._set_restr(Parent.full_table_name, "parent_id = 2")
+    got = graph._get_restr(Parent.full_table_name)
+
+    assert isinstance(got, str), f"Union of conditions nested, got {type(got)}"
+    assert len(Parent & got) == 2, "Union of conditions lost rows."
+
+
+def test_duplicate_restrs_deduped(RestrGraph, graph_tables):
+    """Repeated identical conditions must collapse.
+
+    Convergent paths deliver the same condition to a shared ancestor
+    repeatedly; keeping every copy grows the OR-list without narrowing it.
+    """
+    Parent = graph_tables["ParentNode"]()
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    for _ in range(3):
+        graph._set_restr(Parent.full_table_name, "parent_id = 1")
+
+    assert (
+        len(graph._get_restr_list(Parent.full_table_name)) == 1
+    ), "Identical restrictions were not deduped."
+    assert (
+        len(Parent & graph._get_restr(Parent.full_table_name)) == 1
+    ), "Dedupe changed which rows the restriction selects."
+
+
+# ---------------------------- Traversal invariants ------------------------------
+
+
+@pytest.mark.parametrize(
+    "seed, direction, target, msg",
+    [
+        ("master", "up", "part", "parts of a master, going up"),
+        ("part", "down", "master", "master of a part, going down"),
+    ],
+)
+def test_cascade_reaches_master_and_parts(
+    RestrGraph, graph_tables, seed, direction, target, msg
+):
+    """Master/part links must be traversed in both directions.
+
+    `_get_next_tables` injects these as extra targets rather than reading them
+    off the graph: parts when going up, the master when going down. Because
+    they are synthetic, they are exactly what a traversal rewritten around the
+    dependency graph's own ordering would drop.
+    """
+    tables = {
+        "master": graph_tables["MergeOutput"],
+        "part": graph_tables["MergeOutput"].PkNode,
+    }
+    seed_table = tables[seed]()
+
+    graph = RestrGraph(
+        seed_table=seed_table,
+        leaves=[
+            {"table_name": seed_table.full_table_name, "restriction": True}
+        ],
+        direction=direction,
+        cascade=True,
+        verbose=False,
+    )
+
+    assert (
+        tables[target].full_table_name in graph.included_tables
+    ), f"Cascade did not reach the {msg}."
+
+
+def test_cascade_invariant_to_visit_order(
+    RestrGraph, graph_tables, monkeypatch
+):
+    """The result must not depend on the order neighbours are visited.
+
+    `BranchNode` reaches `ParentNode` by two paths of different lengths, so
+    whichever is walked first arrives with a narrower restriction and the other
+    widens it. Any reordering of the traversal has to end in the same place.
+    """
+
+    def build(reverse):
+        graph = RestrGraph(
+            seed_table=graph_tables["BranchNode"](),
+            leaves=[
+                {
+                    "table_name": graph_tables["BranchNode"].full_table_name,
+                    "restriction": "intermediate_id = 2",
+                }
+            ],
+            direction="up",
+            cascade=False,
+            verbose=False,
+        )
+        if reverse:
+            original = graph._get_next_tables
+
+            def reversed_order(table, direction):
+                next_tables, next_func = original(table, direction)
+                flipped = {k: next_tables[k] for k in reversed(next_tables)}
+                return flipped, next_func
+
+            monkeypatch.setattr(graph, "_get_next_tables", reversed_order)
+        graph.cascade()
+        return cascade_signature(graph)
+
+    forward = build(reverse=False)
+    assert forward, "Fixture assumption changed; cascade reached nothing."
+    assert forward == build(
+        reverse=True
+    ), "Cascade result changed with visit order."
+
+
+# ------------------------- Convergence / union semantics ------------------------
+
+
+@pytest.mark.parametrize(
+    "restr, expect_ids, msg",
+    [
+        ("intermediate_id = 2", {1, 3}, "both paths contribute"),
+        ("intermediate_id = 2 AND parent_id = 3", {1, 3}, "compound restr"),
+    ],
+)
+def test_convergence_union(RestrGraph, graph_tables, restr, expect_ids, msg):
+    """Two paths converging on one ancestor must OR their restrictions.
+
+    `BranchNode` reaches `ParentNode` directly and through `IntermediateNode`,
+    so the ancestor restriction is the union of both arrivals. Reordering the
+    traversal must not turn this union into an intersection.
+    """
+    graph = RestrGraph(
+        seed_table=graph_tables["BranchNode"](),
+        leaves=[
+            {
+                "table_name": graph_tables["BranchNode"].full_table_name,
+                "restriction": restr,
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    got = set(
+        graph._get_ft(
+            graph_tables["ParentNode"].full_table_name, with_restr=True
+        ).fetch("parent_id")
+    )
+    assert got == expect_ids, f"Convergence union failed: {msg}."
+
+
+def test_convergence_included_tables(RestrGraph, graph_tables):
+    """The set of tables reached by a cascade is part of the contract."""
+    graph = RestrGraph(
+        seed_table=graph_tables["BranchNode"](),
+        leaves=[
+            {
+                "table_name": graph_tables["BranchNode"].full_table_name,
+                "restriction": "intermediate_id = 2",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    included = {t for t in graph.included_tables if not t.isnumeric()}
+    for name in ("BranchNode", "IntermediateNode", "ParentNode"):
+        assert (
+            graph_tables[name].full_table_name in included
+        ), f"{name} missing from cascade."
+
+
+# ------------------------------ Hash order invariance ---------------------------
+
+
+def test_hash_leaf_order_invariant(RestrGraph, add_graph_tables):
+    """`RestrGraph.hash` must not depend on the order leaves are supplied.
+
+    `all_ft` is topologically sorted, and `dj_topo_sort` ordering feeds
+    `_hash_upstream` (see the NOTE in `dj_graph.py`). Reordering the traversal
+    must leave the hash stable.
+    """
+    tables = add_graph_tables
+    leaves = [
+        {"table_name": tables["B1"].full_table_name, "restriction": "a_id < 2"},
+        {"table_name": tables["B2"].full_table_name, "restriction": "a_id > 2"},
+    ]
+
+    def build(ordered):
+        return RestrGraph(
+            seed_table=tables["B1"],
+            leaves=ordered,
+            direction="up",
+            cascade=True,
+            verbose=False,
+        )
+
+    assert (
+        build(leaves).hash == build(list(reversed(leaves))).hash
+    ), "Graph hash changed with leaf order."
+
+
+# --------------------------------- Verbose parity -------------------------------
+
+
+def test_verbose_parity(RestrGraph, graph_tables, caplog):
+    """Verbose logging must not change what a cascade returns.
+
+    No other fixture builds a graph with `verbose=True`, so the logging branch
+    of `_bridge_restr` is otherwise untested.
+    """
+
+    def build(verbose):
+        return RestrGraph(
+            seed_table=graph_tables["PkNode"](),
+            leaves=[
+                {
+                    "table_name": graph_tables["PkNode"].full_table_name,
+                    "restriction": "pk_attr > 16",
+                }
+            ],
+            direction="up",
+            cascade=True,
+            verbose=verbose,
+        )
+
+    quiet = cascade_signature(build(False))
+    with caplog.at_level("INFO", logger="spyglass"):
+        loud = cascade_signature(build(True))
+
+    assert quiet == loud, "Verbose cascade returned different rows."
+    assert "Bridge Link" in caplog.text, "Verbose cascade logged no bridges."
+
+
+# ----------------------------- Cache invalidation -------------------------------
+
+
+def test_new_graph_sees_new_rows(RestrGraph, mutable_graph_tables):
+    """Rows inserted between two graphs must be visible to the second.
+
+    Caching table emptiness or restricted results across graphs must not
+    outlive the data it describes.
+    """
+    parent = mutable_graph_tables["MutParent"]
+    child = mutable_graph_tables["MutChild"]
+
+    def build():
+        return RestrGraph(
+            seed_table=child,
+            leaves=[
+                {
+                    "table_name": child.full_table_name,
+                    "restriction": "mut_id > 1",
+                }
+            ],
+            direction="up",
+            cascade=True,
+            verbose=False,
+        )
+
+    before = len(build()._get_ft(parent.full_table_name, with_restr=True))
+
+    parent.insert([(9, 99)], skip_duplicates=True)
+    child.insert([(9, 99)], skip_duplicates=True)
+
+    after = len(build()._get_ft(parent.full_table_name, with_restr=True))
+
+    assert after == before + 1, "New graph did not see rows inserted since."
+
+
+def test_empty_table_then_populated(RestrGraph, mutable_graph_tables):
+    """An empty table must not be cached as permanently empty."""
+    parent = mutable_graph_tables["MutParent"]
+    child = mutable_graph_tables["MutChild"]
+
+    child.delete_quick()
+
+    def build():
+        return RestrGraph(
+            seed_table=parent,
+            leaves=[
+                {
+                    "table_name": parent.full_table_name,
+                    "restriction": "mut_id < 2",
+                }
+            ],
+            direction="down",
+            cascade=True,
+            verbose=False,
+        )
+
+    assert (
+        len(build()._get_ft(child.full_table_name, with_restr=True)) == 0
+    ), "Fixture assumption changed: child should be empty."
+
+    child.insert([(0, 20), (1, 21)], skip_duplicates=True)
+
+    assert (
+        len(build()._get_ft(child.full_table_name, with_restr=True)) == 2
+    ), "Cascade treated a repopulated table as still empty."
+
+
+def test_redeclared_table_heading(RestrGraph, redeclare_table):
+    """A dropped and re-created table must not be served a stale heading.
+
+    Guards any process-wide FreeTable cache. Module-scoped fixtures in this
+    suite drop and re-create their schemas, so a cache keyed on table name
+    alone would hand the second declaration the first one's heading.
+    """
+    first = """
+    redeclared_id: int
+    ---
+    first_attr: int
+    """
+    second = """
+    redeclared_id: int
+    ---
+    second_attr: int
+    """
+
+    schema, table = redeclare_table(first, [(0, 10)])
+    graph = RestrGraph(seed_table=table, leaves=[], verbose=False)
+    names = set(graph._get_ft(table.full_table_name).heading.names)
+    assert "first_attr" in names, "Fixture assumption changed."
+    schema.drop(force=True)
+
+    _, table = redeclare_table(second, [(0, 20)])
+    graph = RestrGraph(seed_table=table, leaves=[], verbose=False)
+    names = set(graph._get_ft(table.full_table_name).heading.names)
+
+    assert "second_attr" in names, "Stale heading served after redeclaration."
+    assert (
+        "first_attr" not in names
+    ), "Stale heading served after redeclaration."
+
+
+# ------------------------------ Graph construction ------------------------------
+
+
+def test_shared_graph_drops_cascade_data(RestrGraph, graph_tables):
+    """A graph built from another's inherits structure, never restrictions.
+
+    A multi-leaf cascade builds one graph per leaf from a single load. Each
+    must start unrestricted, or a leaf would begin already narrowed by its
+    siblings.
+    """
+    PkNode = graph_tables["PkNode"]()
+    first = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    restricted = {t for t in first.included_tables if not t.isnumeric()}
+    assert restricted, "Fixture assumption changed; nothing was restricted."
+
+    # A node a fresh load could not produce, so that reusing the given graph is
+    # distinguishable from silently rebuilding one. Without it, both assertions
+    # below hold either way and the test proves nothing.
+    marker = "`not_a_schema`.`not_a_table`"
+    first.graph.add_node(marker)
+
+    second = RestrGraph(seed_table=PkNode, graph=first.graph, verbose=False)
+
+    assert (
+        marker in second.graph.nodes
+    ), "Graph was rebuilt from the connection instead of the one given."
+    assert set(second.graph.nodes) == set(
+        first.graph.nodes
+    ), "Shared graph did not carry the structure over."
+    for table in restricted:
+        assert (
+            second._get_restr(table) is None
+        ), f"{table} inherited a restriction from the graph it was built from."
+
+
+def test_intersect_preserves_skip_external(RestrGraph, graph_tables):
+    """Intersecting must not reset how the cascade treats outside tables.
+
+    The export builds its graph with `skip_external=False` and then intersects
+    with a whitelist graph. If the intersection reverted to the default, the
+    cascade that follows would stop at the non-spyglass tables the inputs were
+    explicitly told to include.
+    """
+    PkNode = graph_tables["PkNode"]()
+    leaves = [
+        {"table_name": PkNode.full_table_name, "restriction": "pk_attr > 16"}
+    ]
+    kwargs = dict(direction="up", cascade=True, verbose=False)
+
+    first = RestrGraph(
+        seed_table=PkNode, leaves=leaves, skip_external=False, **kwargs
+    )
+    second = RestrGraph(
+        seed_table=PkNode, leaves=leaves, skip_external=False, **kwargs
+    )
+
+    assert (
+        first & second
+    ).skip_external is False, "Intersection reset skip_external to the default."
+
+
+def test_undirect_graph_holds_no_node_data(RestrGraph, graph_tables):
+    """The undirected graph must copy names and edges only.
+
+    Once a cascade has run, node data holds FreeTable objects, which carry a
+    live connection and must not be copied into a second graph.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[
+            {
+                "table_name": PkNode.full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+    assert graph._get_node(PkNode.full_table_name).get(
+        "ft"
+    ), "Fixture assumption changed; no FreeTable was attached."
+
+    assert all(
+        not data for _, data in graph.undirect_graph.nodes(data=True)
+    ), "Undirected graph copied node data."
+    assert set(graph.undirect_graph.nodes) == set(
+        graph.graph.nodes
+    ), "Undirected graph lost nodes."
+
+
+# ------------------------------- Log redundancy ---------------------------------
+
+
+def test_spawn_skips_registered_schema(
+    RestrGraph, graph_tables, caplog, monkeypatch
+):
+    """A schema already registered on the connection is merged, not respawned.
+
+    Registration is process-wide, so once any graph has spawned a schema the
+    rest must reuse it. A cascade over many leaves builds a graph per leaf,
+    which otherwise repeats both the work and the warning for every one.
+    """
+    from spyglass.utils import dj_graph
+
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    table = graph_tables["PkNode"].full_table_name
+    schema = table.split(".")[0].strip("`")
+
+    assert schema in graph.connection.schemas, "Fixture assumption changed."
+
+    def _spawned(*args, **kwargs):
+        raise AssertionError("Respawned a schema already on the connection")
+
+    monkeypatch.setattr(dj_graph, "VirtualModule", _spawned)
+
+    with caplog.at_level("WARNING", logger="spyglass"):
+        graph._spawn_virtual_module(table)
+
+    assert "Spawning tables" not in caplog.text, "Logged a skipped respawn."
+
+
+def test_as_dict_quiet_when_cascaded(RestrGraph, graph_tables, caplog):
+    """Reading a cascaded graph repeatedly must not narrate each read.
+
+    `as_dict` is read once per table by the export, and once per leaf graph
+    when leaf cascades are merged.
+    """
+    PkNode = graph_tables["PkNode"]()
+    graph = RestrGraph(
+        seed_table=PkNode,
+        leaves=[{"table_name": PkNode.full_table_name, "restriction": True}],
+        direction="up",
+        cascade=True,
+        verbose=True,
+    )
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        _, _ = graph.as_dict, graph.as_dict
+
+    assert "Already cascaded" not in caplog.text, "Narrated a routine read."
+
+
+# ----------------------------- Edge resolution ----------------------------------
+
+
+def test_get_edge_alias(RestrGraph, graph_tables):
+    """`_get_edge` must resolve an aliased edge through its alias node.
+
+    The fallback that handles this walks `all_simple_paths` over the whole
+    graph. Bounding that walk must not change the resolution.
+    """
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    _, edge = graph._get_edge(
+        graph_tables["PkAliasNode"].full_table_name,
+        graph_tables["PkNode"].full_table_name,
+    )
+    assert "fk_pk_id" in edge.get("attr_map", {}), "Alias edge attr_map lost."
+
+
+def test_get_edge_direct(RestrGraph, graph_tables):
+    """A direct edge resolves without the path-search fallback.
+
+    Pins the polarity of the returned flag, which `_bridge_restr` maps straight
+    onto a cascade direction. Despite the parameter names, the flag is False
+    when the arguments are ordered (child, parent) and True when they are
+    swapped -- it reports "arguments are reversed", not "child is a child".
+    """
+    graph = RestrGraph(seed_table=graph_tables["PkNode"](), verbose=False)
+    pk_node = graph_tables["PkNode"].full_table_name
+    intermediate = graph_tables["IntermediateNode"].full_table_name
+
+    reversed_args, edge = graph._get_edge(pk_node, intermediate)
+    assert not reversed_args, "Flag set for correctly ordered (child, parent)."
+    assert "intermediate_id" in edge.get("attr_map", {}), "attr_map lost."
+
+    reversed_args, edge = graph._get_edge(intermediate, pk_node)
+    assert reversed_args, "Flag unset for swapped (parent, child)."
+    assert "intermediate_id" in edge.get("attr_map", {}), "attr_map lost."
+
+
+# -------------------------------- Query budget ----------------------------------
+
+# Ceilings recorded against pre-optimization code; tighten as cascade
+# performance work lands. The point is to catch a regression that adds queries
+# per edge, not to pin an exact count. Construction, cascade, and realizing the
+# results are measured separately: the first two scale with the traversal, the
+# third currently scales with the size of the whole database.
+GRAPH_BUILD_QUERY_CEILING = 60
+CASCADE_QUERY_CEILING = 40
+
+
+def _budget_graph(RestrGraph, graph_tables):
+    """Build an uncascaded graph over a fixed leaf."""
+    return RestrGraph(
+        seed_table=graph_tables["PkNode"](),
+        leaves=[
+            {
+                "table_name": graph_tables["PkNode"].full_table_name,
+                "restriction": "pk_attr > 16",
+            }
+        ],
+        direction="up",
+        cascade=False,
+        verbose=False,
+    )
+
+
+def test_graph_build_query_budget(RestrGraph, graph_tables, query_counter):
+    """Bound the cost of constructing a graph, before any cascade.
+
+    Every `RestrGraph` reloads and copies the dependency graph, and multi-leaf
+    cascades build one graph per leaf, so this cost is paid repeatedly.
+    """
+    _budget_graph(RestrGraph, graph_tables)
+    measured = len(query_counter)
+
+    assert measured < GRAPH_BUILD_QUERY_CEILING, (
+        f"Graph construction issued {measured} queries, ceiling is "
+        + f"{GRAPH_BUILD_QUERY_CEILING}."
+    )
+
+
+def test_cascade_query_budget(RestrGraph, graph_tables, query_counter):
+    """Bound the SQL statements one cascade issues, excluding construction.
+
+    Deterministic stand-in for a timing benchmark: cascade performance is
+    largely a function of how many statements it issues.
+    """
+    graph = _budget_graph(RestrGraph, graph_tables)
+
+    query_counter.reset()  # exclude construction, measured separately
+    graph.cascade()
+    measured = len(query_counter)
+
+    assert measured < CASCADE_QUERY_CEILING, (
+        f"Cascade issued {measured} queries, ceiling is "
+        + f"{CASCADE_QUERY_CEILING}. If this is an intended trade, update the "
+        + "ceiling; if not, an optimization added per-edge queries."
+    )
+
+
+def test_included_tables_limited_to_cascade(RestrGraph, graph_tables):
+    """Only tables the cascade actually reached should be reported as included.
+
+    Node truthiness cannot be used to decide this: DataJoint gives every table
+    of every loaded schema a `primary_key` node attribute, so a truthiness
+    check reports the whole database.
+    """
+    graph = _budget_graph(RestrGraph, graph_tables)
+    graph.cascade()
+
+    reached = graph.visited | graph.leaves
+    extra = {t for t in graph.included_tables if not t.isnumeric()} - reached
+
+    assert not extra, (
+        f"{len(extra)} tables reported as included were never visited, "
+        + f"e.g. {sorted(extra)[:3]}"
+    )
+
+
+def test_restr_ft_scales_with_cascade(RestrGraph, graph_tables, query_counter):
+    """Realizing results costs queries per restricted table, not per DB table.
+
+    `all_ft` builds a FreeTable and runs an existence query for every table
+    `included_tables` reports, so the two must stay proportional to the
+    cascade rather than to the size of the session.
+    """
+    graph = _budget_graph(RestrGraph, graph_tables)
+    graph.cascade()
+
+    query_counter.reset()
+    restricted = graph.restr_ft
+    measured = len(query_counter)
+
+    budget = 10 * max(len(restricted), 1)
+    assert measured <= budget, (
+        f"Realizing {len(restricted)} restricted tables issued {measured} "
+        + f"queries, budget is {budget}."
+    )
+
+
+def test_verbose_query_overhead(RestrGraph, graph_tables, query_counter):
+    """Verbose cascades must not cost dramatically more queries than quiet ones.
+
+    Debug instrumentation in `_bridge_restr` runs an anti-join over the
+    unrestricted target table once per edge. This test records that overhead so
+    a regression reintroducing it is visible.
+    """
+
+    def run(verbose):
+        graph = _budget_graph(RestrGraph, graph_tables)
+        graph.verbose = verbose
+        query_counter.reset()  # exclude construction from the comparison
+        graph.cascade()
+        return len(query_counter)
+
+    quiet = run(False)
+    loud = run(True)
+
+    assert loud <= quiet * 3, (
+        f"Verbose cascade issued {loud} queries vs {quiet} quiet. Debug "
+        + "instrumentation should not dominate the cascade."
+    )
