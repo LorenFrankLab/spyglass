@@ -207,9 +207,13 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 # case where no units found or curation removed all units
                 continue
 
-            sorting_spike_times = nwb_file[nwb_field_name][
-                "spike_times"
-            ].to_list()
+            units = nwb_file[nwb_field_name]
+            # A zero-unit curation has a real, empty Units table but no
+            # ``spike_times`` column. It contributes no units to the group.
+            if "spike_times" not in units:
+                continue
+
+            sorting_spike_times = units["spike_times"].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
                 for unit_id in _get_nwb_unit_ids(nwb_file, nwb_field_name)
@@ -217,13 +221,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             # filter the spike times based on the labels if present
             group_col = (  # v0: "label", v1: "curation_label"
-                c
-                for c in nwb_file[nwb_field_name].columns
-                if c in ("label", "curation_label")
+                c for c in units.columns if c in ("label", "curation_label")
             )
-            group_labels = nwb_file[nwb_field_name].get(
-                next(group_col, None), None
-            )
+            group_labels = units.get(next(group_col, None), None)
 
             # NOTE: the ``not test_mode`` guard is load-bearing. The shared
             # base-env test fixtures build ``default_exclusion`` groups
