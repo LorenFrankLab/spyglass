@@ -494,7 +494,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         # common sink (get_firing_rate -> get_spike_indicator ->
         # get_spike_times), so warn here once; the strict raise stays on the
         # decoding boundary.
-        nwb_files, merge_ids = self.fetch_nwb(key, return_merge_ids=True)
+        nwb_files, merge_ids = self.fetch_nwb(
+            key, return_merge_ids=True, multi_source=True
+        )
         type(self)._warn_preview_merge_ids(merge_ids)
         spike_times = []
         for nwb_file in nwb_files:

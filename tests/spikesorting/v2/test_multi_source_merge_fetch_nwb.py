@@ -120,14 +120,11 @@ def two_source_output(populated_sorting, dj_conn, tmp_path_factory):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
-    two_source_output, caplog
-):
+def test_spikesortingoutput_multi_source_fetch_nwb_aligned(two_source_output):
     """A SpikeSortingOutput restriction spanning CurationV2 +
-    ImportedSpikeSorting: default WARNS and fetches across both;
+    ImportedSpikeSorting: default raises before fetching;
     multi_source=True returns one merge_id per file, each aligned to its
-    owning source's file (and silences the warning)."""
-    import logging
+    owning source's file."""
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
@@ -137,15 +134,9 @@ def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
         {"merge_id": ctx["mid_imported"]},
     ]
 
-    # Default (multi_source=False): a 2-source restriction now WARNS (not
-    # raises) and fetches across both sources.
-    with caplog.at_level(logging.WARNING):
-        nwb_default, mids_default = (SpikeSortingOutput & merge_keys).fetch_nwb(
-            return_merge_ids=True
-        )
-    assert "multi_source=True" in caplog.text
-    assert len(nwb_default) == 2
-    assert set(mids_default) == {ctx["mid_v2"], ctx["mid_imported"]}
+    # Default (multi_source=False): an accidental 2-source restriction fails.
+    with pytest.raises(ValueError, match="spans 2 sources"):
+        (SpikeSortingOutput & merge_keys).fetch_nwb(return_merge_ids=True)
 
     # multi_source=True: aligned (nwb_list, merge_ids) across the two sources.
     nwb_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
@@ -173,6 +164,23 @@ def test_spikesortingoutput_multi_source_fetch_nwb_aligned(
     assert len(imported_idx) == 1, "imported file not uniquely identifiable"
     assert merge_ids[imported_idx[0]] == ctx["mid_imported"]
     assert merge_ids[1 - imported_idx[0]] == ctx["mid_v2"]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_spikesortingoutput_get_spike_times_spans_sources(two_source_output):
+    """The spike-time aggregator explicitly opts into multiple sources."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    ctx = two_source_output
+    merge_keys = [
+        {"merge_id": ctx["mid_v2"]},
+        {"merge_id": ctx["mid_imported"]},
+    ]
+
+    spike_times = SpikeSortingOutput().get_spike_times(merge_keys)
+
+    assert len(spike_times) >= 3
 
 
 @pytest.mark.slow
@@ -244,11 +252,10 @@ def test_unit_annotation_hard_blocks_multi_source(two_source_output):
     """UnitAnnotation.fetch_unit_spikes raises on a restriction spanning >1
     SpikeSortingOutput source, but a single-source restriction still fetches.
 
-    Merge.fetch_nwb now only WARNS on a multi-source restriction (it used to
-    raise), so annotations -- which are single-analysis by design -- carry the
+    Annotations -- which are single-analysis by design -- carry a domain-specific
     hard block in fetch_unit_spikes itself. Unlike SortedSpikesGroup (above),
-    which intentionally spans sources, UnitAnnotation must not silently mix
-    spike-time namespaces.
+    which intentionally spans sources, UnitAnnotation must not mix spike-time
+    namespaces.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         _get_nwb_unit_ids,

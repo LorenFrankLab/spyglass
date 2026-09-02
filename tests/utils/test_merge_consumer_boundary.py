@@ -5,7 +5,7 @@ Both bugs live in the generic merge-table layer
 hermetic two-source merge table, rather than against any one pipeline's
 merge master:
 
-A2 -- ``Merge.fetch_nwb`` advertised a ``multi_source`` argument that the
+``Merge.fetch_nwb`` advertised a ``multi_source`` argument that the
 implementation never used: a restriction spanning >=2 source part types
 raised a cryptic "Found N potential parents" from ``merge_get_parent``, and
 ``return_merge_ids`` resolved each file's merge_id against the *cumulative*
@@ -13,18 +13,20 @@ raised a cryptic "Found N potential parents" from ``merge_get_parent``, and
 advertised API true:
 
   - ``multi_source=False`` (default) + a restriction spanning >1 source
-    warns and still fetches across all sources.
+    raises before fetching unrelated parent tables.
   - ``multi_source=True`` iterates source-by-source, scoping the parent
     resolution to one source per loop, and returns ``len(merge_ids) ==
     len(nwb_list)`` with each id the owner of its paired file.
   - the single-source path (used by every merge master today) is unchanged.
 
-A6 -- the ``delete_downstream_merge`` shim called
+Separately, the ``delete_downstream_merge`` shim called
 ``ActivityLog.deprecate_log(..., alternate=...)`` but the signature kwarg is
 ``alt=``, so the shim raised ``TypeError`` before doing anything.
 """
 
 from __future__ import annotations
+
+import inspect
 
 import datajoint as dj
 import pytest
@@ -144,23 +146,23 @@ def two_source_merge(dj_conn, mini_dict):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_fetch_nwb_multi_source_warns_without_opt_in(two_source_merge, caplog):
-    """A restriction spanning >=2 source types now WARNS (not raises) and
-    fetches across both; ``multi_source=True`` silences the warning."""
-    import logging as _logging
-
+def test_fetch_nwb_multi_source_raises_without_opt_in(two_source_merge):
+    """A restriction spanning multiple sources requires explicit opt-in."""
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
     merge_id_b = two_source_merge["merge_id_b"]
 
     restriction = [{"merge_id": merge_id_a}, {"merge_id": merge_id_b}]
-    with caplog.at_level(_logging.WARNING):
-        nwb_list, merge_ids = (Merge & restriction).fetch_nwb(
-            return_merge_ids=True
-        )
-    assert "multi_source=True" in caplog.text
-    assert len(nwb_list) == 2
-    assert set(merge_ids) == {merge_id_a, merge_id_b}
+    with pytest.raises(ValueError, match="spans 2 sources"):
+        (Merge & restriction).fetch_nwb(return_merge_ids=True)
+
+
+def test_fetch_nwb_has_no_disable_warning_kwarg():
+    """The removed warning escape hatch is absent from the public API."""
+    from spyglass.utils.dj_merge_tables import _Merge
+
+    params = inspect.signature(_Merge.fetch_nwb).parameters
+    assert "disable_warning" not in params
 
 
 @pytest.mark.slow

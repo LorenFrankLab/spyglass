@@ -588,7 +588,6 @@ class Merge(ExportMixin, dj.Manual):
         self,
         restriction: str = None,
         multi_source=False,
-        disable_warning=False,
         return_merge_ids=False,
         log_export=True,
         *attrs,
@@ -611,8 +610,7 @@ class Merge(ExportMixin, dj.Manual):
         multi_source: bool
             Default False. Allow the restriction to span more than one source
             part type. When False (the default), a multi-source restriction
-            WARNS and still fetches across all sources; when True, the same
-            source-by-source fetch runs without the warning and (with
+            raises; when True, the source-by-source fetch runs and (with
             ``return_merge_ids``) each merge_id aligns with its file.
         return_merge_ids: bool
             Default False. Return merge_ids with nwb files.
@@ -662,7 +660,7 @@ class Merge(ExportMixin, dj.Manual):
                 # parent-attribute branch below was not taken. Probe each source
                 # through its ``master * part * parent`` join to keep only the
                 # ones whose parent actually carries the restriction. This makes
-                # discovery exact -- no spurious multi-source warning, and no
+                # discovery exact -- no spurious multi-source rejection, and no
                 # non-matching source reaching the per-source resolution below
                 # (which would raise "0 potential parents").
                 sources = set()
@@ -690,7 +688,7 @@ class Merge(ExportMixin, dj.Manual):
                     # applied_to_any_source True and correctly yields no files.)
                     raise
             if len(sources) > 1 and not multi_source:
-                self._warn_multi_source(sources)
+                self._raise_multi_source(sources)
             for source in sources:
                 source_restr = (
                     self
@@ -763,7 +761,7 @@ class Merge(ExportMixin, dj.Manual):
                 )
             sources = {m[0] for m in matches}
             if len(sources) > 1 and not multi_source:
-                self._warn_multi_source(sources)
+                self._raise_multi_source(sources)
             for _source_name, parent, matched in matches:
                 # ``matched`` already applied the restriction through the join.
                 # Restrict the parent to the matched rows by PRIMARY KEY (a
@@ -790,20 +788,17 @@ class Merge(ExportMixin, dj.Manual):
             return nwb_list, merge_ids
         return nwb_list
 
-    def _warn_multi_source(self, sources) -> None:
-        """Warn (do not raise) for a restriction spanning multiple sources.
+    def _raise_multi_source(self, sources) -> None:
+        """Refuse a restriction that resolves to more than one source part.
 
         Each source resolves to a different parent class, so fetching across
-        them mixes files/ids from unrelated tables -- usually unintended, but
-        valid: the per-source loop resolves each source correctly. Warn so the
-        breadth is visible rather than silent; pass ``multi_source=True`` to
-        silence, or restrict to a single source.
+        them returns files and ids from unrelated tables. Callers that
+        aggregate across sources intentionally pass ``multi_source=True``.
         """
-        logger.warning(
+        raise ValueError(
             f"Merge.fetch_nwb: restriction spans {len(sources)} sources "
-            f"({sorted(sources)}); fetching across all of them. Pass "
-            "multi_source=True to silence this warning, or restrict to a "
-            "single source."
+            f"({sorted(sources)}). Restrict to a single source, or pass "
+            "multi_source=True to fetch across all of them."
         )
 
     @classmethod

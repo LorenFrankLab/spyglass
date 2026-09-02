@@ -119,10 +119,9 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             {"merge_id": merge_id}
             for merge_id in list(set(self.fetch("spikesorting_merge_id")))
         ]
-        # Annotations are one-analysis / one-source. ``Merge.fetch_nwb`` now only
-        # WARNS on a multi-source restriction (it used to raise), so guard
-        # explicitly here: mixing spike-time namespaces across SpikeSortingOutput
-        # sources is not supported for annotations.
+        # Annotations are one-analysis / one-source. Guard explicitly here so
+        # callers receive the annotation-specific remedy before the generic
+        # Merge.fetch_nwb multi-source rejection.
         sources = set((SpikeSortingOutput & merge_keys).fetch("source"))
         if len(sources) > 1:
             raise ValueError(
