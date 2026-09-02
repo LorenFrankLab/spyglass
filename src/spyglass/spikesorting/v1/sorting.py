@@ -16,6 +16,7 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.v1.recording import (  # noqa: F401
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
@@ -423,10 +424,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
-            sorting = si.NumpySorting.from_times_labels(
-                times_list=detected_spikes["sample_index"],
-                labels_list=np.zeros(len(detected_spikes), dtype=np.int32),
-                sampling_frequency=recording.get_sampling_frequency(),
+            sorting = _si_compat.numpy_sorting_from_samples_and_labels(
+                detected_spikes["sample_index"],
+                np.zeros(len(detected_spikes), dtype=np.int32),
+                recording.get_sampling_frequency(),
             )
         else:
             # Specify tempdir (expected by some sorters like mountainsort4)

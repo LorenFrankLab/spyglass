@@ -6,6 +6,7 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.utils import _reformat_metrics
 from spyglass.spikesorting.v0.spikesorting_curation import Curation
 from spyglass.spikesorting.v0.spikesorting_recording import (
@@ -87,7 +88,7 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
         R = SpikeSortingRecording().load_recording(key)
         if R.get_num_segments() > 1:
             R = si.concatenate_recordings([R])
-        S = si.load_extractor(sorting_path)
+        S = _si_compat.load_extractor(sorting_path)
 
         # Generate the figURL
         url = _generate_the_figurl(

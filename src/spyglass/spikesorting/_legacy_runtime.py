@@ -11,7 +11,8 @@ inside SpikeInterface.
 The guard is intentionally narrow:
 
 - Read-only / query paths that do not invoke removed APIs continue to work and
-  are not guarded.
+  are not guarded. Renamed loading and ``NumpySorting`` APIs are routed through
+  ``spyglass.spikesorting._si_compat`` so those paths work under both pins.
 - v0/v1 schemas are unchanged; ``SpikeSortingOutput`` merge queries on existing
   rows keep functioning.
 - Modern (v2) spike-sorting code is unaffected.

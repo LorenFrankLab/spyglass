@@ -32,6 +32,7 @@ from spyglass.settings import waveforms_dir
 from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -206,7 +207,7 @@ class Curation(SpyglassMixin, dj.Manual):
         sorting_extractor: spike interface sorting extractor
 
         """
-        sorting = si.load_extractor(sorting_path)
+        sorting = _si_compat.load_extractor(sorting_path)
         if len(merge_groups) != 0:
             return MergedSortingExtractor(
                 parent_sorting=sorting, merge_groups=merge_groups
@@ -430,7 +431,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         _require_legacy_si_environment("v0 Waveforms.make")
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
-        recording = si.load_extractor(recording_path)
+        recording = _si_compat.load_extractor(recording_path)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
 
@@ -1257,7 +1258,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
 
         logger.info(f"Found {len(accepted_units)} accepted units")
 
-        recording = si.load_extractor(recording_path)
+        recording = _si_compat.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
         analysis_file_name, units_object_id = Curation().save_sorting_nwb(

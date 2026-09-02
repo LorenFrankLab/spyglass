@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import importlib
 
+import numpy as np
 import pytest
+from packaging.version import Version
 
 # The SI-bearing v0/v1 table modules (those with top-level SpikeInterface
 # imports and ``_require_legacy_si_environment`` guards on their compute paths).
@@ -42,6 +44,93 @@ _LEGACY_TABLE_MODULES = [
     "spyglass.spikesorting.v0.spikesorting_sorting",
     "spyglass.spikesorting.v0.spikesorting_recompute",
 ]
+
+
+def test_compat_loader_dispatches_to_available_si_api(monkeypatch):
+    """The loader wrapper selects the API exposed by the installed SI."""
+    import spikeinterface as si
+
+    from spyglass.spikesorting import _si_compat
+
+    source = {"serialized": "extractor"}
+    loaded = object()
+    calls = []
+
+    def _load(value):
+        calls.append(value)
+        return loaded
+
+    loader_name = (
+        "load_extractor"
+        if callable(getattr(si, "load_extractor", None))
+        else "load"
+    )
+    monkeypatch.setattr(si, loader_name, _load)
+
+    assert _si_compat.load_extractor(source) is loaded
+    assert calls == [source]
+
+
+def test_compat_numpy_sorting_constructor_preserves_unit_ids():
+    """The constructor wrapper works across SI names and keeps empty units."""
+    from spyglass.spikesorting._si_compat import (
+        numpy_sorting_from_samples_and_labels,
+    )
+
+    samples = np.asarray([5, 10, 15], dtype=np.int64)
+    labels = np.asarray([2, 2, 10], dtype=np.int64)
+    sorting = numpy_sorting_from_samples_and_labels(
+        samples,
+        labels,
+        sampling_frequency=30_000.0,
+        unit_ids=[2, 10, 99],
+    )
+
+    assert list(sorting.get_unit_ids()) == [2, 10, 99]
+    np.testing.assert_array_equal(
+        sorting.get_unit_spike_train(unit_id=2), [5, 10]
+    )
+    np.testing.assert_array_equal(
+        sorting.get_unit_spike_train(unit_id=10), [15]
+    )
+    np.testing.assert_array_equal(sorting.get_unit_spike_train(unit_id=99), [])
+
+
+def test_v0_v1_read_paths_under_modern_si(dj_conn, monkeypatch):
+    """Legacy recording and curation reads reach the compatibility shim."""
+    import spikeinterface as si
+
+    if Version(si.__version__) < Version("0.101"):
+        pytest.skip("Modern-SI read-path regression test")
+
+    from spyglass.spikesorting import _si_compat
+    from spyglass.spikesorting.v0.spikesorting_curation import Curation
+    from spyglass.spikesorting.v0.spikesorting_recording import (
+        SpikeSortingRecording,
+    )
+
+    loaded = object()
+    sources = []
+
+    def _load(source):
+        sources.append(source)
+        return loaded
+
+    monkeypatch.setattr(_si_compat, "load_extractor", _load)
+    monkeypatch.setattr(
+        SpikeSortingRecording,
+        "_fetch_recording_path",
+        lambda self, key: "recording-folder",
+    )
+    monkeypatch.setattr(
+        Curation,
+        "_load_sorting_info",
+        lambda self, key: ("sorting-folder", []),
+    )
+
+    assert SpikeSortingRecording().load_recording({}) is loaded
+    assert Curation().get_curated_sorting({}) is loaded
+    assert sources == ["recording-folder", "sorting-folder"]
 
 
 @pytest.mark.parametrize("module_name", _LEGACY_TABLE_MODULES)

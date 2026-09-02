@@ -18,6 +18,7 @@ from spyglass.common.common_lab import LabTeam  # noqa: F401
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import recording_dir
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
@@ -507,7 +508,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     def load_recording(self, key):
         """Load the recording data from the file."""
         path = self._fetch_recording_path(key)
-        return si.load_extractor(path)
+        return _si_compat.load_extractor(path)
 
     def update_ids(self):
         """Update file hashes for all entries in the table.

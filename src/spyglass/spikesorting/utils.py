@@ -7,6 +7,7 @@ import scipy.stats as stats
 import spikeinterface as si
 
 from spyglass.common.common_ephys import Electrode
+from spyglass.spikesorting import _si_compat
 from spyglass.utils import logger
 
 
@@ -145,7 +146,7 @@ def _init_artifact_worker(
     proportion_above_thresh=1.0,
 ):
     recording = (
-        si.load_extractor(recording)
+        _si_compat.load_extractor(recording)
         if isinstance(recording, dict)
         else recording
     )
