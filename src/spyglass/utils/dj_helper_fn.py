@@ -295,14 +295,6 @@ def fetch_nwb(*attrs, **kwargs):
     )
 
 
-def _get_nwb_object(objects, object_id):
-    """Retrieve NWB object and try to convert to dataframe if possible"""
-    try:
-        return objects[object_id].to_dataframe()
-    except AttributeError:
-        return objects[object_id]
-
-
 def get_child_tables(table):
     """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table
