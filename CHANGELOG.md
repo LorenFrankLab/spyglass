@@ -1,59 +1,6 @@
 # Change Log
 
-## [0.5.6] (Unreleased)
-
-### Release Notes
-
-Running draft to be removed immediately prior to release. When altering tables,
-import all foreign key references.
-
-```python
-# Alter Decoding v1 table
-from spyglass.common.common_filter import FirFilterParameters
-from spyglass.decoding.v1.core import DecodingParameters
-
-FirFilterParameters().alter()
-DecodingParameters().alter()
-
-# Alter v0 recompute table
-from spyglass.spikesorting.v0.spikesorting_recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-# Alter v1 recompute table
-from spyglass.spikesorting.v1.recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-
-# Fix LFPBandV1 issue #1481
-from spyglass.lfp.analysis.v1 import LFPBandV1
-
-LFPBandV1().fix_1481()
-
-# Increase DLCProject.config_path length
-from spyglass.position.v1.position_dlc_project import DLCProject
-
-DLCProject().alter()
-
-# Add unit_criteria to UnitSelectionParams. Only needed to use that option;
-# existing filters work against the un-altered table
-from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
-
-UnitSelectionParams().alter()
-```
+## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
 
@@ -422,15 +369,15 @@ for label, interval_data in results.groupby("interval_labels"):
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
-    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be
-        selected on arbitrary units table columns with numeric, range, and
-        membership criteria. A criterion naming a column a sorting's units
-        table does not have raises an error #1670
-    - Fix `SpikeSorting.populate` raising `AttributeError: Bad parameters:
-        ['tempdir']` for SpikeInterface-native sorters (e.g. `spykingcircus2`,
-        `tridesclous2`). `_run_spike_sorter` now injects the `tempdir`
-        scratch-dir param only for sorters that declare it (only
-        `mountainsort4`), instead of injecting it into every sorter and
+    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be selected
+        on arbitrary units table columns with numeric, range, and membership
+        criteria. A criterion naming a column a sorting's units table does not
+        have raises an error #1670
+    - Fix `SpikeSorting.populate` raising
+        `AttributeError: Bad parameters:   ['tempdir']` for SpikeInterface-native
+        sorters (e.g. `spykingcircus2`, `tridesclous2`). `_run_spike_sorter` now
+        injects the `tempdir` scratch-dir param only for sorters that declare it
+        (only `mountainsort4`), instead of injecting it into every sorter and
         maintaining hardcoded removal lists #1655
 
 ## [0.5.5] (Aug 6, 2025)
@@ -930,4 +877,4 @@ for label, interval_data in results.groupby("interval_labels"):
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
-[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
+[0.6.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0
