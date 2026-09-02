@@ -165,9 +165,9 @@ describe_pipeline_presets()
 #   hippocampal polymer probes, prefer a quiet anatomical reference when you
 #   have one and inspect common-median choices carefully; `plot_sort_group_geometry`
 #   marks a specific reference with a star.
-# - Extracellular spikes are often downward but can flip with geometry, so the
-#   Frank Lab MountainSort rows use bidirectional `detect_sign=0`. A downward-only
-#   `-1` row is more conservative and usually needs separate validation.
+# - The Frank Lab MountainSort rows use downward-only `detect_sign=-1`, matching
+#   the v0/v1 defaults. If your geometry requires bidirectional detection, use
+#   `clone_pipeline_preset` and set the sorter override `detect_sign` to `0`.
 # - Hippocampus rows high-pass at 600 Hz; cortex rows at 300 Hz. Recordings are
 #   already filtered when MountainSort runs (`filter=False`). MS4 rows whiten,
 #   use adjacency radius 100 um, and tune clip/detect intervals to 30 vs 20 kHz.

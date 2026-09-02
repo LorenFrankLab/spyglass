@@ -428,13 +428,14 @@ Available pipeline presets (all dated `_2026_06`):
 For Frank-lab polymer/tetrode rows, the scientific defaults mirror the v1
 workflow: sort one group at a time, use a 600 Hz hippocampal high-pass (300 Hz
 for cortex), pass already-filtered recordings to MountainSort (`filter=False`),
-whiten inside the sorter, use a 100 um adjacency radius, and default to
-bidirectional `detect_sign=0` because extracellular polarity can flip with
-geometry. The analyzer uses separate waveform rows for display and metrics:
-unwhitened waveforms preserve the visible shape/amplitude, while the whitened
-metric analyzer supports PC/nearest-neighbour metrics. Hippocampal analyzer
-rows intentionally keep the v1-like 0.5/0.5 ms window and sample up to 20000
-spikes per unit.
+whiten inside the sorter, use a 100 um adjacency radius, and use downward-only
+`detect_sign=-1`, matching the v0/v1 defaults. If your geometry requires
+bidirectional detection, clone the preset with `clone_pipeline_preset` and set
+the sorter override `detect_sign` to `0`. The analyzer uses separate waveform
+rows for display and metrics: unwhitened waveforms preserve the visible
+shape/amplitude, while the whitened metric analyzer supports
+PC/nearest-neighbour metrics. Hippocampal analyzer rows intentionally keep the
+v1-like 0.5/0.5 ms window and sample up to 20000 spikes per unit.
 
 The tetrode- and probe-hippocampus 30 kHz presets resolve to the **same**
 parameter rows (the recipe is set by region + rate; `probe_type` is
