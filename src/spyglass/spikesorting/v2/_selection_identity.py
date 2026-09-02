@@ -1,14 +1,15 @@
 """Deterministic, content-addressed identities for v2 selection rows.
 
 Every logical spike-sorting v2 *selection* -- a ``RecordingSelection``,
-``ArtifactDetectionSelection``, or ``SortingSelection`` -- must resolve to ONE
-stable primary-key UUID under serial, repeated, concurrent, and
-worker-retry insertion. This module derives that UUID from the
-selection's canonical logical identity with :func:`uuid.uuid5`, so the
-primary-key uniqueness constraint -- not a check-then-insert dedup race --
-becomes the concurrency guard. Two callers that ask for the same logical
-selection compute the same id; the database accepts one master row and
-rejects the duplicate, and the loser refetches the winner's row.
+``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection``, or
+``SortingSelection`` -- must resolve to ONE stable primary-key UUID under
+serial, repeated, concurrent, and worker-retry insertion. This module derives
+that UUID from the selection's canonical logical identity with
+:func:`uuid.uuid5`, so the primary-key uniqueness constraint -- not a
+check-then-insert dedup race -- becomes the concurrency guard. Two callers that
+ask for the same logical selection compute the same id; the database accepts
+one master row and rejects the duplicate, and the loser refetches the winner's
+row.
 
 DB-FREE BY CONTRACT. Like ``_artifact_compute``, this module imports
 neither DataJoint nor SpikeInterface and opens no database connection at
@@ -213,14 +214,15 @@ def artifact_detection_identity_payload(
     recording_id=None,
     shared_artifact_group_name=None,
 ) -> dict:
-    """Build an ``ArtifactDetectionSelection`` logical-identity payload.
+    """Build an artifact-detection selection logical-identity payload.
 
     Exactly one of ``recording_id`` (single-recording path) or
     ``shared_artifact_group_name`` (cross-recording path) must be given.
     ``source_kind`` is explicit so a recording source and a shared-group
     source never alias even if their source-identifier strings collide.
     Single source of truth shared by
-    ``ArtifactDetectionSelection.insert_selection`` and
+    ``RecordingArtifactSelection.insert_selection``,
+    ``SharedGroupArtifactSelection.insert_selection``, and
     ``preflight_v2_pipeline``.
 
     Parameters
@@ -271,7 +273,7 @@ def shared_group_member_set_hash(recording_ids) -> str:
     shared-group artifact identity is ``{params, group_name}`` only, but
     ``ArtifactDetection.make`` scans the LIVE ``SharedArtifactGroup.Member`` set,
     so that set could change under a fixed ``artifact_detection_id``. This hash
-    is snapshotted onto ``ArtifactDetectionSelection.SharedGroupSource`` at
+    is snapshotted onto ``SharedGroupArtifactSelection`` at
     selection time; ``make_fetch`` re-derives it from the live members and
     rejects a drift. Membership is a SET (order-independent), so the ids are
     sorted before hashing -- a member added or removed changes the digest, a
@@ -318,12 +320,12 @@ def recording_input_hash(
     changed input mints a NEW recording, and it is snapshotted onto
     ``RecordingSelection.recording_input_hash`` so ``make_fetch`` can re-derive
     it and reject a drift (mirrors ``shared_group_member_set_hash`` /
-    ``SharedGroupSource.member_set_hash``). Both id sets are SETS: the ids are
-    sorted before hashing, so a re-query in a different row order is stable
-    while an added/removed channel changes the digest. On the ``remove`` /
-    ``none`` bad-channel paths pass an empty ``interpolated_bad_channel_ids`` --
-    those paths re-include nothing, so the bad-channel set does not enter the
-    recording's content.
+    ``SharedGroupArtifactSelection.member_set_hash``). Both id sets are SETS:
+    the ids are sorted before hashing, so a re-query in a different row order is
+    stable while an added/removed channel changes the digest. On the ``remove``
+    / ``none`` bad-channel paths pass an empty
+    ``interpolated_bad_channel_ids`` -- those paths re-include nothing, so the
+    bad-channel set does not enter the recording's content.
 
     Parameters
     ----------

@@ -996,19 +996,18 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     # Secondary provenance, never identity.
 
     # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
-    # DB transaction. make_compute resolves no DB INPUTS: every upstream input
-    # is read in make_fetch and threaded through the carrier (no get_sorting /
-    # get_analyzer in compute). It does still stage its OUTPUT through
-    # AnalysisNwbfile().create()/get_abs_path() -- the same off-transaction
-    # write every v2 make_compute uses (Recording / Sorting /
-    # ConcatenatedRecording) -- keeping the heavy NWB write off the commit txn.
+    # DB transaction. make_compute performs no DB writes: every upstream input
+    # is resolved in make_fetch and threaded through the carrier (no get_sorting
+    # / get_analyzer in compute). Runtime helpers such as get_recording and
+    # AnalysisNwbfile().create()/get_abs_path() may perform DB reads while
+    # staging the output -- keeping the heavy NWB write off the commit txn.
     _parallel_make = True
 
     def make_fetch(self, key) -> CurationEvaluationFetched:
         """Resolve every DB input make_compute needs (no SI/NWB compute here).
 
         Resolves the params, the recording-reconstruction inputs (so the
-        DB-free worker can rebuild the recording + sorting), the curated-units
+        compute stage can rebuild the recording + sorting), the curated-units
         NWB abs path + expected unit ids, the analyzer recipes + cache folders,
         and the committed-state routing decision. Re-asserts the parent is a
         committed (non-preview) curation and the metric recipe is whitened, so a
@@ -1066,9 +1065,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         )
 
         # Recording reconstruction inputs. make_compute rebuilds the recording
-        # DB-free from these; self-heal the regeneratable cache here (the DB
-        # stage) so that read succeeds, mirroring Recording().get_recording's
-        # rebuild-if-missing (the same self-heal get_analyzer provides).
+        # from these without resolving more upstream inputs; self-heal the
+        # regeneratable cache here so that read succeeds, mirroring
+        # Recording().get_recording's rebuild-if-missing (the same self-heal
+        # get_analyzer provides).
         source = SortingSelection.resolve_source(sorting_key)
         artifact_detection_id = SortingSelection.resolve_artifact_detection(
             sorting_key
@@ -1226,14 +1226,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     ) -> CurationEvaluationComputed:
         """Compute metrics / merges / labels over the committed curation.
 
-        No DB INPUT resolution (tri-part contract): the recording + raw /
-        curated sortings are reconstructed from the threaded inputs, never via
-        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer`` (both DB-backed).
-        The only DB touch is staging the OUTPUT artifact via
-        ``AnalysisNwbfile().create()`` / ``get_abs_path()`` -- the standard v2
-        off-transaction write (identical to ``Recording`` / ``Sorting`` /
-        ``ConcatenatedRecording`` ``make_compute``) that keeps the heavy NWB
-        write outside the commit transaction.
+        This stage performs no DB writes (tri-part contract): upstream inputs
+        are resolved in ``make_fetch``, and the recording + raw / curated
+        sortings are reconstructed from those threaded inputs rather than via
+        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer``. Runtime helpers
+        such as ``get_recording`` and ``AnalysisNwbfile().create()`` /
+        ``get_abs_path()`` may perform DB reads while staging the output. The
+        heavy NWB write remains outside the commit transaction.
         """
         import tempfile
         from pathlib import Path

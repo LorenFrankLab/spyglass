@@ -385,10 +385,11 @@ class SharedArtifactGroupMemberDriftError(RuntimeError):
     The shared-group ``artifact_detection_id`` identity is ``{params,
     group_name}`` only, but ``ArtifactDetection.make`` scans the LIVE
     ``SharedArtifactGroup.Member`` set. ``insert_selection`` snapshots the ordered
-    member ``recording_id`` set as ``SharedGroupSource.member_set_hash``;
-    ``make_fetch`` re-derives it from the current members and raises this when
-    they disagree -- a member was added or removed after the selection was
-    created, so the scanned set no longer matches what the id was minted for.
+    member ``recording_id`` set as
+    ``SharedGroupArtifactSelection.member_set_hash``; ``make_fetch`` re-derives
+    it from the current members and raises this when they disagree -- a member
+    was added or removed after the selection was created, so the scanned set no
+    longer matches what the id was minted for.
     The ``artifact_detection_id`` identity is params + group name only (the
     member set is a snapshot, not identity), so ``insert_selection`` returns this
     same id with its stale snapshot; recovery is to DELETE this selection and

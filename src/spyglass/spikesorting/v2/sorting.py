@@ -127,12 +127,11 @@ class SortingFetched(NamedTuple):
         source preprocessing recipe (region), stored on the ``Sorting`` row.
     display_waveform_params : dict
         That recipe's resolved params blob, threaded into ``_build_analyzer``
-        so ``make_compute`` does no parameter DB I/O.
+        so ``make_compute`` receives the resolved parameter input.
     execution_params : dict
         The validated ``SorterParameters.execution_params`` blob (sorter
         execution backend + container provenance), resolved here so
-        ``make_compute`` does no parameter DB I/O before passing it to the
-        DB-free sorter dispatch.
+        ``make_compute`` can pass it directly to the sorter dispatch.
     """
 
     source: SourceResolution
@@ -145,9 +144,9 @@ class SortingFetched(NamedTuple):
     display_waveform_params: dict
     execution_params: dict
     # Per-unit Electrode FK resolution, threaded so make_compute builds the
-    # Sorting.Unit rows DB-free (anchored to the recording / first concat
-    # member). ``region_by_electrode`` maps electrode_id -> brain region for the
-    # NWB ``brain_region`` column.
+    # Sorting.Unit rows without DB writes (anchored to the recording / first
+    # concat member). ``region_by_electrode`` maps electrode_id -> brain region
+    # for the NWB ``brain_region`` column.
     sort_group_id: int
     electrode_by_id: dict
     region_by_electrode: dict
@@ -1503,10 +1502,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
         # 1.0/2.0 row, any other recipe -> the wider cortex fallback. The
         # concat source resolves the SAME recipe from its single shared
-        # preprocessing recipe. Resolve the params blob HERE (make_fetch is the
-        # only stage allowed DB I/O); make_compute builds with it and
-        # make_insert persists the name so every later rebuild reads it back
-        # deterministically.
+        # preprocessing recipe. Resolve the upstream params blob HERE;
+        # make_compute builds with it and make_insert persists the name so every
+        # later rebuild reads it back deterministically.
         display_waveform_params_name, _ = waveform_params_for_preprocessing(
             preprocessing_params_name
         )
@@ -1515,8 +1513,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
         # Resolve + validate the sorter execution backend (local vs container)
-        # here -- make_fetch is the only stage allowed DB I/O. make_compute
-        # passes the resolved dict to the DB-free sorter dispatch.
+        # here. make_compute passes the resolved dict to the sorter dispatch.
         from spyglass.spikesorting.v2._params.sorter import (
             validate_execution_params,
         )
@@ -1548,13 +1545,16 @@ class Sorting(SpyglassMixin, dj.Computed):
     def _fetch_unit_electrode_metadata(recording_id, nwb_file_name):
         """DB reads for the per-unit Electrode FK + brain region (fetch stage).
 
-        Resolved once here so ``make_compute`` builds the ``Sorting.Unit`` rows
-        (and the matching NWB unit columns) with no DB I/O. ``electrode_by_id``
-        comes from the unjoined ``SortGroupElectrode`` so it stays complete (the
-        row-construction key set is unchanged); ``region_by_electrode`` is a
-        best-effort ``electrode_id -> brain region`` map (an electrode without a
-        region simply has no entry). Anchored to ``recording_id`` /
-        ``nwb_file_name`` (the sort's own recording, or the first concat member).
+        Resolved once here so ``make_compute`` performs no DB writes while
+        building the ``Sorting.Unit`` rows (and matching NWB unit columns).
+        Upstream inputs are resolved in ``make_fetch``; runtime calls such as
+        ``get_recording`` and ``AnalysisNwbfile.create`` may still perform DB
+        reads. ``electrode_by_id`` comes from the unjoined
+        ``SortGroupElectrode`` so it stays complete (the row-construction key set
+        is unchanged); ``region_by_electrode`` is a best-effort
+        ``electrode_id -> brain region`` map (an electrode without a region
+        simply has no entry). Anchored to ``recording_id`` / ``nwb_file_name``
+        (the sort's own recording, or the first concat member).
         """
         from spyglass.common.common_region import BrainRegion
         from spyglass.spikesorting.v2.recording import (
@@ -1747,10 +1747,11 @@ class Sorting(SpyglassMixin, dj.Computed):
             cache folder and is persisted by ``make_insert``.
         display_waveform_params : dict
             That recipe's resolved params blob, fed to ``_build_analyzer`` so
-            the window / subsample are not hardcoded (no DB I/O here).
+            the window / subsample are not hardcoded. Resolved in
+            ``make_fetch``; no DB write occurs here.
         execution_params : dict
             The validated sorter execution backend / container provenance from
-            ``make_fetch``, passed to the DB-free sorter dispatch.
+            ``make_fetch``, passed to the sorter dispatch.
 
         Returns
         -------
@@ -2525,10 +2526,12 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Each populated sort writes a 5-50 GB ``analyzer_folder`` of
         regeneratable scratch outside the DataJoint-tracked store. The
-        ``Sorting.delete`` override cleans it up on row delete, but an external
-        path that bypasses the override (raw SQL delete, scripted
-        ``dj.Table.connection.query``) leaks the folder. This periodic audit
-        mirrors ``prune_orphaned_selections`` and reports three classes:
+        ``Sorting.delete`` override cleans it up on row delete. The common leak
+        path is a delete that starts at ``Recording``, ``RecordingSelection``,
+        or ``SortGroupV2``: the cascade reaches ``Sorting`` through DataJoint
+        ``FreeTable`` objects and never dispatches this override. Raw SQL or a
+        scripted ``dj.Table.connection.query`` also bypasses it. This periodic
+        audit mirrors ``prune_orphaned_selections`` and reports three classes:
 
         - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
           folder (``analyzer_path(sorting_id, display_waveform_params_name)``)
@@ -2541,8 +2544,9 @@ class Sorting(SpyglassMixin, dj.Computed):
           ``SortingAnalyzerRecompute.deleted=1`` audit trail. This is expected
           storage reclamation, not an unexpected DB-side orphan.
         - **Disk-side orphan**: an on-disk folder under the analyzer root that
-          no ``Sorting`` row references (the row was deleted via a path that
-          bypassed the ``delete`` override). Safe to delete after inspection.
+          no ``Sorting`` row references (the row was deleted through an upstream
+          cascade or another path that bypassed the ``delete`` override). Safe
+          to delete after inspection.
 
         **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
         orphans: ``_build_analyzer`` short-circuits before writing a folder and
@@ -2960,12 +2964,13 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Build the ``Sorting.Unit`` rows from the freshly built analyzer.
 
-        Run ONCE in ``make_compute`` (DB-free): the analyzer folder
+        Run once in ``make_compute`` after upstream inputs are resolved in
+        ``make_fetch``; this helper performs no DB writes. The analyzer folder
         ``_build_analyzer`` just wrote is loaded here, each unit's peak channel
-        + amplitude is resolved under the sorter's configured detection polarity
-        (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not SI's
-        ``"neg"`` default, so a positive-going detection attributes each unit to
-        its true peak channel), and the rows are assembled by
+        + amplitude is resolved under the sorter's configured detection
+        polarity (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not
+        SI's ``"neg"`` default, so a positive-going detection attributes each
+        unit to its true peak channel), and the rows are assembled by
         ``build_sorting_unit_rows`` (which raises on a sort-group/recording
         channel-id mismatch). The resulting rows are reused for BOTH the NWB
         unit columns and the ``Sorting.Unit`` insert, so the file and the DB
