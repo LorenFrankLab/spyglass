@@ -90,6 +90,126 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         # add annotation
         self.Annotation().insert1(key, **kwargs)
 
+    @classmethod
+    def audit_positional_unit_ids(cls):
+        """List annotations whose NWB unit namespace is not ``0..n-1``.
+
+        In a sparse namespace, an older positional ``unit_id`` and the current
+        NWB units-table id can differ. This audit is read-only and idempotent;
+        it reports candidate merge ids but cannot determine whether migration
+        has already occurred.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns are ``spikesorting_merge_id``, ``n_units``,
+            ``true_unit_ids``, and ``stored_unit_ids``.
+        """
+        import pandas as pd
+
+        columns = [
+            "spikesorting_merge_id",
+            "n_units",
+            "true_unit_ids",
+            "stored_unit_ids",
+        ]
+        rows = []
+        merge_ids = sorted(set(cls.fetch("spikesorting_merge_id")), key=str)
+        for merge_id in merge_ids:
+            nwb_file = (
+                SpikeSortingOutput & {"merge_id": merge_id}
+            ).fetch_nwb()[0]
+            name = _get_spike_obj_name(nwb_file, allow_empty=True)
+            true_ids = _get_nwb_unit_ids(nwb_file, name) if name else []
+            if true_ids == list(range(len(true_ids))):
+                continue
+            stored_ids = sorted(
+                int(unit_id)
+                for unit_id in (
+                    cls & {"spikesorting_merge_id": merge_id}
+                ).fetch("unit_id")
+            )
+            rows.append(
+                {
+                    "spikesorting_merge_id": merge_id,
+                    "n_units": len(true_ids),
+                    "true_unit_ids": true_ids,
+                    "stored_unit_ids": stored_ids,
+                }
+            )
+        return pd.DataFrame(rows, columns=columns)
+
+    @classmethod
+    def migrate_positional_unit_ids(cls, *, dry_run: bool = True) -> dict:
+        """Remap positional annotation ids to NWB unit ids exactly once.
+
+        Run this immediately after upgrading from the positional-id contract
+        and before writing any new annotations. It is intentionally not
+        idempotent because no schema marker distinguishes legacy rows from
+        rows already written with true NWB ids. The full migration plan is
+        validated before any write and applied in one transaction.
+
+        Parameters
+        ----------
+        dry_run : bool, default True
+            Return the proposed mapping without modifying rows.
+
+        Returns
+        -------
+        dict
+            ``{merge_id: {old_unit_id: new_unit_id}}`` for changed ids.
+
+        Raises
+        ------
+        ValueError
+            If a stored id is outside the valid positional range for its NWB
+            units table. No rows are changed in that case.
+        """
+        audit = cls.audit_positional_unit_ids()
+        plan = {}
+        for row in audit.itertuples(index=False):
+            true_ids = row.true_unit_ids
+            invalid = [
+                unit_id
+                for unit_id in row.stored_unit_ids
+                if unit_id < 0 or unit_id >= len(true_ids)
+            ]
+            if invalid:
+                raise ValueError(
+                    f"UnitAnnotation rows for {row.spikesorting_merge_id} "
+                    f"have unit_id(s) {invalid} outside the positional range "
+                    f"0..{len(true_ids) - 1} for n_units={len(true_ids)}; "
+                    "resolve them by hand before migrating."
+                )
+            mapping = {
+                unit_id: true_ids[unit_id]
+                for unit_id in row.stored_unit_ids
+                if true_ids[unit_id] != unit_id
+            }
+            if mapping:
+                plan[row.spikesorting_merge_id] = mapping
+
+        if dry_run or not plan:
+            return plan
+
+        with cls.connection.transaction:
+            for merge_id, mapping in plan.items():
+                restriction = {"spikesorting_merge_id": merge_id}
+                masters = (cls & restriction).fetch(as_dict=True)
+                annotations = (cls.Annotation & restriction).fetch(as_dict=True)
+                (cls.Annotation & restriction).delete_quick()
+                (cls & restriction).delete_quick()
+
+                def _remap(row):
+                    row = dict(row)
+                    old_id = int(row["unit_id"])
+                    row["unit_id"] = mapping.get(old_id, old_id)
+                    return row
+
+                cls.insert([_remap(row) for row in masters])
+                cls.Annotation.insert([_remap(row) for row in annotations])
+        return plan
+
     def fetch_unit_spikes(
         self, return_unit_ids=False
     ) -> Union[list[np.ndarray], Optional[list[dict]]]:

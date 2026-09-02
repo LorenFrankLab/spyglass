@@ -37,6 +37,13 @@ from spyglass.spikesorting.v1.recompute import (
 RecordingRecomputeSelection().alter()
 RecordingRecompute().alter()
 
+# UnitAnnotation.unit_id now stores the NWB unit id (was a positional index).
+# Run ONCE, before writing new annotations:
+from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+UnitAnnotation.audit_positional_unit_ids()  # inspect candidates
+UnitAnnotation.migrate_positional_unit_ids(dry_run=False)  # apply once
+
 
 # Fix LFPBandV1 issue #1481
 from spyglass.lfp.analysis.v1 import LFPBandV1
@@ -50,6 +57,14 @@ DLCProject().alter()
 ```
 
 ### Breaking Changes
+
+#### UnitAnnotation now stores NWB unit ids
+
+`UnitAnnotation.unit_id` identifies the actual NWB units-table row rather than
+its position in the spike-times list. Existing annotations on sparse or
+merge-applied unit namespaces must be migrated once using the release-note
+commands above, before writing new annotations. Dense `0..n-1` unit namespaces
+are unaffected.
 
 #### Spike Sorting v2: register schemas against any configured database host
 
