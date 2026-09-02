@@ -431,7 +431,14 @@ def convert_to_cm(df, meters_to_pixels):
     """Converts x and y columns from pixels to cm"""
     CM_TO_METERS = 100
     idx = pd.IndexSlice
-    df.loc[:, idx[("x", "y")]] *= meters_to_pixels * CM_TO_METERS
+    xy_cols = df.loc[:, idx[("x", "y")]]
+    # Scalar multiplication upcasts float32 -> float64; cast back to the
+    # original per-column dtype before assigning through .loc to avoid
+    # pandas' incompatible-dtype FutureWarning (mirrors the fix applied to
+    # the V2 equivalent in position/utils/pose_processing.convert_to_cm).
+    df.loc[:, idx[("x", "y")]] = (
+        xy_cols * (meters_to_pixels * CM_TO_METERS)
+    ).astype(xy_cols.dtypes)
     return df
 
 

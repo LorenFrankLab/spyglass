@@ -17,6 +17,7 @@ from .centroid import (
 )
 from .dlc_io import (
     DLCProjectReader,
+    dedupe_warnings,
     do_pose_estimation,
     get_dlc_bodyparts,
     get_dlc_model_eval,
@@ -91,6 +92,7 @@ __all__ = [
     "get_4pt_centroid",
     # DLC I/O
     "DLCProjectReader",
+    "dedupe_warnings",
     "do_pose_estimation",
     "get_dlc_bodyparts",
     "get_dlc_model_eval",

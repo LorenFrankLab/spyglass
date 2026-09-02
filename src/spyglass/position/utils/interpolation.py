@@ -21,7 +21,7 @@ mask_short_valid_islands
     Mark short valid islands surrounded by NaN as missing
 """
 
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -244,9 +244,15 @@ def interp_position(
             fp=[boundary_values["y"][0], boundary_values["y"][1]],
         )
 
-        # Apply interpolated values
-        df.loc[idx[span_times[0] : span_times[-1]], idx[x_col]] = x_new
-        df.loc[idx[span_times[0] : span_times[-1]], idx[y_col]] = y_new
+        # Apply interpolated values. np.interp always returns float64, which
+        # would upcast a float32 x/y column via a bare .loc assignment
+        # (pandas FutureWarning); cast back to the column's own dtype first.
+        df.loc[idx[span_times[0] : span_times[-1]], idx[x_col]] = x_new.astype(
+            df[x_col].dtype
+        )
+        df.loc[idx[span_times[0] : span_times[-1]], idx[y_col]] = y_new.astype(
+            df[y_col].dtype
+        )
 
         # Set NaN values for failed spans
         span_times = df.index[span_start : span_stop + 1]

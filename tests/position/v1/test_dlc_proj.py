@@ -104,7 +104,7 @@ def test_process_video_error(dlc_project_tbl, teardown):
         dlc_project_tbl._process_videos(video_list=["fake_video.mp4"], **kwarg)
     with open("temp_file.txt", "w") as f:
         f.write("This is a temporary file.")
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError):
         dlc_project_tbl._process_videos(video_list=["temp_file.txt"], **kwarg)
 
     os.remove("temp_file.txt")

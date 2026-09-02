@@ -32,7 +32,14 @@ def convert_to_cm(
     """
     pose_df = pose_df.copy()
     xy_mask = pose_df.columns.get_level_values(-1).isin(["x", "y"])
-    pose_df.loc[:, xy_mask] = pose_df.loc[:, xy_mask] * (meters_per_pixel * 100)
+    xy_cols = pose_df.loc[:, xy_mask]
+    # Scalar multiplication upcasts float32 -> float64; cast the result back
+    # to the original per-column dtype before assigning through .loc so we
+    # don't trigger pandas' incompatible-dtype FutureWarning (and don't
+    # silently widen the whole DataFrame to float64 in the process).
+    pose_df.loc[:, xy_mask] = (xy_cols * (meters_per_pixel * 100)).astype(
+        xy_cols.dtypes
+    )
     return pose_df
 
 
