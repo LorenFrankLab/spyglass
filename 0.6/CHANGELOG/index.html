@@ -1,0 +1,5305 @@
+
+<!DOCTYPE html>
+
+<html class="no-js" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<meta content="Spyglass Documentation" name="description"/>
+<meta content="CBroz1" name="author"/>
+<link href="https://lorenfranklab.github.io/spyglass/latest/CHANGELOG/" rel="canonical"/>
+<link href="../api/utils/waveforms/" rel="prev"/>
+<link href="../LICENSE/" rel="next"/>
+<link href="../images/Spyglass.svg" rel="icon"/>
+<meta content="mkdocs-ProperDocs 1.6.7, mkdocs-material-9.7.7" name="generator"/>
+<title>Change Log - Spyglass</title>
+<link href="../assets/stylesheets/main.ec1eaa64.min.css" rel="stylesheet"/>
+<link href="../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="../assets/_mkdocstrings.css" rel="stylesheet"/>
+<link href="../stylesheets/extra.css" rel="stylesheet"/>
+<script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+</head>
+<body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="auto" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#change-log">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<div data-md-color-scheme="default" data-md-component="outdated" hidden="">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="Spyglass" class="md-header__button md-logo" data-md-component="logo" href=".." title="Spyglass">
+<img alt="logo" src="../images/FrankLab.png"/>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            Spyglass
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              Change Log
+            
+          </span>
+</div>
+</div>
+</div>
+<form class="md-header__option" data-md-component="palette">
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="(prefers-color-scheme: light)" data-md-color-primary="indigo" data-md-color-scheme="auto" id="__palette_0" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to dark mode">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="indigo" data-md-color-media="(prefers-color-scheme: slate)" data-md-color-primary="indigo" data-md-color-scheme="slate" id="__palette_1" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to light mode">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+</form>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<a aria-label="Share" class="md-search__icon md-icon" data-clipboard="" data-clipboard-text="" data-md-component="search-share" href="javascript:void(0)" tabindex="-1" title="Share">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"></path></svg>
+</a>
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+<div class="md-search__suggest" data-md-component="search-suggest"></div>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/LorenFrankLab/spyglass" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="Spyglass" class="md-nav__button md-logo" data-md-component="logo" href=".." title="Spyglass">
+<img alt="logo" src="../images/FrankLab.png"/>
+</a>
+    Spyglass
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/LorenFrankLab/spyglass" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../GettingStarted/QUICKSTART/">
+<span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../GettingStarted/DATABASE/">
+<span class="md-ellipsis">
+    
+  
+    Database Setup
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../GettingStarted/TROUBLESHOOTING/">
+<span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Intro
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Intro
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/00_Setup/">
+<span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/01_Concepts/">
+<span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/02_Insert_Data/">
+<span class="md-ellipsis">
+    
+  
+    Insert Data
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/03_Data_Sync/">
+<span class="md-ellipsis">
+    
+  
+    Data Sync
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/04_Merge_Tables/">
+<span class="md-ellipsis">
+    
+  
+    Merge Tables
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/05_Export/">
+<span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Spikes
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_3_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Spikes
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/10_Spike_SortingV0/">
+<span class="md-ellipsis">
+    
+  
+    Spike Sorting V0
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/10_Spike_SortingV1/">
+<span class="md-ellipsis">
+    
+  
+    Spike Sorting V1
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/11_Spike_Sorting_Analysis/">
+<span class="md-ellipsis">
+    
+  
+    Spike Sorting Analysis
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/12_Burst_Merge_Curation/">
+<span class="md-ellipsis">
+    
+  
+    Spike Burst Merge
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Position
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_4_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Position
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/20_Position_Trodes/">
+<span class="md-ellipsis">
+    
+  
+    Position Trodes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/21_DLC/">
+<span class="md-ellipsis">
+    
+  
+    DLC Models
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/22_DLC_Loop/">
+<span class="md-ellipsis">
+    
+  
+    Looping DLC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/24_Linearization/">
+<span class="md-ellipsis">
+    
+  
+    Linearization
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    LFP
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    LFP
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/30_LFP/">
+<span class="md-ellipsis">
+    
+  
+    LFP
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/31_Theta/">
+<span class="md-ellipsis">
+    
+  
+    Theta
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/32_Ripple_Detection/">
+<span class="md-ellipsis">
+    
+  
+    Ripple Detection
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Decoding
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_6_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Decoding
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/40_Extracting_Clusterless_Waveform_Features/">
+<span class="md-ellipsis">
+    
+  
+    Extracting Waveforms
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/41_Decoding_Clusterless/">
+<span class="md-ellipsis">
+    
+  
+    Decoding Clusterless
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/42_Decoding_SortedSpikes/">
+<span class="md-ellipsis">
+    
+  
+    Decoding Sorted Spikes
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/50_MUA_Detection/">
+<span class="md-ellipsis">
+    
+  
+    MUA Detection
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/60_MoSeq/">
+<span class="md-ellipsis">
+    
+  
+    Behavior Syllables
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/FigURL/">
+<span class="md-ellipsis">
+    
+  
+    FigURL
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Merge/">
+<span class="md-ellipsis">
+    
+  
+    Merge Tables
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/AnalysisTables/">
+<span class="md-ellipsis">
+    
+  
+    Analysis Tables
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Export/">
+<span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Mixin/">
+<span class="md-ellipsis">
+    
+  
+    Centralized Code
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Recompute/">
+<span class="md-ellipsis">
+    
+  
+    Recompute
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Ingestion/">
+<span class="md-ellipsis">
+    
+  
+    Ingestion
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Intervals/">
+<span class="md-ellipsis">
+    
+  
+    Interval
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../Features/Populate/">
+<span class="md-ellipsis">
+    
+  
+    Populate
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    For Developers
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    For Developers
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/Contribute/">
+<span class="md-ellipsis">
+    
+  
+    How to Contribute
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/Management/">
+<span class="md-ellipsis">
+    
+  
+    Database Management
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/Reuse/">
+<span class="md-ellipsis">
+    
+  
+    Code Reuse
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/TableTypes/">
+<span class="md-ellipsis">
+    
+  
+    Table Types
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/Classes/">
+<span class="md-ellipsis">
+    
+  
+    Classes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/Schema/">
+<span class="md-ellipsis">
+    
+  
+    Understanding a Schema
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/CustomPipelines/">
+<span class="md-ellipsis">
+    
+  
+    Custom Pipelines
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/UsingNWB/">
+<span class="md-ellipsis">
+    
+  
+    Using NWB
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ForDevelopers/ingestion_mapping/">
+<span class="md-ellipsis">
+    
+  
+    Ingestion Mapping
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Fixing Bugs
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_6_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Fixing Bugs
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../FixingBugs/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../FixingBugs/LabelRepair/">
+<span class="md-ellipsis">
+    
+  
+    Label Repair (#1513)
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_2" id="__nav_7_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    behavior
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    behavior
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_2_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_2_1" id="__nav_7_2_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_2_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_2_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/behavior/v1/core/">
+<span class="md-ellipsis">
+    
+  
+    core.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/behavior/v1/moseq/">
+<span class="md-ellipsis">
+    
+  
+    moseq.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_3" id="__nav_7_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    common
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_3_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    common
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/_fir_filter/">
+<span class="md-ellipsis">
+    
+  
+    _fir_filter.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/_nwbfile_cleanup/">
+<span class="md-ellipsis">
+    
+  
+    _nwbfile_cleanup.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_behav/">
+<span class="md-ellipsis">
+    
+  
+    common_behav.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_dandi/">
+<span class="md-ellipsis">
+    
+  
+    common_dandi.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_device/">
+<span class="md-ellipsis">
+    
+  
+    common_device.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_dio/">
+<span class="md-ellipsis">
+    
+  
+    common_dio.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_ephys/">
+<span class="md-ellipsis">
+    
+  
+    common_ephys.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_file_tracking/">
+<span class="md-ellipsis">
+    
+  
+    common_file_tracking.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_filter/">
+<span class="md-ellipsis">
+    
+  
+    common_filter.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_interval/">
+<span class="md-ellipsis">
+    
+  
+    common_interval.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_lab/">
+<span class="md-ellipsis">
+    
+  
+    common_lab.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_nwbfile/">
+<span class="md-ellipsis">
+    
+  
+    common_nwbfile.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_optogenetics/">
+<span class="md-ellipsis">
+    
+  
+    common_optogenetics.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_position/">
+<span class="md-ellipsis">
+    
+  
+    common_position.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_region/">
+<span class="md-ellipsis">
+    
+  
+    common_region.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_sensors/">
+<span class="md-ellipsis">
+    
+  
+    common_sensors.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_session/">
+<span class="md-ellipsis">
+    
+  
+    common_session.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_subject/">
+<span class="md-ellipsis">
+    
+  
+    common_subject.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_task/">
+<span class="md-ellipsis">
+    
+  
+    common_task.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_usage/">
+<span class="md-ellipsis">
+    
+  
+    common_usage.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_user/">
+<span class="md-ellipsis">
+    
+  
+    common_user.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/common_version/">
+<span class="md-ellipsis">
+    
+  
+    common_version.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/custom_nwbfile/">
+<span class="md-ellipsis">
+    
+  
+    custom_nwbfile.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/errors/">
+<span class="md-ellipsis">
+    
+  
+    errors.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/populate_all_common/">
+<span class="md-ellipsis">
+    
+  
+    populate_all_common.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_3_26" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_3_26" id="__nav_7_3_26_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    prepopulate
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_3_26_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_3_26">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    prepopulate
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/common/prepopulate/prepopulate/">
+<span class="md-ellipsis">
+    
+  
+    prepopulate.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_4" id="__nav_7_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    data_import
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_4_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    data_import
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/data_import/insert_sessions/">
+<span class="md-ellipsis">
+    
+  
+    insert_sessions.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_5" id="__nav_7_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    decoding
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    decoding
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/decoding_merge/">
+<span class="md-ellipsis">
+    
+  
+    decoding_merge.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_5_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_5_3" id="__nav_7_5_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v0
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_5_3_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_5_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v0
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/clusterless/">
+<span class="md-ellipsis">
+    
+  
+    clusterless.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/core/">
+<span class="md-ellipsis">
+    
+  
+    core.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/dj_decoder_conversion/">
+<span class="md-ellipsis">
+    
+  
+    dj_decoder_conversion.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/sorted_spikes/">
+<span class="md-ellipsis">
+    
+  
+    sorted_spikes.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/visualization/">
+<span class="md-ellipsis">
+    
+  
+    visualization.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/visualization_1D_view/">
+<span class="md-ellipsis">
+    
+  
+    visualization_1D_view.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v0/visualization_2D_view/">
+<span class="md-ellipsis">
+    
+  
+    visualization_2D_view.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_5_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_5_4" id="__nav_7_5_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_5_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_5_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/clusterless/">
+<span class="md-ellipsis">
+    
+  
+    clusterless.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/core/">
+<span class="md-ellipsis">
+    
+  
+    core.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/dj_decoder_conversion/">
+<span class="md-ellipsis">
+    
+  
+    dj_decoder_conversion.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/sorted_spikes/">
+<span class="md-ellipsis">
+    
+  
+    sorted_spikes.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/decoding/v1/waveform_features/">
+<span class="md-ellipsis">
+    
+  
+    waveform_features.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_6" id="__nav_7_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    lfp
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_6_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    lfp
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_6_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_6_1" id="__nav_7_6_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    analysis
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_6_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_6_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    analysis
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_6_1_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_6_1_1" id="__nav_7_6_1_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_6_1_1_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_7_6_1_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/analysis/v1/lfp_band/">
+<span class="md-ellipsis">
+    
+  
+    lfp_band.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/lfp_electrode/">
+<span class="md-ellipsis">
+    
+  
+    lfp_electrode.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/lfp_imported/">
+<span class="md-ellipsis">
+    
+  
+    lfp_imported.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/lfp_merge/">
+<span class="md-ellipsis">
+    
+  
+    lfp_merge.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_6_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_6_5" id="__nav_7_6_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_6_5_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_6_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/v1/lfp/">
+<span class="md-ellipsis">
+    
+  
+    lfp.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/v1/lfp_artifact/">
+<span class="md-ellipsis">
+    
+  
+    lfp_artifact.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/v1/lfp_artifact_MAD_detection/">
+<span class="md-ellipsis">
+    
+  
+    lfp_artifact_MAD_detection.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lfp/v1/lfp_artifact_difference_detection/">
+<span class="md-ellipsis">
+    
+  
+    lfp_artifact_difference_detection.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_7" id="__nav_7_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    linearization
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_7_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    linearization
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/linearization/merge/">
+<span class="md-ellipsis">
+    
+  
+    merge.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/linearization/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_7_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_7_3" id="__nav_7_7_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v0
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_7_3_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_7_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v0
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/linearization/v0/main/">
+<span class="md-ellipsis">
+    
+  
+    main.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_7_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_7_4" id="__nav_7_7_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_7_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_7_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/linearization/v1/main/">
+<span class="md-ellipsis">
+    
+  
+    main.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_8" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_8" id="__nav_7_8_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    lock
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_8_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    lock
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/lock/file_lock/">
+<span class="md-ellipsis">
+    
+  
+    file_lock.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_9" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_9" id="__nav_7_9_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    mua
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_9_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    mua
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_9_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_9_1" id="__nav_7_9_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_9_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_9_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/mua/v1/mua/">
+<span class="md-ellipsis">
+    
+  
+    mua.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_10" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_10" id="__nav_7_10_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    position
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_10_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_10">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    position
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/position_merge/">
+<span class="md-ellipsis">
+    
+  
+    position_merge.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/utils_dlc/">
+<span class="md-ellipsis">
+    
+  
+    utils_dlc.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_10_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_10_4" id="__nav_7_10_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_10_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_10_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/dlc_reader/">
+<span class="md-ellipsis">
+    
+  
+    dlc_reader.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/dlc_utils/">
+<span class="md-ellipsis">
+    
+  
+    dlc_utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/dlc_utils_makevid/">
+<span class="md-ellipsis">
+    
+  
+    dlc_utils_makevid.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/imported_pose/">
+<span class="md-ellipsis">
+    
+  
+    imported_pose.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_centroid/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_centroid.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_cohort/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_cohort.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_model/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_model.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_orient/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_orient.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_pose_estimation/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_pose_estimation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_position/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_position.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_project/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_project.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_selection/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_selection.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_dlc_training/">
+<span class="md-ellipsis">
+    
+  
+    position_dlc_training.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/position/v1/position_trodes_position/">
+<span class="md-ellipsis">
+    
+  
+    position_trodes_position.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_11" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_11" id="__nav_7_11_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    ripple
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_11_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_11">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    ripple
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_11_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_11_1" id="__nav_7_11_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_11_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_11_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/ripple/v1/ripple/">
+<span class="md-ellipsis">
+    
+  
+    ripple.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/settings/">
+<span class="md-ellipsis">
+    
+  
+    settings.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_13" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_13" id="__nav_7_13_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    sharing
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_13_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_13">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    sharing
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/sharing/sharing_kachery/">
+<span class="md-ellipsis">
+    
+  
+    sharing_kachery.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14" id="__nav_7_14_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    spikesorting
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_14">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    spikesorting
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14_1" id="__nav_7_14_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    analysis
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_14_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    analysis
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14_1_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14_1_1" id="__nav_7_14_1_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_1_1_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_7_14_1_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/analysis/v1/group/">
+<span class="md-ellipsis">
+    
+  
+    group.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/analysis/v1/unit_annotation/">
+<span class="md-ellipsis">
+    
+  
+    unit_annotation.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/imported/">
+<span class="md-ellipsis">
+    
+  
+    imported.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/spikesorting_merge/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_merge.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/utils_burst/">
+<span class="md-ellipsis">
+    
+  
+    utils_burst.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14_6" id="__nav_7_14_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v0
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_6_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_14_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v0
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/curation_figurl/">
+<span class="md-ellipsis">
+    
+  
+    curation_figurl.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14_6_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14_6_2" id="__nav_7_14_6_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    figurl_views
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_6_2_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_7_14_6_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    figurl_views
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/figurl_views/SpikeSortingRecordingView/">
+<span class="md-ellipsis">
+    
+  
+    SpikeSortingRecordingView.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/figurl_views/SpikeSortingView/">
+<span class="md-ellipsis">
+    
+  
+    SpikeSortingView.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/figurl_views/prepare_spikesortingview_data/">
+<span class="md-ellipsis">
+    
+  
+    prepare_spikesortingview_data.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/merged_sorting_extractor/">
+<span class="md-ellipsis">
+    
+  
+    merged_sorting_extractor.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/sortingview/">
+<span class="md-ellipsis">
+    
+  
+    sortingview.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/sortingview_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    sortingview_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_artifact/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_artifact.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_burst/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_burst.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_curation/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_curation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_populator/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_populator.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_recompute/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_recompute.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_recording/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_recording.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v0/spikesorting_sorting/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting_sorting.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_14_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_14_7" id="__nav_7_14_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    v1
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_14_7_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_14_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    v1
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/artifact/">
+<span class="md-ellipsis">
+    
+  
+    artifact.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/burst_curation/">
+<span class="md-ellipsis">
+    
+  
+    burst_curation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/curation/">
+<span class="md-ellipsis">
+    
+  
+    curation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/figurl_curation/">
+<span class="md-ellipsis">
+    
+  
+    figurl_curation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/metric_curation/">
+<span class="md-ellipsis">
+    
+  
+    metric_curation.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/metric_utils/">
+<span class="md-ellipsis">
+    
+  
+    metric_utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/recompute/">
+<span class="md-ellipsis">
+    
+  
+    recompute.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/recording/">
+<span class="md-ellipsis">
+    
+  
+    recording.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/sorting/">
+<span class="md-ellipsis">
+    
+  
+    sorting.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/spikesorting/v1/utils/">
+<span class="md-ellipsis">
+    
+  
+    utils.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_15" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_15" id="__nav_7_15_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_15_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_7_15">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    utils
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/dandi_file_updates/">
+<span class="md-ellipsis">
+    
+  
+    dandi_file_updates.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/database_settings/">
+<span class="md-ellipsis">
+    
+  
+    database_settings.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/dj_graph/">
+<span class="md-ellipsis">
+    
+  
+    dj_graph.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/dj_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    dj_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/dj_merge_tables/">
+<span class="md-ellipsis">
+    
+  
+    dj_merge_tables.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/dj_mixin/">
+<span class="md-ellipsis">
+    
+  
+    dj_mixin.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/h5py_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    h5py_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/logging/">
+<span class="md-ellipsis">
+    
+  
+    logging.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7_15_9" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7_15_9" id="__nav_7_15_9_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    mixins
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_15_9_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_7_15_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    mixins
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/analysis/">
+<span class="md-ellipsis">
+    
+  
+    analysis.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/analysis_builder/">
+<span class="md-ellipsis">
+    
+  
+    analysis_builder.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/base/">
+<span class="md-ellipsis">
+    
+  
+    base.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/cautious_delete/">
+<span class="md-ellipsis">
+    
+  
+    cautious_delete.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/export/">
+<span class="md-ellipsis">
+    
+  
+    export.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/fetch/">
+<span class="md-ellipsis">
+    
+  
+    fetch.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/helpers/">
+<span class="md-ellipsis">
+    
+  
+    helpers.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/ingestion/">
+<span class="md-ellipsis">
+    
+  
+    ingestion.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/populate/">
+<span class="md-ellipsis">
+    
+  
+    populate.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/mixins/restrict_by/">
+<span class="md-ellipsis">
+    
+  
+    restrict_by.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/nwb_hash/">
+<span class="md-ellipsis">
+    
+  
+    nwb_hash.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/nwb_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    nwb_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/position/">
+<span class="md-ellipsis">
+    
+  
+    position.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/recompute_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    recompute_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/spikesorting/">
+<span class="md-ellipsis">
+    
+  
+    spikesorting.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/sql_helper_fn/">
+<span class="md-ellipsis">
+    
+  
+    sql_helper_fn.py
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../api/utils/waveforms/">
+<span class="md-ellipsis">
+    
+  
+    waveforms.py
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    Change Log
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    Change Log
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#060-sep-1st-2026">
+<span class="md-ellipsis">
+      
+        0.6.0 (Sep 1st 2026)
+      
+    </span>
+</a>
+<nav aria-label="0.6.0 (Sep 1st 2026)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#breaking-changes">
+<span class="md-ellipsis">
+      
+        Breaking Changes
+      
+    </span>
+</a>
+<nav aria-label="Breaking Changes" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#insert_sessions-returns-a-list-1660">
+<span class="md-ellipsis">
+      
+        insert_sessions Returns a List (#1660)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ingestion-raises-instead-of-skipping-1660">
+<span class="md-ellipsis">
+      
+        Ingestion Raises Instead of Skipping (#1660)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nwbfilehasher-now-includes-dataset-content-1600">
+<span class="md-ellipsis">
+      
+        NwbfileHasher Now Includes Dataset Content (#1600)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#lfpbandv1-fix">
+<span class="md-ellipsis">
+      
+        LFPBandV1 Fix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#automaticcuration-fix">
+<span class="md-ellipsis">
+      
+        AutomaticCuration Fix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decoding-results-structure">
+<span class="md-ellipsis">
+      
+        Decoding Results Structure
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#055-aug-6-2025">
+<span class="md-ellipsis">
+      
+        0.5.5 (Aug 6, 2025)
+      
+    </span>
+</a>
+<nav aria-label="0.5.5 (Aug 6, 2025)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_1">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_1">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_1">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#054-december-20-2024">
+<span class="md-ellipsis">
+      
+        0.5.4 (December 20, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.4 (December 20, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_2">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_2">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#053-august-27-2024">
+<span class="md-ellipsis">
+      
+        0.5.3 (August 27, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.3 (August 27, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_3">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_3">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#052-april-22-2024">
+<span class="md-ellipsis">
+      
+        0.5.2 (April 22, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.2 (April 22, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_4">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_4">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#051-march-7-2024">
+<span class="md-ellipsis">
+      
+        0.5.1 (March 7, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.1 (March 7, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_5">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_5">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#050-february-9-2024">
+<span class="md-ellipsis">
+      
+        0.5.0 (February 9, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.0 (February 9, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_6">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_6">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#043-november-7-2023">
+<span class="md-ellipsis">
+      
+        0.4.3 (November 7, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#042-october-10-2023">
+<span class="md-ellipsis">
+      
+        0.4.2 (October 10, 2023)
+      
+    </span>
+</a>
+<nav aria-label="0.4.2 (October 10, 2023)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure-support">
+<span class="md-ellipsis">
+      
+        Infrastructure / Support
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_7">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#041-june-30-2023">
+<span class="md-ellipsis">
+      
+        0.4.1 (June 30, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#040-may-22-2023">
+<span class="md-ellipsis">
+      
+        0.4.0 (May 22, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#034-march-30-2023">
+<span class="md-ellipsis">
+      
+        0.3.4 (March 30, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#033-march-29-2023">
+<span class="md-ellipsis">
+      
+        0.3.3 (March 29, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#032-march-28-2023">
+<span class="md-ellipsis">
+      
+        0.3.2 (March 28, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#031-march-24-2023">
+<span class="md-ellipsis">
+      
+        0.3.1 (March 24, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#030-march-24-2023">
+<span class="md-ellipsis">
+      
+        0.3.0 (March 24, 2023)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../LICENSE/">
+<span class="md-ellipsis">
+    
+  
+    Copyright
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#060-sep-1st-2026">
+<span class="md-ellipsis">
+      
+        0.6.0 (Sep 1st 2026)
+      
+    </span>
+</a>
+<nav aria-label="0.6.0 (Sep 1st 2026)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#breaking-changes">
+<span class="md-ellipsis">
+      
+        Breaking Changes
+      
+    </span>
+</a>
+<nav aria-label="Breaking Changes" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#insert_sessions-returns-a-list-1660">
+<span class="md-ellipsis">
+      
+        insert_sessions Returns a List (#1660)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ingestion-raises-instead-of-skipping-1660">
+<span class="md-ellipsis">
+      
+        Ingestion Raises Instead of Skipping (#1660)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nwbfilehasher-now-includes-dataset-content-1600">
+<span class="md-ellipsis">
+      
+        NwbfileHasher Now Includes Dataset Content (#1600)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#lfpbandv1-fix">
+<span class="md-ellipsis">
+      
+        LFPBandV1 Fix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#automaticcuration-fix">
+<span class="md-ellipsis">
+      
+        AutomaticCuration Fix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#decoding-results-structure">
+<span class="md-ellipsis">
+      
+        Decoding Results Structure
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#055-aug-6-2025">
+<span class="md-ellipsis">
+      
+        0.5.5 (Aug 6, 2025)
+      
+    </span>
+</a>
+<nav aria-label="0.5.5 (Aug 6, 2025)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_1">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_1">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_1">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#054-december-20-2024">
+<span class="md-ellipsis">
+      
+        0.5.4 (December 20, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.4 (December 20, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_2">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_2">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#053-august-27-2024">
+<span class="md-ellipsis">
+      
+        0.5.3 (August 27, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.3 (August 27, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_3">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_3">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#052-april-22-2024">
+<span class="md-ellipsis">
+      
+        0.5.2 (April 22, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.2 (April 22, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_4">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_4">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#051-march-7-2024">
+<span class="md-ellipsis">
+      
+        0.5.1 (March 7, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.1 (March 7, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_5">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_5">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#050-february-9-2024">
+<span class="md-ellipsis">
+      
+        0.5.0 (February 9, 2024)
+      
+    </span>
+</a>
+<nav aria-label="0.5.0 (February 9, 2024)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure_6">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_6">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#043-november-7-2023">
+<span class="md-ellipsis">
+      
+        0.4.3 (November 7, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#042-october-10-2023">
+<span class="md-ellipsis">
+      
+        0.4.2 (October 10, 2023)
+      
+    </span>
+</a>
+<nav aria-label="0.4.2 (October 10, 2023)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure-support">
+<span class="md-ellipsis">
+      
+        Infrastructure / Support
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipelines_7">
+<span class="md-ellipsis">
+      
+        Pipelines
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#041-june-30-2023">
+<span class="md-ellipsis">
+      
+        0.4.1 (June 30, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#040-may-22-2023">
+<span class="md-ellipsis">
+      
+        0.4.0 (May 22, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#034-march-30-2023">
+<span class="md-ellipsis">
+      
+        0.3.4 (March 30, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#033-march-29-2023">
+<span class="md-ellipsis">
+      
+        0.3.3 (March 29, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#032-march-28-2023">
+<span class="md-ellipsis">
+      
+        0.3.2 (March 28, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#031-march-24-2023">
+<span class="md-ellipsis">
+      
+        0.3.1 (March 24, 2023)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#030-march-24-2023">
+<span class="md-ellipsis">
+      
+        0.3.0 (March 24, 2023)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="change-log">Change Log<a class="headerlink" href="#change-log" title="Permanent link">¶</a></h1>
+<h2 id="060-sep-1st-2026"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0">0.6.0</a> (Sep 1st 2026)<a class="headerlink" href="#060-sep-1st-2026" title="Permanent link">¶</a></h2>
+<h3 id="breaking-changes">Breaking Changes<a class="headerlink" href="#breaking-changes" title="Permanent link">¶</a></h3>
+<h4 id="insert_sessions-returns-a-list-1660"><code>insert_sessions</code> Returns a List (#1660)<a class="headerlink" href="#insert_sessions-returns-a-list-1660" title="Permanent link">¶</a></h4>
+<p><code>insert_sessions</code> returned from inside its loop over <code>nwb_file_names</code>, so a list
+argument only ever processed its first file. It now processes every file and
+returns one <code>populate_all_common</code> result per file, rather than a single result.</p>
+<h4 id="ingestion-raises-instead-of-skipping-1660">Ingestion Raises Instead of Skipping (#1660)<a class="headerlink" href="#ingestion-raises-instead-of-skipping-1660" title="Permanent link">¶</a></h4>
+<p>Two cases ingestion used to pass over silently now raise.</p>
+<p><code>_expected_duplicates</code> is read per table rather than once for the whole
+ingestion, so a table that legitimately recurs across files (<code>Task</code>) can be
+validated while the table driving the ingestion is not. <code>TaskEpoch</code>,
+<code>ImportedPose</code> and <code>ImportedLFP</code> no longer expect duplicates: re-ingesting an
+already-ingested file raises <code>DuplicateError</code> instead of validating and
+skipping.</p>
+<p>A <code>TaskEpoch</code> whose <code>camera_id</code> matched no <code>CameraDevice</code> in the NWB file or
+config was dropped with only an info log, and with it the <code>VideoFile</code>,
+<code>StateScriptFile</code> and <code>OptogeneticProtocol</code> rows referencing that epoch. A
+dangling camera reference now raises <code>ValueError</code>; an epoch that genuinely names
+no camera stores <code>camera_names = []</code> and is kept.</p>
+<h4 id="nwbfilehasher-now-includes-dataset-content-1600">NwbfileHasher Now Includes Dataset Content (#1600)<a class="headerlink" href="#nwbfilehasher-now-includes-dataset-content-1600" title="Permanent link">¶</a></h4>
+<p><code>NwbfileHasher</code> previously discarded the return value of <code>hash_dataset()</code>, so
+HDF5 Dataset values (the actual array data) were never incorporated into
+<code>SpikeSortingRecording.hash</code>. Only metadata (attrs, shape, dtype) was hashed.</p>
+<p><strong>Impact</strong>: All V1 <code>SpikeSortingRecording</code> hashes computed before this fix are
+metadata-only. Running <code>RecordingRecompute.populate()</code> against a pre-fix stored
+hash will produce <code>matched=False</code> even when the file is identical, because the
+old and new hashers disagree on what to include.</p>
+<p><strong>If you have existing <code>matched=1</code> entries</strong> from before this fix, those matches
+only verified metadata — Dataset content was not compared. These entries should
+be re-validated once all users have upgraded.</p>
+<p><strong>Backward compatibility</strong>: Set <code>SPYGLASS_LEGACY_HASHES=true</code> in your shell
+environment to restore pre-fix (metadata-only) hashing in <code>RecordingRecompute</code>.
+This allows existing matched entries to be reproduced without recomputing, and
+is intended as a temporary bridge while labs transition:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a><span class="nv">SPYGLASS_LEGACY_HASHES</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span>
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a><span class="s2">from spyglass.spikesorting.v1.recompute import RecordingRecompute</span>
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a><span class="s2">RecordingRecompute().populate(...)</span>
+</span><span id="__span-0-4"><a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a><span class="s2">"</span>
+</span></code></pre></div>
+<h4 id="lfpbandv1-fix">LFPBandV1 Fix<a class="headerlink" href="#lfpbandv1-fix" title="Permanent link">¶</a></h4>
+<p>If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the following after updating:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">spyglass.lfp.analysis.v1</span><span class="w"> </span><span class="kn">import</span> <span class="n">LFPBandV1</span>
+</span><span id="__span-1-2"><a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a href="#__codelineno-1-3" id="__codelineno-1-3" name="__codelineno-1-3"></a><span class="n">LFPBandV1</span><span class="p">()</span><span class="o">.</span><span class="n">fix_1481</span><span class="p">()</span>
+</span></code></pre></div>
+<h4 id="automaticcuration-fix">AutomaticCuration Fix<a class="headerlink" href="#automaticcuration-fix" title="Permanent link">¶</a></h4>
+<p>If you were using <code>v0.AutomaticCuration</code> after April 2025, you may have stored
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a href="#__codelineno-2-1" id="__codelineno-2-1" name="__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">spyglass.spikesorting.v0</span><span class="w"> </span><span class="kn">import</span> <span class="n">Fix1513Status</span>
+</span><span id="__span-2-2"><a href="#__codelineno-2-2" id="__codelineno-2-2" name="__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a href="#__codelineno-2-3" id="__codelineno-2-3" name="__codelineno-2-3"></a><span class="n">Fix1513Status</span><span class="o">.</span><span class="n">populate</span><span class="p">()</span>
+</span><span id="__span-2-4"><a href="#__codelineno-2-4" id="__codelineno-2-4" name="__codelineno-2-4"></a><span class="n">Fix1513Status</span><span class="o">.</span><span class="n">activate_pending_nwb_repairs</span><span class="p">()</span>
+</span><span id="__span-2-5"><a href="#__codelineno-2-5" id="__codelineno-2-5" name="__codelineno-2-5"></a><span class="n">Fix1513Status</span><span class="o">.</span><span class="n">run_pending_repopulates</span><span class="p">()</span>
+</span></code></pre></div>
+<h4 id="decoding-results-structure">Decoding Results Structure<a class="headerlink" href="#decoding-results-structure" title="Permanent link">¶</a></h4>
+<p>The <code>intervals</code> dimension has been removed from decoding results. Results from
+multiple decoding intervals are now concatenated along the <code>time</code> dimension with
+an <code>interval_labels</code> coordinate tracking which interval each time point belongs
+to.</p>
+<p><strong>Why</strong>: Eliminates NaN padding when intervals have different lengths, reducing
+memory usage significantly.</p>
+<p><strong>Migration guide</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a><span class="c1"># OLD (before v0.5.6):</span>
+</span><span id="__span-3-2"><a href="#__codelineno-3-2" id="__codelineno-3-2" name="__codelineno-3-2"></a><span class="n">results</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">intervals</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># Get first interval</span>
+</span><span id="__span-3-3"><a href="#__codelineno-3-3" id="__codelineno-3-3" name="__codelineno-3-3"></a><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">results</span><span class="o">.</span><span class="n">sizes</span><span class="p">[</span><span class="s2">"intervals"</span><span class="p">]):</span>  <span class="c1"># Iterate intervals</span>
+</span><span id="__span-3-4"><a href="#__codelineno-3-4" id="__codelineno-3-4" name="__codelineno-3-4"></a>    <span class="n">interval_data</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">isel</span><span class="p">(</span><span class="n">intervals</span><span class="o">=</span><span class="n">i</span><span class="p">)</span>
+</span><span id="__span-3-5"><a href="#__codelineno-3-5" id="__codelineno-3-5" name="__codelineno-3-5"></a>
+</span><span id="__span-3-6"><a href="#__codelineno-3-6" id="__codelineno-3-6" name="__codelineno-3-6"></a><span class="c1"># NEW (v0.5.6+):</span>
+</span><span id="__span-3-7"><a href="#__codelineno-3-7" id="__codelineno-3-7" name="__codelineno-3-7"></a><span class="n">results</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">results</span><span class="o">.</span><span class="n">interval_labels</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Get first interval</span>
+</span><span id="__span-3-8"><a href="#__codelineno-3-8" id="__codelineno-3-8" name="__codelineno-3-8"></a><span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">results</span><span class="o">.</span><span class="n">interval_labels</span><span class="o">.</span><span class="n">values</span><span class="p">):</span>  <span class="c1"># Iterate intervals</span>
+</span><span id="__span-3-9"><a href="#__codelineno-3-9" id="__codelineno-3-9" name="__codelineno-3-9"></a>    <span class="k">if</span> <span class="p">(</span>
+</span><span id="__span-3-10"><a href="#__codelineno-3-10" id="__codelineno-3-10" name="__codelineno-3-10"></a>        <span class="n">label</span> <span class="o">&gt;=</span> <span class="mi">0</span>
+</span><span id="__span-3-11"><a href="#__codelineno-3-11" id="__codelineno-3-11" name="__codelineno-3-11"></a>    <span class="p">):</span>  <span class="c1"># Skip -1 (outside intervals, only with estimate_decoding_params=True)</span>
+</span><span id="__span-3-12"><a href="#__codelineno-3-12" id="__codelineno-3-12" name="__codelineno-3-12"></a>        <span class="n">interval_data</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">results</span><span class="o">.</span><span class="n">interval_labels</span> <span class="o">==</span> <span class="n">label</span><span class="p">,</span> <span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-3-13"><a href="#__codelineno-3-13" id="__codelineno-3-13" name="__codelineno-3-13"></a>
+</span><span id="__span-3-14"><a href="#__codelineno-3-14" id="__codelineno-3-14" name="__codelineno-3-14"></a><span class="c1"># Or use groupby:</span>
+</span><span id="__span-3-15"><a href="#__codelineno-3-15" id="__codelineno-3-15" name="__codelineno-3-15"></a><span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">interval_data</span> <span class="ow">in</span> <span class="n">results</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">"interval_labels"</span><span class="p">):</span>
+</span><span id="__span-3-16"><a href="#__codelineno-3-16" id="__codelineno-3-16" name="__codelineno-3-16"></a>    <span class="k">if</span> <span class="n">label</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="__span-3-17"><a href="#__codelineno-3-17" id="__codelineno-3-17" name="__codelineno-3-17"></a>        <span class="c1"># process interval_data</span>
+</span><span id="__span-3-18"><a href="#__codelineno-3-18" id="__codelineno-3-18" name="__codelineno-3-18"></a>        <span class="k">pass</span>
+</span></code></pre></div>
+<p><strong>interval_labels values</strong>:</p>
+<ul>
+<li><code>0, 1, 2, ...</code> - Sequential interval indices (0-indexed)</li>
+<li><code>-1</code> - Time points outside any decoding interval (only when
+    <code>estimate_decoding_params=True</code>)</li>
+</ul>
+<h3 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">¶</a></h3>
+<ul>
+<li>Delete extra pyscripts that were renamed #1363</li>
+<li>Add note on fetching changes to setup notebook #1371</li>
+<li>Revise table field docstring heading and <code>mermaid</code> diagram generation #1402</li>
+<li>Add pages for custom analysis tables and class inheritance structure #1435</li>
+<li>Add support for bandstop filter type #1464</li>
+<li>Add Interval and Populate migration guides #1615</li>
+</ul>
+<h3 id="infrastructure">Infrastructure<a class="headerlink" href="#infrastructure" title="Permanent link">¶</a></h3>
+<ul>
+<li>Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414</li>
+<li>Set default codecov threshold for test fail, disable patch check #1370, #1372</li>
+<li>Simplify PR template #1370</li>
+<li>Allow email send on space check success, clean up maintenance logging #1381,
+    #1544</li>
+<li>Update pynwb pin to &gt;=2.5.0 for <code>TimeSeries.get_timestamps</code> #1385</li>
+<li>Sort <code>UserEnvironment</code> dict objects by key for consistency #1380</li>
+<li>Fix typo in VideoFile.make #1427</li>
+<li>Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+    from NWB #1433</li>
+<li>Split <code>SpyglassMixin</code> into task-specific mixins #1435 #1451</li>
+<li>Auto-load within-Spyglass tables for graph operations #1368</li>
+<li>Add explicit <code>kachery-cloud</code> dependency #1430</li>
+<li>Default to globally saved config #1430</li>
+<li>Allow rechecking of recomputes #1380, #1413</li>
+<li>Add <code>SpyglassIngestion</code> class to centralize functionality #1377, #1423, #1465,
+    #1484, #1489, #1507, #1614, #1660</li>
+<li>Pin <code>ndx-optogenetics</code> to 0.2.0 #1458</li>
+<li>Cleanup bug when fetching raw files from DANDI #1469</li>
+<li>Refactor pytests for speed, run fast tests on push #1440</li>
+<li>Allow for permissive name selection when identifying objects in ingestion nwb
+    #1490</li>
+<li>Update fixes for accessing files from DANDI #1477</li>
+<li>Deprecate <code>populate</code> transaction workaround with tripart <code>make</code> calls #1422
+    #1505, #1633</li>
+<li>Improve export process for speed and generalization #1387</li>
+<li>Additional methods for updating files for DANDI standards #1387</li>
+<li>Implementation of union and intersect methods for restriction graphs #1387</li>
+<li>Add file issue checks to AnalysisNwbfile cleanup steps #1431</li>
+<li>Update to latest <code>black</code> and <code>jupytext</code> versions #1508</li>
+<li>Update minimum Python version to 3.10 #1508</li>
+<li>Remove outdated cli scripts #1508</li>
+<li>Pin datajoint version &lt; 2.0 #1516</li>
+<li>Log expected recompute failures #1470</li>
+<li>Track file created/deletion status of recomputes #1470</li>
+<li>Upgrade to pynwb&gt;=3.1 #1506</li>
+<li>Remove imports of ndx extensions in main package to prevent errors in nwb io
+    #1506</li>
+<li>Add <code>analysis_table</code> property to mixin for custom pipelines #1525</li>
+<li>Quiet pytest output for expected warnings in test runs #1534</li>
+<li>Fix update bug in <code>_resolve_external_tables</code> #1536</li>
+<li>Fix <code>_get_epoch_groups</code> raising <code>TypeError</code> for <code>SpatialSeries</code> with
+    <code>starting_time + rate</code> (no timestamps) #1567</li>
+<li>Fix <code>_get_pos_dict</code> raising <code>TypeError</code> for <code>SpatialSeries</code> with
+    <code>starting_time + rate</code> (no timestamps) #1571</li>
+<li>Parallelize <code>AnalysisFileIssues</code> checks #1557</li>
+<li>Tests update config sooner to avoid false-negative <code>test_mode</code> errors #1572</li>
+<li>Tests default <code>--base-dir</code> to <code>./tests/_data/</code> and ignore an exported
+    <code>SPYGLASS_BASE_DIR</code>. <code>SpyglassConfig.load_config</code> now resolves and validates
+    every path before creating anything, and under <code>test_mode</code> requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems. A config instance binds <code>test_mode</code> before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574</li>
+<li><code>AnalysisNwbfile.cleanup()</code> follows leaf <code>*.nwb</code> symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Directory symlinks are not traversed (<code>followlinks=False</code>), so cleanup
+    cannot follow a symlinked subdirectory out of <code>analysis_dir</code>; only leaf
+    <code>*.nwb</code> symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour <code>mtime</code> gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574</li>
+<li>Add filesystem deletion limits to <code>AnalysisNwbfile.cleanup()</code>, computed over
+    the files the sweep was eligible to act on #1573 #1574</li>
+<li>Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    <code>AnalysisRegistry().unblock_new_inserts()</code>. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol #1574</li>
+<li>Fix: <code>AnalysisNwbfile.cleanup()</code> no longer deletes a <strong>tracked</strong> 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)</li>
+<li>Fix: honor <code>SpyglassConfig(test_mode=...)</code> and <code>debug_mode</code>; <code>load_config</code>
+    previously discarded the constructor/call kwargs in favor of <code>dj.config</code>
+    (pre-existing) #1574</li>
+<li>The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574</li>
+<li>Fix typo in <code>env_defaults</code> key: <code>HD5_USE_FILE_LOCKING</code> →
+    <code>HDF5_USE_FILE_LOCKING</code> so the HDF5 library actually sees the intended
+    <code>FALSE</code> default #1575</li>
+<li>Warn on no-operation restrictions #1586</li>
+<li>Improved efficiency for writing multiple objects to analysis file #1594</li>
+<li>Pin <code>scipy&lt;1.13</code> for <code>spikeinterface==0.99.1</code> compatibility #1612</li>
+<li>Fix <code>NwbfileHasher</code> to include HDF5 Dataset content in file hash; add
+    <code>SPYGLASS_LEGACY_HASHES</code> env var to <code>RecordingRecompute</code> for backward
+    compatibility with pre-fix hashes #1600</li>
+<li>Fix redundant hash computation in <code>SpikeSortingRecording._make_file</code>:
+    <code>_update_external</code> no longer re-reads the NWB file to verify a hash that was
+    just computed by the caller #1600</li>
+<li>Kachery as optional dependency #1607</li>
+<li>Allow revisited nodes in graph cascade #1610</li>
+<li>Add <code>DandiValidation</code> tables for tracking dandi compliance during export #1584</li>
+<li>Save disk checks as csv, predict runway of primary data directory #1611</li>
+<li>Fix package scanning without database import #1621</li>
+<li>Allow <code>RestrGraph</code> to inspect tables outside of Spyglass #1595</li>
+<li>Drop the <code>ghostipy</code> dependency by vendoring the FIR filter design and
+    out-of-core filtering it used (<code>scipy.fft</code> backend, no <code>pyfftw</code>). Filter
+    coefficients are bit-identical and the filtered float result matches the
+    previous implementation to round-off (~1e-15). Note that LFP is stored in
+    the raw data's dtype, so for <code>int16</code> raw data the float result is truncated
+    on write, and truncation can turn that round-off into a one-count difference
+    in a small fraction of stored samples -- recomputing an existing LFP entry
+    may not reproduce it exactly to the bit. Declares <code>scipy</code> explicitly and
+    ships Ghostipy's Apache-2.0 license #1635</li>
+<li>Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
+    than the filter combined with a tight <code>nfft</code> returned a wrong convolution.
+    Unreachable at the default <code>nfft</code>, so LFP output is unaffected #1635</li>
+<li>Fix filtering an on-disk electrical series with 16 or more electrodes when a
+    block read is empty -- an interval starting at sample 0, or a trailing block
+    beginning at the end of the data -- which raised an h5py "Dataspaces don't
+    have hyperslab selections" error #1635</li>
+<li><code>FirFilterParameters.filter_data</code> and <code>filter_data_nwb</code> now raise when every
+    interval in <code>valid_times</code> is empty, instead of writing a zero-length
+    electrical series and then failing, and reject a reversed interval instead
+    of silently dropping it #1635</li>
+<li>Electrode selections may again be given in any order, on-disk as well as
+    in-memory; rows are returned in the order requested #1635</li>
+<li>Log a warning when an interval in <code>valid_times</code> is skipped for containing no
+    samples, instead of dropping it silently #1635</li>
+<li>Split the vendored FIR sizing pass into its own <code>describe_output</code> function
+    instead of a <code>describe_dims</code> flag on <code>filter_data_fir</code>, so each returns one
+    type and arguments that cannot affect the sizing answer are rejected rather
+    than ignored #1635</li>
+<li>Remove items scheduled for 0.6.0 deprecation #1633</li>
+<li>Add <code>--container-vol-dir</code> pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    <code>--container-name</code>/<code>--container-port</code> options #1661</li>
+</ul>
+<h3 id="pipelines">Pipelines<a class="headerlink" href="#pipelines" title="Permanent link">¶</a></h3>
+<ul>
+<li>
+<p>Behavior</p>
+<ul>
+<li>Add methods for calling moseq visualization functions #1374</li>
+<li>Ensure latent moseq dimension is compatible with dataset #1511</li>
+<li>Add option to normalize keypoint spacing by body length #1569</li>
+</ul>
+</li>
+<li>
+<p>Common</p>
+<ul>
+<li>Add tables for storing optogenetic experiment information #1312</li>
+<li>Remove wildcard matching in <code>Nwbfile().get_abs_path</code> #1382</li>
+<li>Change <code>IntervalList.insert</code> to <code>cautious_insert</code> #1423</li>
+<li>Allow email send on space check success, clean up maintenance logging #1381</li>
+<li>Update pynwb pin to &gt;=2.5.0 for <code>TimeSeries.get_timestamps</code> #1385</li>
+<li>Fix error from unlinked object in <code>AnalysisNwbfile.create</code> #1396</li>
+<li>Sort <code>UserEnvironment</code> dict objects by key for consistency #1380</li>
+<li>Fix typo in VideoFile.make #1427</li>
+<li>Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+    from NWB #1433</li>
+<li>Add custom/dynamic <code>AnalysisNwbfile</code> creation #1435, #1496, #1498, #1632</li>
+<li>Allow nullable <code>DataAcquisitionDevice</code> foreign keys #1455</li>
+<li>Remove pre-existing <code>Units</code> from created analysis nwb files #1453</li>
+<li>Allow multiple VideoFile entries during ingestion #1462</li>
+<li>Handle epoch formats with varying zero-padding #1459, #1492</li>
+<li>Reduce lock conflicts between users during ingestion #1483</li>
+<li>Add the table <code>RawCompassDirection</code> for importing orientation data from NWB
+    files #1466</li>
+<li>Allow ingestion of nwb files without behavior module #1441</li>
+<li>Warn when ingesting ImageSeries without TaskEpoch #1461</li>
+<li>Support ingestion of multi-epoch video files #1548</li>
+<li>Fix bug with <code>LabTeam().create_new_team</code> when <code>google_user_name</code> is not
+    available #1546</li>
+<li>Fix bug from overlapping intervals in interval union #1520</li>
+<li>Bypass delete permission check when removing null <code>PositionIntervalMap</code>
+    entries in <code>convert_epoch_interval_name_to_position_interval_name</code> #1640</li>
+<li>Clear a file's existing <code>InsertError</code> rows at the start of
+    <code>populate_all_common</code>, so a rerun no longer reports or rolls back on
+    failures logged by an earlier attempt #1497</li>
+<li><code>PositionSource</code> ingestion is now responsible for <code>RawPosition</code> #1660</li>
+</ul>
+</li>
+<li>
+<p>Decoding</p>
+<ul>
+<li>Ensure results directory is created if it doesn't exist #1362</li>
+<li>Change BLOB fields to LONGBLOB in DecodingParameters #1463</li>
+<li>Fix <code>PositionGroup.fetch_position_info()</code> returning empty DataFrame when
+    merge IDs are fetched in non-chronological order #1471</li>
+<li>Separate <code>ClusterlessDecodingV1</code> to tri-part <code>make</code> #1467</li>
+<li><strong>BREAKING</strong>: Remove <code>intervals</code> dimension from decoding results. Results
+    from multiple intervals are now concatenated along the <code>time</code> dimension
+    with an <code>interval_labels</code> coordinate to track interval membership. This
+    eliminates NaN padding and reduces memory usage. See migration guide
+    above.</li>
+<li>Fix fetching position dataframe in
+    <code>SortedSpikesDecodingV1.get_ahead_behind_distance()</code> #1540</li>
+<li>Fix <code>DecodingOutput.create_decoding_view()</code> for 2D decoders: normalize the
+    posterior over the correct spatial dimension(s), auto-detect the
+    orientation column name, and pass the <code>linear_position</code> column (not the
+    whole DataFrame) to the 1D view #1616</li>
+<li>Import <code>non_local_detector</code> inside the decoding operations that use it, so a
+    broken <code>jax</code>/<code>numpy</code> stack no longer breaks <code>import   spyglass.common</code> or
+    data ingestion #1619</li>
+<li>Pin <code>numpy</code>, <code>scipy</code>, and <code>jax</code> to the combination <code>spikeinterface</code> 0.99
+    needs. Temporary, pending #1609 #1619</li>
+<li>Fix <code>DecodingParameters.insert_default()</code>, which raised <code>AttributeError</code> on
+    every call, and stop <code>insert</code> from mutating the caller's rows #1619</li>
+</ul>
+</li>
+<li>
+<p>LFP</p>
+<ul>
+<li><code>LFPBandV1</code>: fix bug that inserted LFP times instead of LFP band times #1482</li>
+<li>Update artifact detection algorithms to return times #1553</li>
+</ul>
+</li>
+<li>
+<p>Position</p>
+<ul>
+<li>Ensure video files are properly added to <code>DLCProject</code> # 1367</li>
+<li>DLC parameter handling improvements and default value corrections #1379</li>
+<li>Fix ingestion nwb files with position objects but no spatial series #1405</li>
+<li>Ignore <code>percent_frames</code> when using <code>limit</code> in <code>DLCPosVideo</code> #1418</li>
+<li>Increase <code>DLCProject.config_path</code> length #1534</li>
+<li>Add option to bound output of DLC to defined spatial region #1570</li>
+</ul>
+</li>
+<li>
+<p>Spikesorting</p>
+<ul>
+<li>Implement short-transaction <code>SpikeSortingRecording.make</code> for v0 #1338</li>
+<li>Fix <code>FigURLCuration.make</code>. Postpone fetch of unhashable items #1505</li>
+<li>Improve get_recording efficiency #1522</li>
+<li>Raise error if <code>FigURLCurationSelection</code> finds no curation label #1531</li>
+<li>Allow <code>CurationV1</code> to save without any spikes #1533</li>
+<li>Trigger recompute in <code>CurationV1.get_recording</code> when necessary #1561</li>
+<li>Drop spike sample indices that exceed the recording length in
+    <code>CurationV1.get_sorting</code> and <code>SpikeSorting.get_sorting</code>, fixing a
+    SpikeInterface <code>ValueError</code> caused by floating-point round-trip in the
+    seconds-to-samples conversion #1564</li>
+<li>Trigger recording recompute in <code>SpikeSortingRecording.populate</code> when
+    necessary #1588, #1599</li>
+<li>Restrict <code>ImportedSpikeSorting.Annotations</code> to the current session in
+    <code>make_df_from_annotations</code> so <code>fetch_nwb</code> works across multiple sessions
+    with overlapping unit ids #1581, #1592</li>
+<li>Fix <code>NwbfileHasher</code> to include HDF5 Dataset content in
+    <code>SpikeSortingRecording.hash</code>; previously only attrs/shape/dtype were
+    hashed so in-place Dataset edits were invisible to the hasher #1600</li>
+<li>Implement fix for <code>AutomaticCuration</code> incorrect labels #1537</li>
+<li>Fix <code>SortGroup.set_group_by_shank</code> to support non-numeric
+    <code>electrode_group_name</code>s by falling back to lexicographic ordering #1624</li>
+<li>Fix <code>MetricCuration.populate</code> crash when no unit is labeled; skip the empty
+    <code>curation_label</code> column #1626</li>
+<li>Fix <code>MetricCuration</code> dropping non-empty <code>merge_groups</code> when writing to NWB
+    #1626</li>
+<li>Add <code>unit_criteria</code> to <code>UnitSelectionParams</code>, allowing units to be selected
+    on arbitrary units table columns with numeric, range, and membership
+    criteria. A criterion naming a column a sorting's units table does not
+    have raises an error #1670</li>
+<li>Fix <code>SpikeSorting.populate</code> raising
+    <code>AttributeError: Bad parameters:   ['tempdir']</code> for SpikeInterface-native
+    sorters (e.g. <code>spykingcircus2</code>, <code>tridesclous2</code>). <code>_run_spike_sorter</code> now
+    injects the <code>tempdir</code> scratch-dir param only for sorters that declare it
+    (only <code>mountainsort4</code>), instead of injecting it into every sorter and
+    maintaining hardcoded removal lists #1655</li>
+</ul>
+</li>
+</ul>
+<h2 id="055-aug-6-2025"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5">0.5.5</a> (Aug 6, 2025)<a class="headerlink" href="#055-aug-6-2025" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_1">Infrastructure<a class="headerlink" href="#infrastructure_1" title="Permanent link">¶</a></h3>
+<ul>
+<li>Ensure merge tables are declared during file insertion #1205</li>
+<li>Update URL for DANDI Docs #1210</li>
+<li>Add common method <code>get_position_interval_epoch</code> #1056</li>
+<li>Improve cron job documentation and script #1226, #1241, #1257, #1328</li>
+<li>Update export process to include <code>~external</code> tables #1239</li>
+<li>Only add merge parts to <code>source_class_dict</code> if present in codebase #1237</li>
+<li>Remove cli module #1250</li>
+<li>Fix column error in <code>check_threads</code> method #1256</li>
+<li>Export python env and store in newly created analysis files #1270</li>
+<li>Enforce single table entry in <code>fetch1_dataframe</code> calls #1270</li>
+<li>Add recompute ability for <code>SpikeSortingRecording</code> for both v0 and v1 #1093,
+    #1311, #1340</li>
+<li>Track Spyglass version in dedicated table for enforcing updates #1281</li>
+<li>Pin to <code>datajoint&gt;=0.14.4</code> for <code>dj.Top</code> and long make call fix #1281</li>
+<li>Remove outdated code comments #1304</li>
+<li>Add code coverage badge, and increase position coverage #1305, #1315</li>
+<li>Force <code>TableChain</code> to follow shortest path #1356</li>
+<li>Avoid database connections in import of <code>spyglass.settings</code> #1563</li>
+</ul>
+<h3 id="documentation_1">Documentation<a class="headerlink" href="#documentation_1" title="Permanent link">¶</a></h3>
+<ul>
+<li>Add documentation for custom pipeline #1281</li>
+<li>Add developer note on initializing <code>hatch</code> #1281</li>
+<li>Add concrete example for long-distance restrictions #1361</li>
+</ul>
+<h3 id="pipelines_1">Pipelines<a class="headerlink" href="#pipelines_1" title="Permanent link">¶</a></h3>
+<ul>
+<li>Common<ul>
+<li>Default <code>AnalysisNwbfile.create</code> permissions are now 777 #1226</li>
+<li>Make <code>Nwbfile.fetch_nwb</code> functional # 1256</li>
+<li>Calculate mode of timestep size in log scale when estimating sampling rate
+    #1270</li>
+<li>Ingest all <code>ImageSeries</code> objects in nwb file to <code>VideoFile</code> #1278</li>
+<li>Allow ingestion of multi-row task epoch tables #1278</li>
+<li>Add <code>SensorData</code> to <code>populate_all_common</code> #1281</li>
+<li>Add <code>fetch1_dataframe</code> to <code>SensorData</code> #1291</li>
+<li>Allow storage of numpy arrays using <code>AnalysisNwbfile.add_nwb_object</code> #1298</li>
+<li><code>IntervalList.fetch_interval</code> now returns <code>Interval</code> object #1293, #1357</li>
+<li>Correct name parsing in Session.Experimenter insertion #1306</li>
+<li>Allow insert with dio events but no e-series data #1318</li>
+<li>Prompt user to verify compatibility between new insert and existing table
+    entries # 1318, #1350</li>
+<li>Skip empty timeseries ingestion (<code>PositionSource</code>, <code>DioEvents</code>) #1347</li>
+<li>Reduce excess warnings/errors #1589</li>
+</ul>
+</li>
+<li>Position<ul>
+<li>Allow population of missing <code>PositionIntervalMap</code> entries during population
+    of <code>DLCPoseEstimation</code> #1208</li>
+<li>Enable import of existing pose data to <code>ImportedPose</code> in position pipeline
+    #1247</li>
+<li>Change key value <code>position_source</code> to "imported" during ingestion #1270</li>
+<li>Define orientation as <code>nan</code> for single-led data #1270</li>
+<li>Sanitize new project names for unix file system #1247</li>
+<li>Add arg to return percent below threshold in <code>get_subthresh_inds</code> #1304,
+    #1305</li>
+<li>Accept imported timestamps defined by <code>rate</code> and <code>start_time</code> #1322</li>
+<li>Fix bug preventing DLC config updates #1352</li>
+</ul>
+</li>
+<li>Spikesorting<ul>
+<li>Fix compatibility bug between v1 pipeline and <code>SortedSpikesGroup</code> unit
+    filtering #1238, #1249</li>
+<li>Speedup <code>get_sorting</code> on <code>CurationV1</code> #1246</li>
+<li>Add cleanup for <code>v0.SpikeSortingRecording</code> #1263</li>
+<li>Revise cleanup for <code>v0.SpikeSorting</code> #1271</li>
+<li>Fix type compatibility of <code>time_slice</code> in
+    <code>SortedSpikesGroup.fetch_spike_data</code> #1261</li>
+<li>Update transaction and parallel make settings for <code>v0</code> and <code>v1</code>
+<code>SpikeSorting</code> tables #1270</li>
+<li>Disable make transactionsfor <code>CuratedSpikeSorting</code> #1288</li>
+<li>Refactor <code>SpikeSortingOutput.get_restricted_merge_ids</code> #1304</li>
+<li>Add burst merge curation #1209</li>
+<li>Reconcile spikeinterface value for <code>channel_id</code> when <code>channel_name</code> column
+    present in nwb file electrodes table #1310, #1334</li>
+<li>Ensure matching order of returned merge_ids and nwb files in
+    <code>SortedSpikesGroup.fetch_spike_data</code> #1320</li>
+</ul>
+</li>
+<li>Behavior<ul>
+<li>Implement pipeline for keypoint-moseq extraction of behavior syllables #1056</li>
+</ul>
+</li>
+<li>LFP<ul>
+<li>Implement <code>ImportedLFP.make()</code> for ingestion from nwb files #1278</li>
+<li>Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
+    values with 1.0. #1280</li>
+<li>Refactoring the creation of LFPElectrodeGroup with added input validation
+    and transactional insertion. #1280, #1302</li>
+<li>Updating the LFPBandSelection logic with comprehensive validation and batch
+    insertion for electrodes and references. #1280</li>
+<li>Implement <code>ImportedLFP.make()</code> for ingestion from nwb files #1278, #1302</li>
+<li>Skip empty timeseries ingestion for <code>ImportedLFP</code> #1347</li>
+</ul>
+</li>
+</ul>
+<h2 id="054-december-20-2024"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4">0.5.4</a> (December 20, 2024)<a class="headerlink" href="#054-december-20-2024" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_2">Infrastructure<a class="headerlink" href="#infrastructure_2" title="Permanent link">¶</a></h3>
+<ul>
+<li>Disable populate transaction protection for long-populating tables #1066,
+    #1108, #1172, #1187</li>
+<li>Add docstrings to all public methods #1076</li>
+<li>Update DataJoint to 0.14.2 #1081</li>
+<li>Remove <code>AnalysisNwbfileLog</code> #1093</li>
+<li>Allow restriction based on parent keys in <code>Merge.fetch_nwb()</code> #1086, #1126</li>
+<li>Import <code>datajoint.dependencies.unite_master_parts</code> -&gt; <code>topo_sort</code> #1116,
+    #1137, #1162</li>
+<li>Fix bool settings imported from dj config file #1117</li>
+<li>Allow definition of tasks and new probe entries from config #1074, #1120,
+    #1179</li>
+<li>Enforce match between ingested nwb probe geometry and existing table entry
+    #1074</li>
+<li>Update DataJoint install and password instructions #1131</li>
+<li>Fix dandi upload process for nwb's with video or linked objects #1095, #1151</li>
+<li>Minor docs fixes #1145</li>
+<li>Add Nwb hashing tool #1093</li>
+<li>Test fixes<ul>
+<li>Remove stored hashes from pytests #1152</li>
+<li>Remove mambaforge from tests #1153</li>
+<li>Remove debug statement #1164</li>
+<li>Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169</li>
+<li>Initialize tables in pytests #1181</li>
+<li>Download test data without credentials, trigger on approved PRs #1180</li>
+<li>Add coverage of decoding pipeline to pytests #1155</li>
+</ul>
+</li>
+<li>Allow python &lt; 3.13 #1169</li>
+<li>Remove numpy version restriction #1169</li>
+<li>Merge table delete removes orphaned master entries #1164</li>
+<li>Edit <code>merge_fetch</code> to expect positional before keyword arguments #1181</li>
+<li>Allow part restriction <code>SpyglassMixinPart.delete</code> #1192</li>
+<li>Move cleanup of <code>IntervalList</code> orphan entries to cron job cleanup process
+    #1195</li>
+<li>Add mixin method <code>get_fully_defined_key</code> #1198</li>
+</ul>
+<h3 id="pipelines_2">Pipelines<a class="headerlink" href="#pipelines_2" title="Permanent link">¶</a></h3>
+<ul>
+<li>
+<p>Common</p>
+<ul>
+<li>Drop <code>SessionGroup</code> table #1106</li>
+<li>Improve electrodes import efficiency #1125</li>
+<li>Fix logger method call in <code>common_task</code> #1132</li>
+<li>Export fixes #1164<ul>
+<li>Allow <code>get_abs_path</code> to add selection entry. #1164</li>
+<li>Log restrictions and joins. #1164</li>
+<li>Check if querying table inherits mixin in <code>fetch_nwb</code>. #1192, #1201</li>
+<li>Ensure externals entries before adding to export. #1192</li>
+</ul>
+</li>
+<li>Error specificity in <code>LabMemberInfo</code> #1192</li>
+</ul>
+</li>
+<li>
+<p>Decoding</p>
+<ul>
+<li>Fix edge case errors in spike time loading #1083</li>
+<li>Allow fetch of partial key from <code>DecodingParameters</code> #1198</li>
+<li>Allow data fetching with partial but unique key #1198</li>
+</ul>
+</li>
+<li>
+<p>Linearization</p>
+<ul>
+<li>Add edge_map parameter to LinearizedPositionV1 #1091</li>
+</ul>
+</li>
+<li>
+<p>Position</p>
+<ul>
+<li>Fix video directory bug in <code>DLCPoseEstimationSelection</code> #1103</li>
+<li>Restore #973, allow DLC without position tracking #1100</li>
+<li>Minor fix to <code>DLCCentroid</code> make function order #1112, #1148</li>
+<li>Video creator tools:<ul>
+<li>Pass output path as string to <code>cv2.VideoWriter</code> #1150</li>
+<li>Set <code>DLCPosVideo</code> default processor to <code>matplotlib</code>, remove support for
+    <code>open-cv</code> #1168</li>
+<li><code>VideoMaker</code> class to process frames in multithreaded batches #1168, #1174</li>
+<li><code>TrodesPosVideo</code> updates for <code>matplotlib</code> processor #1174</li>
+</ul>
+</li>
+<li>User prompt if ambiguous insert in <code>DLCModelSource</code> #1192</li>
+</ul>
+</li>
+<li>
+<p>Spike Sorting</p>
+<ul>
+<li>Fix bug in <code>get_group_by_shank</code> #1096</li>
+<li>Fix bug in <code>_compute_metric</code> #1099</li>
+<li>Fix bug in <code>insert_curation</code> returned key #1114</li>
+<li>Add fields to <code>SpikeSortingRecording</code> to allow recompute #1093</li>
+<li>Fix handling of waveform extraction sparse parameter #1132</li>
+<li>Limit Artifact detection intervals to valid times #1196</li>
+</ul>
+</li>
+</ul>
+<h2 id="053-august-27-2024"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3">0.5.3</a> (August 27, 2024)<a class="headerlink" href="#053-august-27-2024" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_3">Infrastructure<a class="headerlink" href="#infrastructure_3" title="Permanent link">¶</a></h3>
+<ul>
+<li>Create class <code>SpyglassGroupPart</code> to aid delete propagations #899</li>
+<li>Fix bug report template #955</li>
+<li>Add rollback option to <code>populate_all_common</code> #957, #971</li>
+<li>Add long-distance restrictions via <code>&lt;&lt;</code> and <code>&gt;&gt;</code> operators. #943, #969</li>
+<li>Fix relative pathing for <code>mkdocstring-python=&gt;1.9.1</code>. #967, #968</li>
+<li>Add method to export a set of files to Dandi. #956</li>
+<li>Add <code>fetch_nwb</code> fallback to stream files from Dandi. #956</li>
+<li>Clean up old <code>TableChain.join</code> call in mixin delete. #982</li>
+<li>Add pytests for position pipeline, various <code>test_mode</code> exceptions #966</li>
+<li>Migrate <code>pip</code> dependencies from <code>environment.yml</code>s to <code>pyproject.toml</code> #966</li>
+<li>Add documentation for common error messages #997</li>
+<li>Expand <code>delete_downstream_merge</code> -&gt; <code>delete_downstream_parts</code>. #1002</li>
+<li><code>cautious_delete</code> now ...<ul>
+<li>Checks <code>IntervalList</code> and externals tables. #1002</li>
+<li>Ends early if called on empty table. #1055</li>
+</ul>
+</li>
+<li>Allow mixin tables with parallelization in <code>make</code> to run populate with
+    <code>processes &gt; 1</code> #1001, #1052, #1068</li>
+<li>Speed up fetch_nwb calls through merge tables #1017</li>
+<li>Allow <code>ModuleNotFoundError</code> or <code>ImportError</code> for optional dependencies #1023</li>
+<li>Ensure integrity of group tables #1026</li>
+<li>Convert list of LFP artifact removed interval list to array #1046</li>
+<li>Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062,
+    #1066, #1069</li>
+<li>Reivise docs organization.<ul>
+<li>Misc -&gt; Features/ForDevelopers. #1029</li>
+<li>Installation instructions -&gt; Setup notebook. #1029</li>
+</ul>
+</li>
+<li>Migrate SQL export tools to <code>utils</code> to support exporting <code>DandiPath</code> #1048</li>
+<li>Add tool for checking threads for metadata locks on a table #1063</li>
+<li>Use peripheral tables as fallback in <code>TableChains</code> #1035</li>
+<li>Ignore non-Spyglass tables during descendant check for <code>part_masters</code> #1035</li>
+</ul>
+<h3 id="pipelines_3">Pipelines<a class="headerlink" href="#pipelines_3" title="Permanent link">¶</a></h3>
+<ul>
+<li>
+<p>Common</p>
+<ul>
+<li><code>PositionVideo</code> table now inserts into self after <code>make</code> #966</li>
+<li>Don't insert lab member when creating lab team #983</li>
+<li>Files created by <code>AnalysisNwbfile.create()</code> receive new object_id #999</li>
+<li>Remove unused <code>ElectrodeBrainRegion</code> table #1003</li>
+<li>Files created by <code>AnalysisNwbfile.create()</code> receive new object_id #999,
+    #1004</li>
+<li>Remove redundant calls to tables in <code>populate_all_common</code> #870</li>
+<li>Improve logging clarity in <code>populate_all_common</code> #870</li>
+<li><code>PositionIntervalMap</code> now inserts null entries for missing intervals #870</li>
+<li><code>AnalysisFileLog</code> now truncates table names that exceed field length #1021</li>
+<li>Disable logging with <code>AnalysisFileLog</code> #1024</li>
+<li>Remove <code>common_ripple</code> schema #1061</li>
+</ul>
+</li>
+<li>
+<p>Decoding:</p>
+<ul>
+<li>Default values for classes on <code>ImportError</code> #966</li>
+<li>Add option to upsample data rate in <code>PositionGroup</code> #1008</li>
+<li>Avoid interpolating over large <code>nan</code> intervals in position #1033</li>
+<li>Minor code calling corrections #1073</li>
+</ul>
+</li>
+<li>
+<p>Position</p>
+<ul>
+<li>Allow dlc without pre-existing tracking data #973, #975</li>
+<li>Raise <code>KeyError</code> for missing input parameters across helper funcs #966</li>
+<li><code>DLCPosVideo</code> table now inserts into self after <code>make</code> #966</li>
+<li>Remove unused <code>PositionVideoSelection</code> and <code>PositionVideo</code> tables #1003</li>
+<li>Fix SQL query error in <code>DLCPosV1.fetch_nwb</code> #1011</li>
+<li>Add keyword args to all calls of <code>convert_to_pixels</code> #870</li>
+<li>Unify <code>make_video</code> logic across <code>DLCPosVideo</code> and <code>TrodesVideo</code> #870</li>
+<li>Replace <code>OutputLogger</code> context manager with decorator #870</li>
+<li>Rename <code>check_videofile</code> -&gt; <code>find_mp4</code> and <code>get_video_path</code> -&gt;
+    <code>get_video_info</code> to reflect actual use #870</li>
+<li>Fix <code>red_led_bisector</code> <code>np.nan</code> handling issue from #870. Fixed in #1034</li>
+<li>Fix <code>one_pt_centoid</code> <code>np.nan</code> handling issue from #870. Fixed in #1034</li>
+</ul>
+</li>
+<li>
+<p>Spikesorting</p>
+<ul>
+<li>Allow user to set smoothing timescale in <code>SortedSpikesGroup.get_firing_rate</code>
+    #994</li>
+<li>Update docstrings #996</li>
+<li>Remove unused <code>UnitInclusionParameters</code> table from <code>spikesorting.v0</code> #1003</li>
+<li>Fix bug in identification of artifact samples to be zeroed out in
+    <code>spikesorting.v1.SpikeSorting</code> #1009</li>
+<li>Remove deprecated dependencies on kachery_client #1014</li>
+<li>Add <code>UnitAnnotation</code> table and naming convention for units #1027, #1052</li>
+<li>Set <code>sparse</code> parameter to waveform extraction step in <code>spikesorting.v1</code>
+    #1039</li>
+<li>Efficiency improvement to <code>v0.Curation.insert_curation</code> #1072</li>
+<li>Add pytests for <code>spikesorting.v1</code> #1078</li>
+</ul>
+</li>
+</ul>
+<h2 id="052-april-22-2024"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2">0.5.2</a> (April 22, 2024)<a class="headerlink" href="#052-april-22-2024" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_4">Infrastructure<a class="headerlink" href="#infrastructure_4" title="Permanent link">¶</a></h3>
+<ul>
+<li>Refactor <code>TableChain</code> to include <code>_searched</code> attribute. #867</li>
+<li>Fix errors in config import #882</li>
+<li>Save current spyglass version in analysis nwb files to aid diagnosis #897</li>
+<li>Add functionality to export vertical slice of database. #875</li>
+<li>Add pynapple support #898</li>
+<li>Update PR template checklist to include db changes. #903</li>
+<li>Avoid permission check on personnel tables. #903</li>
+<li>Add documentation for <code>SpyglassMixin</code>. #903</li>
+<li>Add helper to identify merge table by definition. #903</li>
+<li>Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile
+    #918</li>
+<li>Fix potential duplicate entries in Merge part tables #922</li>
+<li>Add logging of AnalysisNwbfile creation time and size #937</li>
+<li>Fix error on empty delete call in merge table. #940</li>
+<li>Add log of AnalysisNwbfile creation time, size, and access count #937, #941</li>
+</ul>
+<h3 id="pipelines_4">Pipelines<a class="headerlink" href="#pipelines_4" title="Permanent link">¶</a></h3>
+<ul>
+<li>Spikesorting<ul>
+<li>Update calls in v0 pipeline for spikeinterface&gt;=0.99 #893</li>
+<li>Fix method type of <code>get_spike_times</code> #904</li>
+<li>Add helper functions for restricting spikesorting results and linking to
+    probe info #910</li>
+</ul>
+</li>
+<li>Decoding<ul>
+<li>Handle dimensions of clusterless <code>get_ahead_behind_distance</code> #904</li>
+<li>Fix improper handling of nwb file names with .strip #929</li>
+</ul>
+</li>
+</ul>
+<h2 id="051-march-7-2024"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1">0.5.1</a> (March 7, 2024)<a class="headerlink" href="#051-march-7-2024" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_5">Infrastructure<a class="headerlink" href="#infrastructure_5" title="Permanent link">¶</a></h3>
+<ul>
+<li>Add user roles to <code>database_settings.py</code>. #832</li>
+<li>Fix redundancy in <code>waveforms_dir</code> #857</li>
+<li>Revise <code>dj_chains</code> to permit undirected paths for paths with multiple Merge
+    Tables. #846</li>
+</ul>
+<h3 id="pipelines_5">Pipelines<a class="headerlink" href="#pipelines_5" title="Permanent link">¶</a></h3>
+<ul>
+<li>Common:<ul>
+<li>Add ActivityLog to <code>common_usage</code> to track unreferenced utilities. #870</li>
+</ul>
+</li>
+<li>Position:<ul>
+<li>Fixes to <code>environment-dlc.yml</code> restricting tensortflow #834</li>
+<li>Video restriction for multicamera epochs #834</li>
+<li>Fixes to <code>_convert_mp4</code> #834</li>
+<li>Replace deprecated calls to <code>yaml.safe_load()</code> #834</li>
+<li>Refactoring to reduce redundancy #870</li>
+<li>Migrate <code>OutputLogger</code> behavior to decorator #870</li>
+</ul>
+</li>
+<li>Spikesorting:<ul>
+<li>Increase<code>spikeinterface</code> version to &gt;=0.99.1, \&lt;0.100 #852</li>
+<li>Bug fix in single artifact interval edge case #859</li>
+<li>Bug fix in FigURL #871</li>
+</ul>
+</li>
+<li>LFP<ul>
+<li>In LFPArtifactDetection, only apply referencing if explicitly selected #863</li>
+</ul>
+</li>
+</ul>
+<h2 id="050-february-9-2024"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0">0.5.0</a> (February 9, 2024)<a class="headerlink" href="#050-february-9-2024" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure_6">Infrastructure<a class="headerlink" href="#infrastructure_6" title="Permanent link">¶</a></h3>
+<ul>
+<li>Docs:<ul>
+<li>Additional documentation. #690</li>
+<li>Add overview of Spyglass to docs. #779</li>
+<li>Update docs to reflect new notebooks. #776</li>
+</ul>
+</li>
+<li>Mixin:<ul>
+<li>Add Mixin class to centralize <code>fetch_nwb</code> functionality. #692, #734</li>
+<li>Refactor restriction use in <code>delete_downstream_merge</code> #703</li>
+<li>Add <code>cautious_delete</code> to Mixin class<ul>
+<li>Initial implementation. #711, #762</li>
+<li>More robust caching of join to downstream tables. #806</li>
+<li>Overwrite datajoint <code>delete</code> method to use <code>cautious_delete</code>. #806</li>
+<li>Reverse join order for session summary. #821</li>
+<li>Add temporary logging of use to <code>common_usage</code>. #811, #821</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>Merge Tables:<ul>
+<li>UUIDs: Revise Merge table uuid generation to include source. #824</li>
+<li>UUIDs: Remove mutual exclusivity logic due to new UUID generation. #824</li>
+<li>Add method for <code>merge_populate</code>. #824</li>
+</ul>
+</li>
+<li>Linting:<ul>
+<li>Clean up following pre-commit checks. #688</li>
+<li>Update linting for Black 24. #808</li>
+</ul>
+</li>
+<li>Misc:<ul>
+<li>Add <code>deprecation_factory</code> to facilitate table migration. #717</li>
+<li>Add Spyglass logger. #730</li>
+<li>Increase pytest coverage for <code>common</code>, <code>lfp</code>, and <code>utils</code>. #743</li>
+<li>Steamline dependency management. #822</li>
+</ul>
+</li>
+</ul>
+<h3 id="pipelines_6">Pipelines<a class="headerlink" href="#pipelines_6" title="Permanent link">¶</a></h3>
+<ul>
+<li>Common:<ul>
+<li><code>IntervalList</code>: Add secondary key <code>pipeline</code> #742</li>
+<li>Add <code>common_usage</code> table. #811, #821, #824</li>
+<li>Add catch errors during <code>populate_all_common</code>. #824</li>
+</ul>
+</li>
+<li>Spike sorting:<ul>
+<li>Add SpikeSorting V1 pipeline. #651</li>
+<li>Move modules into spikesorting.v0 #807</li>
+</ul>
+</li>
+<li>LFP:<ul>
+<li>Minor fixes to LFPBandV1 populator and <code>make</code>. #706, #795</li>
+<li>LFPV1: Fix error for multiple lfp settings on same data #775</li>
+</ul>
+</li>
+<li>Linearization:<ul>
+<li>Minor fixes to LinearizedPositionV1 pipeline #695</li>
+<li>Rename <code>position_linearization</code> -&gt; <code>linearization</code>. #717</li>
+<li>Migrate tables: <code>common_position</code> -&gt; <code>linearization.v0</code>. #717</li>
+</ul>
+</li>
+<li>Position:<ul>
+<li>Refactor input validation in DLC pipeline. #688</li>
+<li>DLC path handling from config, and normalize naming convention. #722</li>
+<li>Fix in place column bug #752</li>
+</ul>
+</li>
+<li>Decoding:<ul>
+<li>Add <code>decoding</code> pipeline V1. #731, #769, #819</li>
+<li>Add a table to store the decoding results #731</li>
+<li>Use the new <code>non_local_detector</code> package for decoding #731</li>
+<li>Allow multiple spike waveform features for clusterless decoding #731</li>
+<li>Reorder notebooks #731</li>
+<li>Add fetch class functionality to <code>Merge</code> table. #783, #786</li>
+<li>Add ability to filter sorted units in decoding #807</li>
+<li>Rename SortedSpikesGroup.SortGroup to SortedSpikesGroup.Units #807</li>
+<li>Change methods with load_... to fetch_... for consistency #807</li>
+<li>Use merge table methods to access part methods #807</li>
+</ul>
+</li>
+<li>MUA<ul>
+<li>Add MUA pipeline V1. #731, #819</li>
+</ul>
+</li>
+<li>Ripple<ul>
+<li>Add figurl to Ripple pipeline #819</li>
+</ul>
+</li>
+</ul>
+<h2 id="043-november-7-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3">0.4.3</a> (November 7, 2023)<a class="headerlink" href="#043-november-7-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Migrate <code>config</code> helper scripts to Spyglass codebase. #662</li>
+<li>Revise contribution guidelines. #655</li>
+<li>Minor bug fixes. #656, #657, #659, #651, #671</li>
+<li>Add setup instruction specificity.</li>
+<li>Reduce primary key varchar allocation aross may tables. #664</li>
+</ul>
+<h2 id="042-october-10-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2">0.4.2</a> (October 10, 2023)<a class="headerlink" href="#042-october-10-2023" title="Permanent link">¶</a></h2>
+<h3 id="infrastructure-support">Infrastructure / Support<a class="headerlink" href="#infrastructure-support" title="Permanent link">¶</a></h3>
+<ul>
+<li>Bumped Python version to 3.9. #583</li>
+<li>Updated user management helper scripts for MySQL 8. #650</li>
+<li>Centralized config/path handling to permit setting via datajoint config. #593</li>
+<li>Fixed Merge Table deletes: error specificity and transaction context. #617</li>
+</ul>
+<h3 id="pipelines_7">Pipelines<a class="headerlink" href="#pipelines_7" title="Permanent link">¶</a></h3>
+<ul>
+<li>Common:<ul>
+<li>Added support multiple cameras per epoch. #557</li>
+<li>Removed <code>common_backup</code> schema. #631</li>
+<li>Added support for multiple position objects per NWB in <code>common_behav</code> via
+    PositionSource.SpatialSeries and RawPosition.PosObject #628, #616. <em>Note:</em>
+    Existing functions have been made compatible, but column labels for
+    <code>RawPosition.fetch1_dataframe</code> may change.</li>
+</ul>
+</li>
+<li>Spike sorting:<ul>
+<li>Added pipeline populator. #637, #646, #647</li>
+<li>Fixed curation functionality for <code>nn_isolation</code>. #597, #598</li>
+</ul>
+</li>
+<li>Position: Added position interval/epoch mapping via PositionIntervalMap. #620,
+    #621, #627</li>
+<li>LFP: Refactored pipeline. #594, #588, #605, #606, #607, #608, #615, #629</li>
+</ul>
+<h2 id="041-june-30-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.1">0.4.1</a> (June 30, 2023)<a class="headerlink" href="#041-june-30-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Add mkdocs automated deployment. #527, #537, #549, #551</li>
+<li>Add class for Merge Tables. #556, #564, #565</li>
+</ul>
+<h2 id="040-may-22-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.0">0.4.0</a> (May 22, 2023)<a class="headerlink" href="#040-may-22-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Updated call to <code>spikeinterface.preprocessing.whiten</code> to use dtype np.float16.
+    #446,</li>
+<li>Updated default spike sorting metric parameters. #447</li>
+<li>Updated whitening to be compatible with recent changes in spikeinterface when
+    using mountainsort. #449</li>
+<li>Moved LFP pipeline to <code>src/spyglass/lfp/v1</code> and addressed related usability
+    issues. #468, #478, #482, #484, #504</li>
+<li>Removed whiten parameter for clusterless thresholder. #454</li>
+<li>Added plot to plot all DIO events in a session. #457</li>
+<li>Added file sharing functionality through kachery_cloud. #458, #460</li>
+<li>Pinned numpy version to <code>numpy&lt;1.24</code></li>
+<li>Added scripts to add guests and collaborators as users. #463</li>
+<li>Cleaned up installation instructions in repo README. #467</li>
+<li>Added checks in decoding visualization to ensure time dimensions are the
+    correct length.</li>
+<li>Fixed artifact removed valid times. #472</li>
+<li>Added codespell workflow for spell checking and fixed typos. #471</li>
+<li>Updated LFP code to save LFP as <code>pynwb.ecephys.LFP</code> type. #475</li>
+<li>Added artifact detection to LFP pipeline. #473</li>
+<li>Replaced calls to <code>spikeinterface.sorters.get_default_params</code> with
+    <code>spikeinterface.sorters.get_default_sorter_params</code>. #486</li>
+<li>Updated position pipeline and added functionality to handle pose estimation
+    through DeepLabCut. #367, #505</li>
+<li>Updated <code>environment_position.yml</code>. #502</li>
+<li>Renamed <code>FirFilter</code> class to <code>FirFilterParameters</code>. #512</li>
+</ul>
+<h2 id="034-march-30-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.4">0.3.4</a> (March 30, 2023)<a class="headerlink" href="#034-march-30-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Fixed error in spike sorting pipeline referencing the "probe_type" column
+    which is no longer accessible from the <code>Electrode</code> table. #437</li>
+<li>Fixed error when inserting an NWB file that does not have a probe
+    manufacturer. #433, #436</li>
+<li>Fixed error when adding a new <code>DataAcquisitionDevice</code> and a new <code>ProbeType</code>.
+    #436</li>
+<li>Fixed inconsistency between capitalized/uncapitalized versions of "Intan" for
+    DataAcquisitionAmplifier and DataAcquisitionDevice.adc_circuit. #430, #438</li>
+</ul>
+<h2 id="033-march-29-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.3">0.3.3</a> (March 29, 2023)<a class="headerlink" href="#033-march-29-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Fixed errors from referencing the changed primary key for <code>Probe</code>. #429</li>
+</ul>
+<h2 id="032-march-28-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.2">0.3.2</a> (March 28, 2023)<a class="headerlink" href="#032-march-28-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Fixed import of <code>common_nwbfile</code>. #424</li>
+</ul>
+<h2 id="031-march-24-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.1">0.3.1</a> (March 24, 2023)<a class="headerlink" href="#031-march-24-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Fixed import error due to <code>sortingview.Workspace</code>. #421</li>
+</ul>
+<h2 id="030-march-24-2023"><a href="https://github.com/LorenFrankLab/spyglass/releases/tag/0.3.0">0.3.0</a> (March 24, 2023)<a class="headerlink" href="#030-march-24-2023" title="Permanent link">¶</a></h2>
+<ul>
+<li>Refactor common for non Frank Lab data, allow file-based mods #420</li>
+<li>Allow creation and linkage of device metadata from YAML #400</li>
+<li>Move helper functions to utils directory #386</li>
+</ul>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+<button class="md-top md-icon" data-md-component="top" hidden="" type="button">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+</main>
+<footer class="md-footer">
+<nav aria-label="Footer" class="md-footer__inner md-grid">
+<a aria-label="Previous: waveforms.py" class="md-footer__link md-footer__link--prev" href="../api/utils/waveforms/">
+<div class="md-footer__button md-icon">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</div>
+<div class="md-footer__title">
+<span class="md-footer__direction">
+                Previous
+              </span>
+<div class="md-ellipsis">
+                waveforms.py
+              </div>
+</div>
+</a>
+<a aria-label="Next: Copyright" class="md-footer__link md-footer__link--next" href="../LICENSE/">
+<div class="md-footer__title">
+<span class="md-footer__direction">
+                Next
+              </span>
+<div class="md-ellipsis">
+                Copyright
+              </div>
+</div>
+<div class="md-footer__button md-icon">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"></path></svg>
+</div>
+</a>
+</nav>
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+<div class="md-copyright__highlight">
+      Copyright (c) 2020-present Loren Frank
+    </div>
+</div>
+<div class="md-social">
+<a class="md-social__link" href="https://github.com/LorenFrankLab/spyglass" rel="noopener" target="_blank" title="github.com">
+<svg viewbox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+</a>
+<a class="md-social__link" href="https://pypi.org/project/spyglass-neuro/" rel="noopener" target="_blank" title="pypi.org">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"></path></svg>
+</a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+<script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+</body>
+</html>

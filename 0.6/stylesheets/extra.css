@@ -1,0 +1,133 @@
+/*https://github.com/squidfunk/mkdocs-material/blob/master/src/assets/stylesheets/main/_colors.scss*/
+/* Color palette of lab logo */
+:root {
+  --green-: #2a4344;
+  --blue--: #40555e;
+  --brown-: #5c3829;
+  --orange: #b45c3c;
+  --yellow: #ecd4a3;
+  --white-: #dbdcda;
+  --icon-hue: #448aff;
+}
+
+[data-md-color-scheme="auto"] {
+  /* Primary Bar */
+  --md-primary-fg-color: var(--brown-);
+  --md-primary-bg-color: var(--yellow);
+  --md-accent-fg-color: var(--blue--);
+  --md-accent-bg-color: var(--orange);
+  /* // Code color shades */
+  --md-code-fg-color: var(--brown-);
+  --md-code-bg-color: var(--yellow);
+  /* Typeset `a` color shades */
+  --md-typeset-a-color: var(--orange);
+}
+
+[data-md-color-scheme="slate"] {
+  /* Primary Bar */
+  --md-primary-fg-color: var(--brown-);
+  --md-primary-bg-color: var(--yellow);
+  --md-accent-fg-color: var(--orange);
+  --md-accent-bg-color: var(--blue--);
+  --md-typeset-a-color: var(--yellow);
+  --md-hue: 30;
+}
+
+.table {
+  table-layout: auto;
+  width: auto;
+}
+
+td {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+blockquote {
+  margin-left: 10px;
+  padding-left: 10px;
+  padding-top: 0px;
+  padding-bottom: 0px;
+  border-left: 3px solid #80808080;
+}
+
+/* DataJoint Header */
+.py.class dd > p:first-child {
+  margin-top: 0.8rem;
+  background-color: #f8f9fb;
+  margin-bottom: 0.9rem;
+  font-weight: bold;
+  margin-left: 0;
+  font-size: 1rem;
+}
+
+[data-theme="slate"] .py.class dd > p:first-child {
+  background-color: #000;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .py.class dd > p:first-child {
+    background-color: #000;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] .py.class dd > p:first-child {
+    background-color: #f8f9fb;
+  }
+}
+
+.py.class dd > p {
+  margin-bottom: 1px;
+  margin-top: 1px;
+  background-color: #f8f9fb;
+  margin-left: 20px;
+  font-size: 0.9rem;
+}
+
+.md-typeset .quote > .admonition-title:before,
+.md-typeset .quote > summary:before {
+  background-color: var(--icon-hue);
+  -webkit-mask-image: var(--md-admonition-icon--note);
+  mask-image: var(--md-admonition-icon--note);
+}
+
+[data-theme="slate"] .py.class dd > p {
+  background-color: #000;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .py.class dd > p {
+    background-color: #000;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] .py.class dd > p {
+    background-color: #f8f9fb;
+  }
+}
+
+.py.class dd > p.rubric {
+  background-color: white;
+  margin-top: 15px;
+  margin-left: 0;
+  font-size: 1rem;
+}
+
+[data-theme="slate"] .py.class dd > p.rubric {
+  background-color: #000;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] .py.class dd > p.rubric {
+    background-color: #000;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] .py.class dd > p.rubric {
+    background-color: #f8f9fb;
+  }
+}
