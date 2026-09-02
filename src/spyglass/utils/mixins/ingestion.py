@@ -10,7 +10,10 @@ from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import get_file_namespaces
-from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
+from spyglass.utils.nwb_helper_fn import (
+    is_nwb_obj_type,
+    sanitize_nwb_object_name,
+)
 
 # typing alias compatible with Python 3.9
 IngestionEntries = dict["IngestionMixin", list[dict]]
@@ -199,7 +202,7 @@ class IngestionMixin(BaseMixin):
     @staticmethod
     def sanitize_nwb_object_name(name: Optional[str]) -> Optional[str]:
         """Sanitize NWB object name for case-insensitive and space-insensitive matching."""
-        return name.lower().replace(" ", "") if name else None
+        return sanitize_nwb_object_name(name)
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
         """Log line for insert_from_nwbfile."""

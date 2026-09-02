@@ -21,6 +21,18 @@ __configs = dict()
 global invalid_electrode_index
 invalid_electrode_index = 99999999
 
+RAW_ELECTRICAL_SERIES_NAMES = (
+    "e-series",
+    "electricalseries",
+    "ephys",
+    "electrophysiology",
+)
+
+
+def sanitize_nwb_object_name(name):
+    """Return the case- and space-insensitive form of an NWB object name."""
+    return name.lower().replace(" ", "") if name else None
+
 
 def assert_safe_nwb_file_name(nwb_file_name: str) -> None:
     """Reject a caller-supplied NWB file name that is not a bare basename.
@@ -361,7 +373,8 @@ def get_raw_eseries_path(nwb_file_path):
     Raises
     ------
     ValueError
-        If the acquisition group contains no ElectricalSeries.
+        If the acquisition group does not contain exactly one named raw
+        ElectricalSeries candidate.
     """
     # Read the file layout directly with h5py rather than ``get_nwb_file``: this
     # stays a pure file inspection (no database, no pynwb namespace load), and
@@ -379,14 +392,21 @@ def get_raw_eseries_path(nwb_file_path):
                     neurodata_type = neurodata_type.decode()
                 if neurodata_type == "ElectricalSeries":
                     names.append(name)
-    if not names:
+    wanted = {
+        sanitize_nwb_object_name(name) for name in RAW_ELECTRICAL_SERIES_NAMES
+    }
+    matches = [
+        name for name in names if sanitize_nwb_object_name(name) in wanted
+    ]
+    if len(matches) != 1:
         raise ValueError(
-            f"No acquisition ElectricalSeries found in {nwb_file_path}."
+            "Expected exactly one raw acquisition ElectricalSeries named one "
+            f"of {list(RAW_ELECTRICAL_SERIES_NAMES)} in {nwb_file_path}; "
+            f"found {matches or 'none'} among acquisition ElectricalSeries "
+            f"{names}. Pass electrical_series_path='acquisition/<name>' "
+            "explicitly to select one."
         )
-    # Standard Spyglass raw files carry a single acquisition ElectricalSeries.
-    # If more than one is present, the first matches what Raw ingests (Raw sets
-    # ``_only_ingest_first`` and records the first acquisition ElectricalSeries).
-    return f"acquisition/{names[0]}"
+    return f"acquisition/{matches[0]}"
 
 
 def estimate_sampling_rate(
