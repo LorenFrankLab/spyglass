@@ -491,13 +491,27 @@ print(f"model_key: {model_key['model_id']}")
 # The best available device (GPU if present, otherwise CPU) is selected
 # automatically for both training and inference. `device` is a **runtime**
 # choice, not a stored/hashed parameter, so it never forks an
-# otherwise-identical parameter set. To force a specific device, pass it to
-# `populate` via `make_kwargs`:
+# otherwise-identical parameter set.
+#
+# On a machine with several GPUs, a bare `"cuda"` is resolved to the
+# *least-loaded* device, preferring one that is completely unused. This
+# matters on a shared cluster node: PyTorch reads a plain `"cuda"` as
+# `cuda:0` specifically, so without this step every job on the machine
+# would pile onto GPU 0 and fail with an out-of-memory error while the
+# other cards sat idle. The chosen device is logged.
+#
+# To force a specific device, pass it to `populate` via `make_kwargs`:
 #
 # ```python
-# Model().populate(selection_key, make_kwargs={"device": "cuda:0"})  # training
-# PoseEstim().populate(estim_key, make_kwargs={"device": "cuda:0"})  # inference
+# Model().populate(selection_key, make_kwargs={"device": "cuda"})  # training
+# PoseEstim().populate(estim_key, make_kwargs={"device": "cuda"})  # inference
 # ```
+#
+# Prefer `"cuda"` over a hardcoded `"cuda:0"`. An explicit index is
+# honored as given — which is the point of asking for one — but *which*
+# GPU is free changes from run to run, so a pinned index silently
+# reintroduces the same crowding problem. Name an index only when you
+# genuinely need that card.
 #
 # </details>
 
@@ -766,8 +780,9 @@ if model_key is None:
 #
 # Here `params_hash` uniquely identifies the parameter set; inserting a new
 # entry whose `params` match an existing row raises an error. The compute device
-# (GPU if present, else CPU) is chosen automatically at run time — you don't set
-# it here. These parameters cover scientific settings like `batch_size`.
+# (GPU if present, else CPU — and the least-loaded GPU when there are several)
+# is chosen automatically at run time — you don't set it here. These parameters
+# cover scientific settings like `batch_size`.
 
 # %%
 params_id = "batch8"
@@ -1366,8 +1381,17 @@ else:
 #
 # **"Inference taking too long"**
 # - Reduce batch size: `batch_size: 4` or `batch_size: 1`
-# - Run on a machine with a GPU (the best available device is used automatically)
+# - Run on a machine with a GPU (the best available device is used
+#   automatically; on a multi-GPU host the least-loaded card is picked)
 # - Consider shorter video clips for testing
+#
+# **"CUDA out of memory"**
+# - If you pinned a device (`"cuda:0"`), drop the index and pass `"cuda"` so
+#   Spyglass can pick a free card — a hardcoded index does not move when that
+#   GPU is busy
+# - If every GPU is genuinely full, populate raises before inference starts,
+#   listing free memory per device: wait for another job, or use a `device:
+#   "cpu"` parameter set
 #
 # </details>
 #

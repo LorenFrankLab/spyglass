@@ -376,13 +376,27 @@ else:
 # The best available device (GPU if present, otherwise CPU) is selected
 # automatically for both training and inference. `device` is a **runtime**
 # choice, not a stored/hashed parameter, so it never forks an
-# otherwise-identical parameter set. To force a specific device, pass it to
-# `populate` via `make_kwargs`:
+# otherwise-identical parameter set.
+#
+# On a machine with several GPUs, a bare `"cuda"` is resolved to the
+# *least-loaded* device, preferring one that is completely unused. This
+# matters on a shared cluster node: PyTorch reads a plain `"cuda"` as
+# `cuda:0` specifically, so without this step every job on the machine
+# would pile onto GPU 0 and fail with an out-of-memory error while the
+# other cards sat idle. The chosen device is logged.
+#
+# To force a specific device, pass it to `populate` via `make_kwargs`:
 #
 # ```python
-# Model().populate(train_sel_key, make_kwargs={"device": "cuda:0"})  # training
-# PoseEstim().populate(estim_key, make_kwargs={"device": "cuda:0"})  # inference
+# Model().populate(train_sel_key, make_kwargs={"device": "cuda"})  # training
+# PoseEstim().populate(estim_key, make_kwargs={"device": "cuda"})  # inference
 # ```
+#
+# Prefer `"cuda"` over a hardcoded `"cuda:0"`. An explicit index is
+# honored as given — which is the point of asking for one — but *which*
+# GPU is free changes from run to run, so a pinned index silently
+# reintroduces the same crowding problem. Name an index only when you
+# genuinely need that card.
 #
 # </details>
 
@@ -712,7 +726,8 @@ if model_key is None:
 
 # %%
 # Name a set of inference parameters. The best available device (GPU if present,
-# else CPU) is selected automatically at run time — you don't set it here.
+# else CPU — and the least-loaded GPU when there are several) is selected
+# automatically at run time — you don't set it here.
 batch_size = 4
 params_result = PoseEstimParams.insert_params(
     params={"batch_size": batch_size},
@@ -828,6 +843,12 @@ print(pose_df.head())
 # #### **Note on device**
 # - The best available device (GPU if present, otherwise CPU) is selected
 #   automatically at run time — you don't set it here.
+# - On a multi-GPU host, a bare `"cuda"` resolves to the least-loaded card,
+#   preferring one that is completely unused. Prefer it over a hardcoded
+#   `"cuda:0"`, which does not move when that GPU is busy.
+# - If every GPU is full, populate raises before inference starts and lists
+#   free memory per device, rather than dying with an out-of-memory error
+#   part-way through a long run.
 #
 # ### Diagnostic Commands
 #
