@@ -81,6 +81,50 @@ class TestModelInference:
         assert captured.get("save_as_csv") is True
         assert Path(captured.get("destfolder")) == destfolder
 
+    def test_run_inference_cuda_unpickling_error_hint(
+        self,
+        model,
+        dlc_project_config,
+        dlc_bootstrapped_session,
+        mock_video_file,
+        skip_if_no_dlc,
+        caplog,
+    ):
+        """A CUDA-related UnpicklingError propagates with an actionable hint.
+
+        torch's ``weights_only`` unpickler wraps any snapshot-load failure
+        (including a low-level "device busy/unavailable" CUDA driver error)
+        in a generic ``pickle.UnpicklingError``. run_dlc_inference must not
+        swallow or reclassify it, but should log an actionable hint pointing
+        at GPU contention rather than a corrupt/untrusted file.
+        """
+        import logging
+        import pickle
+        from unittest.mock import patch
+
+        model_key = model.load(model_path=str(dlc_project_config))
+
+        def _fake_analyze(**kwargs):
+            raise pickle.UnpicklingError(
+                "Weights only load failed... WeightsUnpickler error: CUDA "
+                "error: CUDA-capable device(s) is/are busy or unavailable"
+            )
+
+        with (
+            # spyglass's own logger has its level pinned to INFO (see
+            # spyglass.utils.logging), which filters out the .debug() calls
+            # _err_msg uses in test mode before caplog's root-level setting
+            # ever sees them. Override this specific logger by name.
+            caplog.at_level(logging.DEBUG, logger="spyglass"),
+            patch("deeplabcut.analyze_videos", side_effect=_fake_analyze),
+            pytest.raises(pickle.UnpicklingError),
+        ):
+            model.run_inference(model_key, video_path=str(mock_video_file))
+
+        assert any(
+            "GPU availability problem" in rec.message for rec in caplog.records
+        ), "Expected an actionable GPU-contention hint in the logs"
+
     def test_run_inference_invalid_model(
         self,
         model,
@@ -108,6 +152,39 @@ class TestModelInference:
                 model_key,
                 video_path="/nonexistent/video.avi",
             )
+
+
+class TestCheckGpuAvailable:
+    """check_gpu_available: the non-cuda guard short-circuits before
+    touching torch at all (see issue #1676).
+
+    Lives alongside PoseInferenceRunner in nwb_io.py (DLC 3.x/PyTorch is
+    the only V2 backend), not in the tool-agnostic position/utils/ package
+    -- a bare torch.cuda.is_available() check would be silently wrong for
+    a hypothetical V1/TensorFlow caller.
+
+    The torch.cuda-touching branch itself is marked ``# pragma: no cover``
+    in source and deliberately untested here: CI never has a GPU, and
+    mocking ``torch.cuda.is_available()`` to assert an ``if not X: raise``
+    fires is mock theatre -- it tests Python's control flow, not our
+    logic. The one thing worth asserting is the real branching decision:
+    a non-CUDA device never reaches that code at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.v2.utils.nwb_io import check_gpu_available
+
+        self.fn = check_gpu_available
+
+    @pytest.mark.parametrize("device", [None, "cpu"])
+    def test_non_cuda_device_is_noop(self, device):
+        """Non-CUDA (or absent) device requests never touch torch.cuda."""
+        from unittest.mock import patch
+
+        with patch("torch.cuda.is_available") as mock_avail:
+            self.fn(device)
+        mock_avail.assert_not_called()
 
 
 class _FakeCap:
@@ -504,6 +581,122 @@ class TestEndToEndInference:
             PoseEstim().populate(selection_key)
 
         assert len(PoseEstim() & selection_key) == 1
+
+
+class TestFetchVideoTimestamps:
+    """PoseEstim._fetch_video_timestamps: NWB lookup + video-file fallback
+    (see issue #1676). Two bugs fixed here:
+
+    1. The NWB lookup's exception was silently swallowed (``ts = None``
+       with no logging), so a real failure (e.g. an NFS/HDF5 file-lock
+       hiccup) was indistinguishable from "no NWB data, fall back as
+       expected" -- both just fell through to the same generic error.
+    2. The video-file fallback read frame count from the *raw* registered
+       ``VideoFile.path`` (e.g. a ``.h264`` elementary stream) instead of
+       the already-converted mp4 -- OpenCV cannot read a frame count from
+       a raw H.264 stream (it returns a nonsensical negative value rather
+       than raising), so the fallback silently failed too.
+    """
+
+    KEY = {"vid_group_id": "vg1"}
+    VF_KEY = {
+        "vid_group_id": "vg1",
+        "nwb_file_name": "n.nwb",
+        "epoch": 1,
+        "video_file_num": 1,
+    }
+
+    def _patch_vf_keys(self, estim_mod):
+        estim_mod.VidFileGroup.File.__and__.return_value.fetch.return_value = [
+            self.VF_KEY
+        ]
+
+    def test_nwb_lookup_success_returns_timestamps(self):
+        """The common path: NWB lookup succeeds, fallback never runs."""
+        from unittest.mock import MagicMock, patch
+
+        from spyglass.position.v2 import estim as estim_mod
+
+        with patch.multiple(
+            estim_mod, VidFileGroup=MagicMock(), VideoFile=MagicMock()
+        ):
+            self._patch_vf_keys(estim_mod)
+            fake_video_file = MagicMock()
+            fake_video_file.timestamps = [1.0, 2.0, 3.0]
+            estim_mod.VideoFile.__and__.return_value.fetch_nwb.return_value = [
+                {"video_file": fake_video_file}
+            ]
+            result = estim_mod.PoseEstim._fetch_video_timestamps(self.KEY)
+
+        np.testing.assert_array_equal(result, [1.0, 2.0, 3.0])
+
+    def test_nwb_lookup_failure_is_logged(self, caplog):
+        """A real NWB-lookup exception is logged, not silently swallowed."""
+        import logging
+        from unittest.mock import MagicMock, patch
+
+        from spyglass.position.v2 import estim as estim_mod
+
+        with patch.multiple(
+            estim_mod, VidFileGroup=MagicMock(), VideoFile=MagicMock()
+        ):
+            self._patch_vf_keys(estim_mod)
+            estim_mod.VideoFile.__and__.return_value.fetch_nwb.side_effect = (
+                OSError("unable to lock file")
+            )
+            estim_mod.VideoFile.__and__.return_value.fetch1.return_value = (
+                "/tmp/raw.h264"
+            )
+            with (
+                patch(
+                    "spyglass.position.utils.general.ensure_mp4",
+                    return_value=["/tmp/converted.mp4"],
+                ),
+                patch("cv2.VideoCapture") as mock_cap,
+                # spyglass's logger is pinned to INFO; _err_msg/_warn_msg use
+                # .debug() in test mode, which INFO would filter before
+                # caplog's root-level setting ever sees it.
+                caplog.at_level(logging.DEBUG, logger="spyglass"),
+            ):
+                mock_cap.return_value.get.side_effect = [30.0, 10]
+                estim_mod.PoseEstim._fetch_video_timestamps(self.KEY)
+
+        assert any(
+            "NWB timestamp lookup failed" in r.message
+            and "unable to lock file" in r.message
+            for r in caplog.records
+        ), "Expected the real NWB-lookup exception to be logged"
+
+    def test_fallback_uses_converted_mp4_not_raw_source(self):
+        """The video-file fallback counts frames on the converted mp4."""
+        from unittest.mock import MagicMock, patch
+
+        from spyglass.position.v2 import estim as estim_mod
+
+        with patch.multiple(
+            estim_mod, VidFileGroup=MagicMock(), VideoFile=MagicMock()
+        ):
+            self._patch_vf_keys(estim_mod)
+            estim_mod.VideoFile.__and__.return_value.fetch_nwb.side_effect = (
+                OSError("no nwb data")
+            )
+            estim_mod.VideoFile.__and__.return_value.fetch1.return_value = (
+                "/tmp/raw.h264"
+            )
+            with (
+                patch(
+                    "spyglass.position.utils.general.ensure_mp4",
+                    return_value=["/tmp/converted.mp4"],
+                ) as mock_ensure_mp4,
+                patch("cv2.VideoCapture") as mock_cap,
+            ):
+                mock_cap.return_value.get.side_effect = [30.0, 10]
+                result = estim_mod.PoseEstim._fetch_video_timestamps(self.KEY)
+
+        mock_ensure_mp4.assert_called_once()
+        assert mock_ensure_mp4.call_args[0][0] == ["/tmp/raw.h264"]
+        mock_cap.assert_called_once_with("/tmp/converted.mp4")
+        np.testing.assert_array_equal(result, np.arange(10) / 30.0)
 
 
 class TestInsertEstimationTaskValidation:

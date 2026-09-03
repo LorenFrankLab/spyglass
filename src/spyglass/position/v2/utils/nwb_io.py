@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import pickle
 from pathlib import Path
 from typing import Union
 
@@ -16,6 +17,56 @@ try:
     import ndx_pose
 except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
+
+
+def check_gpu_available(device: Union[str, None]) -> None:
+    """Raise fast if a GPU device is requested but none is visible.
+
+    Meant to be called at the top of ``PoseEstim.make_compute``, before any
+    video conversion or model-loading work, so a missing/misconfigured GPU
+    fails immediately with a clear message instead of surfacing deep inside
+    ``torch.load`` as a cryptic ``pickle.UnpicklingError`` after several
+    minutes of setup work (see issue #1676).
+
+    This only checks basic driver/runtime visibility
+    (``torch.cuda.is_available()``); it cannot detect a GPU that is present
+    but locked/busy from another process's exclusive context -- that
+    condition is inherently racy to pre-check (the device can be grabbed
+    between the check and the actual use) and is handled instead by the
+    actionable hint in :meth:`PoseInferenceRunner.run_dlc_inference` if it
+    happens at load time.
+
+    DLC 3.x/PyTorch is the only V2 inference backend (V1's DeepLabCut used
+    TensorFlow instead), so this lives alongside ``PoseInferenceRunner``
+    rather than in the tool-agnostic ``position/utils/`` package -- a bare
+    ``torch.cuda.is_available()`` check would be silently wrong for a
+    TensorFlow caller, and V1 has no comparable ``device="cuda"`` string
+    convention to check (it takes an integer ``gputouse`` instead).
+
+    Parameters
+    ----------
+    device : str or None
+        The requested device string, e.g. ``"cuda"``, ``"cuda:0"``,
+        ``"cpu"``, or ``None``. A no-op unless it requests a CUDA device.
+
+    Raises
+    ------
+    RuntimeError
+        If a CUDA device is requested but ``torch.cuda.is_available()`` is
+        False.
+    """
+    if not device or "cuda" not in str(device).lower():
+        return
+
+    import torch  # pragma: no cover -- CI has no GPU, see below
+
+    if not torch.cuda.is_available():  # pragma: no cover
+        raise RuntimeError(  # pragma: no cover
+            f"Requested device={device!r}, but no CUDA device is visible "
+            "to PyTorch on this machine (torch.cuda.is_available() is "
+            "False). Check GPU drivers and CUDA_VISIBLE_DEVICES, or use a "
+            "CPU-configured PoseEstimParams entry (device='cpu')."
+        )
 
 
 class PoseInferenceRunner(BaseMixin):
@@ -150,7 +201,13 @@ class PoseInferenceRunner(BaseMixin):
             kwargs, analyze_params, self._warn_msg, context="inference"
         )
 
-        self._info_msg(f"Running DLC inference on {videos}")
+        self._info_msg(
+            f"Running DLC inference on {len(videos)} video(s) "
+            f"[model={Path(model_path).parent.name}, "
+            f"device={analyze_params.get('device', 'auto')}, "
+            f"batch_size={analyze_params.get('batch_size', 'default')}]: "
+            f"{videos}"
+        )
         self._logger.debug("DLC parameters: %s", analyze_params)
 
         try:
@@ -167,8 +224,30 @@ class PoseInferenceRunner(BaseMixin):
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 analyze_videos(**analyze_params)
-        except (RuntimeError, OSError, ValueError) as e:
-            self._err_msg(f"DLC inference failed: {e}")
+        except (
+            RuntimeError,
+            OSError,
+            ValueError,
+            pickle.UnpicklingError,
+        ) as e:
+            # torch.load's weights_only unpickler wraps ANY failure during
+            # snapshot loading -- including a low-level CUDA driver error --
+            # in a generic UnpicklingError with a scary "arbitrary code
+            # execution" warning that has nothing to do with the real cause.
+            # Detect the common case (GPU busy/unavailable/locked by another
+            # process) and add an actionable hint alongside the original
+            # message, rather than letting it look like a corrupt/untrusted
+            # snapshot file.
+            hint = ""
+            if "cuda" in str(e).lower():
+                hint = (
+                    " This looks like a GPU availability problem (busy, "
+                    "locked by another process, or a driver/visibility "
+                    "issue) rather than a bad model file -- check "
+                    "`nvidia-smi` on the inference host, or retry with a "
+                    "CPU PoseEstimParams entry (device='cpu')."
+                )
+            self._err_msg(f"DLC inference failed: {e}{hint}")
             raise
 
         output_folder = Path(destfolder) if destfolder else None
@@ -182,7 +261,7 @@ class PoseInferenceRunner(BaseMixin):
                     output_files, key=lambda p: p.stat().st_mtime
                 )
                 output_paths.append(str(latest_output))
-                self._info_msg(f"DLC created: {latest_output}")
+                self._logger.debug(f"DLC created: {latest_output}")
             else:
                 self._warn_msg(
                     f"No DLC output found for {vid_path.stem} in {output_dir}"
@@ -589,7 +668,9 @@ class NDXPoseBuilder(BaseMixin):
             behavior_module.add(pose_estimation)
             nwb_io.write(nwbf)
 
-        self._info_msg(f"Stored pose estimation in NWB: {analysis_abs_path}")
+        self._logger.debug(
+            f"Stored pose estimation in NWB: {analysis_abs_path}"
+        )
 
 
 def _populate_nwb_pose_estimation(

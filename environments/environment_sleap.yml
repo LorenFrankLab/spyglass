@@ -17,7 +17,7 @@
 #       NOT reuse, clone, or `env update` onto a Position-V1 environment.
 name: spyglass-sleap
 channels:
-  # - defaults # DLC only
+  # - defaults # Do not add
   - conda-forge
   # - pytorch # DLC only
   - franklab

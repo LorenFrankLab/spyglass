@@ -121,15 +121,22 @@ def _run_pose_estim_make(device):
     def fetch_side(arg):
         return [{"vf": 1}] if arg == "KEY" else [0]
 
-    with patch.multiple(
-        estim_mod,
-        PoseEstimSelection=MagicMock(),
-        Model=MagicMock(),
-        ModelParams=MagicMock(),
-        PoseEstimParams=MagicMock(),
-        VidFileGroup=MagicMock(),
-        VideoFile=MagicMock(),
-        BodyPart=MagicMock(),  # canon_map() now resolved in make_fetch
+    with (
+        patch.multiple(
+            estim_mod,
+            PoseEstimSelection=MagicMock(),
+            Model=MagicMock(),
+            ModelParams=MagicMock(),
+            PoseEstimParams=MagicMock(),
+            VidFileGroup=MagicMock(),
+            VideoFile=MagicMock(),
+            BodyPart=MagicMock(),  # canon_map() now resolved in make_fetch
+        ),
+        # Device-threading is under test here, not GPU hardware presence
+        # (check_gpu_available's own behavior has dedicated unit tests in
+        # test_utils_general.py); pretend a CUDA device is visible so a
+        # cuda:N device string doesn't fail this test on a CPU-only box.
+        patch("torch.cuda.is_available", return_value=True),
     ):
         estim_mod.PoseEstimSelection.__and__.return_value.fetch1.return_value = (  # noqa: E501
             "trigger",
