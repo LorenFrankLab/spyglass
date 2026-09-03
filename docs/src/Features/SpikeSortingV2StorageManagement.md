@@ -164,6 +164,16 @@ recording — plus a frozen member set tied into its identity.
   increasing boundary per frozen member and that every input spike lands in
   exactly one member, raising `ConcatSplitError` rather than dropping spikes that
   fall outside a member's range.
+- **Per-member curated outputs are regenerable.** `ConcatMemberCuration` derives
+  each session-aligned Units table entirely from the chosen concat `CurationV2`
+  NWB, frozen member boundaries, and member recording timestamps. The supported
+  `ConcatMemberCuration.delete()` and `CurationV2.delete()` paths list the member
+  rows, merge IDs, and analysis files in a dry run; after a confirmed delete they
+  remove the downstream member/merge rows and reclaim only `AnalysisNwbfile`
+  entries (and external files) that became true orphans. Administrative bypasses
+  such as `super_delete`, raw SQL, or an upstream `FreeTable` cascade do not call
+  these Python cleanup hooks; after such a bypass, review
+  `AnalysisNwbfile().cleanup(dry_run=True)` before applying cleanup.
 - **Recompute/reclamation: deferred.** There is no `ConcatenatedRecordingArtifact*`
   recompute trio yet — a concat cache that is deleted out of band is rebuilt and
   verified on demand by `get_recording()`, which covers correctness. A dedicated

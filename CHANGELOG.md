@@ -46,6 +46,7 @@ UnitAnnotation.migrate_positional_unit_ids(dry_run=False)  # apply once
 
 # Remove unsafe concat CurationV2 merge rows created by trial v2 deployments.
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2.concat_member_curation import ConcatMemberCuration
 from spyglass.spikesorting.v2.curation import CurationV2
 
 concat_merge_rows = CurationV2.audit_concat_merge_rows()  # inspect first
@@ -53,6 +54,10 @@ for row in concat_merge_rows:
     (SpikeSortingOutput & {"merge_id": row["merge_id"]}).super_delete(
         warn=False
     )
+
+# Replace each unsafe synthetic-timeline row with one wall-clock-aligned merge
+# row per frozen member session. This is idempotent and may be resumed.
+ConcatMemberCuration.populate()
 
 
 # Fix LFPBandV1 issue #1481
@@ -94,14 +99,18 @@ environment and raises a targeted `RuntimeError` under 0.104. Existing v0/v1
 recording and sorting rows remain readable under 0.104 through the compatibility
 shim, including access through `SpikeSortingOutput`.
 
-#### Concat v2 curations stay out of `SpikeSortingOutput`
+#### Concat v2 curations surface as per-session merge rows
 
 `CurationV2` rows backed by a `ConcatenatedRecording` are no longer registered
 in `SpikeSortingOutput`: their spike times use the concatenation's synthetic
 timeline and are unsafe for a downstream consumer scoped to one NWB session.
-Concat pipeline summaries therefore return `None` for merge IDs and include an
-actionable warning. Trial databases should run `audit_concat_merge_rows()` and
-delete the rows it lists using the release-note commands above.
+Instead, `ConcatMemberCuration` materializes one wall-clock-aligned
+`SpikeSortingOutput` row per frozen member session, preserving the same curated
+unit IDs and labels across members. Concat pipeline summaries keep
+`root_merge_id` / `analysis_merge_id` unset and return the usable mapping as
+`member_merge_ids[nwb_file_name]`. Trial databases should run
+`audit_concat_merge_rows()`, delete the unsafe rows it lists, and populate the
+member table using the release-note commands above.
 
 #### UnitAnnotation now stores NWB unit ids
 
@@ -150,7 +159,8 @@ registrations); existing v2 table definitions are unchanged.
   through `ConcatenatedRecording` for same-day chronic sorting (mutually
   exclusive with the single-session inputs; no artifact stage). `require_units`
   keeps the graceful zero-unit default (an empty-but-real curation; its
-  single-session form is merge-keyable, while concat remains behind the
+  single-session form is merge-keyable, while concat exposes one safe member
+  merge row per session and keeps the synthetic concat row behind the
   timeline-safety gate).
 - **`run_v2_unit_match(session_group_owner=..., session_group_name=..., ...)`** is the
   match-and-track convenience function for the sort-then-match workflow (it does

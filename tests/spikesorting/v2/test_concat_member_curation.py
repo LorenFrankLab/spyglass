@@ -470,3 +470,102 @@ def test_preview_member_output_is_rejected_for_decoding(
     )
     with pytest.raises(ValueError, match="NOT applied"):
         SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_id])
+
+
+@pytest.mark.slow
+def test_direct_member_delete_reclaims_file_and_repopulates(
+    concat_member_curation,
+):
+    """A member row owns a reclaimable file and remains regenerable."""
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+
+    curation_key = concat_member_curation["curation_key"]
+    row = (ConcatMemberCuration & curation_key & {"member_index": 0}).fetch1()
+    member_key = {name: row[name] for name in ConcatMemberCuration.primary_key}
+    analysis_key = {"analysis_file_name": row["analysis_file_name"]}
+    analysis_path = Path(
+        AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    )
+    merge_key = {
+        "merge_id": (
+            SpikeSortingOutput.ConcatMemberCuration & member_key
+        ).fetch1("merge_id")
+    }
+
+    (ConcatMemberCuration & member_key).delete(
+        force_permission=True, safemode=False
+    )
+    assert not (ConcatMemberCuration & member_key)
+    assert not (SpikeSortingOutput & merge_key)
+    assert not (AnalysisNwbfile & analysis_key)
+    assert not analysis_path.exists()
+
+    ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
+    assert ConcatMemberCuration & member_key
+    assert SpikeSortingOutput.ConcatMemberCuration & member_key
+
+
+@pytest.mark.slow
+def test_delete_cascades_member_rows_and_reclaims_files(
+    concat_member_curation, monkeypatch
+):
+    """Deleting a concat curation removes member outputs and owned files."""
+    from pathlib import Path
+
+    import spyglass.spikesorting.v2.concat_member_curation as member_mod
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ctx = concat_member_curation
+    curation_key = ctx["curation_key"]
+    rows = (ConcatMemberCuration & curation_key).fetch(as_dict=True)
+    analysis_names = [str(row["analysis_file_name"]) for row in rows]
+    paths = [
+        Path(AnalysisNwbfile.get_abs_path(name)) for name in analysis_names
+    ]
+    merge_ids = list(
+        (SpikeSortingOutput.ConcatMemberCuration & curation_key).fetch(
+            "merge_id"
+        )
+    )
+    assert rows and all(path.exists() for path in paths)
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        member_mod.logger,
+        "info",
+        lambda message, *args, **kwargs: seen.append(str(message)),
+    )
+    (CurationV2 & curation_key).delete(force_permission=True, dry_run=True)
+    preview = "\n".join(seen)
+    assert all(name in preview for name in analysis_names)
+    assert CurationV2 & curation_key
+    assert ConcatMemberCuration & curation_key
+
+    monkeypatch.setattr(
+        "datajoint.table.user_choice", lambda *args, **kwargs: "no"
+    )
+    (CurationV2 & curation_key).delete(force_permission=True, safemode=True)
+    assert CurationV2 & curation_key
+    assert ConcatMemberCuration & curation_key
+    assert all(path.exists() for path in paths)
+
+    (CurationV2 & curation_key).delete(force_permission=True, safemode=False)
+    assert not (CurationV2 & curation_key)
+    assert not (ConcatMemberCuration & curation_key)
+    assert not (SpikeSortingOutput & [{"merge_id": mid} for mid in merge_ids])
+    assert not (
+        AnalysisNwbfile
+        & [{"analysis_file_name": name} for name in analysis_names]
+    )
+    assert not any(path.exists() for path in paths)

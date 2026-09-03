@@ -40,6 +40,10 @@ import datajoint as dj
 from IPython.display import display
 
 from spyglass.common import LabTeam
+from spyglass.spikesorting.analysis.v1.group import (
+    SortedSpikesGroup,
+    UnitSelectionParams,
+)
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_run,
@@ -127,9 +131,10 @@ LabTeam.insert1(
 # motion-corrected recording, and sorts the result as a single piece. The summary
 # is concat-shaped — `member_recording_ids` and `concat_recording_id` in place of
 # the single-session `recording_id`, and no artifact stage (a concat preset runs
-# none). The sort is then a normal `SpikeSortingOutput` `merge_id`, curated with
-# the section-7 tools from notebook 10. Idempotent, like every `run_v2_pipeline`
-# call.
+# none). The synthetic concat curation itself stays out of `SpikeSortingOutput`;
+# the summary instead returns one wall-clock-aligned `member_merge_ids` entry per
+# session. `auto_curate=True` makes those member IDs point to the auto-curated
+# child. Idempotent, like every `run_v2_pipeline` call.
 
 if run_concat:
     concat_key = {
@@ -146,12 +151,26 @@ if run_concat:
         concat_session_group_owner=session_group_owner,
         concat_session_group_name=concat_group_name,
         pipeline_preset=concat_preset,
+        auto_curate=True,
     )
     display(describe_run(concat_summary))
     print(
         f"{len(concat_summary['member_recording_ids'])} member recordings -> "
         f"one concatenated sort with {concat_summary['n_units']} unit(s); "
-        f"root_merge_id={concat_summary['root_merge_id']}"
+        f"{len(concat_summary['member_merge_ids'])} session-safe outputs"
+    )
+
+    # Feed one session's wall-clock-aligned output into the existing downstream
+    # group API. Every member output has the same curated unit IDs, while spike
+    # times are expressed on this member's own NWB clock.
+    member_nwb_file_name = same_day_members[0]["nwb_file_name"]
+    member_merge_id = concat_summary["member_merge_ids"][member_nwb_file_name]
+    UnitSelectionParams.insert_default()
+    SortedSpikesGroup().create_group(
+        group_name=f"{concat_group_name}_member_units",
+        nwb_file_name=member_nwb_file_name,
+        unit_filter_params_name="all_units",
+        keys=[{"spikesorting_merge_id": member_merge_id}],
     )
 
 # ## Part B — Match units across sessions

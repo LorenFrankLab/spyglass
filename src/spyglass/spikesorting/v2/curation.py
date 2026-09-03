@@ -370,6 +370,38 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         cls = type(self)
         pk = self.primary_key
         rows = self.fetch("KEY")
+        # A concat member's AnalysisNwbfile is an UPSTREAM registry row, so the
+        # normal DataJoint cascade can remove the member and merge-part rows but
+        # cannot remove that registry row or external file. Snapshot those
+        # dependents before the cascade; after a successful (non-cancelled)
+        # delete the owning table reclaims only registry rows that became true
+        # orphans. The local import avoids the module's intentional CurationV2
+        # foreign-key import cycle at declaration time.
+        from spyglass.spikesorting.v2.concat_member_curation import (
+            ConcatMemberCuration,
+        )
+
+        concat_member_rows = (
+            (ConcatMemberCuration & list(rows)).fetch(as_dict=True)
+            if len(rows)
+            else []
+        )
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        merge_ids = list(
+            (SpikeSortingOutput.CurationV2 & list(rows)).fetch("merge_id")
+        ) + list(
+            (
+                SpikeSortingOutput.ConcatMemberCuration
+                & [
+                    {
+                        name: row[name]
+                        for name in ConcatMemberCuration.primary_key
+                    }
+                    for row in concat_member_rows
+                ]
+            ).fetch("merge_id")
+        )
         in_delete_set = {tuple(sorted(row.items())) for row in rows}
         orphaned: list[tuple[int, int]] = []
         for row in rows:
@@ -390,9 +422,29 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 f"(parent_curation_id, child_curation_id) pairs: {orphaned}. "
                 "Delete the descendant curations first (leaf-up)."
             )
+        dry_run = bool(kwargs.get("dry_run", False))
+        if dry_run:
+            ConcatMemberCuration._delete_inventory(
+                concat_member_rows, context=f"{cls.__name__}.delete"
+            )
+        # ``force_masters=True`` is normally how cautious deletion removes a
+        # merge master through its source part. CurationV2 has nested parts,
+        # though, and DataJoint 0.14 can then revisit/delete CurationV2 through
+        # a grandchild before the outer cascade reaches it. The outer delete
+        # reports zero rows and rolls the whole transaction back. Opt out for
+        # this cascade and remove only proven-orphan merge masters afterwards.
+        kwargs["force_masters"] = False
+        kwargs["force_parts"] = True
         if safemode is None:
-            return super().delete(*args, **kwargs)
-        return super().delete(*args, safemode=safemode, **kwargs)
+            result = super().delete(*args, **kwargs)
+        else:
+            result = super().delete(*args, safemode=safemode, **kwargs)
+        if not dry_run:
+            ConcatMemberCuration._cleanup_orphaned_merge_masters(merge_ids)
+            ConcatMemberCuration._cleanup_deleted_analysis_rows(
+                concat_member_rows
+            )
+        return result
 
     @classmethod
     def audit_orphaned_lineage(cls) -> list[dict]:

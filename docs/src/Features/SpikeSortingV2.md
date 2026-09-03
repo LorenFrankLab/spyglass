@@ -53,11 +53,12 @@ All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
 `spikesorting_v2_sorting`,
 `spikesorting_v2_curation`, `spikesorting_v2_metric_curation`,
-`spikesorting_v2_figpack_curation`, `spikesorting_v2_session_group`,
-`spikesorting_v2_unit_matching`, `spikesorting_v2_recompute`), so the v0/v1
-schemas are untouched. `CurationV2` registers as a new part on the existing
-`SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations all
-coexist under one merge surface.
+`spikesorting_v2_concat_curation`, `spikesorting_v2_figpack_curation`,
+`spikesorting_v2_session_group`, `spikesorting_v2_unit_matching`,
+`spikesorting_v2_recompute`), so the v0/v1 schemas are untouched. `CurationV2`
+and its session-aligned `ConcatMemberCuration` outputs register as parts on the
+existing `SpikeSortingOutput` merge table, so v0, v1, imported, and v2 curations
+all coexist under one merge surface.
 
 ### Tables
 
@@ -1034,6 +1035,8 @@ whole NWB — and materializes one `ConcatenatedRecording` cache before sorting:
 
 ```python
 from spyglass.spikesorting.v2.recording import RecordingSelection, Recording
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2.concat_member_curation import ConcatMemberCuration
 from spyglass.spikesorting.v2.session_group import (
     SessionGroup,
     ConcatenatedRecordingSelection,
@@ -1082,11 +1085,19 @@ sort_key = SortingSelection.insert_selection({
 })
 Sorting.populate(sort_key)
 
-# 5. (optional) Back-map the concatenated sort into per-session sortings.
-sorting = Sorting().get_analyzer(sort_key).sorting
-per_session = ConcatenatedRecording().split_sorting_by_session(sorting, concat_key)
-# -> {(nwb_file_name, sort_group_id, interval_list_name, team_name): si.BaseSorting}
-#    each member's own sample frame, unit ids preserved.
+# 5. After reviewing/curating the concat sort, materialize the chosen curation
+#    as one wall-clock-aligned output per frozen member session.
+curation_key = {"sorting_id": sort_key["sorting_id"], "curation_id": ...}
+ConcatMemberCuration.populate(curation_key)
+member_merge_ids = {
+    row["nwb_file_name"]: row["merge_id"]
+    for row in (
+        SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
+        & curation_key
+    ).fetch(as_dict=True)
+}
+# -> {member_nwb_file_name: merge_id}; every member carries the same curated
+#    unit ids, including empty spike trains when a unit did not fire there.
 ```
 
 Key behaviors and caveats:
@@ -1108,11 +1119,12 @@ Key behaviors and caveats:
 - **No concat artifact detection.** A concat `SortingSelection` may not carry an
   artifact-detection pass; artifact detection remains a single-recording (or
   shared-recording-group) input.
-- **Downstream merge gate.** Concat sorts are not registered in
-  `SpikeSortingOutput` yet: their spike times use a synthetic gap-free timeline
-  that is unsafe for session-scoped consumers. Use
-  `ConcatenatedRecording.split_sorting_by_session` for local member frames;
-  per-member decodable rows are a planned addition.
+- **Downstream merge gate.** The concat `CurationV2` row itself is never
+  registered in `SpikeSortingOutput`: its synthetic gap-free timeline is unsafe
+  for session-scoped consumers. `ConcatMemberCuration` instead registers one
+  wall-clock-aligned merge row per frozen member `nwb_file_name`; labels and unit
+  IDs are shared across members. `run_v2_pipeline` returns these rows as
+  `member_merge_ids`.
 
 ### Cross-session unit tracking
 
@@ -1258,13 +1270,14 @@ Key behaviors and caveats:
 
 v1 (`CurationV1`) and single-session v2 (`CurationV2`) curations register on the
 same `SpikeSortingOutput` merge table, so existing downstream code (decoding,
-ripple detection, etc.) keeps working unchanged. Concat v2 curations remain
+ripple detection, etc.) keeps working unchanged. A concat v2 curation registers
+through one `ConcatMemberCuration` row per session; its synthetic parent remains
 behind the [downstream merge gate](#chronic-same-day-recordings) described
 above. **`run_summary["root_merge_id"]` is the uncurated root** — for downstream
-science, use `run_summary["analysis_merge_id"]` instead: it is `None` on a
-root-only or concat run (so you can't silently decode the root or a synthetic
-concat timeline) and points at the analysis-ready single-session curation once
-you curate. For a single-session run, the fastest way to fill it is
+single-session science, use `run_summary["analysis_merge_id"]` instead. For a
+concat run, use `run_summary["member_merge_ids"][nwb_file_name]`; the mapping
+points to the auto-curated child when `auto_curate=True`, otherwise the root.
+For a single-session run, the fastest way to fill `analysis_merge_id` is
 `run_v2_pipeline(..., auto_curate=True)`, whose summary sets `analysis_merge_id`
 (equal to `auto_merge_id`, the auto-curated child); or build a curation by hand
 and carry its `merge_id` (see the [evaluate → accept →
@@ -1348,6 +1361,7 @@ params are written.
 | Recording | `spyglass_v2_recording_provenance` | raw source `object_id`, `recording_id`, preprocessing recipe, sort group, resolved reference mode, bad-channel handling, SpikeInterface version |
 | Sorting | `spyglass_v2_sorting_provenance` + per-unit Units columns | `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` / `brain_region` columns (matching `Sorting.Unit`), and a header with the recording/concat id, sorter + params, `artifact_detection_id`, display recipe, effective seed, SI + sorter versions |
 | Curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | curation header (sorting/curation id, parent, source, `merges_applied`, description) and the kept→contributor merge lineage mirroring `CurationV2.MergeGroup` (raw contributors; proposed-vs-applied is the header's `merges_applied`) |
+| Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | the chosen concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, with curated unit IDs preserved across members |
 | UnitMatch | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members` | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map |
 | CurationEvaluation | `spyglass_v2_curation_evaluation_provenance` | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash` |
 | ConcatenatedRecording | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members` | resolved motion preset **+ kwargs** (not the displacement field) and the ordered member map with per-member frame boundaries (`split_sorting_by_session` is reconstructable from these) |

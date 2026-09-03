@@ -342,6 +342,15 @@ def test_cross_session_notebook_runs(dj_conn):
 
     # Part A concatenated both members into one sort (runs everywhere).
     assert len(namespace["concat_summary"]["member_recording_ids"]) == 2
+    member_merge_ids = namespace["concat_summary"]["member_merge_ids"]
+    assert len(member_merge_ids) == 2
+    assert namespace["member_merge_id"] in member_merge_ids.values()
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
+    assert SortedSpikesGroup & {
+        "nwb_file_name": namespace["member_nwb_file_name"],
+        "sorted_spikes_group_name": "notebook_concat_member_units",
+    }
     # Part B matched units into tracked units (only where UnitMatchPy is present).
     if unitmatch_available:
         assert namespace["match_summary"]["n_tracked_units"] >= 1

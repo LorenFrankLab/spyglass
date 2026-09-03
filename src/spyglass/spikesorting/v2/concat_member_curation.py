@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import datajoint as dj
@@ -28,7 +29,7 @@ from spyglass.spikesorting.v2.session_group import (
 )
 from spyglass.spikesorting.v2.sorting import SortingSelection
 from spyglass.spikesorting.v2.utils import transaction_or_noop
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -72,6 +73,197 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
         # the populate key exactly equal to this table's primary key rather
         # than leaking that implementation detail into AutoPopulate.
         return dj.U("sorting_id", "curation_id", "member_index") & joined
+
+    @classmethod
+    def _delete_inventory(cls, rows: list[dict], *, context: str) -> None:
+        """Log member, merge, and analysis rows affected by a dry-run delete."""
+        if not rows:
+            return
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
+        member_keys = [
+            {name: row[name] for name in cls.primary_key} for row in rows
+        ]
+        merge_ids = list(
+            (SpikeSortingOutput.ConcatMemberCuration & member_keys).fetch(
+                "merge_id"
+            )
+        )
+        analysis_file_names = sorted(
+            {str(row["analysis_file_name"]) for row in rows}
+        )
+        logger.info(
+            f"{context} dry-run concat-member dependents: "
+            f"member_rows={member_keys}, merge_ids={merge_ids}, "
+            f"analysis_file_names={analysis_file_names}"
+        )
+
+    @staticmethod
+    def _cleanup_orphaned_merge_masters(merge_ids) -> None:
+        """Remove merge masters whose captured source parts were deleted."""
+        if not merge_ids:
+            return
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        merge_keys = [{"merge_id": merge_id} for merge_id in merge_ids]
+        orphaned = (SpikeSortingOutput & merge_keys) - SpikeSortingOutput.parts(
+            as_objects=True
+        )
+        if orphaned:
+            # A merge master may already feed a SortedSpikesGroup (a part table)
+            # or another downstream consumer. Delete only the referencing rows;
+            # force_masters would remove an entire group that may contain other
+            # outputs. Call DataJoint's primitive directly because Merge's
+            # ``super_delete`` intentionally re-enters cautious deletion.
+            dj.Table.delete(
+                orphaned,
+                safemode=False,
+                force_masters=False,
+                force_parts=True,
+            )
+
+    @classmethod
+    def _cleanup_deleted_analysis_rows(cls, rows: list[dict]) -> list[str]:
+        """Delete orphaned member AnalysisNwbfile rows and external files.
+
+        An ``AnalysisNwbfile`` is upstream of this table, so DataJoint's
+        downstream cascade cannot remove it. Only consider files for member
+        rows that are actually gone (a safemode cancellation leaves them
+        untouched), then restrict cleanup to registry rows with no remaining
+        child reference anywhere in Spyglass.
+        """
+        deleted_names = {
+            str(row["analysis_file_name"])
+            for row in rows
+            if not (cls & {name: row[name] for name in cls.primary_key})
+        }
+        if not deleted_names:
+            return []
+        # Removing an external file before an enclosing caller commits would
+        # make a later rollback restore a registry row whose file is gone.
+        # Leave that uncommon administrative case for the documented global
+        # cleanup pass instead of violating transaction safety.
+        if cls.connection.in_transaction:
+            logger.warning(
+                "Concat-member rows were deleted inside an outer transaction; "
+                "deferring their AnalysisNwbfile/file reclamation. Run "
+                "AnalysisNwbfile().cleanup(dry_run=True) after commit."
+            )
+            return []
+        candidates = [
+            {"analysis_file_name": name} for name in sorted(deleted_names)
+        ]
+        orphan_names = {
+            str(name)
+            for name in (AnalysisNwbfile & candidates).fetch(
+                "analysis_file_name"
+            )
+        }
+        # ``AnalysisNwbfile.get_orphans()`` subtracts every child relation in
+        # one expression. That is invalid when a child (including this table)
+        # shares another secondary attribute such as ``nwb_file_name`` with the
+        # registry. Inspect the actual FK map instead and remove a candidate as
+        # soon as any child still references its analysis-file key.
+        for child, foreign_key in AnalysisNwbfile.children(
+            as_objects=True, foreign_key_info=True
+        ):
+            child_attrs = [
+                child_attr
+                for child_attr, parent_attr in foreign_key["attr_map"].items()
+                if parent_attr == "analysis_file_name"
+            ]
+            if len(child_attrs) != 1:
+                # The registry has a one-column primary key. An unexpected FK
+                # shape is safer to treat as referenced than to delete through.
+                logger.warning(
+                    "Deferring concat-member analysis cleanup because child "
+                    f"{child.full_table_name} has unexpected AnalysisNwbfile "
+                    f"FK mapping {foreign_key['attr_map']}."
+                )
+                return []
+            child_attr = child_attrs[0]
+            referenced = {
+                str(name)
+                for name in (
+                    child
+                    & [{child_attr: name} for name in sorted(orphan_names)]
+                ).fetch(child_attr)
+            }
+            orphan_names -= referenced
+            if not orphan_names:
+                return []
+        orphan_names = sorted(orphan_names)
+        if orphan_names:
+            orphan_paths = {
+                Path(AnalysisNwbfile.get_abs_path(name)).resolve()
+                for name in orphan_names
+            }
+            # Calling the cautious AnalysisNwbfile.delete here would run a
+            # second force-masters cascade. These rows are proven orphans, so
+            # use the table's explicit administrative primitive, then reclaim
+            # only the newly-unused external entries whose paths we captured.
+            orphan_candidates = [
+                {"analysis_file_name": name} for name in orphan_names
+            ]
+            (AnalysisNwbfile & orphan_candidates).super_delete(
+                warn=False, safemode=False, force_masters=False
+            )
+            external = AnalysisNwbfile()._ext_tbl
+            external_hashes = [
+                file_hash
+                for file_hash, file_path in external.unused().fetch_external_paths()
+                if Path(file_path).resolve() in orphan_paths
+            ]
+            if external_hashes:
+                errors = (
+                    external
+                    & [{"hash": file_hash} for file_hash in external_hashes]
+                ).delete(
+                    delete_external_files=True,
+                    display_progress=False,
+                    errors_as_string=True,
+                )
+                if errors:
+                    raise RuntimeError(
+                        "Failed to reclaim concat-member analysis file(s): "
+                        f"{errors}"
+                    )
+        return orphan_names
+
+    def delete(self, *args, **kwargs):
+        """Delete member rows and reclaim their orphaned analysis files."""
+        from spyglass.spikesorting.v2.utils import split_leading_restrictions
+
+        restriction_args, args = split_leading_restrictions(args)
+        if restriction_args:
+            target = self
+            for restriction in restriction_args:
+                target = target & restriction
+            return target.delete(*args, **kwargs)
+
+        rows = self.fetch(as_dict=True)
+        dry_run = bool(kwargs.get("dry_run", False))
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        member_keys = [
+            {name: row[name] for name in self.primary_key} for row in rows
+        ]
+        merge_ids = list(
+            (SpikeSortingOutput.ConcatMemberCuration & member_keys).fetch(
+                "merge_id"
+            )
+        )
+        if dry_run:
+            self._delete_inventory(rows, context="ConcatMemberCuration.delete")
+        kwargs["force_masters"] = False
+        kwargs["force_parts"] = True
+        result = super().delete(*args, **kwargs)
+        if not dry_run:
+            self._cleanup_orphaned_merge_masters(merge_ids)
+            self._cleanup_deleted_analysis_rows(rows)
+        return result
 
     @staticmethod
     def _curation_key(key: dict) -> dict:
