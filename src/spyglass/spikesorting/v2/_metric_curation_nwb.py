@@ -51,31 +51,33 @@ def _vectordata(name: str, values, dtype) -> VectorData:
 
 
 def _scalar_or_nan(value, *, context: str = "") -> float:
-    """Coerce a metric cell to float; non-scalar / non-numeric -> NaN.
+    """Return one numeric scalar, rejecting metric shape or dtype drift.
 
-    Every quality metric and every surfaced single-channel template column is a
-    plain scalar, so this is belt-and-suspenders: it keeps a future SI column
-    whose cell is not a plain number (e.g. an array) from crashing the wide
-    one-float-per-column write -- the stray value lands as NaN instead.
-
-    The coercion-failure substitution is on the scientific-result write path
-    (a downstream auto-curation rule would silently never fire on a NaN metric),
-    so it is logged at warning level with ``context`` (unit / column) rather than
-    swallowed silently. A legitimately non-finite SI value (already a float NaN)
-    takes the ``float(value)`` success path and is not logged.
+    A legitimate scalar NaN remains valid: it represents metrics that cannot
+    be computed for a low-spike unit.  Array-valued and object-valued cells are
+    unsupported because silently replacing them with NaN would change the
+    scientific output consumed by auto-curation rules.
     """
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        from spyglass.utils import logger
+    from spyglass.spikesorting.v2.exceptions import (
+        UnsupportedMetricValueError,
+    )
 
-        logger.warning(
-            "quality-metrics write: a non-scalar/non-numeric cell "
-            f"(type {type(value).__name__!r}) was coerced to NaN"
-            + (f" [{context}]" if context else "")
-            + "; a future SpikeInterface column may have changed shape."
-        )
-        return float("nan")
+    array = np.asarray(value)
+    if (
+        array.ndim == 0
+        and np.issubdtype(array.dtype, np.number)
+        and not np.issubdtype(array.dtype, np.complexfloating)
+    ):
+        return float(array)
+    location = f" [{context}]" if context else ""
+    raise UnsupportedMetricValueError(
+        "quality-metrics write"
+        f"{location}: expected a scalar numeric metric value; received "
+        f"{value!r} (type={type(value).__name__}, "
+        f"shape={getattr(value, 'shape', None)}, "
+        f"dtype={getattr(value, 'dtype', None)}). Check the "
+        "SpikeInterface metric output and QualityMetricParameters recipe."
+    )
 
 
 def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:

@@ -151,6 +151,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "artifact_detection",
         "member_recording",
         "concat_recording",
+        "member_curation",
         "auto_curation",
         "figpack",
     }
@@ -202,6 +203,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
             "member_recording_ids",
             "concat_recording_id",
             "concat_recording_status",
+            "member_curation_status",
+            "member_merge_ids",
         }
     )
     assert (

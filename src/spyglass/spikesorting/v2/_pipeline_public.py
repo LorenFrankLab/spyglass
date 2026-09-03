@@ -45,6 +45,12 @@ PIPELINE_FACADE_EXPORTS = (
     "RunV2PipelineSummary",
     "RunV2SingleSessionSummary",
     "RunV2UnitMatchSummary",
+    "RunResult",
+    "CurationRef",
+    "EvaluationSpec",
+    "EvaluationResult",
+    "MergedCuration",
+    "MergeEvaluateReceipt",
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
@@ -72,6 +78,12 @@ PACKAGE_ROOT_REEXPORTS = (
     "clone_pipeline_preset",
     "describe_unit_match_choices",
     "plot_sort_group_geometry",
+    "RunResult",
+    "CurationRef",
+    "EvaluationSpec",
+    "EvaluationResult",
+    "MergedCuration",
+    "MergeEvaluateReceipt",
 )
 
 

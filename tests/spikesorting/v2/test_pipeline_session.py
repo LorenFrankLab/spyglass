@@ -315,6 +315,8 @@ def test_session_runner_preflight_continue(monkeypatch):
     The groups that run are called with ``preflight=False`` (the session
     preflight already covered the DB checks).
     """
+    from spyglass.spikesorting.v2.curation_api import RunResult
+
     monkeypatch.setattr(
         plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
@@ -343,6 +345,8 @@ def test_session_runner_preflight_continue(monkeypatch):
     assert all(c["preflight"] is False for c in calls)
     assert [r["sort_group_id"] for r in results] == [0, 1]
     by_id = {r["sort_group_id"]: r for r in results}
+    assert isinstance(by_id[0], RunResult)
+    assert not isinstance(by_id[1], RunResult)
     assert by_id[0]["outcome"] == "ok" and by_id[0]["root_merge_id"] == "m0"
     assert by_id[1]["outcome"] == "failed"
     assert by_id[1]["partial_run_summary"] is None

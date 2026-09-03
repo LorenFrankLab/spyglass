@@ -138,14 +138,12 @@ def test_round_trip_preserves_template_columns(empty_nwb_path):
 
 
 def test_build_table_guards_nonscalar_column():
-    """A non-scalar / non-numeric metric cell is coerced to NaN, not crashed.
-
-    Every validated single-channel template column is scalar, so this is
-    belt-and-suspenders against a future SI column whose cell is an array or a
-    string: the wide one-float-per-column write must NaN it rather than raise.
-    """
+    """A non-scalar metric cell fails loudly instead of becoming NaN."""
     from spyglass.spikesorting.v2._metric_curation_nwb import (
         build_quality_metrics_table,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        UnsupportedMetricValueError,
     )
 
     metrics = pd.DataFrame(
@@ -155,9 +153,26 @@ def test_build_table_guards_nonscalar_column():
         },
         index=pd.Index([1, 2], name="unit_id"),
     )
-    table = build_quality_metrics_table(metrics)
-    frame = table.to_dataframe().set_index("unit_id")
-    # The scalar column is preserved; the non-scalar / non-numeric cells NaN.
-    assert frame.loc[1, "snr"] == 4.0
-    assert np.isnan(frame.loc[1, "weird"])
-    assert np.isnan(frame.loc[2, "weird"])
+    with pytest.raises(
+        UnsupportedMetricValueError,
+        match=r"unit_id=1.*column='weird'.*shape=\(2,\)",
+    ):
+        build_quality_metrics_table(metrics)
+
+
+def test_build_table_accepts_scalar_nan_and_rejects_one_element_array():
+    """Scalar NaN is valid, but a length-one array is still non-scalar."""
+    from spyglass.spikesorting.v2._metric_curation_nwb import (
+        build_quality_metrics_table,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        UnsupportedMetricValueError,
+    )
+
+    valid = pd.DataFrame({"metric": [np.asarray(np.nan)]}, index=[5])
+    frame = build_quality_metrics_table(valid).to_dataframe()
+    assert np.isnan(frame.loc[0, "metric"])
+
+    invalid = pd.DataFrame({"metric": [np.asarray([1.0])]}, index=[5])
+    with pytest.raises(UnsupportedMetricValueError, match=r"shape=\(1,\)"):
+        build_quality_metrics_table(invalid)

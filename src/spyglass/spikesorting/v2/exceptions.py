@@ -240,6 +240,24 @@ class ZeroUnitAnalyzerError(RuntimeError):
     """
 
 
+class CurationNotFoundError(LookupError):
+    """Raise when a curation handle no longer names the same row generation.
+
+    ``CurationRef`` carries both the ergonomic numeric key and the immutable
+    ``curation_uuid``.  This error covers a deleted row and a numeric id that
+    was later reused for a different curation generation.
+    """
+
+
+class UnsupportedMetricValueError(ValueError):
+    """Raise when a metric write receives a non-scalar or non-numeric cell.
+
+    Quality-metric NWB columns are scalar numeric values.  Rejecting shape or
+    dtype drift keeps an unsupported SpikeInterface result from being silently
+    converted to NaN and changing downstream auto-curation decisions.
+    """
+
+
 class FigPackUploadError(RuntimeError):
     """Raise when a FigPack hosted upload is requested without credentials.
 

@@ -31,6 +31,7 @@ def _rule(rule_index, metric_name, operator, threshold, label, name=None):
         "operator": operator,
         "threshold": threshold,
         "label": label,
+        "missing_policy": "error",
     }
 
 
@@ -109,8 +110,44 @@ def test_apply_label_rules_non_finite_compares_false(value, operator):
     """Non-finite metrics never satisfy thresholds (even ``NaN != x``)."""
     metrics = pd.DataFrame({"nn_noise_overlap": [value]}, index=[4])
     rules = [_rule(0, "nn_noise_overlap", operator, 0.1, "noise")]
+    rules[0]["missing_policy"] = "ignore"
     labels = apply_label_rules(metrics, rules)
     assert labels == {}
+
+
+def test_apply_label_rules_all_nan_defaults_to_actionable_error():
+    """An all-missing rule input cannot silently disable a rule."""
+    metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
+    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+    with pytest.raises(ValueError, match="no finite values.*missing_policy"):
+        apply_label_rules(metrics, rules)
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        ("fail", {4: ["noise"], 5: ["noise"]}),
+        ("pass", {}),
+        ("ignore", {}),
+    ],
+)
+def test_apply_label_rules_all_nan_explicit_policies(policy, expected):
+    """Explicit missing-value policies make all-NaN behavior deliberate."""
+    metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
+    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+    rules[0]["missing_policy"] = policy
+    assert apply_label_rules(metrics, rules) == expected
+
+
+def test_apply_label_rules_partial_missing_fail_labels_only_missing_unit():
+    """The fail policy labels missing units as failures alongside matches."""
+    metrics = pd.DataFrame({"snr": [np.nan, 0.5, 5.0]}, index=[1, 2, 3])
+    rules = [_rule(0, "snr", "<", 1.0, "noise")]
+    rules[0]["missing_policy"] = "fail"
+    assert apply_label_rules(metrics, rules) == {
+        1: ["noise"],
+        2: ["noise"],
+    }
 
 
 def test_is_finite_metric_value_warns_on_non_numeric(caplog):

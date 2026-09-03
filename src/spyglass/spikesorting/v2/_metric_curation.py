@@ -38,9 +38,8 @@ def _is_finite_metric_value(value) -> bool:
     A legitimate ``NaN`` (a low-spike unit's metric) is filtered silently. A
     genuinely non-numeric value -- which would mean SpikeInterface's metric
     output drifted to a non-scalar shape/dtype -- is also filtered, but logged
-    at WARNING rather than swallowed, so an auto-curation rule that silently
-    stops flagging a unit is visible (mirroring the write path, which warns
-    when it coerces a non-scalar metric to NaN).
+    at WARNING rather than swallowed. The NWB write path is stricter and rejects
+    that drift before a persisted evaluation can reach this read-side filter.
     """
     if pd.isna(value):
         return False
@@ -120,7 +119,9 @@ def apply_label_rules(
     rule_rows : list of dict
         ``AutoCurationRules.Rule`` rows, each with ``rule_index``,
         ``metric_name``, ``operator``, ``threshold``, and ``label``. Rules are
-        applied in ascending ``rule_index``.
+        applied in ascending ``rule_index``. ``missing_policy`` defaults to
+        ``"error"``; ``"fail"`` applies the rule label to a unit whose value
+        is non-finite, while ``"pass"`` and ``"ignore"`` leave it unlabelled.
 
     Returns
     -------
@@ -133,8 +134,8 @@ def apply_label_rules(
     Raises
     ------
     ValueError
-        If a rule references a metric column absent from ``metrics_df`` -- a
-        clear error before serialization rather than a silent miss.
+        If a rule references a metric column absent from ``metrics_df``, or if
+        it has no finite values and the rule's missing policy is ``"error"``.
 
     Notes
     -----
@@ -160,9 +161,33 @@ def apply_label_rules(
         compare = _COMPARISON_TO_FUNCTION[rule["operator"]]
         column = metrics_df[metric_name]
         label = rule["label"]
+        missing_policy = rule.get("missing_policy", "error")
+        if missing_policy not in {"error", "fail", "pass", "ignore"}:
+            raise ValueError(
+                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"has invalid missing_policy {missing_policy!r}; expected "
+                "'error', 'fail', 'pass', or 'ignore'."
+            )
+        finite_by_unit = {
+            unit_id: _is_finite_metric_value(column.loc[unit_id])
+            for unit_id in metrics_df.index
+        }
+        if finite_by_unit and not any(finite_by_unit.values()):
+            if missing_policy == "error":
+                raise ValueError(
+                    f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                    f"references metric {metric_name!r}, but that column has "
+                    "no finite values. Fix the metric computation or choose "
+                    "an explicit missing_policy ('fail', 'pass', or 'ignore') "
+                    "for this rule."
+                )
         for unit_id in metrics_df.index:
             value = column.loc[unit_id]
-            if not _is_finite_metric_value(value):
+            if not finite_by_unit[unit_id]:
+                if missing_policy == "fail":
+                    unit_labels = labels.setdefault(int(unit_id), [])
+                    if label not in unit_labels:
+                        unit_labels.append(label)
                 continue
             if not compare(value, rule["threshold"]):
                 continue

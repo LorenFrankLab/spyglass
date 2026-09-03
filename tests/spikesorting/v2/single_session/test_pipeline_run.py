@@ -669,7 +669,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
     zero-unit result still yields a (stable) curation row.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import RunResult, run_v2_pipeline
 
     nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
         polymer_smoke_session
@@ -683,6 +683,12 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
     )
     try:
         first = run_v2_pipeline(**common)
+        assert isinstance(first, RunResult)
+        assert first.root_curation.as_key() == {
+            "sorting_id": first["sorting_id"],
+            "curation_id": first["root_curation_id"],
+        }
+        assert first.analysis_curation is None
         second = run_v2_pipeline(**common)
         assert (
             second["root_curation_id"] == first["root_curation_id"]

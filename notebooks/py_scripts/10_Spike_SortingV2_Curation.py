@@ -16,9 +16,9 @@
 #
 # Curate a single-session v2 sort, picking up where the
 # [first-sort walkthrough](./10_Spike_SortingV2.ipynb) leaves off. It re-runs a
-# sort to get a root curation, then shows the two hands-on curation paths:
-# browser curation with **FigPack**, and the step-by-step **evaluate → merge →
-# re-evaluate** loop built on `CurationEvaluation`.
+# sort to get a root curation, then shows browser curation with **FigPack** and
+# the secondary scripted **evaluate → merge → re-evaluate** path for automation
+# and debugging, built on the identity-safe curation facade.
 #
 # Assumes a configured DataJoint connection and an ingested session (see
 # [Setup](./00_Setup.ipynb) / [Insert Data](./02_Insert_Data.ipynb)).
@@ -31,9 +31,8 @@ from spyglass.common import LabTeam
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
-from spyglass.spikesorting.v2.metric_curation import (
-    CurationEvaluation,
-    CurationEvaluationSelection,
+from spyglass.spikesorting.v2.curation_api import (
+    save_manual_curation,
 )
 from spyglass.spikesorting.v2.pipeline import (
     describe_sort_groups,
@@ -129,44 +128,39 @@ run_summary = run_v2_pipeline(
 
 # ## 3. Inspect and curate
 #
-# `run_v2_pipeline` leaves you a root curation. `summarize_curation` describes
+# `run_v2_pipeline` leaves you a typed `root_curation`. `summarize_curation` describes
 # **one** curation and returns a plain dict (`n_units`, `labels`, `merge_groups`
 # for real >1-unit merges, `unit_contributor_groups` for full provenance,
-# `merges_applied`, `is_merge_preview`, `merge_id`, ...); build its key from the
-# summary's `root_curation_id` (a run summary has no bare `curation_id`). The
+# `merges_applied`, `is_merge_preview`, `merge_id`, ...); the typed handle builds
+# the expert-layer key safely. The
 # labels curation *accepts* are the canonical set `CurationV2.label_options()`
 # (the `CurationLabel` enum); custom labels need `allow_custom_labels=True`.
 #
-# There are three ways to curate, from most automated to most hands-on:
+# There are three curation surfaces:
 #
 # - **Automated** — `run_v2_pipeline(auto_curate=True)` scores the sort and
 #   commits the rule set's labels in the same call (section 3-auto).
 # - **In a browser** — `run_v2_pipeline(build_figpack_view=True)` publishes an interactive
 #   FigPack view you label and merge in a browser (section 3-browser).
-# - **Step by step** — the evaluate → accept → merge → re-evaluate loop below
-#   (sections 3a–3e), for full control over each decision.
+# - **Scripted** — the evaluate → merge → re-evaluate loop below (sections
+#   3a–3e), the supported secondary path for automation and debugging.
 #
-# The step-by-step loop is built on `CurationEvaluation`, which scores a
+# The scripted loop is built on `CurationRef.evaluate`, which scores a
 # **committed** curation in that curation's OWN unit namespace (a merged unit is
 # scored over its merged template, not inherited from a contributor):
 #
-# 1. **Evaluate** the committed curation — `CurationEvaluation` walks its
+# 1. **Evaluate** the committed curation — the facade walks its
 #    analyzer, computes quality metrics, and proposes labels from a rule set.
-# 2. **Accept** the proposals into a committed child — `use_evaluation_labels` writes
-#    the evaluation's label verdict (the final-metrics path); `accept_evaluation_outputs`
-#    accepts explicit merges too.
+# 2. **Inspect** metrics, label proposals, merge proposals, and routed plots on
+#    one `EvaluationResult` snapshot.
 # 3. **Manually merge** oversplit clusters (MS4/MS5 oversplit and don't track
-#    drift) — find burst pairs with `plot_burst_pair_metrics` /
-#    `investigate_pair_*`, then merge them with `create_merged_curation`.
-# 4. **Re-evaluate the merged curation** — merging changes each unit's template
+#    drift) with the plot accessors, then call `merge_and_evaluate`.
+# 4. **Re-evaluate the merged curation automatically** — merging changes each unit's template
 #    (and so its SNR / ISI-violation fraction / PC-NN separation), so metrics
 #    over the *post-merge* templates are the numbers of record.
 
-root_key = {
-    "sorting_id": run_summary["sorting_id"],
-    "curation_id": run_summary["root_curation_id"],
-}
-CurationV2.summarize_curation(root_key)
+root_curation = run_summary.root_curation
+CurationV2.summarize_curation(root_curation.as_key())
 
 # ### 3-browser. Curate in a browser with FigPack
 #
@@ -251,31 +245,26 @@ if figpack_summary is not None:
 # whitened PCA analyzer, so it can take minutes on a real session (it is
 # idempotent, so a re-run reuses the result instead of recomputing).
 
-eval_sel = CurationEvaluationSelection.insert_selection(
-    {
-        "sorting_id": run_summary["sorting_id"],
-        "curation_id": run_summary["root_curation_id"],
-        "metric_params_name": "franklab_default",
-        "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
-    }
+evaluation = root_curation.evaluate(
+    metric_params_name="franklab_default",
+    auto_curation_rules_name="franklab_default_auto_curation_2026_06",
 )
-CurationEvaluation.populate(eval_sel)
-CurationEvaluation().plot_units_qc(eval_sel)
-CurationEvaluation.get_metrics(eval_sel)
+evaluation.plots.units_qc()
+evaluation.metrics
 
 # #### Reading the labels: proposals to verify, not verdicts
 #
 # The rule set proposes labels from thresholds — a starting point, not a
 # verdict. Before trusting a `noise` / `reject` tag, cross-check the unit:
 #
-# - **Refractory dip** — `CurationEvaluation().plot_correlograms(eval_sel)`: a
+# - **Refractory dip** — `evaluation.plots.correlograms()`: a
 #   real single unit has a central dip in its autocorrelogram; a symmetric,
 #   dip-free autocorrelogram is a noise signature.
 # - **The interneuron trap** — a fast-spiking interneuron raises ISI violations
 #   and sits just around the `nn_noise_overlap` noise threshold. If its waveform
 #   is narrow, its refractory dip clean, and its firing stable, it is a cell, not
 #   noise — don't reject it on the metric alone.
-# - **Amplitude over time** — `CurationEvaluation().get_peak_amps(eval_sel)`: a
+# - **Amplitude over time** — `evaluation.plots.peak_over_time(pairs)`: a
 #   slow, smooth amplitude drift across a place-field traversal is a place cell,
 #   not multi-unit activity; sharp amplitude steps or several distinct bands are
 #   MUA.
@@ -294,65 +283,41 @@ CurationEvaluation.get_metrics(eval_sel)
 # bursts with an amplitude decrement that MountainSort oversplits into a parent +
 # a shorter-waveform daughter — exactly the high-similarity, short-lag-asymmetric
 # pair this scatter surfaces, so merging them reassembles one cell.
-# `use_evaluation_labels` then writes the evaluation's label verdict into a committed
-# child you merge on top of (it CLEARS any earlier label the evaluation no
-# longer proposes — the authoritative "use the evaluation's labels" path; use
-# `overlay_evaluation_labels` instead to KEEP existing labels and only add the proposed
-# ones).
+# Label proposals stay proposals until the final post-merge evaluation. If no
+# merge is selected, `accept_labels(mode="replace")` below accepts this pass's
+# complete verdict; choose `mode="overlay"` to retain existing labels.
 
-CurationEvaluation().plot_burst_pair_metrics(eval_sel)
-labeled_curation = CurationEvaluation().use_evaluation_labels(eval_sel)
-labeled_curation  # {"sorting_id", "curation_id"} of the auto-labeled child
+evaluation.plots.burst_pair_metrics()
+evaluation.proposed_labels
 
 # ### 3c. Manual merge, then the final evaluation pass (pass 2)
 #
 # List the burst pairs you decided to merge in step 3b in `merge_groups_to_apply`
 # (each a list of ≥2 unit ids, e.g. `[[3, 7]]`). It starts EMPTY so a run-all
 # never merges arbitrary units — fill it in after inspecting 3b, then re-run.
-# When you merge, `create_merged_curation` (intent-first sugar over
-# `insert_curation` with `apply_merge=True`) branches off the auto-labeled
-# curation, and `CurationEvaluation` runs once more on the MERGED curation: the
-# metrics over the post-merge templates are the final numbers of record. The
-# analyzer-backed plots (`plot_units_qc`, `plot_correlograms`, ...) are
-# raw-unit-curation only and RAISE on a merged curation, so read the merged
-# result with `get_metrics` (it carries the curation's own merged namespace).
-# `use_evaluation_labels` commits those final labels so downstream code keys off the
-# curated result, not the uncurated root curation. (Leaving the list empty keeps
-# the auto-labeled curation from 3b as the result — no merge applied.)
+# `merge_and_evaluate` commits/reuses the merge child and immediately evaluates
+# that child's actual merged templates with the SAME recipes. The receipt makes
+# each create/reuse decision visible and its `.evaluation` owns merged plots and
+# metrics. `accept_labels(mode="replace")` then commits the final verdict.
 
 merge_groups_to_apply = []  # e.g. [[3, 7]] after inspecting step 3b
 
 if merge_groups_to_apply:
-    merged = CurationV2.create_merged_curation(
-        sorting_key={"sorting_id": run_summary["sorting_id"]},
-        merge_groups=merge_groups_to_apply,
-        parent_curation_id=labeled_curation["curation_id"],
-        description="manual burst-pair merge",
-        reuse_existing=True,
-    )
-    final_eval_sel = CurationEvaluationSelection.insert_selection(
-        {
-            "sorting_id": run_summary["sorting_id"],
-            "curation_id": merged["curation_id"],
-            "metric_params_name": "franklab_default",
-            "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
-        }
-    )
-    CurationEvaluation.populate(final_eval_sel)
-    display(CurationEvaluation.get_metrics(final_eval_sel))  # merged templates
-    final_curation = CurationEvaluation().use_evaluation_labels(final_eval_sel)
+    merge_receipt = evaluation.merge_and_evaluate(merge_groups_to_apply)
+    analysis_evaluation = merge_receipt.evaluation
+    display(analysis_evaluation.metrics)  # actual merged templates
 else:
-    final_curation = labeled_curation  # no manual merge yet; use the 3b result
-    final_eval_sel = eval_sel  # the curation-evaluation selection of record
+    analysis_evaluation = evaluation
 
-final_summary = CurationV2.summarize_curation(final_curation)
-final_merge_id = final_summary["merge_id"]
+final_curation = analysis_evaluation.accept_labels(mode="replace")
+final_summary = CurationV2.summarize_curation(final_curation.as_key())
+final_merge_id = final_curation.merge_id
 final_summary
 
 # ### 3d. Surface waveform shape for cell typing (your thresholds, not the pipeline's)
 #
-# Over the final curated result (`final_eval_sel` from section 3c — post-merge if you
-# merged, the pass-1 auto curation otherwise), `get_metrics` returns a
+# Over `analysis_evaluation` (post-merge if you merged, otherwise pass 1),
+# `.metrics` returns a
 # waveform-shape column next to the quality metrics: `trough_half_width` — the
 # half-amplitude width of the spike trough, in seconds, read from the unwhitened
 # display analyzer. Narrow spikes are fast-spiking interneurons, wide spikes
@@ -368,7 +333,7 @@ final_summary
 # wider post-trough window than the hippocampus display recipe's 0.5 ms and clip
 # there — they are reliable on the wider cortex/fallback window.)
 
-shape = CurationEvaluation.get_metrics(final_eval_sel)[
+shape = analysis_evaluation.metrics[
     ["firing_rate", "trough_half_width"]
 ].dropna()
 
@@ -463,7 +428,7 @@ unit_ids = list(Sorting().get_sorting(sorting_key).get_unit_ids())
 if unit_ids:
     ssviz.plot_unit_summary(sorting_key, unit_ids[0], compute_missing=True)
 
-ssviz.plot_metrics(final_eval_sel)  # the routed Spyglass metric table, plotted
+analysis_evaluation.plots.metrics()
 
 # ### 3f. Hand-label specific units
 #
@@ -475,18 +440,17 @@ ssviz.plot_metrics(final_eval_sel)  # the routed Spyglass metric table, plotted
 # `manual_labels` starts EMPTY so a run-all is a no-op — fill it in after
 # inspecting the units above, then re-run.
 
-manual_labels = {}  # e.g. {5: "noise", 12: "mua"} after inspecting the units
+manual_labels = {}  # e.g. {5: ["noise"], 12: ["mua"]} after inspecting
 curated_merge_id = final_merge_id  # default: the section-3c result
 
 if manual_labels:
-    hand_labeled = CurationV2.save_manual_curation(
-        {"sorting_id": run_summary["sorting_id"]},
-        parent_curation_id=final_curation["curation_id"],
+    hand_labeled = save_manual_curation(
+        parent_curation=final_curation,
         labels=manual_labels,
         description="manual per-unit labels",
     )
-    hand_summary = CurationV2.summarize_curation(hand_labeled)
-    curated_merge_id = hand_summary["merge_id"]
+    hand_summary = CurationV2.summarize_curation(hand_labeled.as_key())
+    curated_merge_id = hand_labeled.merge_id
     display(hand_summary)
 
 # ### 3g. Use the curated result downstream

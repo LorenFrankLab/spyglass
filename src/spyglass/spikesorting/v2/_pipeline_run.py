@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # import is cycle-free and keeps the UnitMatchPlan annotations resolvable at
 # runtime (e.g. typing.get_type_hints for API docs).
 from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+from spyglass.spikesorting.v2.curation_api import RunResult
 
 from spyglass.spikesorting.v2._pipeline_preflight import (
     _resolve_session_sort_group_ids,
@@ -45,7 +46,6 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
     RunV2PipelineSessionResult,
-    RunV2PipelineSummary,
     RunV2UnitMatchSummary,
     StageStatus,
     UnitMatchMemberChoices,
@@ -177,7 +177,7 @@ def run_v2_pipeline(
     concat_session_group_name: "str | None" = None,
     build_figpack_view: bool = False,
     figpack_label_options: "list[str] | None" = None,
-) -> RunV2PipelineSummary:
+) -> "RunResult":
     """End-to-end sort in one call: select + populate every stage, then curate.
 
     Two input modes, exactly one required. Single-session mode (recording ->
@@ -315,13 +315,14 @@ def run_v2_pipeline(
 
     Returns
     -------
-    RunV2PipelineSummary
-        Run summary -- a ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``
-        (the two arms of the ``RunV2PipelineSummary`` union). The sort / curation
-        keys are always present. A concat run keeps its synthetic-timeline
-        root/analysis merge IDs unset and instead returns one session-safe merge
-        ID per frozen member. The source-stage keys depend on the input mode,
-        discriminated by ``source_mode``.
+    RunResult
+        Mapping-compatible run summary wrapping a
+        ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``. In addition to
+        the preserved item keys it exposes ``root_curation`` and
+        ``analysis_curation`` identity-safe accessors. A concat run keeps its
+        synthetic-timeline root/analysis merge IDs unset and instead returns one
+        session-safe merge ID per frozen member. The source-stage keys depend on
+        the input mode, discriminated by ``source_mode``.
 
         Always present:
             ``pipeline_preset``          : the pipeline-preset name
@@ -1054,7 +1055,7 @@ def run_v2_pipeline(
             ).fetch1("figpack_uri")
 
     run_summary["stage_seconds"] = stage_seconds
-    return cast(RunV2PipelineSummary, run_summary)
+    return RunResult(run_summary)
 
 
 def run_v2_pipeline_session(
@@ -1290,13 +1291,15 @@ def run_v2_pipeline_session(
                     f"{sort_group_id} preflight: {warning}"
                 )
             results.append(
-                {
-                    **summary,
-                    "sort_group_id": sort_group_id,
-                    "outcome": "ok",
-                    "warnings": list(summary.get("warnings", []))
-                    + group_preflight_warnings,
-                }
+                RunResult(
+                    {
+                        **summary,
+                        "sort_group_id": sort_group_id,
+                        "outcome": "ok",
+                        "warnings": list(summary.get("warnings", []))
+                        + group_preflight_warnings,
+                    }
+                )
             )
 
     # Stable, group-ordered result (preflight-failed entries were appended
