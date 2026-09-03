@@ -33,7 +33,10 @@ SHARED_PRIVILEGES = (
 )
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SHARED = f"GRANT {SHARED_PRIVILEGES} ON "
-GRANT_SEL = "GRANT SELECT ON "
+# Read access pairs SELECT with REFERENCES: a foreign key is checked against
+# the *parent* table, so a role that can only SELECT a schema cannot declare a
+# table pointing into it. Order matches MySQL's `SHOW GRANTS` output.
+GRANT_SEL = "GRANT SELECT, REFERENCES ON "
 GRANT_SHOW = "GRANT SHOW DATABASES ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
 CREATE_ROLE = "CREATE ROLE IF NOT EXISTS "
@@ -55,14 +58,18 @@ class DatabaseSettings:
         """Class to manage common database settings
 
         Roles:
-        - dj_guest:  select for all prefix
-        - dj_collab: select for all prefix, all for user prefix
-        - dj_user:   select for all prefix, all for user prefix, all but
-          create for shared prefix
+        - dj_guest:  select/references for all prefix
+        - dj_collab: select/references for all prefix, all for user prefix
+        - dj_user:   select/references for all prefix, all for user prefix,
+          all but create for shared prefix
         - dj_admin:     all for all prefix
 
         Note: dj_user cannot create tables in shared prefixes. An admin must
         declare new shared tables. See issue #1065.
+
+        Note: read access grants REFERENCES alongside SELECT. A foreign key is
+        validated against the parent table, so SELECT alone would leave a role
+        unable to declare a table referencing any schema it does not own.
 
         Note: To add dj_user role to all those with common access, run...
 

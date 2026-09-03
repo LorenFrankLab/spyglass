@@ -82,7 +82,39 @@ def test_user_role_shared_grants_list_privileges(user_role_sql, shared_modules):
 
 def test_user_role_keeps_global_select(user_role_sql):
     """`dj_user` still reads every schema."""
-    assert "GRANT SELECT ON `%`.* TO `dj_user`;\n" in user_role_sql
+    assert "GRANT SELECT, REFERENCES ON `%`.* TO `dj_user`;\n" in user_role_sql
+
+
+@pytest.mark.parametrize("role", ["guest", "collab", "user"])
+def test_global_select_carries_references(db_settings, role):
+    """Every role that can read a schema can also reference it.
+
+    A foreign key needs ``REFERENCES`` on the *parent* table, so a role with
+    ``SELECT`` alone cannot declare a table pointing at any schema it does not
+    own -- including the shared prefixes it is meant to build on.
+    """
+    grants = [
+        line
+        for line in db_settings._create_roles_dict[role]
+        if "`%`.*" in line and "GRANT" in line and "TO `dj_" in line
+    ]
+    assert grants, f"No global grant found for {role}"
+    for line in grants:
+        assert "SELECT" in line, f"Lost SELECT for {role}: {line}"
+        assert "REFERENCES" in line, f"Missing REFERENCES for {role}: {line}"
+
+
+@pytest.mark.parametrize("role", ["guest", "collab", "user"])
+def test_global_grant_adds_nothing_else(db_settings, role):
+    """The global grant widens to REFERENCES only -- no write privileges."""
+    (line,) = [
+        ln
+        for ln in db_settings._create_roles_dict[role]
+        if "`%`.*" in ln and "GRANT" in ln and "TO `dj_" in ln
+    ]
+    assert line.startswith("GRANT SELECT, REFERENCES ON "), line
+    for forbidden in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALL"):
+        assert forbidden not in line, f"{role} gained {forbidden}: {line}"
 
 
 def test_add_module_sql_omits_create(db_settings):

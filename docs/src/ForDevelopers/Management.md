@@ -29,6 +29,11 @@ DataJoint schemas correspond to MySQL databases. Privileges are managed by
 schema/database prefix.
 
 - `SELECT` privileges allow users to read, write, and delete data.
+- `REFERENCES` privileges allow users to declare a foreign key pointing at a
+    table. MySQL validates a foreign key against the *parent* table, so this is
+    granted everywhere `SELECT` is: a role able to read a schema but not
+    reference it could not declare a table in its own prefix that depends on any
+    upstream table, which is the normal way pipelines are built.
 - `ALL` privileges allow users to create, alter, or drop tables and schemas in
     addition to operations above.
 
@@ -73,10 +78,10 @@ variable server-side. For details, see
 When a database is first initialized, the team should run `add_roles` to create
 the following roles:
 
-- `dj_guest`: `SELECT` on all schemas.
-- `dj_collab`: `ALL` on user schema, `SELECT` on all other schemas.
+- `dj_guest`: `SELECT`, `REFERENCES` on all schemas.
+- `dj_collab`: `ALL` on user schema, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_user`: `ALL` on user schema, all privileges except `CREATE` on shared
-    schemas, `SELECT` on all other schemas.
+    schemas, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_admin`: `ALL` on all schemas.
 
 If new shared modules are introduced, the `add_module` method should be used to

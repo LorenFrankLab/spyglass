@@ -265,6 +265,7 @@ for label, interval_data in results.groupby("interval_labels"):
     `--container-name`/`--container-port` options #1661
 - Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
 - Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
 - Default analysis schema prefix to `database.user` when unset #1678
 - Import `_fir_filter` in a fixture, not at test-module scope #1678
 - Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
