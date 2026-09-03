@@ -817,10 +817,11 @@ def test_every_preset_declares_curation_params():
     """Every shipped preset names a quality-metric + auto-curation rule set.
 
     These became required fields, so a preset that omitted them would fail to
-    build. The shipped mapping: franklab / Neuropixels presets pair their
-    ``*_default`` metric set with the noise-labeling ``v1_default_nn_noise``
-    rules, while the clusterless preset (no clustered units to merge) pairs the
-    ``minimal`` metric set with the inert ``none`` rules.
+    build. The shipped mapping: Frank-lab polymer/tetrode presets pair
+    ``franklab_default`` metrics with the ISI-aware Frank-lab rules;
+    Neuropixels keeps the historical ``v1_default_nn_noise`` rules; and the
+    clusterless preset (no clustered units to merge) pairs ``minimal`` metrics
+    with the inert ``none`` rules.
     """
     for name, preset in _PIPELINE_PRESETS.items():
         assert preset.metric_params_name.strip(), f"{name}.metric blank"
@@ -839,13 +840,22 @@ def test_every_preset_declares_curation_params():
     assert clusterless.metric_params_name == "minimal"
     assert clusterless.auto_curation_rules_name == "none"
 
-    ms5 = _PIPELINE_PRESETS[_CLONE_BASE]
-    assert ms5.metric_params_name == "franklab_default"
-    assert ms5.auto_curation_rules_name == "v1_default_nn_noise"
-
     npx = _PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
     assert npx.metric_params_name == "neuropixels_default"
     assert npx.auto_curation_rules_name == "v1_default_nn_noise"
+
+    excluded = {
+        "franklab_clusterless_2026_06",
+        "franklab_neuropixels_ks4_2026_06",
+    }
+    for name, preset in _PIPELINE_PRESETS.items():
+        if name in excluded:
+            continue
+        assert preset.metric_params_name == "franklab_default", name
+        assert (
+            preset.auto_curation_rules_name
+            == "franklab_default_auto_curation_2026_06"
+        ), name
 
 
 def test_concat_preset_is_registered_and_shaped():
@@ -862,7 +872,10 @@ def test_concat_preset_is_registered_and_shaped():
     assert preset.motion_correction_params_name == "auto_default"
     assert preset.sorter == "mountainsort5"
     assert preset.metric_params_name == "franklab_default"
-    assert preset.auto_curation_rules_name == "v1_default_nn_noise"
+    assert (
+        preset.auto_curation_rules_name
+        == "franklab_default_auto_curation_2026_06"
+    )
 
 
 def test_run_v2_pipeline_rejects_motion_pinned_preset_without_db():
@@ -1241,7 +1254,7 @@ def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
     )
     assert (
         _stage_value(detail, "preset", "auto_curation_rules_name")
-        == "v1_default_nn_noise"
+        == "franklab_default_auto_curation_2026_06"
     )
 
 

@@ -13,7 +13,10 @@ This assumes you have already ingested the session with `insert_sessions` (see
 ```python
 from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+from spyglass.spikesorting.v2.pipeline import (
+    describe_pipeline_preset,
+    run_v2_pipeline,
+)
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
 nwb_file_name = "your_session.nwb"  # already ingested
@@ -33,6 +36,9 @@ if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
 Pass `auto_curate=True` so the run doesn't stop at the uncurated root: it scores
 the sort and commits an auto-labeled child in the same call, giving you an
 **analysis-ready** curation to send downstream.
+For the preset below it applies `franklab_default_auto_curation_2026_06`; call
+`describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms5_2026_06")` to
+inspect the exact rules before running.
 
 ```python
 summary = run_v2_pipeline(
