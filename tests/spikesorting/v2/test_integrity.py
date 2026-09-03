@@ -16,8 +16,9 @@ exercise as a focused gate:
   ``RecordingArtifactSelection`` master. (The split artifact selection is
   structural single-source -- the recording source is a required master FK on
   ``RecordingArtifactSelection``, not an XOR source part.)
-- **Merge-table CurationV2 part is correctly wired**:
-  ``SpikeSortingOutput.CurationV2`` is the only v2 routing entry;
+- **Merge-table v2 parts are correctly wired**:
+  ``SpikeSortingOutput.CurationV2`` and
+  ``SpikeSortingOutput.ConcatMemberCuration`` are the v2 routing entries;
   v1's ``CurationV1`` and v0's ``CuratedSpikeSorting`` keep their
   separate parts. ``source_class_dict["CurationV2"] = CurationV2``
   so ``get_recording`` / ``get_sorting`` / ``get_sort_group_info``
@@ -125,10 +126,15 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     # deliberate, not as a table that was forgotten above). TrackedUnit does no
     # SI/NWB I/O; FigPackCuration's make does a non-rollback-able network upload
     # (upload=True), so keeping its work outside a transaction is pointless.
+    # ConcatMemberCuration is a bounded read-split-write over one Units table;
+    # its staged file is still kept outside its explicit insert transaction.
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
     from spyglass.spikesorting.v2.unit_matching import TrackedUnit
 
-    for excluded in (TrackedUnit, FigPackCuration):
+    for excluded in (TrackedUnit, FigPackCuration, ConcatMemberCuration):
         assert hasattr(excluded, "make"), (
             f"{excluded.__name__} should still define a make; it is a "
             "documented monolithic exclusion from the tri-part gate above."
@@ -136,9 +142,7 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
 
 
 def test_v2_dispatch_classes_wired_into_merge_table():
-    """``source_class_dict["CurationV2"]`` resolves to the v2
-    ``CurationV2`` class and the ``SpikeSortingOutput.CurationV2``
-    part exists.
+    """Both v2 source classes and merge parts are registered.
 
     This is a registration / wiring check only -- behavioral
     coverage that the dispatch methods (``get_recording`` /
@@ -148,6 +152,9 @@ def test_v2_dispatch_classes_wired_into_merge_table():
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
         source_class_dict,
+    )
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
     )
     from spyglass.spikesorting.v2.curation import CurationV2 as V2Curation
 
@@ -159,6 +166,11 @@ def test_v2_dispatch_classes_wired_into_merge_table():
     assert hasattr(SpikeSortingOutput, "CurationV2"), (
         "SpikeSortingOutput.CurationV2 part missing -- v2 entries "
         "cannot be registered into the merge table."
+    )
+    assert source_class_dict["ConcatMemberCuration"] is ConcatMemberCuration
+    assert hasattr(SpikeSortingOutput, "ConcatMemberCuration"), (
+        "SpikeSortingOutput.ConcatMemberCuration part missing -- member "
+        "outputs cannot be registered into the merge table."
     )
 
 

@@ -62,6 +62,30 @@ def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
 CurationV2, _v2_import_error = _probe_v2_curation()
 
 
+def _probe_v2_concat_member_curation() -> (
+    "tuple[Union[type, None], Union[Exception, None]]"
+):
+    """Import the optional per-member concat curation merge target."""
+    try:
+        from spyglass.spikesorting.v2.concat_member_curation import (
+            ConcatMemberCuration,
+        )
+    except Exception as err:  # noqa: BLE001 -- optional v2 boundary
+        logger.warning(
+            "spikesorting v2 concat-member outputs are unavailable; "
+            "SpikeSortingOutput will be declared without its "
+            "ConcatMemberCuration part in this process. Captured cause: "
+            f"{type(err).__name__}: {err}"
+        )
+        return None, err
+    return ConcatMemberCuration, None
+
+
+ConcatMemberCuration, _v2_concat_member_import_error = (
+    _probe_v2_concat_member_curation()
+)
+
+
 def _raise_v2_unavailable(caller: str) -> None:
     """Raise a clear RuntimeError when v2 is requested but didn't import.
 
@@ -108,6 +132,8 @@ source_class_dict = {
 }
 if CurationV2 is not None:
     source_class_dict["CurationV2"] = CurationV2
+if ConcatMemberCuration is not None:
+    source_class_dict["ConcatMemberCuration"] = ConcatMemberCuration
 
 
 @schema
@@ -147,6 +173,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             -> master
             ---
             -> CurationV2
+            """
+
+    if ConcatMemberCuration is not None:
+
+        class ConcatMemberCuration(SpyglassMixin, dj.Part):  # noqa: F811
+            definition = """
+            -> master
+            ---
+            -> ConcatMemberCuration
             """
 
     def _get_restricted_merge_ids_v2(
@@ -214,7 +249,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 )
 
         joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
-        return joined.fetch("merge_id", as_dict=as_dict)
+        merge_ids = list(joined.fetch("merge_id", as_dict=as_dict))
+        if ConcatMemberCuration is not None:
+            member_joined = (
+                SpikeSortingOutput.ConcatMemberCuration * curation_table.proj()
+            )
+            merge_ids.extend(member_joined.fetch("merge_id", as_dict=as_dict))
+        return merge_ids
 
     def _get_restricted_merge_ids_v1(
         self,

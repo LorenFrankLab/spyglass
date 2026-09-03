@@ -87,11 +87,25 @@ def clear_curations_for(sorting_key) -> None:
         ``{"sorting_id": ...}`` or a full curation PK).
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
 
+    for mid in (SpikeSortingOutput.ConcatMemberCuration & sorting_key).fetch(
+        "merge_id"
+    ):
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+            warn=False, safemode=False
+        )
+    (ConcatMemberCuration & sorting_key).super_delete(
+        warn=False, safemode=False
+    )
     for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
-        (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    (CurationV2 & sorting_key).super_delete(warn=False)
+        (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+            warn=False, safemode=False
+        )
+    (CurationV2 & sorting_key).super_delete(warn=False, safemode=False)
 
 
 def configure_v2_run_inputs(
@@ -315,6 +329,9 @@ def clean_session_groups_for_owner(owner: str) -> None:
         are dropped.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -336,20 +353,35 @@ def clean_session_groups_for_owner(owner: str) -> None:
             SortingSelection.ConcatenatedRecordingSource & concat_id_restr
         ).fetch("KEY", as_dict=True)
         if sort_keys:
+            for mid in (
+                SpikeSortingOutput.ConcatMemberCuration & sort_keys
+            ).fetch("merge_id"):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False, safemode=False
+                )
+            (ConcatMemberCuration & sort_keys).super_delete(
+                warn=False, safemode=False
+            )
             for mid in (SpikeSortingOutput.CurationV2 & sort_keys).fetch(
                 "merge_id"
             ):
                 (SpikeSortingOutput & {"merge_id": mid}).super_delete(
-                    warn=False
+                    warn=False, safemode=False
                 )
-            (CurationV2 & sort_keys).super_delete(warn=False)
-            (Sorting & sort_keys).super_delete(warn=False)
+            (CurationV2 & sort_keys).super_delete(warn=False, safemode=False)
+            (Sorting & sort_keys).super_delete(warn=False, safemode=False)
             # Drop SortingSelection masters BEFORE ConcatenatedRecording so its
             # cascade never hits the orphan ConcatenatedRecordingSource part.
-            (SortingSelection & sort_keys).super_delete(warn=False)
-        (ConcatenatedRecording & concat_id_restr).super_delete(warn=False)
-        (ConcatenatedRecordingSelection & owner_key).super_delete(warn=False)
-    (SessionGroup & owner_key).super_delete(warn=False)
+            (SortingSelection & sort_keys).super_delete(
+                warn=False, safemode=False
+            )
+        (ConcatenatedRecording & concat_id_restr).super_delete(
+            warn=False, safemode=False
+        )
+        (ConcatenatedRecordingSelection & owner_key).super_delete(
+            warn=False, safemode=False
+        )
+    (SessionGroup & owner_key).super_delete(warn=False, safemode=False)
 
 
 def synthesize_minirec_nwb(

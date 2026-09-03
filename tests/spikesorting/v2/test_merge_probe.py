@@ -1,12 +1,8 @@
 """The eager v2 part-table probe in ``spikesorting_merge``.
 
-``spikesorting_merge`` imports the v2 ``CurationV2`` part target inside a broad
-``except Exception`` so that v0/v1-only environments -- which may lack the
-optional modern-SpikeInterface / Pydantic v2 dependencies -- can still load the
-merge table when the v2 ``curation`` import fails. That breadth is deliberate:
-it tolerates any import-time failure of the optional v2 layer (an ``ImportError``
-from a missing dependency, or any other exception raised while the v2 modules
-import) rather than letting it break ``spikesorting_merge`` import for everyone.
+``spikesorting_merge`` imports its v2 part targets inside broad
+``except Exception`` boundaries so v0/v1-only environments can still load the
+merge table when either optional module fails to import.
 
 The fix for silent failures is visibility, not narrowing: the probe logs the
 captured cause via ``logger.warning`` while still tolerating it. These tests
@@ -24,6 +20,17 @@ def _force_v2_curation_error(monkeypatch, exc):
     """Make ``from spyglass.spikesorting.v2.curation import CurationV2`` raise
     ``exc`` by injecting a stand-in module whose attribute access raises."""
     name = "spyglass.spikesorting.v2.curation"
+
+    class _Boom(types.ModuleType):
+        def __getattr__(self, attr):
+            raise exc
+
+    monkeypatch.setitem(sys.modules, name, _Boom(name))
+
+
+def _force_v2_concat_member_error(monkeypatch, exc):
+    """Make importing the concat-member merge target raise ``exc``."""
+    name = "spyglass.spikesorting.v2.concat_member_curation"
 
     class _Boom(types.ModuleType):
         def __getattr__(self, attr):
@@ -63,4 +70,36 @@ def test_unexpected_v2_import_error_is_logged(
         "spikesorting v2 is unavailable" in r.message
         and type(exc).__name__ in r.message
         for r in caplog.records
-    ), f"probe failure not warning-logged: {[r.message for r in caplog.records]}"
+    ), (
+        "probe failure not warning-logged: "
+        f"{[record.message for record in caplog.records]}"
+    )
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ImportError("concat member module missing"),
+        RuntimeError("concat member module raised at import"),
+    ],
+    ids=["import_error", "non_import_error"],
+)
+def test_unexpected_concat_member_import_error_is_logged(
+    dj_conn, monkeypatch, caplog, exc
+):
+    """The optional member-output probe tolerates and surfaces any failure."""
+    from spyglass.spikesorting.spikesorting_merge import (
+        _probe_v2_concat_member_curation,
+    )
+
+    _force_v2_concat_member_error(monkeypatch, exc)
+    with caplog.at_level("WARNING"):
+        member_table, captured = _probe_v2_concat_member_curation()
+
+    assert member_table is None
+    assert captured is exc
+    assert any(
+        "concat-member outputs are unavailable" in record.message
+        and type(exc).__name__ in record.message
+        for record in caplog.records
+    )

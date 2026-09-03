@@ -194,6 +194,7 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
     from spyglass.spikesorting import spikesorting_merge as m
 
     monkeypatch.setattr(m, "CurationV2", None)
+    monkeypatch.setattr(m, "ConcatMemberCuration", None)
     assert m._available_merge_sources() == ["v0", "v1"]
 
     monkeypatch.setattr(m, "CurationV2", object())
