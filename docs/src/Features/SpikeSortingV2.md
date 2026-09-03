@@ -618,6 +618,77 @@ paths publish the same prebuilt bundle, including seeded annotations and the
 Spyglass identity sidecar. The FigPack packages remain optional through the
 `spikesorting-v2-curation` extra.
 
+### Custom unit annotations
+
+Computed unit properties that are not built-in quality metrics live in typed,
+immutable annotation sets. A set belongs to one exact curation namespace and is
+selected explicitly for reading or review; Spyglass never chooses the “latest”
+set. Custom columns are namespaced by definition version and full `set_hash`, so
+two sets—or a set and a built-in metric—cannot silently overwrite each other.
+
+```python
+import pandas as pd
+
+from spyglass.spikesorting.v2.unit_annotation import (
+    CurationUnitAnnotationSet,
+    UnitAnnotationDefinition,
+    read_unit_properties,
+)
+
+root = run_summary.root_curation
+unit_ids = sorted(
+    int(unit_id) for unit_id in (CurationV2.Unit & root.as_key()).fetch("unit_id")
+)
+definition = UnitAnnotationDefinition.insert_definition(
+    "custom_score",
+    1,
+    "float",
+    physical_unit="a.u.",
+    description="Example lab-specific unit score",
+)
+values = pd.DataFrame(
+    {
+        "custom_score": [
+            rank / max(1, len(unit_ids) - 1)
+            for rank, _ in enumerate(unit_ids)
+        ]
+    },
+    index=pd.Index(unit_ids, name="unit_id"),
+)
+annotation_set = CurationUnitAnnotationSet.from_dataframe(
+    root,
+    definition,
+    values,
+    producer="my-analysis",
+    producer_version="1.0",
+    producer_parameters={"window_s": 2.0},
+)
+
+properties = read_unit_properties(
+    root,
+    evaluation=None,  # or one explicit EvaluationResult
+    annotation_sets=[annotation_set],
+)
+display(properties)
+display(root.summarize(evaluation=None, annotation_sets=[annotation_set]))
+
+# The selected custom column appears in the read-only review table and its
+# set_hash becomes part of this figure's identity.
+review = root.start_review(
+    "franklab_hippocampus_2026_06",
+    annotation_sets=[annotation_set],
+)
+```
+
+Definitions support scalar `float`, `int`, `bool`, and `text` values. `float`
+uses database `double` storage so float64 values survive content addressing.
+Definitions are immutable by version, and changing parameters or values creates
+a new set while leaving the old one intact. Annotation sets are **not curation
+labels**: they never write `CurationV2.UnitLabel` and do not change a curation's
+UUID, scientific identity, or `merge_id`. Because a committed child is a new
+curation identity, parent annotation sets are not implicitly carried into a
+continuation review; compute/select child-scoped sets explicitly.
+
 ### Scripted curation facade (automation and debugging)
 
 `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its
@@ -655,7 +726,8 @@ both the stored producer and a change kind derived from the immediate-parent
 merge rows plus label delta. No inferred “superseded” state exists in a
 branching graph. Use `preview_curation_delete()` before the supported
 `delete_subtree()` leaf-up deletion; `health_report()` composes lineage and
-analyzer-cache orphan audits.
+analyzer-cache orphan audits. `created_at` and `created_by` expose the persisted
+creation metadata for the exact curation generation.
 
 ### Quality metrics and the scripted evaluate/merge loop
 

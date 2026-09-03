@@ -53,7 +53,7 @@ if "curation_uuid" not in curation_table.heading.names:
         "SET `curation_uuid` = UNHEX(REPLACE(UUID(), '-', '')) "
         "WHERE `curation_uuid` IS NULL"
     )
-CurationV2().alter()  # finalize NOT NULL and UNIQUE INDEX
+CurationV2().alter()  # finalize UUID and add created_at / created_by
 AutoCurationRules.Rule().alter()  # missing_policy defaults existing rows to error
 
 # Declare and seed the net-new immutable review-profile lookup after its two
@@ -62,6 +62,14 @@ from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.review_profile import CurationReviewProfile  # noqa F401
 
 initialize_v2_defaults()
+
+# Declare the net-new typed annotation schema. It annotates exact CurationV2
+# unit namespaces and does not alter curation identity or the v1 annotation
+# table.
+from spyglass.spikesorting.v2.unit_annotation import (  # noqa F401
+    CurationUnitAnnotationSet,
+    UnitAnnotationDefinition,
+)
 
 # UnitAnnotation.unit_id now stores the NWB unit id (was a positional index).
 # Run ONCE, before writing new annotations:
@@ -117,6 +125,15 @@ palette, and `replace`/`overlay` import mode under one content-addressed name.
 choices (`upload`, `ephemeral`, credentials/local destination) and
 curation-specific annotation selections remain runtime inputs and are not
 profile content.
+
+`CurationV2.created_at` and `created_by` now store creation metadata; the
+additive defaults cover existing preproduction rows without claiming historical
+authorship. The new `UnitAnnotationDefinition` / `CurationUnitAnnotationSet`
+schema stores typed (`float`/`int`/`bool`/`text`), immutable,
+content-addressed custom unit properties against a real `CurationV2.Unit`
+foreign key. Float values use database `double` precision. Readers and FigPack
+reviews require explicit annotation-set references; these properties are not
+curation labels and never affect curation UUIDs or merge IDs.
 
 #### `Merge.fetch_nwb` rejects ambiguous multi-source reads
 

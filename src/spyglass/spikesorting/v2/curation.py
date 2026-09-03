@@ -124,6 +124,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     merges_applied=0: bool
     curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'curation_evaluation')
     description: varchar(255)
+    created_at=CURRENT_TIMESTAMP: timestamp
+    created_by='': varchar(128)
     UNIQUE INDEX (curation_uuid)
     """
 
@@ -1410,6 +1412,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             "merges_applied": bool(apply_merge),
             "curation_source": curation_source,
             "description": description,
+            "created_by": str(dj.config["database.user"]),
         }
         # Labels attach to the units actually written. For
         # apply_merge=False that is every original unit; for
@@ -1839,7 +1842,13 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         return {int(u) for u in matched}
 
     @classmethod
-    def summarize_curation(cls, curation_key: dict) -> dict:
+    def summarize_curation(
+        cls,
+        curation_key: dict,
+        *,
+        evaluation=None,
+        annotation_sets=None,
+    ) -> dict:
         """Return a notebook-printable summary of one curation.
 
         Pure read accessor: it reads only existing master fields and part
@@ -1873,7 +1882,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             >1-contributor merge group -- the same condition as
             ``has_unapplied_proposed_merges``), ``merge_id`` (from
             ``SpikeSortingOutput.CurationV2``, ``None`` if unregistered), and
-            ``description``.
+            ``description``, ``created_at``, and ``created_by``. When
+            ``annotation_sets`` is explicitly supplied, ``unit_properties``
+            contains the explicitly selected evaluation/custom properties;
+            no latest evaluation or annotation set is inferred.
 
         See Also
         --------
@@ -1905,8 +1917,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         }
 
         # fetch1 doubles as the "exactly one curation" check.
-        merges_applied, description = (cls & pk).fetch1(
-            "merges_applied", "description"
+        merges_applied, description, created_at, created_by = (cls & pk).fetch1(
+            "merges_applied", "description", "created_at", "created_by"
         )
 
         labels = cls._labels_by_unit(pk)
@@ -1919,7 +1931,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # The pure formatter (DB-free) assembles the return dict and derives
         # ``is_merge_preview`` from the values in hand rather than re-fetching
         # via ``has_unapplied_proposed_merges``.
-        return build_curation_summary(
+        summary = build_curation_summary(
             sorting_id=pk["sorting_id"],
             curation_id=pk["curation_id"],
             merges_applied=merges_applied,
@@ -1929,6 +1941,26 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             unit_contributor_groups=cls.get_unit_contributor_groups(pk),
             n_units=len(cls.Unit & pk),
         )
+        summary["created_at"] = created_at
+        summary["created_by"] = str(created_by)
+        if annotation_sets is not None:
+            from spyglass.spikesorting.v2.curation_api import CurationRef
+            from spyglass.spikesorting.v2.unit_annotation import (
+                read_unit_properties,
+            )
+
+            summary["unit_properties"] = read_unit_properties(
+                CurationRef.from_key(pk),
+                evaluation=evaluation,
+                annotation_sets=annotation_sets,
+            )
+        elif evaluation is not None:
+            raise ValueError(
+                "summarize_curation requires annotation_sets to be supplied "
+                "explicitly whenever evaluation is selected; pass [] for no "
+                "custom annotation sets."
+            )
+        return summary
 
     # ---- Accessors -------------------------------------------------------
 

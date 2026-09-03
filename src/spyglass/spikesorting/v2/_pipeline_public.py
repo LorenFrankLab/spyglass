@@ -57,6 +57,9 @@ PIPELINE_FACADE_EXPORTS = (
     "MergeLabelConflict",
     "ReviewImportReceipt",
     "ReviewStageStatus",
+    "AnnotationDefinitionRef",
+    "AnnotationSetRef",
+    "read_unit_properties",
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
@@ -96,6 +99,9 @@ PACKAGE_ROOT_REEXPORTS = (
     "MergeLabelConflict",
     "ReviewImportReceipt",
     "ReviewStageStatus",
+    "AnnotationDefinitionRef",
+    "AnnotationSetRef",
+    "read_unit_properties",
 )
 
 

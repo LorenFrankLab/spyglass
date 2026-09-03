@@ -435,7 +435,7 @@ def _build_curation_view(
         items.append(
             figpack_views.LayoutItem(
                 view=figpack_views.DataFrame(review_table.reset_index()),
-                title="Evaluation suggestions (read-only)",
+                title="Review properties and suggestions (read-only)",
                 max_size=300,
             )
         )
@@ -548,7 +548,14 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
     if review_config is None:
         return None
 
-    from spyglass.spikesorting.v2.curation_api import EvaluationResult
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+    )
+    from spyglass.spikesorting.v2.unit_annotation import (
+        AnnotationSetRef,
+        read_unit_properties,
+    )
 
     evaluation = EvaluationResult.from_key(
         {"curation_evaluation_id": review_config["curation_evaluation_id"]}
@@ -567,22 +574,27 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
             "unit_id", order_by="unit_id"
         )
     ]
-    metrics = evaluation.metrics.copy(deep=True)
-    try:
-        metrics.index = [int(value) for value in metrics.index]
-    except (TypeError, ValueError) as exc:
-        raise FigPackDisplayedUnitPropertyError(
-            "Evaluation metric rows do not have integer unit ids."
-        ) from exc
-    requested = list(review_config["displayed_unit_properties"])
-    missing = [name for name in requested if name not in metrics.columns]
+    annotation_sets = tuple(
+        AnnotationSetRef.from_snapshot(snapshot)
+        for snapshot in review_config.get("annotation_sets", [])
+    )
+    properties = read_unit_properties(
+        CurationRef.from_key(curation_key),
+        evaluation=evaluation,
+        annotation_sets=annotation_sets,
+    )
+    requested = [
+        *review_config["displayed_unit_properties"],
+        *(ref.column_name for ref in annotation_sets),
+    ]
+    missing = [name for name in requested if name not in properties.columns]
     if missing:
         raise FigPackDisplayedUnitPropertyError(
-            "Review profile requests evaluation properties absent from its "
-            f"populated metric table: {missing}. Available properties: "
-            f"{list(map(str, metrics.columns))}."
+            "Review requests properties absent from its selected evaluation "
+            f"and annotation sets: {missing}. Available properties: "
+            f"{list(map(str, properties.columns))}."
         )
-    table = metrics.reindex(unit_ids)[requested].copy()
+    table = properties.reindex(unit_ids)[requested].copy()
     table.index.name = "unit_id"
 
     proposed_labels = evaluation.proposed_labels

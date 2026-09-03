@@ -125,6 +125,8 @@ def test_browser_review_preview_commit_resume_and_continue(
         pristine_bytes = (Path(review.uri) / "annotations.json").read_bytes()
         children_before = len(review.parent.children)
         no_change = review.preview_import()
+        assert no_change.reviewed_parent_created_at == review.parent.created_at
+        assert no_change.reviewed_parent_created_by == review.parent.created_by
         assert dict(no_change.labels_before) == dict(no_change.labels_after)
         assert no_change.merge_groups == ()
         assert len(review.parent.children) == children_before
@@ -136,6 +138,14 @@ def test_browser_review_preview_commit_resume_and_continue(
         no_change_receipt = no_change.commit(confirm_no_changes=True)
         assert no_change_receipt.curation.parent == review.parent
         assert not no_change_receipt.needs_merge_verification
+        assert (
+            no_change_receipt.created_at
+            == no_change_receipt.curation.created_at
+        )
+        assert (
+            no_change_receipt.created_by
+            == no_change_receipt.curation.created_by
+        )
 
         first_edits = {
             unit_ids[0]: ["mua"],
@@ -191,5 +201,76 @@ def test_browser_review_preview_commit_resume_and_continue(
         )
         assert pending_merges == []
         assert labels == {max(unit_ids) + 1: ["accept"]}
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def test_review_explicit_annotation_set_identity_and_display(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """Selected custom properties are hashed, resumable, and displayed."""
+    import pandas as pd
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+    )
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        unit_ids = sorted(
+            map(int, (Sorting.Unit & sorting_key).fetch("unit_id"))
+        )
+        definition = UnitAnnotationDefinition.insert_definition(
+            "phase4_figpack_score", 1, "float"
+        )
+        annotation_set = CurationUnitAnnotationSet.from_dataframe(
+            root,
+            definition,
+            pd.DataFrame(
+                {"phase4_figpack_score": [0.25, 0.75]},
+                index=pd.Index(unit_ids, name="unit_id"),
+            ),
+            producer="phase4-review-test",
+        )
+        profile = _ensure_test_profile()
+
+        baseline = root.start_review(profile, upload=False)
+        explicit_empty = root.start_review(
+            profile, upload=False, annotation_sets=[]
+        )
+        assert explicit_empty.review_id == baseline.review_id
+
+        selected = root.start_review(
+            profile,
+            upload=False,
+            annotation_sets=[annotation_set],
+        )
+        assert selected.review_id != baseline.review_id
+        assert selected.annotation_sets == (annotation_set,)
+        resumed = FigPackReview.resume(selected.review_id)
+        assert resumed.annotation_sets == (annotation_set,)
+
+        config = json.loads(
+            (Path(selected.uri) / "spyglass_curation.json").read_text()
+        )
+        snapshot = config["review"]["annotation_sets"][0]
+        assert snapshot["set_hash"] == annotation_set.set_hash
+        assert snapshot["curation_uuid"] == str(root.curation_uuid)
+
+        serialized = "\n".join(
+            path.read_text() for path in Path(selected.uri).rglob("*.json")
+        )
+        assert annotation_set.column_name in serialized
     finally:
         clear_curations_for(sorting_key)

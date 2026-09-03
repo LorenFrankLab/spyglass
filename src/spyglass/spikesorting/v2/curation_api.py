@@ -228,6 +228,16 @@ class CurationRef:
         return not self.children
 
     @property
+    def created_at(self):
+        """Return the database timestamp recorded for this curation."""
+        return self._current_row()["created_at"]
+
+    @property
+    def created_by(self) -> str:
+        """Return the database user recorded for this curation."""
+        return str(self._current_row()["created_by"])
+
+    @property
     def has_committed_children(self) -> bool:
         return any(
             child.commit_status == "committed" for child in self.children
@@ -293,11 +303,18 @@ class CurationRef:
         *,
         upload: bool = False,
         ephemeral: bool = False,
+        annotation_sets=(),
     ):
         """Start/reuse a seeded browser review over this exact generation."""
         from spyglass.spikesorting.v2.review_api import start_review
 
-        return start_review(self, profile, upload=upload, ephemeral=ephemeral)
+        return start_review(
+            self,
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            annotation_sets=annotation_sets,
+        )
 
     def preview_merges(
         self, groups: Sequence[Sequence[int]], **kwargs
@@ -394,6 +411,21 @@ class CurationRef:
         analyzer = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         return MappingProxyType(
             {"orphaned_lineage": tuple(lineage), "analyzer_cache": analyzer}
+        )
+
+    def summarize(
+        self,
+        *,
+        evaluation: "EvaluationResult | None" = None,
+        annotation_sets=None,
+    ) -> dict:
+        """Summarize this curation and explicitly selected unit properties."""
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        return CurationV2.summarize_curation(
+            self.as_key(),
+            evaluation=evaluation,
+            annotation_sets=annotation_sets,
         )
 
 
@@ -708,6 +740,7 @@ class EvaluationResult:
         *,
         upload: bool = False,
         ephemeral: bool = False,
+        annotation_sets=(),
     ):
         """Start a review after verifying this evaluation matches its profile."""
         from spyglass.spikesorting.v2.review_api import start_review
@@ -718,6 +751,7 @@ class EvaluationResult:
             upload=upload,
             ephemeral=ephemeral,
             evaluation=self,
+            annotation_sets=annotation_sets,
         )
 
 
@@ -793,6 +827,7 @@ class RunResult(dict):
         source: Literal["analysis", "root"] = "analysis",
         upload: bool = False,
         ephemeral: bool = False,
+        annotation_sets=(),
     ):
         """Start the canonical review without silently changing its source."""
         if source == "analysis":
@@ -811,7 +846,10 @@ class RunResult(dict):
                 f"got {source!r}."
             )
         return curation.start_review(
-            profile, upload=upload, ephemeral=ephemeral
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            annotation_sets=annotation_sets,
         )
 
 

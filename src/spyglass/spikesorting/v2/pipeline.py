@@ -68,6 +68,11 @@ from spyglass.spikesorting.v2._pipeline_run import (
     run_v2_unit_match,
 )
 from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+from spyglass.spikesorting.v2.annotation_api import (
+    AnnotationDefinitionRef,
+    AnnotationSetRef,
+    read_unit_properties,
+)
 from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,

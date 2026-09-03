@@ -34,8 +34,8 @@ downstream code keys off `merge_id` regardless of which produced the sort.
 
 ### Upgrading a preproduction v2 database for curation review
 
-This release adds two columns and one lookup without changing the existing
-DataJoint primary keys:
+This release adds four columns and new lookup/annotation tables without
+changing the existing DataJoint primary keys:
 
 - `CurationV2.curation_uuid` is a fresh, immutable UUID for one row generation.
   `(sorting_id, curation_id)` remains the query key, but its integer component
@@ -45,15 +45,21 @@ DataJoint primary keys:
 - `CurationReviewProfile` persists one immutable metric/rule/display/label
   bundle. `initialize_v2_defaults()` installs
   `franklab_hippocampus_2026_06`.
+- `CurationV2.created_at` / `created_by` record real lifecycle metadata. The
+  additive defaults cover pre-existing preproduction rows; historical authorship
+  is not reconstructed.
+- `UnitAnnotationDefinition` and `CurationUnitAnnotationSet` add typed,
+  content-addressed custom unit properties scoped to an exact curation. These
+  are separate from both v1's merge-output `UnitAnnotation` and curation labels.
 
 Run the staged migration in the unreleased [CHANGELOG](../CHANGELOG.md) before
 creating new v2 curations. It first adds a nullable UUID column, assigns a
 different UUID to every existing curation, and only then runs `alter()` to make
 the column non-null and database-unique. Running the final `alter()` first on a
 populated table can give every old row the same zero value and fail the unique
-index. The rule-column alter is additive and its database default preserves old
-rows; importing the profile module declares its net-new lookup without changing
-either recipe table.
+index. The rule and creation-metadata alters are additive and their database
+defaults preserve old rows; importing the profile and unit-annotation modules
+declares their net-new tables without changing either recipe table.
 
 ### Porting a v1 sort to v2
 
@@ -271,11 +277,16 @@ surface that stays v1-only is the stored per-pair burst metrics
   (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
   `spikesorting-v2-curation` extra. The table-level `FigPackCurationSelection`
   and `FigPackCuration` APIs remain the expert layer.
+- **Available in v2** — lab-specific computed unit properties use immutable
+  `CurationUnitAnnotationSet` rows over exact curated-unit namespaces. Reads and
+  FigPack display require explicit set references; annotations are not labels
+  and do not change curation identity or `merge_id`.
 
 | Feature | v1 fallback | v2 delivery |
 | --- | --- | --- |
 | Metric / auto-merge curation | v1 still available for legacy rows | `CurationEvaluation` (`QualityMetricParameters`, `AutoCurationRules`) |
 | FigURL curation views | `from spyglass.spikesorting.v1 import FigURLCuration, FigURLCurationSelection`; `metrics_figurl=[...]` for metric display columns | `run.start_review(profile=...) → preview_import() → commit() → continue_review()`; local or hosted FigPack; `spikesorting-v2-curation` extra |
+| Custom unit properties | v1 curation `metrics=` or downstream `UnitAnnotation` | typed, immutable `CurationUnitAnnotationSet`; explicit `read_unit_properties(..., evaluation=..., annotation_sets=...)` selection |
 | Burst-pair curation | v1 `BurstPair` remains the only source for stored per-pair metrics | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table |
 | Recording/analyzer recompute | v1 recompute remains for v1 rows | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` |
 | Concatenated recording / session group | (no v1 equivalent) | same-day chronic concatenate-and-sort (available) |
