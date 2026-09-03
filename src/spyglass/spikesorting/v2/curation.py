@@ -20,6 +20,7 @@ back and the staged file is cleaned up in the except path.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 import datajoint as dj
@@ -97,6 +98,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ``SpikeSortingOutput`` merge-table router expects when dispatching
     ``get_spike_times()``; using the wrong name would break that routing.
 
+    ``curation_uuid`` is the immutable identity of one row generation. The
+    numeric ``curation_id`` remains part of the ergonomic DataJoint primary key
+    but may be reused after deletion; every fresh insert therefore receives a
+    random, database-unique UUID while an idempotent reuse keeps the stored one.
+
     A direct ``insert`` / ``insert1`` and an in-place ``update1`` are blocked
     (``FactoryOnlyMaster``): a curation is an identity/provenance root that
     ``SpikeSortingOutput`` and child curations reference, so it must be written
@@ -111,12 +117,14 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     -> Sorting
     curation_id: int
     ---
+    curation_uuid: uuid
     parent_curation_id=-1: int
     -> AnalysisNwbfile
     object_id: varchar(72)
     merges_applied=0: bool
     curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'curation_evaluation')
     description: varchar(255)
+    UNIQUE INDEX (curation_uuid)
     """
 
     class Unit(SpyglassMixinPart):
@@ -715,6 +723,13 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # after the filesystem write. On that collision recompute the id,
         # rebuild the id-stamped rows + NWB, and retry (lock-free).
         for attempt in range(_CURATION_ID_RACE_RETRIES + 1):
+            # This is the durable identity of one committed curation
+            # generation. It is intentionally random rather than derived from
+            # curation content: deleting and recreating the same numeric
+            # curation_id must not make stale figures or caches look current.
+            # Mint inside the retry loop so even a lost curation_id race gets a
+            # fresh token for the row that is ultimately committed.
+            curation_uuid = uuid.uuid4()
             # Build the raw MergeGroup + parent-operation rows ONCE (pure, no DB
             # I/O) and reuse them for BOTH the NWB merge-lineage scratch and the
             # CurationV2.MergeGroup insert, so the file's lineage matches the DB
@@ -748,6 +763,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     curation_header={
                         "sorting_id": str(sorting_id),
                         "curation_id": int(curation_id),
+                        "curation_uuid": str(curation_uuid),
                         "parent_curation_id": int(parent_curation_id),
                         # Canonical string for the enum option on the row.
                         "curation_source": getattr(
@@ -763,6 +779,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 cls._insert_curation_rows_transaction(
                     sorting_id=sorting_id,
                     curation_id=curation_id,
+                    curation_uuid=curation_uuid,
                     parent_curation_id=parent_curation_id,
                     analysis_file_name=analysis_file_name,
                     units_object_id=units_object_id,
@@ -1346,6 +1363,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         cls,
         sorting_id,
         curation_id: int,
+        curation_uuid: uuid.UUID,
         parent_curation_id: int,
         analysis_file_name: str,
         units_object_id: str,
@@ -1380,6 +1398,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         master_row = {
             "sorting_id": sorting_id,
             "curation_id": curation_id,
+            "curation_uuid": curation_uuid,
             "parent_curation_id": parent_curation_id,
             "analysis_file_name": analysis_file_name,
             "object_id": units_object_id,

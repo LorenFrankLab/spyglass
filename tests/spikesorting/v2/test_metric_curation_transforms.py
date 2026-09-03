@@ -209,7 +209,14 @@ def test_isi_violation_fraction_guards_low_spike(n):
 # ---------- rules-payload idempotency comparison ----------------------------
 
 
-def _payload(threshold, *, operator=">", label="noise", preset="none"):
+def _payload(
+    threshold,
+    *,
+    operator=">",
+    label="noise",
+    preset="none",
+    missing_policy="error",
+):
     """A minimal normalized AutoCurationRules payload for comparison."""
     return {
         "auto_curation_rules_name": "r",
@@ -225,6 +232,7 @@ def _payload(threshold, *, operator=">", label="noise", preset="none"):
                 "operator": operator,
                 "threshold": threshold,
                 "label": label,
+                "missing_policy": missing_policy,
             }
         ],
     }
@@ -243,6 +251,14 @@ def test_rules_payloads_match_tolerates_float32_round_trip():
 def test_rules_payloads_match_rejects_genuinely_different_threshold():
     """Thresholds differing by more than float round-off are NOT equal."""
     assert not rules_payloads_match(_payload(0.1), _payload(0.2))
+
+
+def test_rules_payloads_match_includes_missing_policy():
+    """Rule sets differing only in missing-value semantics are distinct."""
+    assert not rules_payloads_match(
+        _payload(0.1, missing_policy="error"),
+        _payload(0.1, missing_policy="ignore"),
+    )
 
 
 @pytest.mark.parametrize(

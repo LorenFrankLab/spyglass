@@ -37,6 +37,32 @@ from spyglass.spikesorting.v1.recompute import (
 RecordingRecomputeSelection().alter()
 RecordingRecompute().alter()
 
+# Add the curation-UX identity and rule-policy columns. Existing CurationV2
+# rows must receive distinct UUIDs BEFORE the final non-null + unique alter.
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+curation_table = CurationV2()
+if "curation_uuid" not in curation_table.heading.names:
+    curation_table.connection.query(
+        f"ALTER TABLE {curation_table.full_table_name} "
+        "ADD COLUMN `curation_uuid` BINARY(16) NULL AFTER `curation_id`"
+    )
+    curation_table.connection.query(
+        f"UPDATE {curation_table.full_table_name} "
+        "SET `curation_uuid` = UNHEX(REPLACE(UUID(), '-', '')) "
+        "WHERE `curation_uuid` IS NULL"
+    )
+CurationV2().alter()  # finalize NOT NULL and UNIQUE INDEX
+AutoCurationRules.Rule().alter()  # missing_policy defaults existing rows to error
+
+# Declare and seed the net-new immutable review-profile lookup after its two
+# recipe foreign keys have been upgraded/seeded.
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.review_profile import CurationReviewProfile  # noqa F401
+
+initialize_v2_defaults()
+
 # UnitAnnotation.unit_id now stores the NWB unit id (was a positional index).
 # Run ONCE, before writing new annotations:
 from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
@@ -72,6 +98,25 @@ DLCProject().alter()
 ```
 
 ### Breaking Changes
+
+#### Spike Sorting v2 curation identity and review-profile foundation
+
+`CurationV2` now carries a database-unique `curation_uuid` for each immutable
+row generation. The `(sorting_id, curation_id)` DataJoint primary key remains
+unchanged, but `curation_id` is `max(existing) + 1` and can be reused after a
+delete; durable review/cache references therefore use the fresh UUID. Existing
+preproduction rows require the one-time backfill above before the final
+non-null/unique `alter()`.
+
+`AutoCurationRules.Rule.missing_policy` persists one of `error`, `fail`, `pass`,
+or `ignore` and is part of rule-set content identity; existing rules default to
+the fail-fast `error` policy. A net-new immutable `CurationReviewProfile` lookup
+binds the metric/rule recipes, ordered evaluation display columns, ordered label
+palette, and `replace`/`overlay` import mode under one content-addressed name.
+`initialize_v2_defaults()` ships `franklab_hippocampus_2026_06`; delivery
+choices (`upload`, `ephemeral`, credentials/local destination) and
+curation-specific annotation selections remain runtime inputs and are not
+profile content.
 
 #### `Merge.fetch_nwb` rejects ambiguous multi-source reads
 

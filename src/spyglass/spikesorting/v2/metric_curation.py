@@ -462,6 +462,11 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     metric/label is queryable. Insert through ``insert_rules(row, rule_rows)``
     so the master row and its rule rows are validated together; direct
     ``insert1`` is unsupported.
+
+    Each rule persists a Spyglass ``missing_policy``: ``error`` is fail-fast,
+    ``fail`` applies the rule label, ``pass`` leaves the unit unlabelled by that
+    rule, and ``ignore`` skips the rule for that unit. This is distinct from
+    SpikeInterface's ``nan_policy`` (its ``fail`` mode labels and never raises).
     """
 
     definition = """
@@ -483,6 +488,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         operator: enum('<', '<=', '>', '>=', '==', '!=')
         threshold: float
         label: varchar(32)
+        missing_policy='error': enum('error', 'fail', 'pass', 'ignore')
         """
 
         def insert(self, rows, **kwargs):
@@ -586,6 +592,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                     "operator",
                     "threshold",
                     "label",
+                    "missing_policy",
                 )
             }
             for rule in rule_rows

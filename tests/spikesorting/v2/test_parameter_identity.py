@@ -684,6 +684,64 @@ def test_describe_parameter_rows_autocuration_duplicate_name_insensitive(
 
 
 @pytest.mark.database
+def test_rule_missing_policy_persists_and_changes_identity(dj_conn):
+    """Policy round-trips and is semantic in idempotency/reporting identity."""
+    from spyglass.spikesorting.v2._pipeline_reporting import (
+        describe_parameter_rows,
+    )
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    names = ["missing_policy_error", "missing_policy_ignore"]
+    keys = [{"auto_curation_rules_name": name} for name in names]
+
+    def rule(policy):
+        return {
+            "rule_index": 0,
+            "rule_name": "snr_noise",
+            "metric_name": "snr",
+            "operator": "<",
+            "threshold": 2.0,
+            "label": "noise",
+            "missing_policy": policy,
+        }
+
+    (AutoCurationRules & keys).delete(safemode=False)
+    try:
+        AutoCurationRules.insert_rules(
+            {**keys[0], "auto_merge_preset": "none"}, [rule("error")]
+        )
+        AutoCurationRules.insert_rules(
+            {**keys[1], "auto_merge_preset": "none"}, [rule("ignore")]
+        )
+        assert (AutoCurationRules.Rule & keys[0]).fetch1(
+            "missing_policy"
+        ) == "error"
+        assert (AutoCurationRules.Rule & keys[1]).fetch1(
+            "missing_policy"
+        ) == "ignore"
+        with pytest.raises(
+            ValueError, match="different auto-merge/rule payload"
+        ):
+            AutoCurationRules.insert_rules(
+                {**keys[0], "auto_merge_preset": "none"}, [rule("pass")]
+            )
+
+        rows = describe_parameter_rows()
+        rows = rows[
+            (rows["table"] == "AutoCurationRules")
+            & rows["parameter_name"].isin(names)
+        ].set_index("parameter_name")
+        assert (
+            rows.loc[names[0], "fingerprint"]
+            != rows.loc[names[1], "fingerprint"]
+        )
+        assert not rows.loc[names[0], "duplicate_of"]
+        assert not rows.loc[names[1], "duplicate_of"]
+    finally:
+        (AutoCurationRules & keys).delete(safemode=False)
+
+
+@pytest.mark.database
 def test_within_batch_duplicate_content_rejected(dj_conn):
     """Two same-content/different-name rows in ONE insert() call collide.
 

@@ -32,6 +32,29 @@ rows.
 Both pipelines register on the same `SpikeSortingOutput` merge table, so
 downstream code keys off `merge_id` regardless of which produced the sort.
 
+### Upgrading a preproduction v2 database for curation review
+
+This release adds two columns and one lookup without changing the existing
+DataJoint primary keys:
+
+- `CurationV2.curation_uuid` is a fresh, immutable UUID for one row generation.
+  `(sorting_id, curation_id)` remains the query key, but its integer component
+  can be reused after deletion and is not safe as a durable external identity.
+- `AutoCurationRules.Rule.missing_policy` stores `error`, `fail`, `pass`, or
+  `ignore`; existing rows take the `error` default.
+- `CurationReviewProfile` persists one immutable metric/rule/display/label
+  bundle. `initialize_v2_defaults()` installs
+  `franklab_hippocampus_2026_06`.
+
+Run the staged migration in the unreleased [CHANGELOG](../CHANGELOG.md) before
+creating new v2 curations. It first adds a nullable UUID column, assigns a
+different UUID to every existing curation, and only then runs `alter()` to make
+the column non-null and database-unique. Running the final `alter()` first on a
+populated table can give every old row the same zero value and fail the unique
+index. The rule-column alter is additive and its database default preserves old
+rows; importing the profile module declares its net-new lookup without changing
+either recipe table.
+
 ### Porting a v1 sort to v2
 
 1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,
@@ -176,8 +199,11 @@ downstream code keys off `merge_id` regardless of which produced the sort.
   selection / curation / group rather than silently retargeting an existing id.
   The escape hatches, for a deliberate maintenance edit of a row with no live
   references, are `update1(..., allow_master_mutation=True)` and (for a direct
-  insert) `insert(..., allow_direct_insert=True)`. A `UnitMatch` run also freezes
-  its matchable-unit universe (`UnitMatch.MatchableUnit`) and a
+  insert) `insert(..., allow_direct_insert=True)`. Each newly inserted
+  `CurationV2` generation receives a database-unique `curation_uuid`; deleting
+  and recreating the same numeric `curation_id` creates a different UUID, while
+  `reuse_existing=True` keeps the existing generation. A `UnitMatch` run also
+  freezes its matchable-unit universe (`UnitMatch.MatchableUnit`) and a
   `SharedArtifactGroup`-backed artifact selection freezes its member set, so a
   later relabel / membership edit cannot change a populated result under a fixed
   id (a drifted artifact group is recovered by deleting + re-creating that

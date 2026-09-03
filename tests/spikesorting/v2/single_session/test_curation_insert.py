@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
@@ -42,6 +44,102 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     assert row["parent_curation_id"] == -1
     assert row["merges_applied"] == 0
     assert row["curation_source"] == "manual"
+    assert isinstance(row["curation_uuid"], uuid.UUID)
+
+
+@pytest.mark.slow
+def test_curation_uuid_immutable_and_unique(populated_sorting):
+    """Each curation generation gets one DB-unique, immutable UUID."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    try:
+        root = CurationV2.insert_curation(populated_sorting)
+        child = CurationV2.insert_curation(
+            populated_sorting,
+            parent_curation_id=root["curation_id"],
+            description="uuid child",
+        )
+        rows = (CurationV2 & [root, child]).fetch(as_dict=True)
+        uuids = [row["curation_uuid"] for row in rows]
+        assert len(uuids) == len(set(uuids)) == 2
+        assert all(isinstance(value, uuid.UUID) for value in uuids)
+
+        root_row = (CurationV2 & root).fetch1()
+        with pytest.raises(dj.errors.DataJointError, match="In-place update1"):
+            CurationV2.update1({**root_row, "curation_uuid": uuid.uuid4()})
+
+        # The heading's UNIQUE INDEX is defense in depth against a deliberate
+        # factory bypass that tries to reuse a generation token.
+        child_row = (CurationV2 & child).fetch1()
+        with pytest.raises(dj.errors.DuplicateError):
+            CurationV2.insert1(
+                {
+                    **child_row,
+                    "curation_id": child["curation_id"] + 1,
+                    "parent_curation_id": root["curation_id"],
+                },
+                allow_direct_insert=True,
+            )
+    finally:
+        _clear_curations(populated_sorting)
+
+
+@pytest.mark.slow
+def test_curation_id_reuse_yields_new_uuid(populated_sorting):
+    """Delete/recreate may reuse the numeric id but never its generation UUID."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    try:
+        root = CurationV2.insert_curation(populated_sorting)
+        first = CurationV2.insert_curation(
+            populated_sorting,
+            parent_curation_id=root["curation_id"],
+            description="replaceable child",
+        )
+        first_uuid = (CurationV2 & first).fetch1("curation_uuid")
+
+        (CurationV2 & first).delete(safemode=False)
+        replacement = CurationV2.insert_curation(
+            populated_sorting,
+            parent_curation_id=root["curation_id"],
+            description="replaceable child",
+        )
+        replacement_uuid = (CurationV2 & replacement).fetch1("curation_uuid")
+        assert replacement["curation_id"] == first["curation_id"]
+        assert replacement_uuid != first_uuid
+    finally:
+        _clear_curations(populated_sorting)
+
+
+@pytest.mark.slow
+def test_reuse_existing_keeps_uuid(populated_sorting):
+    """Idempotent child reuse returns the exact existing generation."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    try:
+        root = CurationV2.insert_curation(populated_sorting)
+        child = CurationV2.insert_curation(
+            populated_sorting,
+            parent_curation_id=root["curation_id"],
+            description="reusable child",
+            reuse_existing=True,
+        )
+        first_uuid = (CurationV2 & child).fetch1("curation_uuid")
+        reused = CurationV2.insert_curation(
+            populated_sorting,
+            parent_curation_id=root["curation_id"],
+            description="reusable child",
+            reuse_existing=True,
+        )
+        assert reused == child
+        assert (CurationV2 & reused).fetch1("curation_uuid") == first_uuid
+    finally:
+        _clear_curations(populated_sorting)
 
 
 @pytest.mark.slow
@@ -909,7 +1007,12 @@ def test_insert_curation_root_reuse_deterministic_with_multiple_roots(
         int(c) for c in (CurationV2 & {"sorting_id": sid}).fetch("curation_id")
     ]
     planted_id = max(existing_ids) + 1
-    planted = {**full, "curation_id": planted_id, "parent_curation_id": -1}
+    planted = {
+        **full,
+        "curation_id": planted_id,
+        "curation_uuid": uuid.uuid4(),
+        "parent_curation_id": -1,
+    }
     CurationV2.insert1(planted, allow_direct_insert=True)
     try:
         reused = CurationV2.insert_curation(

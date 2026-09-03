@@ -178,6 +178,9 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
         assert lineage == _merge_group_pairs(merged)
         assert header["sorting_id"] == str(sort["sorting_id"])
         assert header["curation_id"] == int(merged["curation_id"])
+        assert header["curation_uuid"] == str(
+            (CurationV2 & merged).fetch1("curation_uuid")
+        )
         assert header["parent_curation_id"] == int(root["curation_id"])
         assert header["merges_applied"] is True
         assert header["description"] == "merged pair"

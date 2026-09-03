@@ -41,6 +41,11 @@ AUTO_CURATION_RULES_SCHEMA_VERSION = 1
 # agree on the allowed set.
 RuleOperator = Literal["<", "<=", ">", ">=", "==", "!="]
 
+# Spyglass policy for a non-finite value in a metric column referenced by a
+# rule. This is deliberately distinct from SpikeInterface's ``nan_policy``:
+# ``error`` is Spyglass fail-fast behavior.
+MissingMetricPolicy = Literal["error", "fail", "pass", "ignore"]
+
 # Auto-merge presets. The first five are SpikeInterface 0.104.3's
 # ``compute_merge_unit_groups`` presets (verified against the installed
 # source -- see tests/spikesorting/v2/resolver/si0104-quality-metrics.md);
@@ -318,7 +323,11 @@ class AutoCurationRuleSchema(BaseModel):
     target a column the metric name does not equal -- e.g. the
     ``nn_noise_overlap`` column produced by the ``nn_advanced`` metric. A rule
     that references a column absent from the computed metrics raises a clear
-    error at populate time, not here.
+    error at populate time, not here. ``missing_policy`` records Spyglass's
+    handling for non-finite values: ``error`` is fail-fast; ``fail`` applies the
+    label; ``pass`` leaves the unit unlabelled by this rule; and ``ignore`` skips
+    this rule for the unit. These names do not inherit SpikeInterface
+    ``nan_policy`` semantics.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -328,6 +337,7 @@ class AutoCurationRuleSchema(BaseModel):
     operator: RuleOperator
     threshold: float
     label: str = Field(min_length=1, max_length=32)
+    missing_policy: MissingMetricPolicy = "error"
 
 
 class AutoCurationRulesSchema(BaseModel):

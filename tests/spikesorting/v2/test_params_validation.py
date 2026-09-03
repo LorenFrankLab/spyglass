@@ -1163,6 +1163,7 @@ def test_param_lookup_bulk_insert_validates(
 from spyglass.spikesorting.v2._params.metric_curation import (  # noqa: E402
     AUTO_CURATION_RULES_SCHEMA_VERSION,
     QUALITY_METRIC_SCHEMA_VERSION,
+    AutoCurationRuleSchema,
     AutoCurationRulesSchema,
     QualityMetricParamsSchema,
 )
@@ -1291,6 +1292,26 @@ def test_auto_curation_rules_non_default_round_trips():
     assert rebuilt == blob
     assert rebuilt["schema_version"] == AUTO_CURATION_RULES_SCHEMA_VERSION
     assert [r["rule_index"] for r in rebuilt["rules"]] == [0, 1]
+
+
+def test_auto_curation_rule_missing_policy_validates_and_defaults():
+    """Missing-value policy is persisted in normalized rule payloads."""
+    base = {
+        "rule_index": 0,
+        "rule_name": "snr_noise",
+        "metric_name": "snr",
+        "operator": "<",
+        "threshold": 2.0,
+        "label": "noise",
+    }
+    assert AutoCurationRuleSchema(**base).missing_policy == "error"
+    for policy in ("error", "fail", "pass", "ignore"):
+        dumped = AutoCurationRuleSchema(
+            **base, missing_policy=policy
+        ).model_dump()
+        assert dumped["missing_policy"] == policy
+    with pytest.raises(ValidationError):
+        AutoCurationRuleSchema(**base, missing_policy="skip")
 
 
 def test_auto_curation_rules_allows_none_preset_no_rules():

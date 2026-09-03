@@ -117,6 +117,9 @@ all coexist under one merge surface.
     the NWB.
 - **`CurationV2`** -- versioned curation rows (labels + merge groups) chained
     by `parent_curation_id`. `insert_curation` is the single entry point;
+    each inserted generation has an immutable, database-unique
+    `curation_uuid` (the numeric `curation_id` remains the ergonomic query key
+    but can be reused after deletion);
     every row is automatically registered on `SpikeSortingOutput.CurationV2`
     so downstream consumers can key off `merge_id`.
 - **`CurationEvaluationSelection` / `CurationEvaluation`** -- post-sort SI
@@ -129,6 +132,12 @@ all coexist under one merge surface.
     `accept_evaluation_outputs`). Preview/draft curations are rejected.
     Replaces the removed `AnalyzerCuration`. See
     [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
+- **`CurationReviewProfile`** -- one immutable, DB-persisted name binding the
+    exact quality-metric and auto-curation recipes to an ordered property
+    display, label palette, and explicit `replace`/`overlay` import mode.
+    `initialize_v2_defaults()` installs `franklab_hippocampus_2026_06`.
+    Upload/ephemeral/credential/destination choices remain per-review runtime
+    inputs and are not profile identity.
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
     verification families for safely reclaiming preprocessed recording/artifact
     NWBs and analyzer folders after a current-environment content match.
@@ -721,6 +730,29 @@ Notes:
 - `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
   `insert1` is blocked) so the master row and its ordered rule rows validate
   together.
+- Every rule stores a `missing_policy`. `error` is fail-fast when a referenced
+  metric has no finite value, `fail` applies the rule's label to that unit,
+  `pass` leaves it unlabelled by that rule, and `ignore` skips that rule for the
+  unit. These are Spyglass semantics, not SpikeInterface's `nan_policy` (SI's
+  `fail` labels a NaN unit and does not raise).
+
+The browser-first configuration is persisted separately from a pipeline preset:
+
+```python
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+
+initialize_v2_defaults()
+profile = (
+    CurationReviewProfile
+    & {"review_profile_name": "franklab_hippocampus_2026_06"}
+).fetch1()
+```
+
+The profile binds `franklab_default` metrics to the approved dated Frank-lab
+rules, an ordered property/label display, and `label_import_mode="replace"`.
+Publishing location, credentials, ephemeral mode, and annotation-set choices
+are intentionally supplied per review rather than stored in the profile.
 
 #### Population QC plot and burst-pair views
 
@@ -1360,7 +1392,7 @@ params are written.
 | --- | --- | --- |
 | Recording | `spyglass_v2_recording_provenance` | raw source `object_id`, `recording_id`, preprocessing recipe, sort group, resolved reference mode, bad-channel handling, SpikeInterface version |
 | Sorting | `spyglass_v2_sorting_provenance` + per-unit Units columns | `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` / `brain_region` columns (matching `Sorting.Unit`), and a header with the recording/concat id, sorter + params, `artifact_detection_id`, display recipe, effective seed, SI + sorter versions |
-| Curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | curation header (sorting/curation id, parent, source, `merges_applied`, description) and the kept→contributor merge lineage mirroring `CurationV2.MergeGroup` (raw contributors; proposed-vs-applied is the header's `merges_applied`) |
+| Curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | curation header (sorting/curation id, immutable `curation_uuid`, parent, source, `merges_applied`, description) and the kept→contributor merge lineage mirroring `CurationV2.MergeGroup` (raw contributors; proposed-vs-applied is the header's `merges_applied`) |
 | Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | the chosen concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, with curated unit IDs preserved across members |
 | UnitMatch | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members` | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map |
 | CurationEvaluation | `spyglass_v2_curation_evaluation_provenance` | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash` |
