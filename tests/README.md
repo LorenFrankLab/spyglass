@@ -20,6 +20,7 @@ pytest tests/position/v1/test_trodes.py
 pytest --cov=spyglass --cov-report term-missing
 
 # Debug mode (preserve database, verbose output)
+# --base-dir defaults to ./tests/_data/, so it can be omitted
 pytest --no-teardown -v
 ```
 
@@ -193,8 +194,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-pytest --no-teardown  # Avoid container restart overhead
+pytest --no-teardown
 ```
+
+Persists state across runs in the default `./tests/_data/` base.
 
 **Run specific test files:**
 
@@ -249,14 +252,37 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ### Data and Database Options
 
 ```bash
---base_dir PATH     # Where to store downloaded/created files
-# Default: ./tests/_data/
+--base-dir PATH     # Where to store downloaded/created files
+# Default: ./tests/_data/. SPYGLASS_BASE_DIR in the environment is ignored
+# by the test suite — a shell-exported value pointing at shared/production
+# storage would let destructive tests (e.g. AnalysisNwbfile.cleanup) scan
+# and delete real data. Pass --base-dir explicitly to override the default.
+#
+# The resolved --base-dir must contain a 'tests' path component; this is
+# checked in conftest before anything is created or downloaded, and again
+# in settings.py under test_mode, which additionally requires every
+# resolved Spyglass directory to sit inside the base dir.
+#
+# Generated data (analysis/*.nwb plus the export, moseq, recording,
+# spikesorting, and tmp trees) is removed on teardown ONLY when --base-dir
+# is the repository's own tests/_data. Any other base is left untouched,
+# since a 'tests' component proves location, not ownership. Nested
+# analysis/<session>/*.nwb files are NOT removed and accumulate across
+# runs; if that backlog grows large enough to trip the cleanup deletion
+# limits, clear it with `rm -rf tests/_data/analysis`.
+#
+# Concurrent pytest runs (--container-name/--container-port) should use
+# distinct --base-dir values. This is not currently enforced: two runs
+# sharing a base can race during teardown or other filesystem mutations.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-# Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management
+
+--container-name NAME  # Docker container name (default: branch-derived)
+--container-port PORT  # Host port mapped to MySQL's 3306
 
 --container-vol-dir PATH  # Host dir for per-container MySQL data volumes
 # Bind-mounts <PATH>/<container-name> -> /var/lib/mysql, keeping test-container
@@ -267,6 +293,31 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 --no-pose           # Skip DeepLabCut/SLEAP (pose) tests and downloads
 # Useful for: systems without DLC/SLEAP, faster test runs
 ```
+
+#### Container Data Directory
+
+By default Docker stores the test database on its own root filesystem, which on
+a shared machine is often the smallest disk available. A populated test database
+is not small, so `--container-vol-dir` bind-mounts the container's
+`/var/lib/mysql` onto a directory you choose:
+
+```bash
+pytest --container-vol-dir /path/to/roomy-disk/docker-vols/
+```
+
+Each container gets its own subdirectory, `<vol-dir>/<container-name>`, so
+concurrent runs on different branches do not share data. The directory is
+created if it does not exist. Without the flag, storage is left to Docker
+exactly as before.
+
+Unless `--no-teardown` is passed, this directory is deleted along with the
+container at the end of the run, so a later run that reuses the same
+`--container-name` always starts from an empty data dir rather than rebooting
+MySQL onto stale, partially-cleaned-up data. With `--no-teardown`, both the
+container and its data dir are left in place. Note that `--container-vol-dir`
+only takes effect when the container is (re)created — if a container with the
+matching name is already running (e.g. from a prior `--no-teardown` run), the
+flag has no effect on it; a warning is logged in that case.
 
 ### Debugging Options
 
@@ -378,6 +429,33 @@ pytest --no-teardown  # Run once to start container
 
 Note that the container process will try to use the branch name as the database
 suffix. If your branch name has special characters, consider renaming.
+
+### Fixture Teardown and `--no-teardown`
+
+`--no-teardown` exists to skip **expensive** rebuilds - the Docker container and
+the ingestion of the shared test NWB file - so that repeated runs are fast. It
+is not a license to leave state behind.
+
+A fixture whose leftover rows or files would break a *subsequent* run must clean
+up unconditionally, without consulting the `teardown` fixture:
+
+```python
+@pytest.fixture
+def some_fixture(raw_dir, common):
+    ...
+    yield file_name
+
+    # Not guarded by `teardown`: this entry would give populate() phantom
+    # work on the next run, and the file is cheap to rebuild.
+    (common.SomeTable & {"some_field": file_name}).delete(safemode=False)
+```
+
+The common case is a fixture that registers a new `Nwbfile` entry. Its Session
+has no rows in the ingestion tables, so any later `populate()` call finds work
+to do for it and fails. If a fixture cannot be written to survive
+`--no-teardown`, it should tear itself down instead.
+
+______________________________________________________________________
 
 ### Slow Test Runs
 

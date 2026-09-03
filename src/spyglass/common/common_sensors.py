@@ -11,14 +11,13 @@ from spyglass.common.common_ephys import Raw
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.nwb_helper_fn import get_data_interface, get_nwb_file
+from spyglass.utils import SpyglassIngestion
 
 schema = dj.schema("common_sensors")
 
 
 @schema
-class SensorData(SpyglassMixin, dj.Imported):
+class SensorData(SpyglassIngestion, dj.Imported):
     definition = """
     -> Session
     ---
@@ -27,59 +26,90 @@ class SensorData(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    # The enclosing ProcessingModule and the inner TimeSeries share this name,
+    # so the type below is what distinguishes the three.
+    _source_nwb_object_name = "analog"
+    _only_ingest_first = True  # first match wins, as get_data_interface did
 
-    def make(self, key: dict) -> None:
-        """Populate SensorData using the analog BehavioralEvents from the NWB.
+    _source_nwb_object_type = pynwb.behavior.BehavioralEvents
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"sensor_data_object_id": self._analog_object_id}}
+
+    @staticmethod
+    def _analog_series(nwb_obj):
+        """Return the analog TimeSeries held by a BehavioralEvents object.
 
         Parameters
         ----------
-        key: dict
-            The key for the session to populate the SensorData for.
-            This should include the nwb_file_name and session_id.
+        nwb_obj : pynwb.behavior.BehavioralEvents
+            The sensor data container.
+
+        Returns
+        -------
+        pynwb.base.TimeSeries
+            The series named 'analog'.
+        """
+        return nwb_obj.time_series["analog"]
+
+    def _analog_object_id(self, nwb_obj) -> str:
+        """Validate the analog series and return its object id.
+
+        The id stored is the series', not the enclosing container's.
+
+        Parameters
+        ----------
+        nwb_obj : pynwb.behavior.BehavioralEvents
+            The sensor data container.
+
+        Returns
+        -------
+        str
+            Object id of the analog series.
 
         Raises
-        -------
+        ------
         ValueError
-            If the number of columns in the description does not match
-            the number of columns in the data.
+            If the description does not name one column per column of data.
         """
+        series = self._analog_series(nwb_obj)
 
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
+        columns = [
+            col
+            for col in series.description.split()
+            if col not in ["time", "timestamps"]
+        ]
+        n_cols = series.data.shape[1]
 
-        sensor = get_data_interface(
-            nwbf, "analog", pynwb.behavior.BehavioralEvents
-        )
-
-        # Validate the sensor data
-        if sensor is None:
-            self._info_msg(
-                f"No conforming sensor data found in {nwb_file_name}\n"
-            )
-            return
-
-        columns = sensor.time_series["analog"].description.split()
-        columns = [col for col in columns if col not in ["time", "timestamps"]]
-        n_cols = sensor.time_series["analog"].data.shape[1]
-        if len(columns) != n_cols:  # pragma: no cover
-            raise ValueError(  # pragma: no cover
+        if len(columns) != n_cols:
+            raise ValueError(
                 f"Number of columns in description ({len(columns)}) "
                 f"does not match number of columns in data ({n_cols}). "
-                f"Columns: {sensor.time_series['analog'].description}. "
+                f"Columns: {series.description}. "
                 "Please check the NWB file."
             )
 
-        # Create the NWB file object
-        key["sensor_data_object_id"] = sensor.time_series["analog"].object_id
+        return series.object_id
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Attach the raw ephys interval, which these data share."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
 
         # the valid times for these data are the same as the valid times for
         # the raw ephys data
-        key["interval_list_name"] = (
-            Raw & {"nwb_file_name": nwb_file_name}
+        self_key["interval_list_name"] = (
+            Raw & {"nwb_file_name": self_key["nwb_file_name"]}
         ).fetch1("interval_list_name")
 
-        self.insert1(key, allow_direct_insert=True)
+        return super_ins
+
+    def make(self, key: dict) -> None:
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "SensorData.make is deprecated. Use insert_from_nwbfile."
+        )
 
     def fetch1_dataframe(
         self, interval_list_name: Optional[str] = None

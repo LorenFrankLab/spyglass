@@ -149,11 +149,15 @@ jobs:
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        pytest --no-docker --no-pose \
+        # --base-dir matches the conftest default (./tests/_data/) and the
+        # path covered by the cache-test-data step above. Pinned explicitly
+        # so cache hits are stable across any future conftest default change.
+        pytest --no-docker --no-pose --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/
     - name: Upload coverage reports to Codecov
+      if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

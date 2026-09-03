@@ -26,16 +26,16 @@ dependencies:
   - bottleneck
   - ffmpeg
   - ipympl
+  - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
   - jupyterlab>=3.*
   - matplotlib
   - non_local_detector
-  - numpy
+  - numpy<2  # spikeinterface 0.99.1 calls np.issctype, removed in numpy 2.0
   - pip>=20.2.*
   - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - position_tools
   - pybind11
   - pydotplus>=2.0.*
-  - pyfftw<=0.12.0
   - python>=3.10,<3.13
   - pytorch>=2.0
   - ripple_detection

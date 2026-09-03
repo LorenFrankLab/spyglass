@@ -7,7 +7,6 @@ import pynwb
 
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import interval_list_censor  # noqa: F401
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
@@ -18,7 +17,6 @@ from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
-    get_data_interface,
     get_electrode_indices,
     get_nwb_file,
     get_valid_intervals,
@@ -41,10 +39,7 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
     target_hemisphere = "Unknown": enum("Right", "Left", "Unknown")
     """
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.ecephys.ElectrodeGroup
+    _source_nwb_object_type = pynwb.ecephys.ElectrodeGroup
 
     @property
     def table_key_to_obj_attr(self):
@@ -77,15 +72,10 @@ class ElectrodeGroup(SpyglassIngestion, dj.Imported):
         return "Unknown"
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="ElectrodeGroup.make", alt="insert_from_nwbfile"
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "ElectrodeGroup.make is deprecated. Use insert_from_nwbfile."
         )
-        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
@@ -112,10 +102,7 @@ class Electrode(SpyglassIngestion, dj.Imported):
 
     _single_entry_per_table = False
 
-    @property
-    def _source_nwb_object_type(self):
-        """The NWB object type from which this table can ingest data."""
-        return pynwb.ecephys.ElectrodesTable
+    _source_nwb_object_type = pynwb.ecephys.ElectrodesTable
 
     @property
     def table_key_to_obj_attr(self):
@@ -271,15 +258,10 @@ class Electrode(SpyglassIngestion, dj.Imported):
             cls.update1(update)
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="Electrode.make", alt="insert_from_nwbfile"
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Electrode.make is deprecated. Use insert_from_nwbfile."
         )
-        self.insert_from_nwbfile(key["nwb_file_name"])
 
 
 @schema
@@ -303,9 +285,7 @@ class Raw(SpyglassIngestion, dj.Imported):
         "electrophysiology",
     ]
 
-    @property
-    def _source_nwb_object_type(self):
-        return pynwb.ecephys.ElectricalSeries
+    _source_nwb_object_type = pynwb.ecephys.ElectricalSeries
 
     @property
     def table_key_to_obj_attr(self):
@@ -364,15 +344,10 @@ class Raw(SpyglassIngestion, dj.Imported):
         }
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(name="Raw.make", alt="insert_from_nwbfile")
-
-        # Call the new SpyglassIngestion method
-        self.insert_from_nwbfile(key["nwb_file_name"])
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "Raw.make is deprecated. Use insert_from_nwbfile."
+        )
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
@@ -390,7 +365,7 @@ class Raw(SpyglassIngestion, dj.Imported):
 
 
 @schema
-class SampleCount(SpyglassMixin, dj.Imported):
+class SampleCount(SpyglassIngestion, dj.Imported):
     definition = """
     # Sample count :s timestamp timeseries
     -> Session
@@ -399,25 +374,23 @@ class SampleCount(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    # TODO: change name when nwb file is changed
+    _source_nwb_object_name = "sample_count"
+    _only_ingest_first = True  # first match wins, as get_data_interface did
+
+    # The enclosing ProcessingModule carries this name too, and is itself
+    # an NWBDataInterface, so a broader type here matches the module and
+    # stores its object id instead of the series'. The previous lookup
+    # searched module.data_interfaces, which never holds modules.
+    _source_nwb_object_type = pynwb.base.TimeSeries
+
+    table_key_to_obj_attr = {"self": {"sample_count_object_id": "object_id"}}
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        # get the sample count object
-        # TODO: change name when nwb file is changed
-        sample_count = get_data_interface(nwbf, "sample_count")
-        if sample_count is None:
-            self._info_msg(
-                "Unable to import SampleCount: no data interface named "
-                + f'"sample_count" found in {nwb_file_name}.'
-            )
-            return  # see #849
-        key["sample_count_object_id"] = sample_count.object_id
-        self.insert1(key, allow_direct_insert=True)
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "SampleCount.make is deprecated. Use insert_from_nwbfile."
+        )
 
 
 @schema

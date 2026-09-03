@@ -41,28 +41,33 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  # 1. jax 0.7.2 req numpy>=2/scipy>=1.13, which spikeinterface 0.99 can't use.
+  # 2. spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
+  # 3. spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but
+  #    declares an unbounded numpy, we bound here.
   "black[jupyter]>26",
   "bottleneck",
   "dask",
   "datajoint>=0.14.5,<2.0",
-  # "ghostipy", # removed from list bc M1 users need to install pyfftw first
   "hdmf>=3.4.6",
   "ipympl",
+  "jax<0.7.2",                    # TODO(#1609): remove with SpikeInterface bump
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
-  "ndx-optogenetics==0.3.0",
   "ndx-ophys-devices",
+  "ndx-optogenetics==0.3.0",
   "ndx-pose<0.4",                  # 0.4 needs pynwb>=4 / hdmf>=6
   "non-local-detector",
-  "numpy",
+  "numpy<2",                      # TODO(#1609): remove with SpikeInterface bump
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
-  "probeinterface<0.3",            # Bc some probes fail space checks
-  "pubnub<6.4",                    # TODO: remove this when sortingview is updated
+  "probeinterface<0.3",           # Bc some probes fail space checks
+  "pubnub<6.4",                   # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",
   "ripple-detection",
+  "scipy<1.13",                   # TODO(#1609): remove with SpikeInterface bump
   "seaborn",
   "sortingview>=0.11",
   "spikeinterface>=0.99.1,<0.100",
@@ -110,7 +115,6 @@ optional-dependencies.sleap = [
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container
-  "ghostipy",
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
@@ -151,8 +155,9 @@ lint.ignore = [ "E402", "E501", "F401" ]
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude/*'
 ignore-words = './docs/spellcheck_words.txt'
-ignore-words-list = 'nevers'
+ignore-words-list = 'nevers,notin'
 # Nevers - name in Citation
+# notin - UnitSelectionParams.unit_criteria operator, paired with isin
 
 [tool.cspell] # CB: Recommended as VSCode extension
 language = "en"
