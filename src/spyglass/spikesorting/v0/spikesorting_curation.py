@@ -497,11 +497,6 @@ class Waveforms(SpyglassMixin, dj.Computed):
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we
 
-    def fetch_nwb(self, key):
-        """Fetches the NWB file path for the waveforms. NOT YET IMPLEMENTED."""
-        # TODO: implement fetching waveforms from NWB
-        return NotImplementedError
-
     def _get_waveform_extractor_name(self, key):
         waveform_params_name = (WaveformParameters & key).fetch1(
             "waveform_params_name"

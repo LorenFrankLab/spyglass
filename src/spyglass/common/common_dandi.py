@@ -26,6 +26,7 @@ try:
     from dandi.organize import CopyMode, FileOperationMode, OrganizeInvalid
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
+    from dandi.upload import UploadExisting, UploadValidation
 
     MIN_ERROR_SEVERITY = Severity["ERROR"].value
     MIN_WARNING_SEVERITY = Severity["WARNING"].value
@@ -43,7 +44,9 @@ except (ImportError, ModuleNotFoundError) as e:
         nwb_has_external_links,
         MIN_ERROR_SEVERITY,
         MIN_WARNING_SEVERITY,
-    ) = [None] * 11
+        UploadExisting,
+        UploadValidation,
+    ) = [None] * 13
     logger.warning(e)
 
 
@@ -134,14 +137,16 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 "table": self.Violations,
                 "min_severity": MIN_ERROR_SEVERITY,
                 "max_severity": None,
+                "prefix": "violation",
             },
             {
                 "table": self.Warnings,
                 "min_severity": MIN_WARNING_SEVERITY,
                 "max_severity": MIN_ERROR_SEVERITY,
+                "prefix": "warning",
             },
         ]
-        result_inserts = []
+        result_inserts = {}
         for result_map in results_maps:
             min_severity_value = result_map["min_severity"]
             max_severity_value = result_map["max_severity"]
@@ -159,8 +164,8 @@ class DandiValidation(SpyglassMixin, dj.Computed):
             part_keys = [
                 {
                     **key,
-                    "violation_id": i,
-                    "id": result.id,
+                    f"{result_map['prefix']}_id": i,
+                    "id": result.id[:128],
                     "message": result.message[:255]
                     .replace("'", "")
                     .encode("ascii", "ignore")
@@ -172,9 +177,9 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 }
                 for i, result in enumerate(filtered_results)
             ]
-            result_inserts.append({result_map["table"]: part_keys})
+            result_inserts[result_map["table"]] = part_keys
         self.insert1(key)
-        for part_table, part_keys in result_inserts:
+        for part_table, part_keys in result_inserts.items():
             part_table.insert(part_keys)
 
 
@@ -357,6 +362,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
             [dandiset_dir],
             dandi_instance=dandi_instance,
             jobs=n_upload_processes,
+            existing=UploadExisting.SKIP,
+            validation=UploadValidation.SKIP,
         )
         logger.info(f"Dandiset {dandiset_id} uploaded")
 
@@ -516,7 +523,12 @@ def validate_dandiset(
             f"Using multiprocessing to validate dandi export. {n_processes} processes"
         )
         with Pool(processes=n_processes) as pool:
-            per_file_results = pool.map(validate_1, files_to_validate)
+            per_file_results = list(
+                tqdm(
+                    pool.imap_unordered(validate_1, files_to_validate),
+                    total=len(files_to_validate),
+                )
+            )
         validator_result = [item for sub in per_file_results for item in sub]
     min_severity_value = Severity[min_severity].value
 
