@@ -95,6 +95,8 @@ class SpyglassConfig:
             The bound test mode, or ``_UNSET`` before the first deliberate or
             successful load. The public ``test_mode`` property always returns
             a bool.
+        _prefer_download (bool)
+            True if streaming backends should download whole files instead.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
@@ -110,6 +112,11 @@ class SpyglassConfig:
             else str_to_bool(self._debug_mode_arg)
         )
         self._test_mode = _UNSET
+        # An ordinary reloadable setting, like debug_mode: the constructor
+        # seeds it so it reads before any load, and each load re-resolves it.
+        self._prefer_download = str_to_bool(
+            kwargs.get("prefer_download", False)
+        )
         self._dlc_base = None
         # Initialized here, not only in load_config's COMMIT phase: a load
         # that fails or returns early (e.g. no base under an ambient test
@@ -271,6 +278,7 @@ class SpyglassConfig:
             return str_to_bool(dj_custom.get("debug_mode", False))
 
         debug_mode = _resolve_debug_mode()
+        prefer_download = str_to_bool(dj_custom.get("prefer_download", False))
 
         # Until a deliberate test-mode load commits, keep the object visibly
         # failed. A successful commit below resets this flag. Same-mode reloads
@@ -421,6 +429,7 @@ class SpyglassConfig:
         if self._test_mode is _UNSET:
             self._test_mode = test_mode
         self._debug_mode = debug_mode
+        self._prefer_download = prefer_download
         self._dlc_base = dlc_base
         self._moseq_base = moseq_base
 
@@ -438,6 +447,7 @@ class SpyglassConfig:
         self._config = dict(
             debug_mode=self._debug_mode,
             test_mode=self.test_mode,
+            prefer_download=self._prefer_download,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -687,6 +697,7 @@ class SpyglassConfig:
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
                 "test_mode": str(self.test_mode).lower(),
+                "prefer_download": str(self._prefer_download).lower(),
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -793,6 +804,30 @@ class SpyglassConfig:
         if self._initial_test_mode is not _UNSET:
             return str_to_bool(self._initial_test_mode)
         return False
+
+    @property
+    def prefer_download(self) -> bool:
+        """Returns True if whole-file download is preferred over streaming.
+
+        Streaming backends honor this by fetching the file to local disk and
+        reading the copy. Backends that cannot download ignore it. Useful on
+        slow or metered connections, where many small range requests cost more
+        than one sequential transfer.
+        """
+        return self._prefer_download
+
+    @prefer_download.setter
+    def prefer_download(self, value) -> None:
+        """Set the download preference for the current session.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings.
+        """
+        self.load_config()
+        self._prefer_download = str_to_bool(value)
+        self._config["prefer_download"] = self._prefer_download
 
     @property
     def dlc_project_dir(self) -> str:
