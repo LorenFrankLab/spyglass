@@ -68,6 +68,32 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### `Merge.fetch_nwb` rejects ambiguous multi-source reads
+
+`Merge.fetch_nwb()` now raises `ValueError` when a restriction spans more than
+one source part instead of warning and returning a mixed list. Callers that
+intentionally consume heterogeneous sources must pass `multi_source=True` and
+handle every returned source explicitly. The former `disable_warning` keyword
+was removed; replace it with the explicit opt-in rather than suppressing the
+safety check.
+
+#### Raw `ElectricalSeries` selection is explicit
+
+Automatic raw-source discovery now follows the same naming contract as `Raw`
+ingestion: after case/space sanitization, exactly one acquisition
+`ElectricalSeries` must be named `e-series`, `electricalseries`, `ephys`, or
+`electrophysiology`. Zero or multiple matches raise `ValueError` and list the
+candidates. Pass `electrical_series_path="acquisition/<name>"` when a file needs
+an explicit override; the previous first-acquisition fallback is gone.
+
+#### SpikeInterface 0.104 is the package runtime boundary
+
+The package-wide SpikeInterface pin is `0.104.3`. Creating or populating v0/v1
+spike-sorting rows still requires the documented legacy SpikeInterface 0.99
+environment and raises a targeted `RuntimeError` under 0.104. Existing v0/v1
+recording and sorting rows remain readable under 0.104 through the compatibility
+shim, including access through `SpikeSortingOutput`.
+
 #### Concat v2 curations stay out of `SpikeSortingOutput`
 
 `CurationV2` rows backed by a `ConcatenatedRecording` are no longer registered
@@ -123,7 +149,9 @@ registrations); existing v2 table definitions are unchanged.
   `concat_session_group_owner` / `concat_session_group_name` pair routes the run
   through `ConcatenatedRecording` for same-day chronic sorting (mutually
   exclusive with the single-session inputs; no artifact stage). `require_units`
-  keeps the graceful zero-unit default (an empty-but-real, merge-keyable row).
+  keeps the graceful zero-unit default (an empty-but-real curation; its
+  single-session form is merge-keyable, while concat remains behind the
+  timeline-safety gate).
 - **`run_v2_unit_match(session_group_owner=..., session_group_name=..., ...)`** is the
   match-and-track convenience function for the sort-then-match workflow (it does
   not sort the members): it requires explicit per-member `curation_choices`
@@ -135,6 +163,12 @@ registrations); existing v2 table definitions are unchanged.
   one-knob variant, validating every derived parameter row before insert and refusing
   ambiguous or duplicate names. `describe_pipeline_presets` /
   `describe_pipeline_preset` inspect the catalog.
+- **Frank-lab presets use the ISI-aware curation policy.** The shipped
+  polymer/tetrode MountainSort4, MountainSort5, and concat presets select
+  `franklab_default_auto_curation_2026_06`: units with
+  `nn_noise_overlap > 0.1` are labeled `noise`, and units with
+  `isi_violation > 0.02` are labeled `reject`. Neuropixels presets retain the
+  v1-compatible NN-noise policy, while clusterless remains uncurated.
 - **FigPack offline curation.** `FigPackCurationSelection` + `FigPackCuration`
   build a self-contained local bundle (label / merge units in a browser);
   `FigPackCuration.fetch_curation_from_uri` reads the edits back for
@@ -212,6 +246,10 @@ identity, or `content_hash` change.
   *Migration:* re-resolve environments after pulling; the numpy-2 baseline is
   unchanged in practice (the v2 env already resolved numpy 2), only the
   declaration is now explicit.
+- **Common file scans no longer activate optional v2 schemas.**
+  `AnalysisNwbfile.check_all_files()` checks whether
+  `spikesorting_v2_recompute` exists before importing its table module, so a
+  scan on a v1-only database does not declare any `spikesorting_v2_*` schema.
 - **Sorter execution-dispatch mismatches fixed.** A clusterless (in-process)
   `SorterParameters` row can no longer claim a container backend (rejected at
   insert); the legacy SI seeder skips MATLAB sorters (a local `default` row for
@@ -237,8 +275,10 @@ identity, or `content_hash` change.
 - **conda-less environments can write analysis NWB.** `_logged_env_info` records
   an "environment capture unavailable" marker instead of aborting when
   `conda env export` is unavailable.
-- **`Export` overwrite removes superseded `Export.File` rows** (a duplicated
-  `Table` delete had leaked them), and the superseded-id set-precedence is
+- **`Export` overwrite removes unreferenced superseded `Export.File` rows** (a
+  duplicated `Table` delete had leaked them), while retaining any file row
+  still referenced by downstream provenance such as `DandiPath`. Superseded
+  `Table` rows are always removed, and the superseded-id set-precedence is
   corrected.
 - **Cross-team overwrite visibility.** `SortGroupV2.preview_existing_entries`
   enumerates, per team, the downstream rows an overwrite would cascade-delete.
@@ -713,6 +753,11 @@ guide.
   extra: `UnitMatchPy` + `mat73`) ships first, with DeepUnitMatch as future work
   through the same slot. `MatcherParameters.insert1` validates the matcher name
   against the registry (`UnknownMatcherError`) and Pydantic-validates `params`.
+- **Template baseline follows waveform width.** UnitMatch bundle
+  zero-centering now averages the first quarter of each symmetric waveform
+  window instead of a fixed 15 samples. That uses 4 samples for an 18-sample
+  waveform and 22 for the default 90-sample waveform, keeping the baseline
+  pre-spike for user-configured windows.
 - **Explicit per-member curations.** `UnitMatchSelection` pins one
   `(sorting_id, curation_id)` per `SessionGroup.Member` (no implicit "latest
   curation"), with a SHA-256 `curation_set_hash` for idempotent
