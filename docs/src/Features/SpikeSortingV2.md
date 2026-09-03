@@ -16,7 +16,8 @@ SpikeInterface objects.
 
 ## What
 
-v2 currently ships the single-session sorting chain:
+v2 ships the single-session sorting chain plus same-day concatenation and
+cross-session unit matching:
 
 ```
 SortGroupV2
