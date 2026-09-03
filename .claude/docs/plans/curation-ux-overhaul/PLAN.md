@@ -1,6 +1,12 @@
 # Curation UX Overhaul Implementation Plan
 
-**Status:** Not started.
+**Status:** Implementation complete on `spikesorting-v2`; external release
+validation pending.
+
+Automated validation completed on 2026-09-03. Before release, run the
+credentialed hosted FigPack edit/save/read-back check and the moderated exercise
+with three current v1 FigURL users tracked in
+[usability-exercise.md](usability-exercise.md).
 
 Makes hands-on spike-sorting curation in the v2 pipeline something a lab member can do without holding the internal data model in their head. The **primary user journey is browser-first**, matching the lab's real v1 FigURL workflow: start one review from a curation, inspect/label/merge in FigPack, preview the imported change set, commit it, and continue directly into a post-merge verification review when needed. The scripted evaluation/plot facade remains a supported secondary path for automation, debugging, and expert use. Today a curator must build DataJoint keys by hand, choose between several near-identical "apply the evaluation" methods, remember to re-key downstream off the curated child, and cannot *look at* a merged unit's waveform or correlogram at all. This plan closes that gap at the architectural root, adds a persisted review profile and first-class review session, brings FigPack to identity-verified round-trip parity, and restores v1's custom-metric flexibility through typed annotations without its NWB failure mode.
 
@@ -18,7 +24,7 @@ For agent invocation, **load only the slice you need**:
 - [overview.md](overview.md) — scope, integration points, risks, rollout, open questions.
 - [shared-contracts.md](shared-contracts.md) — curation/evaluation/review value objects, resolver signature, error type, and figure-identity schema shared across phases.
 - [designs.md](designs.md) — resolver + cache internals, scripted `merge_and_evaluate`, browser review orchestration, strict-metric handling, figure identity, and annotation model.
-- Phases (each ships as a separable PR, in this order):
+- Phases (implemented as reviewable commits on this PR, in this order):
   - [phase-0-schema-foundation.md](phase-0-schema-foundation.md) — immutable `curation_uuid` identity, persisted rule `missing_policy`, and immutable `CurationReviewProfile` rows. Small, additive schema the later phases depend on.
   - [phase-1-curation-analyzer.md](phase-1-curation-analyzer.md) — one curation-scoped analyzer resolver behind evaluation, plotting, and FigPack; closes the merged-unit visualization gap.
   - [phase-2-curation-facade.md](phase-2-curation-facade.md) — immutable value objects + scripted facade foundation, `merge_and_evaluate`, strict metric errors, and schema-free lifecycle helpers.
