@@ -31,6 +31,25 @@ cycle.
 
 from __future__ import annotations
 
+BASE_ANALYZER_EXTENSIONS = (
+    "random_spikes",
+    "noise_levels",
+    "templates",
+    "waveforms",
+)
+
+# Complete immutable extension set published for an interactive display
+# analyzer. Evaluation, curation plots, and the curation-scoped resolver import
+# this one tuple so a cached merged analyzer cannot be missing an extension a
+# supported display helper expects and then be mutated in place on first use.
+STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
+    "spike_amplitudes",
+    "correlograms",
+    "template_similarity",
+    "unit_locations",
+    "template_metrics",
+)
+
 
 def ensure_extensions(
     analyzer, names, *, job_kwargs=None, extension_params=None
@@ -813,10 +832,8 @@ def build_analyzer(
         # rebuilds identically and is part of ``ANALYZER_RECOMPUTE_EXTENSIONS``:
         # the recompute-verify path hashes it alongside random_spikes /
         # templates / waveforms.
-        base_extensions = (
-            list(extensions)
-            if extensions is not None
-            else ["random_spikes", "noise_levels", "templates", "waveforms"]
+        base_extensions = list(
+            extensions if extensions is not None else BASE_ANALYZER_EXTENSIONS
         )
         extension_params = {
             "random_spikes": {

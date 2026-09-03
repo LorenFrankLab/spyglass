@@ -62,6 +62,9 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.spikesorting.v2._recipe_catalog import (
     waveform_params_for_preprocessing,
 )
+from spyglass.spikesorting.v2._sorting_analyzer import (
+    STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+)
 from spyglass.spikesorting.v2.recording import RecordingSelection
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
@@ -85,13 +88,7 @@ schema = dj.schema("spikesorting_v2_metric_curation")
 # auto-merge. The sort-time base set (random_spikes, noise_levels, templates,
 # waveforms) is already present; these derive from it. ``principal_components``
 # is added separately, only when PCA metrics are requested.
-_CURATION_EXTENSIONS = (
-    "spike_amplitudes",
-    "correlograms",
-    "template_similarity",
-    "unit_locations",
-    "template_metrics",
-)
+_CURATION_EXTENSIONS = STANDARD_DISPLAY_ANALYZER_EXTENSIONS
 
 # Pinned principal_components params for the whitened METRIC analyzer. The
 # recording is already SPATIALLY whitened (sip.whiten decorrelates channels);
@@ -185,34 +182,6 @@ def _assert_is_metric_recipe(waveform_params_name: str) -> None:
             "cluster-separation metrics must compute on a whitened analyzer; "
             "pass a metric recipe (e.g. franklab_cortex_metric_waveforms) or "
             "omit it to use the sort's resolved region metric row."
-        )
-
-
-def _assert_curation_in_raw_namespace(
-    sorting_id, curation_id, *, context: str
-) -> None:
-    """Raise unless the curation's unit set equals the raw sort's unit set.
-
-    The raw-sort DISPLAY analyzer's unit namespace is the raw sort. A merged
-    curation -- or a label-only child of a merged parent -- carries merged unit
-    ids absent from the raw sort, so reading its waveforms / correlograms /
-    peak amplitudes off the raw analyzer would silently mix namespaces. The
-    analyzer-backed notebook/plot helpers therefore reject such a curation and
-    point the caller at the routed ``get_metrics`` / ``get_suggested_merge_groups``
-    accessors (which carry the curation's own unit namespace) or at plotting the
-    raw sort directly.
-    """
-    if not CurationV2.matches_raw_namespace(
-        {"sorting_id": sorting_id, "curation_id": curation_id}
-    ):
-        raise ValueError(
-            f"{context}: curation (sorting_id={sorting_id}, "
-            f"curation_id={curation_id}) has a unit namespace that differs from "
-            "the raw sort (it is a merged curation or a label-only child of "
-            "one), so the raw-sort display analyzer cannot render it in the "
-            "curation's namespace. Use the routed get_metrics() / "
-            "get_suggested_merge_groups() accessors (curation namespace), or plot the raw "
-            "sort directly via the sorting_id."
         )
 
 
@@ -2481,11 +2450,12 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
     # ---- visualization (notebook-facing) ---------------------------------
 
     def get_waveforms(self, key, fetch_all: bool = False):
-        """Return a waveform accessor over the sort's SortingAnalyzer.
+        """Return a waveform accessor over this curation's display analyzer.
 
         The returned object exposes SI's ``get_waveforms_one_unit(unit_id)``
         and a v1-style ``get_waveforms(unit_id)`` over the analyzer's
         ``waveforms`` extension, replacing v1 ``MetricCuration.get_waveforms``.
+        Committed merged curations resolve their own analyzer and unit namespace.
         ``fetch_all`` is accepted for v1 signature parity; the sort-time
         waveform subsample is returned (a full re-extract is out of scope).
         """
@@ -2495,68 +2465,68 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "the sort-time waveform subsample (full re-extraction is not "
                 "supported)."
             )
-        sel = (CurationEvaluationSelection & key).fetch1()
-        _assert_curation_in_raw_namespace(
-            sel["sorting_id"],
-            int(sel["curation_id"]),
-            context="CurationEvaluation.get_waveforms",
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            _resolve_curation_analyzer,
         )
-        analyzer = Sorting().get_analyzer({"sorting_id": sel["sorting_id"]})
+
+        request = self._display_analyzer_key(key)
+        analyzer = _resolve_curation_analyzer(**request)
         return _WaveformsAccessor(analyzer)
 
     def _display_analyzer_key(self, key):
-        """Resolve + namespace-validate the DISPLAY-analyzer key for a plot.
+        """Resolve the curation + DISPLAY recipe request for every plot.
 
-        Returns the ``{"sorting_id": ...}`` the sort's DISPLAY (unwhitened)
-        analyzer loads from. This is the RAW sort's display analyzer, so it is
-        REJECTED for a merged curation (or a label-only child of one) whose unit
-        namespace differs from the raw sort -- those would mix namespaces. The
-        routed ``get_metrics()`` / ``get_suggested_merge_groups()`` accessors
-        carry the curation's own namespace. Shared by the read-only
-        ``_analyzer_for`` and the write-locking ``_locked_display_analyzer``.
+        The curation analyzer resolver classifies the namespace centrally:
+        raw-unit curations reuse the sort analyzer, while committed merged
+        curations build or reuse their per-generation analyzer. Preview and
+        zero-unit handling therefore cannot drift among individual helpers.
         """
         sel = (CurationEvaluationSelection & key).fetch1()
-        _assert_curation_in_raw_namespace(
-            sel["sorting_id"],
-            int(sel["curation_id"]),
-            context="CurationEvaluation analyzer-backed plot",
+        waveform_recipe = (Sorting & {"sorting_id": sel["sorting_id"]}).fetch1(
+            "display_waveform_params_name"
         )
-        return {"sorting_id": sel["sorting_id"]}
+        return {
+            "curation_ref": {
+                "sorting_id": sel["sorting_id"],
+                "curation_id": int(sel["curation_id"]),
+            },
+            "waveform_recipe": waveform_recipe,
+            "role": "display",
+        }
 
     def _analyzer_for(self, key):
-        """Return the sort's DISPLAY (unwhitened) analyzer, read-only.
+        """Return this curation's DISPLAY analyzer for a controlled read.
 
         All burst-pair legs, peak amplitudes, and the notebook plots load
         through here, so they all read real waveforms / amplitudes / positions
         -- never the whitened metric analyzer (which is built only for the PC/NN
-        cluster-separation metrics). ``get_analyzer`` with no recipe name
-        resolves the sort's stored display recipe.
-
-        The returned analyzer MUST NOT be mutated: it is loaded WITHOUT holding
-        ``analyzer_cache_lock``, so any accessor that computes-and-persists an
-        extension must go through ``_locked_display_analyzer`` instead, or it
-        could write the shared canonical zarr store concurrently with a locked
-        populate / rebuild / recompute writer and corrupt it.
+        cluster-separation metrics). Committed merged curations are resolved in
+        their own unit namespace. The returned cache-backed analyzer must not be
+        mutated; helpers needing an extension use ``_display_analyzer`` below.
         """
-        return Sorting().get_analyzer(self._display_analyzer_key(key))
-
-    @contextmanager
-    def _locked_display_analyzer(self, key):
-        """Yield the DISPLAY analyzer while holding ``analyzer_cache_lock``.
-
-        The plot accessors that compute-and-persist extensions into the
-        canonical display analyzer (``plot_units_qc``,
-        ``plot_burst_pair_metrics``) must hold the per-sort cache lock across the
-        load + mutate -- the same lock the populate / rebuild / recompute writers
-        take -- so two processes never write the shared zarr store at once.
-        """
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_lock,
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            _resolve_curation_analyzer,
         )
 
-        sorting_key = self._display_analyzer_key(key)
-        with analyzer_cache_lock(sorting_key["sorting_id"]):
-            yield Sorting().get_analyzer(sorting_key)
+        return _resolve_curation_analyzer(**self._display_analyzer_key(key))
+
+    @contextmanager
+    def _display_analyzer(self, key, *, extra_extensions=None):
+        """Yield a display analyzer without mutating its published cache.
+
+        Standard display extensions are built before a merged analyzer is
+        published. Any unusual missing extension is computed on a temporary
+        in-memory derivative owned by this context, never into the shared zarr.
+        """
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            curation_analyzer_with_extensions,
+        )
+
+        with curation_analyzer_with_extensions(
+            **self._display_analyzer_key(key),
+            extra_extensions=extra_extensions,
+        ) as analyzer:
+            yield analyzer
 
     def plot_units_qc(
         self, key, *, metric_names=None, color_metric: str = "snr", axes=None
@@ -2581,14 +2551,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             plot_units_qc_figure,
         )
 
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            ensure_extensions,
-        )
-
         metrics = self.get_metrics(key)
         try:
-            with self._locked_display_analyzer(key) as analyzer:
-                ensure_extensions(analyzer, ["unit_locations"])
+            with self._display_analyzer(
+                key, extra_extensions={"unit_locations": {}}
+            ) as analyzer:
                 locations = analyzer.get_extension("unit_locations").get_data()
                 unit_ids = list(analyzer.unit_ids)
         except ZeroUnitAnalyzerError:
@@ -2688,17 +2655,23 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         Scatters waveform similarity vs cross-correlogram asymmetry, one point
         per unit pair, computed on the fly from the analyzer's extensions (no
-        pair metrics are stored, though the required display extensions are
-        computed into the analyzer under the cache lock). v1 laid out one panel
-        per sort group; a v2 sort is a single sort group, so this renders that
-        sort's pairs. ``pairs`` defaults to all ordered pairs.
+        pair metrics are stored). Any missing display extensions are built on a
+        detached derivative, not persisted into the published cache. v1 laid
+        out one panel per sort group; a v2 sort is a single sort group, so this
+        renders that sort's pairs. ``pairs`` defaults to all ordered pairs.
         """
         from spyglass.spikesorting.utils_burst import plot_burst_metrics
         from spyglass.spikesorting.v2._metric_curation_plots import (
             burst_pair_metrics_from_analyzer,
         )
 
-        with self._locked_display_analyzer(key) as analyzer:
+        with self._display_analyzer(
+            key,
+            extra_extensions={
+                "template_similarity": {},
+                "unit_locations": {},
+            },
+        ) as analyzer:
             rows = burst_pair_metrics_from_analyzer(analyzer, pairs=pairs)
         return plot_burst_metrics(rows)
 

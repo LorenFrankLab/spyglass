@@ -2187,11 +2187,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         raw-sort display analyzer already holds its namespace. ``False`` for a
         merged curation -- or a label-only child of a merged parent -- whose unit
         set includes merged ids absent from the raw sort. The single owner of
-        this predicate: ``CurationEvaluation.make_fetch`` routes its analyzer
-        fast path on it and ``_assert_curation_in_raw_namespace`` guards the
-        raw-analyzer plot helpers with it, so the two cannot drift. Distinct
-        from :meth:`is_committed_curation`: a committed label-only child of a
-        merged parent is committed yet does NOT match the raw namespace.
+        this predicate: ``CurationEvaluation.make_fetch`` and the curation
+        analyzer resolver route their raw-analyzer fast paths on it, so compute
+        and interactive reads cannot drift. Distinct from
+        :meth:`is_committed_curation`: a committed label-only child of a merged
+        parent is committed yet does NOT match the raw namespace.
 
         Parameters
         ----------
@@ -2219,14 +2219,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> None:
         """Raise if ``key`` is a preview curation; no-op for committed states.
 
-        The guard at every evaluation boundary (``CurationEvaluation``): a
-        preview curation has unapplied proposed merges, so scoring it would
-        attach metrics to the UNMERGED preview units rather than the final
-        merged unit set the user intends. Mirrors
-        ``_assert_curation_in_raw_namespace`` (the raw-namespace guard) but in the
-        opposite direction -- there the danger is a merged parent under a
-        raw-sort analyzer; here it is a NOT-yet-merged preview under a
-        committed-state evaluation.
+        The guard at every evaluation/analyzer boundary: a preview curation has
+        unapplied proposed merges, so scoring or plotting it would attach data
+        to the UNMERGED preview units rather than the final merged unit set the
+        user intends.
 
         Parameters
         ----------

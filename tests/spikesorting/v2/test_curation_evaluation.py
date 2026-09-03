@@ -1061,12 +1061,21 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         CurationEvaluation,
         CurationEvaluationSelection,
     )
+    from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting_key = dict(planted_zero_unit_sort)
     clear_curations_for(planted_zero_unit_sort)
     try:
         root = CurationV2.insert_curation(sorting_key=sorting_key)
         assert len(CurationV2.Unit & root) == 0
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            _resolve_curation_analyzer,
+        )
+        from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+        recipe = (Sorting & sorting_key).fetch1("display_waveform_params_name")
+        with pytest.raises(ZeroUnitAnalyzerError, match="zero units"):
+            _resolve_curation_analyzer(root, recipe)
         sel = CurationEvaluationSelection.insert_selection(
             {
                 **root,
@@ -1079,6 +1088,8 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         assert CurationEvaluation.get_metrics(sel).empty
         assert CurationEvaluation.get_labels(sel) == {}
         assert CurationEvaluation.get_suggested_merge_groups(sel) == []
+        axes = CurationEvaluation().plot_units_qc(sel)
+        assert set(axes) == {"empty"}
         # The zero-unit artifact is still self-describing: the provenance header
         # is written even though there are no metrics (no analyzer is built, so
         # the source-analyzer manifest is None).
@@ -1554,52 +1565,6 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
             int(u) for u in (CurationV2.Unit & child).fetch("unit_id")
         ) == {merged_id}
         assert len(CurationV2.UnitLabel & child) == 0
-    finally:
-        clear_curations_for(planted_two_unit_sort)
-
-
-@pytest.mark.slow
-@pytest.mark.integration
-def test_analyzer_backed_helpers_reject_merged_curation(
-    planted_two_unit_sort, curation_evaluation_defaults
-):
-    """The raw-analyzer notebook/SI helpers refuse a merged curation rather
-    than silently rendering it in the wrong (raw) unit namespace.
-    """
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    from spyglass.spikesorting.v2 import visualization as ssviz
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.metric_curation import (
-        CurationEvaluation,
-        CurationEvaluationSelection,
-    )
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    sorting_key = dict(planted_two_unit_sort)
-    unit_ids = sorted(
-        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
-    )
-    clear_curations_for(planted_two_unit_sort)
-    try:
-        root = CurationV2.insert_curation(sorting_key=sorting_key)
-        merged = CurationV2.create_merged_curation(
-            sorting_key,
-            merge_groups=[[unit_ids[0], unit_ids[1]]],
-            parent_curation_id=root["curation_id"],
-        )
-        sel = CurationEvaluationSelection.insert_selection(
-            {
-                **merged,
-                "metric_params_name": "minimal",
-                "auto_curation_rules_name": "none",
-            }
-        )
-        # No populate needed: the namespace guard fires before any analyzer load.
-        with pytest.raises(ValueError, match="namespace"):
-            CurationEvaluation().get_waveforms(sel)
-        with pytest.raises(ValueError, match="namespace"):
-            ssviz.plot_si_quality_metrics(sel)
     finally:
         clear_curations_for(planted_two_unit_sort)
 

@@ -1,9 +1,9 @@
 """Routing tests for the ``v2.visualization`` facade (db_unit, monkeypatched).
 
 These exercise the key -> recording/analyzer/metric routing without populating a
-sort: SI widget/exporter functions, ``Sorting.get_analyzer`` /
+sort: SI widget/exporter functions, the raw and curation analyzer resolvers /
 ``Recording.get_recording`` / ``CurationEvaluation.get_metrics`` /
-``CurationEvaluation.get_suggested_merge_groups`` and the curation->sort resolver are
+``CurationEvaluation.get_suggested_merge_groups`` and the curation resolver are
 monkeypatched with fakes, and the assertions pin which analyzer (display vs
 whitened) and which extensions each helper touches. The ``db_unit`` mark is for
 the schema-class imports (Docker MySQL only); nothing here populates. Real
@@ -253,6 +253,38 @@ def _patch_display_analyzer(monkeypatch, fake, *, recorder=None):
     monkeypatch.setattr(Sorting, "get_analyzer", _get_analyzer)
 
 
+def _patch_curation_display_analyzer(monkeypatch, fake, *, recorder=None):
+    """Patch the curation-scoped display resolver with one analyzer fake."""
+    from contextlib import contextmanager
+
+    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+
+    request = {
+        "curation_ref": {"sorting_id": "s", "curation_id": 0},
+        "waveform_recipe": "display_recipe",
+        "role": "display",
+    }
+    monkeypatch.setattr(
+        ssviz, "_curation_analyzer_request", lambda key: request
+    )
+
+    def _resolve(**kwargs):
+        if recorder is not None:
+            recorder.append(dict(kwargs))
+        return fake
+
+    @contextmanager
+    def _with_extensions(**kwargs):
+        if recorder is not None:
+            recorder.append(dict(kwargs))
+        yield fake
+
+    monkeypatch.setattr(resolver, "_resolve_curation_analyzer", _resolve)
+    monkeypatch.setattr(
+        resolver, "curation_analyzer_with_extensions", _with_extensions
+    )
+
+
 def _forbid_add_extensions(monkeypatch):
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -492,16 +524,13 @@ def test_plot_metrics_rejects_non_matplotlib_backend(dj_conn):
 def test_curation_evaluation_plot_si_quality_metrics_uses_display_analyzer(
     dj_conn, monkeypatch
 ):
-    """The SI-native quality view uses the display analyzer (wpn=None)."""
+    """The SI-native quality view uses the curation display analyzer."""
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer(["quality_metrics"])
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
+    requests = []
+    _patch_curation_display_analyzer(monkeypatch, fake, recorder=requests)
     _forbid_add_extensions(monkeypatch)
-    monkeypatch.setattr(
-        ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
-    )
     captured = {}
     monkeypatch.setattr(
         sw,
@@ -510,7 +539,13 @@ def test_curation_evaluation_plot_si_quality_metrics_uses_display_analyzer(
     )
     assert ssviz.plot_si_quality_metrics({"curation_id": 0}) == "QM"
     assert captured["analyzer"] is fake
-    assert wpn == [None]
+    assert requests == [
+        {
+            "curation_ref": {"sorting_id": "s", "curation_id": 0},
+            "waveform_recipe": "display_recipe",
+            "role": "display",
+        }
+    ]
 
 
 @pytest.mark.db_unit
@@ -521,12 +556,9 @@ def test_curation_evaluation_plot_si_template_metrics_uses_display_analyzer(
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer(["template_metrics"])
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
+    requests = []
+    _patch_curation_display_analyzer(monkeypatch, fake, recorder=requests)
     _forbid_add_extensions(monkeypatch)
-    monkeypatch.setattr(
-        ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
-    )
     captured = {}
     monkeypatch.setattr(
         sw,
@@ -535,7 +567,7 @@ def test_curation_evaluation_plot_si_template_metrics_uses_display_analyzer(
     )
     assert ssviz.plot_si_template_metrics({"curation_id": 0}) == "TM"
     assert captured["analyzer"] is fake
-    assert wpn == [None]
+    assert requests[0]["role"] == "display"
 
 
 @pytest.mark.db_unit
@@ -546,11 +578,8 @@ def test_si_metric_widgets_require_explicit_compute_for_missing_extensions(
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer([])  # quality_metrics absent
-    _patch_display_analyzer(monkeypatch, fake)
+    _patch_curation_display_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
-    monkeypatch.setattr(
-        ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
-    )
     monkeypatch.setattr(
         sw,
         "plot_quality_metrics",
@@ -585,11 +614,8 @@ def test_plot_suggested_merges_uses_persisted_merge_groups(
 
     monkeypatch.setattr(sic, "compute_merge_unit_groups", _must_not_recompute)
     fake = _FakeAnalyzer(["spike_amplitudes", "correlograms"])
-    _patch_display_analyzer(monkeypatch, fake)
+    _patch_curation_display_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
-    monkeypatch.setattr(
-        ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
-    )
     captured = {}
 
     def _fake(analyzer, *, potential_merges, backend, **kwargs):
@@ -750,7 +776,7 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
 
 @pytest.mark.db_unit
 def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
-    """Every analyzer-backed helper resolves the display recipe (wpn=None)."""
+    """Every analyzer-backed helper resolves a display-role analyzer."""
     import spikeinterface.exporters as sie
     import spikeinterface.widgets as sw
 
@@ -768,10 +794,11 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     )
     wpn = []
     _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
-    _forbid_add_extensions(monkeypatch)
-    monkeypatch.setattr(
-        ssviz, "_curation_sorting_key", lambda key: {"sorting_id": "s"}
+    curation_requests = []
+    _patch_curation_display_analyzer(
+        monkeypatch, fake, recorder=curation_requests
     )
+    _forbid_add_extensions(monkeypatch)
     monkeypatch.setattr(
         CurationEvaluation,
         "get_suggested_merge_groups",
@@ -806,6 +833,8 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
 
     assert wpn, "expected analyzer loads"
     assert set(wpn) == {None}
+    assert curation_requests, "expected curation analyzer loads"
+    assert {request["role"] for request in curation_requests} == {"display"}
 
 
 @pytest.mark.db_unit

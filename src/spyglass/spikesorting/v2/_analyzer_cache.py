@@ -28,12 +28,14 @@ side-effect free.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import tempfile
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 # The recipe name is embedded in the analyzer cache folder
@@ -44,6 +46,27 @@ from pathlib import Path
 # analyzer-path policy -- so the load path can validate without importing the
 # ``sorting`` schema module.
 _WAVEFORM_PARAMS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_CURATION_CACHE_RE = re.compile(
+    r"^curation_"
+    r"(?P<curation_uuid>[0-9a-f]{32})_"
+    r"(?P<role>display|metric)_"
+    r"(?P<waveform_recipe_hash>[0-9a-f]{64})_"
+    r"si_(?P<spikeinterface_version_hash>[0-9a-f]{16})$"
+)
+
+
+@dataclass(frozen=True)
+class AnalyzerCacheFolderIdentity:
+    """Parsed identity of one canonical analyzer-cache folder."""
+
+    kind: str
+    sorting_id: uuid.UUID
+    waveform_params_name: str | None = None
+    curation_uuid: uuid.UUID | None = None
+    role: str | None = None
+    waveform_recipe_hash: str | None = None
+    spikeinterface_version_hash: str | None = None
 
 
 def assert_path_safe_waveform_params_name(name) -> None:
@@ -70,14 +93,47 @@ def is_canonical_analyzer_folder_name(name: str) -> bool:
     uses this to refuse deleting any directory under a (possibly misconfigured)
     analyzer root that is not a canonical analyzer cache.
     """
+    return analyzer_cache_folder_identity(name) is not None
+
+
+def analyzer_cache_folder_identity(
+    name: str,
+) -> AnalyzerCacheFolderIdentity | None:
+    """Parse a raw- or curation-kind canonical cache folder name.
+
+    Raw cache names retain the established
+    ``{sorting_id}__{waveform_params_name}.zarr`` shape. Curation cache names
+    use the same outer shape with a structured, path-safe payload carrying the
+    immutable curation generation, analyzer role, recipe-content hash, and
+    SpikeInterface-version hash. Returning a typed identity lets cleanup share
+    one conservative canonical-name gate across both cache kinds.
+    """
     if not name.endswith(".zarr") or "__" not in name:
-        return False
-    sorting_id, _, recipe = name[: -len(".zarr")].partition("__")
+        return None
+    sorting_id_text, _, payload = name[: -len(".zarr")].partition("__")
     try:
-        uuid.UUID(sorting_id)
-    except ValueError:
-        return False
-    return bool(_WAVEFORM_PARAMS_NAME_RE.match(recipe))
+        sorting_id = uuid.UUID(sorting_id_text)
+    except (ValueError, TypeError):
+        return None
+    match = _CURATION_CACHE_RE.fullmatch(payload)
+    if match is not None:
+        return AnalyzerCacheFolderIdentity(
+            kind="curation",
+            sorting_id=sorting_id,
+            curation_uuid=uuid.UUID(hex=match.group("curation_uuid")),
+            role=match.group("role"),
+            waveform_recipe_hash=match.group("waveform_recipe_hash"),
+            spikeinterface_version_hash=match.group(
+                "spikeinterface_version_hash"
+            ),
+        )
+    if not _WAVEFORM_PARAMS_NAME_RE.fullmatch(payload):
+        return None
+    return AnalyzerCacheFolderIdentity(
+        kind="raw",
+        sorting_id=sorting_id,
+        waveform_params_name=payload,
+    )
 
 
 # Memoize one ``FileLock`` instance per lock-file path so a same-thread nested
@@ -143,6 +199,59 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
         The analyzer-cache folder path for this ``(sorting_id, recipe)`` pair.
     """
     return analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"
+
+
+def waveform_recipe_hash(recipe_row) -> str:
+    """Return the content fingerprint of one analyzer-waveform recipe row."""
+    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+    from spyglass.spikesorting.v2._parameter_identity import (
+        parameter_fingerprint,
+    )
+
+    return parameter_fingerprint(
+        "AnalyzerWaveformParameters",
+        params=_jsonable_blob(recipe_row["params"]),
+        params_schema_version=int(recipe_row["params_schema_version"]),
+    )
+
+
+def _spikeinterface_version_hash(version: str) -> str:
+    """Return the path-safe digest component for one SI version string."""
+    return hashlib.sha256(str(version).encode("utf-8")).hexdigest()[:16]
+
+
+def curation_analyzer_path(
+    sorting_id,
+    curation_uuid,
+    role: str,
+    waveform_recipe_hash_value: str,
+    spikeinterface_version: str,
+) -> Path:
+    """Return a per-curation analyzer path keyed by immutable generation.
+
+    The numeric ``curation_id`` is intentionally absent because it may be
+    reused after deletion. Distinct curation generations, recipe content,
+    analyzer roles, and SpikeInterface versions therefore cannot share a cache
+    slot even when their human-readable recipe name is the same.
+    """
+    sorting_uuid = uuid.UUID(str(sorting_id))
+    generation_uuid = uuid.UUID(str(curation_uuid))
+    if role not in {"display", "metric"}:
+        raise ValueError(
+            "curation analyzer role must be 'display' or 'metric'; "
+            f"got {role!r}."
+        )
+    recipe_hash = str(waveform_recipe_hash_value)
+    if not _HASH_RE.fullmatch(recipe_hash):
+        raise ValueError(
+            "waveform_recipe_hash must be a 64-character lowercase SHA-256 "
+            f"digest; got {waveform_recipe_hash_value!r}."
+        )
+    payload = (
+        f"curation_{generation_uuid.hex}_{role}_{recipe_hash}_si_"
+        f"{_spikeinterface_version_hash(spikeinterface_version)}"
+    )
+    return analyzer_cache_root() / f"{sorting_uuid}__{payload}.zarr"
 
 
 def analyzer_cache_lock(sorting_id):
@@ -395,6 +504,143 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     for folder in folders:
         shutil.rmtree(folder, ignore_errors=False)
     return True
+
+
+def collect_analyzer_cache_references(sorting_table) -> dict:
+    """Collect every live raw- and curation-kind analyzer cache reference.
+
+    This is the single DB-backed reference collector for the analyzer cache.
+    Raw references cover each sort's display recipe and PC-requesting
+    evaluation metric recipes. Curation references cover the per-generation
+    display cache for every live committed curation outside the raw namespace,
+    plus its PC-requesting metric recipes. The caller supplies ``sorting_table``
+    to keep this module free of schema activation at import time.
+
+    Missing curation folders are not DB-side orphans: they are lazy,
+    regeneratable caches built on first interactive use. ``units_bearing``
+    therefore continues to describe only raw sort display analyzers, whose
+    absence is operationally useful to report.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerRecompute
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+
+    units_bearing = []
+    sorting_rows = sorting_table.fetch(
+        "sorting_id", "display_waveform_params_name", "n_units", as_dict=True
+    )
+    referenced_paths: set[str] = set()
+    for row in sorting_rows:
+        path = analyzer_path(
+            row["sorting_id"], row["display_waveform_params_name"]
+        )
+        referenced_paths.add(str(path))
+        if int(row["n_units"]) > 0:
+            units_bearing.append((row["sorting_id"], str(path), path.exists()))
+
+    pc_rows = CurationEvaluationSelection.pc_requesting().fetch(
+        "sorting_id",
+        "curation_id",
+        "metric_waveform_params_name",
+        as_dict=True,
+    )
+    recipe_hashes: dict[str, str] = {}
+
+    def _recipe_hash(name: str) -> str:
+        if name not in recipe_hashes:
+            recipe_row = (
+                AnalyzerWaveformParameters & {"waveform_params_name": name}
+            ).fetch1()
+            recipe_hashes[name] = waveform_recipe_hash(recipe_row)
+        return recipe_hashes[name]
+
+    display_recipe_by_sorting = {
+        str(row["sorting_id"]): row["display_waveform_params_name"]
+        for row in sorting_rows
+    }
+    curation_rows = CurationV2.fetch(
+        "sorting_id", "curation_id", "curation_uuid", as_dict=True
+    )
+    curation_by_key: dict[tuple[str, int], dict] = {}
+    for row in curation_rows:
+        sorting_id = str(row["sorting_id"])
+        curation_id = int(row["curation_id"])
+        curation_by_key[(sorting_id, curation_id)] = row
+        key = {"sorting_id": row["sorting_id"], "curation_id": curation_id}
+        if (
+            not (CurationV2.Unit & key)
+            or not CurationV2.is_committed_curation(key)
+            or CurationV2.matches_raw_namespace(key)
+        ):
+            continue
+        recipe_name = display_recipe_by_sorting[sorting_id]
+        referenced_paths.add(
+            str(
+                curation_analyzer_path(
+                    row["sorting_id"],
+                    row["curation_uuid"],
+                    "display",
+                    _recipe_hash(recipe_name),
+                    si.__version__,
+                )
+            )
+        )
+
+    for row in pc_rows:
+        recipe_name = row["metric_waveform_params_name"]
+        curation = curation_by_key.get(
+            (str(row["sorting_id"]), int(row["curation_id"]))
+        )
+        if curation is None:
+            # Preserve the established conservative behavior for legacy or
+            # partially planted selection rows: without a live curation UUID
+            # there is no safe merged-cache identity to derive, but the raw
+            # metric folder is still explicitly referenced by the selection.
+            referenced_paths.add(
+                str(analyzer_path(row["sorting_id"], recipe_name))
+            )
+            continue
+        key = {
+            "sorting_id": row["sorting_id"],
+            "curation_id": int(row["curation_id"]),
+        }
+        if not (CurationV2.Unit & key) or not CurationV2.is_committed_curation(
+            key
+        ):
+            continue
+        if CurationV2.matches_raw_namespace(key):
+            referenced_paths.add(
+                str(analyzer_path(row["sorting_id"], recipe_name))
+            )
+            continue
+        referenced_paths.add(
+            str(
+                curation_analyzer_path(
+                    row["sorting_id"],
+                    curation["curation_uuid"],
+                    "metric",
+                    _recipe_hash(recipe_name),
+                    si.__version__,
+                )
+            )
+        )
+
+    reclaimed_paths = {
+        str(analyzer_path(row["sorting_id"], row["waveform_params_name"]))
+        for row in (SortingAnalyzerRecompute & "deleted=1").fetch(
+            "sorting_id", "waveform_params_name", as_dict=True
+        )
+    }
+    return {
+        "units_bearing": units_bearing,
+        "referenced_paths": referenced_paths,
+        "reclaimed_paths": reclaimed_paths,
+    }
 
 
 def classify_orphaned_analyzer_folders(

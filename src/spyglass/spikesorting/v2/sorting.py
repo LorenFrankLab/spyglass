@@ -2543,10 +2543,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         - **Reclaimed**: a missing analyzer folder with a
           ``SortingAnalyzerRecompute.deleted=1`` audit trail. This is expected
           storage reclamation, not an unexpected DB-side orphan.
-        - **Disk-side orphan**: an on-disk folder under the analyzer root that
-          no ``Sorting`` row references (the row was deleted through an upstream
-          cascade or another path that bypassed the ``delete`` override). Safe
-          to delete after inspection.
+        - **Disk-side orphan**: an on-disk raw- or curation-kind folder under
+          the analyzer root that no live sort/evaluation/curation generation
+          references. Safe to delete after inspection.
 
         **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
         orphans: ``_build_analyzer`` short-circuits before writing a folder and
@@ -2577,78 +2576,22 @@ class Sorting(SpyglassMixin, dj.Computed):
         import datajoint as dj
 
         from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_folder_identity,
+            analyzer_cache_lock,
             analyzer_cache_root,
-            analyzer_path,
             classify_orphaned_analyzer_folders,
+            collect_analyzer_cache_references,
             is_canonical_analyzer_folder_name,
         )
 
-        # Gather the DB / filesystem facts, then classify (the orphan set logic
-        # is pure and DB-free in ``classify_orphaned_analyzer_folders``). Each
-        # sort has one DISPLAY analyzer folder, named
-        # {sorting_id}__{display_waveform_params_name}.zarr; the n_units==0
-        # carve-out excludes legitimately folder-less rows from the DB-side set.
-        # A sort's stored display recipe is the folder we expect on disk; a
-        # {sid}__{other}.zarr folder (e.g. a stale recipe) is therefore a
-        # disk-side orphan -- UNLESS it is a whitened metric recipe referenced
-        # by a CurationEvaluationSelection (built on demand for PC/NN metrics),
-        # which is retained below.
-        units_bearing = []
-        for r in (cls & "n_units > 0").fetch(
-            "sorting_id", "display_waveform_params_name", as_dict=True
-        ):
-            path = analyzer_path(
-                r["sorting_id"], r["display_waveform_params_name"]
-            )
-            units_bearing.append((r["sorting_id"], str(path), path.exists()))
-        referenced_paths = {
-            str(
-                analyzer_path(
-                    r["sorting_id"], r["display_waveform_params_name"]
-                )
-            )
-            for r in cls.fetch(
-                "sorting_id", "display_waveform_params_name", as_dict=True
-            )
-        }
-        # A metric (whitened) analyzer folder referenced by a PC-requesting
-        # curation selection is in active use (its PC/NN metrics were computed
-        # from it), so it is NOT a disk-side orphan even though it is not a
-        # sort's display recipe. Only selections that actually build the metric
-        # analyzer (CurationEvaluationSelection.pc_requesting() -- the same
-        # source the recompute key_source uses) are retained, so a skip-PC
-        # selection's recipe is not (a stale folder for it stays a cleanable
-        # orphan). Lazily imported to avoid a metric_curation <-> sorting cycle.
-        from spyglass.spikesorting.v2.metric_curation import (
-            CurationEvaluationSelection,
-        )
-
-        referenced_paths.update(
-            str(
-                analyzer_path(r["sorting_id"], r["metric_waveform_params_name"])
-            )
-            for r in CurationEvaluationSelection.pc_requesting().fetch(
-                "sorting_id", "metric_waveform_params_name", as_dict=True
-            )
-        )
-        # A missing display analyzer with a recompute deleted=1 row is expected
-        # storage reclamation, not an unexpected DB-side orphan. Import lazily to
-        # avoid a sorting <-> recompute import cycle at module load.
-        from spyglass.spikesorting.v2.recompute import SortingAnalyzerRecompute
-
-        reclaimed_paths = {
-            str(analyzer_path(r["sorting_id"], r["waveform_params_name"]))
-            for r in (SortingAnalyzerRecompute & "deleted=1").fetch(
-                "sorting_id", "waveform_params_name", as_dict=True
-            )
-        }
+        # One collector owns references for BOTH cache kinds. Keeping this out
+        # of the filesystem loop prevents a new curation cache from being
+        # accidentally classified as garbage by a raw-sort-only sweep.
+        references = collect_analyzer_cache_references(cls)
         analyzer_root = analyzer_cache_root()
-        # Only canonical ``{sorting_id}__{recipe}.zarr`` directories are deletion
-        # candidates. Skipping hidden directories excludes the atomic publisher's
-        # ``.publish`` staging scratch; the canonical-name filter additionally
-        # refuses to treat any unrelated subdirectory as an orphan, so a
-        # misconfigured (e.g. shared, non-dedicated) analyzer root cannot lead
-        # the sweep to delete non-analyzer folders.
+        # Only typed canonical raw/curation directories are deletion candidates.
+        # Hidden atomic-publisher siblings and unrelated directories are never
+        # considered, even under a misconfigured shared cache root.
         disk_dir_paths = (
             [
                 str(c)
@@ -2661,10 +2604,10 @@ class Sorting(SpyglassMixin, dj.Computed):
             else []
         )
         classification = classify_orphaned_analyzer_folders(
-            units_bearing,
-            referenced_paths,
+            references["units_bearing"],
+            references["referenced_paths"],
             disk_dir_paths,
-            reclaimed_paths=reclaimed_paths,
+            reclaimed_paths=references["reclaimed_paths"],
         )
         db_side = classification["db_side"]
         disk_side = classification["disk_side"]
@@ -2708,7 +2651,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         if dj.utils.user_choice(msg).lower() in ("y", "yes"):
             for folder in disk_side:
-                shutil.rmtree(folder, ignore_errors=False)
+                identity = analyzer_cache_folder_identity(Path(folder).name)
+                if identity is None:  # pragma: no cover - classified above
+                    continue
+                with analyzer_cache_lock(identity.sorting_id):
+                    shutil.rmtree(folder, ignore_errors=False)
             logger.info(
                 "Sorting.find_orphaned_analyzer_folders: deleted "
                 f"{len(disk_side)} disk-side orphan folder(s)."
