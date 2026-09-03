@@ -15,7 +15,7 @@ def _fake_installed(versions):
     return _installed
 
 
-def _patch(monkeypatch, versions, ffmpeg_present=True):
+def _patch(monkeypatch, versions, ffmpeg_present=True, blas_error=None):
     from spyglass.position.v2 import env_check
 
     monkeypatch.setattr(env_check, "_installed", _fake_installed(versions))
@@ -24,6 +24,7 @@ def _patch(monkeypatch, versions, ffmpeg_present=True):
         "which",
         lambda name: "/usr/bin/ffmpeg" if ffmpeg_present else None,
     )
+    monkeypatch.setattr(env_check, "_blas_lapack_error", lambda: blas_error)
     return env_check
 
 
@@ -73,6 +74,16 @@ class TestCheckEnvironment:
         )
         problems = env_check.check_environment(verbose=False)
         assert len(problems) == 1 and "ffmpeg" in problems[0]
+
+    def test_broken_blas_flagged(self, monkeypatch):
+        env_check = _patch(
+            monkeypatch,
+            {"jax": "0.5.0", "torch": "2.10.0"},
+            blas_error="liwork=1",
+        )
+        problems = env_check.check_environment(verbose=False)
+        assert len(problems) == 1
+        assert "BLAS/LAPACK" in problems[0] and "liwork=1" in problems[0]
 
     def test_raise_on_error(self, monkeypatch):
         env_check = _patch(

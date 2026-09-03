@@ -38,7 +38,7 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_behav import VideoFile
-from spyglass.position.utils.dlc_io import parse_dlc_h5_output
+from spyglass.position.utils.dlc_io import dedupe_warnings, parse_dlc_h5_output
 from spyglass.position.utils.sleap_io import parse_sleap_analysis_h5
 from spyglass.position.utils.validation import (
     validate_centroid_params,
@@ -54,10 +54,12 @@ from spyglass.position.v2.train import (
     default_pk_name,
     resolve_model_path,
 )
+from spyglass.position.v2.utils.device import resolve_cuda_device
 from spyglass.position.v2.utils.nwb_io import (
     NDXPoseBuilder,
     PoseInferenceRunner,
     _populate_nwb_pose_estimation,
+    check_gpu_available,
 )
 from spyglass.position.v2.utils.params import (
     CentroidParams,
@@ -558,7 +560,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if not dlc_output_path.exists():
             raise FileNotFoundError(f"DLC output not found: {dlc_output_path}")
 
-        logger.info_msg(f"Loading DLC output: {dlc_output_path}")
+        logger.debug(f"Loading DLC output: {dlc_output_path}")
 
         # Load DLC output data using consolidated parser
         df, scorer, bodyparts = parse_dlc_h5_output(dlc_output_path)
@@ -995,6 +997,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             If trigger mode is requested with no registered video files.
         FileNotFoundError
             If no tool output files can be located.
+        RuntimeError
+            If trigger mode requests a CUDA device that is not visible to
+            PyTorch (see :func:`~spyglass.position.v2.utils.nwb_io.
+            check_gpu_available`), or if no visible CUDA device has enough
+            free memory (see :func:`~spyglass.position.v2.utils.device.
+            resolve_cuda_device`).
         """
         task_mode = fetched["task_mode"]
         output_dir = fetched["output_dir"]
@@ -1002,10 +1010,27 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         inference_params = fetched["inference_params"]
         video_paths = fetched["video_paths"]
 
-        self._info_msg(
+        self._logger.debug(
             "PoseEstim.make_compute: "
             + f"tool={tool}, mode={task_mode}, output_dir={output_dir}"
         )
+
+        if task_mode == "trigger":
+            check_gpu_available(inference_params.get("device"))
+            # A bare "cuda" means cuda:0 to PyTorch, which on a shared
+            # multi-GPU host is an arbitrary pick that may be the one
+            # saturated device (issue #1676). Resolve to the least-loaded
+            # GPU at dispatch. Copied, not mutated in place: the fetched
+            # params mirror a stored PoseEstimParams row, and the chosen
+            # index is a runtime detail that must not leak back into it.
+            resolved_device = resolve_cuda_device(
+                inference_params.get("device")
+            )
+            if resolved_device != inference_params.get("device"):
+                inference_params = {
+                    **inference_params,
+                    "device": resolved_device,
+                }
 
         # Branch — 3D triangulation vs standard 2D path.
         if fetched["is_3d"]:
@@ -1041,7 +1066,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     f"{key['vid_group_id']}. Cannot trigger inference "
                     "without registered video files in VideoFile table."
                 )
-            self._info_msg("Triggering inference...")
             model_key = {"model_id": key["model_id"]}
             destfolder = output_dir if output_dir else None
             output_file_info = self.run_inference(
@@ -1133,7 +1157,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 ctx=store_ctx,
             )
             self.insert1({**key, "analysis_file_name": analysis_file_name})
-            self._info_msg("PoseEstim (3D) entry inserted.")
+            self._logger.debug("PoseEstim (3D) entry inserted.")
             return
 
         analysis_file_name = self._store_estimation_nwb(
@@ -1146,7 +1170,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             ctx=store_ctx,
         )
         self.insert1({**key, "analysis_file_name": analysis_file_name})
-        self._info_msg("PoseEstim entry inserted.")
+        self._logger.debug("PoseEstim entry inserted.")
 
     def _find_output_files(
         self,
@@ -1278,7 +1302,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             params_info = (ModelParams() & model_params_key).fetch1()
             tool = params_info["tool"]
 
-        self._info_msg(f"Running inference with {tool} model: {model_key}")
+        self._logger.debug(f"Running inference with {tool} model: {model_key}")
 
         if tool == "DLC":
             runner = self._get_inference_runner_cls()()
@@ -1373,9 +1397,23 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 f"'{key['vid_group_id']}'. Cannot fetch real timestamps."
             )
         try:
-            nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
+            # hdmf warns once per legacy Device.model string, so one NWB
+            # read yields several lines about a single schema fact.
+            with dedupe_warnings():
+                nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
             ts = np.asarray(nwb_data["video_file"].timestamps)
-        except (OSError, KeyError, TypeError, AttributeError):
+        except (OSError, KeyError, TypeError, AttributeError) as e:
+            # Don't swallow silently: this is the difference between "the
+            # video-file fallback below actually ran and got a real answer"
+            # and "something (an NFS/HDF5 file-lock hiccup, a genuinely
+            # missing NWB object, ...) broke the primary lookup" -- the
+            # latter needs to be visible to diagnose, not just a generic
+            # "both paths failed" message at the end.
+            logger.warning(
+                f"NWB timestamp lookup failed for vid_group_id="
+                f"'{key['vid_group_id']}' ({type(e).__name__}: {e}); "
+                "falling back to video-file frame count."
+            )
             ts = None  # fall through to video-file fallback below
 
         if ts is not None and len(ts) > 0:
@@ -1383,12 +1421,23 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         # Fallback: derive timestamps from the actual video file (e.g. for
         # tutorial/bootstrap sessions whose NWB object IDs are synthetic).
+        # Uses the already-converted mp4 (the same one DLC inference runs
+        # on) via the shared ensure_mp4, not the raw registered
+        # VideoFile.path directly -- OpenCV cannot read a frame count from
+        # a raw H.264 elementary stream (reports a nonsensical negative
+        # value instead of raising), the same limitation ensure_mp4/find_mp4
+        # elsewhere in this pipeline exist to work around.
         video_path = (VideoFile & vf_keys[0]).fetch1("path")
         if video_path:
             try:
+                from spyglass.position.utils.general import ensure_mp4
+                from spyglass.settings import pose_video_dir
+
+                countable_path = ensure_mp4([video_path], pose_video_dir)[0]
+
                 import cv2
 
-                cap = cv2.VideoCapture(str(video_path))
+                cap = cv2.VideoCapture(str(countable_path))
                 fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
                 n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 cap.release()
