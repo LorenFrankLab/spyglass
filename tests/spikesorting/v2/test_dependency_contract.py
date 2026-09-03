@@ -1,10 +1,10 @@
 """Static dependency-contract checks for the v2 stack.
 
 These are pure-text checks (no DB, no SpikeInterface import): they parse
-``pyproject.toml``, the v2 conda env file, and the ``pytest-legacy`` CI job
-and assert the declared pins agree with each other.
+``pyproject.toml``, every conda environment file, and the ``pytest-legacy`` CI
+job and assert the declared pins agree with each other.
 
-Two coupled invariants live here:
+Three coupled invariants live here:
 
 1. The base ``numpy`` requirement is pinned to the v2 baseline (``>=2,<3``)
    and the v2 conda env's SpikeInterface spec matches the ``pyproject``
@@ -17,8 +17,11 @@ Two coupled invariants live here:
    ``numpy`` pin text changes, those seds silently no-op and the legacy env
    resolves numpy 2 against SI 0.99 (``np.issctype`` breakage). So the sed's
    source pattern must always target the *current* committed numpy spec.
+3. Every conda environment either declares the modern SciPy >=1.13 contract
+   or documents the complete legacy pre-install pin-relaxation recipe.
 """
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -29,6 +32,7 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 V2_ENV = REPO_ROOT / "environments" / "environment_spikesorting_v2.yml"
 LEGACY_ENV = REPO_ROOT / "environments" / "environment_spikesorting_legacy.yml"
 CONDA_CI = REPO_ROOT / ".github" / "workflows" / "test-conda.yml"
+ENVIRONMENTS = REPO_ROOT / "environments"
 
 # The legacy (SI-0.99) suite downgrades numpy via this exact sed target.
 LEGACY_NUMPY_SPEC = "numpy>=1.23,<2"
@@ -126,4 +130,33 @@ def test_legacy_numpy_sed_targets_current_pin():
             f'"{numpy_spec}" -> "{LEGACY_NUMPY_SPEC}". The numpy pin changed '
             f"without updating the legacy downgrade sed, so the SI-0.99 "
             f"legacy env would resolve numpy 2 (np.issctype break)."
+        )
+
+
+def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
+    """Every environment makes its SciPy/runtime generation explicit.
+
+    Modern Spyglass installs need SciPy >=1.13 alongside the NumPy 2 / SI 0.104
+    package contract. The one deliberate exception is the SI-0.99 legacy
+    environment, whose header must carry the exact pre-install pin-relaxation
+    recipe; a stale ``scipy<1.13`` line without that recipe is not sufficient.
+    """
+    modern_scipy = re.compile(
+        r'^\s*-\s*["\']?scipy>=1\.13(?:["\']|\s|$)', re.MULTILINE
+    )
+    legacy_markers = (
+        "sed -i",
+        "spikeinterface>=0.99.1,<0.100",
+        "numpy>=1.23,<2",
+    )
+
+    for path in sorted(ENVIRONMENTS.glob("*.yml")):
+        contents = path.read_text()
+        is_modern = bool(modern_scipy.search(contents))
+        documents_legacy_install = all(
+            marker in contents for marker in legacy_markers
+        )
+        assert is_modern or documents_legacy_install, (
+            f"{path} must pin scipy>=1.13 or document the complete legacy "
+            "SI-0.99 pre-install sed recipe in its header"
         )

@@ -46,6 +46,8 @@ channels:
   - edeno
 dependencies:
   - python=3.11
+  - numpy>=2,<3
+  - scipy>=1.13
   - pip
   - pip:
       # Editable install of the repo root (this file lives in

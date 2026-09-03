@@ -104,11 +104,11 @@ That plan (status "Not started" as of 2026-09-02; none of its Phase 0 columns/ta
 - **Hand-off into the overhaul.** (a) Overhaul Phase 3's `commit()` creates a child `CurationV2`; for a concat-backed sort it must also `ConcatMemberCuration.populate(child)` so the review's final handle is `member_merge_ids`, not a single `merge_id` (the release-gate snippet in the overhaul overview ends with `final.merge_id`; for concat that is `None`). (b) Remediation Phase 1 changes `root_merge_id` to `UUID | None` in `_pipeline_types.py`; Overhaul Phase 2's `CurationRef` wrapper keys off curation ids, so no conflict, but its summary wrapper must tolerate `None` merge ids.
 - **Staleness.** Remediation Phase 1 edits `curation.py`, `metric_curation.py` docstrings, `_pipeline_run.py`, and `_pipeline_types.py`, so the overhaul overview's file:line refs into those files drift. Refresh them (in place, per the planning skill's staleness rule) after Phase 1 lands and before Overhaul Phase 0 starts.
 
-## Open Questions
+## Decisions and remaining questions
 
-1. **Which auto-curation rule set should `franklab_*` presets carry?** Current best answer: point the three `franklab_*` presets at `franklab_default_auto_curation_2026_06` and leave generic `default*` presets on `v1_default_nn_noise`; the Quickstart then states which rules ran. Owner confirms before the executor edits `_recipe_catalog.py:559,671,793`. If the owner prefers to keep presets unchanged, the fix is prose only: the Curation notebook and doc stop calling the ISI set "the default".
+1. **Resolved 2026-09-03: `franklab_*` presets use the ISI-aware rules.** The owner selected `franklab_default_auto_curation_2026_06`; generic Neuropixels presets retain `v1_default_nn_noise`, and clusterless remains on `none`.
 2. **Should Phase 2 propagate concat curation labels to member rows verbatim?** Current best answer: yes, verbatim (labels are per unit id; ids are preserved). Re-labeling per member is out of scope.
-3. **Do DLC/MoSeq environments need to co-install spyglass under the 0.104 pin at all?** Deferred to the Phase 1 env task outcome.
+3. **Resolved 2026-09-03: DLC/MoSeq remain modern Spyglass environments.** A focused Linux dry-run resolved `numpy=2.2.6`, `scipy=1.15.2`, `pyfftw=0.15.0`, and the existing `pytorch=1.11.0` cap together, so these files do not need the legacy SI-0.99 sed recipe. Complete five-channel DLC solves were attempted with libmamba and rattler but did not finish within the bounded validation windows; the full channel graph remains a release-environment check rather than evidence for a legacy pin.
 
 ## Estimated Effort
 
