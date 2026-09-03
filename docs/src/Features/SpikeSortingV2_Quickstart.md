@@ -15,6 +15,7 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
+    describe_sort_groups,
     run_v2_pipeline,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -29,6 +30,30 @@ LabTeam.insert1(
 # re-run (or delete the groups first; see the reference).
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+# Inspect the scientific grouping before choosing a shank. Set sort_group_id
+# explicitly when the session has more than one candidate.
+sort_groups = describe_sort_groups(nwb_file_name)
+if sort_groups.empty:
+    raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
+available_sort_group_ids = [
+    int(value) for value in sort_groups["sort_group_id"]
+]
+sort_group_id = None  # replace with one reviewed ID when several are listed
+if sort_group_id is None:
+    if len(available_sort_group_ids) == 1:
+        sort_group_id = available_sort_group_ids[0]
+    else:
+        raise ValueError(
+            f"Choose sort_group_id from {available_sort_group_ids} after "
+            "reviewing sort_groups."
+        )
+elif sort_group_id not in available_sort_group_ids:
+    raise ValueError(
+        f"sort_group_id={sort_group_id} is not one of "
+        f"{available_sort_group_ids} for {nwb_file_name!r}."
+    )
+sort_groups
 ```
 
 ## 2. Sort **and** auto-curate in one call
@@ -43,7 +68,7 @@ inspect the exact rules before running.
 ```python
 summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
-    sort_group_id=0,  # the shank to sort
+    sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
