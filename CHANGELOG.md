@@ -2,11 +2,23 @@
 
 ## [0.6.1] (Unreleased)
 
-## Pipelines
+### Pipelines
 
 - Position
 
-    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #1679
+    - Separate `DLCPosVideo`, `TrodesPosVideo`, and `PositionVideo` to tri-part
+        `make`; `PositionVideo` also closes the video NWB file handle it
+        previously left open #1679
+    - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
+        `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
+        under DataJoint's daemonic workers #1679
+
+### Infrastructure
+
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
 
 ## [0.6.0] (Sep 1st 2026)
 
@@ -309,8 +321,6 @@ for label, interval_data in results.groupby("interval_labels"):
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
     - `PositionSource` ingestion is now responsible for `RawPosition` #1660
-    - Separate `PositionVideo` to tri-part `make`, and close the video NWB file
-        handle it previously left open #1679
 
 - Decoding
 

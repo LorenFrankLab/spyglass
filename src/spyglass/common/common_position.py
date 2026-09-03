@@ -641,7 +641,9 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            empty; nothing beyond the key is inserted
+            Empty. Must be an empty list rather than None: DataJoint
+            recomputes when the result is None, which would re-render the
+            video inside the transaction and skip make_insert entirely.
         """
         nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
         output_video_filename = (

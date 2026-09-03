@@ -153,10 +153,13 @@ def file_log(logger, console=False):
             logger.addHandler(file_handler)
 
             # Suppress console output by removing whatever handlers are
-            # present, then restoring those same objects. Removing
-            # handlers[0] by position and restoring the module-level
-            # stream_handler instead duplicated handlers when these calls
-            # nested, and dropped any handler another caller had added.
+            # present, then restoring those same objects. The old code
+            # removed handlers[0] by position, which under nesting was the
+            # outer call's file handler -- so the outer call silently lost
+            # its log file and regained the console output it had
+            # suppressed. Restoring the module-level stream_handler rather
+            # than the removed object also resurrected a handler another
+            # caller had deliberately removed.
             suppressed = (
                 []
                 if console
