@@ -71,7 +71,7 @@ declares their net-new tables without changing either recipe table.
    curation; `analysis_merge_id` is `None` until you curate (there is no bare
    `merge_id` to grab).
 3. Curate from that root — evaluate + label, then merge (see the
-   [curation flow](./SpikeSortingV2.md#the-evaluate-accept-merge-curation-flow)),
+   [curation flow](./SpikeSortingV2.md#the-scripted-evaluate-merge-evaluate-label-flow)),
    or pass `auto_curate=True` to fill `analysis_merge_id` in one call. The
    **final curated** `CurationV2` row is the one you carry forward, not the root.
 4. Key downstream analysis and export off the **final** curation's `merge_id`

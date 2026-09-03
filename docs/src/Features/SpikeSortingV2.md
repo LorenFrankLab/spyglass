@@ -131,7 +131,7 @@ all coexist under one merge surface.
     step (`use_evaluation_labels`, `accept_merges`, or the expert
     `accept_evaluation_outputs`). Preview/draft curations are rejected.
     Replaces the removed `AnalyzerCuration`. See
-    [Quality metrics, evaluation, and acceptance](#quality-metrics-evaluation-and-acceptance-curationevaluation).
+    [Quality metrics, evaluation, and acceptance](#quality-metrics-and-the-scripted-evaluatemerge-loop).
 - **`CurationReviewProfile`** -- one immutable, DB-persisted name binding the
     exact quality-metric and auto-curation recipes to an ordered property
     display, label palette, and explicit `replace`/`overlay` import mode.
@@ -1417,8 +1417,8 @@ points to the auto-curated child when `auto_curate=True`, otherwise the root.
 For a single-session run, the fastest way to fill `analysis_merge_id` is
 `run_v2_pipeline(..., auto_curate=True)`, whose summary sets `analysis_merge_id`
 (equal to `auto_merge_id`, the auto-curated child); or build a curation by hand
-and carry its `merge_id` (see the [evaluate → accept →
-merge curation flow](#the-evaluate-accept-merge-curation-flow)). Pass whichever
+and carry its `merge_id` (see the [scripted evaluate → merge → evaluate →
+label flow](#the-scripted-evaluate-merge-evaluate-label-flow)). Pass whichever
 analysis-ready `merge_id` you choose to the accessors below:
 
 #### What do I call next?
