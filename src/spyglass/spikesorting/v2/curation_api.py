@@ -170,6 +170,22 @@ class CurationRef:
         return _uuid(merge_ids[0]) if len(merge_ids) else None
 
     @property
+    def member_merge_ids(self) -> Mapping[str, uuid.UUID]:
+        """Return concat member ``nwb_file_name -> merge_id`` outputs."""
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+        from spyglass.spikesorting.v2.concat_member_curation import (
+            ConcatMemberCuration,
+        )
+
+        rows = (
+            ConcatMemberCuration * SpikeSortingOutput.ConcatMemberCuration
+            & self.as_key()
+        ).fetch("nwb_file_name", "merge_id", as_dict=True)
+        return MappingProxyType(
+            {str(row["nwb_file_name"]): _uuid(row["merge_id"]) for row in rows}
+        )
+
+    @property
     def parent(self) -> "CurationRef | None":
         row = self._current_row()
         parent_id = int(row["parent_curation_id"])
@@ -270,6 +286,18 @@ class CurationRef:
             auto_curation_rules_name=auto_curation_rules_name,
         )
         return _evaluate_curation(self, spec)
+
+    def start_review(
+        self,
+        profile,
+        *,
+        upload: bool = False,
+        ephemeral: bool = False,
+    ):
+        """Start/reuse a seeded browser review over this exact generation."""
+        from spyglass.spikesorting.v2.review_api import start_review
+
+        return start_review(self, profile, upload=upload, ephemeral=ephemeral)
 
     def preview_merges(
         self, groups: Sequence[Sequence[int]], **kwargs
@@ -674,6 +702,24 @@ class EvaluationResult:
             )
         return CurationRef.from_key(child)
 
+    def start_review(
+        self,
+        profile,
+        *,
+        upload: bool = False,
+        ephemeral: bool = False,
+    ):
+        """Start a review after verifying this evaluation matches its profile."""
+        from spyglass.spikesorting.v2.review_api import start_review
+
+        return start_review(
+            self.curation,
+            profile,
+            upload=upload,
+            ephemeral=ephemeral,
+            evaluation=self,
+        )
+
 
 @dataclass(frozen=True)
 class MergedCuration:
@@ -738,6 +784,34 @@ class RunResult(dict):
             return None
         return CurationRef.from_key(
             {"sorting_id": self.sorting_id, "curation_id": curation_id}
+        )
+
+    def start_review(
+        self,
+        profile,
+        *,
+        source: Literal["analysis", "root"] = "analysis",
+        upload: bool = False,
+        ephemeral: bool = False,
+    ):
+        """Start the canonical review without silently changing its source."""
+        if source == "analysis":
+            curation = self.analysis_curation
+            if curation is None:
+                raise ValueError(
+                    "RunResult.start_review(source='analysis') requires an "
+                    "analysis curation, but this run did not auto-curate. Pass "
+                    "source='root' explicitly to review the root curation."
+                )
+        elif source == "root":
+            curation = self.root_curation
+        else:
+            raise ValueError(
+                "RunResult.start_review source must be 'analysis' or 'root'; "
+                f"got {source!r}."
+            )
+        return curation.start_review(
+            profile, upload=upload, ephemeral=ephemeral
         )
 
 

@@ -263,22 +263,36 @@ class FigPackUploadError(RuntimeError):
 
     ``FigPackCuration`` was asked to publish a hosted figpack.org figure
     (``upload=True``) but ``FIGPACK_API_KEY`` is unset and the figure is not
-    ``ephemeral`` -- OR a curation that already carries labels/merges was asked
-    to upload, which does not seed that initial state into the hosted figure.
-    Message points the caller at setting the API key, using ``ephemeral=True``
-    for a temporary figure, or ``upload=False`` to save a seeded local bundle.
+    ``ephemeral``. Message points the caller at setting the API key, using
+    ``ephemeral=True`` for a temporary figure, or ``upload=False`` to save a
+    seeded local bundle.
     """
 
 
-class FigPackCurationNamespaceError(RuntimeError):
-    """Raise when a FigPack view is requested for a non-raw-namespace curation.
+class FigPackIdentityError(ValueError):
+    """Raise when a FigPack figure cannot prove its curation identity.
 
-    The FigPack view is built over the sort's display analyzer (the RAW
-    ``Sorting.Unit`` namespace). A merged curation -- or a label-only child of a
-    merged curation -- lives in a different unit namespace, so rendering the raw
-    analyzer would show the wrong units. Raised by
-    ``FigPackCurationSelection.insert_selection``; curate the root curation
-    instead.
+    Verified imports require the embedded sorting id, immutable curation UUID,
+    informational curation id, and content-addressed FigPack configuration hash.
+    A missing or mismatched value is refused instead of trusting a caller's
+    reusable numeric curation key.
+    """
+
+
+class ReviewChangedSincePreviewError(RuntimeError):
+    """Raise when a review figure changes after its import preview.
+
+    ``CurationChangeSet.commit`` re-reads the annotations immediately before
+    writing.  A different logical payload must be previewed again so the
+    committed child is always the exact change set the researcher inspected.
+    """
+
+
+class UnresolvedMergeLabelConflictError(ValueError):
+    """Raise when merged contributors have incompatible unresolved labels.
+
+    No contributor wins implicitly.  The caller must provide an explicit label
+    tuple for every predicted merged unit listed by the exception message.
     """
 
 

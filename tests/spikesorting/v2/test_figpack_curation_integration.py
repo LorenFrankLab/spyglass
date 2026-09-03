@@ -52,6 +52,16 @@ def test_build_curation_view_offline_creates_bundle(
     assert bundle.is_dir()
     assert (bundle / "index.html").exists()
     assert (bundle / "data.zarr").exists()
+    config = json.loads((bundle / "spyglass_curation.json").read_text())
+    assert config["sorting_id"] == str(
+        populated_sorting_with_curation["sorting_id"]
+    )
+    assert config["curation_id"] == int(
+        populated_sorting_with_curation["curation_id"]
+    )
+    assert "curation_uuid" in config
+    assert len(config["figpack_config_hash"]) == 64
+    assert "unit_namespace_hash" not in config
 
 
 def test_displayed_unit_properties_render_in_bundle(
@@ -196,6 +206,80 @@ def test_save_curation_from_uri_commits_browser_edits(
     assert stored == {(labeled, "noise")}
 
 
+def test_verified_save_refuses_reused_numeric_curation_id(
+    planted_two_unit_sort,
+):
+    """An old figure cannot attach after its numeric parent id is reused."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import FigPackIdentityError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        original = CurationV2.create_initial_curation(planted_two_unit_sort)
+        uri = FigPackCuration.build_curation_view(original, upload=False)
+        original_uuid = (CurationV2 & original).fetch1("curation_uuid")
+        (CurationV2 & original).delete(safemode=False)
+        replacement = CurationV2.create_initial_curation(planted_two_unit_sort)
+        assert replacement["curation_id"] == original["curation_id"]
+        assert (CurationV2 & replacement).fetch1("curation_uuid") != (
+            original_uuid
+        )
+        with pytest.raises(FigPackIdentityError, match="curation_uuid"):
+            FigPackCuration.save_curation_from_uri(
+                uri, replacement, allow_empty=True
+            )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+def test_identityless_legacy_import_has_one_explicit_escape(
+    planted_two_unit_sort, tmp_path
+):
+    """Verified save fails closed; the separately named legacy API opts in."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2._figpack_curation import (
+        labels_and_merges_to_annotations,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import FigPackIdentityError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.create_initial_curation(planted_two_unit_sort)
+        unit_id = int(
+            sorted((Sorting.Unit & planted_two_unit_sort).fetch("unit_id"))[0]
+        )
+        bundle = tmp_path / "legacy-figure"
+        bundle.mkdir()
+        (bundle / "annotations.json").write_text(
+            json.dumps(
+                labels_and_merges_to_annotations({unit_id: ["noise"]}, [])
+            )
+        )
+        with pytest.raises(FigPackIdentityError):
+            FigPackCuration.save_curation_from_uri(str(bundle), root)
+        with pytest.raises(FigPackIdentityError):
+            FigPackCuration.import_legacy_figpack_curation(
+                str(bundle), asserted_parent=root
+            )
+        child = FigPackCuration.import_legacy_figpack_curation(
+            str(bundle),
+            asserted_parent=root,
+            confirm_unverified_identity=True,
+        )
+        assert (CurationV2.UnitLabel & child).fetch1("curation_label") == (
+            "noise"
+        )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
 def test_upload_without_api_key_raises(monkeypatch):
     """upload=True without FIGPACK_API_KEY raises a clear, typed error."""
     from spyglass.spikesorting.v2.exceptions import FigPackUploadError
@@ -211,6 +295,8 @@ def test_upload_without_api_key_raises(monkeypatch):
             ephemeral=False,
             title="x",
             figpack_curation_id="x",
+            annotations={},
+            figure_config={},
         )
 
 
@@ -243,15 +329,13 @@ def test_ephemeral_normalized_when_offline(populated_sorting_with_curation):
     )
 
 
-def test_merged_curation_rejected(planted_two_unit_sort):
-    """A merged curation (non-raw namespace) is refused with a typed error."""
+def test_merged_curation_opens(planted_two_unit_sort):
+    """A merged curation builds from its own analyzer and unit namespace."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import (
-        FigPackCurationNamespaceError,
-    )
     from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
         FigPackCurationSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -265,17 +349,26 @@ def test_merged_curation_rejected(planted_two_unit_sort):
         merge_groups=[unit_ids[:2]],
         apply_merge=True,
     )
-    with pytest.raises(FigPackCurationNamespaceError):
-        FigPackCurationSelection.insert_selection(merged)
-    clear_curations_for(planted_two_unit_sort)
+    try:
+        selection = FigPackCurationSelection.insert_selection(merged)
+        uri = FigPackCuration.build_curation_view(merged, upload=False)
+        assert Path(uri).is_dir()
+        assert FigPackCuration & selection
+        assert len(CurationV2.Unit & merged) == len(unit_ids) - 1
+    finally:
+        clear_curations_for(planted_two_unit_sort)
 
 
-def test_upload_of_labeled_curation_rejected(planted_two_unit_sort):
-    """Hosted upload of a curation with existing labels raises (no blank view)."""
+def test_upload_of_labeled_curation_is_seeded(
+    planted_two_unit_sort, monkeypatch
+):
+    """Hosted publishing uploads the same seeded sidecars as local bundles."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
+    from spyglass.spikesorting.v2._figpack_curation import (
+        curation_annotations_to_labels_and_merges,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import FigPackUploadError
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -286,9 +379,34 @@ def test_upload_of_labeled_curation_rejected(planted_two_unit_sort):
     labeled = CurationV2.insert_curation(
         sorting_key=planted_two_unit_sort, labels={unit_ids[0]: ["noise"]}
     )
-    with pytest.raises(FigPackUploadError):
-        FigPackCuration.build_curation_view(labeled, upload=True)
-    clear_curations_for(planted_two_unit_sort)
+    captured = {}
+
+    def fake_upload(tmpdir, **kwargs):
+        captured["annotations"] = json.loads(
+            (Path(tmpdir) / "annotations.json").read_text()
+        )
+        captured["config"] = json.loads(
+            (Path(tmpdir) / "spyglass_curation.json").read_text()
+        )
+        return "https://example.test/seeded-figure"
+
+    import figpack.core._upload_bundle as upload_module
+
+    monkeypatch.setenv("FIGPACK_API_KEY", "test-key")
+    monkeypatch.setattr(upload_module, "_upload_bundle", fake_upload)
+    try:
+        uri = FigPackCuration.build_curation_view(labeled, upload=True)
+        assert uri == "https://example.test/seeded-figure"
+        labels, merges = curation_annotations_to_labels_and_merges(
+            captured["annotations"]
+        )
+        assert labels == {unit_ids[0]: ["noise"]}
+        assert merges == []
+        assert captured["config"]["curation_uuid"] == str(
+            (CurationV2 & labeled).fetch1("curation_uuid")
+        )
+    finally:
+        clear_curations_for(planted_two_unit_sort)
 
 
 def test_fetch_from_nonexistent_local_path_fails_closed():
@@ -416,8 +534,8 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
         FigPackCuration.populate({"figpack_curation_id": figpack_id})
 
 
-def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
-    """A selection bypassing insert_selection is re-validated at populate time."""
+def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
+    """A preview bypassing insert_selection is refused at populate time."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2._figpack_curation import (
@@ -426,9 +544,6 @@ def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
     )
     from spyglass.spikesorting.v2._selection_identity import deterministic_id
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import (
-        FigPackCurationNamespaceError,
-    )
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
         FigPackCurationSelection,
@@ -439,21 +554,22 @@ def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
     unit_ids = sorted(
         int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
     )
-    merged = CurationV2.insert_curation(
+    preview = CurationV2.insert_curation(
         sorting_key=planted_two_unit_sort,
         merge_groups=[unit_ids[:2]],
-        apply_merge=True,
+        apply_merge=False,
     )
     label_options = default_label_options()
     config_hash = figpack_config_hash(
-        sorting_id=merged["sorting_id"],
-        curation_id=merged["curation_id"],
+        sorting_id=preview["sorting_id"],
+        curation_id=preview["curation_id"],
+        curation_uuid=(CurationV2 & preview).fetch1("curation_uuid"),
         label_options=label_options,
         displayed_unit_properties=None,
         upload=False,
         ephemeral=False,
     )
-    identity = {**merged, "figpack_config_hash": config_hash}
+    identity = {**preview, "figpack_config_hash": config_hash}
     figpack_id = deterministic_id("figpack_curation", identity)
     # Bypass insert_selection's guard via the documented escape hatch.
     FigPackCurationSelection.insert1(
@@ -467,6 +583,6 @@ def test_make_revalidates_a_bypassed_selection(planted_two_unit_sort):
         },
         allow_direct_insert=True,
     )
-    with pytest.raises(FigPackCurationNamespaceError):
+    with pytest.raises(ValueError, match="preview/draft"):
         FigPackCuration.populate({"figpack_curation_id": figpack_id})
     clear_curations_for(planted_two_unit_sort)

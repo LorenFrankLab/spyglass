@@ -13,7 +13,9 @@ edited labels and merge groups back in the exact shape
 The view is built by letting SpikeInterface compose the whole sorting summary
 (``plot_sorting_summary(curation=False, backend="figpack")``) and attaching only
 the ``SortingCuration`` control as a sibling -- SpikeInterface owns the layout,
-and the hand-written surface is one widget plus a wrapper. (SI's
+while a profile-backed review adds one read-only metrics/suggestions table.
+The analyzer is resolved for the exact committed curation generation, so merged
+units render their real waveforms and correlograms. (SI's
 ``plot_sorting_summary(curation=True)`` is not used: released SpikeInterface
 passes ``label_choices=`` while ``figpack-spike-sorting`` expects
 ``default_label_options=``; ``_curation_control_accepts_label_choices`` probes
@@ -30,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -37,11 +40,14 @@ import datajoint as dj
 
 from spyglass.spikesorting.v2._figpack_curation import (
     FIGPACK_INSTALL_HINT,
+    FIGURE_CONFIG_FILENAME,
     curation_annotations_to_labels_and_merges,
     default_label_options,
     figpack_config_hash,
     labels_and_merges_to_annotations,
     normalize_displayed_unit_properties,
+    pack_display_config,
+    unpack_display_config,
 )
 from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
@@ -50,8 +56,8 @@ from spyglass.spikesorting.v2._selection_identity import (
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
     DuplicateSelectionError,
-    FigPackCurationNamespaceError,
     FigPackDisplayedUnitPropertyError,
+    FigPackIdentityError,
     FigPackRetrievalError,
     FigPackUploadError,
     SchemaBypassError,
@@ -120,8 +126,8 @@ def figpack_bundle_path(figpack_curation_id) -> Path:
     return figpack_cache_root() / f"{figpack_curation_id}"
 
 
-def _load_annotations_json(uri: str) -> dict:
-    """Fetch a figure's ``annotations.json`` (HTTP or local path); fail closed.
+def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
+    """Fetch one figure JSON sidecar (HTTP or local); fail closed.
 
     Mirrors how the FigPack frontend loads annotations: a GET on
     ``<figure>/annotations.json`` for a hosted figure, or a file read for a
@@ -140,34 +146,32 @@ def _load_annotations_json(uri: str) -> dict:
     if text.startswith("file://"):
         text = text[len("file://") :]
     base = text.rstrip("/")
-    annotations_url = base + "/annotations.json"
+    sidecar_url = base + f"/{filename}"
 
     if base.startswith(("http://", "https://")):
         try:
             # Bound the fetch so a stalled host fails closed instead of hanging
             # indefinitely (a read timeout raises a bare TimeoutError, not a
             # URLError, so both are caught below).
-            with urllib.request.urlopen(
-                annotations_url, timeout=30
-            ) as response:
+            with urllib.request.urlopen(sidecar_url, timeout=30) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return {}  # no annotations file yet == pristine figure
+            if exc.code == 404 and missing_ok:
+                return {}
             raise FigPackRetrievalError(
-                f"Failed to fetch {annotations_url}: HTTP {exc.code}."
+                f"Failed to fetch {sidecar_url}: HTTP {exc.code}."
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", exc)
             raise FigPackRetrievalError(
-                f"Could not reach {annotations_url}: {reason}. Refusing to "
+                f"Could not reach {sidecar_url}: {reason}. Refusing to "
                 "treat an unreachable figure as having no edits."
             ) from exc
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise FigPackRetrievalError(
-                f"Malformed annotations at {annotations_url}: {exc}."
+                f"Malformed JSON at {sidecar_url}: {exc}."
             ) from exc
 
     figure_dir = Path(base)
@@ -176,15 +180,121 @@ def _load_annotations_json(uri: str) -> dict:
             f"FigPack figure path does not exist: {figure_dir}. Refusing to "
             "treat a missing/typoed figure as having no edits."
         )
-    path = figure_dir / "annotations.json"
+    path = figure_dir / filename
     if not path.exists():
-        return {}  # existing figure dir, never edited == pristine
+        if missing_ok:
+            return {}
+        raise FigPackRetrievalError(
+            f"FigPack figure is missing required {filename}: {figure_dir}."
+        )
     try:
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise FigPackRetrievalError(
-            f"Malformed annotations at {path}: {exc}."
+            f"Malformed JSON at {path}: {exc}."
         ) from exc
+
+
+def _load_annotations_json(uri: str) -> dict:
+    """Load optional annotations; absence means a pristine figure."""
+    return _load_figure_json(uri, "annotations.json", missing_ok=True)
+
+
+def _load_figure_config(uri: str) -> dict:
+    """Load the required Spyglass identity/profile figure sidecar."""
+    try:
+        return _load_figure_json(uri, FIGURE_CONFIG_FILENAME, missing_ok=False)
+    except FigPackRetrievalError as exc:
+        raise FigPackIdentityError(
+            "FigPack figure has no verifiable Spyglass curation identity. "
+            "Use import_legacy_figpack_curation(..., "
+            "confirm_unverified_identity=True) only after independently "
+            "confirming its parent."
+        ) from exc
+
+
+def _assert_figure_identity(
+    uri: str,
+    parent_curation_key: dict,
+    *,
+    expected_config_hash: str | None = None,
+) -> dict:
+    """Verify a figure against the parent's immutable curation generation."""
+    required = {
+        "sorting_id",
+        "curation_uuid",
+        "curation_id",
+        "figpack_config_hash",
+    }
+    config = _load_figure_config(uri)
+    missing = sorted(required - set(config))
+    if missing:
+        raise FigPackIdentityError(
+            "FigPack figure identity is incomplete; missing "
+            f"{missing}. Refusing an unverified import."
+        )
+    try:
+        parent_key = {
+            "sorting_id": parent_curation_key["sorting_id"],
+            "curation_id": int(parent_curation_key["curation_id"]),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FigPackIdentityError(
+            "Verified FigPack import requires a parent with sorting_id and "
+            "curation_id."
+        ) from exc
+    rows = (CurationV2 & parent_key).fetch(as_dict=True)
+    if len(rows) != 1:
+        raise FigPackIdentityError(
+            f"FigPack parent no longer exists: {parent_key}."
+        )
+    row = rows[0]
+    try:
+        embedded_curation_id = int(config["curation_id"])
+        embedded_uuid = uuid.UUID(str(config["curation_uuid"]))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise FigPackIdentityError(
+            "FigPack figure identity contains a malformed curation_id or "
+            "curation_uuid."
+        ) from exc
+    mismatches = []
+    if str(config["sorting_id"]) != str(row["sorting_id"]):
+        mismatches.append("sorting_id")
+    if embedded_curation_id != int(row["curation_id"]):
+        mismatches.append("curation_id")
+    if embedded_uuid != uuid.UUID(str(row["curation_uuid"])):
+        mismatches.append("curation_uuid")
+    if expected_config_hash is not None and str(
+        config["figpack_config_hash"]
+    ) != str(expected_config_hash):
+        mismatches.append("figpack_config_hash")
+    if mismatches:
+        raise FigPackIdentityError(
+            "FigPack figure does not match the pinned parent generation; "
+            f"mismatched field(s): {mismatches}. Expected "
+            f"curation_uuid={row['curation_uuid']}, found "
+            f"{config['curation_uuid']}. Refusing to attach annotations to a "
+            "different curation."
+        )
+    selection_relation = FigPackCurationSelection & {
+        **parent_key,
+        "figpack_config_hash": str(config["figpack_config_hash"]),
+    }
+    if len(selection_relation) != 1:
+        raise FigPackIdentityError(
+            "FigPack figure config hash does not resolve to exactly one "
+            "persisted selection for its pinned parent."
+        )
+    selection = selection_relation.fetch1()
+    selection_key = {"figpack_curation_id": selection["figpack_curation_id"]}
+    try:
+        _assert_selection_identity(selection, selection_key)
+    except SchemaBypassError as exc:
+        raise FigPackIdentityError(
+            "FigPack figure references a selection whose content-addressed "
+            "identity is invalid."
+        ) from exc
+    return config
 
 
 def _coerce_units_table_ids(view) -> None:
@@ -250,7 +360,12 @@ def _assert_displayed_unit_properties_available(
 
 
 def _build_curation_view(
-    curation_key: dict, *, label_options, displayed_unit_properties
+    curation_key: dict,
+    *,
+    label_options,
+    displayed_unit_properties,
+    seed_labels=None,
+    review_table=None,
 ):
     """Build the FigPack curation view for a curation (minimal-attach).
 
@@ -263,89 +378,91 @@ def _build_curation_view(
     import spikeinterface.widgets as sw
 
     from spyglass.spikesorting.v2 import _visualization as _viz
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        curation_analyzer_with_extensions,
+    )
 
     figpack_views, figpack_ss_views = _require_figpack()
 
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
-    sorting = Sorting()
-    sorting.add_extensions(
-        sorting_key,
-        list(_viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]),
+    waveform_recipe = (Sorting & sorting_key).fetch1(
+        "display_waveform_params_name"
     )
-    analyzer = sorting.get_analyzer(sorting_key)
-    _assert_displayed_unit_properties_available(
-        analyzer, displayed_unit_properties
-    )
-
-    summary = sw.plot_sorting_summary(
-        analyzer,
-        backend="figpack",
-        curation=False,
-        displayed_unit_properties=displayed_unit_properties,
-        generate_url=False,
-        display=False,
-    ).view
+    required = _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
+    with curation_analyzer_with_extensions(
+        curation_key,
+        waveform_recipe,
+        "display",
+        extra_extensions={name: {} for name in required},
+    ) as analyzer:
+        # Profile-backed metrics live in the adjacent read-only review table;
+        # the expert path still selects analyzer-native SI unit properties.
+        analyzer_properties = (
+            None if review_table is not None else displayed_unit_properties
+        )
+        _assert_displayed_unit_properties_available(
+            analyzer, analyzer_properties
+        )
+        summary = sw.plot_sorting_summary(
+            analyzer,
+            backend="figpack",
+            curation=False,
+            displayed_unit_properties=analyzer_properties,
+            generate_url=False,
+            display=False,
+        ).view
 
     control = figpack_ss_views.SortingCuration(
-        default_label_options=list(label_options)
+        default_label_options=list(label_options),
+        curation={
+            "labelsByUnit": {
+                str(unit_id): list(labels)
+                for unit_id, labels in (seed_labels or {}).items()
+            },
+            # Applied merge provenance belongs in the read-only review table.
+            # Only new browser edits may populate this field.
+            "mergeGroups": [],
+            "isClosed": False,
+            "labelChoices": list(label_options),
+        },
+    )
+    items = [
+        figpack_views.LayoutItem(
+            view=summary, title="Sorting summary", stretch=1
+        )
+    ]
+    if review_table is not None:
+        items.append(
+            figpack_views.LayoutItem(
+                view=figpack_views.DataFrame(review_table.reset_index()),
+                title="Evaluation suggestions (read-only)",
+                max_size=300,
+            )
+        )
+    items.append(
+        figpack_views.LayoutItem(view=control, title="Curation", max_size=260)
     )
     view = figpack_views.Box(
         direction="vertical",
-        items=[
-            figpack_views.LayoutItem(
-                view=summary, title="Sorting summary", stretch=1
-            ),
-            figpack_views.LayoutItem(
-                view=control, title="Curation", max_size=260
-            ),
-        ],
+        items=items,
     )
     _coerce_units_table_ids(view)
     return view
 
 
-def _curation_matches_raw_namespace(curation_key: dict) -> bool:
-    """Whether a curation's unit set equals the raw sort's unit set.
-
-    The FigPack view is built over the raw-sort display analyzer, so it is only
-    correct when the curation lives in the raw ``Sorting.Unit`` namespace. A
-    merged curation (or a label-only child of a merged parent) has a different
-    unit set, so this returns ``False`` and the view is rejected upstream. Label-
-    only curations of a non-merged sort keep the raw unit set, so they pass.
-    """
-    raw = {
-        int(unit_id)
-        for unit_id in (
-            Sorting.Unit & {"sorting_id": curation_key["sorting_id"]}
-        ).fetch("unit_id")
-    }
-    curated = {
-        int(unit_id)
-        for unit_id in (CurationV2.Unit & curation_key).fetch("unit_id")
-    }
-    return curated == raw
-
-
 def _assert_figpack_curatable(curation_key: dict) -> None:
-    """Assert a curation is committed and in the raw-sort unit namespace.
+    """Assert a curation is committed before building its exact analyzer.
 
     Enforced at BOTH ``insert_selection`` (early, friendly) and ``make`` (the
     integrity boundary): ``SelectionMasterInsertGuard`` has an
     ``allow_direct_insert`` escape hatch, so a row bypassing ``insert_selection``
-    must still be re-validated before the view is built -- otherwise a preview or
-    merged-namespace curation could render the raw-sort namespace. Mirrors
+    must still be re-validated before the view is built -- otherwise a preview
+    could be rendered as though it had a final unit namespace. Mirrors
     ``CurationEvaluation.make_fetch`` re-asserting its preview guard.
     """
     CurationV2.assert_committed_curation(
         curation_key, context="FigPackCuration"
     )
-    if not _curation_matches_raw_namespace(curation_key):
-        raise FigPackCurationNamespaceError(
-            "FigPack curation of a merged curation (or a label-only child of a "
-            "merged curation) is not supported: the view renders the raw "
-            "sort's unit namespace, not this curation's units. "
-            f"curation_key={curation_key}. Curate the root curation instead."
-        )
 
 
 def _assert_selection_identity(selection: dict, key: dict) -> None:
@@ -368,7 +485,7 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
             "and re-insert via insert_selection()."
         )
     try:
-        displayed_unit_properties = normalize_displayed_unit_properties(
+        displayed_unit_properties, review_config = unpack_display_config(
             selection["displayed_unit_properties"]
         )
     except (TypeError, ValueError) as exc:
@@ -381,10 +498,18 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
     expected_hash = figpack_config_hash(
         sorting_id=selection["sorting_id"],
         curation_id=selection["curation_id"],
+        curation_uuid=(
+            CurationV2
+            & {
+                "sorting_id": selection["sorting_id"],
+                "curation_id": selection["curation_id"],
+            }
+        ).fetch1("curation_uuid"),
         label_options=list(selection["label_options"]),
         displayed_unit_properties=displayed_unit_properties,
         upload=bool(selection["upload"]),
         ephemeral=bool(selection["ephemeral"]),
+        review_config=review_config,
     )
     if selection["figpack_config_hash"] != expected_hash:
         raise SchemaBypassError(
@@ -410,36 +535,111 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
 
 
 def _existing_curation_state(curation_key: dict) -> tuple[dict, list]:
-    """Return ``(labels, merge_groups)`` a curation already carries.
+    """Return editable committed state in the curation's own namespace.
 
-    Used both to seed an offline view and to detect (and refuse) a hosted upload
-    of a curation with pre-existing state before cloud seeding is verified. Reads
-    the curation's own namespace; for the raw-namespace curations FigPack
-    accepts, ``merge_groups`` is empty and only labels can be present.
+    Existing labels seed the control. Already-applied merges are provenance,
+    not pending edits, so the returned merge list is always empty.
     """
-    labels = CurationV2._labels_by_unit(curation_key)
-    merge_groups = [
-        sorted({kept, *contributors})
-        for kept, contributors in CurationV2.get_unit_contributor_groups(
-            curation_key
-        ).items()
-        if len({kept, *contributors}) > 1
-    ]
-    return labels, merge_groups
+    return CurationV2._labels_by_unit(curation_key), []
 
 
-def _write_seed_annotations(
-    bundle: Path, labels: dict, merge_groups: list, label_options
-) -> None:
-    """Write ``annotations.json`` so a saved bundle opens pre-curated."""
-    payload = labels_and_merges_to_annotations(
-        labels, merge_groups, label_options=label_options
+def _review_context_table(curation_key: dict, review_config: dict | None):
+    """Build the read-only evaluation/provenance table for a guided review."""
+    if review_config is None:
+        return None
+
+    from spyglass.spikesorting.v2.curation_api import EvaluationResult
+
+    evaluation = EvaluationResult.from_key(
+        {"curation_evaluation_id": review_config["curation_evaluation_id"]}
     )
-    (bundle / "annotations.json").write_text(json.dumps(payload, indent=2))
+    if evaluation.curation.as_key() != {
+        "sorting_id": curation_key["sorting_id"],
+        "curation_id": int(curation_key["curation_id"]),
+    }:
+        raise SchemaBypassError(
+            "FigPack review evaluation does not target the selected curation."
+        )
+
+    unit_ids = [
+        int(value)
+        for value in (CurationV2.Unit & curation_key).fetch(
+            "unit_id", order_by="unit_id"
+        )
+    ]
+    metrics = evaluation.metrics.copy(deep=True)
+    try:
+        metrics.index = [int(value) for value in metrics.index]
+    except (TypeError, ValueError) as exc:
+        raise FigPackDisplayedUnitPropertyError(
+            "Evaluation metric rows do not have integer unit ids."
+        ) from exc
+    requested = list(review_config["displayed_unit_properties"])
+    missing = [name for name in requested if name not in metrics.columns]
+    if missing:
+        raise FigPackDisplayedUnitPropertyError(
+            "Review profile requests evaluation properties absent from its "
+            f"populated metric table: {missing}. Available properties: "
+            f"{list(map(str, metrics.columns))}."
+        )
+    table = metrics.reindex(unit_ids)[requested].copy()
+    table.index.name = "unit_id"
+
+    proposed_labels = evaluation.proposed_labels
+    suggested_groups = evaluation.suggested_merges
+    raw_provenance: dict[int, list[int]] = {}
+    for row in (CurationV2.MergeGroup & curation_key).fetch(
+        "unit_id",
+        "contributor_unit_id",
+        as_dict=True,
+        order_by=("unit_id", "contributor_unit_id"),
+    ):
+        raw_provenance.setdefault(int(row["unit_id"]), []).append(
+            int(row["contributor_unit_id"])
+        )
+
+    def groups_for(unit_id: int) -> str:
+        groups = [group for group in suggested_groups if unit_id in group]
+        return "; ".join(",".join(map(str, group)) for group in groups)
+
+    table["proposed_labels"] = [
+        ",".join(proposed_labels.get(unit_id, [])) for unit_id in unit_ids
+    ]
+    table["proposed_merge_groups"] = [
+        groups_for(unit_id) for unit_id in unit_ids
+    ]
+    table["merged_from"] = [
+        (
+            ",".join(map(str, raw_provenance.get(unit_id, [])))
+            if len(raw_provenance.get(unit_id, [])) > 1
+            else ""
+        )
+        for unit_id in unit_ids
+    ]
+    return table
+
+
+def _write_figure_sidecars(
+    bundle: Path, annotations: dict, figure_config: dict
+) -> None:
+    """Write seeded annotations and immutable Spyglass figure identity."""
+    (bundle / "annotations.json").write_text(
+        json.dumps(annotations, indent=2, sort_keys=True)
+    )
+    (bundle / FIGURE_CONFIG_FILENAME).write_text(
+        json.dumps(figure_config, indent=2, sort_keys=True)
+    )
 
 
 def _publish_view(
-    view, *, upload: bool, ephemeral: bool, title: str, figpack_curation_id
+    view,
+    *,
+    upload: bool,
+    ephemeral: bool,
+    title: str,
+    figpack_curation_id,
+    annotations: dict,
+    figure_config: dict,
 ) -> str:
     """Publish a built view and return its URI (cloud URL or saved bundle path).
 
@@ -448,27 +648,35 @@ def _publish_view(
     returns its folder path.
     """
     if upload:
-        if not ephemeral and not os.environ.get("FIGPACK_API_KEY"):
+        api_key = os.environ.get("FIGPACK_API_KEY")
+        if not ephemeral and not api_key:
             raise FigPackUploadError(
                 "FigPack upload=True requires the FIGPACK_API_KEY environment "
                 "variable (or ephemeral=True for a temporary figure). Set it "
                 "to publish to figpack.org, or use upload=False to save a local "
                 "bundle."
             )
-        return view.show(
-            upload=True,
-            ephemeral=ephemeral,
-            open_in_browser=False,
-            wait_for_input=False,
-            inline=False,
-            title=title,
-        )
+        # Build the exact bundle first, then upload every file. FigPack's
+        # uploader recursively includes both sidecars, giving hosted and local
+        # reviews identical seeded state and identity semantics.
+        from figpack.core._upload_bundle import _upload_bundle
+
+        with tempfile.TemporaryDirectory(prefix="spyglass-figpack-") as tmp:
+            view.save(tmp, title=title)
+            _write_figure_sidecars(Path(tmp), annotations, figure_config)
+            return _upload_bundle(
+                tmp,
+                api_key=api_key,
+                title=title,
+                ephemeral=ephemeral,
+            )
 
     bundle = figpack_bundle_path(figpack_curation_id)
     bundle.parent.mkdir(parents=True, exist_ok=True)
     if bundle.exists():
         shutil.rmtree(bundle)
     view.save(str(bundle), title=title)
+    _write_figure_sidecars(bundle, annotations, figure_config)
     return str(bundle)
 
 
@@ -494,7 +702,7 @@ class FigPackCurationSelection(
     -> CurationV2
     figpack_config_hash: char(64)  # sha256 over FigPack UI config
     label_options: blob            # curation label palette, in display order
-    displayed_unit_properties=null: blob # SI unit-table columns; null means SI default
+    displayed_unit_properties=null: blob # display columns + optional immutable review snapshot
     upload: bool                   # True publishes a hosted figpack.org URI
     ephemeral: bool                # temporary hosted figure (no API key needed)
     """
@@ -508,6 +716,7 @@ class FigPackCurationSelection(
         displayed_unit_properties: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
+        review_config: dict | None = None,
         figpack_curation_id=None,
     ) -> dict:
         """Insert or find a FigPack curation selection; return PK-only dict.
@@ -530,6 +739,9 @@ class FigPackCurationSelection(
         ephemeral : bool, optional
             For ``upload=True``, publish a temporary figure (no API key needed).
             Default ``False``.
+        review_config : dict, optional
+            Exact immutable review/profile snapshot. The browser facade owns
+            this field; expert callers normally leave it ``None``.
         figpack_curation_id : optional
             Caller-supplied PK; must equal the content-addressed id if given.
 
@@ -571,13 +783,16 @@ class FigPackCurationSelection(
         displayed_unit_properties = normalize_displayed_unit_properties(
             displayed_unit_properties
         )
+        curation_uuid = (CurationV2 & parent_key).fetch1("curation_uuid")
         config_hash = figpack_config_hash(
             sorting_id=parent_key["sorting_id"],
             curation_id=parent_key["curation_id"],
+            curation_uuid=curation_uuid,
             label_options=label_options,
             displayed_unit_properties=displayed_unit_properties,
             upload=upload,
             ephemeral=ephemeral,
+            review_config=review_config,
         )
         identity = {**parent_key, "figpack_config_hash": config_hash}
         deterministic_figpack_id = deterministic_id(
@@ -597,7 +812,9 @@ class FigPackCurationSelection(
             **identity,
             "figpack_curation_id": deterministic_figpack_id,
             "label_options": label_options,
-            "displayed_unit_properties": displayed_unit_properties,
+            "displayed_unit_properties": pack_display_config(
+                displayed_unit_properties, review_config
+            ),
             "upload": bool(upload),
             "ephemeral": bool(ephemeral),
         }
@@ -676,7 +893,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             "curation_id": selection["curation_id"],
         }
         label_options = list(selection["label_options"])
-        displayed_unit_properties = normalize_displayed_unit_properties(
+        displayed_unit_properties, review_config = unpack_display_config(
             selection["displayed_unit_properties"]
         )
         upload = bool(selection["upload"])
@@ -689,19 +906,25 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         _assert_selection_identity(selection, key)
 
         seed_labels, seed_merges = _existing_curation_state(curation_key)
-        if upload and (seed_labels or seed_merges):
-            raise FigPackUploadError(
-                "Hosted upload (upload=True) of a curation that already carries "
-                "labels/merges is not supported: the initial curation state is "
-                "not written into the hosted figure's annotations.json. Use "
-                "upload=False (the seeded local bundle), or open a fresh root "
-                "curation."
-            )
+        annotations = labels_and_merges_to_annotations(
+            seed_labels, seed_merges, label_options=label_options
+        )
+        curation_uuid = (CurationV2 & curation_key).fetch1("curation_uuid")
+        figure_config = {
+            "sorting_id": str(curation_key["sorting_id"]),
+            "curation_uuid": str(curation_uuid),
+            "curation_id": int(curation_key["curation_id"]),
+            "figpack_config_hash": str(selection["figpack_config_hash"]),
+        }
+        if review_config is not None:
+            figure_config["review"] = review_config
 
         view = _build_curation_view(
             curation_key,
             label_options=label_options,
             displayed_unit_properties=displayed_unit_properties,
+            seed_labels=seed_labels,
+            review_table=_review_context_table(curation_key, review_config),
         )
         title = (
             f"Spyglass curation {curation_key['sorting_id']}"
@@ -713,11 +936,9 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             ephemeral=bool(selection["ephemeral"]),
             title=title,
             figpack_curation_id=key["figpack_curation_id"],
+            annotations=annotations,
+            figure_config=figure_config,
         )
-        if not upload:
-            _write_seed_annotations(
-                Path(uri), seed_labels, seed_merges, label_options
-            )
 
         self.insert1(
             {
@@ -740,6 +961,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         displayed_unit_properties: list[str] | None = None,
         upload: bool = False,
         ephemeral: bool = False,
+        review_config: dict | None = None,
     ) -> str:
         """Insert the selection, populate the view, and return its URI.
 
@@ -754,6 +976,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             displayed_unit_properties=displayed_unit_properties,
             upload=upload,
             ephemeral=ephemeral,
+            review_config=review_config,
         )
         # An offline bundle lives under a temp dir that can be purged; if the
         # row exists but its local bundle is gone, drop the stale row so populate
@@ -818,6 +1041,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
                 "parent_curation_key with 'sorting_id' and 'curation_id'."
             ) from exc
 
+        _assert_figure_identity(uri, parent_curation_key)
         labels, merge_groups = cls.fetch_curation_from_uri(uri)
         if not labels and not merge_groups and not allow_empty:
             raise ValueError(
@@ -838,3 +1062,67 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             allow_custom_labels=allow_custom_labels,
             label_policy=label_policy,
         )
+
+    @classmethod
+    def import_legacy_figpack_curation(
+        cls,
+        uri: str,
+        *,
+        asserted_parent: dict,
+        confirm_unverified_identity: bool = False,
+        **save_kwargs,
+    ) -> dict:
+        """Import an identity-less legacy figure behind an explicit escape.
+
+        This operation cannot prove which curation produced the figure. It is
+        intentionally separate from :meth:`save_curation_from_uri`; callers
+        must independently verify the asserted parent and opt in by name.
+        """
+        if confirm_unverified_identity is not True:
+            raise FigPackIdentityError(
+                "Legacy FigPack import cannot verify its parent. Set "
+                "confirm_unverified_identity=True only after independently "
+                "confirming asserted_parent."
+            )
+        try:
+            sorting_id = asserted_parent["sorting_id"]
+            parent_curation_id = int(asserted_parent["curation_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "asserted_parent must contain sorting_id and curation_id."
+            ) from exc
+        labels, merge_groups = cls.fetch_curation_from_uri(uri)
+        allow_empty = bool(save_kwargs.pop("allow_empty", False))
+        if not labels and not merge_groups and not allow_empty:
+            raise ValueError(
+                "Legacy FigPack figure contains no edits. Pass "
+                "allow_empty=True to record an explicit no-change review."
+            )
+        return CurationV2.save_manual_curation(
+            {"sorting_id": sorting_id},
+            parent_curation_id=parent_curation_id,
+            labels=labels,
+            merge_groups=merge_groups,
+            merge_action=save_kwargs.pop("merge_action", "preview"),
+            curation_source="figpack",
+            description=save_kwargs.pop(
+                "description", "legacy curation imported from FigPack"
+            ),
+            **save_kwargs,
+        )
+
+
+def import_legacy_figpack_curation(
+    uri: str,
+    *,
+    asserted_parent: dict,
+    confirm_unverified_identity: bool = False,
+    **save_kwargs,
+) -> dict:
+    """Module-level explicit escape hatch for identity-less figures."""
+    return FigPackCuration.import_legacy_figpack_curation(
+        uri,
+        asserted_parent=asserted_parent,
+        confirm_unverified_identity=confirm_unverified_identity,
+        **save_kwargs,
+    )

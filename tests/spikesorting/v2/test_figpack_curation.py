@@ -8,15 +8,20 @@ These need neither a DataJoint server nor the optional ``figpack`` packages.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from spyglass.spikesorting.v2._figpack_curation import (
     FIGPACK_INSTALL_HINT,
+    annotations_payload_hash,
     curation_annotations_to_labels_and_merges,
     default_label_options,
     figpack_config_hash,
     labels_and_merges_to_annotations,
     normalize_displayed_unit_properties,
+    pack_display_config,
+    unpack_display_config,
 )
 
 _SORTING_ID = "11111111-2222-3333-4444-555555555555"
@@ -51,6 +56,7 @@ def test_config_hash_sensitive_to_every_field():
     """Each config field changes the hash (no silent aliasing)."""
     base = _hash()
     assert _hash(curation_id=1) != base
+    assert _hash(curation_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") != base
     assert _hash(label_options=["mua", "accept", "noise"]) != base  # order
     assert _hash(displayed_unit_properties=["x", "y"]) != base
     assert _hash(displayed_unit_properties=["y", "x"]) != _hash(
@@ -60,6 +66,33 @@ def test_config_hash_sensitive_to_every_field():
     assert _hash(upload=True) != base
     assert _hash(ephemeral=True) != base
     assert _hash(sorting_id="99999999-2222-3333-4444-555555555555") != base
+    assert _hash(review_config={"profile_hash": "a"}) != base
+    assert _hash(review_config={"profile_hash": "b"}) != _hash(
+        review_config={"profile_hash": "a"}
+    )
+
+
+def test_review_config_packs_without_changing_expert_storage_shape():
+    """Review snapshots share the blob while legacy expert lists stay lists."""
+    assert pack_display_config(["x", "y"]) == ["x", "y"]
+    packed = pack_display_config(
+        ["snr"], {"profile_hash": "abc", "spec": ("minimal", "none")}
+    )
+    properties, review = unpack_display_config(packed)
+    assert properties == ["snr"]
+    assert review == {
+        "profile_hash": "abc",
+        "spec": ["minimal", "none"],
+    }
+
+
+def test_annotations_hash_is_logical_not_json_spacing():
+    """TOCTOU hash is stable across mapping order and serialization spacing."""
+    first = {"annotations": {"/": {"b": 2, "a": 1}}}
+    second = json.loads(json.dumps(first, indent=4, sort_keys=False))
+    assert annotations_payload_hash(first) == annotations_payload_hash(second)
+    second["annotations"]["/"]["a"] = 3
+    assert annotations_payload_hash(first) != annotations_payload_hash(second)
 
 
 def test_displayed_unit_properties_normalization():

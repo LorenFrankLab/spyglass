@@ -559,6 +559,65 @@ reproducible. Two guards keep names honest:
   chosen pipeline preset's threshold units in `describe_pipeline_presets()`,
   and whether artifact masking removed the interval you expected to sort.
 
+### Browser-first curation review
+
+The normal hands-on workflow is one profile-backed review. The profile binds
+the exact evaluation recipes, ordered metric columns, label palette, and label
+import mode. The review evaluates or reuses the requested curation, seeds its
+current labels, shows metric-derived label/merge suggestions as **read-only**
+context, and opens a FigPack view over that curation's actual analyzer.
+
+```python
+review = run_summary.start_review(
+    source="root",  # use "analysis" only when the run produced one
+    profile="franklab_hippocampus_2026_06",
+    upload=False,   # local seeded bundle; True publishes the same bundle
+)
+review.open()
+
+# After saving edits in FigPack, preview is a pure read: no rows or files change.
+changes = review.preview_import()
+print(changes.labels_before, changes.labels_after)
+print(changes.merge_groups)
+print(changes.unit_count_before, changes.unit_count_after)
+print(changes.label_conflicts, changes.newer_sibling_curations)
+
+# If contributors have incompatible labels, resolve every predicted merged id.
+receipt = changes.commit(
+    conflict_resolutions={12: ("accept",)},
+)
+final = receipt.curation
+
+# A merge is automatically re-evaluated with the same profile. Inspect the
+# actual merged waveform/correlogram in a continuation review before final use.
+if receipt.needs_merge_verification:
+    continuation = receipt.continue_review()
+    continuation.open()
+
+final_merge_id = final.merge_id
+member_merge_ids = final.member_merge_ids  # populated for concat-backed sorts
+```
+
+`RunResult.start_review(source="analysis")` never falls back to root: if no
+analysis curation exists it raises and tells you to choose `source="root"`
+explicitly. `CurationRef.start_review(...)` and
+`EvaluationResult.start_review(...)` are lower-level forms. A lost Python
+handle is reconstructed with `FigPackReview.resume(review_id)`.
+
+Every import is pinned to the parent's immutable `curation_uuid` and the exact
+figure/profile configuration. `preview_import()` reports children created by
+other reviewers after this review began; commit still creates/reuses a sibling
+from the pinned parent and never silently rebases. It re-reads the annotations
+and refuses a figure changed after preview. A zero-diff review is refused unless
+`confirm_no_changes=True`, and conflicting contributor labels require explicit
+`conflict_resolutions`—no contributor wins by precedence.
+
+Local delivery is the default. A persistent hosted review requires
+`FIGPACK_API_KEY`; `ephemeral=True` creates a temporary hosted figure. Both
+paths publish the same prebuilt bundle, including seeded annotations and the
+Spyglass identity sidecar. The FigPack packages remain optional through the
+`spikesorting-v2-curation` extra.
+
 ### Scripted curation facade (automation and debugging)
 
 `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its
@@ -597,13 +656,6 @@ merge rows plus label delta. No inferred “superseded” state exists in a
 branching graph. Use `preview_curation_delete()` before the supported
 `delete_subtree()` leaf-up deletion; `health_report()` composes lineage and
 analyzer-cache orphan audits.
-
-The browser layer extends these same objects with
-`RunResult.start_review(source="analysis"|"root", profile=...)`,
-`CurationRef.start_review(...)`, and `EvaluationResult.start_review(...)`.
-Requesting an absent analysis curation will raise and point to `source="root"`;
-it will not silently review different scientific input. The facade module does
-not import the optional FigPack dependency merely to provide the scripted path.
 
 ### Quality metrics and the scripted evaluate/merge loop
 
@@ -696,12 +748,13 @@ child = save_manual_curation(
 )
 ```
 
-This is the same labels / merge-groups payload that
-`FigPackCuration.fetch_curation_from_uri(uri)` extracts from a FigPack bundle
-edited in the browser. FigPack users normally call
-`FigPackCuration.save_curation_from_uri(uri, parent_curation_key)`, which wraps
-that extraction and writes the child `CurationV2` row with `curation_source`
-set to `"figpack"`.
+This is also the expert layer beneath the browser facade.
+`FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` verifies the
+figure's embedded `curation_uuid` before writing a child. Identity-less old
+figures fail closed; the deliberately separate
+`import_legacy_figpack_curation(..., asserted_parent=...,
+confirm_unverified_identity=True)` escape is only for a parent independently
+verified by the operator.
 
 Notes:
 
@@ -1413,36 +1466,18 @@ cross-session unit matching ([Cross-session unit tracking](#cross-session-unit-t
 all run end-to-end through `run_v2_pipeline` / `run_v2_unit_match` and the
 underlying tables.
 
-FigPack curation is offline by default: `FigPackCuration` (and
-`run_v2_pipeline(..., build_figpack_view=True)`, which forces `upload=False`) builds a
-self-contained local bundle you open in a browser to label and merge units.
-Pass `displayed_unit_properties=["x", "y", ...]` to
-`FigPackCuration.build_curation_view` /
-`FigPackCurationSelection.insert_selection` to choose the unit-table columns
-shown in the FigPack summary; names come from SpikeInterface sorting
-properties plus any already-computed display-analyzer `quality_metrics`,
-`template_metrics`, and `unit_locations` columns. `None` keeps SpikeInterface's
-default unit-table behavior, while explicit unavailable names raise instead of
-being silently dropped.
-Edits to a local bundle are not written back automatically —
-`FigPackCuration.fetch_curation_from_uri(uri)` reads the edited labels / merge
-groups out of it, and `FigPackCuration.save_curation_from_uri(uri,
-parent_curation_key)` ingests them into a child curation (see
-[Saving a manual / FigURL-style payload](#saving-a-manual-figurl-style-payload)).
-For team review, give each curator a bundle and import each edited URI as a
-sibling child of the same parent, using `description` for reviewer/round notes;
-then compare summaries and commit the chosen child or proposed merge. A
-never-edited bundle reads back empty and is not imported by default; pass
-`allow_empty=True` only when you intentionally want a "reviewed, no changes"
-child curation.
-The lower-level `FigPackCurationSelection.insert_selection(..., upload=True)`
-can instead publish a hosted figpack.org figure (needs `FIGPACK_API_KEY`, or
-`ephemeral=True` for a temporary one); hosted publish is for sharing a view of
-an uncurated root curation, while the local bundle is the path that round-trips
-edited labels back into Spyglass. FigPack curation needs the
-`spikesorting-v2-curation` extra
-(`pip install -e ".[spikesorting-v2-curation]"`); cross-session matching needs
-the `spikesorting-v2-matching` extra.
+FigPack curation is profile-backed and local by default. Call
+`run_summary.start_review(...)`, edit the seeded bundle in the browser, inspect
+`review.preview_import()`, and commit the exact verified change set. Merged and
+label-only curations render in their own unit namespace; evaluation suggestions
+and already-applied merge provenance are read-only context. Hosted delivery
+publishes the identical seeded/identity-bearing bundle and requires
+`FIGPACK_API_KEY` unless `ephemeral=True`. The lower-level
+`FigPackCurationSelection` / `FigPackCuration` methods remain available for
+expert composition, not as the normal notebook workflow. FigPack needs the
+`spikesorting-v2-curation` extra (`pip install -e
+".[spikesorting-v2-curation]"`); cross-session matching needs the
+`spikesorting-v2-matching` extra.
 
 ## Streaming, parallel populate, and v1 parity
 

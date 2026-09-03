@@ -76,6 +76,14 @@ from spyglass.spikesorting.v2.curation_api import (
     MergeEvaluateReceipt,
     RunResult,
 )
+from spyglass.spikesorting.v2.review_api import (
+    CurationChangeSet,
+    FigPackReview,
+    MergeLabelConflict,
+    ReviewImportReceipt,
+    ReviewProfileRef,
+    ReviewStageStatus,
+)
 from spyglass.spikesorting.v2._pipeline_types import (
     PipelineOutcome,
     PipelineStageSeconds,

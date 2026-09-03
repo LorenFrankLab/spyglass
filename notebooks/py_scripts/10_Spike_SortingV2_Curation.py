@@ -50,6 +50,10 @@ nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
+review_profile = "franklab_hippocampus_2026_06"
+# Keep run-all/headless execution safe. Set True interactively when ready.
+open_review_in_browser = False
+commit_browser_review = False
 # Sort group (shank) to sort. None auto-picks only when the session has exactly
 # one sort group; otherwise set it deliberately after reviewing step 2.
 sort_group_id = None
@@ -140,8 +144,9 @@ run_summary = run_v2_pipeline(
 #
 # - **Automated** — `run_v2_pipeline(auto_curate=True)` scores the sort and
 #   commits the rule set's labels in the same call (section 3-auto).
-# - **In a browser** — `run_v2_pipeline(build_figpack_view=True)` publishes an interactive
-#   FigPack view you label and merge in a browser (section 3-browser).
+# - **In a browser (recommended hands-on path)** — `run_summary.start_review`
+#   resolves one review profile, evaluates, seeds FigPack, previews the exact
+#   diff, and commits an identity-verified child (section 3-browser).
 # - **Scripted** — the evaluate → merge → re-evaluate loop below (sections
 #   3a–3e), the supported secondary path for automation and debugging.
 #
@@ -164,23 +169,17 @@ CurationV2.summarize_curation(root_curation.as_key())
 
 # ### 3-browser. Curate in a browser with FigPack
 #
-# To inspect units in a point-and-click view, `build_figpack_view=True` publishes a FigPack
-# curation view of the root curation and returns its location in `figpack_uri`.
-# This needs the optional FigPack packages (the `spikesorting-v2-curation`
-# extra); without them `run_v2_pipeline(build_figpack_view=True)` raises, so the cell below
-# runs only when they are installed.
+# `start_review` is the browser-first surface: one immutable profile resolves
+# the evaluation recipes, ordered metric columns, label palette, and import
+# mode. It evaluates/reuses the exact root, seeds its current committed labels,
+# and shows proposals plus applied-merge provenance as read-only context.
+# `source="analysis"` is also available when a run produced an analysis
+# curation; it never silently falls back to root.
 #
-# Offline, the view is a self-contained static bundle on disk — open `index.html`
-# from `figpack_uri` in a browser to inspect the sort. Edits made to a static
-# bundle in the browser are **not** written back automatically. To bring labels
-# and merges from a FigPack figure into Spyglass, use
-# `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` (the
-# round-trip cell below). A never-edited figure reads back empty and is not
-# imported unless you pass `allow_empty=True`. For team review, import each
-# curator's edited URI as a sibling child curation and put reviewer/round notes
-# in `description`. For custom unit-table columns, call
-# `FigPackCuration.build_curation_view(root_key,
-# displayed_unit_properties=["x", "y"])`; explicit unavailable names raise.
+# `upload=False` (default) creates a seeded local bundle. `upload=True` publishes
+# the identical seeded/identity-bearing bundle and needs `FIGPACK_API_KEY`
+# unless `ephemeral=True`. The optional `spikesorting-v2-curation` extra is
+# required only for this browser path.
 
 import importlib.util
 
@@ -188,49 +187,63 @@ figpack_available = (
     importlib.util.find_spec("figpack") is not None
     and importlib.util.find_spec("figpack_spike_sorting") is not None
 )
-figpack_summary = None
+review = None
 if figpack_available:
-    figpack_summary = run_v2_pipeline(
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
-        pipeline_preset=pipeline_preset,
-        build_figpack_view=True,
+    review = run_summary.start_review(
+        source="root",
+        profile=review_profile,
+        upload=False,
     )
-    print("FigPack view:", figpack_summary["figpack_uri"])
+    print("Review id:", review.review_id)
+    print("FigPack view:", review.uri)
+    if open_review_in_browser:
+        review.open()
 else:
     print(
         "FigPack extra not installed; skipping. Install the "
         "'spikesorting-v2-curation' extra to publish a browser curation view."
     )
 
-# Round-trip: after labeling/merging in the browser, re-run this to import the
-# edits as the next child curation (here, on a fresh sort, the figure reads
-# back empty).
+# After saving browser edits, re-run from here. Preview is mutation-free and
+# reports labels before/after, merge groups, resulting unit count, incompatible
+# contributor labels, and sibling children created by other reviewers.
+# Losing the Python variable is harmless: resume from the printed review id.
 
-if figpack_summary is not None:
-    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+browser_changes = None
+browser_receipt = None
+if review is not None:
+    from spyglass.spikesorting.v2.review_api import FigPackReview
 
-    labels, merge_groups = FigPackCuration.fetch_curation_from_uri(
-        figpack_summary["figpack_uri"]
-    )
-    print("from figure — labels:", labels, "| merge groups:", merge_groups)
-    # With real edits, save them as a CHILD of the root curation. The explicit
-    # parent key avoids the root-curation default. `merge_action="commit"`
-    # applies browser merges into the child's unit set; use `"preview"` to store
-    # them as proposals you review in section 3 first.
-    # FigPackCuration.save_curation_from_uri(
-    #     figpack_summary["figpack_uri"],
-    #     {
-    #         "sorting_id": figpack_summary["sorting_id"],
-    #         "curation_id": figpack_summary["root_curation_id"],
-    #     },
-    #     merge_action="commit",
-    #     description="curator=alice; round=1",
-    # )
+    review = FigPackReview.resume(review.review_id)
+    browser_changes = review.preview_import()
+    display(browser_changes)
 
-# ### 3a. Evaluate the root curation (pass 1)
+    # Leave False during run-all and until you have inspected this exact diff.
+    # A zero-diff commit additionally requires confirm_no_changes=True. If
+    # label_conflicts is non-empty, map every predicted merged_unit_id to the
+    # explicit labels the merged unit should carry, for example:
+    # conflict_resolutions = {12: ("accept",)}
+    conflict_resolutions = {}
+    if commit_browser_review:
+        browser_receipt = browser_changes.commit(
+            conflict_resolutions=conflict_resolutions,
+        )
+        print("Final merge id:", browser_receipt.curation.merge_id)
+        print(
+            "Concat member merge ids:",
+            browser_receipt.curation.member_merge_ids,
+        )
+
+        # Every imported merge is automatically re-evaluated with the SAME
+        # profile. Continue directly into a seeded review over the actual
+        # merged waveform/correlogram, not the pre-merge contributor view.
+        if browser_receipt.needs_merge_verification:
+            verification_review = browser_receipt.continue_review()
+            print("Merged verification review:", verification_review.review_id)
+            if open_review_in_browser:
+                verification_review.open()
+
+# ### 3a. Automation/debugging appendix: evaluate the root (pass 1)
 #
 # Pair the (committed) root curation with a quality-metric recipe and an
 # auto-curation rule set, then populate. `franklab_default` computes `snr` /
@@ -414,7 +427,8 @@ ssviz.available_visualizations()
 # `ssviz.export_si_report(sorting_key, folder, compute_missing=True)` /
 # `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
 # off the display analyzer. To label and merge in a browser instead, publish a
-# FigPack curation view with `run_v2_pipeline(build_figpack_view=True)` (section 3-browser).
+# To label and merge in a browser instead, use
+# `run_summary.start_review(profile=..., source=...)` (section 3-browser).
 
 # +
 sorting_key = {"sorting_id": run_summary["sorting_id"]}

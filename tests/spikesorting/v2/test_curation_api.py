@@ -17,12 +17,22 @@ def test_public_curation_api_is_reexported():
         MergeEvaluateReceipt,
         RunResult,
     )
+    from spyglass.spikesorting.v2.review_api import (
+        CurationChangeSet,
+        FigPackReview,
+        ReviewImportReceipt,
+        ReviewProfileRef,
+    )
 
     assert pipeline.CurationRef is CurationRef
     assert pipeline.EvaluationResult is EvaluationResult
     assert pipeline.EvaluationSpec is EvaluationSpec
     assert pipeline.MergeEvaluateReceipt is MergeEvaluateReceipt
     assert pipeline.RunResult is RunResult
+    assert pipeline.ReviewProfileRef is ReviewProfileRef
+    assert pipeline.FigPackReview is FigPackReview
+    assert pipeline.CurationChangeSet is CurationChangeSet
+    assert pipeline.ReviewImportReceipt is ReviewImportReceipt
 
 
 def test_non_root_facade_requires_typed_parent():

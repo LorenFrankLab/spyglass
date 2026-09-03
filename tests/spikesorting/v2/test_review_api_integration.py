@@ -1,0 +1,195 @@
+"""Browser-first review facade integration contracts."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+_FIGPACK_MISSING = (
+    importlib.util.find_spec("figpack") is None
+    or importlib.util.find_spec("figpack_spike_sorting") is None
+)
+
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        _FIGPACK_MISSING,
+        reason="requires the spikesorting-v2-curation extra (figpack)",
+    ),
+]
+
+
+def _write_edits(uri: str, labels: dict, groups: list[list[int]]) -> None:
+    from spyglass.spikesorting.v2._figpack_curation import (
+        labels_and_merges_to_annotations,
+    )
+
+    (Path(uri) / "annotations.json").write_text(
+        json.dumps(labels_and_merges_to_annotations(labels, groups))
+    )
+
+
+def _ensure_test_profile() -> str:
+    from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+
+    name = "test_browser_minimal_2026_09"
+    CurationReviewProfile.insert1(
+        {
+            "review_profile_name": name,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+            "displayed_unit_properties": [
+                "snr",
+                "isi_violation",
+                "firing_rate",
+            ],
+            "label_options": ["accept", "mua", "noise"],
+            "label_import_mode": "replace",
+        },
+        skip_duplicates=True,
+    )
+    return name
+
+
+def test_browser_review_preview_commit_resume_and_continue(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The full review journey is pinned, pure, resumable, and merge-safe."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import RunResult
+    from spyglass.spikesorting.v2._figpack_curation import (
+        curation_annotations_to_labels_and_merges,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        ReviewChangedSincePreviewError,
+        UnresolvedMergeLabelConflictError,
+    )
+    from spyglass.spikesorting.v2.figpack_curation import (
+        _load_annotations_json,
+    )
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
+    profile_name = _ensure_test_profile()
+    try:
+        root_key = CurationV2.create_initial_curation(
+            sorting_key,
+            labels={
+                unit_ids[0]: ["mua"],
+                unit_ids[1]: ["noise"],
+            },
+        )
+        run = RunResult(
+            {
+                "sorting_id": sorting_key["sorting_id"],
+                "root_curation_id": root_key["curation_id"],
+                "analysis_curation_id": None,
+            }
+        )
+        with pytest.raises(ValueError, match="source='root'"):
+            run.start_review(profile_name, source="analysis")
+
+        review = run.start_review(profile_name, source="root", upload=False)
+        assert review.parent == run.root_curation
+        assert review.profile.review_profile_name == profile_name
+        assert review.evaluation.spec == review.profile.evaluation_spec
+        resumed = FigPackReview.resume(review.review_id)
+        assert resumed.review_id == review.review_id
+        assert resumed.parent == review.parent
+        assert resumed.profile == review.profile
+        assert resumed.uri == review.uri
+
+        figure_config = json.loads(
+            (Path(review.uri) / "spyglass_curation.json").read_text()
+        )
+        assert figure_config["curation_uuid"] == str(
+            review.parent.curation_uuid
+        )
+        assert figure_config["review"]["profile_hash"] == (
+            review.profile.profile_hash
+        )
+        assert figure_config["review"]["evaluation_spec"] == {
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+
+        pristine_bytes = (Path(review.uri) / "annotations.json").read_bytes()
+        children_before = len(review.parent.children)
+        no_change = review.preview_import()
+        assert dict(no_change.labels_before) == dict(no_change.labels_after)
+        assert no_change.merge_groups == ()
+        assert len(review.parent.children) == children_before
+        assert (Path(review.uri) / "annotations.json").read_bytes() == (
+            pristine_bytes
+        )
+        with pytest.raises(ValueError, match="confirm_no_changes"):
+            no_change.commit()
+        no_change_receipt = no_change.commit(confirm_no_changes=True)
+        assert no_change_receipt.curation.parent == review.parent
+        assert not no_change_receipt.needs_merge_verification
+
+        first_edits = {
+            unit_ids[0]: ["mua"],
+            unit_ids[1]: ["noise"],
+        }
+        _write_edits(review.uri, first_edits, [unit_ids])
+        stale_preview = review.preview_import()
+        assert stale_preview.label_conflicts
+        _write_edits(
+            review.uri,
+            {unit_ids[0]: ["accept"], unit_ids[1]: ["accept"]},
+            [unit_ids],
+        )
+        with pytest.raises(ReviewChangedSincePreviewError):
+            stale_preview.commit(
+                conflict_resolutions={max(unit_ids) + 1: ("accept",)}
+            )
+
+        _write_edits(review.uri, first_edits, [unit_ids])
+        changes = review.preview_import()
+        assert changes.unit_count_before == 2
+        assert changes.unit_count_after == 1
+        assert changes.merge_groups == (tuple(unit_ids),)
+        assert changes.label_conflicts[0].merged_unit_id == max(unit_ids) + 1
+        assert no_change_receipt.curation in changes.newer_sibling_curations
+        with pytest.raises(UnresolvedMergeLabelConflictError):
+            changes.commit()
+
+        receipt = changes.commit(
+            conflict_resolutions={max(unit_ids) + 1: ("accept",)}
+        )
+        assert receipt.curation.parent == review.parent
+        assert receipt.curation != no_change_receipt.curation
+        assert receipt.needs_merge_verification
+        assert receipt.evaluation is not None
+        assert receipt.evaluation.spec == review.profile.evaluation_spec
+        assert receipt.curation.merge_id is not None
+        assert receipt.curation.member_merge_ids == {}
+        assert {child.curation_id for child in review.parent.children} >= {
+            receipt.curation.curation_id,
+            no_change_receipt.curation.curation_id,
+        }
+
+        continuation = receipt.continue_review()
+        assert continuation.parent == receipt.curation
+        assert continuation.profile == review.profile
+        assert continuation.evaluation == receipt.evaluation
+        resumed_continuation = FigPackReview.resume(continuation.review_id)
+        assert resumed_continuation.parent == continuation.parent
+        assert resumed_continuation.profile == continuation.profile
+        labels, pending_merges = curation_annotations_to_labels_and_merges(
+            _load_annotations_json(continuation.uri)
+        )
+        assert pending_merges == []
+        assert labels == {max(unit_ids) + 1: ["accept"]}
+    finally:
+        clear_curations_for(sorting_key)

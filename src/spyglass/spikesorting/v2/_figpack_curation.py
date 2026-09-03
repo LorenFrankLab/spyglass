@@ -30,6 +30,7 @@ FIGPACK_INSTALL_HINT = (
 #: figure-root path it is stored under in ``annotations.json``.
 SORTING_CURATION_KEY = "sorting_curation"
 ANNOTATION_ROOT_PATH = "/"
+FIGURE_CONFIG_FILENAME = "spyglass_curation.json"
 
 
 def default_label_options() -> list[str]:
@@ -51,10 +52,12 @@ def figpack_config_hash(
     *,
     sorting_id,
     curation_id,
+    curation_uuid=None,
     label_options,
     displayed_unit_properties,
     upload,
     ephemeral,
+    review_config=None,
 ) -> str:
     """Return the sha256 hex digest content-addressing a FigPack UI config.
 
@@ -66,8 +69,10 @@ def figpack_config_hash(
 
     Parameters
     ----------
-    sorting_id, curation_id
-        The ``CurationV2`` primary key the view is built for.
+    sorting_id, curation_id, curation_uuid
+        The ``CurationV2`` key and immutable row-generation identity the view
+        is built for. ``curation_uuid`` remains optional only for callers
+        hashing legacy/external configurations; persisted selections supply it.
     label_options : list of str
         The curation label palette.
     displayed_unit_properties : list of str or None
@@ -76,6 +81,8 @@ def figpack_config_hash(
         SpikeInterface's backend defaults; ``[]`` requests no property columns.
     upload, ephemeral : bool
         The publish mode flags.
+    review_config : dict or None
+        Exact persisted profile/evaluation snapshot for a guided review.
 
     Returns
     -------
@@ -85,13 +92,73 @@ def figpack_config_hash(
     payload = {
         "sorting_id": str(sorting_id),
         "curation_id": int(curation_id),
+        "curation_uuid": (
+            str(curation_uuid) if curation_uuid is not None else None
+        ),
         "label_options": list(label_options),
         "displayed_unit_properties": normalize_displayed_unit_properties(
             displayed_unit_properties
         ),
         "upload": bool(upload),
         "ephemeral": bool(ephemeral),
+        "review_config": _json_native(review_config),
     }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _json_native(value):
+    """Return a deterministic JSON-native copy of nested config values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_native(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_native(item) for item in value]
+    if hasattr(value, "item"):
+        return _json_native(value.item())
+    return str(value)
+
+
+def pack_display_config(displayed_unit_properties, review_config=None):
+    """Pack optional review identity into the existing display-config blob.
+
+    Plain expert selections retain the historical ``list | None`` storage
+    shape. Profile-backed reviews use a mapping so the existing
+    content-addressed selection can persist and re-check the exact immutable
+    profile snapshot without adding workflow-state schema.
+    """
+    properties = normalize_displayed_unit_properties(displayed_unit_properties)
+    if review_config is None:
+        return properties
+    if not isinstance(review_config, dict):
+        raise TypeError(
+            "review_config must be a mapping or None; got "
+            f"{type(review_config).__name__}."
+        )
+    return {
+        "properties": properties,
+        "review": _json_native(review_config),
+    }
+
+
+def unpack_display_config(stored) -> tuple[list[str] | None, dict | None]:
+    """Decode legacy display lists and profile-backed review configurations."""
+    if isinstance(stored, dict) and set(stored) == {"properties", "review"}:
+        properties = normalize_displayed_unit_properties(stored["properties"])
+        review = stored["review"]
+        if not isinstance(review, dict):
+            raise TypeError("stored review configuration must be a mapping.")
+        return properties, _json_native(review)
+    return normalize_displayed_unit_properties(stored), None
+
+
+def annotations_payload_hash(annotations: dict | None) -> str:
+    """Hash the complete logical annotations payload independent of spacing."""
+    payload = _json_native(annotations or {})
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"

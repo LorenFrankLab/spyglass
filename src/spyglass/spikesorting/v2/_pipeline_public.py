@@ -51,6 +51,12 @@ PIPELINE_FACADE_EXPORTS = (
     "EvaluationResult",
     "MergedCuration",
     "MergeEvaluateReceipt",
+    "ReviewProfileRef",
+    "FigPackReview",
+    "CurationChangeSet",
+    "MergeLabelConflict",
+    "ReviewImportReceipt",
+    "ReviewStageStatus",
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
@@ -84,6 +90,12 @@ PACKAGE_ROOT_REEXPORTS = (
     "EvaluationResult",
     "MergedCuration",
     "MergeEvaluateReceipt",
+    "ReviewProfileRef",
+    "FigPackReview",
+    "CurationChangeSet",
+    "MergeLabelConflict",
+    "ReviewImportReceipt",
+    "ReviewStageStatus",
 )
 
 
