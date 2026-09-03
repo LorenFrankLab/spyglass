@@ -84,6 +84,25 @@ def test_describe_run_single_auto_curated_status():
     assert summary["status"] == "auto-curated"
 
 
+def test_describe_run_concat_lists_each_member_merge_id():
+    """Concat receipts expose one explicit row per session-safe output."""
+    summary = {
+        **_run_summary(),
+        "source_mode": "concat",
+        "root_merge_id": None,
+        "member_curation_status": "computed",
+        "member_merge_ids": {"b.nwb": "merge-b", "a.nwb": "merge-a"},
+        "stage_seconds": {
+            **_run_summary()["stage_seconds"],
+            "member_curation": 0.25,
+        },
+    }
+    frame = describe_run(summary)
+    members = frame[frame["row_type"] == "member"]
+    assert members["nwb_file_name"].tolist() == ["a.nwb", "b.nwb"]
+    assert members["member_merge_id"].tolist() == ["merge-a", "merge-b"]
+
+
 def _unit_match_summary():
     """A minimal run_v2_unit_match-shaped summary (no root/analysis merge id)."""
     return {

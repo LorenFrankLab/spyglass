@@ -78,9 +78,9 @@ CONCAT_MERGE_GATE_MESSAGE = (
     "CurationV2 for concat-backed sorting {sorting_id} was NOT registered in "
     "SpikeSortingOutput: its spike times are on the concatenated recording's "
     "synthetic 0-based timeline (member wall-clock gaps are dropped), so a "
-    "downstream consumer keyed by nwb_file_name would misalign them. Use "
-    "ConcatenatedRecording.split_sorting_by_session for per-member frames; "
-    "per-member decodable rows are a planned addition."
+    "downstream consumer keyed by nwb_file_name would misalign them. Populate "
+    "ConcatMemberCuration for one wall-clock-aligned SpikeSortingOutput row "
+    "per frozen member session."
 )
 
 

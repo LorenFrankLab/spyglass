@@ -413,8 +413,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         * two merge_ids resolving to the SAME sorting (different curations of
           one sort) -> the same physical units counted more than once.
 
-        v0/v1 sources are skipped: the preview / multi-curation-per-sort
-        concepts are specific to v2 ``CurationV2``.
+        Per-member concat outputs inherit the preview state of their parent
+        ``CurationV2``. Multiple curations of the same concat member are also
+        duplicate physical units; different members are distinct session
+        outputs and are not conflated here. v0/v1 sources are skipped.
 
         Parameters
         ----------
@@ -423,19 +425,34 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         if CurationV2 is None:
             return
-        sorting_to_merges: dict = {}
+        source_to_merges: dict = {}
         for mid in merge_ids:
             part = cls.CurationV2 & {"merge_id": mid}
-            if not part:
-                continue  # v0/v1 source -- preview/multi-curation are v2 only
-            # The merge part's PK is ``merge_id``; the CurationV2 PK
-            # (sorting_id, curation_id) lives as secondary FK columns.
-            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            source_identity = None
+            source_name = "CurationV2"
+            if part:
+                # The merge part's PK is ``merge_id``; the CurationV2 PK
+                # (sorting_id, curation_id) lives as secondary FK columns.
+                sorting_id, curation_id = part.fetch1(
+                    "sorting_id", "curation_id"
+                )
+                source_identity = str(sorting_id)
+            elif ConcatMemberCuration is not None:
+                part = cls.ConcatMemberCuration & {"merge_id": mid}
+                if part:
+                    sorting_id, curation_id, member_index = part.fetch1(
+                        "sorting_id", "curation_id", "member_index"
+                    )
+                    source_identity = f"{sorting_id}:member={member_index}"
+                    source_name = "ConcatMemberCuration"
+            if source_identity is None:
+                continue  # v0/v1 source
+
             cur_key = {"sorting_id": sorting_id, "curation_id": curation_id}
-            sorting_to_merges.setdefault(str(sorting_id), []).append(mid)
+            source_to_merges.setdefault(source_identity, []).append(mid)
             if CurationV2.has_unapplied_proposed_merges(cur_key):
                 raise ValueError(
-                    f"merge_id {mid} is a CurationV2 curation "
+                    f"merge_id {mid} is a {source_name} output "
                     f"(sorting_id={cur_key['sorting_id']}, "
                     f"curation_id={cur_key['curation_id']}) created with "
                     "apply_merge=False whose proposed merges are NOT applied; "
@@ -444,14 +461,50 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     "applied) before adding it to a decoding group."
                 )
         duplicated = {
-            sid: m for sid, m in sorting_to_merges.items() if len(m) > 1
+            source: mids
+            for source, mids in source_to_merges.items()
+            if len(mids) > 1
         }
         if duplicated:
             raise ValueError(
-                "Multiple merge_ids resolve to the same sorting (different "
-                "curations of one sort), so the same units would be counted "
-                f"more than once in decoding: {duplicated}. Restrict to one "
-                "curation per sorting (pass curation_id)."
+                "Multiple merge_ids resolve to the same sorting/member source "
+                "(different curations of one sorting/member), so the same "
+                f"units would be counted more than once: {duplicated}. "
+                "Restrict to one curation per source (pass curation_id)."
+            )
+
+    @classmethod
+    def assert_merge_ids_match_session(cls, merge_ids, nwb_file_name) -> None:
+        """Reject concat-member outputs owned by a different session.
+
+        ``SortedSpikesGroup`` is keyed by ``Session``, while its ``Units`` part
+        only foreign-keys a generic merge ID and therefore cannot express the
+        source session structurally. Per-member concat rows do carry that
+        session; validate it at group creation so wall-clock spikes from one
+        member cannot be inserted into another member's group.
+
+        Other source generations retain their existing behavior because their
+        source tables do not expose one uniform session FK through this merge
+        table.
+        """
+        if ConcatMemberCuration is None:
+            return
+        requested = [{"merge_id": mid} for mid in merge_ids if mid is not None]
+        if not requested:
+            return
+        member_rows = (
+            cls.ConcatMemberCuration * ConcatMemberCuration & requested
+        ).fetch("merge_id", "nwb_file_name", as_dict=True)
+        mismatched = {
+            str(row["merge_id"]): str(row["nwb_file_name"])
+            for row in member_rows
+            if str(row["nwb_file_name"]) != str(nwb_file_name)
+        }
+        if mismatched:
+            raise ValueError(
+                "Concat-member SpikeSortingOutput row(s) belong to a "
+                f"different session than SortedSpikesGroup {nwb_file_name!r}: "
+                f"{mismatched}. Use that member's own merge_id."
             )
 
     @classmethod
@@ -477,14 +530,26 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             return
         for mid in merge_ids:
             part = cls.CurationV2 & {"merge_id": mid}
-            if not part:
-                continue  # v0/v1 source
-            sorting_id, curation_id = part.fetch1("sorting_id", "curation_id")
+            source_name = "CurationV2"
+            if part:
+                sorting_id, curation_id = part.fetch1(
+                    "sorting_id", "curation_id"
+                )
+            elif ConcatMemberCuration is not None:
+                part = cls.ConcatMemberCuration & {"merge_id": mid}
+                if not part:
+                    continue  # v0/v1 source
+                sorting_id, curation_id = part.fetch1(
+                    "sorting_id", "curation_id"
+                )
+                source_name = "ConcatMemberCuration"
+            else:
+                continue
             if CurationV2.has_unapplied_proposed_merges(
                 {"sorting_id": sorting_id, "curation_id": curation_id}
             ):
                 logger.warning(
-                    f"merge_id {mid} is a CurationV2 curation "
+                    f"merge_id {mid} is a {source_name} output "
                     f"(sorting_id={sorting_id}, curation_id={curation_id}) "
                     "created with apply_merge=False whose proposed merges are "
                     "NOT applied; the returned spike times are for the UNMERGED "

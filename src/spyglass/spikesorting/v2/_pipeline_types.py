@@ -95,6 +95,7 @@ class PipelineStageSeconds(TypedDict):
     # Concat source stages (concat mode only).
     member_recording: NotRequired[float]
     concat_recording: NotRequired[float]
+    member_curation: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
     # Present only when ``run_v2_pipeline(build_figpack_view=True)``.
@@ -118,8 +119,8 @@ class _RunV2SummaryBase(TypedDict):
     # called simply ``merge_id`` to copy downstream by mistake (the root is
     # uncurated and not analysis-ready).
     root_curation_id: int
-    # Concat curations stay out of SpikeSortingOutput until per-member,
-    # wall-clock-safe rows are materialized.
+    # A concat curation's synthetic-timeline row stays out of
+    # SpikeSortingOutput; RunV2ConcatSummary exposes wall-clock-safe member rows.
     root_merge_id: "UUID | None"
     # The ANALYSIS-ready (downstream-science) curation. Always present, so a
     # consumer can branch on it: ``None`` on a root-only run
@@ -173,8 +174,8 @@ class RunV2ConcatSummary(_RunV2SummaryBase):
 
     ``source_mode == "concat"``. Carries the per-member recording PKs and the
     ConcatenatedRecording keys in place of the single-session recording keys,
-    and has no artifact stage (a concat SortingSelection has no
-    ArtifactDetectionSource row).
+    one wall-clock-aligned merge ID per member session, and no artifact stage
+    (a concat SortingSelection has no ArtifactDetectionSource row).
     """
 
     source_mode: Literal["concat"]
@@ -182,6 +183,8 @@ class RunV2ConcatSummary(_RunV2SummaryBase):
     member_recording_ids: list[UUID]
     concat_recording_id: UUID
     concat_recording_status: StageStatus
+    member_curation_status: StageStatus
+    member_merge_ids: dict[str, UUID]
 
 
 # A run_v2_pipeline summary is exactly one of the two modes; ``source_mode`` is

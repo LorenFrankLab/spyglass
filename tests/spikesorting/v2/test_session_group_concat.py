@@ -2080,6 +2080,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
     from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
     from spyglass.spikesorting.v2.pipeline import (
         register_pipeline_preset,
@@ -2126,7 +2129,14 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert summary["member_recording_status"] in {"computed", "reused"}
         assert "member_recording" in summary["stage_seconds"]
         assert "concat_recording" in summary["stage_seconds"]
-        # Sorted + curated, but deliberately not registered on the merge table.
+        assert summary["member_curation_status"] == "computed"
+        assert "member_curation" in summary["stage_seconds"]
+        assert set(summary["member_merge_ids"]) == {
+            member["nwb_file_name"] for member in grp["same_day_members"]
+        }
+        assert len(summary["member_merge_ids"]) == 2
+        # The synthetic concat row remains gated; one safe merge row is
+        # registered for each member session instead.
         assert summary["n_units"] >= 0
         assert summary["root_merge_id"] is None
         curation_key = {
@@ -2134,6 +2144,8 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             "curation_id": summary["root_curation_id"],
         }
         assert not (SpikeSortingOutput.CurationV2 & curation_key)
+        assert len(ConcatMemberCuration & curation_key) == 2
+        assert len(SpikeSortingOutput.ConcatMemberCuration & curation_key) == 2
         assert (
             CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=summary["sorting_id"])
             in summary["warnings"]
@@ -2147,6 +2159,8 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         )
         assert rerun["sorting_id"] == summary["sorting_id"]
         assert rerun["root_merge_id"] is None
+        assert rerun["member_merge_ids"] == summary["member_merge_ids"]
+        assert rerun["member_curation_status"] == "reused"
         assert (
             CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=summary["sorting_id"])
             in rerun["warnings"]
@@ -2154,8 +2168,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert rerun["concat_recording_status"] == "reused"
 
         # Auto-curation still materializes an analysis-ready child curation,
-        # but neither that child nor the root is exposed on the unsafe merge
-        # timeline. The repeated gate is represented by one warning entry.
+        # The child and root remain off the unsafe concat timeline. Member IDs
+        # now point at the analysis-ready child, one row per session. The
+        # repeated gate is represented by one warning entry.
         auto_summary = run_v2_pipeline(
             concat_session_group_owner=grp["group_key"]["session_group_owner"],
             concat_session_group_name=grp["group_key"]["session_group_name"],
@@ -2176,6 +2191,17 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
                 "curation_id": auto_summary["auto_curation_id"],
             }
         )
+        child_key = {
+            "sorting_id": auto_summary["sorting_id"],
+            "curation_id": auto_summary["auto_curation_id"],
+        }
+        assert len(ConcatMemberCuration & child_key) == 2
+        assert len(auto_summary["member_merge_ids"]) == 2
+        assert set(
+            (SpikeSortingOutput.ConcatMemberCuration & child_key).fetch(
+                "merge_id"
+            )
+        ) == set(auto_summary["member_merge_ids"].values())
         gate_message = CONCAT_MERGE_GATE_MESSAGE.format(
             sorting_id=summary["sorting_id"]
         )

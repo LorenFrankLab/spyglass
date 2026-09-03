@@ -318,9 +318,10 @@ def run_v2_pipeline(
     RunV2PipelineSummary
         Run summary -- a ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``
         (the two arms of the ``RunV2PipelineSummary`` union). The sort / curation
-        / merge keys are always present; concat merge-id values are ``None``
-        until per-member rows are supported. The source-stage keys depend on
-        the input mode, discriminated by ``source_mode``.
+        keys are always present. A concat run keeps its synthetic-timeline
+        root/analysis merge IDs unset and instead returns one session-safe merge
+        ID per frozen member. The source-stage keys depend on the input mode,
+        discriminated by ``source_mode``.
 
         Always present:
             ``pipeline_preset``          : the pipeline-preset name
@@ -345,22 +346,27 @@ def run_v2_pipeline(
         Concat mode adds instead (no artifact stage):
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
+            ``member_merge_ids``         : member ``nwb_file_name`` to
+                wall-clock-aligned SpikeSortingOutput PK; points to the
+                auto-curated child when ``auto_curate=True``, otherwise the root
         ``build_figpack_view=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
-        For downstream science key off ``analysis_merge_id`` (the curated,
-        analysis-ready handle) -- NOT ``root_merge_id``, the uncurated root.
-        There is deliberately no bare ``merge_id``: a default run has no
-        analysis-ready id to copy. A zero-unit single-session sort yields an
-        empty (but real) root curation/merge row. A concat run leaves merge ids
-        ``None`` because its synthetic timeline is not session-safe.
+        For downstream single-session science key off ``analysis_merge_id``
+        (the curated, analysis-ready handle) -- NOT ``root_merge_id``, the
+        uncurated root. For concat science, use the current member's
+        ``member_merge_ids[nwb_file_name]``. There is deliberately no bare
+        ``merge_id``. A zero-unit single-session sort yields an empty (but real)
+        root curation/merge row. A concat run leaves only its unsafe synthetic-
+        timeline merge IDs ``None``; its member IDs are session-safe.
 
         Plus per-stage observability keys (additive; the keys above are
         unchanged):
             ``*_status`` (one per source/sort/curation stage above -- e.g.
                 ``recording_status`` / ``artifact_detection_status`` in
                 single-session mode, ``member_recording_status`` /
-                ``concat_recording_status`` in concat mode, plus
+                ``concat_recording_status`` / ``member_curation_status`` in
+                concat mode, plus
                 ``sorting_status`` / ``curation_status``) : ``"computed"`` if the
                 stage did work this call, ``"reused"`` if its row already existed
                 and the call no-opped, or ``"skipped"`` if the preset configured
@@ -520,6 +526,9 @@ def run_v2_pipeline(
         CONCAT_MERGE_GATE_MESSAGE,
         CurationV2,
     )
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         PreflightError,
         ZeroUnitSortError,
@@ -606,6 +615,22 @@ def run_v2_pipeline(
         if warning not in warnings_list:
             warnings_list.append(warning)
         return None
+
+    def _concat_member_merge_ids(curation_key) -> dict[str, Any]:
+        """Return the complete member-NWB to merge-id mapping."""
+        rows = (
+            SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
+            & curation_key
+        ).fetch("merge_id", "nwb_file_name", as_dict=True)
+        nwb_names = [str(row["nwb_file_name"]) for row in rows]
+        if len(set(nwb_names)) != len(nwb_names):
+            raise ValueError(
+                "run_v2_pipeline: concat member outputs cannot be represented "
+                "as member_merge_ids because multiple frozen members share "
+                f"an nwb_file_name: {nwb_names}. Use ConcatMemberCuration "
+                "directly with member_index for this group."
+            )
+        return {str(row["nwb_file_name"]): row["merge_id"] for row in rows}
 
     if is_single:
         # Single-session: recording (+ optional artifact detection) -> sort.
@@ -913,6 +938,56 @@ def run_v2_pipeline(
         # The auto-curated child IS the analysis-ready curation for this run.
         run_summary["analysis_curation_id"] = child["curation_id"]
         run_summary["analysis_merge_id"] = auto_merge_id
+
+    # A concat curation's own synthetic-timeline row remains gated, but its
+    # final curation for this run (the auto-curated child when present,
+    # otherwise the root) is materialized into one session-safe merge row per
+    # frozen member. Populate each full member PK separately so the advisory
+    # lock and benign-duplicate recovery retain their single-key guarantee.
+    if is_concat:
+        member_curation_key = {
+            "sorting_id": sorting_key["sorting_id"],
+            "curation_id": (
+                run_summary["analysis_curation_id"]
+                if run_summary["analysis_curation_id"] is not None
+                else run_summary["root_curation_id"]
+            ),
+        }
+        member_indices = [
+            int(index)
+            for index in (
+                ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+            ).fetch("member_index", order_by="member_index")
+        ]
+        member_keys = [
+            {**member_curation_key, "member_index": member_index}
+            for member_index in member_indices
+        ]
+
+        def _populate_member_curations():
+            for member_key in member_keys:
+                _populate_once(ConcatMemberCuration, member_key)
+            member_merge_ids = _concat_member_merge_ids(member_curation_key)
+            if len(member_merge_ids) != len(member_keys):
+                raise ValueError(
+                    "run_v2_pipeline: ConcatMemberCuration registration is "
+                    f"incomplete for {member_curation_key}: expected "
+                    f"{len(member_keys)} member merge rows, found "
+                    f"{len(member_merge_ids)}."
+                )
+            return member_merge_ids
+
+        (
+            member_merge_ids,
+            run_summary["member_curation_status"],
+            stage_seconds["member_curation"],
+        ) = _run_stage(
+            "member_curation",
+            all(bool(ConcatMemberCuration & key) for key in member_keys),
+            _populate_member_curations,
+            run_summary,
+        )
+        run_summary["member_merge_ids"] = member_merge_ids
 
     # Optional FigPack manual-curation view: only when the caller opts in.
     # Publish an OFFLINE FigPack bundle of the ROOT curation (FigPack publishes

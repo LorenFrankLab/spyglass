@@ -914,6 +914,8 @@ _RUN_COLUMNS = [
     "n_units",
     "root_merge_id",
     "analysis_merge_id",
+    "nwb_file_name",
+    "member_merge_id",
     "warning",
     "error",
 ]
@@ -929,6 +931,9 @@ _RUN_STAGE_ORDER = (
     "concat_recording",
     "sorting",
     "curation",
+    "auto_curation",
+    "member_curation",
+    "figpack",
     "merge",
 )
 
@@ -987,7 +992,11 @@ def _describe_run_single_rows(
     # (e.g. a run_v2_unit_match manifest) have no root_merge_id -- leave their
     # summary status blank rather than mislabeling them "root only".
     if "root_merge_id" in run_summary:
-        summary_status = "auto-curated" if analysis_merge_id else "root only"
+        summary_status = (
+            "auto-curated"
+            if run_summary.get("analysis_curation_id") is not None
+            else "root only"
+        )
     else:
         summary_status = None
     header = _run_blank_row()
@@ -1011,6 +1020,16 @@ def _describe_run_single_rows(
             seconds=stage_seconds.get(stage),
         )
         rows.append(row)
+    for nwb_file_name, member_merge_id in sorted(
+        (run_summary.get("member_merge_ids") or {}).items()
+    ):
+        row = _run_blank_row()
+        row.update(
+            row_type="member",
+            nwb_file_name=str(nwb_file_name),
+            member_merge_id=member_merge_id,
+        )
+        rows.append(row)
     for warning in run_summary.get("warnings") or []:
         row = _run_blank_row()
         row.update(
@@ -1028,8 +1047,9 @@ def describe_run(result) -> "pd.DataFrame":
     The post-run companion to the ``describe_*`` discovery helpers: it turns the
     plain dict / list those runners return into a long-format DataFrame whose
     rows are explicit, so the things easiest to overlook -- a zero-unit sort, a
-    warning, a failed group -- are first-class rows, not a value buried in a
-    nested dict. Warnings never disappear into a print statement.
+    concat member merge ID, a warning, or a failed group -- are first-class
+    rows, not values buried in a nested dict. Warnings never disappear into a
+    print statement.
 
     Pass a single ``dict`` run summary -- a ``run_v2_pipeline`` summary or a
     ``run_v2_unit_match`` manifest (both carry ``stage_seconds`` + per-stage
@@ -1042,15 +1062,18 @@ def describe_run(result) -> "pd.DataFrame":
     Returns
     -------
     pandas.DataFrame
-        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"group"`` /
-        ``"warning"``), ``sort_group_id``, ``stage``, ``status``, ``seconds``,
-        ``n_units``, ``root_merge_id``, ``analysis_merge_id``, ``warning``,
-        ``error``. For a ``run_v2_pipeline`` summary the ``summary`` row's
-        ``status`` is ``"root only"`` / ``"auto-curated"`` (and
-        ``analysis_merge_id`` is ``None`` until a curation makes the sort
-        analysis-ready); for any other dict summary (e.g. ``run_v2_unit_match``,
-        which has no ``root_merge_id``) the ``summary`` status is blank and its
-        stages render from its own ``*_status`` keys.
+        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
+        ``"group"`` / ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
+        ``seconds``, ``n_units``, ``root_merge_id``, ``analysis_merge_id``,
+        ``nwb_file_name``, ``member_merge_id``, ``warning``, ``error``. For a
+        ``run_v2_pipeline`` summary the ``summary`` row's
+        ``status`` is ``"root only"`` / ``"auto-curated"``. Single-session
+        runs expose the analysis-ready row through ``analysis_merge_id``;
+        concat runs leave that synthetic-timeline ID unset and expose their
+        session-safe outputs through the ``member`` rows instead. For any other
+        dict summary (e.g. ``run_v2_unit_match``, which has no
+        ``root_merge_id``) the ``summary`` status is blank and its stages render
+        from its own ``*_status`` keys.
     """
     import pandas as pd
 

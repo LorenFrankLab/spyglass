@@ -98,8 +98,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         # (which would double-count units in the decode). No-op for v0/v1.
         # Runs AFTER the existing-group short-circuit -- an existing group is a
         # no-op and never processes ``keys``, so they must not be validated here.
-        SpikeSortingOutput.assert_decoding_merge_ids_ok(
-            [k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys]
+        merge_ids = [
+            k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys
+        ]
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+        SpikeSortingOutput.assert_merge_ids_match_session(
+            merge_ids, nwb_file_name
         )
 
         parts_insert = [{**key, **group_key} for key in keys]

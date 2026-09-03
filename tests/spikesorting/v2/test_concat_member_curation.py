@@ -273,3 +273,200 @@ def test_member_rows_register_and_dispatch_through_merge_table(
         SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_row["merge_id"]])
 
     assert seen_nwbs == expected_nwbs
+
+
+@pytest.mark.slow
+def test_decoding_duplicate_guard_is_scoped_to_one_member(
+    concat_member_curation,
+):
+    """Different members coexist; two curations of one member do not."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+
+    ctx = concat_member_curation
+    root_member_key = {**ctx["root_curation_key"], "member_index": 0}
+    ConcatMemberCuration.populate(root_member_key, reserve_jobs=False)
+    root_member_id = (
+        SpikeSortingOutput.ConcatMemberCuration & root_member_key
+    ).fetch1("merge_id")
+
+    child_rows = sorted(ctx["rows"], key=lambda row: int(row["member_index"]))
+    child_ids = [
+        (
+            SpikeSortingOutput.ConcatMemberCuration
+            & {
+                "sorting_id": row["sorting_id"],
+                "curation_id": row["curation_id"],
+                "member_index": int(row["member_index"]),
+            }
+        ).fetch1("merge_id")
+        for row in child_rows
+    ]
+
+    SpikeSortingOutput.assert_decoding_merge_ids_ok(child_ids)
+    with pytest.raises(ValueError, match="same sorting/member"):
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            [root_member_id, child_ids[0]]
+        )
+
+
+@pytest.mark.slow
+def test_session_consumers_read_member_row(concat_member_curation):
+    """Sorted-spike groups and unit annotations consume the member NWB."""
+    import numpy as np
+
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+
+    ctx = concat_member_curation
+    row = ctx["rows"][0]
+    member_key = {
+        "sorting_id": row["sorting_id"],
+        "curation_id": row["curation_id"],
+        "member_index": int(row["member_index"]),
+    }
+    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+        "merge_id"
+    )
+    direct_units = (ConcatMemberCuration & member_key).fetch_nwb()[0][
+        "object_id"
+    ]
+    unit_id = int(direct_units.index[0])
+    expected_spikes = direct_units.loc[unit_id, "spike_times"]
+
+    UnitSelectionParams.insert_default()
+    group_name = "concat_member_curation_consumer"
+    SortedSpikesGroup().create_group(
+        group_name=group_name,
+        nwb_file_name=row["nwb_file_name"],
+        unit_filter_params_name="all_units",
+        keys=[{"spikesorting_merge_id": merge_id}],
+    )
+    group_key = {
+        "nwb_file_name": row["nwb_file_name"],
+        "unit_filter_params_name": "all_units",
+        "sorted_spikes_group_name": group_name,
+    }
+    spikes, ids = SortedSpikesGroup.fetch_spike_data(
+        group_key, return_unit_ids=True
+    )
+    assert ids == [{"spikesorting_merge_id": merge_id, "unit_id": unit_id}]
+    np.testing.assert_array_equal(spikes[0], expected_spikes)
+
+    annotation_key = {
+        "spikesorting_merge_id": merge_id,
+        "unit_id": unit_id,
+        "annotation": "cell_type",
+        "label": "test_cell",
+    }
+    UnitAnnotation().add_annotation(annotation_key)
+    annotation_unit_key = {
+        key: annotation_key[key] for key in ("spikesorting_merge_id", "unit_id")
+    }
+    annotated = (UnitAnnotation & annotation_unit_key).fetch_unit_spikes()
+    np.testing.assert_array_equal(annotated[0], expected_spikes)
+
+    # The generic merge FK cannot encode the group's Session. The explicit
+    # member-session guard rejects a valid member output placed in the wrong
+    # session rather than silently mixing incompatible wall-clock axes.
+    with pytest.raises(ValueError, match="different session"):
+        SortedSpikesGroup().create_group(
+            group_name="concat_member_wrong_session",
+            nwb_file_name=ctx["rows"][1]["nwb_file_name"],
+            unit_filter_params_name="all_units",
+            keys=[{"spikesorting_merge_id": merge_id}],
+        )
+
+
+@pytest.mark.slow
+def test_waveform_features_use_member_recording(concat_member_curation):
+    """The SI 0.104 waveform path extracts against the member recording."""
+    import numpy as np
+
+    from spyglass.decoding.v1.waveform_features import (
+        UnitWaveformFeatures,
+        UnitWaveformFeaturesSelection,
+        WaveformFeaturesParams,
+    )
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    row = concat_member_curation["rows"][0]
+    member_key = {
+        "sorting_id": row["sorting_id"],
+        "curation_id": row["curation_id"],
+        "member_index": int(row["member_index"]),
+    }
+    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+        "merge_id"
+    )
+    params_name = "concat_member_amplitude"
+    WaveformFeaturesParams.insert1(
+        {
+            "features_param_name": params_name,
+            "params": {
+                "waveform_extraction_params": {
+                    "ms_before": 0.2,
+                    "ms_after": 0.2,
+                    "max_spikes_per_unit": None,
+                    "n_jobs": 1,
+                    "chunk_duration": "1s",
+                },
+                "waveform_features_params": {
+                    "amplitude": {
+                        "peak_sign": "neg",
+                        "estimate_peak_time": False,
+                    }
+                },
+            },
+        },
+        skip_duplicates=True,
+    )
+    selection = {
+        "spikesorting_merge_id": merge_id,
+        "features_param_name": params_name,
+    }
+    UnitWaveformFeaturesSelection.insert1(selection, skip_duplicates=True)
+    UnitWaveformFeatures.populate(selection, reserve_jobs=False)
+    assert UnitWaveformFeatures & selection
+
+    spike_times, features = (UnitWaveformFeatures & selection).fetch_data()
+    direct = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    assert len(spike_times) == len(features) == len(direct) == 1
+    np.testing.assert_array_equal(spike_times[0], direct[0])
+    assert features[0].shape[0] == len(direct[0])
+
+
+@pytest.mark.slow
+def test_preview_member_output_is_rejected_for_decoding(
+    concat_member_curation,
+):
+    """A member row inherits its parent curation's unapplied-merge guard."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    ctx = concat_member_curation
+    preview = CurationV2.propose_merge_curation(
+        sorting_key=ctx["sorting_key"],
+        merge_groups=[[0, 1]],
+        parent_curation_id=ctx["root_curation_key"]["curation_id"],
+        description="concat member preview guard test",
+    )
+    member_key = {**preview, "member_index": 0}
+    ConcatMemberCuration.populate(member_key, reserve_jobs=False)
+    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+        "merge_id"
+    )
+    with pytest.raises(ValueError, match="NOT applied"):
+        SpikeSortingOutput.assert_decoding_merge_ids_ok([merge_id])

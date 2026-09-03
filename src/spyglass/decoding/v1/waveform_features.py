@@ -17,7 +17,10 @@ from spyglass.settings import temp_dir
 from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
-from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import (
+    SpikeSortingOutput,
+    source_class_dict,
+)
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
 from spyglass.utils.waveforms import _get_peak_amplitude
@@ -184,15 +187,14 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # ``MetricCurationV2`` source would not collide).
         from datajoint.utils import to_camel_case
 
-        is_v2 = to_camel_case(source_parent.table_name) == "CurationV2"
+        source_name = to_camel_case(source_parent.table_name)
+        is_v2 = source_name in {"CurationV2", "ConcatMemberCuration"}
 
         if is_v2:
             # v2 pipeline. Unit-id indexing below uses NWB ``.id`` (the true
             # unit_id); v2 merge-applied sortings produce sparse unit_ids, so
             # any callsite that mapped a positional index back to a unit_id
             # would mis-index here.
-            from spyglass.spikesorting.v2.curation import CurationV2
-
             # The v2 SortingAnalyzer path serves the ``get_waveforms``-based
             # features (amplitude, full_waveform) plus ``spike_location`` (an
             # optional clusterless mark), which the accessor computes lazily
@@ -210,9 +212,13 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                     "{'amplitude', 'full_waveform', 'spike_location'}."
                 )
 
-            # CurationV2 owns the v2 source-part walk (sorter + nwb_file_name);
-            # delegate instead of re-implementing v2's join topology here.
-            sorter, nwb_file_name = CurationV2.get_sort_metadata(source_key)
+            # Each v2 source owns its source-part walk. For a concat-member
+            # output this resolves the MEMBER recording/NWB, not the concat
+            # anchor, so extracted waveforms and output provenance are aligned
+            # to the same session as its wall-clock spike times.
+            sorter, nwb_file_name = source_class_dict[
+                source_name
+            ].get_sort_metadata(source_key)
             analysis_nwb_key = "object_id"
             waveform_extractor = self._fetch_waveform_v2(
                 merge_key, params["waveform_extraction_params"]
