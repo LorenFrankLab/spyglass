@@ -7,6 +7,7 @@ truth'. In practice, file modification is rare, and storing copies is
 inefficient.
 """
 
+import getpass
 import shutil
 import warnings
 from dataclasses import dataclass
@@ -2391,6 +2392,7 @@ class Model(SpyglassMixin, dj.Computed):
         video_list: "List[dict]",
         frames_per_video: int = 20,
         project_directory: Union[str, None] = None,
+        experimenter: Union[str, None] = None,
         **kwargs,
     ) -> dict:
         """Create a new DLC project from videos in the Spyglass database.
@@ -2427,6 +2429,15 @@ class Model(SpyglassMixin, dj.Computed):
             ``spyglass.settings.pose_project_dir`` (set via ``pose_dirs.project``
             in ``dj_local_conf.json``).  Falls back to ``~/dlc_projects`` if
             that setting is not configured.
+        experimenter : str, optional
+            Name recorded as the DLC project's ``experimenter`` -- becomes
+            the middle component of the folder name DLC creates:
+            ``{project_name}-{experimenter}-{date}``. Defaults to the
+            current OS user (``getpass.getuser()``) if not given. Must be
+            passed here, not via ``**kwargs``: ``deeplabcut.create_new_project``
+            already receives an explicit ``experimenter``, so forwarding one
+            through ``**kwargs`` collides with it (``TypeError: got multiple
+            values for keyword argument 'experimenter'``).
         **kwargs
             Passed through to ``deeplabcut.create_new_project()`` and/or
             ``deeplabcut.extract_frames()`` based on each function's
@@ -2599,6 +2610,7 @@ class Model(SpyglassMixin, dj.Computed):
             bodyparts=bodyparts,
             numframes2pick=effective_frames_per_video,
             sanitize=sanitize_filename,
+            experimenter=experimenter or getpass.getuser(),
             create_kwargs=create_kwargs,
             model_instance=self,
         )
