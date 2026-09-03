@@ -1,9 +1,13 @@
 """Pre-flight environment checks for the Position V2 pipeline.
 
-The check logic uses only the standard library (package *metadata*, never real
-imports), so it can never trigger the very import-time conflict it detects. Run
-it early -- right after importing spyglass, before training a model -- to catch
-a misconfigured environment before the heavy pose-tool imports crash on the GPU.
+Most checks use only the standard library (package *metadata*, never real
+imports of the heavy, GPU-touching pose tools), so they can never trigger the
+very import-time conflict they detect. The one exception is the BLAS/LAPACK
+self-test, which does import numpy/scipy for real -- both are lightweight
+core dependencies, not part of the TensorFlow/jax GPU collision this module
+otherwise avoids triggering. Run this early -- right after importing
+spyglass, before training a model -- to catch a misconfigured environment
+before the heavy pose-tool imports crash on the GPU.
 
 For a truly stand-alone check (e.g. an environment with no database configured),
 run this file directly -- it imports nothing from spyglass, so it never opens a
@@ -41,6 +45,31 @@ def _installed(name: str):
         return None
 
 
+def _blas_lapack_error():
+    """Return a LAPACK error message from a trivial eigh call, or None.
+
+    Returns None if numpy/scipy are missing (nothing to check) or if the
+    call succeeds. A broken BLAS/LAPACK build (seen with a mismatched
+    conda-forge ``liblapack`` netlib build + ``blas=openblas``, e.g. pulled
+    in by a ``defaults``-channel ``numpy-base``) fails on a 1x1 matrix --
+    the ``dsyevr`` LAPACK workspace-size query hits a ``liwork=1`` edge case
+    -- surfacing as a cryptic ``_flapack.error`` deep inside an unrelated
+    import chain (e.g. deeplabcut -> filterpy -> scipy.stats, which calls
+    ``eigh`` on a 1x1 matrix as an import-time side effect). A 2x2 matrix
+    does NOT reproduce this; the check must use a 1x1 matrix.
+    """
+    try:
+        import numpy
+        import scipy.linalg
+    except ImportError:
+        return None
+    try:
+        scipy.linalg.eigh(numpy.eye(1))
+    except Exception as exc:
+        return str(exc)
+    return None
+
+
 def check_environment(raise_on_error: bool = False, verbose: bool = True):
     """Check for known Position V2 dependency conflicts.
 
@@ -55,6 +84,12 @@ def check_environment(raise_on_error: bool = False, verbose: bool = True):
     it (video clipping, frame extraction/stitching, NWB re-encoding) rather
     than using a pip package, so it is easy to miss -- pip metadata never
     reflects whether the binary is on ``PATH``.
+
+    It also runs a trivial ``scipy.linalg.eigh`` call to catch a broken
+    BLAS/LAPACK build early. A bad ``libopenblas`` build otherwise surfaces
+    as a cryptic LAPACK error deep inside an unrelated import (e.g.
+    deeplabcut's ``filterpy`` dependency calls ``eigh`` as an import-time
+    side effect), which looks like a DeepLabCut or filterpy bug but is not.
 
     Parameters
     ----------
@@ -105,6 +140,28 @@ def check_environment(raise_on_error: bool = False, verbose: bool = True):
             "    Fix -- install it via conda (already listed in "
             "environments/environment_dlc.yml and environment_sleap.yml):\n"
             "      conda install -c conda-forge ffmpeg"
+        )
+
+    blas_error = _blas_lapack_error()
+    if blas_error:
+        problems.append(
+            "scipy.linalg.eigh failed on a trivial 1x1 matrix -- this "
+            f"environment's BLAS/LAPACK build is broken ({blas_error}). "
+            "This crashes any import that triggers it transitively (e.g. "
+            "deeplabcut -> filterpy -> scipy.stats calls eigh at import "
+            "time), often deep in an unrelated traceback.\n"
+            "    Most often caused by a `defaults`-channel numpy install: "
+            "its `numpy-base` companion package hard-depends on "
+            "`blas * openblas`, which combines with conda-forge's "
+            "`liblapack` into a mismatched, broken netlib/openblas build. "
+            "Pinning a specific libopenblas version is NOT a reliable fix -- "
+            "the mismatch can recur on other point releases. Fix -- drop "
+            "the `defaults` channel and reinstall numpy/scipy from "
+            "conda-forge only (see environments/environment_dlc.yml):\n"
+            "      conda install -c conda-forge --override-channels "
+            '"numpy" "scipy"\n'
+            "    Or force the MKL backend explicitly:\n"
+            '      conda install -c conda-forge "blas=*=*mkl"'
         )
 
     if verbose:
