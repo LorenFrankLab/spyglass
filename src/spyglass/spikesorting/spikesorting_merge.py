@@ -184,14 +184,22 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return query.get_sorting(query.fetch("KEY"))
 
     @classmethod
-    def get_sort_group_info(cls, key):
+    def get_sort_group_info(cls, key, all_electrodes: bool = False):
         """get the sort group info associated with a spike sorting output
         (e.g. electrode location, brain region, etc.)
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         key : dict
-            dictionary specifying the restriction (note: multi-source not currently supported)
-        Returns:
+            dictionary specifying the restriction (note: multi-source not
+            currently supported)
+        all_electrodes : bool, optional
+            If False (default), return one representative electrode per sort
+            group, preserving historical behavior. If True, return every
+            electrode belonging to each sort group. Passed through to the
+            source table's ``get_sort_group_info``.
+
+        Returns
         -------
         sort_group_info : Table
             Table linking a merge id to information about the electrode group.
@@ -201,7 +209,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ]
         part_table = cls.merge_get_part(key)
         query = source_table & part_table
-        sort_group_info = source_table.get_sort_group_info(query.fetch("KEY"))
+        sort_group_info = source_table.get_sort_group_info(
+            query.fetch("KEY"), all_electrodes=all_electrodes
+        )
         return part_table * sort_group_info  # join the info with merge id's
 
     def get_spike_times(self, key):

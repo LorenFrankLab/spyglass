@@ -127,6 +127,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
 
 ### Infrastructure
 
@@ -260,6 +263,15 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `--container-vol-dir` pytest option to store the test container's MySQL
     data on a chosen disk, and document it alongside the existing
     `--container-name`/`--container-port` options #1661
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
 
 ### Pipelines
 
@@ -301,6 +313,7 @@ for label, interval_data in results.groupby("interval_labels"):
         `populate_all_common`, so a rerun no longer reports or rolls back on
         failures logged by an earlier attempt #1497
     - `PositionSource` ingestion is now responsible for `RawPosition` #1660
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
 
 - Decoding
 
@@ -327,6 +340,7 @@ for label, interval_data in results.groupby("interval_labels"):
         needs. Temporary, pending #1609 #1619
     - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
         every call, and stop `insert` from mutating the caller's rows #1619
+    - Pair waveform-feature units with spike times by label, not position #1678
 
 - LFP
 
@@ -379,6 +393,13 @@ for label, interval_data in results.groupby("interval_labels"):
         injects the `tempdir` scratch-dir param only for sorters that declare it
         (only `mountainsort4`), instead of injecting it into every sorter and
         maintaining hardcoded removal lists #1655
+    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
+    - Add `unit_criteria` to `UnitSelectionParams` #1670
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - Add `all_electrodes` option to `get_sort_group_info` #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
+        #1678
 
 ## [0.5.5] (Aug 6, 2025)
 

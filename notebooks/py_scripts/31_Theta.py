@@ -26,9 +26,9 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 # - To run this notebook, you should have already completed the
-#   [LFP](./12_LFP.ipynb) notebook and populated the `LFPBand` table.
+#   [LFP](./30_LFP.ipynb) notebook and populated the `LFPBand` table.
 #
 # In this tutorial, we demonstrate how to generate analytic signals from the LFP
 # data, as well as how to compute theta phases and power.
@@ -37,7 +37,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 import numpy as np
 import matplotlib.pyplot as plt
