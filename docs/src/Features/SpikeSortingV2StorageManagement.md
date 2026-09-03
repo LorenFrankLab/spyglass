@@ -82,6 +82,35 @@ the folder, which `Sorting.get_analyzer()` rebuilds on the next access.
 A `matched=0` recompute also records which objects differ in the `Name`
 (missing-from-old/new) and `Hash` (differing) part tables for review.
 
+## Upstream deletion cascades and analyzer folders
+
+`Sorting.delete()` removes the corresponding regeneratable analyzer folder when
+the delete starts at `Sorting`. An upstream delete is different: deleting a
+`Recording`, `RecordingSelection`, or `SortGroupV2` cascades to `Sorting`
+through DataJoint `FreeTable` objects, which remove the database row without
+calling the Python `Sorting.delete()` override. The same bypass occurs with raw
+SQL or other out-of-band deletion. In those cases the database cascade is
+correct, but the 5–50 GB analyzer folder can remain on disk.
+
+After any deletion that did not start at `Sorting`, audit the analyzer cache and
+then reclaim only the disk-side orphans you reviewed:
+
+```python
+from spyglass.spikesorting.v2.sorting import Sorting
+
+report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+report["disk_side"]  # folders with no surviving Sorting row
+
+# Interactive confirmation; deletes disk-side folders only, never DB rows.
+Sorting.find_orphaned_analyzer_folders(dry_run=False)
+```
+
+The report also distinguishes DB-side rows whose expected folder is absent and
+folders intentionally reclaimed through `SortingAnalyzerRecompute`. It never
+auto-deletes a database row. Finish the upstream cascade before running the
+audit, and do not reclaim folders while sorting or analyzer rebuild jobs are
+active.
+
 ## Cache-drift policy
 
 The recording cache is **content-addressed and fail-closed on drift**.
