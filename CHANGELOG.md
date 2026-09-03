@@ -1,59 +1,14 @@
 # Change Log
 
-## [0.5.6] (Unreleased)
+## [0.6.1] (Unreleased)
 
-### Release Notes
+## Pipelines
 
-Running draft to be removed immediately prior to release. When altering tables,
-import all foreign key references.
+- Position
 
-```python
-# Alter Decoding v1 table
-from spyglass.common.common_filter import FirFilterParameters
-from spyglass.decoding.v1.core import DecodingParameters
+    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #1679
 
-FirFilterParameters().alter()
-DecodingParameters().alter()
-
-# Alter v0 recompute table
-from spyglass.spikesorting.v0.spikesorting_recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-# Alter v1 recompute table
-from spyglass.spikesorting.v1.recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
-)
-
-RecordingRecomputeSelection().alter()
-RecordingRecompute().alter()
-
-
-# Fix LFPBandV1 issue #1481
-from spyglass.lfp.analysis.v1 import LFPBandV1
-
-LFPBandV1().fix_1481()
-
-# Increase DLCProject.config_path length
-from spyglass.position.v1.position_dlc_project import DLCProject
-
-DLCProject().alter()
-
-# Add unit_criteria to UnitSelectionParams. Only needed to use that option;
-# existing filters work against the un-altered table
-from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
-
-UnitSelectionParams().alter()
-```
+## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
 
@@ -231,6 +186,38 @@ for label, interval_data in results.groupby("interval_labels"):
     `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Tests default `--base-dir` to `./tests/_data/` and ignore an exported
+    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
+    every path before creating anything, and under `test_mode` requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems. A config instance binds `test_mode` before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574
+- `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Directory symlinks are not traversed (`followlinks=False`), so cleanup
+    cannot follow a symlinked subdirectory out of `analysis_dir`; only leaf
+    `*.nwb` symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour `mtime` gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574
+- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
+    the files the sweep was eligible to act on #1573 #1574
+- Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol #1574
+- Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)
+- Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
+    previously discarded the constructor/call kwargs in favor of `dj.config`
+    (pre-existing) #1574
+- The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
@@ -364,7 +351,6 @@ for label, interval_data in results.groupby("interval_labels"):
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
     - Increase `DLCProject.config_path` length #1534
     - Add option to bound output of DLC to defined spatial region #1570
-    - Separate `DLCPosVideo` and `TrodesPosVideo` to tri-part `make` #1679
 
 - Spikesorting
 
@@ -397,6 +383,12 @@ for label, interval_data in results.groupby("interval_labels"):
         on arbitrary units table columns with numeric, range, and membership
         criteria. A criterion naming a column a sorting's units table does not
         have raises an error #1670
+    - Fix `SpikeSorting.populate` raising
+        `AttributeError: Bad parameters:   ['tempdir']` for SpikeInterface-native
+        sorters (e.g. `spykingcircus2`, `tridesclous2`). `_run_spike_sorter` now
+        injects the `tempdir` scratch-dir param only for sorters that declare it
+        (only `mountainsort4`), instead of injecting it into every sorter and
+        maintaining hardcoded removal lists #1655
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -895,4 +887,4 @@ for label, interval_data in results.groupby("interval_labels"):
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
-[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
+[0.6.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0
