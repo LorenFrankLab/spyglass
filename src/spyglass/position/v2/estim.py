@@ -203,6 +203,47 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
     output_dir='': varchar(255)       # results dir
     """
 
+    def insert1(self, row, **kwargs):
+        """Insert one inference task, requiring a single-session video group.
+
+        ``VidFileGroup`` deliberately permits multi-session groups so one model
+        can train across sessions (see ``ModelSelection``). Inference has no
+        such freedom: results that span two sessions have no well-defined
+        ``nwb_file_name``, and every downstream table -- ``PoseEstim``,
+        ``PoseV2``, ``PositionOutput`` -- assumes exactly one. Rejecting here
+        surfaces the problem at queue time rather than partway through
+        ``populate``.
+
+        Parameters
+        ----------
+        row : dict
+            Entry to insert; must include ``vid_group_id``.
+        **kwargs
+            Additional DataJoint insertion options.
+
+        Raises
+        ------
+        ValueError
+            If the video group does not resolve to exactly one ``Nwbfile``.
+        """
+        vid_group_id = (
+            row.get("vid_group_id") if isinstance(row, dict) else None
+        )
+        if vid_group_id is not None:
+            try:
+                VidFileGroup().get_nwb_file(vid_group_id)
+            except ValueError as e:
+                raise ValueError(
+                    f"Cannot queue pose estimation on video group "
+                    f"'{vid_group_id}': {e} Pose estimation requires a group "
+                    "whose videos all belong to one session. Multi-session "
+                    "groups are for model training (ModelSelection) only -- "
+                    "build a per-session group for inference, e.g. with "
+                    "PoseEstimSelection().insert_from_videofile()."
+                ) from e
+
+        super().insert1(row, **kwargs)
+
     def insert_estimation_task(
         self,
         key,
@@ -920,25 +961,31 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             if vf_entry.get("path"):
                 video_paths.append(vf_entry["path"])
 
-        # Resolve nwb_file_name via the VidFileGroup → Session link.
-        # Returns None when no common NWB parent exists (e.g. tutorial mode).
-        nwb_file_name = None
+        # Resolve nwb_file_name via the VidFileGroup → Session link, failing
+        # fast (before any expensive I/O) if it does not resolve to exactly
+        # one. PoseEstimSelection.insert1 already gates this; the check
+        # remains for rows written by other means. Preserve the underlying
+        # cause -- a group spanning two sessions is a different problem from
+        # one whose videos were never registered, and the two were previously
+        # reported with the same misleading message.
         try:
             nwb_file_name = VidFileGroup().get_nwb_file(key["vid_group_id"])[
                 "nwb_file_name"
             ]
-        except ValueError:
-            pass
-
-        # Fail fast if no NWB parent (before any expensive I/O)
-        if nwb_file_name is None:
+        except ValueError as e:
+            if "Expected exactly 1 common NWB file" in str(e):
+                raise ValueError(
+                    f"Cannot store pose estimation: {e} Pose estimation "
+                    "requires a single-session video group; multi-session "
+                    "groups are for model training only."
+                ) from e
             raise ValueError(
                 "Cannot store pose estimation: no registered Nwbfile linked "
                 f"to VidFileGroup '{key['vid_group_id']}'. Ensure the video "
                 "files in this group are registered in VideoFile and linked "
                 "to a Session via TaskEpoch. Use "
                 "VidFileGroup().get_nwb_file() to verify before populating."
-            )
+            ) from e
 
         is_3d = self._is_3d_mode(key)
 
@@ -2442,7 +2489,15 @@ class PoseSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class PoseV2(SpyglassMixin, dj.Computed):
-    """Processed pose derivatives (orientation, centroid, velocity)"""
+    """Processed pose derivatives (orientation, centroid, velocity).
+
+    The recording session is *not* an attribute here. ``PoseV2`` reaches its
+    videos through ``VidFileGroup``, whose ``vid_group_id`` collapses a set of
+    ``VideoFile`` rows into one opaque ID, so -- unlike ``DLCPosV1``, which
+    references ``VideoFile`` directly -- ``nwb_file_name`` and ``epoch`` do not
+    ride down the primary key. Use :meth:`fetch_by_epoch` to select entries by
+    session or epoch (issue #1680).
+    """
 
     definition = """
     -> PoseSelection
@@ -2453,6 +2508,59 @@ class PoseV2(SpyglassMixin, dj.Computed):
     velocity_object_id='': varchar(40)
     smoothed_pose_object_id='': varchar(40)
     """
+
+    def fetch_by_epoch(self, restriction=True):
+        """Restrict these entries to those recorded in matching epochs.
+
+        ``PoseV2``'s key carries ``vid_group_id``, not ``nwb_file_name`` /
+        ``epoch``, so selecting entries by recording session means going back
+        out through ``VidFileGroup.File`` to the videos. This does that walk
+        for you.
+
+        Parameters
+        ----------
+        restriction : dict, str, or query expression, optional
+            Any restriction valid on ``TaskEpoch`` -- e.g.
+            ``{"nwb_file_name": "sub_2023_.nwb"}`` for a whole session, or
+            ``{"nwb_file_name": ..., "epoch": 1}`` for one epoch. Default
+            ``True`` (every epoch), which returns all entries whose video group
+            resolves to a registered session.
+
+        Returns
+        -------
+        PoseV2
+            ``self`` restricted to entries whose videos fall in a matching
+            epoch. Chain ``.fetch1_dataframe()`` to read one out.
+
+        Examples
+        --------
+        >>> # Every PoseV2 entry for one session
+        >>> PoseV2().fetch_by_epoch({"nwb_file_name": "sub_2023_.nwb"})
+        >>>
+        >>> # One epoch, straight to a dataframe
+        >>> df = PoseV2().fetch_by_epoch(
+        ...     {"nwb_file_name": "sub_2023_.nwb", "epoch": 1}
+        ... ).fetch1_dataframe()
+        >>>
+        >>> # Compose with other restrictions as usual
+        >>> (PoseV2 & {"pose_params_id": "default"}).fetch_by_epoch(
+        ...     {"nwb_file_name": "sub_2023_.nwb"}
+        ... )
+
+        Notes
+        -----
+        A video group may hold several videos (one per camera on a 3-D rig, or
+        several epochs). Matching *any* of them selects the entry, and the
+        result is deduplicated to one row per ``PoseV2`` entry -- joining
+        ``VidFileGroup.File`` directly would instead repeat the entry once per
+        matching video.
+        """
+        from spyglass.common import TaskEpoch
+
+        groups = dj.U("vid_group_id") & (
+            VidFileGroup.File & (TaskEpoch & restriction)
+        )
+        return self & groups
 
     def fetch1_dataframe(self):
         """Fetch processed pose data as pandas DataFrame.
@@ -2881,8 +2989,10 @@ class PoseV2(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             Primary key from PoseSelection.
-        nwb_file_name : str or None
-            Parent NWB file name from :meth:`make_compute`.
+        nwb_file_name : str
+            Parent NWB file name from :meth:`make_compute`, used to name the
+            analysis file. Not stored as an attribute -- see
+            :meth:`fetch_by_epoch` for selecting entries by session.
         outputs : dict
             Result of ``compute_pose_outputs``.
         """
@@ -2935,28 +3045,30 @@ class PoseV2(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_nwb_file_name(key: dict):
-        """Return the common nwb_file_name for this VidFileGroup, or None.
+        """Return the nwb_file_name common to this VidFileGroup's videos.
 
-        Delegates to VidFileGroup.get_nwb_file(), which joins VideoFile →
-        TaskEpoch → Session to confirm all videos share one NWB parent.
-        Returns None when no such parent exists (e.g. tutorial / no registered
-        videos), so callers can fall back to standalone NWB storage.
+        Delegates to ``VidFileGroup.get_nwb_file()``, which confirms all videos
+        share one NWB parent. The error is deliberately not swallowed: the only
+        consumer, ``_store_pose_nwb``, hands the value to
+        ``AnalysisNwbfile.create()``, which cannot accept ``None`` -- returning
+        it merely defers the failure to a less informative site.
 
         Parameters
         ----------
         key : dict
-            Must include vid_group_id
+            Must include ``vid_group_id``.
 
         Returns
         -------
-        str or None
+        str
+            The common parent NWB file name.
+
+        Raises
+        ------
+        ValueError
+            If the group does not resolve to exactly one ``Nwbfile``.
         """
-        try:
-            return VidFileGroup().get_nwb_file(key["vid_group_id"])[
-                "nwb_file_name"
-            ]
-        except ValueError:
-            return None
+        return VidFileGroup().get_nwb_file(key["vid_group_id"])["nwb_file_name"]
 
     def _calculate_orientation(
         self,

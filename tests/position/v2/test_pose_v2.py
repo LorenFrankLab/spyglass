@@ -675,6 +675,106 @@ class TestPositionOutputInsert:
             assert call_args.kwargs.get("skip_duplicates") is True
 
 
+class TestPoseV2SessionResolution:
+    """Resolving a PoseV2 entry back to its recording session (issue #1680).
+
+    ``VidFileGroup`` collapses a set of ``VideoFile`` rows into an opaque
+    ``vid_group_id``, so unlike ``DLCPosV1`` neither ``nwb_file_name`` nor
+    ``epoch`` rides the primary key down. ``fetch_by_epoch`` walks back out
+    through ``VidFileGroup.File`` instead of duplicating the attribute.
+    """
+
+    def test_get_nwb_file_name_resolves(
+        self, pose_v2_instance, single_session_group, two_sessions
+    ):
+        """Single-session group resolves to that session."""
+        result = pose_v2_instance._get_nwb_file_name(
+            {"vid_group_id": single_session_group}
+        )
+        assert result == two_sessions["names"][0]
+
+    def test_get_nwb_file_name_raises_on_multi_session(
+        self, pose_v2_instance, multi_session_group
+    ):
+        """Multi-session group raises rather than returning None.
+
+        The only consumer, ``_store_pose_nwb``, passes the value to
+        ``AnalysisNwbfile.create()``, which cannot accept None -- returning it
+        merely defers the failure to a less informative site.
+        """
+        with pytest.raises(ValueError, match="Expected exactly 1 common NWB"):
+            pose_v2_instance._get_nwb_file_name(
+                {"vid_group_id": multi_session_group}
+            )
+
+
+class TestFetchByEpoch:
+    """``PoseV2.fetch_by_epoch`` — select entries by recording session/epoch.
+
+    This is the issue #1680 ask, answered with a helper rather than a stored
+    attribute: the session is already reachable through ``VidFileGroup.File``,
+    so duplicating it onto ``PoseV2`` would add a second source of truth.
+    """
+
+    def test_selects_matching_session(self, PoseV2, pose_v2_row, two_sessions):
+        """A session restriction returns the entry recorded in that session."""
+        assert PoseV2().fetch_by_epoch(
+            {"nwb_file_name": two_sessions["names"][0]}
+        ).fetch1("KEY") == {
+            k: v for k, v in pose_v2_row.items() if k in PoseV2.primary_key
+        }
+
+    def test_excludes_other_session(self, PoseV2, pose_v2_row, two_sessions):
+        """A different session returns nothing — not everything.
+
+        Guards the DataJoint footgun this helper exists to avoid: restricting
+        by an attribute a table does not have is silently ignored, so a naive
+        ``PoseV2 & {"nwb_file_name": ...}`` returns *every* row.
+        """
+        assert (
+            len(
+                PoseV2().fetch_by_epoch(
+                    {"nwb_file_name": two_sessions["names"][1]}
+                )
+            )
+            == 0
+        )
+
+    def test_epoch_granularity(self, PoseV2, pose_v2_row, two_sessions):
+        """Restricting to the wrong epoch excludes the entry."""
+        name = two_sessions["names"][0]
+        assert len(PoseV2().fetch_by_epoch({"nwb_file_name": name, "epoch": 1}))
+        assert not len(
+            PoseV2().fetch_by_epoch({"nwb_file_name": name, "epoch": 99})
+        )
+
+    def test_composes_with_restriction(self, PoseV2, pose_v2_row, two_sessions):
+        """Callable on an already-restricted query, not just the full table."""
+        name = two_sessions["names"][0]
+        restricted = PoseV2 & {"pose_params_id": pose_v2_row["pose_params_id"]}
+        assert len(restricted.fetch_by_epoch({"nwb_file_name": name})) == 1
+
+        no_match = PoseV2 & {"pose_params_id": "definitely_not_a_params_id"}
+        assert len(no_match.fetch_by_epoch({"nwb_file_name": name})) == 0
+
+    def test_multicam_group_yields_one_row(
+        self, PoseV2, multicam_pose_v2_row, multicam_session
+    ):
+        """A 3-camera group must not repeat its entry once per camera.
+
+        The join posted on the issue (``PoseV2 * VidFileGroup.File``) fans out
+        to one row per matching video; ``fetch_by_epoch`` deduplicates.
+        """
+        result = PoseV2().fetch_by_epoch(
+            {"nwb_file_name": multicam_session["name"]}
+        )
+        assert len(result) == 1
+
+    def test_default_restriction_matches_all(self, PoseV2, pose_v2_row):
+        """No restriction → every session-linked entry."""
+        assert len(PoseV2().fetch_by_epoch()) == len(PoseV2())
+
+
 def _make_two_led_pose_df(n=300, sampling_rate=30.0, seed=42):
     """Return a 2-LED (greenLED + redLED) MultiIndex pose DataFrame.
 
