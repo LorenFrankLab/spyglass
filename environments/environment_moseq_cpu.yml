@@ -19,6 +19,7 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
+  - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
@@ -28,7 +29,6 @@ dependencies:
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
-  - pyfftw  # ghostipy req; resolve a numpy>=2-compatible release
   - python>=3.10,<3.13
   - pytorch<1.12.0
   - ripple_detection
@@ -38,6 +38,5 @@ dependencies:
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
-      - ghostipy # for common_filter
       - mountainsort4
       - ..[moseq-cpu]

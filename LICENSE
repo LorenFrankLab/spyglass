@@ -16,3 +16,13 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BEsq LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+THIRD-PARTY CODE
+
+The module spyglass.common._fir_filter, which provides the FIR filter design and
+out-of-core filtering used by the LFP pipeline, is derived from Ghostipy
+(https://github.com/kemerelab/ghostipy, Kemere Lab, Rice University) and is
+licensed under the Apache License, Version 2.0. A copy of that license is
+distributed with Spyglass at spyglass/common/licenses/ghostipy-Apache-2.0.txt.
+The modifications made to the vendored code are listed in the docstring of
+_fir_filter.py, as required by Apache-2.0 section 4(b).

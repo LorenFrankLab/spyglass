@@ -149,10 +149,9 @@ jobs:
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        # --base-dir pins tests to the cached tests/_data/ path (see
-        # Cache test data step above). Without it, conftest.py now defaults
-        # to a per-session temp directory for safety (issue #1573), which
-        # would bypass the cache and re-download the NWB + video fixtures.
+        # --base-dir matches the conftest default (./tests/_data/) and the
+        # path covered by the cache-test-data step above. Pinned explicitly
+        # so cache hits are stable across any future conftest default change.
         # tests/spikesorting/v*/ are excluded here. This job installs the
         # project pin (SpikeInterface 0.104), which supports only the v2
         # runtime; the v0/v1 active tests exercise guarded legacy
@@ -166,6 +165,7 @@ jobs:
           --ignore=tests/spikesorting/v2 \
           tests/
     - name: Upload coverage reports to Codecov
+      if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}

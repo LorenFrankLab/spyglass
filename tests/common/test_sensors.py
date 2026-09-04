@@ -3,9 +3,14 @@ import pytest
 
 @pytest.fixture
 def sensor_data(common, mini_insert):
-    tbl = common.common_sensors.SensorData()
-    tbl.populate()
-    yield tbl
+    """SensorData as ingested from the mini file.
+
+    Previously called `populate()`. SensorData now ingests via
+    `insert_from_nwbfile`, which `mini_insert` already drives, and its `make`
+    is a deprecation shim -- calling populate() would try to run it for any
+    other session in the database.
+    """
+    yield common.common_sensors.SensorData()
 
 
 def test_sensor_data_insert(sensor_data, mini_insert, mini_restr, mini_content):

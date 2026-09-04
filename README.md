@@ -33,11 +33,11 @@ Features of Spyglass include:
     code. This ensures that all analysis is reproducible and that the results
     are automatically updated when the data or analysis code changes.
 - **Common analysis tools** - Spyglass provides easy usage of the open-source
-    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface),
-    [Ghostipy](https://github.com/kemerelab/ghostipy), and
-    [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common analysis
-    tasks. These packages are well-documented and have active developer
-    communities.
+    packages [SpikeInterface](https://github.com/SpikeInterface/spikeinterface)
+    and [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) for common
+    analysis tasks. These packages are well-documented and have active developer
+    communities. Its LFP filtering is derived from
+    [Ghostipy](https://github.com/kemerelab/ghostipy).
 - **Interactive data visualization** - Spyglass uses
     [figurl](https://github.com/flatironinstitute/figurl) to create interactive
     data visualizations that can be shared with collaborators and the broader

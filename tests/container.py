@@ -1,8 +1,10 @@
 import atexit
 import hashlib
+import re
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 import datajoint as dj
 import docker
@@ -32,6 +34,10 @@ class DockerMySQLManager:
         If True, stop and remove container on exit from python. Default True.
     verbose : bool
         If True, print container status on startup. Default False.
+    vol_dir : str
+        Parent directory for the container's MySQL data dir, bind-mounted as
+        `<vol_dir>/<container_name>` -> /var/lib/mysql. Default None, letting
+        Docker manage storage on its own root disk.
     """
 
     def __init__(
@@ -44,6 +50,7 @@ class DockerMySQLManager:
         verbose: bool = False,
         container_name: str = None,
         port: int = None,
+        vol_dir: str = None,
     ) -> None:
         self.image_name = image_name
         self.mysql_version = mysql_version
@@ -57,11 +64,14 @@ class DockerMySQLManager:
         self.logger = logger
         self.logger.setLevel("INFO" if verbose else "ERROR")
 
-        if container_name is None or port is None:
-            container_name, port = self._container_name_from_branch()
+        if container_name is None:
+            container_name = self._resolve_container_name()
+        if port is None:
+            port = self._resolve_port(container_name)
 
         self.container_name = container_name
         self.port = port
+        self.vol_dir = self._resolve_vol_dir(vol_dir)
 
         if not self.null_server:
             if shutdown:
@@ -102,13 +112,17 @@ class DockerMySQLManager:
             )
         return None
 
-    def _container_name_from_branch(self) -> tuple:
-        """Generate container name from current git branch."""
-        # default is 3308, as a holdover from mysql version testing
-        defaults = "spyglass-pytest", 3300 + int(self.mysql_version[0])
+    def _resolve_container_name(self) -> str:
+        """Generate a container name from the current git branch.
+
+        Resolved independently of `port` so that an explicit `--container-
+        name` is never silently discarded just because `--container-port`
+        was omitted (and vice versa).
+        """
+        default_name = "spyglass-pytest"
 
         if self.null_server:
-            return defaults
+            return default_name
 
         try:
             branch_name = (
@@ -118,22 +132,64 @@ class DockerMySQLManager:
             )
         except Exception as e:
             logger.error(f"Failed to get git branch name: {e}")
-            return defaults
+            return default_name
 
         self.branch_name = branch_name
-        container_name = f"spyglass-pytest-{branch_name}"
+        return f"spyglass-pytest-{branch_name}"
+
+    def _resolve_port(self, container_name: str) -> int:
+        """Pick a port for `container_name`.
+
+        Reuses the port of an existing container with that name if one is
+        running; otherwise deterministically derives one from the name.
+        """
+        # default is 3308, as a holdover from mysql version testing
+        default_port = 3300 + int(self.mysql_version[0])
+
+        if self.null_server:
+            return default_port
 
         # Check if container with this name already exists and get its port
         existing_port = self._get_existing_container_port(container_name)
         if existing_port is not None:
-            return container_name, existing_port
+            return existing_port
 
         # Otherwise, find an available port
         port = self.string_to_port(container_name)
         while self.port_in_use(port):
             port += 1
 
-        return container_name, port
+        return port
+
+    def _resolve_vol_dir(self, vol_dir: str = None) -> Path:
+        """Resolve the host directory to bind-mount as MySQL's data dir.
+
+        Keeps container data off the root disk, which can be small relative to
+        the space a populated test database needs.
+
+        Parameters
+        ----------
+        vol_dir : str, optional
+            Parent directory for container volumes. If not given, returns None
+            and Docker manages storage itself.
+
+        Returns
+        -------
+        Path or None
+            `<vol_dir>/<container_name>`, else None.
+        """
+        if not vol_dir or self.null_server:
+            return None
+
+        # container_name may derive from a branch name (e.g. "feature/foo");
+        # strip path separators and other non-filename characters so it can't
+        # create nested directories or escape vol_dir via ".." segments.
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", self.container_name)
+        safe_name = safe_name.strip(".") or "_"  # reject bare "." / ".."
+        path = Path(vol_dir).expanduser().absolute() / safe_name
+        self.logger.info(f"{self.msg}data dir: {path}")
+
+        return path
 
     @staticmethod
     def string_to_port(
@@ -190,32 +246,22 @@ class DockerMySQLManager:
             return None
 
         elif self.container_status in ["created", "running", "restarting"]:
+            self._warn_if_vol_dir_ignored()
             self.logger.info(
                 self.msg + "starting: " + self.container_status + "."
             )
 
         elif self.container_status == "exited":
+            self._warn_if_vol_dir_ignored()
             self.logger.info(self.msg + "restarting.")
             self.container.restart()
 
         else:
-            # Opt-in volume mount: ``SPYGLASS_TEST_MYSQL_DATA_DIR``
-            # lets the caller bind-mount MySQL's data dir onto a
-            # filesystem with more headroom (default Docker storage
-            # lives on ``/var/lib/docker`` and can fill the root
-            # partition). Per-container subdir keeps parallel test
-            # runs from clobbering each other's data.
-            import os as _os
-
-            data_root = _os.environ.get("SPYGLASS_TEST_MYSQL_DATA_DIR")
             volumes = None
-            if data_root:
-                container_data_dir = _os.path.join(
-                    data_root, self.container_name
-                )
-                _os.makedirs(container_data_dir, exist_ok=True)
+            if self.vol_dir:
+                self.vol_dir.mkdir(parents=True, exist_ok=True)
                 volumes = {
-                    container_data_dir: {
+                    str(self.vol_dir): {
                         "bind": "/var/lib/mysql",
                         "mode": "rw",
                     }
@@ -235,6 +281,16 @@ class DockerMySQLManager:
             self.logger.info(self.msg + "starting new.")
 
         return self.container.name
+
+    def _warn_if_vol_dir_ignored(self) -> None:
+        """Warn that `vol_dir` cannot apply to a container we didn't create."""
+        if self.vol_dir is not None:
+            self.logger.warning(
+                self.msg
+                + "reusing an existing container; --container-vol-dir has "
+                + "no effect unless the container is removed and recreated "
+                + "(omit --no-teardown, or pick a fresh --container-name)."
+            )
 
     def wait(self, timeout=120, wait=3) -> None:
         """Wait for healthy container.
@@ -326,25 +382,57 @@ class DockerMySQLManager:
         return dj.conn().is_connected
 
     def stop(self, remove=True) -> None:
-        """Stop and remove container."""
+        """Stop and remove container, clearing its data dir if removed.
+
+        `vol_dir` bind-mounts outlive the container itself: removing the
+        container without also clearing `vol_dir` leaves a later run that
+        reuses this container name pointed at a stale MySQL data dir, even
+        though its on-disk artifacts (NWB files, DLC projects, etc.) were
+        already deleted by that earlier run's teardown. Clearing `vol_dir`
+        here whenever the container is removed keeps the two in sync.
+
+        An "exited" container is already stopped, but still gets removed
+        when `remove` is True -- otherwise `start()`'s restart branch would
+        bring it back on the old mount/port after its data dir was cleared.
+        """
         if self.null_server:
             return None
-        if not self.container_status or self.container_status == "exited":
+
+        if self.container_status:  # present, whether running or exited
+            if self.container_status != "exited":
+                self.container.stop()  # Logger I/O closes during teardown
+                logline = f"Container {self.container_name} stopped"
+            else:
+                logline = f"Container {self.container_name} (exited)"
+
+            if remove:
+                # ``v=True`` also removes the container's ANONYMOUS volumes.
+                # The datajoint/mysql image declares ``VOLUME /var/lib/mysql``,
+                # so a run WITHOUT a ``vol_dir`` bind mount (the default)
+                # creates a ~4 GB anonymous volume per container; without this
+                # every suite run leaks one until the Docker partition fills.
+                # A bind mount is not a managed volume, so ``vol_dir`` runs are
+                # unaffected and are still cleared by ``_clear_vol_dir``.
+                self.container.remove(v=True)
+                logline += " and removed (with volumes)"
+
+            print(f"{logline}.")
+
+        if remove and self.vol_dir is not None:
+            self._clear_vol_dir()
+
+    def _clear_vol_dir(self) -> None:
+        """Remove `vol_dir` so a later run starts from scratch."""
+        if not self.vol_dir.exists():
             return
-
-        container_name = self.container_name
-        self.container.stop()  # Logger I/O operations close during teardown
-        logline = f"Container {container_name} stopped"
-
-        if remove:
-            # ``v=True`` removes the container's ANONYMOUS volumes. The
-            # datajoint/mysql image declares ``VOLUME /var/lib/mysql``, so
-            # the default (no ``SPYGLASS_TEST_MYSQL_DATA_DIR`` bind mount)
-            # run() creates a ~4 GB anonymous volume per container. Without
-            # ``v=True`` every test-suite run leaks one, eventually filling
-            # the Docker root partition. A bind mount (when configured) is
-            # not a managed volume, so ``v=True`` leaves it untouched.
-            self.container.remove(v=True)
-            logline += " and removed (with volumes)"
-
-        print(f"{logline}.")
+        try:
+            self.client.containers.run(
+                image="alpine",
+                command=["sh", "-c", "rm -rf /data/..?* /data/.[!.]* /data/*"],
+                volumes={str(self.vol_dir): {"bind": "/data", "mode": "rw"}},
+                remove=True,
+                detach=False,
+            )
+            self.vol_dir.rmdir()
+        except Exception as e:
+            self.logger.warning(f"{self.msg}failed to clear vol_dir: {e}")

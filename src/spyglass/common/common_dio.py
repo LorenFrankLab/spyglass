@@ -100,15 +100,10 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         }
 
     def make(self, key):
-        """Make function to populate the table. For backward compatibility"""
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="DIOEvents.make", alt="insert_from_nwbfile"
+        """Deprecated in favor of insert_from_nwbfile."""
+        raise NotImplementedError(
+            "DIOEvents.make is deprecated. Use insert_from_nwbfile."
         )
-
-        # Call the new SpyglassIngestion method
-        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def plot_all_dio_events(self, return_fig=False):
         """Plot all DIO events in the session.

@@ -57,6 +57,34 @@ print(
 UnitSelectionParams()
 # -
 
+# Beyond the curation labels, units can be selected on any column of the units
+# table with `unit_criteria`: a mapping of units table column to a criterion the
+# unit must satisfy. Criteria can be numeric comparisons (`">"`, `">="`, `"<"`,
+# `"<="`, `"=="`, `"!="`), inclusive ranges (`"between"`, `"outside"`), or
+# membership tests (`"isin"`, `"notin"`). A bare value or list of values is
+# shorthand for `"isin"`. A unit is included only if it satisfies all of the
+# criteria. Units whose value is missing (NaN) fail every criterion on that
+# column, including the negated `"!="` and `"notin"`.
+#
+# In the example below, the `brain_region` criterion keeps only units recorded in
+# CA1, in addition to the curation label and quality criteria. This assumes "brain_region",
+# "snr", and "isi_violation" are columns that exist in the nwb units table.
+#
+# ```python
+# UnitSelectionParams().insert1(
+#     {
+#         "unit_filter_params_name": "good_ca1_units",
+#         "include_labels": [],
+#         "exclude_labels": ["noise", "mua"],
+#         "unit_criteria": {
+#             "brain_region": ["CA1"],  # same as {"isin": ["CA1"]}
+#             "snr": {">=": 3},
+#             "isi_violation": {"<": 0.01},
+#         },
+#     }
+# )
+# ```
+
 # We then define the set of curated sorting results to include in the group
 #
 # Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's

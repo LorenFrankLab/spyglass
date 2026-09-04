@@ -338,7 +338,7 @@ The cleanup system handles:
 - **Uninserted files**: Files created but never added to tables
 - **Multi-table coordination**: Works across common and all custom
     `AnalysisNwbfile` tables
-- **Empty files**: Files with 0 bytes are automatically removed
+- **Empty files**: Old, untracked NWB files with 0 bytes are removed
 
 ### Running Cleanup
 
@@ -347,9 +347,15 @@ Use the common `AnalysisNwbfile` table to clean up all analysis files:
 ```python
 from spyglass.common import AnalysisNwbfile
 
-# Run cleanup across all tables (common + custom)
-AnalysisNwbfile().cleanup()
+# Preview cleanup across all tables (common + custom)
+AnalysisNwbfile().cleanup(dry_run=True)
+
+# Apply the cleanup after reviewing the dry-run output
+AnalysisNwbfile().cleanup(dry_run=False)
 ```
+
+The dry run reports aggregate target counts and logical candidate bytes rather
+than a per-path manifest.
 
 **Important**: Cleanup automatically coordinates across all custom
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
@@ -361,27 +367,51 @@ operation treats the analysis directory as a managed resource.
 
 ### How It Works
 
-1. **Discovery**: Finds all custom `AnalysisNwbfile` tables via
-    `AnalysisRegistry`
-2. **Orphan Detection**: For each table, identifies entries with no downstream
-    references
-3. **File Tracking**: Collects all tracked files from all tables
-4. **Cleanup**: Removes database entries and deletes untracked files
-
-The cleanup process checks:
-
-- Database entries (removes orphaned rows)
-- External file store (removes untracked files)
-- Coordination across tables (prevents premature deletion)
+Cleanup discovers common and custom analysis tables, snapshots tracked paths
+once, scans the filesystem, validates the complete deletion plan, and unlinks
+the candidates. It next removes orphan rows and unused DataJoint external
+entries. Files made orphaned by that database phase are handled on the next run.
 
 ### Safety Features
 
-- **Multi-table check**: Verifies file is unused across ALL tables before
-    deletion
-- **Logging**: Reports all actions taken during cleanup
-- **Foreign key protection**: Respects downstream table dependencies
-- **Registry blocking**: Temporarily blocks new table registrations during
-    cleanup
+- **Tracked and recent files are retained**: tracked paths are fetched once
+    across all registered common and custom tables. Files newer than
+    `min_file_age_hours` (default 24), based on target modification time, are
+    deferred and reported. Pass `min_file_age_hours=0` only for intentional
+    immediate cleanup. This age gate applies to the `*.nwb` filesystem sweep,
+    not DataJoint's custom-table external cleanup later in the run.
+- **Deletion limits catch a wrong directory or large unexpected backlog**:
+    destructive cleanup refuses a plan above `max_delete_fraction` (default
+    0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
+    untracked or empty analysis NWB files; foreign keys continue to govern
+    orphan-row deletion.
+- **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
+    `*.nwb` leaf symlink authorizes deletion of both its recorded regular-file
+    target and the link. Dangling links lose only the link. Directory symlinks
+    are **not** traversed (`followlinks=False`): cleanup deletes files, so it
+    must not follow a symlinked subdirectory out of `analysis_dir` into an
+    unrelated store. Only leaf `*.nwb` symlinks are eligible, and a symlinked
+    `analysis_dir` root is still scanned.
+- **The analysis directory is trusted**: cleanup intentionally follows the
+    normal Spyglass snapshot-and-delete model rather than defending against
+    concurrent filesystem or database changes. A leaf `*.nwb` symlink below
+    `analysis_dir` can authorize deletion outside that directory, including
+    beneath another configured store, because there is no protected-store
+    denylist. Restrict write access to the analysis tree and do not run
+    cleanup concurrently with analysis writers or registration.
+- **Insert blocking refuses ambiguous ownership**: cleanup checks registered
+    analysis tables for existing blockers before proceeding; a destructive run
+    then installs temporary `BEFORE INSERT` triggers. If a blocker already
+    exists, previews and destructive runs both refuse because they cannot tell
+    whether another cleanup is active or the trigger is stale. First
+    confirm that no cleanup is running; only then inspect the triggers and use
+    `AnalysisRegistry().unblock_new_inserts()` if every blocking trigger is
+    stale. That helper removes all registered analysis blocking triggers.
+
+**Concurrency limit**: the trigger check is not a database-wide cleanup lease,
+and triggers do not carry per-run ownership. Do not overlap cleanup runs.
+The tracked-path and filesystem snapshots can also become stale before unlink,
+so do not concurrently register or mutate eligible analysis paths.
 
 ### Custom Tables
 

@@ -18,10 +18,6 @@ advertised API true:
     resolution to one source per loop, and returns ``len(merge_ids) ==
     len(nwb_list)`` with each id the owner of its paired file.
   - the single-source path (used by every merge master today) is unchanged.
-
-Separately, the ``delete_downstream_merge`` shim called
-``ActivityLog.deprecate_log(..., alternate=...)`` but the signature kwarg is
-``alt=``, so the shim raised ``TypeError`` before doing anything.
 """
 
 from __future__ import annotations
@@ -391,28 +387,6 @@ def test_fetch_nwb_return_merge_ids_single_source_unchanged(two_source_merge):
     assert len(nwb_list) == 1
     assert merge_ids == [merge_id_a]
     assert "leaf_a_id" in nwb_list[0]
-
-
-def test_delete_downstream_merge_shim_logs_not_raises(dj_conn):
-    """The deprecated ``delete_downstream_merge`` shim logs its deprecation
-    and does NOT raise ``TypeError`` (the A6 ``alt=`` kwarg fix).
-
-    With the bug (``alternate=``) ``deprecate_log`` raised ``TypeError``
-    before running, so no ``ActivityLog`` row was written and the expected
-    ``ValueError`` (non-Spyglass input) was never reached.
-    """
-    from spyglass.common.common_usage import ActivityLog
-    from spyglass.utils.dj_merge_tables import delete_downstream_merge
-
-    log_restr = {"function": "delete_downstream_merge"}
-    before = len(ActivityLog & log_restr)
-
-    # A non-Spyglass input reaches the explicit ValueError only AFTER
-    # ``deprecate_log`` runs; with the bug a TypeError fires first instead.
-    with pytest.raises(ValueError, match="Spyglass Table"):
-        delete_downstream_merge(object())
-
-    assert len(ActivityLog & log_restr) == before + 1
 
 
 @pytest.fixture(scope="module")

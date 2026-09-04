@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+import datajoint as dj
 import numpy as np
 import pandas as pd
 import pytest
@@ -98,7 +99,11 @@ def import_pose_nwb(verbose_context, imported_pose_tbl):
     # Nwbfile().insert_from_relative_file_name(pose_file.name)
     # Session().populate(dict(nwb_file_name=pose_file.name))
 
-    imported_pose_tbl.insert_from_nwbfile(copy_file_name, skip_duplicates=True)
+    # insert_sessions already ingested the pose data; running it again raises
+    # rather than silently skipping. `skip_duplicates` is gone: ImportedPose
+    # ingests through the mixin and does not expect duplicates.
+    with pytest.raises(dj.errors.DuplicateError):
+        imported_pose_tbl.insert_from_nwbfile(copy_file_name)
 
     yield pose_file
 
