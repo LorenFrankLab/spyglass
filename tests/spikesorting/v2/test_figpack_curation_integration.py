@@ -111,14 +111,26 @@ def test_selection_and_view_are_idempotent(populated_sorting_with_curation):
     )
     assert first == second
 
-    uri_a = FigPackCuration.build_curation_view(
+    first_build = FigPackCuration.build_curation_view_result(
         populated_sorting_with_curation, upload=False
     )
-    uri_b = FigPackCuration.build_curation_view(
+    second_build = FigPackCuration.build_curation_view_result(
         populated_sorting_with_curation, upload=False
     )
-    assert uri_a == uri_b
+    assert not first_build.reused
+    assert second_build.reused
+    assert first_build.uri == second_build.uri
     assert len(FigPackCuration & first) == 1
+
+    # A database row whose local artifact disappeared is rebuilt, not reused.
+    import shutil
+
+    shutil.rmtree(second_build.uri)
+    rebuilt = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    assert not rebuilt.reused
+    assert Path(rebuilt.uri).is_dir()
 
 
 def test_edited_curation_round_trips(populated_sorting_with_curation):
@@ -382,6 +394,7 @@ def test_upload_of_labeled_curation_is_seeded(
     captured = {}
 
     def fake_upload(tmpdir, **kwargs):
+        captured["upload_kwargs"] = kwargs
         captured["annotations"] = json.loads(
             (Path(tmpdir) / "annotations.json").read_text()
         )
@@ -397,6 +410,9 @@ def test_upload_of_labeled_curation_is_seeded(
     try:
         uri = FigPackCuration.build_curation_view(labeled, upload=True)
         assert uri == "https://example.test/seeded-figure"
+        assert (
+            captured["upload_kwargs"]["use_consolidated_metadata_only"] is True
+        )
         labels, merges = curation_annotations_to_labels_and_merges(
             captured["annotations"]
         )

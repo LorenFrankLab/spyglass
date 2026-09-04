@@ -34,6 +34,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import datajoint as dj
@@ -70,6 +71,14 @@ from spyglass.spikesorting.v2.utils import (
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v2_figpack_curation")
+
+
+@dataclass(frozen=True)
+class FigPackBuildResult:
+    """Outcome of resolving a persisted FigPack curation view."""
+
+    uri: str
+    reused: bool
 
 
 # ---- figpack access + storage helpers (lazy / DB-light) ------------------
@@ -668,9 +677,10 @@ def _publish_view(
                 "to publish to figpack.org, or use upload=False to save a local "
                 "bundle."
             )
-        # Build the exact bundle first, then upload every file. FigPack's
-        # uploader recursively includes both sidecars, giving hosted and local
-        # reviews identical seeded state and identity semantics.
+        # Build the exact bundle first. FigPack's recursive uploader includes
+        # both sidecars while consolidated-only mode omits redundant per-array
+        # zarr metadata, giving hosted and local reviews identical seeded state
+        # and identity semantics without multiplying the hosted file count.
         from figpack.core._upload_bundle import _upload_bundle
 
         with tempfile.TemporaryDirectory(prefix="spyglass-figpack-") as tmp:
@@ -681,6 +691,7 @@ def _publish_view(
                 api_key=api_key,
                 title=title,
                 ephemeral=ephemeral,
+                use_consolidated_metadata_only=True,
             )
 
     bundle = figpack_bundle_path(figpack_curation_id)
@@ -982,6 +993,27 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         ``FigPackCurationSelection`` row, populates ``FigPackCuration``, and
         returns the stored ``figpack_uri``.
         """
+        return cls.build_curation_view_result(
+            curation_key,
+            label_options=label_options,
+            displayed_unit_properties=displayed_unit_properties,
+            upload=upload,
+            ephemeral=ephemeral,
+            review_config=review_config,
+        ).uri
+
+    @classmethod
+    def build_curation_view_result(
+        cls,
+        curation_key: dict,
+        *,
+        label_options: list[str] | None = None,
+        displayed_unit_properties: list[str] | None = None,
+        upload: bool = False,
+        ephemeral: bool = False,
+        review_config: dict | None = None,
+    ) -> FigPackBuildResult:
+        """Resolve a view and report whether its existing artifact was reused."""
         selection = FigPackCurationSelection.insert_selection(
             curation_key,
             label_options=label_options,
@@ -996,14 +1028,19 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
         # figpack reuse guard). A hosted (upload=True) URI is remote, so the
         # on-disk check does not apply.
         built = cls & selection
+        reused = bool(built)
         if (
             not upload
             and built
             and not Path(built.fetch1("figpack_uri")).exists()
         ):
             built.delete(safemode=False)
+            reused = False
         cls.populate(selection)
-        return (cls & selection).fetch1("figpack_uri")
+        return FigPackBuildResult(
+            uri=(cls & selection).fetch1("figpack_uri"),
+            reused=reused,
+        )
 
     @staticmethod
     def fetch_curation_from_uri(uri: str) -> tuple[dict, list]:

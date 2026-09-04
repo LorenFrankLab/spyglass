@@ -145,6 +145,25 @@ class MergeLabelConflict:
         )
 
 
+def _unknown_conflict_resolution_labels(
+    values: Sequence[str],
+    valid_labels: set[str],
+    conflict: MergeLabelConflict,
+) -> list[str]:
+    """Return labels newly introduced by a merge-conflict resolution.
+
+    A profile palette controls labels the reviewer may add. It does not erase
+    valid labels inherited from the merged contributors, even when an older or
+    site-specific label is absent from the active profile.
+    """
+    inherited_labels = {
+        label
+        for labels in conflict.contributor_labels.values()
+        for label in labels
+    }
+    return sorted(set(map(str, values)) - valid_labels - inherited_labels)
+
+
 @dataclass(frozen=True)
 class FigPackReview:
     """Resumable handle for one profile-backed FigPack review."""
@@ -465,8 +484,7 @@ def start_review(
         ephemeral=ephemeral,
         review_config=config,
     )
-    view_existed = bool(FigPackCuration & selection)
-    uri = FigPackCuration.build_curation_view(
+    view_result = FigPackCuration.build_curation_view_result(
         parent.as_key(),
         label_options=list(resolved_profile.label_options),
         displayed_unit_properties=list(
@@ -479,7 +497,7 @@ def start_review(
     review = FigPackReview.resume(selection["figpack_curation_id"])
     return replace(
         review,
-        uri=uri,
+        uri=view_result.uri,
         stages=(
             ReviewStageStatus("identity_verified", "complete"),
             ReviewStageStatus(
@@ -488,7 +506,7 @@ def start_review(
             ),
             ReviewStageStatus(
                 "verification_view_ready",
-                "reused" if view_existed else "computed",
+                "reused" if view_result.reused else "computed",
             ),
         ),
     )
@@ -509,6 +527,11 @@ def _normalize_review_edits(
     unit_ids = {
         int(value) for value in (CurationV2.Unit & parent_key).fetch("unit_id")
     }
+    before = {
+        int(unit_id): tuple(sorted(map(str, values)))
+        for unit_id, values in CurationV2._labels_by_unit(parent_key).items()
+        if values
+    }
     edited: dict[int, tuple[str, ...]] = {}
     valid_labels = set(review.profile.label_options)
     for unit_id, unit_labels in labels.items():
@@ -518,11 +541,17 @@ def _normalize_review_edits(
             raise ValueError(
                 f"FigPack annotations for unit {uid} contain duplicate labels."
             )
-        unknown_labels = sorted(set(values) - valid_labels)
+        # FigPack seeds every existing parent label into the annotations even
+        # when the active review profile does not offer that label as a new
+        # choice. Preserve those inherited labels on their original unit while
+        # still rejecting an out-of-palette label newly added to another unit.
+        inherited_labels = set(before.get(uid, ()))
+        unknown_labels = sorted(set(values) - valid_labels - inherited_labels)
         if unknown_labels:
             raise ValueError(
-                f"FigPack annotations for unit {uid} contain labels outside "
-                f"the review profile palette: {unknown_labels}."
+                f"FigPack annotations for unit {uid} contain new labels "
+                "outside the review profile palette: "
+                f"{unknown_labels}."
             )
         edited[uid] = values
 
@@ -552,11 +581,6 @@ def _normalize_review_edits(
             f"curation: {unknown_units}. Available units: {sorted(unit_ids)}."
         )
 
-    before = {
-        int(unit_id): tuple(sorted(map(str, values)))
-        for unit_id, values in CurationV2._labels_by_unit(parent_key).items()
-        if values
-    }
     if review.profile.label_import_mode == "replace":
         after = {uid: values for uid, values in edited.items() if values}
     else:
@@ -745,12 +769,19 @@ def _commit_change_set(
             f"missing={missing}, unexpected={unexpected}."
         )
     valid_labels = set(changes.review.profile.label_options)
+    conflicts_by_unit = {
+        conflict.merged_unit_id: conflict
+        for conflict in changes.label_conflicts
+    }
     for unit_id, values in provided.items():
-        unknown = sorted(set(values) - valid_labels)
+        unknown = _unknown_conflict_resolution_labels(
+            values, valid_labels, conflicts_by_unit[unit_id]
+        )
         if unknown:
             raise ValueError(
                 f"Conflict resolution for merged unit {unit_id} contains "
-                f"labels outside the review profile palette: {unknown}."
+                "new labels outside the review profile palette: "
+                f"{unknown}."
             )
 
     existing_children = {

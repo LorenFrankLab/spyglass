@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -59,13 +60,11 @@ def test_browser_review_preview_commit_resume_and_continue(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """The full review journey is pinned, pure, resumable, and merge-safe."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import RunResult
     from spyglass.spikesorting.v2._figpack_curation import (
         curation_annotations_to_labels_and_merges,
     )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import RunResult
     from spyglass.spikesorting.v2.exceptions import (
         ReviewChangedSincePreviewError,
         UnresolvedMergeLabelConflictError,
@@ -75,6 +74,7 @@ def test_browser_review_preview_commit_resume_and_continue(
     )
     from spyglass.spikesorting.v2.review_api import FigPackReview
     from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_two_unit_sort)
     clear_curations_for(sorting_key)
@@ -84,7 +84,10 @@ def test_browser_review_preview_commit_resume_and_continue(
         root_key = CurationV2.create_initial_curation(
             sorting_key,
             labels={
-                unit_ids[0]: ["mua"],
+                # ``artifact`` is a valid CurationLabel but is intentionally
+                # absent from this review profile's palette. The seeded label
+                # must survive a no-change preview/import.
+                unit_ids[0]: ["artifact"],
                 unit_ids[1]: ["noise"],
             },
         )
@@ -99,6 +102,20 @@ def test_browser_review_preview_commit_resume_and_continue(
             run.start_review(profile_name, source="analysis")
 
         review = run.start_review(profile_name, source="root", upload=False)
+        assert {stage.name: stage.status for stage in review.stages}[
+            "verification_view_ready"
+        ] == "computed"
+        reused_review = run.start_review(
+            profile_name, source="root", upload=False
+        )
+        assert {stage.name: stage.status for stage in reused_review.stages}[
+            "verification_view_ready"
+        ] == "reused"
+        shutil.rmtree(review.uri)
+        review = run.start_review(profile_name, source="root", upload=False)
+        assert {stage.name: stage.status for stage in review.stages}[
+            "verification_view_ready"
+        ] == "computed"
         assert review.parent == run.root_curation
         assert review.profile.review_profile_name == profile_name
         assert review.evaluation.spec == review.profile.evaluation_spec
@@ -128,11 +145,20 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert no_change.reviewed_parent_created_at == review.parent.created_at
         assert no_change.reviewed_parent_created_by == review.parent.created_by
         assert dict(no_change.labels_before) == dict(no_change.labels_after)
+        assert no_change.labels_after[unit_ids[0]] == ("artifact",)
         assert no_change.merge_groups == ()
         assert len(review.parent.children) == children_before
         assert (Path(review.uri) / "annotations.json").read_bytes() == (
             pristine_bytes
         )
+        _write_edits(
+            review.uri,
+            {unit_ids[0]: ["artifact"], unit_ids[1]: ["artifact"]},
+            [],
+        )
+        with pytest.raises(ValueError, match="new labels outside"):
+            review.preview_import()
+        (Path(review.uri) / "annotations.json").write_bytes(pristine_bytes)
         with pytest.raises(ValueError, match="confirm_no_changes"):
             no_change.commit()
         no_change_receipt = no_change.commit(confirm_no_changes=True)
@@ -148,7 +174,7 @@ def test_browser_review_preview_commit_resume_and_continue(
         )
 
         first_edits = {
-            unit_ids[0]: ["mua"],
+            unit_ids[0]: ["artifact"],
             unit_ids[1]: ["noise"],
         }
         _write_edits(review.uri, first_edits, [unit_ids])
@@ -175,7 +201,7 @@ def test_browser_review_preview_commit_resume_and_continue(
             changes.commit()
 
         receipt = changes.commit(
-            conflict_resolutions={max(unit_ids) + 1: ("accept",)}
+            conflict_resolutions={max(unit_ids) + 1: ("artifact",)}
         )
         assert receipt.curation.parent == review.parent
         assert receipt.curation != no_change_receipt.curation
@@ -200,7 +226,7 @@ def test_browser_review_preview_commit_resume_and_continue(
             _load_annotations_json(continuation.uri)
         )
         assert pending_merges == []
-        assert labels == {max(unit_ids) + 1: ["accept"]}
+        assert labels == {max(unit_ids) + 1: ["artifact"]}
     finally:
         clear_curations_for(sorting_key)
 
@@ -211,8 +237,6 @@ def test_review_explicit_annotation_set_identity_and_display(
     """Selected custom properties are hashed, resumable, and displayed."""
     import pandas as pd
 
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.review_api import FigPackReview
@@ -221,6 +245,7 @@ def test_review_explicit_annotation_set_identity_and_display(
         CurationUnitAnnotationSet,
         UnitAnnotationDefinition,
     )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_two_unit_sort)
     clear_curations_for(sorting_key)
