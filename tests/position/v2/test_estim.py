@@ -320,6 +320,138 @@ class TestPoseEstimSelectionMethods:
             assert result.endswith("/v2_unknown_model_")
 
 
+class TestPoseEstimSelectionSessionGuard:
+    """One inference task must derive from exactly one Nwbfile.
+
+    ``VidFileGroup`` deliberately permits multi-session groups so a model can
+    train across sessions. Inference has no such freedom: a ``PoseV2`` entry
+    that spans two sessions has no well-defined ``nwb_file_name``. The guard
+    belongs at selection time, before ``populate`` does any work.
+    """
+
+    def test_multi_session_group_rejected(
+        self, PoseEstimSelection, stub_model, two_sessions, multi_session_group
+    ):
+        """insert1 on a two-session group raises, naming the real cause."""
+        with pytest.raises(ValueError) as exc:
+            PoseEstimSelection().insert1(
+                {
+                    "model_id": stub_model["model_id"],
+                    "vid_group_id": multi_session_group,
+                    "pose_estim_params_id": "default",
+                    "task_mode": "load",
+                    "output_dir": "",
+                }
+            )
+
+        msg = str(exc.value)
+        assert multi_session_group in msg
+        for name in two_sessions["names"]:
+            assert name in msg
+        assert "training" in msg.lower()  # points at the legitimate use
+
+    def test_insert_estimation_task_rejects_multi_session(
+        self, PoseEstimSelection, stub_model, multi_session_group
+    ):
+        """The public entry point inherits the guard via self.insert1."""
+        with pytest.raises(ValueError, match="Expected exactly 1 common NWB"):
+            PoseEstimSelection().insert_estimation_task(
+                key={
+                    "model_id": stub_model["model_id"],
+                    "vid_group_id": multi_session_group,
+                },
+                task_mode="load",
+            )
+
+    def test_single_session_group_accepted(
+        self, PoseEstimSelection, stub_model, single_session_group
+    ):
+        """Positive control: a one-session group still inserts."""
+        tbl = PoseEstimSelection()
+        key = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": single_session_group,
+            "pose_estim_params_id": "default",
+        }
+        tbl.insert1({**key, "task_mode": "load", "output_dir": ""})
+        assert len(tbl & key) == 1
+        (tbl & key).super_delete(warn=False, safemode=False)
+
+
+class TestPoseEstimMakeFetchSessionErrors:
+    """``make_fetch`` must not collapse two distinct failures into one message.
+
+    Defense in depth behind the ``PoseEstimSelection`` guard: rows predating
+    the guard, or written through ``insert`` (plural, which does not route
+    through the guarded ``insert1``), still reach ``make_fetch``.
+    """
+
+    def test_multi_session_names_real_cause(
+        self, PoseEstim, PoseEstimSelection, stub_model, multi_session_group
+    ):
+        """A multi-session group reports the multi-NWB cause, chained."""
+        sel = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": multi_session_group,
+            "pose_estim_params_id": "default",
+        }
+        # Bypass the insert1 guard on purpose -- see class docstring.
+        PoseEstimSelection().insert(
+            [{**sel, "task_mode": "load", "output_dir": ""}]
+        )
+
+        with pytest.raises(ValueError) as exc:
+            PoseEstim().make_fetch(sel)
+
+        assert "Expected exactly 1 common NWB file" in str(exc.value)
+        assert exc.value.__cause__ is not None  # raise ... from e
+
+        (PoseEstimSelection() & sel).super_delete(warn=False, safemode=False)
+
+    def test_unregistered_videos_keep_own_message(
+        self, PoseEstim, PoseEstimSelection, stub_model, make_vid_group
+    ):
+        """An empty group still reports the registration problem, not multi-NWB."""
+        gid = make_vid_group("pv2_no_videos_grp", [])
+        sel = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": gid,
+            "pose_estim_params_id": "default",
+        }
+        PoseEstimSelection().insert(
+            [{**sel, "task_mode": "load", "output_dir": ""}]
+        )
+
+        with pytest.raises(ValueError) as exc:
+            PoseEstim().make_fetch(sel)
+
+        msg = str(exc.value)
+        assert "no registered Nwbfile" in msg
+        assert "Expected exactly 1 common NWB file" not in msg
+
+        (PoseEstimSelection() & sel).super_delete(warn=False, safemode=False)
+
+
+class TestMultiSessionTrainingAllowed:
+    """Blast-radius guard: the training path must stay multi-session."""
+
+    def test_training_group_spans_two_sessions(
+        self, pv2_train, VidFileGroup, stub_model, two_sessions
+    ):
+        """ModelSelection accepts the group PoseEstimSelection rejects."""
+        sel = pv2_train.ModelSelection & {
+            "vid_group_id": stub_model["vid_group_id"]
+        }
+        assert len(sel) == 1
+
+        from spyglass.common import Session
+
+        files = VidFileGroup.File & {"vid_group_id": stub_model["vid_group_id"]}
+        assert set((Session & files).fetch("nwb_file_name")) == set(
+            two_sessions["names"]
+        )
+
+
 class TestPoseEstimParams:
     """Test PoseEstimParams methods for coverage."""
 

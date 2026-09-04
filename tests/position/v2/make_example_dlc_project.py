@@ -293,6 +293,121 @@ def bootstrap_dlc_session(config_path):
     return nwb_file_name
 
 
+def bootstrap_minimal_session(
+    nwb_stem,
+    video_paths,
+    task_name="tutorial_dlc",
+    camera_name="tutorial_dlc",
+):
+    """Register the minimal DB rows behind one Spyglass session.
+
+    Inserts ``Nwbfile`` → ``Session`` → ``Task`` / ``IntervalList`` →
+    ``TaskEpoch`` → ``VideoFile`` (one row per entry in *video_paths*, numbered
+    from 0). The NWB placeholder is a copy of ``minirec20230622_.nwb`` so that
+    ``AnalysisNwbfile.create()`` can open it when storing results.
+
+    This is the database half of :func:`bootstrap_from_video_paths`, split out
+    so callers that already have (or do not need) real video files on disk can
+    register a session without invoking ffmpeg. The paths in *video_paths* are
+    recorded verbatim in ``VideoFile.path`` and are never opened here.
+
+    Requires an active Spyglass database connection.
+
+    Parameters
+    ----------
+    nwb_stem : str
+        Stem for the NWB filename; the session is registered as
+        ``f"{nwb_stem}_.nwb"``.
+    video_paths : list of str or Path
+        Paths recorded in ``VideoFile.path``, one row each, ``video_file_num``
+        assigned by position. Must not be empty.
+    task_name : str, optional
+        Task name for the ``Task`` / ``TaskEpoch`` rows.
+    camera_name : str, optional
+        Camera name for the ``VideoFile`` rows.
+
+    Returns
+    -------
+    str
+        The ``nwb_file_name`` registered in ``Nwbfile``.
+    """
+    import uuid
+    from datetime import datetime
+
+    from spyglass.common import (
+        IntervalList,
+        Nwbfile,
+        Session,
+        Task,
+        TaskEpoch,
+        VideoFile,
+    )
+    from spyglass.settings import raw_dir
+
+    if not video_paths:
+        raise ValueError("video_paths must not be empty")
+
+    nwb_file_name = f"{nwb_stem}_.nwb"
+    nwb_file_path = Path(raw_dir) / nwb_file_name
+
+    # Copy minirec as a valid NWB placeholder so AnalysisNwbfile.create()
+    # can open it when storing pose estimation results.
+    if not nwb_file_path.exists() or nwb_file_path.stat().st_size == 0:
+        minirec = Path(raw_dir) / "minirec20230622_.nwb"
+        if minirec.exists():
+            shutil.copy2(str(minirec), str(nwb_file_path))
+        else:
+            nwb_file_path.touch()  # fallback for environments without minirec
+
+    nwb_key = dict(nwb_file_name=nwb_file_name)
+    interval_list_name = f"{task_name}_epoch_1"
+    interval_key = dict(nwb_key, interval_list_name=interval_list_name)
+    now = datetime.now()
+    ins = dict(allow_direct_insert=True, skip_duplicates=True)
+
+    if not Nwbfile() & nwb_key:
+        Nwbfile().insert1(
+            {**nwb_key, "nwb_file_abs_path": str(nwb_file_path.resolve())},
+            allow_direct_insert=True,
+        )
+    Session().insert1(
+        {
+            **nwb_key,
+            "session_description": f"Tutorial dummy: {nwb_stem}",
+            "session_start_time": now,
+            "timestamps_reference_time": now,
+        },
+        **ins,
+    )
+    Task().insert1({"task_name": task_name}, **ins)
+    IntervalList().insert1(
+        {**interval_key, "valid_times": np.array([[0.0, 1.0]])}, **ins
+    )
+    TaskEpoch().insert1(
+        {
+            **interval_key,
+            "epoch": 1,
+            "task_name": task_name,
+            "camera_names": [],
+        },
+        **ins,
+    )
+    for i, video_path in enumerate(video_paths):
+        VideoFile().insert1(
+            {
+                **nwb_key,
+                "epoch": 1,
+                "video_file_num": i,
+                "camera_name": camera_name,
+                "video_file_object_id": str(uuid.uuid4())[:40],
+                "path": str(Path(video_path).resolve()),
+            },
+            **ins,
+        )
+
+    return nwb_file_name
+
+
 def bootstrap_from_video_paths(
     video_paths,
     nwb_stem=None,
@@ -339,18 +454,6 @@ def bootstrap_from_video_paths(
         path to the 1-second inference clip written into ``video_dir``.
     """
     import subprocess
-    import uuid
-    from datetime import datetime
-
-    from spyglass.common import (
-        IntervalList,
-        Nwbfile,
-        Session,
-        Task,
-        TaskEpoch,
-        VideoFile,
-    )
-    from spyglass.settings import raw_dir
 
     video_paths = [str(Path(vp).resolve()) for vp in video_paths]
     if not video_paths:
@@ -360,18 +463,6 @@ def bootstrap_from_video_paths(
     # folder) if the caller did not supply one.
     if nwb_stem is None:
         nwb_stem = Path(video_paths[0]).parent.parent.name
-
-    nwb_file_name = f"{nwb_stem}_.nwb"
-    nwb_file_path = Path(raw_dir) / nwb_file_name
-
-    # Copy minirec as a valid NWB placeholder so AnalysisNwbfile.create()
-    # can open it when storing pose estimation results.
-    if not nwb_file_path.exists() or nwb_file_path.stat().st_size == 0:
-        minirec = Path(raw_dir) / "minirec20230622_.nwb"
-        if minirec.exists():
-            shutil.copy2(str(minirec), str(nwb_file_path))
-        else:
-            nwb_file_path.touch()  # fallback for environments without minirec
 
     # Create a 1-second inference clip in video_dir.  Only runs ffmpeg when
     # the source is a real (non-empty) video file.
@@ -415,51 +506,12 @@ def bootstrap_from_video_paths(
 
     all_video_paths = video_paths + [str(inf_vid_path)]
 
-    nwb_key = dict(nwb_file_name=nwb_file_name)
-    interval_list_name = f"{task_name}_epoch_1"
-    interval_key = dict(nwb_key, interval_list_name=interval_list_name)
-    now = datetime.now()
-    ins = dict(allow_direct_insert=True, skip_duplicates=True)
-
-    if not Nwbfile() & nwb_key:
-        Nwbfile().insert1(
-            {**nwb_key, "nwb_file_abs_path": str(nwb_file_path.resolve())},
-            allow_direct_insert=True,
-        )
-    Session().insert1(
-        {
-            **nwb_key,
-            "session_description": f"Tutorial dummy: {nwb_stem}",
-            "session_start_time": now,
-            "timestamps_reference_time": now,
-        },
-        **ins,
+    nwb_file_name = bootstrap_minimal_session(
+        nwb_stem,
+        all_video_paths,
+        task_name=task_name,
+        camera_name=camera_name,
     )
-    Task().insert1({"task_name": task_name}, **ins)
-    IntervalList().insert1(
-        {**interval_key, "valid_times": np.array([[0.0, 1.0]])}, **ins
-    )
-    TaskEpoch().insert1(
-        {
-            **interval_key,
-            "epoch": 1,
-            "task_name": task_name,
-            "camera_names": [],
-        },
-        **ins,
-    )
-    for i, video_path in enumerate(all_video_paths):
-        VideoFile().insert1(
-            {
-                **nwb_key,
-                "epoch": 1,
-                "video_file_num": i,
-                "camera_name": camera_name,
-                "video_file_object_id": str(uuid.uuid4())[:40],
-                "path": str(Path(video_path).resolve()),
-            },
-            **ins,
-        )
 
     print(
         f"Tutorial session ready: {nwb_file_name}"
