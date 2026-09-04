@@ -53,13 +53,26 @@ def annotation_table(dj_conn):
             UnitAnnotation.migrate_positional_unit_ids.__func__
         )
 
-    context = {"MigrationUnitAnnotation": MigrationUnitAnnotation}
+    class MigrationMarker(SpyglassMixin, dj.Manual):
+        definition = """
+        spikesorting_merge_id: uuid
+        ---
+        migration_version: int unsigned
+        migrated_at=CURRENT_TIMESTAMP: timestamp
+        """
+
+    context = {
+        "MigrationUnitAnnotation": MigrationUnitAnnotation,
+        "MigrationMarker": MigrationMarker,
+    }
     schema = dj.Schema(
         "test_unit_annotation_migration",
         context=context,
         connection=dj_conn,
     )
     schema(MigrationUnitAnnotation)
+    schema(MigrationMarker)
+    MigrationUnitAnnotation._positional_id_migration_table = MigrationMarker
 
     yield MigrationUnitAnnotation
 
@@ -106,11 +119,13 @@ def annotation_case(annotation_table, monkeypatch):
 
     yield {
         "table": annotation_table,
+        "marker": annotation_table._positional_id_migration_table,
         "sparse_id": sparse_id,
         "dense_id": dense_id,
         "payloads": payloads,
     }
 
+    annotation_table._positional_id_migration_table.delete_quick()
     annotation_table.Annotation.delete_quick()
     annotation_table.delete_quick()
 
@@ -193,10 +208,15 @@ def test_apply_rewrites_ids_and_preserves_payload(annotation_case):
     )
     assert payload_after == payload_before
 
-    # The audit identifies sparse namespaces, so it remains a candidate audit
-    # after a successful one-time migration. Validate the actual postcondition.
-    audit = table.audit_positional_unit_ids()
-    assert audit.iloc[0].stored_unit_ids == audit.iloc[0].true_unit_ids
+    marker = case["marker"] & sparse_restriction
+    assert marker.fetch1("migration_version") == 1
+    assert table.audit_positional_unit_ids().empty
+
+    masters_after = _fetch_rows(table)
+    annotations_after = _fetch_rows(table.Annotation)
+    assert table.migrate_positional_unit_ids(dry_run=False) == {}
+    assert _fetch_rows(table) == masters_after
+    assert _fetch_rows(table.Annotation) == annotations_after
 
 
 def test_invalid_position_aborts_without_writes(annotation_case):

@@ -92,12 +92,12 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
 
     @classmethod
     def audit_positional_unit_ids(cls):
-        """List annotations whose NWB unit namespace is not ``0..n-1``.
+        """List unmigrated annotations whose NWB namespace is not ``0..n-1``.
 
         In a sparse namespace, an older positional ``unit_id`` and the current
         NWB units-table id can differ. This audit is read-only and idempotent;
-        it reports candidate merge ids but cannot determine whether migration
-        has already occurred.
+        a durable migration marker excludes merge ids already processed by
+        :meth:`migrate_positional_unit_ids`.
 
         Returns
         -------
@@ -114,7 +114,15 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             "stored_unit_ids",
         ]
         rows = []
-        merge_ids = sorted(set(cls.fetch("spikesorting_merge_id")), key=str)
+        marker_table = getattr(
+            cls,
+            "_positional_id_migration_table",
+            UnitAnnotationPositionalIdMigration,
+        )
+        migrated = set(marker_table.fetch("spikesorting_merge_id"))
+        merge_ids = sorted(
+            set(cls.fetch("spikesorting_merge_id")) - migrated, key=str
+        )
         for merge_id in merge_ids:
             nwb_file = (
                 SpikeSortingOutput & {"merge_id": merge_id}
@@ -141,13 +149,12 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
 
     @classmethod
     def migrate_positional_unit_ids(cls, *, dry_run: bool = True) -> dict:
-        """Remap positional annotation ids to NWB unit ids exactly once.
+        """Idempotently remap positional annotation ids to NWB unit ids.
 
         Run this immediately after upgrading from the positional-id contract
-        and before writing any new annotations. It is intentionally not
-        idempotent because no schema marker distinguishes legacy rows from
-        rows already written with true NWB ids. The full migration plan is
-        validated before any write and applied in one transaction.
+        and before writing any new annotations. A durable per-merge marker is
+        inserted in the same transaction as the rewrite, making subsequent
+        calls no-ops. The full migration plan is validated before any write.
 
         Parameters
         ----------
@@ -167,7 +174,9 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         """
         audit = cls.audit_positional_unit_ids()
         plan = {}
+        candidate_merge_ids = []
         for row in audit.itertuples(index=False):
+            candidate_merge_ids.append(row.spikesorting_merge_id)
             true_ids = row.true_unit_ids
             invalid = [
                 unit_id
@@ -189,25 +198,45 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             if mapping:
                 plan[row.spikesorting_merge_id] = mapping
 
-        if dry_run or not plan:
+        if dry_run or not candidate_merge_ids:
             return plan
 
+        marker_table = getattr(
+            cls,
+            "_positional_id_migration_table",
+            UnitAnnotationPositionalIdMigration,
+        )
+
+        def _remap(row, mapping):
+            row = dict(row)
+            old_id = int(row["unit_id"])
+            row["unit_id"] = mapping.get(old_id, old_id)
+            return row
+
         with cls.connection.transaction:
-            for merge_id, mapping in plan.items():
+            for merge_id in candidate_merge_ids:
                 restriction = {"spikesorting_merge_id": merge_id}
+                # Insert first: a concurrent or repeated migration collides on
+                # the marker before any annotation rows can be rewritten. A
+                # later failure rolls this marker back with the row changes.
+                marker_table.insert1(
+                    {
+                        **restriction,
+                        "migration_version": 1,
+                    }
+                )
+                mapping = plan.get(merge_id, {})
+                if not mapping:
+                    continue
                 masters = (cls & restriction).fetch(as_dict=True)
                 annotations = (cls.Annotation & restriction).fetch(as_dict=True)
                 (cls.Annotation & restriction).delete_quick()
                 (cls & restriction).delete_quick()
 
-                def _remap(row):
-                    row = dict(row)
-                    old_id = int(row["unit_id"])
-                    row["unit_id"] = mapping.get(old_id, old_id)
-                    return row
-
-                cls.insert([_remap(row) for row in masters])
-                cls.Annotation.insert([_remap(row) for row in annotations])
+                cls.insert([_remap(row, mapping) for row in masters])
+                cls.Annotation.insert(
+                    [_remap(row, mapping) for row in annotations]
+                )
         return plan
 
     def fetch_unit_spikes(
@@ -296,3 +325,15 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         if return_unit_ids:
             return spikes, unit_ids
         return spikes
+
+
+@schema
+class UnitAnnotationPositionalIdMigration(SpyglassMixin, dj.Manual):
+    """Durable marker for completed positional-to-NWB unit-id migrations."""
+
+    definition = """
+    -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
+    ---
+    migration_version: int unsigned
+    migrated_at=CURRENT_TIMESTAMP: timestamp
+    """
