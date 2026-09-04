@@ -275,3 +275,38 @@ def test_neuropixels_ks4_preset_wiring(dj_conn):
     # caveat so a user does not double common-reference before KS4.
     assert "whiten" in preset.notes.lower()
     assert "reference_mode" in preset.notes
+
+
+@pytest.mark.database
+def test_shipped_auto_curation_rules_tolerate_low_spike_nan(dj_conn):
+    """A legitimately-NaN metric must not abort the shipped rule sets.
+
+    ``franklab_default`` computes ``nn_noise_overlap`` with ``min_spikes: 10``,
+    so a unit with fewer than 10 spikes yields NaN by design (see the
+    ``sanitize_for_json`` docstring). Under the fail-fast ``error`` policy that
+    aborts ``CurationEvaluation`` -- and therefore
+    ``run_v2_pipeline(auto_curate=True)`` -- for the entire sort. Every shipped
+    rule must instead carry an explicit non-error policy, and must leave the
+    unassessable unit unlabelled, matching v1's ``compare(NaN, threshold)``.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from spyglass.spikesorting.v2._metric_curation import apply_label_rules
+    from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+    for master, rules in AutoCurationRules._default_payloads():
+        if not rules:
+            continue
+        name = master["auto_curation_rules_name"]
+        # One unassessable unit (1) and one ordinary unit (2) per metric the
+        # shipped rules read.
+        metrics = pd.DataFrame(
+            {rule["metric_name"]: [np.nan, 0.0] for rule in rules},
+            index=[1, 2],
+        )
+        labels = apply_label_rules(metrics, rules)
+        assert 1 not in labels, (
+            f"shipped rule set {name!r} labelled the unassessable unit "
+            f"{labels.get(1)!r}; v1 left it unlabelled"
+        )

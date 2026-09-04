@@ -40,8 +40,9 @@ changing the existing DataJoint primary keys:
 - `CurationV2.curation_uuid` is a fresh, immutable UUID for one row generation.
   `(sorting_id, curation_id)` remains the query key, but its integer component
   can be reused after deletion and is not safe as a durable external identity.
-- `AutoCurationRules.Rule.missing_policy` stores `error`, `fail`, `pass`, or
-  `ignore`; existing rows take the `error` default.
+- `AutoCurationRules.Rule.missing_policy` stores `error`, `fail`, or `pass`;
+  existing rows take the `error` default, while the shipped rule sets record
+  `pass` so a low-spike NaN cannot abort a run.
 - `CurationReviewProfile` persists one immutable metric/rule/display/label
   bundle. `initialize_v2_defaults()` installs
   `franklab_hippocampus_2026_06`.

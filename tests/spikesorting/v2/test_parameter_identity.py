@@ -691,7 +691,7 @@ def test_rule_missing_policy_persists_and_changes_identity(dj_conn):
     )
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
-    names = ["missing_policy_error", "missing_policy_ignore"]
+    names = ["missing_policy_error", "missing_policy_pass"]
     keys = [{"auto_curation_rules_name": name} for name in names]
 
     def rule(policy):
@@ -711,14 +711,14 @@ def test_rule_missing_policy_persists_and_changes_identity(dj_conn):
             {**keys[0], "auto_merge_preset": "none"}, [rule("error")]
         )
         AutoCurationRules.insert_rules(
-            {**keys[1], "auto_merge_preset": "none"}, [rule("ignore")]
+            {**keys[1], "auto_merge_preset": "none"}, [rule("pass")]
         )
         assert (AutoCurationRules.Rule & keys[0]).fetch1(
             "missing_policy"
         ) == "error"
         assert (AutoCurationRules.Rule & keys[1]).fetch1(
             "missing_policy"
-        ) == "ignore"
+        ) == "pass"
         with pytest.raises(
             ValueError, match="different auto-merge/rule payload"
         ):

@@ -116,9 +116,9 @@ delete; durable review/cache references therefore use the fresh UUID. Existing
 preproduction rows require the one-time backfill above before the final
 non-null/unique `alter()`.
 
-`AutoCurationRules.Rule.missing_policy` persists one of `error`, `fail`, `pass`,
-or `ignore` and is part of rule-set content identity; existing rules default to
-the fail-fast `error` policy. A net-new immutable `CurationReviewProfile` lookup
+`AutoCurationRules.Rule.missing_policy` persists one of `error`, `fail`, or
+`pass` and is part of rule-set content identity; existing rules default to
+the fail-fast `error` policy, while the shipped rule sets record `pass`. A net-new immutable `CurationReviewProfile` lookup
 binds the metric/rule recipes, ordered evaluation display columns, ordered label
 palette, and `replace`/`overlay` import mode under one content-addressed name.
 `initialize_v2_defaults()` ships `franklab_hippocampus_2026_06`; delivery
@@ -173,6 +173,24 @@ unit IDs and labels across members. Concat pipeline summaries keep
 `member_merge_ids[member_index]`. Trial databases should run
 `audit_concat_merge_rows()`, delete the unsafe rows it lists, and populate the
 member table using the release-note commands above.
+
+#### Auto-curation rules: `missing_policy` vocabulary and shipped defaults
+
+`AutoCurationRules.Rule.missing_policy` retires the `ignore` member, which was
+byte-identical to `pass`; the column is now `enum('error', 'fail', 'pass')`. The
+`AutoCurationRules.Rule().alter()` already in the release-note commands above
+applies this -- no shipped row ever used `ignore`.
+
+The shipped rule sets (`v1_default_nn_noise`,
+`franklab_default_auto_curation_2026_06`) now record `missing_policy='pass'`
+explicitly instead of inheriting the fail-fast `error` default. `franklab_default`
+computes `nn_noise_overlap` with `min_spikes: 10`, so a unit with fewer than 10
+spikes is NaN *by design*; under `error` that aborted `CurationEvaluation` -- and
+`run_v2_pipeline(auto_curate=True)` -- for the whole sort. `pass` leaves the
+unassessable unit unlabelled, matching v1's `compare(NaN, threshold)`. It stays
+silent per unit, but warns when a metric is non-finite for EVERY unit, since the
+rule then applied no labels at all. A database seeded before this change keeps
+its stored `error` rows: re-seed those two rule sets to pick up the new default.
 
 #### UnitAnnotation now stores NWB unit ids
 

@@ -1305,13 +1305,14 @@ def test_auto_curation_rule_missing_policy_validates_and_defaults():
         "label": "noise",
     }
     assert AutoCurationRuleSchema(**base).missing_policy == "error"
-    for policy in ("error", "fail", "pass", "ignore"):
+    for policy in ("error", "fail", "pass"):
         dumped = AutoCurationRuleSchema(
             **base, missing_policy=policy
         ).model_dump()
         assert dumped["missing_policy"] == policy
-    with pytest.raises(ValidationError):
-        AutoCurationRuleSchema(**base, missing_policy="skip")
+    for retired in ("skip", "ignore"):
+        with pytest.raises(ValidationError):
+            AutoCurationRuleSchema(**base, missing_policy=retired)
 
 
 def test_auto_curation_rules_allows_none_preset_no_rules():

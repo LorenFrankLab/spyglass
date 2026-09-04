@@ -44,7 +44,7 @@ RuleOperator = Literal["<", "<=", ">", ">=", "==", "!="]
 # Spyglass policy for a non-finite value in a metric column referenced by a
 # rule. This is deliberately distinct from SpikeInterface's ``nan_policy``:
 # ``error`` is Spyglass fail-fast behavior.
-MissingMetricPolicy = Literal["error", "fail", "pass", "ignore"]
+MissingMetricPolicy = Literal["error", "fail", "pass"]
 
 # Auto-merge presets. The first five are SpikeInterface 0.104.3's
 # ``compute_merge_unit_groups`` presets (verified against the installed
@@ -325,9 +325,12 @@ class AutoCurationRuleSchema(BaseModel):
     that references a column absent from the computed metrics raises a clear
     error at populate time, not here. ``missing_policy`` records Spyglass's
     handling for non-finite values: ``error`` is fail-fast; ``fail`` applies the
-    label; ``pass`` leaves the unit unlabelled by this rule; and ``ignore`` skips
-    this rule for the unit. These names do not inherit SpikeInterface
-    ``nan_policy`` semantics.
+    label; and ``pass`` leaves the unit unlabelled by this rule. ``pass`` is the
+    right choice whenever the metric has a validity floor (``nn_advanced``'s
+    ``min_spikes``, say), where NaN means "not assessable" rather than "wrong";
+    it stays silent per unit but warns if the metric is missing for EVERY unit,
+    since the rule then applied no labels at all. These names do not inherit
+    SpikeInterface ``nan_policy`` semantics.
     """
 
     model_config = ConfigDict(extra="forbid")

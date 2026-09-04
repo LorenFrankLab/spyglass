@@ -433,9 +433,12 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     ``insert1`` is unsupported.
 
     Each rule persists a Spyglass ``missing_policy``: ``error`` is fail-fast,
-    ``fail`` applies the rule label, ``pass`` leaves the unit unlabelled by that
-    rule, and ``ignore`` skips the rule for that unit. This is distinct from
-    SpikeInterface's ``nan_policy`` (its ``fail`` mode labels and never raises).
+    ``fail`` applies the rule label, and ``pass`` leaves the unit unlabelled by
+    that rule. The shipped rule sets below use ``pass`` because their metrics
+    have validity floors, so NaN means "not assessable for this unit", not
+    "computation broken" -- ``pass`` still warns if a metric is missing for
+    EVERY unit, which does mean broken. This is distinct from SpikeInterface's
+    ``nan_policy`` (its ``fail`` mode labels and never raises).
     """
 
     definition = """
@@ -457,7 +460,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         operator: enum('<', '<=', '>', '>=', '==', '!=')
         threshold: float
         label: varchar(32)
-        missing_policy='error': enum('error', 'fail', 'pass', 'ignore')
+        missing_policy='error': enum('error', 'fail', 'pass')
         """
 
         def insert(self, rows, **kwargs):
@@ -609,6 +612,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                         "operator": ">",
                         "threshold": 0.1,
                         "label": "noise",
+                        "missing_policy": "pass",
                     },
                     {
                         "rule_index": 1,
@@ -617,6 +621,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                         "operator": ">",
                         "threshold": 0.1,
                         "label": "reject",
+                        "missing_policy": "pass",
                     },
                 ],
             ),
@@ -651,6 +656,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                         "operator": ">",
                         "threshold": 0.1,
                         "label": "noise",
+                        "missing_policy": "pass",
                     },
                     {
                         "rule_index": 1,
@@ -659,6 +665,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                         "operator": ">",
                         "threshold": 0.02,
                         "label": "reject",
+                        "missing_policy": "pass",
                     },
                 ],
             ),

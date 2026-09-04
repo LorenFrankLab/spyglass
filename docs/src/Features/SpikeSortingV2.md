@@ -841,10 +841,15 @@ Notes:
   together.
 - Every rule stores a `missing_policy`. `error` is fail-fast when any unit has
   a non-finite value for the referenced metric, `fail` applies the rule's label
-  to that unit,
-  `pass` leaves it unlabelled by that rule, and `ignore` skips that rule for the
-  unit. These are Spyglass semantics, not SpikeInterface's `nan_policy` (SI's
-  `fail` labels a NaN unit and does not raise).
+  to that unit, and `pass` leaves it unlabelled by that rule. These are Spyglass
+  semantics, not SpikeInterface's `nan_policy` (SI's `fail` labels a NaN unit
+  and does not raise).
+- The shipped rule sets use `pass`, because their metrics have validity floors
+  (`nn_advanced`'s `min_spikes: 10`): NaN there means "not assessable for this
+  unit", so `error` would abort the whole sort over a legitimately short train,
+  and v1 left such a unit unlabelled. `pass` is silent per unit but warns when a
+  metric is non-finite for EVERY unit, which means the rule labelled nothing at
+  all and the metric computation is the thing to check.
 - Metric persistence accepts only zero-dimensional numeric scalars. A legitimate
   scalar NaN remains valid for a low-spike unit, while arrays (including a
   one-element array) and non-numeric objects raise

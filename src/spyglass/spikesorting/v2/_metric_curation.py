@@ -163,11 +163,11 @@ def apply_label_rules(
         column = metrics_df[metric_name]
         label = rule["label"]
         missing_policy = rule.get("missing_policy", "error")
-        if missing_policy not in {"error", "fail", "pass", "ignore"}:
+        if missing_policy not in {"error", "fail", "pass"}:
             raise ValueError(
                 f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
                 f"has invalid missing_policy {missing_policy!r}; expected "
-                "'error', 'fail', 'pass', or 'ignore'."
+                "'error', 'fail', or 'pass'."
             )
         finite_by_unit = {
             unit_id: _is_finite_metric_value(column.loc[unit_id])
@@ -183,8 +183,22 @@ def apply_label_rules(
                 f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
                 f"references metric {metric_name!r}, which has non-finite "
                 f"values for unit_id(s) {missing_unit_ids}. Fix the metric "
-                "computation or choose an explicit missing_policy ('fail', "
-                "'pass', or 'ignore') for this rule."
+                "computation or choose an explicit missing_policy ('fail' "
+                "or 'pass') for this rule."
+            )
+        if (
+            missing_policy == "pass"
+            and missing_unit_ids
+            and len(missing_unit_ids) == len(metrics_df.index)
+        ):
+            # A per-unit NaN is an expected low-spike skip, but a metric that
+            # is missing for EVERY unit means the rule labelled nothing at all
+            # -- the silently-inert-rule regression. Say so without raising.
+            logger.warning(
+                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"was inert: metric {metric_name!r} is non-finite for all "
+                f"{len(missing_unit_ids)} unit(s), so the rule applied no "
+                f"{label!r} labels. Check the metric computation."
             )
         for unit_id in metrics_df.index:
             value = column.loc[unit_id]

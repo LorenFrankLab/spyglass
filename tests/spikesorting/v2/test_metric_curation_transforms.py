@@ -110,7 +110,7 @@ def test_apply_label_rules_non_finite_compares_false(value, operator):
     """Non-finite metrics never satisfy thresholds (even ``NaN != x``)."""
     metrics = pd.DataFrame({"nn_noise_overlap": [value]}, index=[4])
     rules = [_rule(0, "nn_noise_overlap", operator, 0.1, "noise")]
-    rules[0]["missing_policy"] = "ignore"
+    rules[0]["missing_policy"] = "pass"
     labels = apply_label_rules(metrics, rules)
     assert labels == {}
 
@@ -140,7 +140,6 @@ def test_apply_label_rules_partial_missing_error_fails_fast():
     [
         ("fail", {4: ["noise"], 5: ["noise"]}),
         ("pass", {}),
-        ("ignore", {}),
     ],
 )
 def test_apply_label_rules_all_nan_explicit_policies(policy, expected):
@@ -306,7 +305,7 @@ def test_rules_payloads_match_includes_missing_policy():
     """Rule sets differing only in missing-value semantics are distinct."""
     assert not rules_payloads_match(
         _payload(0.1, missing_policy="error"),
-        _payload(0.1, missing_policy="ignore"),
+        _payload(0.1, missing_policy="pass"),
     )
 
 
@@ -425,3 +424,45 @@ def test_snr_peak_sign_follows_sorter_polarity():
     assert snr_pos < snr_neg
     # The negative-default path is the regression pin: same as explicit 'neg'.
     assert snr_default == pytest.approx(snr_neg)
+
+
+def test_apply_label_rules_pass_is_silent_for_partial_missing(caplog):
+    """A legitimate low-spike NaN is skipped without log noise.
+
+    ``min_spikes`` makes NaN an expected, per-unit outcome, so the shipped
+    ``pass`` policy must not warn once per affected unit on every sort.
+    """
+    metrics = pd.DataFrame({"snr": [np.nan, 0.5, 5.0]}, index=[1, 2, 3])
+    rules = [_rule(0, "snr", "<", 1.0, "noise")]
+    rules[0]["missing_policy"] = "pass"
+    with caplog.at_level("WARNING"):
+        labels = apply_label_rules(metrics, rules)
+    assert labels == {2: ["noise"]}
+    assert not caplog.records, "partial low-spike NaN skip must stay silent"
+
+
+def test_apply_label_rules_pass_warns_when_rule_is_wholly_inert(caplog):
+    """An all-missing metric under ``pass`` disables the rule -- say so.
+
+    This is the regression class where ``nn_noise_overlap`` was NaN for every
+    unit and default auto-curation became silently inert. ``pass`` still must
+    not raise, but a rule that labelled nothing because its metric was missing
+    everywhere is a computation failure, not a low-spike skip.
+    """
+    metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
+    rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
+    rules[0]["missing_policy"] = "pass"
+    with caplog.at_level("WARNING"):
+        assert apply_label_rules(metrics, rules) == {}
+    assert any(
+        "nn_noise_overlap" in record.getMessage() for record in caplog.records
+    ), "a wholly inert rule was disabled silently"
+
+
+def test_apply_label_rules_rejects_retired_ignore_policy():
+    """``ignore`` was a byte-identical duplicate of ``pass`` and is retired."""
+    metrics = pd.DataFrame({"snr": [np.nan]}, index=[1])
+    rules = [_rule(0, "snr", "<", 1.0, "noise")]
+    rules[0]["missing_policy"] = "ignore"
+    with pytest.raises(ValueError, match="invalid missing_policy"):
+        apply_label_rules(metrics, rules)
