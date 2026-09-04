@@ -98,6 +98,51 @@ def analyzer_seed_modes(analyzer) -> dict[str, object]:
     return modes
 
 
+def analyzer_recompute_unverifiable_reason(manifest) -> str | None:
+    """Explain why a legacy analyzer inventory cannot be recompute-verified.
+
+    Older inventories excluded ``noise_levels`` because the extension was not
+    seed-pinned. Comparing such a folder with today's deterministic rebuild
+    would yield an expected mismatch that looks like corruption. Return an
+    explicit reason so the recompute table records a safe ``matched=0`` without
+    attempting that misleading comparison.
+    """
+    if not manifest:
+        return None
+    content_hashes = manifest.get("extension_content_hashes") or {}
+    seed_modes = manifest.get("base_extension_seed_modes") or {}
+    if "noise_levels" not in content_hashes:
+        return (
+            "legacy/unverifiable analyzer inventory: noise_levels was not "
+            "included in the stored content hash"
+        )
+    if seed_modes.get("noise_levels") == "unseeded":
+        return (
+            "legacy/unverifiable analyzer inventory: stored noise_levels "
+            "has no deterministic seed provenance"
+        )
+    return None
+
+
+def analyzer_inventory_storage_changed(
+    manifest, current_fingerprint: str | None
+) -> bool:
+    """Whether a versions row describes a different folder generation.
+
+    Empty manifests intentionally represent absent or zero-unit analyzers. A
+    nonempty legacy manifest without a storage fingerprint is refreshed once;
+    afterward path/size/mtime drift identifies a rebuild without reading any
+    extension arrays.
+    """
+    manifest = manifest or {}
+    if current_fingerprint is None and not manifest:
+        return False
+    return (
+        "storage_fingerprint" not in manifest
+        or manifest["storage_fingerprint"] != current_fingerprint
+    )
+
+
 def hash_recording_traces(
     recording, *, rounding: int = 4, chunk_frames: int = 300_000
 ) -> dict[str, str]:

@@ -21,6 +21,91 @@ def test_v2_recompute_schema_name_literal(dj_conn):
     assert recompute.schema.database == "spikesorting_v2_recompute"
 
 
+def test_operator_xfail_is_not_inferred_as_automatic_unverifiable(dj_conn):
+    """Outcome routing uses distinct fields, not an operator-text prefix."""
+    from spyglass.spikesorting.v2.recompute import _recompute_compute
+
+    result = _recompute_compute(
+        {"sorting_id": "sort"},
+        6,
+        "legacy/unverifiable is an operator-authored explanation",
+        None,
+        regen=lambda: pytest.fail("an xfail must not regenerate"),
+        what="test",
+    )
+    assert result.outcome == "xfail"
+    assert result.err_msg.startswith("xfail:")
+
+    automatic = _recompute_compute(
+        {"sorting_id": "sort"},
+        6,
+        None,
+        "legacy/unverifiable: unseeded noise_levels",
+        regen=lambda: pytest.fail("an unverifiable row must not regenerate"),
+        what="test",
+    )
+    assert automatic.outcome == "unverifiable"
+    assert not automatic.err_msg.startswith("xfail:")
+
+
+def test_rebuild_refreshes_existing_analyzer_inventory(
+    dj_conn, monkeypatch, tmp_path
+):
+    """Publishing a new folder retires and recreates its computed inventory."""
+    from contextlib import nullcontext
+
+    from spyglass.spikesorting.v2 import (
+        _analyzer_cache as cache,
+    )
+    from spyglass.spikesorting.v2 import (
+        _sorting_analyzer as service,
+    )
+    from spyglass.spikesorting.v2 import (
+        recompute,
+    )
+
+    events = []
+    monkeypatch.setattr(
+        service,
+        "reconstruct_recording_and_sorting",
+        lambda _table, _key: ("recording", "sorting"),
+    )
+    monkeypatch.setattr(
+        service, "fetch_waveform_params", lambda _name: {"purpose": "display"}
+    )
+    monkeypatch.setattr(
+        cache, "analyzer_path", lambda _sorting_id, _name: tmp_path / "cache"
+    )
+    monkeypatch.setattr(
+        cache, "analyzer_cache_lock", lambda _sorting_id: nullcontext()
+    )
+
+    def _publish(_folder, build):
+        events.append("publish")
+        build(tmp_path / "staging")
+
+    monkeypatch.setattr(cache, "publish_analyzer_atomically", _publish)
+    monkeypatch.setattr(
+        recompute,
+        "invalidate_sorting_analyzer_inventory",
+        lambda _sorting_id, _name: events.append("invalidate") or True,
+    )
+    monkeypatch.setattr(
+        recompute,
+        "repopulate_sorting_analyzer_inventory",
+        lambda _sorting_id, _name: events.append("repopulate"),
+    )
+
+    class _SortingTable:
+        def _build_analyzer(self, **_kwargs):
+            events.append("build")
+
+    service.rebuild_analyzer_folder(
+        _SortingTable(), {"sorting_id": "sort"}, "display_recipe"
+    )
+    assert events == ["invalidate", "publish", "build", "repopulate"]
+
+
 class _FakeExtension:
     def __init__(self, params):
         self.params = params
@@ -70,6 +155,53 @@ def test_analyzer_seed_modes_classifies_seed_provenance():
     # Absent extensions are not invented.
     assert "templates" not in analyzer_seed_modes(
         _FakeAnalyzer({"noise_levels": {}})
+    )
+
+
+def test_legacy_noise_inventory_is_explicitly_unverifiable():
+    """Legacy noise hashes never masquerade as corruption mismatches."""
+    from spyglass.spikesorting.v2._recompute import (
+        analyzer_recompute_unverifiable_reason,
+    )
+
+    pinned = {
+        "extension_content_hashes": {"noise_levels": "abc"},
+        "base_extension_seed_modes": {"noise_levels": 0},
+    }
+    assert analyzer_recompute_unverifiable_reason(pinned) is None
+
+    unseeded = {
+        "extension_content_hashes": {"noise_levels": "abc"},
+        "base_extension_seed_modes": {"noise_levels": "unseeded"},
+    }
+    assert "legacy/unverifiable" in analyzer_recompute_unverifiable_reason(
+        unseeded
+    )
+
+    pre_noise_hash = {
+        "extension_content_hashes": {"templates": "abc"},
+        "base_extension_seed_modes": {},
+    }
+    assert "not included" in analyzer_recompute_unverifiable_reason(
+        pre_noise_hash
+    )
+
+
+def test_analyzer_inventory_detects_rebuilt_and_legacy_storage():
+    """Folder generations refresh cheaply, including pre-fingerprint rows."""
+    from spyglass.spikesorting.v2._recompute import (
+        analyzer_inventory_storage_changed,
+    )
+
+    assert not analyzer_inventory_storage_changed({}, None)
+    assert analyzer_inventory_storage_changed(
+        {"extension_content_hashes": {"templates": "abc"}}, "current"
+    )
+    assert not analyzer_inventory_storage_changed(
+        {"storage_fingerprint": "current"}, "current"
+    )
+    assert analyzer_inventory_storage_changed(
+        {"storage_fingerprint": "previous"}, "current"
     )
 
 
@@ -534,6 +666,7 @@ def test_analyzer_manifest_records_noise_levels_seed(
     # effective seed (0), not "unseeded".
     assert seed_modes["noise_levels"] == 0
     assert seed_modes["random_spikes"] != "unseeded"
+    assert len(manifest["storage_fingerprint"]) == 64
     # ...and it now joins the recompute content set.
     assert "noise_levels" in manifest["extension_content_hashes"]
     # analyzer_hash is the combined hash of the extension CONTENT hashes only --
@@ -696,13 +829,13 @@ def test_file_tracking_excludes_v2_deleted_files(
     """
     _assert_temp_base_dir()
     from spyglass.common.common_file_tracking import AnalysisFileIssues
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.recompute import (
         RecordingArtifactRecompute,
         RecordingArtifactRecomputeSelection,
         RecordingArtifactVersions,
         _artifact_created_at,
     )
+    from spyglass.spikesorting.v2.recording import Recording
 
     rec_key = _recording_key(populated_sorting)
     fname = (Recording & rec_key).fetch1("analysis_file_name")
@@ -1107,6 +1240,12 @@ def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
         rebuilt = Sorting().get_analyzer(populated_sorting)
         assert folder.exists(), "get_analyzer must rebuild the reclaimed folder"
         assert list(rebuilt.unit_ids), "rebuilt analyzer carries the units"
+        version_key = {
+            "sorting_id": populated_sorting["sorting_id"],
+            "waveform_params_name": CORTEX_DISPLAY_WAVEFORMS,
+        }
+        assert rc.SortingAnalyzerVersions & version_key
+        assert not (rc.SortingAnalyzerRecomputeSelection & version_key)
     finally:
         # The folder belongs to the shared package fixture; restore it if the
         # body failed after the reclaim, so siblings do not cascade-fail.

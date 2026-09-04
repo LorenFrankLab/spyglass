@@ -26,12 +26,15 @@ verify that regeneration *before* anything is deleted.
 The comparison uses reproducible **content** — for recordings the content
 fingerprint (traces, timestamps, persisted probe geometry, and scaling metadata)
 that defines `Recording.content_hash`, and for analyzers the deterministic
-extension data (excluding the stochastic `noise_levels` estimate). Neither uses
+extension data, including the seed-pinned `noise_levels` estimate. Neither uses
 a whole-file digest, which folds in volatile NWB metadata (`object_id`,
-timestamps) and is not reproducible across regenerations. The recording
-identity has no `rounding` knob — its precision is fixed by the fingerprint's
-`TRACE_ROUNDING` / `TIMESTAMP_ROUNDING` constants; `rounding` applies only to
-the analyzer extension comparison.
+timestamps) and is not reproducible across regenerations. A legacy analyzer
+inventory that omitted `noise_levels`, or records it as unseeded, is reported as
+`matched=0` with an explicit `legacy/unverifiable` message instead of a
+corruption-like hash mismatch. The recording identity has no `rounding` knob —
+its precision is fixed by the fingerprint's `TRACE_ROUNDING` /
+`TIMESTAMP_ROUNDING` constants; `rounding` applies only to the analyzer
+extension comparison.
 
 ## Workflow
 
@@ -64,7 +67,11 @@ RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)   # delete
 ```
 
 The `SortingAnalyzer*` trio mirrors this for analyzer folders; deletion removes
-the folder, which `Sorting.get_analyzer()` rebuilds on the next access.
+the folder, which `Sorting.get_analyzer()` rebuilds on the next access. A
+rebuild retires the prior `SortingAnalyzerVersions` generation and its dependent
+verdicts, then inventories the published folder again. `attempt_all()` also
+refreshes legacy inventories and folders rebuilt by DB-free workers using a
+path/size/mtime fingerprint, without reading waveform payloads.
 
 ## The deletion gate (do not weaken)
 
@@ -79,8 +86,10 @@ the folder, which `Sorting.get_analyzer()` rebuilds on the next access.
   (audit-logged) to override deliberately.
 - Recently-created artifacts are skipped (`days_since_creation`, default 7).
 
-A `matched=0` recompute also records which objects differ in the `Name`
-(missing-from-old/new) and `Hash` (differing) part tables for review.
+A completed comparison with `matched=0` records which objects differ in the
+`Name` (missing-from-old/new) and `Hash` (differing) part tables. Attempts that
+are explicitly skipped, legacy/unverifiable, or fail regeneration instead put
+the reason in `err_msg` and have no synthetic diff rows.
 
 ## Upstream deletion cascades and analyzer folders
 

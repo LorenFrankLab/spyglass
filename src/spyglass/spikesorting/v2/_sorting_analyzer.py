@@ -579,6 +579,10 @@ def rebuild_analyzer_folder(
         analyzer_path,
         publish_analyzer_atomically,
     )
+    from spyglass.spikesorting.v2.recompute import (
+        invalidate_sorting_analyzer_inventory,
+        repopulate_sorting_analyzer_inventory,
+    )
 
     # The canonical (artifact-masked) recording + sorting -- the exact pair the
     # recompute audit reconstructs too (shared resolver), so a rebuilt analyzer
@@ -592,22 +596,54 @@ def rebuild_analyzer_folder(
         )
     waveform_params = fetch_waveform_params(waveform_params_name)
     folder = analyzer_path(key["sorting_id"], waveform_params_name)
+    # A Versions row and every dependent verdict describe the generation that
+    # is about to be replaced. Retire them before publishing so an old
+    # legacy/unverifiable result can never remain attached to new bytes. If an
+    # inventory existed, restore it immediately for whichever folder survives
+    # the atomic publish (new on success, old on failure).
+    had_inventory = invalidate_sorting_analyzer_inventory(
+        key["sorting_id"], waveform_params_name
+    )
     # Publish atomically under the per-sort lock: build into a private temp
     # folder, then move it into the canonical slot. A build failure leaves the
     # existing canonical folder untouched (the publisher cleans only its own
     # temp), so an interrupted rebuild can never replace a valid cache with a
     # half-built one. The lock is reentrant, so a rebuild invoked from the
     # (already-locked) load path does not self-deadlock.
-    with analyzer_cache_lock(key["sorting_id"]):
-        publish_analyzer_atomically(
-            folder,
-            lambda temp_folder: sorting_table._build_analyzer(
-                sorting=sorting_obj,
-                recording=recording,
-                key=key,
-                analyzer_folder=temp_folder,
-                waveform_params=waveform_params,
-            ),
+    try:
+        with analyzer_cache_lock(key["sorting_id"]):
+            publish_analyzer_atomically(
+                folder,
+                lambda temp_folder: sorting_table._build_analyzer(
+                    sorting=sorting_obj,
+                    recording=recording,
+                    key=key,
+                    analyzer_folder=temp_folder,
+                    waveform_params=waveform_params,
+                ),
+            )
+    except Exception:
+        if had_inventory:
+            # Restore the surviving old folder's inventory, or record MISSING
+            # when the load path had already removed an invalid folder, before
+            # propagating the original build failure.
+            try:
+                repopulate_sorting_analyzer_inventory(
+                    key["sorting_id"], waveform_params_name
+                )
+            except Exception:  # noqa: BLE001  # pragma: no cover
+                from spyglass.utils import logger
+
+                logger.exception(
+                    "Failed to restore SortingAnalyzerVersions after an "
+                    "analyzer rebuild failed for sorting_id=%s, recipe=%s.",
+                    key["sorting_id"],
+                    waveform_params_name,
+                )
+        raise
+    if had_inventory:
+        repopulate_sorting_analyzer_inventory(
+            key["sorting_id"], waveform_params_name
         )
 
 

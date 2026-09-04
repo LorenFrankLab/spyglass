@@ -26,14 +26,20 @@ import datetime as dt
 import shutil
 import tempfile
 from pathlib import Path
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Optional
 
 import datajoint as dj
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_user import UserEnvironment
+from spyglass.spikesorting.v2._analyzer_cache import (
+    analyzer_cache_lock,
+    analyzer_folder_storage_fingerprint,
+)
 from spyglass.spikesorting.v2._recompute import (
     ANALYZER_RECOMPUTE_EXTENSIONS,
+    analyzer_inventory_storage_changed,
+    analyzer_recompute_unverifiable_reason,
     analyzer_seed_modes,
     combined_hash,
     compare_hash_dicts,
@@ -41,7 +47,6 @@ from spyglass.spikesorting.v2._recompute import (
     current_nwb_namespaces,
     env_matches,
     hash_extension_data,
-    hash_recording_traces,
 )
 from spyglass.spikesorting.v2._recording_fingerprint import (
     TRACE_ROUNDING,
@@ -94,15 +99,18 @@ class RecomputeFetched(NamedTuple):
     parent_key: dict
     rounding: int
     xfail_reason: Optional[str]
+    unverifiable_reason: Optional[str]
 
 
 class RecomputeComputed(NamedTuple):
     """``make_compute`` -> ``make_insert`` carrier for the recompute tables.
 
-    ``outcome`` is ``'xfail'`` | ``'error'`` | ``'compare'``. A regeneration
-    failure is a VALID ``matched=0`` outcome (``'error'``) encoded here rather
-    than raised, so ``make_insert`` still records the QC result instead of the
-    populate aborting. ``stored_hashes`` / ``new_hashes`` are empty except on
+    ``outcome`` is ``'xfail'`` | ``'unverifiable'`` | ``'error'`` |
+    ``'compare'``. A regeneration failure is a VALID ``matched=0`` outcome
+    (``'error'``) encoded here rather than raised, so ``make_insert`` still
+    records the QC result instead of the populate aborting. Legacy analyzer
+    provenance that cannot support a meaningful deterministic comparison is
+    ``'unverifiable'``. ``stored_hashes`` / ``new_hashes`` are empty except on
     ``'compare'``.
     """
 
@@ -142,12 +150,19 @@ class AnalyzerVersionsComputed(NamedTuple):
 
 
 def _recompute_compute(
-    parent_key, rounding, xfail_reason, *, regen, what
+    parent_key,
+    rounding,
+    xfail_reason,
+    unverifiable_reason,
+    *,
+    regen,
+    what,
 ) -> RecomputeComputed:
     """Shared off-transaction compute for the recompute QC tables.
 
-    Branches the three outcomes the monolithic ``make()`` handled, all of which
-    end in an INSERT: ``xfail`` (skip the regen), ``error`` (a caught
+    Branches the outcomes the monolithic ``make()`` handled, all of which end
+    in an INSERT: ``xfail`` (explicit skip), ``unverifiable`` (legacy
+    provenance cannot support a deterministic comparison), ``error`` (a caught
     regeneration failure -> ``matched=0``, retryable), and ``compare`` (a real
     hash comparison). ``regen`` is a no-arg callable returning
     ``(stored_hashes, new_hashes)``.
@@ -156,6 +171,14 @@ def _recompute_compute(
         return RecomputeComputed(
             outcome="xfail",
             err_msg=f"xfail: {xfail_reason}"[:255],
+            stored_hashes={},
+            new_hashes={},
+            parent_key=parent_key,
+        )
+    if unverifiable_reason:
+        return RecomputeComputed(
+            outcome="unverifiable",
+            err_msg=str(unverifiable_reason)[:255],
             stored_hashes={},
             new_hashes={},
             parent_key=parent_key,
@@ -194,7 +217,8 @@ def _insert_recompute_outcome(
     """Shared ``make_insert`` body: write the QC result atomically.
 
     ``compare`` routes through :func:`_insert_comparison` (master + Name/Hash
-    diff rows); ``xfail`` / ``error`` insert a single ``matched=0`` master row.
+    diff rows); ``xfail`` / ``unverifiable`` / ``error`` insert a single
+    ``matched=0`` master row.
     ``transaction_or_noop`` no-ops inside the framework transaction but keeps a
     direct (non-populate) call atomic.
     """
@@ -205,7 +229,7 @@ def _insert_recompute_outcome(
             _insert_comparison(
                 table, key, stored_hashes, new_hashes, created_at
             )
-        else:  # 'xfail' / 'error': a single matched=0 row, no diff parts
+        else:  # non-comparison outcome: one matched=0 row, no diff parts
             table.insert1(
                 {
                     **key,
@@ -540,10 +564,16 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             parent_key={"recording_id": str(parent["recording_id"])},
             rounding=TRACE_ROUNDING,
             xfail_reason=xfail_reason,
+            unverifiable_reason=None,
         )
 
     def make_compute(
-        self, key, parent_key, rounding, xfail_reason
+        self,
+        key,
+        parent_key,
+        rounding,
+        xfail_reason,
+        unverifiable_reason,
     ) -> RecomputeComputed:
         """Fingerprint the current file + a fresh rebuild, off the transaction.
 
@@ -572,6 +602,7 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
             parent_key,
             rounding,
             xfail_reason,
+            unverifiable_reason,
             regen=_regen,
             what="RecordingArtifactRecompute",
         )
@@ -832,6 +863,11 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             manifest = {
                 "extension_content_hashes": content_hashes,
                 "base_extension_seed_modes": analyzer_seed_modes(analyzer),
+                "storage_fingerprint": analyzer_folder_storage_fingerprint(
+                    _analyzer_folder(
+                        key["sorting_id"], key["waveform_params_name"]
+                    )
+                ),
             }
         except ZeroUnitAnalyzerError:
             # No extensions to hash -> empty manifest + content hashes; the
@@ -881,6 +917,40 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             }
         )
 
+    @classmethod
+    def refresh_changed_folders(cls, restriction=True) -> int:
+        """Refresh inventories whose analyzer-folder generation changed.
+
+        This catches canonical folders rebuilt by DB-free workers as well as
+        legacy inventory rows created before storage fingerprints existed.
+        Dependent selections/verdicts are removed because they describe the
+        prior generation, then the current folder is inventoried immediately.
+        """
+        refreshed = 0
+        for row in (cls & restriction).fetch(as_dict=True):
+            key = {field: row[field] for field in cls.primary_key}
+            folder = _analyzer_folder(
+                key["sorting_id"], key["waveform_params_name"]
+            )
+            with analyzer_cache_lock(key["sorting_id"]):
+                current = (
+                    analyzer_folder_storage_fingerprint(folder)
+                    if folder.exists()
+                    else None
+                )
+                if not analyzer_inventory_storage_changed(
+                    row.get("analyzer_manifest"), current
+                ):
+                    continue
+                invalidate_sorting_analyzer_inventory(
+                    key["sorting_id"], key["waveform_params_name"]
+                )
+                repopulate_sorting_analyzer_inventory(
+                    key["sorting_id"], key["waveform_params_name"]
+                )
+            refreshed += 1
+        return refreshed
+
 
 @schema
 class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
@@ -909,6 +979,7 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
                 "No UserEnvironment available; cannot plan recompute attempts."
             )
             return
+        SortingAnalyzerVersions.refresh_changed_folders(restriction)
         rows = [
             {**version_key, "env_id": env_id, "rounding": rounding}
             for version_key in (SortingAnalyzerVersions & restriction).fetch(
@@ -952,7 +1023,12 @@ class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
-    """Regenerate an analyzer folder and compare extension content hashes."""
+    """Regenerate an analyzer folder and compare extension content hashes.
+
+    Legacy inventories without deterministic ``noise_levels`` provenance are
+    recorded as explicitly unverifiable instead of producing a misleading hash
+    mismatch against today's seed-pinned rebuild.
+    """
 
     definition = """
     -> SortingAnalyzerRecomputeSelection
@@ -996,22 +1072,31 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         rounding, xfail_reason = (
             SortingAnalyzerRecomputeSelection & key
         ).fetch1("rounding", "xfail_reason")
+        manifest = (SortingAnalyzerVersions & key).fetch1("analyzer_manifest")
+        unverifiable_reason = analyzer_recompute_unverifiable_reason(manifest)
         parent = self.get_parent_key(key)
         return RecomputeFetched(
             # str the sorting_id UUID for a DeepHash-stable carrier.
             parent_key={"sorting_id": str(parent["sorting_id"])},
             rounding=int(rounding),
             xfail_reason=xfail_reason,
+            unverifiable_reason=unverifiable_reason,
         )
 
     def make_compute(
-        self, key, parent_key, rounding, xfail_reason
+        self,
+        key,
+        parent_key,
+        rounding,
+        xfail_reason,
+        unverifiable_reason,
     ) -> RecomputeComputed:
         """Regenerate the analyzer folder + hash extensions off the transaction."""
         return _recompute_compute(
             parent_key,
             rounding,
             xfail_reason,
+            unverifiable_reason,
             regen=lambda: _recompute_analyzer_hashes(
                 parent_key, rounding, key["waveform_params_name"]
             ),
@@ -1104,6 +1189,46 @@ def _analyzer_folder(sorting_id, waveform_params_name):
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
     return analyzer_path(sorting_id, waveform_params_name)
+
+
+def invalidate_sorting_analyzer_inventory(
+    sorting_id, waveform_params_name
+) -> bool:
+    """Remove an inventory and verdicts tied to a folder being rebuilt.
+
+    The inventory row describes one concrete on-disk generation. Keeping it
+    across a rebuild would leave old ``unverifiable`` or comparison results
+    attached to newly generated bytes. Return whether a row existed so the
+    rebuild path can restore the inventory after publishing (or after a failed
+    atomic publish that retained the old folder).
+    """
+    restriction = {
+        "sorting_id": sorting_id,
+        "waveform_params_name": waveform_params_name,
+    }
+    inventory = SortingAnalyzerVersions & restriction
+    if not inventory:
+        return False
+    # Delete the selection explicitly so all environment-specific recompute
+    # results cascade before their now-obsolete inventory parent is removed.
+    selections = SortingAnalyzerRecomputeSelection & restriction
+    if selections:
+        selections.delete(safemode=False)
+    inventory.delete(safemode=False)
+    return True
+
+
+def repopulate_sorting_analyzer_inventory(
+    sorting_id, waveform_params_name
+) -> None:
+    """Inventory a freshly published analyzer generation immediately."""
+    SortingAnalyzerVersions.populate(
+        {
+            "sorting_id": sorting_id,
+            "waveform_params_name": waveform_params_name,
+        },
+        reserve_jobs=False,
+    )
 
 
 def _recompute_analyzer_hashes(
