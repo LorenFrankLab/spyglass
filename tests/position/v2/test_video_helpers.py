@@ -165,7 +165,13 @@ class TestVidFileGroupGetNwbFile:
             VidFileGroup().get_nwb_file("definitely_nonexistent_xyzzy_99")
 
     def test_empty_group_raises(self, position_v2):
-        """VidFileGroup entry exists but has no File parts → ValueError."""
+        """VidFileGroup entry exists but has no File parts → ValueError.
+
+        Distinct from the nonexistent-group case: ``VidFileGroup.insert1``
+        explicitly permits creating a group with zero files (it warns and
+        continues), so this is a reachable user error that deserves its own
+        message.
+        """
         VidFileGroup = position_v2.video.VidFileGroup
         VidFileGroup().insert1(
             {
@@ -174,8 +180,34 @@ class TestVidFileGroupGetNwbFile:
             },
             skip_duplicates=True,
         )
-        with pytest.raises(ValueError, match="Video group not found"):
+        with pytest.raises(ValueError, match="no video files"):
             VidFileGroup().get_nwb_file("gnf_empty_group_test")
+
+    def test_multi_session_group_raises(
+        self, position_v2, two_sessions, multi_session_group
+    ):
+        """A group spanning two sessions has no single NWB parent.
+
+        This is the invariant the inference path depends on: a ``PoseV2``
+        entry must derive from exactly one ``Nwbfile``.
+        """
+        VidFileGroup = position_v2.video.VidFileGroup
+        name_a, name_b = two_sessions["names"]
+
+        with pytest.raises(ValueError) as exc:
+            VidFileGroup().get_nwb_file(multi_session_group)
+
+        msg = str(exc.value)
+        assert "Expected exactly 1 common NWB file" in msg
+        assert name_a in msg and name_b in msg  # names both listed
+
+    def test_single_session_group_returns_name(
+        self, position_v2, two_sessions, single_session_group
+    ):
+        """Positive control: one session in, that session's name out."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        result = VidFileGroup().get_nwb_file(single_session_group)
+        assert result == {"nwb_file_name": two_sessions["names"][0]}
 
     def test_returns_nwb_name_with_session_link(
         self, position_v2, mini_insert, mini_dict
