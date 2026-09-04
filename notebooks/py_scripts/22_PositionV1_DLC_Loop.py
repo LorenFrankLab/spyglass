@@ -12,6 +12,13 @@
 #     name: python3
 # ---
 
+# > ⚠️ **Deprecated — Position V1 (DeepLabCut).** This notebook uses the
+# > legacy `spyglass.position.v1` DLC pipeline. New projects should use
+# > **Position V2**: see [23_PositionV2_DLC](./23_PositionV2_DLC_2D.ipynb)
+# > (DeepLabCut) or [24_PositionV2_SLEAP](./25_PositionV2_SLEAP_2D.ipynb) (SLEAP).
+# > Position V1 dependencies will no longer be supported after the Position V2
+# > release.
+
 # ## Position- DeepLabCut from Scratch
 #
 
@@ -38,7 +45,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environments/environment_dlc.yml)**
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environments/environment_position.yml (environment_dlc.yml is deprecated))**
 
 # Here is a schematic showing the tables used in this pipeline.
 #
@@ -69,7 +76,6 @@
 # %autoreload 2
 
 # +
-import os
 import datajoint as dj
 
 import spyglass.common as sgc

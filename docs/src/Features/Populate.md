@@ -24,11 +24,15 @@ method into three methods with explicit responsibilities.
 | `make_compute(key, ...)` | Run the computation              | None       |
 | `make_insert(key, ...)`  | Write results to the database    | Write only |
 
-Spyglass's `populate` calls these three methods in sequence. `make_fetch` and
+DataJoint's `populate` calls these three methods in sequence. `make_fetch` and
 `make_compute` run outside the transaction; `make_insert` runs inside one. The
 long computation no longer holds a lock, but the database write is still atomic.
 
 ## How
+
+Define the three methods and leave `make` undefined. DataJoint sees that the
+inherited `AutoPopulate.make` is a generator function and drives the three
+stages through it.
 
 ```python
 import datajoint as dj
@@ -44,8 +48,6 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     ---
     result: float
     """
-
-    _parallel_make = True  # enables tri-part populate
 
     def make_fetch(self, key):
         """Read inputs. No database writes allowed here."""
@@ -72,6 +74,44 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
 4. `make_insert` is the only method that writes to the database.
 5. Each method returns a list; the next method receives those values as
     positional arguments after `key`.
+
+### What `populate` actually does
+
+```text
+fetched_1 = make_fetch(key, **make_kwargs)      # outside transaction
+computed  = make_compute(key, *fetched_1)       # outside transaction
+BEGIN TRANSACTION
+    fetched_2 = make_fetch(key, **make_kwargs)  # re-run
+    if hash(fetched_1) != hash(fetched_2):
+        raise DataJointError("Referential integrity failed!")
+    make_insert(key, *computed)
+COMMIT
+```
+
+Three consequences worth designing around:
+
+- **`make_fetch` runs twice per key.** Anything expensive in it — reading a
+    large file, fetching a big DataFrame — costs double, and the result is
+    hashed (via `deepdiff.DeepHash`) on both passes. Keep it to the queries you
+    genuinely need.
+
+- **The integrity hash is order-sensitive.** A `fetch` with no explicit
+    `ORDER BY` whose row order varies between the two passes will raise
+    `Referential integrity failed!`. Sort explicitly when the order is not
+    guaranteed by a primary key.
+
+- **`make_kwargs` are passed to `make_fetch` only.** If `make_compute` needs a
+    runtime value such as `device`, accept it in `make_fetch` and return it as
+    part of the fetched tuple:
+
+    ```python
+    def make_fetch(self, key, device=None):
+        return [(UpstreamTable & key).fetch1("raw_data"), device]
+
+
+    def make_compute(self, key, data, device):
+        return [{"result": heavy_analysis(data, device=device)}]
+    ```
 
 For a detailed walkthrough with a real Spyglass table, see
 [Custom Pipelines — Make Method](../ForDevelopers/CustomPipelines.md#make-method).
@@ -118,8 +158,6 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     ---
     result: float
     """
-
-    _parallel_make = True  # replaces _use_transaction = False
 
     def make_fetch(self, key):
         data = (UpstreamTable & key).fetch1("raw_data")
