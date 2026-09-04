@@ -185,6 +185,34 @@ def test_spikesortingoutput_get_spike_times_spans_sources(two_source_output):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_spikesortingoutput_get_spike_times_warns_across_sources(
+    two_source_output, caplog
+):
+    """Spanning pipelines is aggregated, but never silently.
+
+    ``get_spike_times`` opts into ``multi_source=True`` so its own aggregation
+    works, which also disables ``fetch_nwb``'s raise. An over-broad restriction
+    that mixes v0/v1/v2 units must therefore still produce a signal here.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    ctx = two_source_output
+    merge_keys = [
+        {"merge_id": ctx["mid_v2"]},
+        {"merge_id": ctx["mid_imported"]},
+    ]
+
+    with caplog.at_level("WARNING"):
+        SpikeSortingOutput().get_spike_times(merge_keys)
+
+    assert any(
+        "across" in record.getMessage() and "pipelines" in record.getMessage()
+        for record in caplog.records
+    ), "a source-spanning aggregation produced no warning"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_spikesortingoutput_parent_key_join_branch(two_source_output):
     """Restricting by CurationV2's composite primary key
     ``(sorting_id, curation_id)`` routes through the parent-attribute join

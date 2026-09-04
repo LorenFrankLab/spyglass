@@ -588,6 +588,32 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         sort_group_info = source_table.get_sort_group_info(query.fetch("KEY"))
         return part_table * sort_group_info  # join the info with merge id's
 
+    def _warn_multi_source_merge_ids(self, merge_ids) -> None:
+        """Warn when the consumed merges span more than one pipeline source.
+
+        ``get_spike_times`` legitimately aggregates many merges, so it opts
+        into ``multi_source=True`` and cannot rely on ``fetch_nwb``'s raise.
+        Without this the opt-in would make a restriction that accidentally
+        spans v0/v1/v2 -- different pipelines producing different units --
+        concatenate with no signal at all, where before the raise landed such a
+        fetch merely warned. Warns over exactly the merges consumed.
+        """
+        if len(merge_ids) < 2:
+            return
+        sources = set(
+            (self & [{"merge_id": mid} for mid in merge_ids]).fetch(
+                self._reserved_sk
+            )
+        )
+        if len(sources) > 1:
+            logger.warning(
+                "get_spike_times is aggregating spike trains across "
+                f"{len(sources)} sorting pipelines ({sorted(sources)}). "
+                "Different pipelines produce different units, so this is "
+                "usually an over-broad restriction rather than an intentional "
+                "mix. Restrict to one source if that was not deliberate."
+            )
+
     def get_spike_times(self, key):
         """Get spike times for the group"""
         # Resolve the files AND their merge_ids in one fetch_nwb pass so the
@@ -604,6 +630,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             key, return_merge_ids=True, multi_source=True
         )
         type(self)._warn_preview_merge_ids(merge_ids)
+        self._warn_multi_source_merge_ids(merge_ids)
         spike_times = []
         for nwb_file in nwb_files:
             # V1 uses 'object_id', V0 uses 'units'
