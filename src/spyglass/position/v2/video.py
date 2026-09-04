@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Union
 import datajoint as dj
 from datajoint.hash import key_hash
 
-from spyglass.common import Session, TaskEpoch, VideoFile
+from spyglass.common import VideoFile
 from spyglass.common.common_device import CameraDevice
 from spyglass.utils import SpyglassMixin
 
@@ -748,10 +748,18 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         )
 
     def get_nwb_file(self, vid_group_id: str) -> dict:
-        """Get NWB file common across all videos in the group, if it exists.
+        """Get the NWB file common to every video in the group.
 
-        Used for linking training and pose estimation entries to upstream NWB
-        tables.
+        This is the single-session assertion the inference path depends on: a
+        ``PoseEstim`` / ``PoseV2`` entry must derive from exactly one
+        ``Nwbfile`` so its results have a well-defined session.
+
+        Note that a group **may** legitimately span sessions -- ``ModelSelection``
+        trains one model across several -- so this method is an assertion made
+        by callers that need one session, not an invariant of the table itself.
+        Multi-camera (3-D) groups hold one ``File`` row per camera all sharing
+        a single parent NWB; those collapse to that common file rather than
+        counting once per camera.
 
         Parameters
         ----------
@@ -766,29 +774,32 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If video group doesn't exist, or if no common NWB file found across
-            videos
+            If the group does not exist, holds no video files, or spans more
+            than one NWB file. The three cases carry distinct messages.
 
         Examples
         --------
         >>> # Get session info for a video group
-        >>> session_info = VidFileGroup().get_session(vid_group_id=123456789)
+        >>> session_info = VidFileGroup().get_nwb_file(vid_group_id=123456789)
         >>> print(session_info)
         { "nwb_file_name": "subject1_session1.nwb" }
         """
+        if not self & {"vid_group_id": vid_group_id}:
+            raise ValueError(f"Video group not found: {vid_group_id}")
 
         files = self.File() & {"vid_group_id": vid_group_id}
         if not files:
-            raise ValueError(f"Video group not found: {vid_group_id}")
+            # insert1 permits creating a group with zero files (it warns and
+            # continues), so this is a distinct, reachable user error.
+            raise ValueError(
+                f"Video group '{vid_group_id}' has no video files. "
+                "Add VidFileGroup.File entries, or recreate the group with "
+                "files that resolve in the VideoFile table."
+            )
 
-        nwbs = (files * VideoFile * TaskEpoch.proj() * Session).fetch(
-            "nwb_file_name"
-        )
-
-        # Multi-camera (3D) groups hold one File row per camera, all sharing a
-        # single parent NWB; dedup so they collapse to that common file rather
-        # than counting once per camera.
-        distinct_nwbs = set(nwbs)
+        # VideoFile's foreign key already guarantees a TaskEpoch and Session
+        # row for every entry, so joining them would narrow nothing.
+        distinct_nwbs = set(files.fetch("nwb_file_name"))
         if not len(distinct_nwbs) == 1:
             raise ValueError(
                 f"Expected exactly 1 common NWB file across videos in group "
