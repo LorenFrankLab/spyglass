@@ -2,6 +2,26 @@
 
 ## [0.6.1] (Unreleased)
 
+<!--
+### Release notes
+
+```python
+# Add alters here
+# from spyglass.location import Each Table Needed To Resolve FKRef
+
+# Table.alter()
+```
+-->
+
+### Infrastructure
+
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
+- Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
+    the `None` return from `make_compute` #1679
+
 ### Pipelines
 
 - Position
@@ -12,13 +32,13 @@
     - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
         `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
         under DataJoint's daemonic workers #1679
-
-### Infrastructure
-
-- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
-    targets #1679
-- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
-    call's file handler when these calls nested #1679
+    - `TrodesPosVideo` and `PositionVideo` raise on an unmapped epoch instead of
+        committing `has_video=False`, and no longer repair `PositionIntervalMap`
+        or `VideoFile` from `make_fetch` #1679
+    - `DLCPosVideo` raises when a render writes no file, instead of reporting
+        success and inserting no row #1679
+    - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
+        across databases #1679
 
 ## [0.6.0] (Sep 1st 2026)
 
