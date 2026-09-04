@@ -39,6 +39,7 @@
         success and inserting no row #1679
     - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
         across databases #1679
+    - `VideoMaker` raises on a failed partial render #1679
 
 ## [0.6.0] (Sep 1st 2026)
 
