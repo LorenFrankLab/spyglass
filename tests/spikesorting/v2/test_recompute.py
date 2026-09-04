@@ -205,6 +205,29 @@ def test_analyzer_inventory_detects_rebuilt_and_legacy_storage():
     )
 
 
+def test_reclaimed_analyzer_folder_is_not_a_changed_generation():
+    """An absent folder freed on purpose must not read as a new generation.
+
+    ``delete_files`` frees a verified analyzer and records ``deleted=1``. Its
+    inventory still describes the bytes that were verified, and the reclamation
+    audit hangs off it, so refreshing (which invalidates the inventory and
+    cascades the audit away) would erase the record and re-plan a rebuild. An
+    absent folder with NO reclamation is still a real disappearance.
+    """
+    from spyglass.spikesorting.v2._recompute import (
+        analyzer_inventory_refresh_needed,
+    )
+
+    manifest = {"storage_fingerprint": "verified"}
+    assert not analyzer_inventory_refresh_needed(manifest, None, reclaimed=True)
+    assert analyzer_inventory_refresh_needed(manifest, None, reclaimed=False)
+    # A reclaimed row whose folder came BACK with different bytes still needs
+    # the refresh -- the audit no longer describes what is on disk.
+    assert analyzer_inventory_refresh_needed(
+        manifest, "rebuilt", reclaimed=True
+    )
+
+
 class _HashFakeExtension:
     def __init__(self, data):
         self._data = data
@@ -743,6 +766,51 @@ def test_sorting_analyzer_versions_records_missing_without_rebuild(
     assert row["analyzer_hash"] == _MISSING_HASH
     assert not row["analyzer_manifest"]  # {} / None -- no hashed content
     assert not folder.exists()  # the inventory did NOT rebuild
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_attempt_all_preserves_reclaimed_analyzer_audit(
+    display_analyzer_folder, clean_recompute
+):
+    """A deliberately reclaimed analyzer keeps its ``deleted=1`` audit row.
+
+    ``delete_files`` frees a verified analyzer folder and records the
+    reclamation as ``deleted=1``; the folder is regeneratable on demand. Re-
+    planning attempts must not read that absent folder as a CHANGED generation
+    -- invalidating the inventory cascades the audit away, so the folder later
+    re-reports as an unexpected DB-side orphan and a multi-GB rebuild is
+    re-planned against ``_MISSING_HASH``.
+    """
+    import shutil
+
+    from spyglass.spikesorting.v2.recompute import (
+        SortingAnalyzerRecompute,
+        SortingAnalyzerRecomputeSelection,
+        SortingAnalyzerVersions,
+    )
+
+    sort_key, recipe, folder = display_analyzer_folder
+    SortingAnalyzerVersions.populate(sort_key, reserve_jobs=False)
+    SortingAnalyzerRecomputeSelection.attempt_all(sort_key)
+    selection_key = (
+        SortingAnalyzerRecomputeSelection
+        & sort_key
+        & {"waveform_params_name": recipe}
+    ).fetch1("KEY")
+    # Stand in for a completed reclamation: verified, then folder freed.
+    SortingAnalyzerRecompute.insert1(
+        {**selection_key, "matched": 1, "deleted": 1},
+        skip_duplicates=True,
+        allow_direct_insert=True,
+    )
+    shutil.rmtree(folder)
+
+    SortingAnalyzerRecomputeSelection.attempt_all(sort_key)
+
+    assert (
+        SortingAnalyzerRecompute & selection_key & "deleted=1"
+    ), "re-planning erased the reclamation audit for a reclaimed analyzer"
 
 
 @pytest.mark.slow

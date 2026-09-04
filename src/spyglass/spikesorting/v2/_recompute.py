@@ -143,6 +143,25 @@ def analyzer_inventory_storage_changed(
     )
 
 
+def analyzer_inventory_refresh_needed(
+    manifest, current_fingerprint: str | None, *, reclaimed: bool
+) -> bool:
+    """Whether a versions row must be re-inventoried from the current folder.
+
+    Wraps :func:`analyzer_inventory_storage_changed` with the one case a bare
+    fingerprint comparison gets wrong: a folder that is absent because it was
+    deliberately reclaimed. ``delete_files`` frees a verified analyzer and
+    records the reclamation as ``deleted=1``; the inventory row still describes
+    the bytes that were verified, and the audit rows hang off it. Refreshing
+    would invalidate the inventory, cascade the audit away, and re-plan a
+    rebuild against ``_MISSING_HASH``. An absent folder with no reclamation on
+    record is still a real disappearance and does need the refresh.
+    """
+    if reclaimed and current_fingerprint is None:
+        return False
+    return analyzer_inventory_storage_changed(manifest, current_fingerprint)
+
+
 def hash_recording_traces(
     recording, *, rounding: int = 4, chunk_frames: int = 300_000
 ) -> dict[str, str]:

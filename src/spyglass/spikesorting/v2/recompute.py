@@ -38,7 +38,7 @@ from spyglass.spikesorting.v2._analyzer_cache import (
 )
 from spyglass.spikesorting.v2._recompute import (
     ANALYZER_RECOMPUTE_EXTENSIONS,
-    analyzer_inventory_storage_changed,
+    analyzer_inventory_refresh_needed,
     analyzer_recompute_unverifiable_reason,
     analyzer_seed_modes,
     combined_hash,
@@ -932,14 +932,18 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             folder = _analyzer_folder(
                 key["sorting_id"], key["waveform_params_name"]
             )
+            # A folder freed by ``delete_files`` is absent ON PURPOSE; its
+            # ``deleted=1`` rows are the reclamation audit and cascade away if
+            # this invalidates the inventory.
+            reclaimed = bool(SortingAnalyzerRecompute & key & "deleted=1")
             with analyzer_cache_lock(key["sorting_id"]):
                 current = (
                     analyzer_folder_storage_fingerprint(folder)
                     if folder.exists()
                     else None
                 )
-                if not analyzer_inventory_storage_changed(
-                    row.get("analyzer_manifest"), current
+                if not analyzer_inventory_refresh_needed(
+                    row.get("analyzer_manifest"), current, reclaimed=reclaimed
                 ):
                     continue
                 invalidate_sorting_analyzer_inventory(
