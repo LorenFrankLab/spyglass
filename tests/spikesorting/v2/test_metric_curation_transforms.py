@@ -119,7 +119,19 @@ def test_apply_label_rules_all_nan_defaults_to_actionable_error():
     """An all-missing rule input cannot silently disable a rule."""
     metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
-    with pytest.raises(ValueError, match="no finite values.*missing_policy"):
+    with pytest.raises(
+        ValueError, match=r"non-finite values for unit_id\(s\) \[4, 5\]"
+    ):
+        apply_label_rules(metrics, rules)
+
+
+def test_apply_label_rules_partial_missing_error_fails_fast():
+    """The default error policy rejects even one missing unit value."""
+    metrics = pd.DataFrame({"snr": [np.nan, 0.5, 5.0]}, index=[1, 2, 3])
+    rules = [_rule(0, "snr", "<", 1.0, "noise")]
+    with pytest.raises(
+        ValueError, match=r"non-finite values for unit_id\(s\) \[1\]"
+    ):
         apply_label_rules(metrics, rules)
 
 

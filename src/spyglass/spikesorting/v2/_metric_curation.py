@@ -135,7 +135,8 @@ def apply_label_rules(
     ------
     ValueError
         If a rule references a metric column absent from ``metrics_df``, or if
-        it has no finite values and the rule's missing policy is ``"error"``.
+        any unit has a non-finite value and the rule's missing policy is
+        ``"error"``.
 
     Notes
     -----
@@ -172,15 +173,19 @@ def apply_label_rules(
             unit_id: _is_finite_metric_value(column.loc[unit_id])
             for unit_id in metrics_df.index
         }
-        if finite_by_unit and not any(finite_by_unit.values()):
-            if missing_policy == "error":
-                raise ValueError(
-                    f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
-                    f"references metric {metric_name!r}, but that column has "
-                    "no finite values. Fix the metric computation or choose "
-                    "an explicit missing_policy ('fail', 'pass', or 'ignore') "
-                    "for this rule."
-                )
+        missing_unit_ids = [
+            int(unit_id)
+            for unit_id, is_finite in finite_by_unit.items()
+            if not is_finite
+        ]
+        if missing_policy == "error" and missing_unit_ids:
+            raise ValueError(
+                f"Auto-curation rule {rule.get('rule_name', metric_name)!r} "
+                f"references metric {metric_name!r}, which has non-finite "
+                f"values for unit_id(s) {missing_unit_ids}. Fix the metric "
+                "computation or choose an explicit missing_policy ('fail', "
+                "'pass', or 'ignore') for this rule."
+            )
         for unit_id in metrics_df.index:
             value = column.loc[unit_id]
             if not finite_by_unit[unit_id]:

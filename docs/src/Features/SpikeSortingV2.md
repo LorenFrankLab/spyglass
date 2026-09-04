@@ -839,8 +839,9 @@ Notes:
 - `AutoCurationRules` is inserted via `insert_rules(master, rule_rows)` (direct
   `insert1` is blocked) so the master row and its ordered rule rows validate
   together.
-- Every rule stores a `missing_policy`. `error` is fail-fast when a referenced
-  metric has no finite value, `fail` applies the rule's label to that unit,
+- Every rule stores a `missing_policy`. `error` is fail-fast when any unit has
+  a non-finite value for the referenced metric, `fail` applies the rule's label
+  to that unit,
   `pass` leaves it unlabelled by that rule, and `ignore` skips that rule for the
   unit. These are Spyglass semantics, not SpikeInterface's `nan_policy` (SI's
   `fail` labels a NaN unit and does not raise).
