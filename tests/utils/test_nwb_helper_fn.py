@@ -181,11 +181,31 @@ def test_estimate_sampling_rate_too_few_timestamps():
 
 
 def test_estimate_sampling_rate_nan_filtered():
-    """NaN values are filtered before validation."""
+    """NaN values are filtered before validation.
+
+    12 raw entries would pass validation on their own (11 diffs >= 10),
+    but 2 are NaN, leaving only 10 valid timestamps (9 diffs < 10) --
+    demonstrating the failure is actually caused by NaN-filtering, not
+    just an already-too-small input.
+    """
     from spyglass.utils.nwb_helper_fn import estimate_sampling_rate
 
-    # 5 valid diffs → too few; with NaNs, even fewer
-    times = np.array([0.0, np.nan, 0.02, np.nan, 0.04])
+    times = np.array(
+        [
+            0.0,
+            np.nan,
+            0.02,
+            np.nan,
+            0.04,
+            0.05,
+            0.06,
+            0.07,
+            0.08,
+            0.09,
+            0.10,
+            0.11,
+        ]
+    )
     with pytest.raises(ValueError):
         estimate_sampling_rate(times)
 

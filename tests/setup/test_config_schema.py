@@ -285,6 +285,30 @@ class TestBackwardsCompatibility:
             "This breaks backwards compatibility."
         )
 
+    def test_load_config_falls_back_to_dlc_dirs_key(
+        self, monkeypatch, tmp_path
+    ):
+        """A config file written before the dlc_dirs -> pose_dirs rename
+        (custom.dlc_dirs, no custom.pose_dirs) must still resolve the pose
+        directories.
+        """
+        import datajoint as dj
+
+        from spyglass.settings import SpyglassConfig
+
+        legacy_pose_base = tmp_path / "legacy_dlc_base"
+        dj.config.setdefault("custom", {})
+        monkeypatch.setitem(
+            dj.config["custom"], "dlc_dirs", {"base": str(legacy_pose_base)}
+        )
+        monkeypatch.delitem(dj.config["custom"], "pose_dirs", raising=False)
+
+        config = SpyglassConfig(base_dir=str(tmp_path / "spyglass_base"))
+        config.load_config(force_reload=True)
+
+        assert config.pose_project_dir == str(legacy_pose_base / "projects")
+        assert config.pose_video_dir == str(legacy_pose_base / "video")
+
     def test_settings_produces_original_structure(self):
         """Test that settings.py produces original structure at runtime."""
         from spyglass.settings import SpyglassConfig

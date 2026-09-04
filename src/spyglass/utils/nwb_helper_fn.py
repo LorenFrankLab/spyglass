@@ -1,7 +1,9 @@
 """NWB helper functions for finding processing modules and data interfaces."""
 
+import atexit
 import os
 import os.path
+from contextlib import suppress
 from itertools import groupby
 from pathlib import Path
 from typing import List, Union
@@ -204,10 +206,23 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
 
 
 def close_nwb_files():
-    """Close all open NWB files."""
+    """Close all open NWB files.
+
+    Per-handle failures are suppressed so one bad handle cannot leave the
+    rest of the cache open.
+    """
     for io, _ in __open_nwb_files.values():
-        io.close()
+        with suppress(Exception):
+            io.close()
     __open_nwb_files.clear()
+
+
+# Left to garbage collection, these cached handles are finalized during
+# interpreter teardown, where HDMFIO.__del__ -> close() -> h5py can no
+# longer import ("sys.meta_path is None, Python is likely shutting down").
+# atexit runs before teardown, so closing here avoids that. Registered at
+# import, so LIFO ordering puts it after other cleanup handlers.
+atexit.register(close_nwb_files)
 
 
 def get_data_interface(nwbfile, data_interface_name, data_interface_class=None):

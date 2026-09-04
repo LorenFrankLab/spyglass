@@ -166,7 +166,11 @@ def test_convert_epoch(common, mini_dict, pos_interval_01):
 
 
 def test_prepare_video_entry_with_external_file(common):
-    """Test _prepare_video_entry with external_file attribute."""
+    """Test _prepare_video_entry with external_file attribute.
+
+    a single ImageSeries can reference multiple video files.
+    ImageSeries.external_file is a list
+    """
     from pathlib import Path
     from unittest.mock import MagicMock, Mock
 
@@ -394,7 +398,7 @@ def test_validate_video_timestamps_single_file_poor_overlap(common):
     # Mock valid times with poor overlap
     valid_times = Mock()
     valid_times.contains.return_value = np.array([1.0])  # Only 1/5 = 20%
-    valid_times.times = [[6.0, 7.0]]  # Doesn't overlap
+    valid_times.times = [[0.0, 1.0]]  # Overlaps on a single point
 
     video_file = common.VideoFile()
 

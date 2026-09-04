@@ -161,7 +161,9 @@ class SpyglassConfig:
         dj_custom = dj.config.get("custom", {})
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
-        dj_pose = dj_custom.get("pose_dirs", {})
+        # Fall back to the old key name so a config file written before the
+        # dlc_dirs -> pose_dirs rename still resolves during the transition.
+        dj_pose = dj_custom.get("pose_dirs", dj_custom.get("dlc_dirs", {}))
         dj_moseq = dj_custom.get("moseq_dirs", {})
 
         self._debug_mode = dj_custom.get("debug_mode", False)
