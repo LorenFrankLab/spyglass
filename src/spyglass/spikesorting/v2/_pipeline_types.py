@@ -184,7 +184,9 @@ class RunV2ConcatSummary(_RunV2SummaryBase):
     concat_recording_id: UUID
     concat_recording_status: StageStatus
     member_curation_status: StageStatus
-    member_merge_ids: dict[str, UUID]
+    # Keyed by the frozen member index, not NWB filename: one NWB may
+    # legitimately contribute several intervals or sort groups.
+    member_merge_ids: dict[int, UUID]
 
 
 # A run_v2_pipeline summary is exactly one of the two modes; ``source_mode`` is

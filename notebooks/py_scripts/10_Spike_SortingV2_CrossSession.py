@@ -133,8 +133,9 @@ LabTeam.insert1(
 # the single-session `recording_id`, and no artifact stage (a concat preset runs
 # none). The synthetic concat curation itself stays out of `SpikeSortingOutput`;
 # the summary instead returns one wall-clock-aligned `member_merge_ids` entry per
-# session. `auto_curate=True` makes those member IDs point to the auto-curated
-# child. Idempotent, like every `run_v2_pipeline` call.
+# frozen member, keyed by `member_index`. `auto_curate=True` makes those member
+# IDs point to the auto-curated child. Idempotent, like every `run_v2_pipeline`
+# call.
 
 if run_concat:
     concat_key = {
@@ -163,8 +164,9 @@ if run_concat:
     # Feed one session's wall-clock-aligned output into the existing downstream
     # group API. Every member output has the same curated unit IDs, while spike
     # times are expressed on this member's own NWB clock.
+    member_index = 0
     member_nwb_file_name = same_day_members[0]["nwb_file_name"]
-    member_merge_id = concat_summary["member_merge_ids"][member_nwb_file_name]
+    member_merge_id = concat_summary["member_merge_ids"][member_index]
     UnitSelectionParams.insert_default()
     SortedSpikesGroup().create_group(
         group_name=f"{concat_group_name}_member_units",

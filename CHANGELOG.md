@@ -170,7 +170,7 @@ Instead, `ConcatMemberCuration` materializes one wall-clock-aligned
 `SpikeSortingOutput` row per frozen member session, preserving the same curated
 unit IDs and labels across members. Concat pipeline summaries keep
 `root_merge_id` / `analysis_merge_id` unset and return the usable mapping as
-`member_merge_ids[nwb_file_name]`. Trial databases should run
+`member_merge_ids[member_index]`. Trial databases should run
 `audit_concat_merge_rows()`, delete the unsafe rows it lists, and populate the
 member table using the release-note commands above.
 

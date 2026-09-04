@@ -91,7 +91,7 @@ def test_describe_run_concat_lists_each_member_merge_id():
         "source_mode": "concat",
         "root_merge_id": None,
         "member_curation_status": "computed",
-        "member_merge_ids": {"b.nwb": "merge-b", "a.nwb": "merge-a"},
+        "member_merge_ids": {1: "merge-b", 0: "merge-a"},
         "stage_seconds": {
             **_run_summary()["stage_seconds"],
             "member_curation": 0.25,
@@ -99,7 +99,7 @@ def test_describe_run_concat_lists_each_member_merge_id():
     }
     frame = describe_run(summary)
     members = frame[frame["row_type"] == "member"]
-    assert members["nwb_file_name"].tolist() == ["a.nwb", "b.nwb"]
+    assert members["member_index"].tolist() == [0, 1]
     assert members["member_merge_id"].tolist() == ["merge-a", "merge-b"]
 
 

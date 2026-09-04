@@ -347,7 +347,7 @@ def run_v2_pipeline(
         Concat mode adds instead (no artifact stage):
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
-            ``member_merge_ids``         : member ``nwb_file_name`` to
+            ``member_merge_ids``         : frozen ``member_index`` to
                 wall-clock-aligned SpikeSortingOutput PK; points to the
                 auto-curated child when ``auto_curate=True``, otherwise the root
         ``build_figpack_view=True`` adds (unless the sort found zero units):
@@ -356,7 +356,7 @@ def run_v2_pipeline(
         For downstream single-session science key off ``analysis_merge_id``
         (the curated, analysis-ready handle) -- NOT ``root_merge_id``, the
         uncurated root. For concat science, use the current member's
-        ``member_merge_ids[nwb_file_name]``. There is deliberately no bare
+        ``member_merge_ids[member_index]``. There is deliberately no bare
         ``merge_id``. A zero-unit single-session sort yields an empty (but real)
         root curation/merge row. A concat run leaves only its unsafe synthetic-
         timeline merge IDs ``None``; its member IDs are session-safe.
@@ -617,21 +617,13 @@ def run_v2_pipeline(
             warnings_list.append(warning)
         return None
 
-    def _concat_member_merge_ids(curation_key) -> dict[str, Any]:
-        """Return the complete member-NWB to merge-id mapping."""
+    def _concat_member_merge_ids(curation_key) -> dict[int, Any]:
+        """Return the complete frozen-member-index to merge-id mapping."""
         rows = (
             SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
             & curation_key
-        ).fetch("merge_id", "nwb_file_name", as_dict=True)
-        nwb_names = [str(row["nwb_file_name"]) for row in rows]
-        if len(set(nwb_names)) != len(nwb_names):
-            raise ValueError(
-                "run_v2_pipeline: concat member outputs cannot be represented "
-                "as member_merge_ids because multiple frozen members share "
-                f"an nwb_file_name: {nwb_names}. Use ConcatMemberCuration "
-                "directly with member_index for this group."
-            )
-        return {str(row["nwb_file_name"]): row["merge_id"] for row in rows}
+        ).fetch("merge_id", "member_index", as_dict=True)
+        return {int(row["member_index"]): row["merge_id"] for row in rows}
 
     if is_single:
         # Single-session: recording (+ optional artifact detection) -> sort.

@@ -170,8 +170,8 @@ class CurationRef:
         return _uuid(merge_ids[0]) if len(merge_ids) else None
 
     @property
-    def member_merge_ids(self) -> Mapping[str, uuid.UUID]:
-        """Return concat member ``nwb_file_name -> merge_id`` outputs."""
+    def member_merge_ids(self) -> Mapping[int, uuid.UUID]:
+        """Return concat member ``member_index -> merge_id`` outputs."""
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
         from spyglass.spikesorting.v2.concat_member_curation import (
             ConcatMemberCuration,
@@ -180,9 +180,9 @@ class CurationRef:
         rows = (
             ConcatMemberCuration * SpikeSortingOutput.ConcatMemberCuration
             & self.as_key()
-        ).fetch("nwb_file_name", "merge_id", as_dict=True)
+        ).fetch("member_index", "merge_id", as_dict=True)
         return MappingProxyType(
-            {str(row["nwb_file_name"]): _uuid(row["merge_id"]) for row in rows}
+            {int(row["member_index"]): _uuid(row["merge_id"]) for row in rows}
         )
 
     @property

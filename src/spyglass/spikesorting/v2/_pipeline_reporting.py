@@ -914,6 +914,7 @@ _RUN_COLUMNS = [
     "n_units",
     "root_merge_id",
     "analysis_merge_id",
+    "member_index",
     "nwb_file_name",
     "member_merge_id",
     "warning",
@@ -1020,13 +1021,13 @@ def _describe_run_single_rows(
             seconds=stage_seconds.get(stage),
         )
         rows.append(row)
-    for nwb_file_name, member_merge_id in sorted(
+    for member_index, member_merge_id in sorted(
         (run_summary.get("member_merge_ids") or {}).items()
     ):
         row = _run_blank_row()
         row.update(
             row_type="member",
-            nwb_file_name=str(nwb_file_name),
+            member_index=int(member_index),
             member_merge_id=member_merge_id,
         )
         rows.append(row)
@@ -1065,7 +1066,8 @@ def describe_run(result) -> "pd.DataFrame":
         Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
         ``"group"`` / ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
         ``seconds``, ``n_units``, ``root_merge_id``, ``analysis_merge_id``,
-        ``nwb_file_name``, ``member_merge_id``, ``warning``, ``error``. For a
+        ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
+        ``error``. For a
         ``run_v2_pipeline`` summary the ``summary`` row's
         ``status`` is ``"root only"`` / ``"auto-curated"``. Single-session
         runs expose the analysis-ready row through ``analysis_merge_id``;

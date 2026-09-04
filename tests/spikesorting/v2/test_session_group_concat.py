@@ -2084,6 +2084,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         ConcatMemberCuration,
     )
     from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
+    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.pipeline import (
         register_pipeline_preset,
         run_v2_pipeline,
@@ -2131,9 +2132,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert "concat_recording" in summary["stage_seconds"]
         assert summary["member_curation_status"] == "computed"
         assert "member_curation" in summary["stage_seconds"]
-        assert set(summary["member_merge_ids"]) == {
-            member["nwb_file_name"] for member in grp["same_day_members"]
-        }
+        assert set(summary["member_merge_ids"]) == {0, 1}
         assert len(summary["member_merge_ids"]) == 2
         # The synthetic concat row remains gated; one safe merge row is
         # registered for each member session instead.
@@ -2146,6 +2145,10 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         assert not (SpikeSortingOutput.CurationV2 & curation_key)
         assert len(ConcatMemberCuration & curation_key) == 2
         assert len(SpikeSortingOutput.ConcatMemberCuration & curation_key) == 2
+        assert (
+            dict(CurationRef.from_key(curation_key).member_merge_ids)
+            == summary["member_merge_ids"]
+        )
         assert (
             CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=summary["sorting_id"])
             in summary["warnings"]

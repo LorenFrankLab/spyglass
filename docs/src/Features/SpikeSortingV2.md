@@ -1228,13 +1228,13 @@ Sorting.populate(sort_key)
 curation_key = {"sorting_id": sort_key["sorting_id"], "curation_id": ...}
 ConcatMemberCuration.populate(curation_key)
 member_merge_ids = {
-    row["nwb_file_name"]: row["merge_id"]
+    row["member_index"]: row["merge_id"]
     for row in (
         SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
         & curation_key
     ).fetch(as_dict=True)
 }
-# -> {member_nwb_file_name: merge_id}; every member carries the same curated
+# -> {member_index: merge_id}; every member carries the same curated
 #    unit ids, including empty spike trains when a unit did not fire there.
 ```
 
@@ -1260,9 +1260,10 @@ Key behaviors and caveats:
 - **Downstream merge gate.** The concat `CurationV2` row itself is never
   registered in `SpikeSortingOutput`: its synthetic gap-free timeline is unsafe
   for session-scoped consumers. `ConcatMemberCuration` instead registers one
-  wall-clock-aligned merge row per frozen member `nwb_file_name`; labels and unit
-  IDs are shared across members. `run_v2_pipeline` returns these rows as
-  `member_merge_ids`.
+  wall-clock-aligned merge row per frozen `member_index`; labels and unit IDs
+  are shared across members. `run_v2_pipeline` returns these rows as
+  `member_merge_ids`, keyed by that index so separate members from one NWB do
+  not collide.
 
 ### Cross-session unit tracking
 
@@ -1409,11 +1410,12 @@ Key behaviors and caveats:
 v1 (`CurationV1`) and single-session v2 (`CurationV2`) curations register on the
 same `SpikeSortingOutput` merge table, so existing downstream code (decoding,
 ripple detection, etc.) keeps working unchanged. A concat v2 curation registers
-through one `ConcatMemberCuration` row per session; its synthetic parent remains
+through one `ConcatMemberCuration` row per frozen member; its synthetic parent
+remains
 behind the [downstream merge gate](#chronic-same-day-recordings) described
 above. **`run_summary["root_merge_id"]` is the uncurated root** — for downstream
 single-session science, use `run_summary["analysis_merge_id"]` instead. For a
-concat run, use `run_summary["member_merge_ids"][nwb_file_name]`; the mapping
+concat run, use `run_summary["member_merge_ids"][member_index]`; the mapping
 points to the auto-curated child when `auto_curate=True`, otherwise the root.
 For a single-session run, the fastest way to fill `analysis_merge_id` is
 `run_v2_pipeline(..., auto_curate=True)`, whose summary sets `analysis_merge_id`
