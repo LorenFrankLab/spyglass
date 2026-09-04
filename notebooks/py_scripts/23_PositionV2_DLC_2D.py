@@ -1133,6 +1133,37 @@ print(f"Processed data: {processed_df.shape[0]} timepoints")
 print(processed_df.head())
 
 # %% [markdown]
+# ### Finding entries by recording session
+#
+# `PoseV2`'s key carries `vid_group_id`, not `nwb_file_name`/`epoch` — a video
+# group is a *set* of videos, so the session does not ride down the primary
+# key the way it does for `DLCPosV1`. Use `fetch_by_epoch()`, which takes any
+# restriction valid on `TaskEpoch`:
+#
+# ```python
+# # A whole session
+# PoseV2().fetch_by_epoch({"nwb_file_name": "my_session_.nwb"})
+#
+# # One epoch, straight to a dataframe
+# PoseV2().fetch_by_epoch(
+#     {"nwb_file_name": "my_session_.nwb", "epoch": 1}
+# ).fetch1_dataframe()
+#
+# # Composes with other restrictions
+# (PoseV2 & {"pose_params_id": "default"}).fetch_by_epoch(
+#     {"nwb_file_name": "my_session_.nwb"}
+# )
+# ```
+#
+# Equivalent to the underlying join `PoseV2 * (VidFileGroup.File & restriction)`,
+# but deduplicated: a multi-camera group has one `File` row per camera, so the
+# raw join repeats each entry once per matching video.
+#
+# > **Careful:** `PoseV2 & {"nwb_file_name": ...}` does *not* work and does not
+# > raise — DataJoint silently ignores a restriction on an attribute the table
+# > does not have, so you get back *every* row.
+
+# %% [markdown]
 # `PoseV2.populate()` runs the processing pipeline, which performs:
 #
 # 1. **Likelihood filtering**: Remove low-confidence detections
