@@ -296,14 +296,15 @@ class TestBackwardsCompatibility:
 
         from spyglass.settings import SpyglassConfig
 
-        legacy_pose_base = tmp_path / "legacy_dlc_base"
+        spyglass_base = tmp_path / "tests" / "spyglass_base"
+        legacy_pose_base = spyglass_base / "legacy_dlc_base"
         dj.config.setdefault("custom", {})
         monkeypatch.setitem(
             dj.config["custom"], "dlc_dirs", {"base": str(legacy_pose_base)}
         )
         monkeypatch.delitem(dj.config["custom"], "pose_dirs", raising=False)
 
-        config = SpyglassConfig(base_dir=str(tmp_path / "spyglass_base"))
+        config = SpyglassConfig(base_dir=str(spyglass_base))
         config.load_config(force_reload=True)
 
         assert config.pose_project_dir == str(legacy_pose_base / "projects")
