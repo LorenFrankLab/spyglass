@@ -32,7 +32,6 @@ import hashlib
 import os
 import re
 import shutil
-import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
@@ -67,6 +66,26 @@ class AnalyzerCacheFolderIdentity:
     role: str | None = None
     waveform_recipe_hash: str | None = None
     spikeinterface_version_hash: str | None = None
+
+
+def analyzer_folder_storage_fingerprint(folder, *, exclude_names=()) -> str:
+    """Hash an analyzer folder's file paths, sizes, and mtimes without reads."""
+    digest = hashlib.sha256()
+    root = Path(folder)
+    excluded = set(exclude_names)
+    files = sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.name not in excluded
+    )
+    for path in files:
+        stat = path.stat()
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        digest.update(stat.st_size.to_bytes(8, "big"))
+        digest.update(stat.st_mtime_ns.to_bytes(8, "big"))
+    return digest.hexdigest()
 
 
 def assert_path_safe_waveform_params_name(name) -> None:

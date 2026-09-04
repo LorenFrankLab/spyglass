@@ -2291,7 +2291,13 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
 
     def add_extensions(
-        self, key: dict, extensions: list[str], **kwargs
+        self,
+        key: dict,
+        extensions: list[str],
+        *,
+        waveform_params_name: str | None = None,
+        extension_params: dict[str, dict] | None = None,
+        **kwargs,
     ) -> list[str]:
         """Add SortingAnalyzer extensions in place; return the ones computed.
 
@@ -2314,6 +2320,12 @@ class Sorting(SpyglassMixin, dj.Computed):
             Restriction selecting a single ``Sorting`` row.
         extensions : list of str
             SortingAnalyzer extension names to add.
+        waveform_params_name : str, optional
+            Exact analyzer recipe to mutate. ``None`` uses the sort's stored
+            display recipe.
+        extension_params : dict, optional
+            Per-extension parameter dictionaries forwarded to
+            :func:`ensure_extensions`.
         **kwargs
             Job kwargs that override the resolved per-row defaults.
 
@@ -2343,8 +2355,15 @@ class Sorting(SpyglassMixin, dj.Computed):
         # would leave the mutation unguarded. The lock is reentrant, so the
         # nested ``get_analyzer`` load does not self-deadlock.
         with analyzer_cache_lock(sorting_id):
-            analyzer = self.get_analyzer(key)
-            return ensure_extensions(analyzer, extensions, job_kwargs=resolved)
+            analyzer = self.get_analyzer(
+                key, waveform_params_name=waveform_params_name
+            )
+            return ensure_extensions(
+                analyzer,
+                extensions,
+                job_kwargs=resolved,
+                extension_params=extension_params,
+            )
 
     # ---- visualization / export delegates (see v2.visualization facade) ---
 

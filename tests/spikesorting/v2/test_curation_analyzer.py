@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import hashlib
+import inspect
 import multiprocessing
 import time
 import uuid
@@ -163,6 +163,102 @@ def test_spike_content_hash_covers_units_segments_and_frames():
     )
 
 
+def test_extension_inventory_never_reads_payload(monkeypatch):
+    """Cache hits validate small metadata without decoding extension arrays."""
+    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+
+    class _Extension:
+        def __init__(self):
+            self.params = {"operator": "average"}
+
+        def get_data(self):
+            raise AssertionError("extension payload must not be read")
+
+    class _Analyzer:
+        extension = _Extension()
+
+        def get_saved_extension_names(self):
+            return ["templates"]
+
+        def get_extension(self, name):
+            assert name == "templates"
+            return self.extension
+
+    monkeypatch.setattr(
+        resolver, "_expected_extensions", lambda _role: ("templates",)
+    )
+    analyzer = _Analyzer()
+    original = resolver._extension_inventory(analyzer, "display")
+    analyzer.extension.params = {"operator": "median"}
+    modified = resolver._extension_inventory(analyzer, "display")
+    assert modified != original
+
+
+def test_folder_storage_fingerprint_tracks_file_stats_and_ignores_manifest(
+    tmp_path,
+):
+    """The cheap disk fingerprint covers analyzer files, not its own manifest."""
+    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+
+    payload = tmp_path / "extensions" / "templates" / "data.bin"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"stored extension bytes")
+    original = resolver._folder_storage_fingerprint(tmp_path)
+
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text("{}")
+    assert resolver._folder_storage_fingerprint(tmp_path) == original
+
+    payload.write_bytes(b"modified extension bytes with a new size")
+    assert resolver._folder_storage_fingerprint(tmp_path) != original
+
+
+def test_cache_rejects_storage_drift_before_loading_analyzer(
+    monkeypatch, tmp_path
+):
+    """Changed chunks invalidate a cache without opening their array payloads."""
+    import json
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2 import _curation_analyzer as resolver
+
+    expected = {
+        "sorting_id": "sorting-id",
+        "curation_uuid": "curation-uuid",
+        "curation_id": 1,
+        "role": "display",
+        "curated_unit_ids": (1,),
+        "contributor_map": {},
+        "merged_spike_content_hash": "spike-hash",
+        "merge_policy_version": "policy",
+        "source_artifact_hashes": {},
+        "waveform_recipe_hash": "recipe-hash",
+        "spikeinterface_version": "si-version",
+    }
+    payload = tmp_path / "extensions" / "templates" / "data.bin"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"original")
+    manifest = {
+        **expected,
+        "curated_unit_ids": [1],
+        "extension_inventory": {"templates": "params-hash"},
+        "storage_fingerprint": resolver._folder_storage_fingerprint(tmp_path),
+    }
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text(
+        json.dumps(manifest)
+    )
+    payload.write_bytes(b"externally modified with a different size")
+    loads = []
+    monkeypatch.setattr(
+        si, "load_sorting_analyzer", lambda _folder: loads.append(_folder)
+    )
+    assert (
+        resolver._load_valid_cached_analyzer(tmp_path, expected, "display")
+        is None
+    )
+    assert loads == []
+
+
 def test_direct_curation_analyzer_access_is_detached(monkeypatch):
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
 
@@ -255,13 +351,11 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
     from spyglass.spikesorting.v2 import visualization as ssviz
     from spyglass.spikesorting.v2._curation_analyzer import (
         _resolve_curation_analyzer,
-        curation_analyzer_with_extensions,
         curation_analyzer_cache_path,
+        curation_analyzer_with_extensions,
         get_curation_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -270,6 +364,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         CurationEvaluationSelection,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_two_unit_sort)
     unit_ids = sorted(
@@ -285,6 +380,18 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         raw_analyzer = _resolve_curation_analyzer(root, recipe)
         assert list(raw_analyzer.unit_ids) == unit_ids
         assert not raw_curation_folder.exists()
+
+        # Raw curations share the sort analyzer, so a requested extension is
+        # persisted once rather than recomputed on an in-memory copy per view.
+        with curation_analyzer_with_extensions(
+            root,
+            recipe,
+            extra_extensions={"spike_locations": {}},
+        ) as raw_with_locations:
+            assert raw_with_locations.has_extension("spike_locations")
+        assert _resolve_curation_analyzer(root, recipe).has_extension(
+            "spike_locations"
+        )
 
         merged = CurationV2.create_merged_curation(
             sorting_key,
@@ -434,13 +541,12 @@ def test_preview_curation_requires_commit(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """A proposed merge has no final analyzer namespace until committed."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
     from spyglass.spikesorting.v2._curation_analyzer import (
         _resolve_curation_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_two_unit_sort)
     unit_ids = sorted(
