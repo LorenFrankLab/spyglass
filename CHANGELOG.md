@@ -56,6 +56,51 @@ if "curation_uuid" not in curation_table.heading.names:
 CurationV2().alter()  # finalize UUID and add created_at / created_by
 AutoCurationRules.Rule().alter()  # missing_policy defaults existing rows to error
 
+# Re-link each sort's artifact pass to the ArtifactDetectionOutput merge. The
+# part table's secondary FK moved from `artifact_detection_id` to
+# `artifact_detection_merge_id`, which `alter()` cannot retarget, so remap the
+# rows through the merge's source parts and redeclare the part table. Run this
+# BEFORE importing anything that inserts a SortingSelection. A trial database
+# with no v2 sorts worth keeping can instead drop the `spikesorting_v2_*`
+# schemas and let them redeclare.
+import datajoint as dj
+
+from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+from spyglass.spikesorting.v2.sorting import SortingSelection
+
+_part = dj.FreeTable(
+    dj.conn(), SortingSelection.ArtifactDetectionSource.full_table_name
+)
+if "artifact_detection_id" in _part.heading.names:
+    _by_detection = {}
+    for _src in ArtifactDetectionOutput.parts(as_objects=True):
+        for _row in _src.fetch(as_dict=True):
+            _by_detection[_row["artifact_detection_id"]] = _row["merge_id"]
+    _remapped = []
+    for _row in _part.fetch(as_dict=True):
+        _mid = _by_detection.get(_row["artifact_detection_id"])
+        if _mid is None:  # unregistered detection -- do not guess
+            raise RuntimeError(
+                "artifact_detection_id "
+                f"{_row['artifact_detection_id']} for sorting_id "
+                f"{_row['sorting_id']} is not registered in "
+                "ArtifactDetectionOutput; populate the detection (or delete "
+                "the orphaned sort) before migrating."
+            )
+        _remapped.append(
+            {
+                "sorting_id": _row["sorting_id"],
+                "artifact_detection_merge_id": _mid,
+            }
+        )
+    _part.drop_quick()  # redeclared on the next schema import
+    from importlib import reload
+
+    import spyglass.spikesorting.v2.sorting as _sorting_mod
+
+    reload(_sorting_mod)
+    _sorting_mod.SortingSelection.ArtifactDetectionSource.insert(_remapped)
+
 # Declare and seed the net-new immutable review-profile lookup after its two
 # recipe foreign keys have been upgraded/seeded.
 from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -211,7 +256,11 @@ v2's artifact-detection stage uses source-specific selection/detection tables
 (`RecordingArtifact*` / `SharedGroupArtifact*`) behind an
 `ArtifactDetectionOutput` merge; a sort links its artifact pass through a
 `SortingSelection.ArtifactDetectionSource` part carrying
-`artifact_detection_merge_id`.
+`artifact_detection_merge_id`. A trial database created earlier in this release
+carries the superseded `artifact_detection_id` column on that part; the
+release-note commands above remap it through the merge's source parts, which
+`alter()` cannot do. Without that step the next `SortingSelection` insert fails
+with ``KeyError: `artifact_detection_merge_id` is not in the table heading``.
 
 - **Coordinated artifact lifecycle.** A detection registers itself into
   `ArtifactDetectionOutput` at materialization; deleting a detection that a sort
