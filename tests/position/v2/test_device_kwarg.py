@@ -131,11 +131,20 @@ def _run_pose_estim_make(device):
             VidFileGroup=MagicMock(),
             VideoFile=MagicMock(),
             BodyPart=MagicMock(),  # canon_map() now resolved in make_fetch
+            # resolve_cuda_device queries real GPU memory via
+            # torch.cuda.device_count()/mem_get_info(). Device threading is
+            # under test here, not GPU resolution (that has its own unit
+            # tests in test_device_selection.py), so pass the device
+            # through unchanged rather than hitting real torch internals.
+            resolve_cuda_device=lambda device, **kwargs: device,
         ),
-        # Device-threading is under test here, not GPU hardware presence
-        # (check_gpu_available's own behavior has dedicated unit tests in
-        # test_utils_general.py); pretend a CUDA device is visible so a
-        # cuda:N device string doesn't fail this test on a CPU-only box.
+        # check_gpu_available also gates on this; pretend a CUDA device is
+        # visible so a cuda:N device string doesn't fail this test on a
+        # CPU-only box. Mocking is_available() alone is NOT enough for
+        # resolve_cuda_device -- torch.cuda.device_count() checks
+        # is_available() too, then calls the real (uncompiled, on a
+        # CPU-only torch build) torch._C._cuda_getDeviceCount(), hence the
+        # resolve_cuda_device mock above.
         patch("torch.cuda.is_available", return_value=True),
     ):
         estim_mod.PoseEstimSelection.__and__.return_value.fetch1.return_value = (  # noqa: E501
