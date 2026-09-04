@@ -60,6 +60,40 @@ class TestVidFileGroupCameraIndex:
         assert "vid_group_id" in group_key
 
 
+class TestMulticamSingleSession:
+    """A multi-camera group is many File rows, but still one session.
+
+    Blast-radius guard on the single-session inference constraint: the guard
+    must key off *distinct NWB files*, not off the number of ``File`` rows,
+    or every 3-D group would be rejected.
+    """
+
+    def test_get_nwb_file_dedups_cameras(
+        self, position_v2, multicam_session, multicam_group
+    ):
+        """Three camera rows collapse to the one NWB parent they share."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        files = VidFileGroup.File & {"vid_group_id": multicam_group}
+        assert len(files) == 3  # the fan-out that must not be miscounted
+
+        result = VidFileGroup().get_nwb_file(multicam_group)
+        assert result == {"nwb_file_name": multicam_session["name"]}
+
+    def test_selection_accepts_multicam_group(
+        self, PoseEstimSelection, stub_model, multicam_group
+    ):
+        """The session guard must not reject a legitimate 3-D group."""
+        tbl = PoseEstimSelection()
+        key = {
+            "model_id": stub_model["model_id"],
+            "vid_group_id": multicam_group,
+            "pose_estim_params_id": "default",
+        }
+        tbl.insert1({**key, "task_mode": "load", "output_dir": ""})
+        assert len(tbl & key) == 1
+        (tbl & key).super_delete(warn=False, safemode=False)
+
+
 # ---------------------------------------------------------------------------
 # MC02 — per-camera meters_per_pixel from CameraDevice (source of truth)
 # ---------------------------------------------------------------------------
