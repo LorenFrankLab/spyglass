@@ -403,6 +403,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True  # make_compute spawns a process pool per video
+    _video_maker = None  # last VideoMaker; populate cannot return it
 
     def make_fetch(self, key):
         """Fetch the inputs needed to render the position video.
@@ -457,9 +458,13 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
                     DLCPoseEstimation.BodyPart()
                     & {**pose_est_key, **{"bodypart": bodypart}}
                 ).fetch1_dataframe()
-                for bodypart in (DLCSmoothInterpCohort.BodyPart & pose_est_key)
-                .fetch("bodypart")
-                .tolist()
+                # sorted: this order sets the bodypart color assignment in
+                # the rendered video, and `fetch` sends no ORDER BY.
+                for bodypart in sorted(
+                    (DLCSmoothInterpCohort.BodyPart & pose_est_key)
+                    .fetch("bodypart")
+                    .tolist()
+                )
             },
             axis=1,
         )
@@ -490,6 +495,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         1. Assembles the centroid and likelihood arrays per bodypart.
         2. Determines the output video path.
         3. Calls make_video to create the video with the above data.
+        4. Raises if the render produced no file.
 
         Parameters
         ----------
@@ -503,6 +509,14 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         -------
         list
             output_video_filename, video_maker
+
+        Raises
+        ------
+        FileNotFoundError
+            If the pose estimation output dir is missing, or if the render
+            wrote no file. VideoMaker logs ffmpeg failures and returns
+            without raising, so without this check the populate would report
+            success and insert nothing.
         """
         M_TO_CM = 100
         epoch = key["epoch"]
@@ -521,8 +535,12 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             + f'{key["dlc_centroid_params_name"]}'
             + f'{key["dlc_orientation_params_name"]}.mp4'
         )
-        if Path(output_dir).exists():
-            output_video_filename = Path(output_dir) / output_video_filename
+        if not Path(output_dir).exists():
+            raise FileNotFoundError(  # pragma: no cover
+                f"Pose estimation output dir does not exist: {output_dir}\n"
+                f"\tkey: {key}"
+            )
+        output_video_filename = Path(output_dir) / output_video_filename
 
         idx = pd.IndexSlice
         video_frame_inds = pos_info_df["video_frame_ind"].astype(int).to_numpy()
@@ -570,10 +588,18 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             **params.get("video_params", {}),
         )
 
+        if not Path(output_video_filename).exists():
+            raise FileNotFoundError(  # pragma: no cover
+                f"Video render produced no output: {output_video_filename}\n"
+                f"\tkey: {key}\n"
+                "\tCheck the ffmpeg errors above; set params['debug']=True "
+                "to keep the temp directory for inspection."
+            )
+
         return [output_video_filename, video_maker]
 
     def make_insert(self, key, output_video_filename, video_maker):
-        """Insert the key if the video was successfully written.
+        """Insert the key. make_compute has already verified the render.
 
         Parameters
         ----------
@@ -585,6 +611,4 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             the VideoMaker used, retained for debugging
         """
         self._video_maker = video_maker  # retained for debugging
-
-        if Path(output_video_filename).exists():
-            self.insert1(key)
+        self.insert1(key)
