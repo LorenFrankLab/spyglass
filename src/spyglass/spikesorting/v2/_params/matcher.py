@@ -11,7 +11,9 @@ read: the pair-probability cutoffs and the strict tracked-unit graph cap.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import math
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class UnitMatchParamsSchema(BaseModel):
@@ -55,3 +57,15 @@ class UnitMatchParamsSchema(BaseModel):
     max_spikes_per_unit: int = Field(default=100, ge=1)
     seed: int = Field(default=0, ge=0)
     schema_version: int = 1
+
+    @model_validator(mode="after")
+    def _waveform_window_is_symmetric(self):
+        """Keep UnitMatch's trough and baseline in their assumed locations."""
+        if not math.isclose(
+            self.ms_before, self.ms_after, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                "UnitMatch requires a symmetric waveform window: ms_before "
+                f"({self.ms_before}) must equal ms_after ({self.ms_after})."
+            )
+        return self

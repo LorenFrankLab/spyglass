@@ -55,6 +55,37 @@ def test_zero_center_window_scales_with_spike_width(spike_width, n_baseline):
     )
 
 
+def test_unitmatch_params_reject_asymmetric_waveform_window():
+    """UnitMatch assumes the trough is centered in its waveform window."""
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+
+    with pytest.raises(ValidationError, match="symmetric waveform window"):
+        UnitMatchParamsSchema(ms_before=0.5, ms_after=2.0)
+
+    params = UnitMatchParamsSchema(ms_before=0.5, ms_after=0.5)
+    assert params.ms_before == params.ms_after == 0.5
+
+
+def test_unitmatch_bundle_rejects_asymmetric_window_before_io():
+    """The public bundle builder enforces the same centered-window contract."""
+    from pydantic import ValidationError
+
+    from spyglass.spikesorting.v2._unitmatch_backend import (
+        extract_unitmatch_bundle,
+    )
+
+    with pytest.raises(ValidationError, match="symmetric waveform window"):
+        extract_unitmatch_bundle(
+            "unused",
+            recording=object(),
+            sorting=object(),
+            ms_before=0.5,
+            ms_after=2.0,
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Pure graph logic: pair canonicalization (goal 7, no DB) and strict-clique     #
 # tracked-unit derivation (goals 8/9/10, no DB).                                #

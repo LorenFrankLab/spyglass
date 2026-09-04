@@ -162,6 +162,20 @@ def extract_unitmatch_bundle(
         resolves these from ``MatcherParameters.job_kwargs``; ``None`` uses the
         SpikeInterface defaults.
     """
+    # Keep this public service boundary as strict as MatcherParameters.insert:
+    # UnitMatch locates the trough at the geometric midpoint, and the baseline
+    # subtraction assumes the first quarter is wholly pre-spike.
+    validated = UnitMatchParamsSchema(
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=max_spikes_per_unit,
+        seed=seed,
+    )
+    ms_before = validated.ms_before
+    ms_after = validated.ms_after
+    max_spikes_per_unit = validated.max_spikes_per_unit
+    seed = validated.seed
+
     import spikeinterface as si
 
     um = _require_unitmatch()
