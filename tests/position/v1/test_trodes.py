@@ -92,3 +92,11 @@ def test_trodes_video(sgp, trodes_pos_v1):
     vid_tbl = sgp.v1.TrodesPosVideo()
     _ = vid_tbl.populate()
     assert len(vid_tbl) == 2, "Failed to populate TrodesPosVideo"
+
+    # Row count alone cannot tell a render from a skip: the upsampled
+    # paramset always takes the has_video=False path.
+    has_video = dict(zip(*vid_tbl.fetch("trodes_pos_params_name", "has_video")))
+    assert has_video["single_led"], "TrodesPosVideo rendered no video"
+    assert not has_video[
+        "single_led_upsampled"
+    ], "TrodesPosVideo rendered an upsampled video"
