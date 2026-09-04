@@ -594,9 +594,21 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         ).fetch1_dataframe()
 
         self._info_msg("Loading video data...")
+        # populate_missing=False: make_fetch must not write. The default
+        # repairs a missing mapping, which would commit outside the
+        # transaction and start a nested populate.
         epoch = get_position_interval_epoch(
-            key["nwb_file_name"], key["interval_list_name"]
+            key["nwb_file_name"],
+            key["interval_list_name"],
+            populate_missing=False,
         )
+        if epoch is None:
+            raise ValueError(
+                f"No epoch mapped for {key['nwb_file_name']} / "
+                f"{key['interval_list_name']}.\n\tRun "
+                "`populate_position_interval_map_session(nwb_file_name)` "
+                "first."
+            )
         video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
 
         # Read every needed value out of the file so nothing downstream holds
