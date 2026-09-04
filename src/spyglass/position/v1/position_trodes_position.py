@@ -303,6 +303,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True  # make_compute spawns a process pool per video
+    _video_maker = None  # last VideoMaker; populate cannot return it
 
     def make_fetch(self, key):
         """Fetch the inputs needed to render the position video.
@@ -334,9 +335,21 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         self._info_msg("Loading video data...")
+        # populate_missing=False: make_fetch must not write. Both helpers
+        # default to repairing a missing mapping, which would commit outside
+        # the transaction and start a nested populate.
         epoch = get_position_interval_epoch(
-            key["nwb_file_name"], key["interval_list_name"]
+            key["nwb_file_name"],
+            key["interval_list_name"],
+            populate_missing=False,
         )
+        if epoch is None:
+            raise ValueError(
+                f"No epoch mapped for {key['nwb_file_name']} / "
+                f"{key['interval_list_name']}.\n\tRun "
+                "`populate_position_interval_map_session(nwb_file_name)` "
+                "first."
+            )
 
         (
             video_path,
@@ -344,7 +357,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_info(
-            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
+            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch},
+            populate_missing=False,
         )
 
         params_pk = "trodes_pos_params_name"
