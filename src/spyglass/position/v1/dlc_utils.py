@@ -19,7 +19,7 @@ from position_tools import get_distance
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
-from spyglass.utils.logging import logger, stream_handler
+from spyglass.utils.logging import logger
 
 
 def validate_option(
@@ -151,14 +151,29 @@ def file_log(logger, console=False):
             )
             file_handler.setFormatter(file_fmt)
             logger.addHandler(file_handler)
-            if not console:
-                logger.removeHandler(logger.handlers[0])
+
+            # Suppress console output by removing whatever handlers are
+            # present, then restoring those same objects. The old code
+            # removed handlers[0] by position, which under nesting was the
+            # outer call's file handler -- so the outer call silently lost
+            # its log file and regained the console output it had
+            # suppressed. Restoring the module-level stream_handler rather
+            # than the removed object also resurrected a handler another
+            # caller had deliberately removed.
+            suppressed = (
+                []
+                if console
+                else [h for h in logger.handlers if h is not file_handler]
+            )
+            for handler in suppressed:
+                logger.removeHandler(handler)
+
             try:
                 return func(self, *args, **kwargs)
             finally:
-                if not console:
-                    logger.addHandler(stream_handler)
                 logger.removeHandler(file_handler)
+                for handler in suppressed:
+                    logger.addHandler(handler)
                 file_handler.close()
 
         return wrapper
@@ -201,7 +216,7 @@ def _to_Path(path):
     return Path(str(path).replace("\\", "/"))
 
 
-def get_video_info(key):
+def get_video_info(key, populate_missing: bool = True):
     """Returns video path for a given key.
 
     Given nwb_file_name and interval_list_name returns specified
@@ -211,6 +226,10 @@ def get_video_info(key):
     ----------
     key : dict
         Dictionary containing nwb_file_name and interval_list_name as keys
+    populate_missing : bool
+        Whether to insert VideoFile entries from the NWB file when the session
+        has none. Must be False when called from another table's `make_fetch`,
+        which is not permitted to write. Defaults to True.
 
     Returns
     -------
@@ -228,7 +247,7 @@ def get_video_info(key):
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
-    if not video_query:
+    if not video_query and populate_missing:
         if not (VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}):
             VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
             video_query = VideoFile & vf_key
