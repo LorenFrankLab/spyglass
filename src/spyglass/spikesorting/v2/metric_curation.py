@@ -2657,19 +2657,37 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         return peak_amplitudes_from_analyzer(self._analyzer_for(key))
 
-    def plot_burst_pair_metrics(self, key, pairs=None):
-        """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
+    def get_burst_pair_metrics(
+        self,
+        key,
+        pairs=None,
+        *,
+        isi_threshold_ms: float = 2.0,
+        window_ms: float = 100.0,
+        bin_ms: float = 5.0,
+    ):
+        """Per-pair burst-merge diagnostics as a DataFrame (v1 BurstPair data).
 
-        Scatters waveform similarity vs cross-correlogram asymmetry, one point
-        per unit pair, computed on the fly from the analyzer's extensions (no
-        pair metrics are stored). Any missing display extensions are built on a
-        detached derivative, not persisted into the published cache. v1 laid
-        out one panel per sort group; a v2 sort is a single sort group, so this
-        renders that sort's pairs. ``pairs`` defaults to all ordered pairs.
+        The queryable counterpart of v1's ``BurstPair.BurstPairUnit`` part
+        table, computed on the fly from the evaluation's display analyzer
+        rather than stored: ``wf_similarity`` (SI cosine template similarity),
+        ``isi_violation`` of the merged train, directional ``xcorrel_asymm``,
+        and ``unit_distance`` between unit locations. Ordered pairs are
+        distinct rows because the correlogram asymmetry is directional.
+        ``pairs`` defaults to every ordered pair.
+
+        Unlike ``get_metrics`` / ``get_labels`` this is an instance method: it
+        reads the analyzer through ``_display_analyzer`` rather than the
+        stored NWB. Any missing display extension is built on a detached
+        derivative, never persisted into the published cache.
+
+        Returns
+        -------
+        pd.DataFrame
+            Shape ``(n_pairs, 4)``, MultiIndex ``(unit1, unit2)``.
         """
-        from spyglass.spikesorting.utils_burst import plot_burst_metrics
         from spyglass.spikesorting.v2._metric_curation_plots import (
-            burst_pair_metrics_from_analyzer,
+            burst_pair_metrics_frame,
         )
 
         with self._display_analyzer(
@@ -2679,8 +2697,29 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 "unit_locations": {},
             },
         ) as analyzer:
-            rows = burst_pair_metrics_from_analyzer(analyzer, pairs=pairs)
-        return plot_burst_metrics(rows)
+            return burst_pair_metrics_frame(
+                analyzer,
+                pairs=pairs,
+                isi_threshold_ms=isi_threshold_ms,
+                window_ms=window_ms,
+                bin_ms=bin_ms,
+            )
+
+    def plot_burst_pair_metrics(self, key, pairs=None, **kwargs):
+        """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
+
+        Scatters waveform similarity vs cross-correlogram asymmetry, one point
+        per unit pair, over the frame from ``get_burst_pair_metrics`` (which
+        also takes the keyword arguments). v1 laid out one panel per sort
+        group; a v2 sort is a single sort group, so this renders that sort's
+        pairs. ``pairs`` defaults to all ordered pairs.
+        """
+        from spyglass.spikesorting.utils_burst import plot_burst_metrics
+
+        frame = self.get_burst_pair_metrics(key, pairs=pairs, **kwargs)
+        # plot_burst_metrics reads unit1/unit2 per record, which the
+        # MultiIndex would otherwise drop from to_dict("records").
+        return plot_burst_metrics(frame.reset_index().to_dict("records"))
 
     # ---- SI metric / merge delegates (see v2.visualization facade) --------
 

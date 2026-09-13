@@ -452,6 +452,39 @@ def burst_pair_metrics_from_analyzer(
     return rows
 
 
+BURST_PAIR_METRIC_COLUMNS = (
+    "wf_similarity",
+    "isi_violation",
+    "xcorrel_asymm",
+    "unit_distance",
+)
+
+
+def burst_pair_metrics_frame(analyzer, pairs=None, **kwargs):
+    """Burst-pair diagnostics as a ``(unit1, unit2)``-indexed DataFrame.
+
+    The queryable form of :func:`burst_pair_metrics_from_analyzer` -- the v2
+    counterpart to fetching v1's ``BurstPair.BurstPairUnit`` part table as a
+    frame. Ordered pairs stay distinct on the index because ``xcorrel_asymm``
+    is directional. ``pairs`` and the correlogram keyword arguments are passed
+    through unchanged; with ``pairs=None`` every ordered pair is present.
+
+    Returns
+    -------
+    pd.DataFrame
+        Shape ``(n_pairs, 4)``, MultiIndex ``(unit1, unit2)``, float columns
+        ``wf_similarity``, ``isi_violation``, ``xcorrel_asymm``,
+        ``unit_distance``.
+    """
+    import pandas as pd
+
+    rows = burst_pair_metrics_from_analyzer(analyzer, pairs=pairs, **kwargs)
+    frame = pd.DataFrame(
+        rows, columns=("unit1", "unit2", *BURST_PAIR_METRIC_COLUMNS)
+    )
+    return frame.set_index(["unit1", "unit2"]).astype(float)
+
+
 def validate_unit_pairs(unit_ids, pairs):
     """Return the pairs, raising if any member is not a real unit id."""
     unit_set = set(unit_ids)

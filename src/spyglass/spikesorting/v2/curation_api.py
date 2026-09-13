@@ -575,6 +575,22 @@ class EvaluationResult:
     def plots(self) -> EvaluationPlots:
         return EvaluationPlots(self)
 
+    def burst_pair_metrics(self, pairs=None, **kwargs) -> pd.DataFrame:
+        """Burst-merge diagnostics per ordered unit pair, as a DataFrame.
+
+        The data twin of ``plots.burst_pair_metrics()``. A method rather than
+        a property like ``metrics`` because it loads the display analyzer on
+        demand instead of being part of the frozen snapshot. See
+        ``CurationEvaluation.get_burst_pair_metrics`` for the columns and
+        keyword arguments.
+        """
+        from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+        key = self._current_evaluation_key()
+        return CurationEvaluation().get_burst_pair_metrics(
+            key, pairs=pairs, **kwargs
+        )
+
     @classmethod
     def from_key(cls, key: Mapping[str, Any]) -> "EvaluationResult":
         """Load one populated evaluation and freeze a defensive snapshot."""

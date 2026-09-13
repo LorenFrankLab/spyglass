@@ -363,3 +363,134 @@ def test_burst_pair_metrics_flags_oversplit(synthetic_analyzer):
     }
     assert by_pair[(0, 1)]["wf_similarity"] > by_pair[(0, 2)]["wf_similarity"]
     assert by_pair[(0, 1)]["unit_distance"] < by_pair[(0, 2)]["unit_distance"]
+
+
+def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
+    """The data form of the burst diagnostics is a ``(unit1, unit2)`` frame.
+
+    This is the v2 answer to querying v1's ``BurstPair.BurstPairUnit`` part
+    table: ordered pairs on a MultiIndex matching ``fetch(format="frame")``
+    on that table, one column per leg. Ordered pairs must both appear because
+    ``xcorrel_asymm`` is directional.
+    """
+    import pandas as pd
+
+    from spyglass.spikesorting.v2._metric_curation_plots import (
+        burst_pair_metrics_frame,
+    )
+
+    frame = burst_pair_metrics_frame(synthetic_analyzer)
+
+    assert isinstance(frame, pd.DataFrame)
+    assert frame.index.names == ["unit1", "unit2"]
+    assert list(frame.columns) == [
+        "wf_similarity",
+        "isi_violation",
+        "xcorrel_asymm",
+        "unit_distance",
+    ]
+    n_units = len(synthetic_analyzer.unit_ids)
+    assert len(frame) == n_units * (n_units - 1)  # all ordered pairs
+    assert (0, 1) in frame.index and (1, 0) in frame.index
+    assert not frame.index.has_duplicates
+    assert frame.dtypes.eq(float).all()
+
+
+def test_burst_pair_metrics_frame_respects_explicit_pairs(synthetic_analyzer):
+    """An explicit ``pairs`` list is returned in order and nothing else."""
+    from spyglass.spikesorting.v2._metric_curation_plots import (
+        burst_pair_metrics_frame,
+    )
+
+    frame = burst_pair_metrics_frame(synthetic_analyzer, pairs=[(2, 0), (0, 1)])
+    assert list(frame.index) == [(2, 0), (0, 1)]
+
+
+def _patch_evaluation_display_analyzer(monkeypatch, analyzer):
+    """Serve ``analyzer`` as the evaluation's display analyzer (no DB rows)."""
+    from contextlib import contextmanager
+
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    @contextmanager
+    def _display(self, key, *, extra_extensions=None):
+        yield analyzer
+
+    monkeypatch.setattr(CurationEvaluation, "_display_analyzer", _display)
+    return CurationEvaluation
+
+
+@pytest.mark.database
+def test_curation_evaluation_get_burst_pair_metrics(
+    dj_conn, monkeypatch, synthetic_analyzer
+):
+    """The table exposes the burst diagnostics as data, not only as a plot."""
+    CurationEvaluation = _patch_evaluation_display_analyzer(
+        monkeypatch, synthetic_analyzer
+    )
+
+    frame = CurationEvaluation().get_burst_pair_metrics(
+        {"curation_evaluation_id": "unused"}, pairs=[(0, 1), (0, 2)]
+    )
+
+    assert frame.index.names == ["unit1", "unit2"]
+    assert list(frame.index) == [(0, 1), (0, 2)]
+    assert (
+        frame.loc[(0, 1), "wf_similarity"] > frame.loc[(0, 2), "wf_similarity"]
+    )
+
+
+@pytest.mark.database
+def test_plot_burst_pair_metrics_renders_from_the_data_path(
+    dj_conn, monkeypatch, synthetic_analyzer
+):
+    """The scatter is drawn from ``get_burst_pair_metrics`` -- one source."""
+    import matplotlib.pyplot as plt
+
+    CurationEvaluation = _patch_evaluation_display_analyzer(
+        monkeypatch, synthetic_analyzer
+    )
+    seen = []
+    real = CurationEvaluation.get_burst_pair_metrics
+
+    def _recording(self, key, pairs=None, **kwargs):
+        seen.append(pairs)
+        return real(self, key, pairs=pairs, **kwargs)
+
+    monkeypatch.setattr(
+        CurationEvaluation, "get_burst_pair_metrics", _recording
+    )
+
+    fig = CurationEvaluation().plot_burst_pair_metrics(
+        {"curation_evaluation_id": "unused"}, pairs=[(0, 1)]
+    )
+
+    assert isinstance(fig, plt.Figure)
+    assert seen == [[(0, 1)]]
+    # One pair -> one scatter point, labelled by its unit ids.
+    ax = fig.axes[0]
+    assert len(ax.collections) == 1
+    assert [t.get_text() for t in ax.texts] == ["(0,1)"]
+
+
+@pytest.mark.database
+def test_evaluation_result_burst_pair_metrics_returns_frame(
+    dj_conn, monkeypatch, synthetic_analyzer
+):
+    """``EvaluationResult.burst_pair_metrics()`` mirrors ``.plots`` as data."""
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.curation_api import EvaluationResult
+
+    _patch_evaluation_display_analyzer(monkeypatch, synthetic_analyzer)
+    result = object.__new__(EvaluationResult)
+    monkeypatch.setattr(
+        EvaluationResult,
+        "_current_evaluation_key",
+        lambda self: {"curation_evaluation_id": "unused"},
+    )
+
+    frame = result.burst_pair_metrics(pairs=[(1, 0)])
+
+    assert isinstance(frame, pd.DataFrame)
+    assert list(frame.index) == [(1, 0)]
