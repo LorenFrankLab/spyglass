@@ -160,3 +160,32 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
             f"{path} must pin scipy>=1.13 or document the complete legacy "
             "SI-0.99 pre-install sed recipe in its header"
         )
+
+
+def test_pyproject_carries_no_si099_dependency_caps():
+    """pyproject may not cap a dependency below what its own numpy pin needs.
+
+    The package pins ``numpy>=2`` for the SI 0.104 stack, and the conda
+    environments pin ``scipy>=1.13`` to match. A ``scipy<1.13`` or
+    ``jax<0.7.2`` cap here (both SI-0.99 compatibility bounds) contradicts
+    that: every scipy release capping numpy below 2 is excluded, so the
+    resolver falls back to pre-numpy-2 ancients instead of failing loudly.
+    The conda-env contract test above cannot catch it -- it reads only
+    ``environments/*.yml``, so pyproject can disagree with every one of them
+    while that test stays green.
+    """
+    requirements = _base_requirements()
+    numpy = requirements["numpy"].specifier
+    numpy_spec = str(numpy)
+    assert numpy.contains("2.0.0") and not numpy.contains("1.26.0"), (
+        f"numpy is pinned {numpy_spec!r}; this guard assumes the numpy-2 "
+        "line and must be revisited if the baseline moves."
+    )
+    for package, cap in (("scipy", "<1.13"), ("jax", "<0.7.2")):
+        req = requirements.get(package)
+        spec = str(req.specifier) if req else ""
+        assert cap not in spec, (
+            f"pyproject pins {package}{spec}, an SI-0.99 compatibility cap "
+            f"that cannot co-resolve with numpy{numpy_spec}. Drop the cap, or "
+            "move the whole package back to the SI-0.99 baseline."
+        )
