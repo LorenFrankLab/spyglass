@@ -388,6 +388,45 @@ def test_session_consumers_read_member_row(concat_member_curation):
 
 
 @pytest.mark.slow
+def test_waveform_features_group_rejects_other_sessions_member(
+    concat_member_curation,
+):
+    """A clusterless group keyed by session A must refuse member B's output.
+
+    ``UnitWaveformFeaturesGroup`` is keyed by ``Session`` while its
+    ``UnitFeatures`` part only foreign-keys a merge id, the same structural gap
+    ``SortedSpikesGroup`` closes with ``assert_merge_ids_match_session``. The
+    duplicate-curation / unapplied-merge guard alone lets a valid member output
+    into the wrong session's decode with that member's wall-clock timestamps.
+    """
+    from spyglass.decoding.v1.clusterless import UnitWaveformFeaturesGroup
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    ctx = concat_member_curation
+    row = ctx["rows"][0]
+    merge_id = (
+        SpikeSortingOutput.ConcatMemberCuration
+        & {
+            "sorting_id": row["sorting_id"],
+            "curation_id": row["curation_id"],
+            "member_index": int(row["member_index"]),
+        }
+    ).fetch1("merge_id")
+
+    with pytest.raises(ValueError, match="different session"):
+        UnitWaveformFeaturesGroup().create_group(
+            nwb_file_name=ctx["rows"][1]["nwb_file_name"],
+            group_name="concat_member_wrong_session",
+            keys=[
+                {
+                    "spikesorting_merge_id": merge_id,
+                    "features_param_name": "concat_member_amplitude",
+                }
+            ],
+        )
+
+
+@pytest.mark.slow
 def test_waveform_features_use_member_recording(concat_member_curation):
     """The SI 0.104 waveform path extracts against the member recording."""
     import numpy as np
