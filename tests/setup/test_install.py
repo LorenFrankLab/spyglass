@@ -2267,6 +2267,8 @@ class TestConfigCompatibility:
             "custom": {
                 "debug_mode": False,
                 "test_mode": False,
+                "prefer_download": False,
+                "store_url": "",
                 "kachery_zone": "franklab.default",
                 "spyglass_dirs": {
                     "base": str(base_dir),

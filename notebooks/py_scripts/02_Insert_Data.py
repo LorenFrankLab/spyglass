@@ -33,7 +33,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 
 # ignore datajoint+jupyter async warnings
@@ -133,8 +132,12 @@ nwb_copy_file_name
 # Let's start small by inserting personnel information.
 #
 # The `LabMember` table lists all lab members, with an additional part table for
-# `LabMemberInfo`. This holds Google account and DataJoint username info for each
-# member, for authentication purposes.
+# `LabMemberInfo`. This holds Google account, DataJoint username, and GitHub
+# username info for each member, for authentication purposes. The GitHub
+# username is what the shared-storage broker uses to recognize you; leaving it
+# `None` is fine, and means the broker treats you as an unaffiliated reader who
+# can fetch public files only. See the
+# [Data Sync notebook](./03_Data_Sync.ipynb).
 #
 # We can insert lab member information using the NWB file `experimenter` field
 # as follows...
@@ -151,9 +154,9 @@ sgc.LabMember.insert_from_nwbfile(nwb_file_name)
 #
 
 sgc.LabMember.LabMemberInfo.insert(
-    [  # Full name, Google email address, DataJoint username, admin
-        ["Firstname Lastname", "example1@gmail.com", "example1", 0],
-        ["Firstname2 Lastname2", "example2@gmail.com", "example2", 0],
+    [  # Full name, Google email, DataJoint username, GitHub username, admin
+        ["Firstname Lastname", "example1@gmail.com", "example1", None, 0],
+        ["Firstname2 Lastname2", "example2@gmail.com", "example2", None, 0],
     ],
     skip_duplicates=True,
 )
@@ -440,7 +443,7 @@ your_name = "YourFirst YourLast"
 parts = your_name.split(" ")
 sgc.LabMember.insert1([your_name, parts[0], parts[1]])
 sgc.LabMember.LabMemberInfo.insert1(
-    [your_name, "your_gmail", dj.config["database.user"], 0]
+    [your_name, "your_gmail", dj.config["database.user"], None, 0]
 )
 sgc.LabTeam.LabTeamMember.insert1([team_name, your_name])
 

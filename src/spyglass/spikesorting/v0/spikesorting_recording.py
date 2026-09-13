@@ -389,6 +389,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             key,
             sort_interval_list_name=rec_info["name"],
             recording_path=rec_info["path"],
+            hash=rec_info["hash"],  # else null, see _hash_check
         )
         return self_insert, sort_interval_valid_times
 
@@ -435,15 +436,30 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             folder=rec_path, chunk_duration="10000ms", n_jobs=8, verbose=False
         )
 
-        if has_entry and base_dir == recording_dir:  # if recompute, check hash
+        # Verify only a rebuild of the canonical directory. `recording_dir` is
+        # a str, so this must compare Path to Path or the check never runs.
+        if has_entry and base_dir == Path(recording_dir):  # recompute
             _ = self._hash_check(key, rec_path)
 
         return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
 
     def _hash_check(self, key, rec_path):
-        """Check if the hash of the directory matches the hash in the table."""
+        """Check if the hash of the directory matches the hash in the table.
+
+        Entries written before hashes were recorded on insert have a null
+        hash. Those have no baseline to compare against, so accept the
+        recomputed directory rather than deleting it. Run `update_ids` to
+        backfill them, after which recomputes are verified normally.
+        """
         new_hash = self._dir_hash(rec_path, return_hasher=False)
         old_hash = (self & key).fetch("hash")[0]
+
+        if old_hash is None:
+            logger.warning(
+                f"No stored hash to verify against: {rec_path}\n"
+                + "Run SpikeSortingRecording().update_ids() to backfill."
+            )
+            return True
 
         if new_hash == old_hash:
             return True

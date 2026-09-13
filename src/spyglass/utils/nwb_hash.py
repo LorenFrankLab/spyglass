@@ -1,7 +1,7 @@
 import atexit
 import json
 from functools import cached_property
-from hashlib import md5
+from hashlib import md5, sha256
 from pathlib import Path
 from typing import Any, Dict, Union
 
@@ -14,6 +14,7 @@ from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
 DEFAULT_BATCH_SIZE = 32768
+SHA256_CHUNK_SIZE = 1024 * 1024
 IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
@@ -36,6 +37,62 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces
     }
+
+
+def sha256_file(
+    file_path: Union[str, Path],
+    chunk_size: int = SHA256_CHUNK_SIZE,
+    show_progress: bool = False,
+) -> str:
+    """Return the SHA-256 hex digest of a file's raw bytes.
+
+    This answers a different question than `NwbfileHasher`, which digests HDF5
+    datasets with md5 and deliberately ignores parts of the file that carry no
+    scientific content. That makes it the right tool for "did recompute
+    reproduce this file" and the wrong one here: the shared-storage object
+    store verifies the checksum of the bytes it receives, so the client cannot
+    offer an approximation of them.
+
+    Two files with identical bytes produce identical digests, which is what
+    lets the store deduplicate them to one object.
+
+    Parameters
+    ----------
+    file_path : Union[str, Path]
+        Path to any file. Not NWB-specific.
+    chunk_size : int, optional
+        Bytes read per iteration. The default is much larger than
+        `DEFAULT_BATCH_SIZE` because this walks whole multi-gigabyte files
+        rather than individual datasets.
+    show_progress : bool, optional
+        Display a progress bar. Off by default, so the digest is quiet when
+        called as part of a larger operation.
+
+    Returns
+    -------
+    str
+        64-character lowercase hex digest.
+    """
+    path = Path(file_path)
+    hasher = sha256()
+
+    with path.open("rb") as f:
+        if not show_progress:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                hasher.update(chunk)
+            return hasher.hexdigest()
+
+        with tqdm(
+            total=path.stat().st_size,
+            unit="B",
+            unit_scale=True,
+            desc=f"sha256 {path.name}",
+        ) as bar:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                hasher.update(chunk)
+                bar.update(len(chunk))
+
+    return hasher.hexdigest()
 
 
 class DirectoryHasher:

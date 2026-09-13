@@ -65,7 +65,7 @@ class AnalysisFileBuilder:
         AnalysisMixin.build : Factory method that creates this builder
     """
 
-    def __init__(self, analysis_table, nwb_file_name: str):
+    def __init__(self, analysis_table, nwb_file_name: str, share_parents=None):
         """Initialize builder with table and parent file name.
 
         Parameters
@@ -74,9 +74,16 @@ class AnalysisFileBuilder:
             The table to create/register file in
         nwb_file_name : str
             Parent NWB file name
+        share_parents : list of str, optional
+            Additional analysis files this one derives from. Used only to
+            inherit visibility, and only ever to narrow it: the registered
+            file is declared at the narrowest scope any parent declared. Pass
+            these when a result draws on analysis files beyond
+            `nwb_file_name`, so it cannot be shared more widely than they are.
         """
         self._table = analysis_table
         self.nwb_file_name = nwb_file_name
+        self.share_parents = list(share_parents or [])
         self.analysis_file_name = None
         self._state = "INIT"
         self._exception_occurred = False
@@ -230,10 +237,54 @@ class AnalysisFileBuilder:
         self.close_and_write()
         self._table.add(self.nwb_file_name, self.analysis_file_name)
         self._state = "REGISTERED"
+        self._queue_inherited_share()
         logger.debug(
             f"Registered analysis file: {self.analysis_file_name} "
             f"(parent: {self.nwb_file_name})"
         )
+
+    def _queue_inherited_share(self):
+        """Declare this file for sharing at its parents' visibility.
+
+        A derived file should reach the same people its sources reached,
+        without the user being asked again. Queuing is a database insert;
+        `SharedAnalysisFile.populate()` is what uploads, so registering a file
+        never transfers bytes as a side effect.
+
+        Does nothing when no parent was declared shared, which is the common
+        case and the safe one. No default here may widen access.
+
+        Returns before importing anything when no broker is configured.
+        Importing `sharing_store` *declares* its schema, and an instance that
+        will never share a file should not grow four tables as a side effect
+        of writing an analysis file.
+
+        Never raises. A share that could not be queued is a share the user can
+        declare by hand; failing registration over it would destroy an
+        analysis file that is otherwise complete and correct. It does warn,
+        though: this branch is only reached on an instance whose owner
+        configured a broker, so silence would leave them wondering why
+        nothing is ever queued.
+        """
+        from spyglass.settings import sg_config
+
+        if not sg_config.store_url:
+            return
+
+        try:
+            from spyglass.sharing.sharing_store import queue_inherited_share
+
+            queue_inherited_share(
+                self.analysis_file_name,
+                raw_files=[self.nwb_file_name],
+                analysis_files=self.share_parents,
+            )
+        except Exception as err:  # noqa: BLE001 - see docstring
+            logger.warning(
+                f"Could not queue {self.analysis_file_name} for sharing: "
+                + f"{err}. Declare it by hand with "
+                + "`spyglass.sharing.share_file` if it should be shared."
+            )
 
     def close_and_write(self):
         """Close open NWB file and write changes to disk.

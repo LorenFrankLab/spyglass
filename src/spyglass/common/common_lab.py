@@ -33,13 +33,21 @@ class LabMember(SpyglassIngestion, dj.Manual):
         ---
         google_user_name         : varchar(200) # For permission to curate
         datajoint_user_name = "" : varchar(200) # For permission to delete
+        github_user_name = null  : varchar(200) # For shared-store identity
         admin = 0                : bool         # Ignore permission checks
         unique index (datajoint_user_name)
         unique index (google_user_name)
+        unique index (github_user_name)
         """
 
         # NOTE: index present for new instances. pending surgery, not enforced
         # for existing instances.
+
+        # `github_user_name` defaults to null rather than "", so that the many
+        # members who have not linked an account do not collide under the
+        # unique index. A member with no GitHub link is not an error: the
+        # shared-store broker reads them as an unaffiliated reader, on no team,
+        # who can fetch public files only.
 
     _admin = []
     _expected_duplicates = True
@@ -87,6 +95,88 @@ class LabMember(SpyglassIngestion, dj.Manual):
             ),
             skip_duplicates=True,
         )
+
+    @classmethod
+    def set_github_user_name(cls, lab_member_name: str, github_user_name: str):
+        """Link a lab member to the GitHub identity the broker recognizes.
+
+        On an instance attached to a shared-storage broker, `LabMemberInfo` is
+        writable by admins only. It has to be: a user who could edit it could
+        point their own GitHub login at a lab member on better-connected teams
+        and be handed that member's files. So this call is *expected* to fail
+        for an ordinary user, and its job is to fail in a way that says what
+        to ask for rather than surfacing a bare MySQL denial.
+
+        A member with no GitHub link is not broken. The broker reads them as
+        an unaffiliated reader, on no team, who can fetch public files only.
+
+        Parameters
+        ----------
+        lab_member_name : str
+            Primary key of `LabMember`. Must already exist.
+        github_user_name : str
+            GitHub login, without the `@`.
+
+        Raises
+        ------
+        ValueError
+            If no such lab member exists, if they have no `LabMemberInfo` row
+            yet, or if the login is already claimed by a different member. The
+            column is uniquely indexed, so the last case would otherwise
+            surface as an integrity error.
+        PermissionError
+            If this account may not write `LabMemberInfo`, with the update an
+            admin would need to run.
+        """
+        key = {"lab_member_name": lab_member_name}
+
+        if not (cls() & key):
+            raise ValueError(
+                f"No such lab member: {lab_member_name}. Add them with "
+                + "`LabMember.insert_from_name` first."
+            )
+
+        claimed = cls.LabMemberInfo & {"github_user_name": github_user_name}
+        if claimed and not (claimed & key):
+            raise ValueError(
+                f"GitHub login '{github_user_name}' is already linked to "
+                + f"{claimed.fetch1('lab_member_name')}. One login maps to "
+                + "one lab member."
+            )
+
+        if not (cls.LabMemberInfo & key):
+            # `google_user_name` has no default and is uniquely indexed, so
+            # this method cannot create the row: a placeholder would take the
+            # one empty-string slot and make the *next* member's link fail
+            # with a duplicate-key error naming a column they never set.
+            raise ValueError(
+                f"{lab_member_name} has no `LabMemberInfo` row, and one "
+                + "cannot be created here: `google_user_name` is required and "
+                + "uniquely indexed. Add the row first:\n\n"
+                + "    LabMember.LabMemberInfo.insert1(\n"
+                + f'        {{"lab_member_name": "{lab_member_name}",\n'
+                + '         "google_user_name": "you@example.com",\n'
+                + f'         "github_user_name": "{github_user_name}"}}\n'
+                + "    )"
+            )
+
+        row = {**key, "github_user_name": github_user_name}
+
+        try:
+            cls.LabMemberInfo.update1(row)
+        except dj.errors.AccessError as err:
+            raise PermissionError(
+                "`common_lab.LabMember.LabMemberInfo` is admin-only on this "
+                + "instance. Ask an admin to run:\n\n"
+                + "    LabMember.LabMemberInfo.update1(\n"
+                + f'        {{"lab_member_name": "{lab_member_name}",\n'
+                + f'         "github_user_name": "{github_user_name}"}}\n'
+                + "    )\n\n"
+                + "Until then the shared store sees you as an unaffiliated "
+                + "reader who can fetch public files only."
+            ) from err
+
+        logger.info(f"Linked {lab_member_name} to GitHub @{github_user_name}.")
 
     def _load_admin(self):
         """Load admin list."""
