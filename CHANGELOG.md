@@ -1,6 +1,6 @@
 # Change Log
 
-## [0.7.0] (Unreleased)
+## [Unreleased]
 
 ### Release Notes
 
