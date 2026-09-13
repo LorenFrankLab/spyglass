@@ -376,47 +376,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         # legacy default carries ``max_spikes_per_unit=None``, already popped).
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
-        # Disk-backed (``zarr``) rather than ``format="memory"``: the analyzer
-        # extracts EVERY spike's full multi-channel waveform (``method="all"``,
-        # ``sparse=False`` -- mandated for the 1:1 spike<->feature alignment,
-        # see the max_spikes_per_unit guard above), which for a noisy 1 h
-        # tetrode is millions of crossings -> several GB held entirely in RAM,
-        # OOM under parallel workers. zarr keeps the waveforms on disk and reads
-        # them lazily, and compresses them so the transient scratch footprint
-        # stays small under parallel workers; it also matches the v2 sort-time
-        # analyzer's zarr format. The accessor holds the TemporaryDirectory so
-        # it survives feature extraction and is removed when the accessor is
-        # collected.
-        import tempfile
-        from pathlib import Path as _Path
-
-        tmpdir = tempfile.TemporaryDirectory(
-            prefix="v2_clusterless_wf_", dir=temp_dir
-        )
-        # Until the accessor takes ownership (below), an exception during
-        # build/compute would leave the on-disk scratch folder orphaned until
-        # GC; clean it up deterministically and re-raise.
-        try:
-            analyzer = si.create_sorting_analyzer(
-                sorting=sorting,
-                recording=recording,
-                sparse=False,
-                format="zarr",
-                folder=str(_Path(tmpdir.name) / "analyzer.zarr"),
-                return_in_uV=True,
-            )
-            analyzer.compute("random_spikes", method="all")
-            analyzer.compute(
-                "waveforms",
-                ms_before=ms_before,
-                ms_after=ms_after,
-                **job_kwargs,
-            )
-        except BaseException:
-            tmpdir.cleanup()
-            raise
-        return _AnalyzerWaveformAccessor(
-            sorting=analyzer.sorting, analyzer=analyzer, tmpdir=tmpdir
+        return _build_clusterless_waveform_accessor(
+            recording,
+            sorting,
+            ms_before=ms_before,
+            ms_after=ms_after,
+            job_kwargs=job_kwargs,
         )
 
     @staticmethod
@@ -475,6 +440,56 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         ]
 
 
+def _build_clusterless_waveform_accessor(
+    recording, sorting, *, ms_before: float, ms_after: float, job_kwargs: dict
+) -> "_AnalyzerWaveformAccessor":
+    """Extract every spike's full-channel waveform into a disk-backed scratch.
+
+    The analyzer extracts EVERY spike's full multi-channel waveform
+    (``method="all"``, ``sparse=False`` -- mandated for the 1:1
+    spike<->feature alignment), which for a noisy 1 h tetrode is millions of
+    crossings, several GB. ``format="binary_folder"`` is the one SpikeInterface
+    format whose waveform extraction is genuinely out-of-core: it writes
+    ``waveforms.npy`` through a memmap (``mode="memmap", copy=False``). The
+    zarr format is disk-backed only at rest -- ``ComputeWaveforms._run``
+    extracts into shared memory and then copies the whole array into RAM
+    before writing -- so it bounded nothing. The accessor holds the
+    TemporaryDirectory so it survives feature extraction and is removed when
+    the accessor is collected.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    tmpdir = tempfile.TemporaryDirectory(
+        prefix="v2_clusterless_wf_", dir=temp_dir
+    )
+    # Until the accessor takes ownership (below), an exception during
+    # build/compute would leave the on-disk scratch folder orphaned until GC;
+    # clean it up deterministically and re-raise.
+    try:
+        analyzer = si.create_sorting_analyzer(
+            sorting=sorting,
+            recording=recording,
+            sparse=False,
+            format="binary_folder",
+            folder=str(_Path(tmpdir.name) / "analyzer"),
+            return_in_uV=True,
+        )
+        analyzer.compute("random_spikes", method="all")
+        analyzer.compute(
+            "waveforms",
+            ms_before=ms_before,
+            ms_after=ms_after,
+            **job_kwargs,
+        )
+    except BaseException:
+        tmpdir.cleanup()
+        raise
+    return _AnalyzerWaveformAccessor(
+        sorting=analyzer.sorting, analyzer=analyzer, tmpdir=tmpdir
+    )
+
+
 class _AnalyzerWaveformAccessor:
     """Minimal ``WaveformExtractor``-shaped view over a v2 SortingAnalyzer.
 
@@ -508,7 +523,7 @@ class _AnalyzerWaveformAccessor:
         # fail with "extension has lost its SortingAnalyzer". Do NOT drop it
         # as unused -- it is held for lifetime, not read.
         self._analyzer = analyzer
-        # Keep a strong reference to the zarr-store TemporaryDirectory (if
+        # Keep a strong reference to the scratch TemporaryDirectory (if
         # the analyzer is disk-backed) so it is not cleaned up while the
         # analyzer still reads waveforms from it. Cleaned when this accessor is
         # garbage-collected (TemporaryDirectory finalizer) -- i.e. after make()

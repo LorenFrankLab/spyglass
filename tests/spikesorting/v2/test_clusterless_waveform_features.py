@@ -777,3 +777,48 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     ).exists(), (
         "TemporaryDirectory should be removed after the accessor is collected"
     )
+
+
+@pytest.mark.database
+def test_clusterless_waveform_buffer_is_disk_backed(dj_conn):
+    """Every-spike, every-channel extraction must not be resident in RAM.
+
+    The accessor is documented as disk-backed so a long noisy tetrode (millions
+    of crossings x all channels) does not OOM. SpikeInterface honours that only
+    for ``format="binary_folder"`` (``mode="memmap", copy=False``); the zarr
+    format extracts into shared memory and then COPIES the full array into RAM
+    before writing it out, so the scratch folder bounded nothing.
+    """
+    import spikeinterface.full as si
+
+    from spyglass.decoding.v1.waveform_features import (
+        _build_clusterless_waveform_accessor,
+    )
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[5.0], num_units=2, num_channels=4, seed=0
+    )
+    accessor = _build_clusterless_waveform_accessor(
+        recording,
+        sorting,
+        ms_before=0.3,
+        ms_after=0.7,
+        job_kwargs={"n_jobs": 1},
+    )
+
+    buffer = accessor._waveforms.data["waveforms"]
+    assert isinstance(buffer, np.memmap), type(buffer)
+    fs = recording.get_sampling_frequency()
+    assert accessor.nbefore == int(0.3 * fs / 1000.0)
+    n_spikes = sum(
+        len(sorting.get_unit_spike_train(u)) for u in sorting.unit_ids
+    )
+    assert buffer.shape == (
+        n_spikes,
+        accessor.nbefore + int(0.7 * fs / 1000.0),
+        4,
+    )
+    for unit_id in sorting.unit_ids:
+        assert len(accessor.get_waveforms(unit_id)) == len(
+            sorting.get_unit_spike_train(unit_id)
+        )
