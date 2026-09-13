@@ -25,8 +25,14 @@ class _UnitsRelation(_Relation):
 
 class _ParamsRelation(_Relation):
     def fetch1(self, *attributes):
-        assert attributes == ("include_labels", "exclude_labels")
-        return [], []
+        # ``fetch_spike_data`` fetches the whole row and reads the columns by
+        # name, so ``unit_criteria`` can be absent on an un-altered table.
+        assert attributes == ()
+        return {
+            "include_labels": [],
+            "exclude_labels": [],
+            "unit_criteria": None,
+        }
 
 
 class _MergeRelation(_Relation):
@@ -66,6 +72,9 @@ def test_fetch_spike_data_skips_zero_unit_file(monkeypatch):
             return key
 
         filter_units = staticmethod(original.filter_units)
+        filter_units_by_criteria = staticmethod(
+            original.filter_units_by_criteria
+        )
 
     monkeypatch.setattr(module, "SortedSpikesGroup", _FakeSortedSpikesGroup)
     monkeypatch.setattr(module, "UnitSelectionParams", _ParamsRelation())
