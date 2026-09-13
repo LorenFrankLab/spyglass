@@ -36,9 +36,7 @@ if _rw_filter not in _existing:
 
 # ---------------------------------------------------------------------------
 
-import json
 import sys
-import tempfile
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
