@@ -424,6 +424,10 @@ def burst_pair_metrics_from_analyzer(
     ccgs, bins, _ = correlograms_from_analyzer(
         analyzer, window_ms=window_ms, bin_ms=bin_ms
     )
+    # calculate_ca splits on ``bins < 0`` / ``bins > 0``. Right edges would
+    # put the innermost negative bin on edge 0 and drop it, biasing every
+    # asymmetry positive; centers are never zero for an even bin count.
+    bin_centers = (bins[:-1] + bins[1:]) / 2.0
     fs = analyzer.sampling_frequency
     spike_times = {
         u: analyzer.sorting.get_unit_spike_train(u).astype(float) / fs
@@ -443,7 +447,7 @@ def burst_pair_metrics_from_analyzer(
                     spike_times[u2],
                     isi_threshold_ms=isi_threshold_ms,
                 ),
-                "xcorrel_asymm": calculate_ca(bins[1:], ccgs[i1, i2, :]),
+                "xcorrel_asymm": calculate_ca(bin_centers, ccgs[i1, i2, :]),
                 "unit_distance": float(
                     np.linalg.norm(locations[i1] - locations[i2])
                 ),

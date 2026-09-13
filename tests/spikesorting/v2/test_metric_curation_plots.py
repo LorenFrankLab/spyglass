@@ -494,3 +494,35 @@ def test_evaluation_result_burst_pair_metrics_returns_frame(
 
     assert isinstance(frame, pd.DataFrame)
     assert list(frame.index) == [(1, 0)]
+
+
+def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(
+    synthetic_analyzer, monkeypatch
+):
+    """``xcorrel_asymm`` classifies lags by bin CENTER, not by right edge.
+
+    ``calculate_ca`` splits a correlogram into ``bins < 0`` and ``bins > 0``.
+    Handing it the right edges puts the innermost negative bin ``[-5, 0)`` on
+    edge ``0`` -- in neither half -- while ``[0, 5)`` lands on the positive
+    side, so a perfectly symmetric burst-shaped correlogram reads as
+    ``+1`` in BOTH directions instead of ``0``.
+    """
+    from spyglass.spikesorting.v2 import _metric_curation_plots as mod
+
+    unit_ids = list(synthetic_analyzer.unit_ids)
+    n = len(unit_ids)
+    bins = np.arange(-50.0, 50.0 + 5.0, 5.0)  # 21 edges -> 20 bins
+    ccgs = np.zeros((n, n, len(bins) - 1))
+    ccgs[:, :, 9] = 40.0  # [-5, 0)
+    ccgs[:, :, 10] = 40.0  # [0, 5)
+    monkeypatch.setattr(
+        mod,
+        "correlograms_from_analyzer",
+        lambda analyzer, **kwargs: (ccgs, bins, None),
+    )
+
+    frame = mod.burst_pair_metrics_frame(
+        synthetic_analyzer, pairs=[(0, 1), (1, 0)]
+    )
+
+    np.testing.assert_allclose(frame["xcorrel_asymm"].to_numpy(), 0.0)
