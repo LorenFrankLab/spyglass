@@ -18,19 +18,25 @@
 # ## Overview
 #
 
-# This notebook will cover ...
+# This notebook covers sharing NWB files through a **shared-storage broker**: a
+# small service your lab runs that decides who may read a file and hands out
+# short-lived download links. Spyglass never holds an object-store credential.
 #
-# 1. [General Kachery information](#kachery)
-# 2. Setting up Kachery as a [host](#host-setup). If you'll use an existing host,
-#    skip this.
-# 3. Setting up Kachery in your [database](#database-setup). If you're using an
-#    existing database, skip this.
-# 4. Adding Kachery [data](#data-setup).
+# In order:
 #
-
-# ## Imports
+# 1. [Linking your GitHub identity](#1-link-your-github-identity)
+# 2. [One-time login](#2-log-in-once)
+# 3. [Tiers](#3-tiers-what-your-account-may-do)
+# 4. [Declaring a share](#4-declare-a-share)
+# 5. [`populate()` is the transfer](#5-populate-is-the-transfer)
+# 6. [Reading someone else's file](#6-read-someone-elses-file)
+# 7. [Changing visibility](#7-change-visibility)
+# 8. [Inheritance](#8-derived-files-inherit-visibility)
+# 9. [Quota](#9-quota)
 #
-
+# Kachery is being retired. Its instructions are kept in an
+# [appendix](#appendix-kachery-deprecated) until it is removed.
+#
 # _Developer Note:_ if you may make a PR in the future, be sure to copy this
 # notebook, and use the `gitignore` prefix `temp` to avoid future conflicts.
 #
@@ -38,331 +44,241 @@
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
-# - To fully demonstrate syncing features, we'll need to run some basic analyses.
-#   This can either be done with code in this notebook or by running another
-#   notebook (e.g., [LFP](./12_LFP.ipynb))
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [these additional tutorials](https://github.com/datajoint/datajoint-tutorials)
 #
-# Let's start by importing the `spyglass` package and testing that your environment
-# is properly configured for kachery sharing
+# Pointing a whole database instance at a broker is an admin task and is
+# covered in `docs/src/ForDevelopers/`, not here.
 #
-# If you haven't already done so, be sure to set up your Spyglass base directory and Kachery sharing directory with [Setup](./00_Setup.ipynb)
+
+# ## Imports
 #
 
 # +
-import os
 import datajoint as dj
 import spyglass.common as sgc
 import spyglass.sharing as sgs
-from spyglass.settings import config
+from spyglass.settings import sg_config
 
 import warnings
 
 warnings.filterwarnings("ignore")
 # -
 
-# For example analysis files, run the code hidden below.
+# Your instance is attached to a broker if `store_url` is set. If it is empty,
+# nothing in this notebook applies, and `get_nwb_file` keeps working exactly as
+# it does today.
 #
-# <details>
-# <summary>Quick Analysis</summary>
+
+sg_config.store_url
+
+# ## 1. Link your GitHub identity
+#
+
+# **This is the step most likely to be missed, and it is silent when it is.**
+#
+# The broker knows you by your GitHub login. It maps that login to a
+# `LabMember` through `LabMemberInfo.github_user_name`, and from there to your
+# `LabTeam` memberships. Until that column is set, the broker sees an
+# unaffiliated reader on no team, who can fetch **public files only** — a
+# perfectly valid account that quietly cannot see your lab's data.
+#
+
+sgc.LabMember.LabMemberInfo & {"lab_member_name": "Firstname Lastname"}
+
+# Set it with:
 #
 # ```python
-# from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
-# import spyglass.data_import as sgi
-# import spyglass.lfp as lfp
-#
-# nwb_file_name = "minirec20230622.nwb"
-# nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
-#
-# sgi.insert_sessions(nwb_file_name)
-# sgc.FirFilterParameters().create_standard_filters()
-# lfp.lfp_electrode.LFPElectrodeGroup.create_lfp_electrode_group(
-#     nwb_file_name=nwb_copy_file_name,
-#     group_name="test",
-#     electrode_list=[0],
-# )
-# lfp.v1.LFPSelection.insert1(
-#     {
-#         "nwb_file_name": nwb_copy_file_name,
-#         "lfp_electrode_group_name": "test",
-#         "target_interval_list_name": "01_s1",
-#         "filter_name": "LFP 0-400 Hz",
-#         "filter_sampling_rate": 30_000,
-#     },
-#     skip_duplicates=True,
-# )
-# lfp.v1.LFPV1().populate()
+# sgc.LabMember.set_github_user_name("Firstname Lastname", "your-github-login")
 # ```
 #
-# </details>
+# This updates an existing `LabMemberInfo` row; it will not create one. A
+# member who has none needs `google_user_name` supplied, and that column is
+# uniquely indexed, so there is no placeholder this call could invent without
+# taking the one blank slot and breaking the *next* member's link. If you see
+# "has no `LabMemberInfo` row", insert the row first — see
+# [Insert Data](./02_Insert_Data.ipynb).
+#
+# On a database attached to a broker, `LabMemberInfo` is **writable by admins
+# only**. It has to be: anyone who could edit it could point their own GitHub
+# login at a better-connected lab member and be handed that member's files. So
+# the call above is expected to fail for an ordinary user, with a
+# `PermissionError` naming the exact update to request:
+#
+# ```text
+# PermissionError:
+#   `common_lab.LabMember.LabMemberInfo` is admin-only on this instance.
+#   Ask an admin to run:
+#
+#     LabMember.LabMemberInfo.update1(
+#         {"lab_member_name": "Firstname Lastname",
+#          "github_user_name": "your-github-login"}
+#     )
+# ```
+#
+# Send that to your database admin. Nothing else in this notebook will behave
+# as documented until it is done.
 #
 
-# ## Kachery
+# ## 2. Log in once
 #
 
-# ### Cloud
+# Login uses GitHub's **device flow**. There is no browser callback, so it
+# works unchanged over SSH and inside a container — you are never waiting on a
+# `localhost` redirect that cannot reach you.
 #
-
-# This notebook contains instructions for setting up data sharing/syncing through
-# [_Kachery Cloud_](https://github.com/flatironinstitute/kachery-cloud), which
-# makes it possible to share analysis results, stored in NWB files. When a user
-# tries to access a file, Spyglass does the following:
-#
-# 1. Try to load from the local file system/store.
-# 2. If unavailable, check if it is in the relevant sharing table (i.e.,
-#    `NwbKachery` or `AnalysisNWBKachery`).
-# 3. If present, attempt to download from the associated Kachery Resource to the user's spyglass analysis directory.
-#
-# _Note:_ large file downloads may take a long time, so downloading raw data is
-# not supported. We suggest direct transfer with
-# [globus](https://www.globus.org/data-transfer) or a similar service.
-#
-
-# ### Zone
-#
-
-# A [Kachery Zone](https://github.com/flatironinstitute/kachery-cloud/blob/main/doc/create_kachery_zone.md)
-# is a cloud storage host. The Frank laboratory has three separate Kachery zones:
-#
-# 1. `franklab.default`: Internal file sharing, including figurls
-# 2. `franklab.collaborator`: File sharing with collaborating labs.
-# 3. `franklab.public`: Public file sharing (not yet active)
-#
-# Setting your zone can either be done as as an environment variable or an item
-# in a DataJoint config. Spyglass will automatically handle setting the appropriate zone when downloading
-# database files through kachery
-#
-# - Environment variable:
-#
-#   ```bash
-#   export KACHERY_ZONE=franklab.default
-#   export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery-cloud
-#   ```
-#
-# - DataJoint Config:
-#
-#   ```json
-#   "custom": {
-#      "kachery_zone": "franklab.default",
-#      "kachery_dirs": {
-#         "cloud": "/your/base/path/.kachery-cloud"
-#      }
-#   }
-#   ```
-#
-
-# ## Host Setup
-#
-# - If you are a member of a team with a pre-existing database and zone who will be sharing data, please skip to `Sharing Data`
-#
-# - If you are a collaborator outside your team's network and need to access files shared with you, please skip to `Accessing Shared Data`
-#
-
-# ### Zones
-#
-
-# See
-# [instructions](https://github.com/flatironinstitute/kachery-cloud/blob/main/doc/create_kachery_zone.md)
-# for setting up new Kachery Zones, including creating a cloud bucket and
-# registering it with the Kachery team.
-#
-# _Notes:_
-#
-# - Bucket names cannot include periods, so we substitute a dash, as in
-#   `franklab-default`.
-# - You only need to create an API token for your first zone.
-#
-
-# ### Resources
-#
-
-# See [instructions](https://github.com/scratchrealm/kachery-resource/blob/main/README.md)
-# for setting up zone resources. This allows for sharing files on demand. We
-# suggest using the same name for the zone and resource.
-#
-# _Note:_ For each zone, you need to run the local daemon that listens for
-# requests from that zone and uploads data to the bucket for client download when requested. An example of the bash script we use is
+# From a terminal:
 #
 # ```bash
-#     export KACHERY_ZONE=franklab.collaborators
-#     export KACHERY_CLOUD_DIR=/stelmo/nwb/.kachery-cloud
-#     cd /stelmo/nwb/franklab_collaborators_resource
-#     npx kachery-resource@latest share
+# spyglass-store login
 # ```
 #
-# For convenience, we recommend saving this code as a bash script which can be executed by the local daemon. For franklab member, these scripts can be found in the directory `/home/loren/bin/`:
-#
-# - run_restart_kachery_collab.sh
-# - run_restart_kachery_default.sh
-#
-
-# ## Database Setup
-#
-
-# Once you have a hosted zone running, we need to add its information to the Spyglass database.
-# This will allow spyglass to manage linking files from our analysis tables to kachery.
-# First, we'll check existing Zones.
-#
-
-sgs.KacheryZone()
-
-# To add a new hosted Zone, we need to prepare an entry for the `KacheryZone` table.
-# Note that the `kacherycloud_dir` key should be the path for the server daemon _hosting_ the zone,
-# and is not required to be present on the client machine:
-#
-
-# +
-zone_name = config.get("KACHERY_ZONE")
-cloud_dir = config.get("KACHERY_CLOUD_DIR")
-
-zone_key = {
-    "kachery_zone_name": zone_name,
-    "description": " ".join(zone_name.split(".")) + " zone",
-    "kachery_cloud_dir": cloud_dir,
-    "kachery_proxy": "https://kachery-resource-proxy.herokuapp.com",
-    "lab_name": sgc.Lab.fetch("lab_name", limit=1)[0],
-}
-# -
-
-# Use caution when inserting into an active database, as it could interfere with
-# ongoing work.
-#
-
-sgs.KacheryZone().insert1(zone_key, skip_duplicates=True)
-
-# ## Sharing Data
-#
-
-# Once the zone exists, we can add `AnalysisNWB` files we want to share with members of the zone.
-#
-# The `AnalysisNwbFileKachery` table links analysis files made within other spyglass tables with a `uri`
-# used by kachery. We can view files already made available through kachery here:
-#
-
-sgs.AnalysisNwbfileKachery()
-
-# We can share additional results by populating new entries in this table.
-#
-# To do so we first add these entries to the `AnalysisNwbfileKacherySelection` table.
-#
-# _Note:_ This step depends on having previously run an analysis on the example
-# file.
-#
-
-# +
-nwb_copy_filename = "minirec20230622_.nwb"
-
-analysis_file_list = (  # Grab all analysis files for this nwb file
-    sgc.AnalysisNwbfile() & {"nwb_file_name": nwb_copy_filename}
-).fetch("analysis_file_name")
-
-kachery_selection_key = {"kachery_zone_name": zone_name}
-
-for file in analysis_file_list:  # Add all analysis to shared list
-    kachery_selection_key["analysis_file_name"] = file
-    sgs.AnalysisNwbfileKacherySelection.insert1(
-        kachery_selection_key, skip_duplicates=True
-    )
-# -
-
-# With those files in the selection table, we can add them as links to the zone by
-# populating the `AnalysisNwbfileKachery` table:
-#
-
-sgs.AnalysisNwbfileKachery.populate()
-
-# Alternatively, we can share data based on its source table in the database using the helper function `share_data_to_kachery()`
-#
-# This will take a list of tables and add all associated analysis files for entries corresponding with a passed restriction.
-# Here, we are sharing LFP and position data for the Session "minirec20230622\_.nwb"
-#
-
-# +
-from spyglass.sharing import share_data_to_kachery
-from spyglass.lfp.v1 import LFPV1
-from spyglass.position.v1 import TrodesPosV1
-
-tables = [LFPV1, TrodesPosV1]
-restriction = {"nwb_file_name": "minirec20230622_.nwb"}
-share_data_to_kachery(
-    table_list=tables,
-    restriction=restriction,
-    zone_name=zone_name,
-)
-# -
-
-# ## Managing access
-#
-
-# + [markdown] jupyter={"outputs_hidden": true}
-# If all of that worked,
-#
-# 1. Go to https://kachery-gateway.figurl.org/admin?zone=your_zone
-#    (changing your_zone to the name of your zone)
-# 2. Go to the Admin/Authorization Settings tab
-# 3. Add the GitHub login names and permissions for the users you want to share
-#    with.
-#
-# If those users can connect to your database, they should now be able to use the
-# `.fetch_nwb()` method to download any `AnalysisNwbfiles` that have been shared
-# through Kachery.
-#
-# For example:
+# Or from Python:
 #
 # ```python
-# from spyglass.spikesorting import CuratedSpikeSorting
-#
-# test_sort = (
-#     CuratedSpikeSorting & {"nwb_file_name": "minirec20230622_.nwb"}
-# ).fetch()[0]
-# sort = (CuratedSpikeSorting & test_sort).fetch_nwb()
+# sgs.get_client().login()
 # ```
 #
-# -
-
-# ## Accessing Shared Data
+# Either prints a URL and a short code. Open the URL, type the code, and the
+# client stops polling as soon as you approve.
 #
 
-# If you are a collaborator accessing datasets, you first need to be given access to the zone by a collaborator admin (see above).
+sgs.get_client().logged_in
+
+# **What is stored, and where.** The token lands in
+# `~/.spyglass/store_token.json` at mode `0600`, keyed by broker URL so a
+# second instance does not silently reuse the first one's credential.
+# `SPYGLASS_STORE_TOKEN` overrides the location, which is what a container
+# wants.
 #
-# If you know the uri for the dataset you are accessing you can test this process below (example is for members of `franklab.collaborators`)
+# **It grants nothing on GitHub.** Our OAuth app requests *zero* scopes. The
+# GitHub token is used once, by the broker, to learn your login, and is then
+# dropped; what you keep is a broker token that can read nothing on GitHub.
+#
+# There is no expiry and no refresh endpoint. If a call starts failing with
+# "the broker did not accept this token", run `spyglass-store login` again.
 #
 
-# +
-import kachery_cloud as kcl
-
-path = "/path/to/save/file/to/test"
-zone_name = "franklab.collaborators"
-uri = "sha1://ceac0c1995580dfdda98d6aa45b7dda72d63afe4"
-
-os.environ["KACHERY_ZONE"] = zone_name
-kcl.load_file(uri=uri, dest=path, verbose=True)
-assert os.path.exists(path), f"File not downloaded to {path}"
-# -
-
-# In normal use, spyglass will manage setting the zone and uri when accessing files.
-# In general, the easiest way to access data valueswill be through the `fetch1_dataframe()`
-# function part of many of the spyglass tables. In brief this will check for the appropriate
-# nwb analysis file in your local directory, and if not found, attempt to download it from the appropriate kachery zone.
-# It will then parse the relevant information from that nwb file into a pandas dataframe.
+# ## 3. Tiers: what your account may do
 #
-# We will look at an example with data from the `LFPV1` table:
+
+# Every new login starts in the `unverified` tier until an admin promotes it.
+#
+# | Tier         | Upload    | Read                        |
+# | ------------ | --------- | --------------------------- |
+# | `unverified` | no        | public only, throttled      |
+# | `verified`   | yes       | per permissions             |
+# | `trusted`    | yes, bulk | per permissions, unmetered  |
+# | `admin`      | yes       | all                         |
+#
+# **An unverified account cannot upload.** A first `populate()` will fail with
+# `StoreForbidden: This identity may not upload.` That is not a bug and not a
+# misconfiguration — ask your ServerHost admin to whitelist you.
+#
+
+client = sgs.get_client()
+client.tier, client.github_login
+
+# The tier shown here is from your last login and can be stale: the broker
+# re-reads it on every call, so a promotion takes effect without logging in
+# again.
+#
+
+# ## 4. Declare a share
+#
+
+# Visibility has three scopes:
+#
+# | Scope     | Who can read it                         |
+# | --------- | --------------------------------------- |
+# | `private` | you only                                |
+# | `group`   | members of the `LabTeam`s you name      |
+# | `public`  | anyone with an account                  |
+#
+# Declaring a share is a **database insert**. Raw and analysis files live in
+# separate tables, because `Nwbfile` and `AnalysisNwbfile` have separate
+# primary keys.
+#
+
+nwb_copy_filename = "minirec20230622_.nwb"
+
+sgs.SharedFileSelection.insert1(
+    {"nwb_file_name": nwb_copy_filename, "scope": "group"},
+    skip_duplicates=True,
+)
+sgs.SharedFileSelection.Team.insert1(
+    {"nwb_file_name": nwb_copy_filename, "team_name": "My Team"},
+    skip_duplicates=True,
+)
+
+# A `group` scope that names no team is **rejected**, not silently treated as
+# private. A share visible to nobody is almost always a mistake, and saying so
+# is better than quietly doing something other than what was asked.
+#
+# For the common case there is a one-line helper:
+#
+# ```python
+# sgs.share_file(
+#     nwb_copy_filename,
+#     scope="group",
+#     teams=["My Team"],
+#     file_class="raw",
+# )
+# ```
+#
+# Calling it again for the same file **replaces** the declaration, teams
+# included, which is how you narrow a share declared too widely before it is
+# uploaded. Once the file is in the store, use `update_visibility` instead —
+# only that relays the change to the broker, and only the broker's copy is
+# what a reader is actually checked against.
+#
+
+sgs.SharedFileSelection()
+
+# ## 5. `populate()` is the transfer
+#
+
+# **Nothing has crossed the network yet.** The rows above are a declaration.
+# The upload happens when you populate:
+#
+
+sgs.SharedFile.populate()
+
+# That hashes the file's bytes with SHA-256, registers the hash and size with
+# the broker, and uploads to a signed URL — unless someone already stored
+# identical bytes, in which case only the registration is written and the
+# transfer is skipped. Files are content-addressed, so the same bytes are
+# stored once no matter how many people share them.
+#
+
+sgs.SharedFile()
+
+# **Retry is just re-running it.** Because declaring and transferring are
+# separate steps, a failed upload leaves the declaration intact; `populate()`
+# picks up the rows that have no matching entry yet. Nothing to clean up, and
+# nothing to redeclare.
+#
+# Analysis files use the parallel pair:
+#
+
+sgs.AnalysisFileSelection()
+
+# ```python
+# sgs.SharedAnalysisFile.populate()
+# ```
+#
+
+# ## 6. Read someone else's file
+#
+
+# **`get_nwb_file` is unchanged.** There is no separate download step and no
+# new function to call. `fetch_nwb`, `fetch1_dataframe`, and everything built
+# on them work as they always have:
 #
 
 # +
 from spyglass.lfp.v1 import LFPV1
-
-# Here is the data we are going to access
-LFPV1 & {
-    "nwb_file_name": "Winnie20220713_.nwb",
-    "target_interval_list_name": "pos 0 valid times",
-}
-# -
-
-# We can access the data using `fetch1_dataframe()`
-#
 
 (
     LFPV1
@@ -371,10 +287,192 @@ LFPV1 & {
         "target_interval_list_name": "pos 0 valid times",
     }
 ).fetch1_dataframe()
+# -
+
+# Behind that, Spyglass walks an ordered chain of backends and takes the first
+# that has the file: local disk, then the shared store, then Kachery, then
+# DANDI. A local copy always wins.
+#
+
+from spyglass.utils.file_backends import get_backends
+
+[b.name for b in get_backends()]
+
+# **Confirming it streamed.** A file read over the network was never written
+# to disk, and `file_is_remote` reports which happened:
+#
+
+# +
+from spyglass.utils.nwb_helper_fn import file_is_remote
+
+file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
+# -
+
+# Streaming means only the chunks your analysis touches cross the network, and
+# reads are cached locally so the same chunk is not fetched twice. On a slow or
+# metered link the arithmetic inverts — many small range requests cost more
+# than one sequential transfer — so set `prefer_download` and get the whole
+# file in one go:
+#
+# ```python
+# sg_config.prefer_download = True  # this session
+# ```
+#
+# Or in `dj_local_conf.json`, for a machine that is always on a slow link:
+#
+# ```json
+# {"custom": {"prefer_download": true}}
+# ```
+#
+# One caveat worth knowing: a file you are *refused* and a file that does not
+# exist look identical to the resolution chain — both simply fall through to
+# the next backend. If a file you expect to be able to read is not found,
+# check step 1 before assuming it was never shared.
+#
+
+# ## 7. Change visibility
+#
+
+# **Owner only.** A teammate who can read a file cannot widen who else sees it.
+# The change is relayed to the broker, which verifies ownership; the local
+# declaration is updated only after the broker accepts it, so these tables
+# never claim a visibility that was refused.
+#
+
+# ```python
+# sgs.SharedFile().update_visibility(
+#     {"nwb_file_name": nwb_copy_filename},
+#     scope="public",
+# )
+# ```
+#
+# Note that visibility lives in DataJoint and is enforced by the broker; there
+# is no second place to configure it.
+#
+
+# ## 8. Derived files inherit visibility
+#
+
+# Sharing a downstream result takes **no extra action beyond having shared its
+# parent**. When `AnalysisFileBuilder` registers a file, it queues a sharing
+# row inheriting the parent's visibility.
+#
+# Where a file has several parents, inheritance takes the **intersection** —
+# the narrowest scope any parent declared, and the teams *every* group-scoped
+# parent named. A result built from a public source and a private one is
+# private. Combining data is never a way to widen access to any part of it.
+#
+# Two consequences worth stating:
+#
+# - A derived file of parents that were never shared is **not queued at all**.
+#   No default may widen access to something nobody asked to share.
+# - Inheritance never overrides a scope you set by hand.
+#
+# If a result draws on analysis files beyond its raw parent, name them so its
+# visibility cannot exceed theirs:
+#
+# ```python
+# with AnalysisNwbfile().build(
+#     nwb_file_name, share_parents=[upstream_analysis_file]
+# ) as builder:
+#     builder.add_nwb_object(my_data, "results")
+# ```
+#
+# Inheritance queues; it does not upload. Run `populate()` when you are ready.
+#
+
+sgs.AnalysisFileSelection()
+
+# ## 9. Quota
+#
+
+# Reads are metered per tier, over a rolling window. Exceeding the allowance
+# raises `StoreQuotaExceeded` with a `retry_after` giving the broker's own
+# estimate of when capacity frees up:
+#
+# ```python
+# from spyglass.sharing import StoreQuotaExceeded
+#
+# try:
+#     nwbf = get_nwb_file(path)
+# except StoreQuotaExceeded as err:
+#     print(f"Throttled; retry in {err.retry_after}s")
+# ```
+#
+# **This is expected, not a failure.** An unverified account is throttled by
+# design. A file already charged in the current window costs nothing more, so
+# a long streaming read that re-follows the redirect hundreds of times is
+# billed once.
+#
+# Note that being throttled is the one broker refusal that does *not* fall
+# through to the next backend. A missing or forbidden file quietly moves on to
+# DANDI; a quota refusal raises, because the file is there and readable and
+# waiting is cheaper than recomputing it.
+#
+# If you are throttled routinely, you want a tier promotion, not a retry loop.
+#
+
+# ## Appendix: Kachery (deprecated)
+#
+
+# Kachery sharing still works during the deprecation window, and is removed
+# once the shared store replaces it. New work should use the tables above.
+#
+# Kachery is download-only, has no streaming path, and does not support raw
+# files. It requires the optional dependency:
+#
+# ```bash
+# pip install spyglass-neuro[kachery-cloud]
+# ```
+#
+# A [Kachery Zone](https://github.com/flatironinstitute/kachery-cloud/blob/main/doc/create_kachery_zone.md)
+# is a cloud storage host, set by environment variable or DataJoint config:
+#
+# ```json
+# "custom": {
+#    "kachery_zone": "franklab.default",
+#    "kachery_dirs": {"cloud": "/your/base/path/.kachery-cloud"}
+# }
+# ```
+#
+# To share analysis files to a zone:
+#
+# ```python
+# zone_name = config.get("KACHERY_ZONE")
+#
+# for file in (
+#     sgc.AnalysisNwbfile() & {"nwb_file_name": nwb_copy_filename}
+# ).fetch("analysis_file_name"):
+#     sgs.AnalysisNwbfileKacherySelection.insert1(
+#         {"kachery_zone_name": zone_name, "analysis_file_name": file},
+#         skip_duplicates=True,
+#     )
+#
+# sgs.AnalysisNwbfileKachery.populate()
+# ```
+#
+# Or by source table:
+#
+# ```python
+# from spyglass.sharing import share_data_to_kachery
+# from spyglass.lfp.v1 import LFPV1
+#
+# share_data_to_kachery(
+#     table_list=[LFPV1],
+#     restriction={"nwb_file_name": nwb_copy_filename},
+#     zone_name=zone_name,
+# )
+# ```
+#
+# Access is managed outside Spyglass, at
+# `https://kachery-gateway.figurl.org/admin?zone=your_zone`, under
+# Admin/Authorization Settings. That split — permissions in a web console,
+# declarations in DataJoint — is one of the reasons Kachery is being replaced.
+#
 
 # # Up Next
 #
 
-# In the [next notebook](./03_Merge_Tables.ipynb), we'll explore the details of a
-# table tier unique to Spyglass, Merge Tables.
+# In the [next notebook](./04_Merge_Tables.ipynb), we'll explore the details of
+# a table tier unique to Spyglass, Merge Tables.
 #

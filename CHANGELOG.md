@@ -2,15 +2,54 @@
 
 ## [0.6.1] (Unreleased)
 
-<!--
 ### Release Notes
 
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
+
 ```python
-# Add alter commands here
+# Add `github_user_name` to LabMember.LabMemberInfo
+from spyglass.common.common_lab import LabMember
+
+LabMember.LabMemberInfo().alter()
 ```
 
 ### Infrastructure
--->
+
+#### Shared-Storage Broker
+
+Client half of sharing NWB files through a self-hosted broker, which decides who
+may read a file and issues short-lived signed URLs. No Spyglass code holds an
+object-store credential.
+
+- Add `github_user_name` to `LabMember.LabMemberInfo`, linking a lab member to a
+    GitHub identity. Defaults to `null`; a member without one is an unaffiliated
+    reader who can fetch public files only. On a broker-attached instance this
+    table is admin-only, so `LabMember.set_github_user_name()` turns the
+    resulting denial into a `PermissionError` naming the update an admin should
+    run.
+- Add `spyglass.sharing.store_client`, a client for the broker's versioned HTTP
+    API, with GitHub device-flow login (no browser callback, so it works over
+    SSH and in containers) and a `0600` token cache keyed by broker URL. New
+    `spyglass-store` console script for `login` / `logout` / `status`.
+- Add `StoreBackend` to the resolution chain, after `LocalBackend` and before
+    `KacheryBackend`. Streams over range requests against the broker's stable
+    content URL, so a large read outlives any single signature; honors
+    `prefer_download`.
+- Add `spyglass.sharing.sharing_store`, with separate selection tables for raw
+    and analysis files and a part table naming `LabTeam`s for group visibility.
+    Declaring a share is a database insert; `populate()` is the transfer, so a
+    failed upload is a retry rather than a recovery.
+- `AnalysisFileBuilder` queues a sharing row at registration, inheriting the
+    parent's visibility — the intersection where there are several, so a default
+    never widens access. A derived file of unshared parents is not queued at
+    all.
+- Add `sha256_file` to `spyglass.utils.nwb_hash`, digesting a file's raw bytes
+    for the object store's checksum. `NwbfileHasher` answers a different
+    question and is unchanged.
+- Add the `store_url` config key, declare `requests` and `fsspec` as direct
+    dependencies, and rewrite `03_Data_Sync` for the broker workflow with a
+    Kachery appendix.
 
 ### Pipelines
 

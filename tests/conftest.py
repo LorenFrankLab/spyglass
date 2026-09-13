@@ -778,7 +778,7 @@ def mini_insert(
 
     LabMember().insert1(["Root User", "Root", "User"], skip_duplicates=True)
     LabMember.LabMemberInfo().insert1(
-        ["Root User", "email", "root", 1], skip_duplicates=True
+        ["Root User", "email", "root", None, 1], skip_duplicates=True
     )
 
     if not SERVER.connected:

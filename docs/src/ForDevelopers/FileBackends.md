@@ -11,23 +11,32 @@ file before asking it to open one. The first backend that has the file wins.
 | Order | Backend          | Behavior                                 |
 | ----- | ---------------- | ---------------------------------------- |
 | 1     | `LocalBackend`   | Reads from disk                          |
-| 2     | `KacheryBackend` | Downloads, then reads locally            |
-| 3     | `DandiBackend`   | Streams by default, downloads on request |
+| 2     | `StoreBackend`   | Streams by default, downloads on request |
+| 3     | `KacheryBackend` | Downloads, then reads locally            |
+| 4     | `DandiBackend`   | Streams by default, downloads on request |
 
 If no backend has the file and the calling table has a `_make_file` method, the
 file is recomputed. Otherwise `get_nwb_file` raises `FileNotFoundError`.
 
 The chain is fixed in code, in `spyglass.utils.file_backends`. It is
 deliberately not user-configurable: local disk must be tried first, and putting
-a network source ahead of it would only ever be a mistake.
+a network source ahead of it would only ever be a mistake. Adding or removing a
+remote source is a one-line change to `_BACKENDS`; nothing in `get_nwb_file`
+knows how many there are.
 
 ```python
 from spyglass.utils.file_backends import get_backends
 
-[b.name for b in get_backends()]  # ['local', 'kachery', 'Dandi']
+[b.name for b in get_backends()]  # ['local', 'store', 'kachery', 'Dandi']
 ```
 
 `get_backends` returns a copy, so callers cannot reorder the chain in place.
+
+The order between the three remote backends is about where a file is most likely
+to be, and how much it costs to ask. The shared store is the lab's own service
+and answers one HTTP call; DANDI is last because a published file is also the
+one most likely to have a local copy already. Kachery sits between them only
+until it is removed.
 
 ## Streaming and download
 
@@ -72,10 +81,10 @@ honoring a performance preference.
 !!! note
 
     Streaming already caches. `DandiBackend` reads through an `fsspec`
-    `CachingFileSystem` backed by `{export_dir}/nwb-cache`, so re-reading the same
-    chunks does not re-cross the network. If a user reports slowness, check whether
-    they are paying for first reads or for a cold cache before reaching for this
-    setting.
+    `CachingFileSystem` backed by `{export_dir}/nwb-cache`, and `StoreBackend` does
+    the same at `{temp_dir}/store-cache`, so re-reading the same chunks does not
+    re-cross the network. If a user reports slowness, check whether they are paying
+    for first reads or for a cold cache before reaching for this setting.
 
 ## The `FileBackend` protocol
 
@@ -114,6 +123,12 @@ Return `False` rather than raising when the backend is unavailable. For example,
 `KacheryBackend.has` checks whether `kachery_cloud` is importable before it
 queries the database, so a missing optional dependency skips the backend instead
 of breaking file access.
+
+One documented exception: `StoreBackend.has` lets `StoreQuotaExceeded` out.
+Being throttled means the file is there and is readable, only not yet, and
+answering `False` would send `get_nwb_file` on to recompute an analysis the user
+could have had by waiting. Reserve this shape for states that are transient and
+actionable; "I do not have it" is still a `False`.
 
 ### Transferring the file: `stream` and `download`
 
@@ -188,6 +203,29 @@ broader type catch it too; only resolution is narrow.
 
 **`LocalBackend`** checks `os.path.exists` and reads the file directly. It
 neither streams nor downloads, so it is the one backend that overrides `open`.
+
+**`StoreBackend`** reads from a self-hosted shared-storage broker, and declares
+both capabilities. Its `has` asks the broker to resolve a Spyglass file name,
+and a single per-process memo means the `open` that follows does not pay a
+second round trip. Two behaviors are worth knowing:
+
+- **An unconfigured instance holds nothing.** With no `store_url` set, or with
+    the user not logged in, `has` returns `False` and the chain moves on. Most
+    instances are attached to no broker; that is not a misconfiguration.
+- **A refusal is indistinguishable from a miss.** The broker answers 403 for
+    "you may not read this" and 404 for "no such file", and `has` treats both as
+    `False`. This keeps the chain simple but it does mean a file the user
+    *could* read — after linking their GitHub account, say — looks exactly like
+    one that does not exist. `StoreClient.resolve` raises the distinction for
+    callers that need it; `StoreClient.find` is the one that collapses them.
+
+Streaming holds the broker's **stable** content URL rather than the signed URL
+it redirects to. Each range request is re-authorized and re-signed, which is
+what lets a read of a multi-gigabyte file outlive any single signature. The
+bearer header rides every request and is dropped when the redirect crosses to
+the object store — required, because an S3 endpoint that receives an
+`Authorization` header alongside a presigned URL leaves presigned mode and
+rejects the request.
 
 **`KacheryBackend`** is download-only; kachery-cloud has no streaming path. Its
 `has` is a restriction on `AnalysisNwbfileKachery`. Kachery is deprecated and
