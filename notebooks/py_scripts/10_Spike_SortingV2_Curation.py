@@ -351,11 +351,15 @@ evaluation.metrics
 # bursts with an amplitude decrement that MountainSort oversplits into a parent +
 # a shorter-waveform daughter — exactly the high-similarity, short-lag-asymmetric
 # pair this scatter surfaces, so merging them reassembles one cell.
+# The same four legs are available as data via `burst_pair_metrics()` -- a
+# DataFrame indexed by ordered `(unit1, unit2)` -- so you can sort or filter
+# candidates instead of reading them off the scatter.
 # Label proposals stay proposals until the final post-merge evaluation. If no
 # merge is selected, `accept_labels(mode="replace")` below accepts this pass's
 # complete verdict; choose `mode="overlay"` to retain existing labels.
 
 evaluation.plots.burst_pair_metrics()
+evaluation.burst_pair_metrics().sort_values("wf_similarity", ascending=False).head()
 evaluation.proposed_labels
 
 # ### 3c. Manual merge, then the final evaluation pass (pass 2)

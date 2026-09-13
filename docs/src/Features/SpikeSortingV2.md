@@ -884,7 +884,14 @@ custom matplotlib layout; the method returns the axes it drew into. The v1
 `BurstPair` notebook workflow is ported onto `CurationEvaluation` as
 `plot_correlograms`, `investigate_pair_xcorrel`, `investigate_pair_peaks`, and
 `plot_peak_over_time` (reading the analyzer's `correlograms` / `waveforms`
-extensions; no separate `BurstPair` table).
+extensions; no separate `BurstPair` table). The v1 `BurstPair.BurstPairUnit`
+*query* workflow -- pull the per-pair numbers rather than a scatter -- is
+`evaluation.burst_pair_metrics()` (table form:
+`CurationEvaluation().get_burst_pair_metrics(key)`), a DataFrame indexed by
+ordered `(unit1, unit2)` with `wf_similarity`, `isi_violation`,
+`xcorrel_asymm`, and `unit_distance` columns. It is computed from the display
+analyzer on each call, not stored, so restrict with `pairs=[...]` when you only
+need a few candidates; `plots.burst_pair_metrics()` draws from the same frame.
 
 These analyzer-backed plots route through the curation analyzer resolver. A
 committed merged curation therefore renders its actual merged unit namespace;

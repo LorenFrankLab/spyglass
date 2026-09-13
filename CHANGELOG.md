@@ -836,6 +836,13 @@ Proposals are written to three NWB tables (`quality_metrics`,
   `get_waveforms`, the static `plot_units_qc` population QC plot, and the ported
   BurstPair views (`plot_correlograms`, `investigate_pair_xcorrel`,
   `investigate_pair_peaks`, `plot_peak_over_time`).
+- `CurationEvaluation.get_burst_pair_metrics(key)` and
+  `EvaluationResult.burst_pair_metrics()` return v1's per-pair `BurstPairUnit`
+  numbers (`wf_similarity`, `isi_violation`, `xcorrel_asymm`, plus the new
+  `unit_distance`) as a DataFrame indexed by ordered `(unit1, unit2)`, so the
+  burst-merge candidates can be sorted and filtered rather than only read off
+  the `plot_burst_pair_metrics` scatter, which now draws from the same frame.
+  They are computed from the display analyzer per call, not stored.
 - `Sorting.add_extensions()` adds analyzer extensions in place, idempotently.
 - The clusterless `spike_location` decoding mark is now supported for v2
   (`CurationV2`) sources; the legacy `_get_spike_locations` body is repurposed
@@ -1308,8 +1315,11 @@ cross-referenced here, not duplicated.
 - `description` widened `varchar(100)` → `varchar(255)` on `CurationV2`
   ([curation.py](./src/spyglass/spikesorting/v2/curation.py)).
 - `MetricCuration` is replaced by `CurationEvaluation`; v1 `BurstPair` plotting
-  helpers are folded into `CurationEvaluation` while the stored per-pair
-  `BurstPairUnit` metrics remain v1-only. `RecordingRecompute` is replaced by
+  helpers are folded into `CurationEvaluation`, and the per-pair
+  `BurstPairUnit` metrics are exposed on demand by
+  `CurationEvaluation.get_burst_pair_metrics` rather than stored in a table,
+  so they cannot be populated in bulk and queried across sorts.
+  `RecordingRecompute` is replaced by
   the v2 `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`
   verification families. v2 uses `FigPackCuration` for browser curation views;
   legacy `FigURLCuration` remains v1-only.
@@ -1390,10 +1400,11 @@ cross-referenced here, not duplicated.
 - `FigURLCuration` chain remains v1-only for legacy v1 rows; v2 uses
   `FigPackCuration` for offline/hosted browser curation views
   ([figpack_curation.py](./src/spyglass/spikesorting/v2/figpack_curation.py)).
-- `BurstPair` chain has no v2 table clone. Use v1 `BurstPair` for stored
-  per-pair quantitative metrics; use `CurationEvaluation` for the ported
-  correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
-  helpers.
+- `BurstPair` chain has no v2 table clone. `CurationEvaluation` carries the
+  ported correlogram, cross-correlogram, pair-peak, and peak-over-time plotting
+  helpers, and `get_burst_pair_metrics` returns the per-pair quantitative
+  metrics as a DataFrame computed on demand; only a stored, cross-sort
+  queryable `BurstPairUnit` table remains v1-only.
 - `RecordingRecompute` chain is replaced by
   `RecordingArtifactVersions` / `RecordingArtifactRecomputeSelection` /
   `RecordingArtifactRecompute` and `SortingAnalyzerVersions` /
