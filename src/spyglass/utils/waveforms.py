@@ -26,7 +26,7 @@ def _get_peak_amplitude(
         Direction of the peak in the waveform. Defaults to 'neg'.
     estimate_peak_time : bool, optional
         If True, estimates the peak times for each spike because some
-        spikesorters do not align the spike time (at index n_time // 2)
+        spikesorters do not align the spike time (at index ``nbefore``)
         to the peak. Defaults to False.
 
     Returns
@@ -49,6 +49,9 @@ def _get_peak_amplitude(
         values, counts = np.unique(peak_inds, return_counts=True)
         spike_peak_ind = values[counts.argmax()]
     else:
-        spike_peak_ind = waveforms.shape[1] // 2
+        # The spike is aligned at nbefore, which only equals the midpoint for
+        # a symmetric window. Both SI 0.99's WaveformExtractor and the 0.10x
+        # waveforms extension expose it.
+        spike_peak_ind = waveform_extractor.nbefore
 
     return waveforms[:, spike_peak_ind]

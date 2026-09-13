@@ -338,10 +338,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         any finite value would subsample the waveforms so they no longer align
         1:1 with ``spike_times``, so it is rejected up front here (rather than
         doing the full analyzer build and only failing at the write-time 1:1
-        check in ``_write_waveform_features_to_nwb``). The symmetric
-        default window (``ms_before == ms_after``) puts the spike at the centre
-        sample, which ``_get_peak_amplitude`` reads; an asymmetric window would
-        sample off-peak.
+        check in ``_write_waveform_features_to_nwb``). ``_get_peak_amplitude``
+        reads the spike-aligned sample via the accessor's ``nbefore``, so an
+        asymmetric window is supported.
 
         Returns an empty accessor (no analyzer) for a zero-unit sort:
         ``create_sorting_analyzer`` cannot build over zero units, and a
@@ -522,6 +521,16 @@ class _AnalyzerWaveformAccessor:
         )
         # Lazily filled on the first ``get_spike_locations`` call.
         self._spike_locations_by_unit = None
+
+    @property
+    def nbefore(self) -> int:
+        """Spike-aligned sample index within each waveform window."""
+        if self._waveforms is None:
+            raise RuntimeError(
+                "_AnalyzerWaveformAccessor.nbefore read on a zero-unit "
+                "accessor; there is no waveform window."
+            )
+        return int(self._waveforms.nbefore)
 
     def get_waveforms(self, unit_id) -> np.ndarray:
         """Per-spike waveforms for ``unit_id``, ``(n_spikes, n_samples, n_ch)``.

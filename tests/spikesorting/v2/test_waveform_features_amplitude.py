@@ -28,13 +28,15 @@ _CENTER = _N_TIME // 2  # 2
 
 
 class _StubWaveformExtractor:
-    """Minimal stand-in exposing only ``get_waveforms(unit_idx)``.
+    """Minimal stand-in exposing ``get_waveforms(unit_idx)`` and ``nbefore``.
 
-    ``_get_peak_amplitude`` calls exactly that one method; the stub returns
+    ``_get_peak_amplitude`` reads exactly those two; the stub returns
     a fixed ``(n_spikes, n_time, n_channels)`` array so the test controls
     the input and asserts the function's computation on it. This is a test
     double for the input, not a mock whose behavior is under test.
     """
+
+    nbefore = _CENTER  # symmetric window: spike at the center sample
 
     def __init__(self, waveforms: np.ndarray):
         self._waveforms = waveforms
@@ -156,3 +158,26 @@ def test_one_row_per_spike(estimate_peak_time):
         estimate_peak_time=estimate_peak_time,
     )
     assert out.shape == (_N_SPIKES, _N_CHANNELS)
+
+
+def test_spike_sample_follows_nbefore_for_asymmetric_window():
+    """The mark is read at the extractor's ``nbefore`` -- the spike-aligned
+    sample -- not at ``n_time // 2``, which is only the spike for a symmetric
+    window. With ``ms_before=0.3, ms_after=0.7`` the midpoint is well after
+    the trough, so a real peak reads as a near-zero mark."""
+    waveforms = np.zeros((_N_SPIKES, _N_TIME, _N_CHANNELS))
+    waveforms[:, 1, :] = -100.0  # the trough sits at sample 1 == nbefore
+
+    class _Asymmetric(_StubWaveformExtractor):
+        nbefore = 1
+
+    out = _get_peak_amplitude(
+        _Asymmetric(waveforms),
+        unit_idx=0,
+        peak_sign="neg",
+        estimate_peak_time=False,
+    )
+
+    np.testing.assert_array_equal(
+        out, np.full((_N_SPIKES, _N_CHANNELS), -100.0)
+    )
