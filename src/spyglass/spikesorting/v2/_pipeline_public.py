@@ -60,6 +60,8 @@ PIPELINE_FACADE_EXPORTS = (
     "AnnotationDefinitionRef",
     "AnnotationSetRef",
     "read_unit_properties",
+    # expert analyzer access (disk-backed working copy)
+    "open_curation_analyzer",
     # downstream unit selection
     "select_units_for_analysis",
     "UnitSelectionReceipt",
@@ -107,6 +109,7 @@ PACKAGE_ROOT_REEXPORTS = (
     "AnnotationDefinitionRef",
     "AnnotationSetRef",
     "read_unit_properties",
+    "open_curation_analyzer",
     "select_units_for_analysis",
     "UnitSelectionReceipt",
     "SelectedGroup",

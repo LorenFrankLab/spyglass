@@ -322,6 +322,31 @@ class CurationRef:
             display_options=display_options,
         )
 
+    def open_analyzer(self, *, extra_extensions=None):
+        """Context manager: a disk-backed WORKING COPY of this curation's
+        display analyzer.
+
+        Expert SpikeInterface access over exactly this generation's units (a
+        merged child's merged units), in real microvolts. The copy lives in a
+        temp directory under Spyglass's temp dir and is removed on exit;
+        mutating it cannot touch the published cache. ``extra_extensions``
+        (``{name: params}``) are resolved into the published cache /
+        parameter-keyed derivative first, so repeated calls with the same
+        parameters reuse them. The whitened metric analyzer is an
+        evaluation-internal object and is not exposed here.
+        """
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            open_curation_analyzer,
+        )
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        recipe = (Sorting & {"sorting_id": self.sorting_id}).fetch1(
+            "display_waveform_params_name"
+        )
+        return open_curation_analyzer(
+            self, recipe, "display", extra_extensions=extra_extensions
+        )
+
     def preview_merges(
         self, groups: Sequence[Sequence[int]], **kwargs
     ) -> "CurationRef":

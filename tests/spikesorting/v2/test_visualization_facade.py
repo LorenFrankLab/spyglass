@@ -916,3 +916,19 @@ def test_schema_modules_do_not_import_visualization_eagerly(dj_conn):
         assert not hasattr(
             module, "visualization"
         ), f"{module.__name__} imports visualization at module level"
+
+
+@pytest.mark.unit
+def test_expert_analyzer_access_is_public():
+    """``open_curation_analyzer`` is exported by the facade and CurationRef."""
+    from spyglass.spikesorting.v2 import pipeline
+    from spyglass.spikesorting.v2._pipeline_public import (
+        PACKAGE_ROOT_REEXPORTS,
+        PIPELINE_FACADE_EXPORTS,
+    )
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    assert "open_curation_analyzer" in PIPELINE_FACADE_EXPORTS
+    assert "open_curation_analyzer" in PACKAGE_ROOT_REEXPORTS
+    assert callable(pipeline.open_curation_analyzer)
+    assert callable(CurationRef.open_analyzer)

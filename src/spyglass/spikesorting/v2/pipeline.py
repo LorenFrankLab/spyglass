@@ -68,6 +68,9 @@ from spyglass.spikesorting.v2._pipeline_run import (
     run_v2_unit_match,
 )
 from spyglass.spikesorting.v2._unit_match_planning import UnitMatchPlan
+from spyglass.spikesorting.v2._curation_analyzer import (
+    open_curation_analyzer,
+)
 from spyglass.spikesorting.v2.analysis_selection import (
     V2_UNIT_SELECTION_POLICIES,
     SelectedGroup,
