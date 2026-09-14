@@ -203,7 +203,10 @@ data or the production `UnitSelectionParams` rows.
   new additive `UnitSelectionParams` rows `v2_accepted_single_units` (require
   `accept`; deny `mua`/`noise`/`reject`/`artifact`) and
   `v2_accepted_neural_units` (require `accept` or `mua`; deny
-  `noise`/`reject`/`artifact`), unlabeled units excluded and listed, one
+  `noise`/`reject`/`artifact`) and `v2_unflagged_units` (deny
+  `noise`/`reject`/`artifact`; MUA and unlabeled included -- the
+  auto-label-only handoff, since the shipped rules never write `accept`),
+  unlabeled units listed on every receipt, one
   `SortedSpikesGroup` per session (per member for concat sorts), and a receipt
   with included/excluded unit ids and reasons. `SortedSpikesGroup.filter_units`
   delegates to the DB-free `analysis.v1._unit_filter.filter_units_by_labels`

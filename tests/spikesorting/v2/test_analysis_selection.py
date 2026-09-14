@@ -54,6 +54,16 @@ def test_v2_policies_deny_unusable_labels_and_make_mua_explicit():
     assert included == (1, 2, 8)
     assert set(excluded) == {3, 4, 5, 6, 7}
 
+    # Auto-label-only handoff: nothing flagged is kept, MUA and unlabeled
+    # included (explicitly).
+    unflagged = V2_UNIT_SELECTION_POLICIES["v2_unflagged_units"]
+    assert unflagged["include_labels"] == []
+    included, excluded = apply_unit_selection_policy(
+        labels, range(1, 9), unflagged
+    )
+    assert included == (1, 2, 6, 8)
+    assert set(excluded) == {3, 4, 5, 7}
+
     # The explicit expert choice keeps everything, unlabeled included.
     all_units = {"include_labels": [], "exclude_labels": []}
     included, excluded = apply_unit_selection_policy(
@@ -160,11 +170,19 @@ def test_select_units_for_analysis_round_trip(
         assert neural.included_unit_ids == (unit_ids[0],)
         assert unit_ids[1] in neural.excluded_units
 
+        # The auto-label-only policy keeps the unlabeled unit and says so.
+        unflagged = select_units_for_analysis(ref, policy="v2_unflagged_units")
+        created.extend(g.group_key for g in unflagged.groups)
+        assert unflagged.included_unit_ids == (unit_ids[0], unit_ids[2])
+        assert unflagged.included_unlabeled_unit_ids == (unit_ids[2],)
+        assert unit_ids[1] in unflagged.excluded_units
+
         # The expert all-units choice is explicit and reports the unlabeled unit.
         everything = select_units_for_analysis(ref, policy="all_units")
         created.extend(g.group_key for g in everything.groups)
         assert everything.included_unit_ids == tuple(unit_ids)
         assert everything.unlabeled_unit_ids == (unit_ids[2],)
+        assert everything.included_unlabeled_unit_ids == (unit_ids[2],)
 
         # A merge preview is not a result: refused.
         preview = CurationV2.insert_curation(

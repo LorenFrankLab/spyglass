@@ -342,18 +342,21 @@ else:
 # | --- | --- | --- |
 # | `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
 # | `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
+# | `v2_unflagged_units` | everything not denied (MUA and unlabeled included) | `noise`, `reject`, `artifact` |
 # | `all_units` | everything (explicit expert choice) | -- |
 #
-# Unlabeled units are excluded by both v2 policies; the receipt lists them.
-# Pass the root, the auto-labeled child, or a manually curated child -- the
-# curation you actually reviewed.
+# The shipped rule sets only **flag** bad units; they never write `accept`, so
+# after auto-labeling alone the two `accepted` policies select nothing -- accept
+# units in the browser review (section 8) and hand that child over with the
+# default policy, or choose `v2_unflagged_units` to state explicitly that
+# rule-passing, never-reviewed units count. Unlabeled units are excluded by the
+# `accepted` policies and listed on the receipt either way. Pass the curation
+# you actually reviewed.
 
 # +
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
-receipt = select_units_for_analysis(
-    auto_labeled, policy="v2_accepted_single_units"
-)
+receipt = select_units_for_analysis(auto_labeled, policy="v2_unflagged_units")
 print(receipt.policy_name, dict(receipt.policy))
 print("included:", receipt.included_unit_ids)
 print("excluded:", dict(receipt.excluded_units))

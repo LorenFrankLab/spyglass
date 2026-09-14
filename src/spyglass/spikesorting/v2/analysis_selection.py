@@ -10,17 +10,24 @@ decoding / firing-rate consumers), and returns a receipt naming the exact
 curation generation, the policy content, and every included / excluded unit
 with its reason.
 
-Two v2 policies are shipped (``V2_UNIT_SELECTION_POLICIES``); they are new
+Three v2 policies are shipped (``V2_UNIT_SELECTION_POLICIES``); they are new
 rows and never alter the production ``all_units`` / ``exclude_noise`` /
 ``default_exclusion`` rows:
 
-* ``v2_accepted_single_units`` -- require ``accept``; deny ``mua``, ``noise``,
-  ``reject``, ``artifact``. Unlabeled units are excluded.
+* ``v2_accepted_single_units`` (default) -- require ``accept``; deny ``mua``,
+  ``noise``, ``reject``, ``artifact``. Unlabeled units are excluded: a unit
+  is in the analysis only because a reviewer accepted it.
 * ``v2_accepted_neural_units`` -- require ``accept`` or ``mua``; deny
   ``noise``, ``reject``, ``artifact``. Unlabeled units are excluded.
+* ``v2_unflagged_units`` -- deny ``noise``, ``reject``, ``artifact``; every
+  other unit, MUA and unlabeled included. This is the auto-label-only
+  handoff: the shipped rule sets only FLAG bad units (they never write
+  ``accept``), so without a browser review the two accepted policies select
+  nothing. Choosing it states explicitly that rule-passing, never-reviewed
+  units count as analysis units.
 
-``all_units`` remains available as an explicit expert choice; the receipt then
-reports unlabeled units as included so the choice is visible.
+``all_units`` remains available as an explicit expert choice; the receipt
+always reports which included units were unlabeled so the choice is visible.
 
 Concat sorts: the curation has one session-timeline output per frozen member
 (``CurationRef.member_merge_ids``), and a ``SortedSpikesGroup`` is per session,
@@ -48,6 +55,10 @@ V2_UNIT_SELECTION_POLICIES: Mapping[str, Mapping[str, list[str]]] = (
             },
             "v2_accepted_neural_units": {
                 "include_labels": ["accept", "mua"],
+                "exclude_labels": ["noise", "reject", "artifact"],
+            },
+            "v2_unflagged_units": {
+                "include_labels": [],
                 "exclude_labels": ["noise", "reject", "artifact"],
             },
         }
@@ -87,6 +98,14 @@ class UnitSelectionReceipt:
     excluded_units: Mapping[int, str]
     unlabeled_unit_ids: tuple[int, ...]
     groups: tuple[SelectedGroup, ...]
+
+    @property
+    def included_unlabeled_unit_ids(self) -> tuple[int, ...]:
+        """Included units that carry no label (visible only under an
+        exclude-only policy such as ``v2_unflagged_units`` / ``all_units``)."""
+        return tuple(
+            u for u in self.included_unit_ids if u in self.unlabeled_unit_ids
+        )
 
     @property
     def group_key(self) -> Mapping[str, Any]:
@@ -242,8 +261,10 @@ def select_units_for_analysis(
         have per-member outputs (concat).
     policy : str
         ``UnitSelectionParams`` row name. Default
-        ``"v2_accepted_single_units"``; ``"v2_accepted_neural_units"`` adds
-        ``mua``; ``"all_units"`` is the explicit expert choice.
+        ``"v2_accepted_single_units"`` (reviewer-accepted units only);
+        ``"v2_accepted_neural_units"`` adds ``mua``; ``"v2_unflagged_units"``
+        keeps everything the rules did not flag (auto-label-only workflows);
+        ``"all_units"`` is the explicit expert choice.
     group_name : str, optional
         ``SortedSpikesGroup`` name. Default
         ``"v2_{policy}_{curation_uuid_hex[:12]}"`` -- unique per curation

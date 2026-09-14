@@ -1439,8 +1439,11 @@ reviewed (`run.auto_labeled_curation`, a `FigPackReview` commit, or a
 `save_manual_curation` / `commit_merges` child): it applies a named
 `UnitSelectionParams` policy (`v2_accepted_single_units` -- require `accept`,
 deny `mua`/`noise`/`reject`/`artifact`; `v2_accepted_neural_units` -- require
-`accept` or `mua`, deny `noise`/`reject`/`artifact`; `all_units` as the explicit
-expert choice; unlabeled units excluded and listed), builds the
+`accept` or `mua`, deny `noise`/`reject`/`artifact`; `v2_unflagged_units` --
+deny `noise`/`reject`/`artifact` and keep everything else, MUA and unlabeled
+included, for auto-label-only workflows since the shipped rules never write
+`accept`; `all_units` as the explicit expert choice; the receipt lists unlabeled
+units either way), builds the
 `SortedSpikesGroup` that decoding and firing-rate consumers read (one per member
 session for a concat sort), and returns a receipt with the pinned curation
 generation, the policy content, and every unit's verdict and reason.

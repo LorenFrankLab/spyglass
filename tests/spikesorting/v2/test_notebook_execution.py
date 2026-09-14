@@ -165,11 +165,11 @@ def test_single_session_notebook_runs(dj_conn):
     assert namespace["auto_summary"]["auto_labeled_merge_id"] is not None
     receipt = namespace["receipt"]
     assert receipt.curation == namespace["auto_summary"].auto_labeled_curation
-    assert receipt.policy_name == "v2_accepted_single_units"
+    assert receipt.policy_name == "v2_unflagged_units"
     assert set(receipt.included_unit_ids).isdisjoint(receipt.excluded_units)
     assert len(namespace["spike_times"]) == len(receipt.included_unit_ids)
     assert namespace["receipt"].group_key["unit_filter_params_name"] == (
-        "v2_accepted_single_units"
+        "v2_unflagged_units"
     )
     if importlib.util.find_spec("figpack") is not None:
         assert namespace["reopened"].review_id == namespace["review"].review_id
