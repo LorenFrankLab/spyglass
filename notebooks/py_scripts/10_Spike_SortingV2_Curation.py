@@ -460,9 +460,11 @@ print(
 # resolver, not a plot, so it is not in the catalog).
 #
 # Routing is automatic and matters: recording widgets read the saved
-# **preprocessed** recording; sorting/waveform/location widgets read the sort's
-# **display** (unwhitened) analyzer, so you see real µV waveforms and real probe
-# positions — never the whitened metric analyzer. `plot_metrics` plots the
+# **preprocessed** recording; unit-level widgets take an exact **curation**
+# (`CurationRef`) and read its **display** (unwhitened) analyzer, so you see
+# real µV waveforms and real probe positions for exactly the units that
+# curation holds (a merged child shows its merged units) — never the whitened
+# metric analyzer, and never a bare sort key. `plot_metrics` plots the
 # routed `CurationEvaluation.get_metrics()` table (the same numbers as section 3),
 # while the raw SpikeInterface metric widgets are separately named
 # (`plot_si_quality_metrics` / `plot_si_template_metrics`) and read analyzer
@@ -485,9 +487,10 @@ ssviz.available_visualizations()
 # `ipywidgets`). No step here uploads or publishes anything.
 # `plot_recording_probe_map(recording_key)` rounds out the recording view (pass a
 # 3D `ax=` for a probe with z-coordinates), and
-# `ssviz.export_si_report(sorting_key, folder, compute_missing=True)` /
-# `ssviz.export_to_phy(sorting_key, folder)` write a local SI report / Phy folder
-# off the display analyzer. To label and merge in a browser instead, publish a
+# `ssviz.export_si_report(curation, folder, compute_missing=True)` /
+# `ssviz.export_to_phy(curation, folder)` write a local SI report / Phy folder
+# of exactly that curation's units from a disk-backed working copy, with a
+# `spyglass_provenance.json` naming the source generation and unit ids.
 # To label and merge in a browser instead, use
 # `run_summary.start_review(profile=..., source=...)` (section 3-browser).
 
@@ -499,9 +502,13 @@ recording_key = ssviz.recording_key_for_sorting(sorting_key)
 
 ssviz.plot_recording_traces(recording_key, time_range=[0.0, 1.0])
 
-unit_ids = list(Sorting().get_sorting(sorting_key).get_unit_ids())
-if unit_ids:
-    ssviz.plot_unit_summary(sorting_key, unit_ids[0], compute_missing=True)
+# Unit-level plots take the exact curation you are inspecting: here the
+# evaluated (possibly merged) curation from section 3, so a merged unit is
+# plotted as the merged unit.
+curated = analysis_evaluation.curation
+curated_unit_ids = list(CurationV2.get_sorting(curated.as_key()).get_unit_ids())
+if curated_unit_ids:
+    ssviz.plot_unit_summary(curated, curated_unit_ids[0], compute_missing=True)
 
 analysis_evaluation.plots.metrics()
 

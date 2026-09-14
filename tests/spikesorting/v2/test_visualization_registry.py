@@ -106,12 +106,16 @@ def test_available_visualizations_lists_documented_helpers():
     )
     assert indexed.loc["export_si_report", "backend_default"] is None
     assert indexed.loc["export_to_phy", "backend_default"] is None
-    # Key types are constrained to the three resolvable kinds.
-    assert set(table["key_type"]) <= {
+    # Key types are constrained to the three resolvable kinds. Unit-level
+    # plots / exports take an exact CURATION (never a bare sorting key), so the
+    # units shown are the curation's -- merged children included.
+    assert set(table["key_type"]) == {
         "recording",
-        "sorting",
+        "curation",
         "curation_evaluation",
     }
+    assert indexed.loc["export_to_phy", "key_type"] == "curation"
+    assert indexed.loc["plot_waveforms", "key_type"] == "curation"
 
 
 @pytest.mark.unit

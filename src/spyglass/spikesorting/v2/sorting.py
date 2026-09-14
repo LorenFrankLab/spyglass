@@ -2372,10 +2372,33 @@ class Sorting(SpyglassMixin, dj.Computed):
 
     # ---- visualization / export delegates (see v2.visualization facade) ---
 
+    def root_curation(self, key):
+        """Return the generation-pinned ``CurationRef`` of this sort's root.
+
+        The raw sort's units are addressed through the root curation
+        (``parent_curation_id=-1``): every unit-level plot / export in
+        ``v2.visualization`` takes a curation, so the delegates below resolve
+        the root and hand it over. Raises ``ValueError`` if no root curation
+        exists yet (``CurationV2.insert_curation(sorting_key)`` creates it).
+        """
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.curation_api import CurationRef
+
+        sorting_id = (self & key).fetch1("sorting_id")
+        root = CurationV2 & {"sorting_id": sorting_id, "parent_curation_id": -1}
+        if len(root) != 1:
+            raise ValueError(
+                f"Sorting {sorting_id} has no root curation yet; create it "
+                "with CurationV2.insert_curation(sorting_key) (run_v2_pipeline "
+                "does this) before plotting or exporting its units."
+            )
+        return CurationRef.from_key(root.fetch1("KEY"))
+
     def plot_summary(
         self, key, *, compute_missing=False, backend=None, **kwargs
     ):
-        """Delegate to ``visualization.plot_sorting_summary`` for this sort.
+        """Delegate to ``visualization.plot_sorting_summary`` for this sort's
+        root curation (the raw units).
 
         A local-discoverability one-liner; the display-analyzer routing and
         extension policy live in the ``v2.visualization`` facade, which the
@@ -2385,7 +2408,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_sorting_summary(
-            key, compute_missing=compute_missing, backend=backend, **kwargs
+            self.root_curation(key),
+            compute_missing=compute_missing,
+            backend=backend,
+            **kwargs,
         )
 
     def plot_unit_summary(
@@ -2397,11 +2423,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         backend="matplotlib",
         **kwargs,
     ):
-        """Delegate to ``visualization.plot_unit_summary`` for this sort."""
+        """Delegate to ``visualization.plot_unit_summary`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_unit_summary(
-            key,
+            self.root_curation(key),
             unit_id,
             compute_missing=compute_missing,
             backend=backend,
@@ -2411,48 +2437,62 @@ class Sorting(SpyglassMixin, dj.Computed):
     def plot_waveforms(
         self, key, unit_ids=None, *, backend="matplotlib", **kwargs
     ):
-        """Delegate to ``visualization.plot_waveforms`` for this sort."""
+        """Delegate to ``visualization.plot_waveforms`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_waveforms(
-            key, unit_ids=unit_ids, backend=backend, **kwargs
+            self.root_curation(key),
+            unit_ids=unit_ids,
+            backend=backend,
+            **kwargs,
         )
 
     def plot_spikes_on_traces(
         self, key, *, compute_missing=False, backend="matplotlib", **kwargs
     ):
-        """Delegate to ``visualization.plot_spikes_on_traces`` for this sort."""
+        """Delegate to ``visualization.plot_spikes_on_traces`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_spikes_on_traces(
-            key, compute_missing=compute_missing, backend=backend, **kwargs
+            self.root_curation(key),
+            compute_missing=compute_missing,
+            backend=backend,
+            **kwargs,
         )
 
     def plot_unit_locations(
         self, key, *, compute_missing=False, backend="matplotlib", **kwargs
     ):
-        """Delegate to ``visualization.plot_unit_locations`` for this sort."""
+        """Delegate to ``visualization.plot_unit_locations`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_unit_locations(
-            key, compute_missing=compute_missing, backend=backend, **kwargs
+            self.root_curation(key),
+            compute_missing=compute_missing,
+            backend=backend,
+            **kwargs,
         )
 
     def export_si_report(
         self, key, output_folder, *, compute_missing=False, **kwargs
     ):
-        """Delegate to ``visualization.export_si_report`` for this sort."""
+        """Delegate to ``visualization.export_si_report`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.export_si_report(
-            key, output_folder, compute_missing=compute_missing, **kwargs
+            self.root_curation(key),
+            output_folder,
+            compute_missing=compute_missing,
+            **kwargs,
         )
 
     def export_to_phy(self, key, output_folder, **kwargs):
-        """Delegate to ``visualization.export_to_phy`` for this sort."""
+        """Delegate to ``visualization.export_to_phy`` (root curation)."""
         from spyglass.spikesorting.v2 import visualization
 
-        return visualization.export_to_phy(key, output_folder, **kwargs)
+        return visualization.export_to_phy(
+            self.root_curation(key), output_folder, **kwargs
+        )
 
     def _rebuild_analyzer_folder(self, key) -> None:
         """Rebuild the analyzer folder for an existing Sorting row.

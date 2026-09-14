@@ -237,52 +237,68 @@ def test_recording_key_for_sorting_rejects_concat_source(dj_conn, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def _patch_display_analyzer(monkeypatch, fake, *, recorder=None):
-    """Monkeypatch ``Sorting.get_analyzer`` to return ``fake`` (display recipe).
+_REQUEST = {
+    "curation_ref": "CURATION",
+    "waveform_recipe": "display_recipe",
+    "role": "display",
+}
 
-    ``recorder`` (a list) collects every ``waveform_params_name`` passed, so a
-    test can assert no whitened metric recipe is ever requested.
+
+def _patch_curation_analyzer(monkeypatch, fake, *, recorder=None):
+    """Route every curation-keyed helper at one analyzer fake.
+
+    ``_curation_request`` is stubbed (no DB), and the published resolver
+    records each ``(request, extra_extensions)`` call so a test can assert
+    which extensions were requested and that only the display role is used.
+    ``open_curation_analyzer`` (the export working copy) yields the same fake
+    and records too.
     """
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    def _get_analyzer(self, key, waveform_params_name=None):
-        if recorder is not None:
-            recorder.append(waveform_params_name)
-        return fake
-
-    monkeypatch.setattr(Sorting, "get_analyzer", _get_analyzer)
-
-
-def _patch_curation_display_analyzer(monkeypatch, fake, *, recorder=None):
-    """Patch the curation-scoped display resolver with one analyzer fake."""
     from contextlib import contextmanager
 
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
 
-    request = {
-        "curation_ref": {"sorting_id": "s", "curation_id": 0},
-        "waveform_recipe": "display_recipe",
-        "role": "display",
-    }
     monkeypatch.setattr(
-        ssviz, "_curation_analyzer_request", lambda key: request
+        ssviz, "_curation_request", lambda curation, *, caller: dict(_REQUEST)
+    )
+    monkeypatch.setattr(
+        ssviz, "_evaluation_curation", lambda key: {"curation_id": 0}
     )
 
-    def _resolve(**kwargs):
+    def _resolve(
+        curation_ref, waveform_recipe, role="display", *, extra_extensions=None
+    ):
         if recorder is not None:
-            recorder.append(dict(kwargs))
+            recorder.append(
+                {
+                    "role": role,
+                    "extra_extensions": dict(extra_extensions or {}),
+                }
+            )
+        fake.present.update(extra_extensions or {})
         return fake
 
     @contextmanager
-    def _with_extensions(**kwargs):
+    def _open(
+        curation_ref, waveform_recipe, role="display", *, extra_extensions=None
+    ):
         if recorder is not None:
-            recorder.append(dict(kwargs))
+            recorder.append(
+                {
+                    "role": role,
+                    "extra_extensions": dict(extra_extensions or {}),
+                    "working_copy": True,
+                }
+            )
+        fake.present.update(extra_extensions or {})
         yield fake
 
     monkeypatch.setattr(resolver, "_resolve_curation_analyzer", _resolve)
-    monkeypatch.setattr(
-        resolver, "curation_analyzer_with_extensions", _with_extensions
-    )
+    monkeypatch.setattr(resolver, "open_curation_analyzer", _open)
+    monkeypatch.setattr(ssviz, "_write_export_provenance", lambda *a, **k: None)
+
+
+def _requested_extensions(recorder) -> set:
+    return {name for call in recorder for name in call["extra_extensions"]}
 
 
 def _forbid_add_extensions(monkeypatch):
@@ -297,8 +313,10 @@ def _forbid_add_extensions(monkeypatch):
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_summary_uses_display_analyzer(dj_conn, monkeypatch):
-    """Summary resolves the display analyzer (wpn=None) and calls SI."""
+def test_plot_sorting_summary_uses_curation_display_analyzer(
+    dj_conn, monkeypatch
+):
+    """Summary resolves the curation's display analyzer and calls SI."""
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer(
@@ -309,8 +327,8 @@ def test_sorting_plot_summary_uses_display_analyzer(dj_conn, monkeypatch):
             "template_similarity",
         ]
     )
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     _forbid_add_extensions(monkeypatch)
     captured = {}
 
@@ -322,32 +340,50 @@ def test_sorting_plot_summary_uses_display_analyzer(dj_conn, monkeypatch):
     # SortingSummaryWidget has no matplotlib backend; pass one explicitly.
     assert (
         ssviz.plot_sorting_summary(
-            {"sorting_id": "s"}, backend="spikeinterface_gui"
+            {"sorting_id": "s", "curation_id": 0}, backend="spikeinterface_gui"
         )
         == "SUMMARY"
     )
     assert captured["analyzer"] is fake
     assert captured["backend"] == "spikeinterface_gui"
-    # The display default, never the whitened metric recipe.
-    assert wpn == [None]
+    # The display role, never the whitened metric recipe; nothing computed.
+    assert calls == [{"role": "display", "extra_extensions": {}}]
+
+
+@pytest.mark.db_unit
+def test_unit_level_helpers_reject_bare_sorting_keys(dj_conn, monkeypatch):
+    """A bare sorting key is not a curation: refused with the root-curation hint."""
+    for call in (
+        lambda: ssviz.plot_sorting_summary(
+            {"sorting_id": "s"}, backend="spikeinterface_gui"
+        ),
+        lambda: ssviz.plot_unit_summary({"sorting_id": "s"}, 0),
+        lambda: ssviz.plot_waveforms({"sorting_id": "s"}),
+        lambda: ssviz.plot_unit_locations({"sorting_id": "s"}),
+        lambda: ssviz.export_to_phy({"sorting_id": "s"}, "/tmp/phy"),
+        lambda: ssviz.export_si_report({"sorting_id": "s"}, "/tmp/rep"),
+    ):
+        with pytest.raises(ValueError, match="root_curation"):
+            call()
 
 
 @pytest.mark.db_unit
 def test_plot_sorting_summary_requires_explicit_backend(dj_conn):
     """Without a backend it raises (SI's summary widget has no matplotlib path)."""
     with pytest.raises(ValueError, match="no local matplotlib backend"):
-        ssviz.plot_sorting_summary({"sorting_id": "s"})
+        ssviz.plot_sorting_summary({"sorting_id": "s", "curation_id": 0})
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_summary_missing_extensions_read_only_by_default(
+def test_plot_sorting_summary_missing_extensions_read_only_by_default(
     dj_conn, monkeypatch
 ):
     """Missing display-safe extensions raise by default; no compute happens."""
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer([])  # only base extensions present
-    _patch_display_analyzer(monkeypatch, fake)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     _forbid_add_extensions(monkeypatch)
 
     def _must_not_call(*a, **k):
@@ -358,55 +394,48 @@ def test_sorting_plot_summary_missing_extensions_read_only_by_default(
         MissingDisplayExtensionError, match="unit_locations"
     ) as exc:
         ssviz.plot_sorting_summary(
-            {"sorting_id": "s"}, backend="spikeinterface_gui"
+            {"sorting_id": "s", "curation_id": 0}, backend="spikeinterface_gui"
         )
     # The absent extensions are exposed structurally, not only in the message.
     assert "unit_locations" in exc.value.missing
+    assert _requested_extensions(calls) == set()
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_summary_compute_missing_opt_in(dj_conn, monkeypatch):
-    """``compute_missing=True`` computes only the display-safe missing set."""
+def test_plot_sorting_summary_compute_missing_opt_in(dj_conn, monkeypatch):
+    """``compute_missing=True`` requests only the display-safe missing set."""
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2.sorting import Sorting
-
     fake = _FakeAnalyzer(["correlograms"])  # missing 3 of the 4 required
-    _patch_display_analyzer(monkeypatch, fake)
-    added = {}
-
-    def _add(self, key, extensions, **kwargs):
-        added["extensions"] = list(extensions)
-        fake.present.update(extensions)  # the reload now sees them
-
-    monkeypatch.setattr(Sorting, "add_extensions", _add)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
+    _forbid_add_extensions(monkeypatch)
     monkeypatch.setattr(
         sw, "plot_sorting_summary", lambda analyzer, **k: "SUMMARY"
     )
     assert (
         ssviz.plot_sorting_summary(
-            {"sorting_id": "s"},
+            {"sorting_id": "s", "curation_id": 0},
             compute_missing=True,
             backend="spikeinterface_gui",
         )
         == "SUMMARY"
     )
-    assert set(added["extensions"]) == {
+    assert _requested_extensions(calls) == {
         "spike_amplitudes",
         "unit_locations",
         "template_similarity",
     }
-    assert "principal_components" not in added["extensions"]
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_unit_summary_uses_display_analyzer(dj_conn, monkeypatch):
-    """Unit summary uses the display analyzer and forwards unit_id + kwargs."""
+def test_plot_unit_summary_uses_curation_analyzer(dj_conn, monkeypatch):
+    """Unit summary uses the curation analyzer and forwards unit_id + kwargs."""
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer(["unit_locations"])
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     captured = {}
 
     def _fake(analyzer, unit_id, *, backend, **kwargs):
@@ -416,20 +445,23 @@ def test_sorting_plot_unit_summary_uses_display_analyzer(dj_conn, monkeypatch):
         return "UNIT"
 
     monkeypatch.setattr(sw, "plot_unit_summary", _fake)
-    out = ssviz.plot_unit_summary({"sorting_id": "s"}, 7, sparsity=None)
+    out = ssviz.plot_unit_summary(
+        {"sorting_id": "s", "curation_id": 0}, 7, sparsity=None
+    )
     assert out == "UNIT"
     assert captured["analyzer"] is fake
     assert captured["unit_id"] == 7
-    assert wpn == [None]
+    assert {c["role"] for c in calls} == {"display"}
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_waveforms_wraps_unit_waveforms(dj_conn, monkeypatch):
+def test_plot_waveforms_wraps_unit_waveforms(dj_conn, monkeypatch):
     """Spyglass ``plot_waveforms`` wraps SI ``plot_unit_waveforms``."""
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer([])  # base waveforms/templates suffice; no ensure
-    _patch_display_analyzer(monkeypatch, fake)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     _forbid_add_extensions(monkeypatch)
     captured = {}
 
@@ -439,43 +471,39 @@ def test_sorting_plot_waveforms_wraps_unit_waveforms(dj_conn, monkeypatch):
 
     monkeypatch.setattr(sw, "plot_unit_waveforms", _fake)
     assert not hasattr(sw, "plot_waveforms")  # no such SI symbol
-    out = ssviz.plot_waveforms({"sorting_id": "s"}, unit_ids=[1, 2])
+    out = ssviz.plot_waveforms(
+        {"sorting_id": "s", "curation_id": 0}, unit_ids=[1, 2]
+    )
     assert out == "WF"
     assert captured["analyzer"] is fake
     assert captured["unit_ids"] == [1, 2]
+    assert _requested_extensions(calls) == set()
 
 
 @pytest.mark.db_unit
-def test_sorting_plot_unit_locations_requires_extension_or_opt_in(
-    dj_conn, monkeypatch
-):
+def test_plot_unit_locations_requires_extension_or_opt_in(dj_conn, monkeypatch):
     """``plot_unit_locations`` needs the ``unit_locations`` ext or the opt-in."""
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2.sorting import Sorting
-
     fake = _FakeAnalyzer([])
-    _patch_display_analyzer(monkeypatch, fake)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     monkeypatch.setattr(sw, "plot_unit_locations", lambda analyzer, **k: "LOC")
 
     # Default: raises naming the missing extension; no compute.
     _forbid_add_extensions(monkeypatch)
     with pytest.raises(MissingDisplayExtensionError, match="unit_locations"):
-        ssviz.plot_unit_locations({"sorting_id": "s"})
+        ssviz.plot_unit_locations({"sorting_id": "s", "curation_id": 0})
+    assert _requested_extensions(calls) == set()
 
-    # Opt-in: computes exactly unit_locations.
-    added = {}
-
-    def _add(self, key, extensions, **kwargs):
-        added["extensions"] = list(extensions)
-        fake.present.update(extensions)
-
-    monkeypatch.setattr(Sorting, "add_extensions", _add)
+    # Opt-in: requests exactly unit_locations.
     assert (
-        ssviz.plot_unit_locations({"sorting_id": "s"}, compute_missing=True)
+        ssviz.plot_unit_locations(
+            {"sorting_id": "s", "curation_id": 0}, compute_missing=True
+        )
         == "LOC"
     )
-    assert added["extensions"] == ["unit_locations"]
+    assert _requested_extensions(calls) == {"unit_locations"}
 
 
 # --------------------------------------------------------------------------
@@ -529,7 +557,7 @@ def test_curation_evaluation_plot_si_quality_metrics_uses_display_analyzer(
 
     fake = _FakeAnalyzer(["quality_metrics"])
     requests = []
-    _patch_curation_display_analyzer(monkeypatch, fake, recorder=requests)
+    _patch_curation_analyzer(monkeypatch, fake, recorder=requests)
     _forbid_add_extensions(monkeypatch)
     captured = {}
     monkeypatch.setattr(
@@ -539,13 +567,7 @@ def test_curation_evaluation_plot_si_quality_metrics_uses_display_analyzer(
     )
     assert ssviz.plot_si_quality_metrics({"curation_id": 0}) == "QM"
     assert captured["analyzer"] is fake
-    assert requests == [
-        {
-            "curation_ref": {"sorting_id": "s", "curation_id": 0},
-            "waveform_recipe": "display_recipe",
-            "role": "display",
-        }
-    ]
+    assert requests == [{"role": "display", "extra_extensions": {}}]
 
 
 @pytest.mark.db_unit
@@ -557,7 +579,7 @@ def test_curation_evaluation_plot_si_template_metrics_uses_display_analyzer(
 
     fake = _FakeAnalyzer(["template_metrics"])
     requests = []
-    _patch_curation_display_analyzer(monkeypatch, fake, recorder=requests)
+    _patch_curation_analyzer(monkeypatch, fake, recorder=requests)
     _forbid_add_extensions(monkeypatch)
     captured = {}
     monkeypatch.setattr(
@@ -578,7 +600,7 @@ def test_si_metric_widgets_require_explicit_compute_for_missing_extensions(
     import spikeinterface.widgets as sw
 
     fake = _FakeAnalyzer([])  # quality_metrics absent
-    _patch_curation_display_analyzer(monkeypatch, fake)
+    _patch_curation_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
     monkeypatch.setattr(
         sw,
@@ -614,7 +636,7 @@ def test_plot_suggested_merges_uses_persisted_merge_groups(
 
     monkeypatch.setattr(sic, "compute_merge_unit_groups", _must_not_recompute)
     fake = _FakeAnalyzer(["spike_amplitudes", "correlograms"])
-    _patch_curation_display_analyzer(monkeypatch, fake)
+    _patch_curation_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
     captured = {}
 
@@ -651,16 +673,14 @@ def test_plot_suggested_merges_errors_when_no_persisted_suggestions(
 
 
 @pytest.mark.db_unit
-def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
-    """``export_si_report`` wraps SI ``export_report`` over the display analyzer.
+def test_export_report_uses_working_copy(dj_conn, monkeypatch):
+    """``export_si_report`` wraps SI ``export_report`` over a working copy.
 
-    ``compute_missing=False`` does not mutate extensions; ``True`` computes only
+    ``compute_missing=False`` requests no extensions; ``True`` requests only
     display-safe report extensions; SI is always called with its own
-    ``compute_missing=False`` so it never mutates the cache itself.
+    ``force_computation=False`` so it never mutates the cache itself.
     """
     import spikeinterface.exporters as sie
-
-    from spyglass.spikesorting.v2.sorting import Sorting
 
     captured = {}
     monkeypatch.setattr(
@@ -671,49 +691,47 @@ def test_export_report_uses_display_analyzer(dj_conn, monkeypatch):
         ),
     )
 
-    # compute_missing=False with unit_locations already present: no add_extensions.
     fake_present = _FakeAnalyzer(["unit_locations"])
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake_present, recorder=wpn)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake_present, recorder=calls)
     _forbid_add_extensions(monkeypatch)
-    ssviz.export_si_report({"sorting_id": "s"}, "/tmp/report_a")
+    ssviz.export_si_report(
+        {"sorting_id": "s", "curation_id": 0}, "/tmp/report_a"
+    )
     assert captured["analyzer"] is fake_present
     assert captured["kwargs"]["force_computation"] is False
-    assert wpn == [None]
+    assert any(c.get("working_copy") for c in calls)
+    assert _requested_extensions(calls) == {"unit_locations"}
 
-    # compute_missing=True: computes the missing display-safe report extensions.
-    fake_missing = _FakeAnalyzer(["unit_locations"])
-    _patch_display_analyzer(monkeypatch, fake_missing)
-    added = {}
-
-    def _add(self, key, extensions, **kwargs):
-        added["extensions"] = list(extensions)
-        fake_missing.present.update(extensions)
-
-    monkeypatch.setattr(Sorting, "add_extensions", _add)
-    ssviz.export_si_report(
-        {"sorting_id": "s"}, "/tmp/report_b", compute_missing=True
-    )
+    # compute_missing=True: requests the display-safe report extensions.
     from spyglass.spikesorting.v2._visualization import (
         REPORT_DISPLAY_EXTENSIONS,
     )
 
-    assert set(added["extensions"]) <= set(REPORT_DISPLAY_EXTENSIONS)
-    assert "principal_components" not in added["extensions"]
+    calls.clear()
+    fake_missing = _FakeAnalyzer(["unit_locations"])
+    _patch_curation_analyzer(monkeypatch, fake_missing, recorder=calls)
+    ssviz.export_si_report(
+        {"sorting_id": "s", "curation_id": 0},
+        "/tmp/report_b",
+        compute_missing=True,
+    )
+    assert _requested_extensions(calls) == set(REPORT_DISPLAY_EXTENSIONS)
+    assert "principal_components" not in _requested_extensions(calls)
 
 
 @pytest.mark.db_unit
 def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
     """``compute_missing=False`` refuses to run when ``unit_locations`` is absent.
 
-    SI's ``export_report`` computes ``unit_locations`` unconditionally if missing
-    (mutating the shared display cache), so the read-only path must raise rather
-    than let that silent mutation happen -- and must not call SI at all.
+    SI's ``export_report`` computes ``unit_locations`` unconditionally if missing,
+    so the read-only path must raise rather than compute -- and must not call
+    SI at all.
     """
     import spikeinterface.exporters as sie
 
     fake = _FakeAnalyzer([])  # unit_locations absent
-    _patch_display_analyzer(monkeypatch, fake)
+    _patch_curation_analyzer(monkeypatch, fake)
     _forbid_add_extensions(monkeypatch)
 
     def _must_not_export(*a, **k):
@@ -723,22 +741,24 @@ def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
 
     monkeypatch.setattr(sie, "export_report", _must_not_export)
     with pytest.raises(MissingDisplayExtensionError, match="unit_locations"):
-        ssviz.export_si_report({"sorting_id": "s"}, "/tmp/report_ro")
+        ssviz.export_si_report(
+            {"sorting_id": "s", "curation_id": 0}, "/tmp/report_ro"
+        )
 
 
 @pytest.mark.db_unit
-def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
-    """``export_to_phy`` wraps SI ``export_to_phy`` with the display analyzer.
+def test_export_to_phy_uses_working_copy(dj_conn, monkeypatch):
+    """``export_to_phy`` wraps SI ``export_to_phy`` over a curation working copy.
 
     PC features default OFF so SI never computes the whitened-metric-only
-    ``principal_components`` extension onto the unwhitened display analyzer; an
+    ``principal_components`` extension onto the unwhitened display copy; an
     explicit ``compute_pc_features=True`` still passes through.
     """
     import spikeinterface.exporters as sie
 
     fake = _FakeAnalyzer([])
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     captured = {}
     monkeypatch.setattr(
         sie,
@@ -747,10 +767,12 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
             analyzer=analyzer, folder=output_folder, kwargs=k
         ),
     )
-    ssviz.export_to_phy({"sorting_id": "s"}, "/tmp/phy")
+    ssviz.export_to_phy({"sorting_id": "s", "curation_id": 0}, "/tmp/phy")
     assert captured["analyzer"] is fake
-    # Display recipe only -- the whitened metric analyzer is never requested.
-    assert wpn == [None]
+    # Display role only, on an owned working copy.
+    assert calls == [
+        {"role": "display", "extra_extensions": {}, "working_copy": True}
+    ]
     # PC features off by default (no principal_components on the display path),
     # and raw SI display-analyzer metric TSVs off by default (the routed
     # CurationEvaluation.get_metrics() stays the single source of official metrics).
@@ -760,7 +782,7 @@ def test_export_to_phy_uses_display_analyzer(dj_conn, monkeypatch):
 
     # Explicit opt-ins are honored.
     ssviz.export_to_phy(
-        {"sorting_id": "s"},
+        {"sorting_id": "s", "curation_id": 0},
         "/tmp/phy",
         compute_pc_features=True,
         add_quality_metrics=True,
@@ -792,12 +814,8 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
             "template_metrics",
         ]
     )
-    wpn = []
-    _patch_display_analyzer(monkeypatch, fake, recorder=wpn)
-    curation_requests = []
-    _patch_curation_display_analyzer(
-        monkeypatch, fake, recorder=curation_requests
-    )
+    calls = []
+    _patch_curation_analyzer(monkeypatch, fake, recorder=calls)
     _forbid_add_extensions(monkeypatch)
     monkeypatch.setattr(
         CurationEvaluation,
@@ -819,22 +837,20 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     monkeypatch.setattr(sie, "export_to_phy", lambda *a, **k: None)
 
     ckey = {"curation_id": 0}
-    skey = {"sorting_id": "s"}
-    ssviz.plot_sorting_summary(skey, backend="spikeinterface_gui")
-    ssviz.plot_unit_summary(skey, 0)
-    ssviz.plot_waveforms(skey)
-    ssviz.plot_spikes_on_traces(skey)
-    ssviz.plot_unit_locations(skey)
+    curation = {"sorting_id": "s", "curation_id": 0}
+    ssviz.plot_sorting_summary(curation, backend="spikeinterface_gui")
+    ssviz.plot_unit_summary(curation, 0)
+    ssviz.plot_waveforms(curation)
+    ssviz.plot_spikes_on_traces(curation)
+    ssviz.plot_unit_locations(curation)
     ssviz.plot_si_quality_metrics(ckey)
     ssviz.plot_si_template_metrics(ckey)
     ssviz.plot_suggested_merges(ckey)
-    ssviz.export_si_report(skey, "/tmp/r")
-    ssviz.export_to_phy(skey, "/tmp/p")
+    ssviz.export_si_report(curation, "/tmp/r")
+    ssviz.export_to_phy(curation, "/tmp/p")
 
-    assert wpn, "expected analyzer loads"
-    assert set(wpn) == {None}
-    assert curation_requests, "expected curation analyzer loads"
-    assert {request["role"] for request in curation_requests} == {"display"}
+    assert calls, "expected curation analyzer loads"
+    assert {call["role"] for call in calls} == {"display"}
 
 
 @pytest.mark.db_unit

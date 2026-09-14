@@ -7,7 +7,8 @@ curations with SpikeInterface widgets / exporters::
 
     ssviz.available_visualizations()
     ssviz.plot_recording_traces(recording_key)
-    ssviz.plot_sorting_summary(sorting_key, backend="spikeinterface_gui")
+    ssviz.plot_sorting_summary(run.root_curation, backend="spikeinterface_gui")
+    ssviz.plot_waveforms(merged_curation, unit_ids=[3])
     ssviz.plot_metrics(curation_evaluation_key)
 
 These wrappers are intentionally thin: Spyglass resolves the DataJoint key and
@@ -18,11 +19,13 @@ Routing (the load-bearing invariant, see the table contract):
 
 - Recording-only widgets (``plot_recording_traces`` / ``plot_recording_probe_map``)
   read the saved **preprocessed** ``Recording`` extractor, not any analyzer.
-- Sorting widgets and local exports read the raw sort's **display**
-  (unwhitened) analyzer. Curation-keyed widgets resolve the selected committed
-  curation: raw-namespace rows reuse that analyzer, while merged rows use their
-  immutable per-generation display cache. Both show real waveforms / locations /
-  templates and never read the whitened metric analyzer.
+- Unit-level widgets and local exports take an exact **curation**
+  (``CurationRef`` or ``{sorting_id, curation_id}``): a root curation shows the
+  raw sort's units (via the shared display analyzer), a merged / labeled child
+  shows exactly its committed units (via its immutable per-generation display
+  cache). Bare sorting keys are rejected. Everything reads the **display**
+  (unwhitened) analyzer -- real waveforms / locations / templates -- never the
+  whitened metric analyzer.
 - The official metric overview (``plot_metrics``) plots the Spyglass-routed
   ``CurationEvaluation.get_metrics()`` table (configured quality metrics plus the
   surfaced waveform-shape columns), not an SI analyzer extension.
@@ -31,9 +34,10 @@ Routing (the load-bearing invariant, see the table contract):
 
 Plot helpers are read-only by default: a richer widget that needs a missing
 display-safe analyzer extension raises a clear error. Passing
-``compute_missing=True`` computes only display-safe extensions; raw-sort helpers
-use ``Sorting.add_extensions``, while curation helpers use a detached in-memory
-derivative so the published curation cache remains immutable. Most plot helpers
+``compute_missing=True`` computes only display-safe extensions, exactly once:
+onto the shared sort analyzer for a root curation, into a disk-backed
+derivative for a merged one (the published cache stays immutable). Exporters
+run on a disk-backed working copy and write ``spyglass_provenance.json``. Most plot helpers
 default to local ``matplotlib``. SI widgets that do not support
 matplotlib expose that honestly: ``plot_sorting_summary`` requires an explicit
 GUI / web backend, and ``plot_suggested_merges`` defaults to the notebook-local
@@ -48,6 +52,7 @@ one; only the actual plot/export calls touch the database.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 
 from spyglass.spikesorting.v2 import _visualization as _viz
@@ -80,38 +85,118 @@ __all__ = [
 # ---- internal resolution helpers ----------------------------------------
 
 
-def _display_analyzer_with_extensions(
-    sorting_key,
+def _curation_request(curation, *, caller: str) -> dict:
+    """Resolve a ``CurationRef`` / curation key to its display-analyzer request.
+
+    Every unit-level plot / export is keyed by an exact curation (root, merged,
+    or labeled child) so the units shown are the units that curation holds. A
+    bare sorting key is rejected: the raw sort's units are addressed through
+    its root curation (``run.root_curation`` / ``CurationV2`` with
+    ``parent_curation_id=-1``), never through an unqualified sort.
+    """
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    if not isinstance(curation, CurationRef):
+        if not isinstance(curation, Mapping) or "curation_id" not in curation:
+            raise ValueError(
+                f"{caller} takes an exact curation (a CurationRef or a "
+                "{sorting_id, curation_id} key), not a bare sorting key. For "
+                "the raw sort's units pass its root curation (e.g. "
+                "run.root_curation); for curated units pass that curation."
+            )
+        curation = CurationRef.from_key(curation)
+    waveform_recipe = (Sorting & {"sorting_id": curation.sorting_id}).fetch1(
+        "display_waveform_params_name"
+    )
+    return {
+        "curation_ref": curation,
+        "waveform_recipe": waveform_recipe,
+        "role": "display",
+    }
+
+
+def _curation_analyzer_for_plot(
+    curation,
     required_extensions,
     *,
     compute_missing,
+    caller,
     recommend_metrics=False,
 ):
-    """Return the sort's DISPLAY analyzer, ensuring display-safe extensions.
+    """Return the curation's published display analyzer for a read-only plot.
 
-    Loads ``Sorting.get_analyzer(sorting_key)`` with no ``waveform_params_name``
-    -- the sort's stored display (unwhitened) recipe, never the whitened metric
-    analyzer. If a required display-safe extension is missing, the read-only
-    default (``compute_missing=False``) raises a clear, actionable error; with
-    ``compute_missing=True`` it computes only the missing display-safe extensions
-    through the display-only ``Sorting.add_extensions`` entry point and reloads.
+    Missing display-safe extensions raise unless ``compute_missing=True``, in
+    which case they are computed exactly once -- onto the shared sort analyzer
+    for a raw-namespace curation, into a disk-backed derivative for a merged
+    one -- and reused afterwards. The returned analyzer is the published
+    object and must not be mutated.
     """
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        _resolve_curation_analyzer,
+    )
 
-    sorting = Sorting()
-    analyzer = sorting.get_analyzer(sorting_key)
+    request = _curation_request(curation, caller=caller)
+    analyzer = _resolve_curation_analyzer(**request)
     missing = _viz.missing_extensions(analyzer, required_extensions)
-    if missing:
-        if not compute_missing:
-            raise MissingDisplayExtensionError(
-                _viz.format_missing_extension_error(
-                    missing, recommend_metrics=recommend_metrics
-                ),
-                missing=missing,
-            )
-        sorting.add_extensions(sorting_key, missing)
-        analyzer = sorting.get_analyzer(sorting_key)
-    return analyzer
+    if not missing:
+        return analyzer
+    if not compute_missing:
+        raise MissingDisplayExtensionError(
+            _viz.format_missing_extension_error(
+                missing, recommend_metrics=recommend_metrics
+            ),
+            missing=missing,
+        )
+    return _resolve_curation_analyzer(
+        **request, extra_extensions={name: {} for name in missing}
+    )
+
+
+@contextmanager
+def _curation_working_copy(curation, required_extensions, *, caller):
+    """Yield a disk-backed working copy carrying ``required_extensions``.
+
+    For exporters: SpikeInterface computes extensions onto the analyzer it is
+    handed, so exports run on an owned temp copy (never the published cache).
+    """
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        open_curation_analyzer,
+    )
+
+    request = _curation_request(curation, caller=caller)
+    with open_curation_analyzer(
+        **request,
+        extra_extensions={name: {} for name in required_extensions},
+    ) as working:
+        yield working, request["curation_ref"], request["waveform_recipe"]
+
+
+def _write_export_provenance(output_folder, curation_ref, analyzer, recipe):
+    """Write ``spyglass_provenance.json`` beside an export.
+
+    Records the exact source generation and the unit ids exported so a Phy /
+    report folder can always be traced back to one immutable curation.
+    """
+    import json
+    from pathlib import Path
+
+    import spikeinterface as si
+
+    payload = {
+        "sorting_id": str(curation_ref.sorting_id),
+        "curation_id": int(curation_ref.curation_id),
+        "curation_uuid": str(curation_ref.curation_uuid),
+        "unit_ids": [int(unit_id) for unit_id in analyzer.unit_ids],
+        "display_waveform_params_name": recipe,
+        "spikeinterface_version": si.__version__,
+    }
+    folder = Path(output_folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "spyglass_provenance.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    )
+    return payload
 
 
 def recording_key_for_sorting(sorting_key) -> dict:
@@ -144,59 +229,20 @@ def recording_key_for_sorting(sorting_key) -> dict:
     return dict(source.key)
 
 
-def _curation_analyzer_request(curation_evaluation_key) -> dict:
-    """Resolve an evaluation key to its curation + display-recipe request."""
+def _evaluation_curation(curation_evaluation_key):
+    """Resolve an evaluation key to the exact curation it scored."""
+    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluationSelection,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting
 
     sel = (CurationEvaluationSelection & curation_evaluation_key).fetch1()
-    waveform_recipe = (Sorting & {"sorting_id": sel["sorting_id"]}).fetch1(
-        "display_waveform_params_name"
-    )
-    return {
-        "curation_ref": {
+    return CurationRef.from_key(
+        {
             "sorting_id": sel["sorting_id"],
             "curation_id": int(sel["curation_id"]),
-        },
-        "waveform_recipe": waveform_recipe,
-        "role": "display",
-    }
-
-
-@contextmanager
-def _curation_display_analyzer_with_extensions(
-    curation_evaluation_key,
-    required_extensions,
-    *,
-    compute_missing,
-    recommend_metrics=False,
-):
-    """Yield the evaluation curation's analyzer without cache mutation."""
-    from spyglass.spikesorting.v2._curation_analyzer import (
-        _resolve_curation_analyzer,
-        curation_analyzer_with_extensions,
+        }
     )
-
-    request = _curation_analyzer_request(curation_evaluation_key)
-    analyzer = _resolve_curation_analyzer(**request)
-    missing = _viz.missing_extensions(analyzer, required_extensions)
-    if missing and not compute_missing:
-        raise MissingDisplayExtensionError(
-            _viz.format_missing_extension_error(
-                missing, recommend_metrics=recommend_metrics
-            ),
-            missing=missing,
-        )
-    if not missing:
-        yield analyzer
-        return
-    with curation_analyzer_with_extensions(
-        **request,
-        extra_extensions={name: {} for name in missing},
-    ) as derivative:
-        yield derivative
 
 
 # ---- recording inspection ------------------------------------------------
@@ -236,10 +282,12 @@ def plot_recording_probe_map(recording_key, *, backend="matplotlib", **kwargs):
 
 
 def plot_sorting_summary(
-    sorting_key, *, compute_missing=False, backend=None, **kwargs
+    curation, *, compute_missing=False, backend=None, **kwargs
 ):
-    """Plot the sort's display-analyzer summary (SI ``plot_sorting_summary``).
+    """Plot a curation's display-analyzer summary (SI ``plot_sorting_summary``).
 
+    ``curation`` is a ``CurationRef`` / ``{sorting_id, curation_id}`` key: the
+    units shown are exactly that curation's (merged children included).
     Resolves the display (unwhitened) analyzer and renders SI's interactive
     sorting summary. The summary reads ``correlograms`` / ``spike_amplitudes`` /
     ``unit_locations`` / ``template_similarity``; if any are missing the read-only
@@ -265,53 +313,56 @@ def plot_sorting_summary(
         )
     import spikeinterface.widgets as sw
 
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key,
+    analyzer = _curation_analyzer_for_plot(
+        curation,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"],
         compute_missing=compute_missing,
+        caller="plot_sorting_summary",
     )
     return sw.plot_sorting_summary(analyzer, backend=backend, **kwargs)
 
 
 def plot_unit_summary(
-    sorting_key,
+    curation,
     unit_id,
     *,
     compute_missing=False,
     backend="matplotlib",
     **kwargs,
 ):
-    """Plot one unit's display-analyzer summary (SI ``plot_unit_summary``).
+    """Plot one curated unit's summary (SI ``plot_unit_summary``).
 
-    Requires the display ``unit_locations`` extension (read-only default raises if
-    absent; ``compute_missing=True`` computes it). ``unit_id``, backend, and SI
-    kwargs forward straight through.
+    ``unit_id`` is a unit of ``curation`` (a merged child's ids are its own).
+    Requires the display ``unit_locations`` extension (read-only default raises
+    if absent; ``compute_missing=True`` computes it). Backend and SI kwargs
+    forward straight through.
     """
     import spikeinterface.widgets as sw
 
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key,
+    analyzer = _curation_analyzer_for_plot(
+        curation,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_unit_summary"],
         compute_missing=compute_missing,
+        caller="plot_unit_summary",
     )
     return sw.plot_unit_summary(analyzer, unit_id, backend=backend, **kwargs)
 
 
-def plot_waveforms(
-    sorting_key, unit_ids=None, *, backend="matplotlib", **kwargs
-):
-    """Plot real per-unit waveforms (SI ``plot_unit_waveforms``).
+def plot_waveforms(curation, unit_ids=None, *, backend="matplotlib", **kwargs):
+    """Plot real per-unit waveforms of a curation (SI ``plot_unit_waveforms``).
 
     Wraps SI's ``plot_unit_waveforms`` (there is no SI ``plot_waveforms`` symbol)
-    over the display analyzer. The sort-time base ``waveforms`` / ``templates``
-    extensions are always present, so no extra computation is needed.
+    over the curation's display analyzer. The base ``waveforms`` /
+    ``templates`` extensions are always present, so no extra computation is
+    needed; a merged child's waveforms are those of its committed units.
     """
     import spikeinterface.widgets as sw
 
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key,
+    analyzer = _curation_analyzer_for_plot(
+        curation,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_waveforms"],
         compute_missing=False,
+        caller="plot_waveforms",
     )
     return sw.plot_unit_waveforms(
         analyzer, unit_ids=unit_ids, backend=backend, **kwargs
@@ -319,27 +370,28 @@ def plot_waveforms(
 
 
 def plot_spikes_on_traces(
-    sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs
+    curation, *, compute_missing=False, backend="matplotlib", **kwargs
 ):
-    """Overlay spikes on the display-analyzer traces (SI ``plot_spikes_on_traces``).
+    """Overlay a curation's spikes on the traces (SI ``plot_spikes_on_traces``).
 
     Requires the display ``unit_locations`` extension (read-only default raises;
     ``compute_missing=True`` computes it).
     """
     import spikeinterface.widgets as sw
 
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key,
+    analyzer = _curation_analyzer_for_plot(
+        curation,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_spikes_on_traces"],
         compute_missing=compute_missing,
+        caller="plot_spikes_on_traces",
     )
     return sw.plot_spikes_on_traces(analyzer, backend=backend, **kwargs)
 
 
 def plot_unit_locations(
-    sorting_key, *, compute_missing=False, backend="matplotlib", **kwargs
+    curation, *, compute_missing=False, backend="matplotlib", **kwargs
 ):
-    """Plot estimated unit locations (SI ``plot_unit_locations``).
+    """Plot a curation's estimated unit locations (SI ``plot_unit_locations``).
 
     Requires the display ``unit_locations`` extension (read-only default raises;
     ``compute_missing=True`` computes it). Locations come from real (unwhitened)
@@ -347,10 +399,11 @@ def plot_unit_locations(
     """
     import spikeinterface.widgets as sw
 
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key,
+    analyzer = _curation_analyzer_for_plot(
+        curation,
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_unit_locations"],
         compute_missing=compute_missing,
+        caller="plot_unit_locations",
     )
     return sw.plot_unit_locations(analyzer, backend=backend, **kwargs)
 
@@ -403,13 +456,14 @@ def plot_si_quality_metrics(
     """
     import spikeinterface.widgets as sw
 
-    with _curation_display_analyzer_with_extensions(
-        curation_evaluation_key,
+    analyzer = _curation_analyzer_for_plot(
+        _evaluation_curation(curation_evaluation_key),
         _viz.SI_METRIC_WIDGET_EXTENSIONS["plot_si_quality_metrics"],
         compute_missing=compute_missing,
+        caller="plot_si_quality_metrics",
         recommend_metrics=True,
-    ) as analyzer:
-        return sw.plot_quality_metrics(analyzer, backend=backend, **kwargs)
+    )
+    return sw.plot_quality_metrics(analyzer, backend=backend, **kwargs)
 
 
 def plot_si_template_metrics(
@@ -433,13 +487,14 @@ def plot_si_template_metrics(
     """
     import spikeinterface.widgets as sw
 
-    with _curation_display_analyzer_with_extensions(
-        curation_evaluation_key,
+    analyzer = _curation_analyzer_for_plot(
+        _evaluation_curation(curation_evaluation_key),
         _viz.SI_METRIC_WIDGET_EXTENSIONS["plot_si_template_metrics"],
         compute_missing=compute_missing,
+        caller="plot_si_template_metrics",
         recommend_metrics=True,
-    ) as analyzer:
-        return sw.plot_template_metrics(analyzer, backend=backend, **kwargs)
+    )
+    return sw.plot_template_metrics(analyzer, backend=backend, **kwargs)
 
 
 def plot_suggested_merges(
@@ -476,38 +531,42 @@ def plot_suggested_merges(
             "curation, so there is nothing to plot. Run auto-merge first; this "
             "wrapper never recomputes merge candidates at plot time."
         )
-    with _curation_display_analyzer_with_extensions(
-        curation_evaluation_key,
+    analyzer = _curation_analyzer_for_plot(
+        _evaluation_curation(curation_evaluation_key),
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_suggested_merges"],
         compute_missing=False,
-    ) as analyzer:
-        return sw.plot_potential_merges(
-            analyzer, potential_merges=groups, backend=backend, **kwargs
-        )
+        caller="plot_suggested_merges",
+    )
+    return sw.plot_potential_merges(
+        analyzer, potential_merges=groups, backend=backend, **kwargs
+    )
 
 
 # ---- local exports (display analyzer) ------------------------------------
 
 
 def export_si_report(
-    sorting_key, output_folder, *, compute_missing=False, **kwargs
+    curation, output_folder, *, compute_missing=False, **kwargs
 ):
-    """Write a local SI report folder for the sort (SI ``export_report``).
+    """Write a local SI report folder for a curation (SI ``export_report``).
 
-    Uses the display analyzer. ``compute_missing=False`` (default) is read-only:
-    it requires the ``unit_locations`` extension present (SI's ``export_report``
-    would otherwise compute and persist it) and lets SI skip any other missing
-    optional sections with its own warnings -- the analyzer cache is not mutated.
-    ``compute_missing=True`` precomputes the display-safe report extensions SI's
-    report actually renders (``spike_amplitudes`` / ``correlograms`` /
-    ``unit_locations``) through ``Sorting.add_extensions`` first.
+    Runs on a disk-backed WORKING COPY of the curation's display analyzer
+    (never the published cache), so SI's own extension computation cannot
+    mutate shared state. ``compute_missing=False`` (default) requires the
+    ``unit_locations`` extension present on the published analyzer and lets
+    SI skip any other missing optional section with its own warnings;
+    ``compute_missing=True`` precomputes the display-safe report extensions
+    (``spike_amplitudes`` / ``correlograms`` / ``unit_locations``) once into
+    the curation's cache first, so a later export reuses them.
 
     SI's report includes a ``quality metrics.csv`` ONLY if a ``quality_metrics``
     extension already exists on the display analyzer (this wrapper never computes
     it). If present, those are raw SI display-analyzer metrics, NOT the routed
     Spyglass metric table: the official metrics live in
     ``CurationEvaluation.get_metrics()`` (write them beside the report with
-    ``get_metrics(curation_key).to_csv(...)`` if needed). No cloud upload or
+    ``get_metrics(curation_key).to_csv(...)`` if needed). A
+    ``spyglass_provenance.json`` naming the exact curation generation and
+    exported unit ids is written beside the report. No cloud upload or
     publishing happens.
     """
     import spikeinterface.exporters as sie
@@ -517,49 +576,61 @@ def export_si_report(
         if compute_missing
         else _viz.REPORT_REQUIRED_EXTENSIONS
     )
-    analyzer = _display_analyzer_with_extensions(
-        sorting_key, required, compute_missing=compute_missing
+    # Read-only default: fail before any copy if the required extension is
+    # absent from the published analyzer.
+    _curation_analyzer_for_plot(
+        curation,
+        required,
+        compute_missing=compute_missing,
+        caller="export_si_report",
     )
-    # Never let SI compute extensions itself: anything needed was precomputed
-    # above through the display-only add_extensions entry point.
-    return sie.export_report(
-        analyzer, output_folder, force_computation=False, **kwargs
-    )
+    with _curation_working_copy(
+        curation, required, caller="export_si_report"
+    ) as (analyzer, ref, recipe):
+        result = sie.export_report(
+            analyzer, output_folder, force_computation=False, **kwargs
+        )
+        _write_export_provenance(output_folder, ref, analyzer, recipe)
+    return result
 
 
-def export_to_phy(sorting_key, output_folder, **kwargs):
-    """Export the sort to a Phy folder (SI ``export_to_phy``).
+def export_to_phy(curation, output_folder, **kwargs):
+    """Export a curation's exact units to a Phy folder (SI ``export_to_phy``).
 
-    Uses the display (unwhitened) analyzer -- the whitened metric analyzer is
-    never touched, so no official Spyglass metrics are computed on it.
+    The exported unit namespace is the curation's -- a merged child exports its
+    merged units, never the raw sort's -- and a ``spyglass_provenance.json``
+    beside the Phy files records the source generation and exported unit ids.
+    Runs on a disk-backed working copy of the display (unwhitened) analyzer:
+    the extensions SI computes for the export (``template_similarity`` /
+    ``spike_amplitudes``) land in that owned copy, and the whitened metric
+    analyzer is never touched.
 
     Three SI defaults are overridden to ``False`` so the export stays consistent
     with the routing contract; each is an explicit opt-in:
 
-    - ``compute_pc_features``: SI computes ``principal_components`` ON the analyzer
-      it is handed, so the SI default (``True``) would compute and persist PC
-      features on the *unwhitened display* analyzer -- a whitened-metric-only
-      extension landing on the display path and a heavy mutation of the shared
-      display-analyzer cache.
-    - ``add_quality_metrics`` / ``add_template_metrics``: SI writes these TSVs into
-      the Phy folder whenever the corresponding display-analyzer extension already
-      exists (e.g. after a raw ``plot_si_quality_metrics(..., compute_missing=True)``
-      diagnostic). Those are raw SI display-analyzer metrics, NOT the routed
-      Spyglass metric table, so they are off by default to keep
-      ``CurationEvaluation.get_metrics()`` the single source of official metrics.
+    - ``compute_pc_features``: SI computes ``principal_components`` ON the
+      analyzer it is handed -- a whitened-metric-only extension that would land
+      on the unwhitened display copy.
+    - ``add_quality_metrics`` / ``add_template_metrics``: SI writes these TSVs
+      whenever the corresponding display-analyzer extension already exists.
+      Those are raw SI display-analyzer metrics, NOT the routed Spyglass metric
+      table, so they are off by default to keep ``CurationEvaluation.get_metrics()``
+      the single source of official metrics (write it beside the folder with
+      ``get_metrics(curation_key).to_csv(...)``).
 
-    SI still computes the display-safe ``template_similarity`` / ``spike_amplitudes``
-    extensions it needs for the export. For the exact Spyglass-routed metric table
-    beside the Phy folder, write it explicitly from
-    ``CurationEvaluation.get_metrics(curation_key).to_csv(...)``. No cloud upload or
-    publishing happens.
+    External re-import of a Phy-edited result is not supported; the export is
+    for inspection.
     """
-    from spyglass.spikesorting.v2.sorting import Sorting
-
     import spikeinterface.exporters as sie
 
     kwargs.setdefault("compute_pc_features", False)
     kwargs.setdefault("add_quality_metrics", False)
     kwargs.setdefault("add_template_metrics", False)
-    analyzer = Sorting().get_analyzer(sorting_key)
-    return sie.export_to_phy(analyzer, output_folder, **kwargs)
+    with _curation_working_copy(curation, (), caller="export_to_phy") as (
+        analyzer,
+        ref,
+        recipe,
+    ):
+        result = sie.export_to_phy(analyzer, output_folder, **kwargs)
+        _write_export_provenance(output_folder, ref, analyzer, recipe)
+    return result

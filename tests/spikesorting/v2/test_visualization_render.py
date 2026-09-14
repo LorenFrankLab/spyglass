@@ -52,6 +52,18 @@ def test_recording_trace_and_probe_map_render(populated_sorting):
     plt.close("all")
 
 
+def _root_curation(populated_sorting):
+    """Resolve (creating if needed) the smoke sort's root curation ref."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    root = CurationV2 & {**populated_sorting, "parent_curation_id": -1}
+    if not root:
+        CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
+        root = CurationV2 & {**populated_sorting, "parent_curation_id": -1}
+    return CurationRef.from_key(root.fetch1("KEY"))
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_unit_summary_renders_with_compute_missing(populated_sorting):
@@ -63,7 +75,7 @@ def test_unit_summary_renders_with_compute_missing(populated_sorting):
         pytest.skip("zero-unit smoke sort; no unit summary to render")
 
     fig = ssviz.plot_unit_summary(
-        populated_sorting, unit_ids[0], compute_missing=True
+        _root_curation(populated_sorting), unit_ids[0], compute_missing=True
     )
     assert fig is not None
     plt.close("all")
@@ -85,7 +97,9 @@ def test_unit_locations_renders_with_compute_missing(populated_sorting):
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
         pytest.skip("zero-unit smoke sort")
 
-    fig = ssviz.plot_unit_locations(populated_sorting, compute_missing=True)
+    fig = ssviz.plot_unit_locations(
+        _root_curation(populated_sorting), compute_missing=True
+    )
     assert fig is not None
     plt.close("all")
 
@@ -101,9 +115,10 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
 
     output_folder = tmp_path / "si_report"
     ssviz.export_si_report(
-        populated_sorting, output_folder, compute_missing=True
+        _root_curation(populated_sorting), output_folder, compute_missing=True
     )
     assert output_folder.is_dir()
+    assert (output_folder / "spyglass_provenance.json").exists()
     # SI writes a per-unit figure folder and a unit list; assert the folder is
     # non-empty rather than pinning SI's exact filenames.
     assert any(output_folder.iterdir())
@@ -115,20 +130,39 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
 def test_export_to_phy_writes_folder_off_display_analyzer(
     populated_sorting, tmp_path
 ):
-    """``export_to_phy`` writes a Phy folder from the display analyzer.
+    """``export_to_phy`` writes a Phy folder from a curation working copy.
 
     PC features default off, so SI does not compute the whitened-metric-only
-    ``principal_components`` extension onto the unwhitened display analyzer; the
-    export still drives SI end to end and produces ``params.py``.
+    ``principal_components`` extension; the export drives SI end to end,
+    produces ``params.py``, records provenance, and leaves the published
+    display analyzer untouched by SI's export-time extensions.
     """
+    import json
+
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
         pytest.skip("zero-unit smoke sort; nothing to export")
 
+    root = _root_curation(populated_sorting)
+    published = Sorting().get_analyzer(populated_sorting)
+    before = set(published.get_saved_extension_names())
     output_folder = tmp_path / "phy"
-    ssviz.export_to_phy(populated_sorting, output_folder)
+    ssviz.export_to_phy(root, output_folder)
     assert (output_folder / "params.py").exists()
+    provenance = json.loads(
+        (output_folder / "spyglass_provenance.json").read_text()
+    )
+    assert provenance["curation_uuid"] == str(root.curation_uuid)
+    assert provenance["unit_ids"] == [
+        int(u) for u in Sorting().get_analyzer(populated_sorting).unit_ids
+    ]
+    # SI computes template_similarity / spike_amplitudes for the export; they
+    # land on the owned working copy, never on the published cache.
+    after = set(
+        Sorting().get_analyzer(populated_sorting).get_saved_extension_names()
+    )
+    assert after == before
     # compute_pc_features defaults to False, so SI writes no PC-feature arrays
     # (and computes no principal_components onto the display analyzer).
     assert not (output_folder / "pc_features.npy").exists()

@@ -99,7 +99,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_sorting_summary",
-        "key_type": "sorting",
+        "key_type": "curation",
         # SortingSummaryWidget has no matplotlib backend in SI 0.104.3; a
         # backend (spikeinterface_gui / sortingview / figpack) is required.
         "implementation": "spikeinterface.widgets.plot_sorting_summary",
@@ -112,7 +112,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_unit_summary",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.widgets.plot_unit_summary",
         "backend_default": "matplotlib",
         "compute_missing": True,
@@ -122,7 +122,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_waveforms",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.widgets.plot_unit_waveforms",
         "backend_default": "matplotlib",
         "compute_missing": False,
@@ -130,7 +130,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_spikes_on_traces",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.widgets.plot_spikes_on_traces",
         "backend_default": "matplotlib",
         "compute_missing": True,
@@ -138,7 +138,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "plot_unit_locations",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.widgets.plot_unit_locations",
         "backend_default": "matplotlib",
         "compute_missing": True,
@@ -185,7 +185,7 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "export_si_report",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.exporters.export_report",
         "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": True,
@@ -193,11 +193,11 @@ _REGISTRY: tuple[dict, ...] = (
     },
     {
         "name": "export_to_phy",
-        "key_type": "sorting",
+        "key_type": "curation",
         "implementation": "spikeinterface.exporters.export_to_phy",
         "backend_default": None,  # an exporter: no plotting backend
         "compute_missing": False,
-        "description": "Export the sort to a local Phy folder",
+        "description": "Export the exact curated units to a local Phy folder",
     },
 )
 
