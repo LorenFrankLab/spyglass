@@ -6,6 +6,9 @@ import numpy as np
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
+from spyglass.spikesorting.analysis.v1._unit_filter import (
+    filter_units_by_labels,
+)
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
@@ -160,26 +163,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         exclude_labels: list of strings
             if provided, units with any of these labels will be excluded
         """
-        include_labels = np.unique(include_labels)
-        exclude_labels = np.unique(exclude_labels)
-
-        if include_labels.size == 0 and exclude_labels.size == 0:
-            # if no labels are provided, include all units
-            return np.ones(len(labels), dtype=bool)
-
-        include_mask = np.zeros(len(labels), dtype=bool)
-        for ind, unit_labels in enumerate(labels):
-            if isinstance(unit_labels, str):
-                unit_labels = [unit_labels]
-            if (
-                include_labels.size > 0
-                and np.all(~np.isin(unit_labels, include_labels))
-            ) or np.any(np.isin(unit_labels, exclude_labels)):
-                # if the unit does not have any of the include labels
-                # or has any of the exclude labels, skip
-                continue
-            include_mask[ind] = True
-        return include_mask
+        return filter_units_by_labels(labels, include_labels, exclude_labels)
 
     @staticmethod
     def filter_units_by_criteria(

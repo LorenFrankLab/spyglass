@@ -60,6 +60,11 @@ PIPELINE_FACADE_EXPORTS = (
     "AnnotationDefinitionRef",
     "AnnotationSetRef",
     "read_unit_properties",
+    # downstream unit selection
+    "select_units_for_analysis",
+    "UnitSelectionReceipt",
+    "SelectedGroup",
+    "V2_UNIT_SELECTION_POLICIES",
     "SourceMode",
     "StageStatus",
     "UnitMatchCurationChoice",
@@ -102,6 +107,10 @@ PACKAGE_ROOT_REEXPORTS = (
     "AnnotationDefinitionRef",
     "AnnotationSetRef",
     "read_unit_properties",
+    "select_units_for_analysis",
+    "UnitSelectionReceipt",
+    "SelectedGroup",
+    "V2_UNIT_SELECTION_POLICIES",
 )
 
 

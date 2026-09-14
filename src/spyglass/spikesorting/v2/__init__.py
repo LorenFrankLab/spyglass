@@ -65,6 +65,13 @@ def initialize_v2_defaults() -> None:
     AutoCurationRules.insert_default()
     MatcherParameters.insert_default()
     CurationReviewProfile.insert_default()
+    # Downstream unit-selection policies for the v2 handoff (additive rows in
+    # the shared UnitSelectionParams table; production rows untouched).
+    from spyglass.spikesorting.v2.analysis_selection import (
+        ensure_v2_unit_selection_policies,
+    )
+
+    ensure_v2_unit_selection_policies()
 
     # ``insert_default`` skips existing-PK rows, so a stored same-name default
     # whose content has diverged from the shipped content (e.g. a row seeded at
