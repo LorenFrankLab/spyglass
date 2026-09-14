@@ -331,21 +331,61 @@ def _expected_extensions(
 
 
 def _extension_inventory(
-    analyzer, role: str, extra: tuple[str, ...] = ()
+    analyzer, role: str, extra: tuple[str, ...] = (), *, exact: bool = True
 ) -> dict[str, str]:
-    """Validate the extension set and fingerprint its small parameters."""
-    expected = _expected_extensions(role, extra)
+    """Validate the extension set and fingerprint its small parameters.
+
+    ``exact=True`` (a base cache) requires the saved set to equal the role's
+    expected set. ``exact=False`` (a derivative) requires the base extensions
+    plus ``extra`` (the request) to be PRESENT and inventories every saved
+    extension: a derivative copies its source as-is -- the shared raw-sort
+    analyzer carries only the base set plus whatever was persisted on
+    demand, a merged cache carries the full display set -- so the request is
+    the only addition it guarantees.
+    """
     saved = set(analyzer.get_saved_extension_names())
-    if saved != set(expected):
-        raise ValueError(
-            "curation analyzer extension set is incomplete or unexpected: "
-            f"expected {sorted(expected)}, found {sorted(saved)}."
-        )
+    if exact:
+        expected = _expected_extensions(role, extra)
+        if saved != set(expected):
+            raise ValueError(
+                "curation analyzer extension set is incomplete or unexpected: "
+                f"expected {sorted(expected)}, found {sorted(saved)}."
+            )
+    else:
+        required = set(BASE_ANALYZER_EXTENSIONS) | set(extra)
+        if not required <= saved:
+            raise ValueError(
+                "curation analyzer derivative is missing extension(s): "
+                f"{sorted(required - saved)}; found {sorted(saved)}."
+            )
     inventory: dict[str, str] = {}
-    for name in expected:
+    for name in expected if exact else sorted(saved):
         extension = analyzer.get_extension(name)
         inventory[name] = _content_hash(extension.params or {})
     return inventory
+
+
+def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
+    """Whether ``analyzer`` carries ``name`` with every requested parameter.
+
+    ``requested`` is the caller's (possibly partial) parameter dict; a key it
+    does not name is unconstrained (SI's default is accepted), so an empty
+    request matches any present extension. Values compare JSON-natively
+    (``1`` == ``1.0``). A present extension whose stored ``params`` differ on
+    a requested key does NOT satisfy the request and must be recomputed into
+    a derivative rather than silently reused.
+    """
+    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+
+    if not analyzer.has_extension(name):
+        return False
+    if not requested:
+        return True
+    stored = _jsonable_blob(dict(analyzer.get_extension(name).params or {}))
+    wanted = _jsonable_blob(dict(requested))
+    return all(
+        key in stored and stored[key] == value for key, value in wanted.items()
+    )
 
 
 def _read_manifest(folder: Path) -> dict:
@@ -369,6 +409,7 @@ def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
     from spyglass.utils import logger
 
     extra = tuple(expected_prefix.get("extension_request", {}))
+    is_derivative = bool(expected_prefix.get("extension_request"))
     try:
         stored = _read_manifest(folder)
         comparable = dict(stored)
@@ -399,7 +440,9 @@ def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
             )
             return None
         analyzer = load_analyzer_folder(folder)
-        current_inventory = _extension_inventory(analyzer, role, extra)
+        current_inventory = _extension_inventory(
+            analyzer, role, extra, exact=not is_derivative
+        )
         if current_inventory != stored_inventory:
             logger.warning(
                 "Curation analyzer extension inventory mismatch at %s: "
@@ -576,73 +619,92 @@ def _resolve_curation_analyzer(
     recipe_row = _resolve_recipe(waveform_recipe, role)
     request = normalize_extension_request(extra_extensions)
     if namespace == "raw":
-        if request:
-            # Raw curations share the canonical sort analyzer. Persist requested
-            # extensions there under the per-sort cache lock so later view
-            # configurations reuse them without a copy/recompute.
-            analyzer = Sorting().get_analyzer(
-                {"sorting_id": row["sorting_id"]},
-                waveform_params_name=waveform_recipe,
-            )
-            missing = [
-                name for name in request if not analyzer.has_extension(name)
-            ]
-            if missing:
-                Sorting().add_extensions(
-                    {"sorting_id": row["sorting_id"]},
-                    missing,
-                    waveform_params_name=waveform_recipe,
-                    extension_params={name: request[name] for name in missing},
-                )
-        return Sorting().get_analyzer(
+        # Raw curations share the canonical sort analyzer. An ABSENT requested
+        # extension is persisted there under the per-sort cache lock so later
+        # views reuse it. A PRESENT extension whose stored parameters differ
+        # from the request is never overwritten in the shared analyzer
+        # (recomputing would rewrite what every other reader sees); it is
+        # served from a derivative keyed by the request, exactly as for a
+        # merged curation.
+        base = Sorting().get_analyzer(
             {"sorting_id": row["sorting_id"]},
             waveform_params_name=waveform_recipe,
         )
-
-    curated_sorting = CurationV2.get_merged_sorting(key)
-    expected_prefix = _manifest_prefix(row, curated_sorting, recipe_row, role)
-    base_folder = curation_analyzer_path(
-        row["sorting_id"],
-        row["curation_uuid"],
-        role,
-        expected_prefix["waveform_recipe_hash"],
-        si.__version__,
-    )
-
-    def _build_base(staging_folder):
-        analyzer = build_merged_analyzer(
-            key,
-            waveform_recipe,
+        absent = [name for name in request if not base.has_extension(name)]
+        if absent:
+            Sorting().add_extensions(
+                {"sorting_id": row["sorting_id"]},
+                absent,
+                waveform_params_name=waveform_recipe,
+                extension_params={name: request[name] for name in absent},
+            )
+            base = Sorting().get_analyzer(
+                {"sorting_id": row["sorting_id"]},
+                waveform_params_name=waveform_recipe,
+            )
+        mismatched = {
+            name: params
+            for name, params in request.items()
+            if not extension_params_match(base, name, params)
+        }
+        if not mismatched:
+            return base
+        sorting_for_manifest = base.sorting
+        expected_prefix = _manifest_prefix(
+            row, sorting_for_manifest, recipe_row, role
+        )
+        derived_request = mismatched
+    else:
+        curated_sorting = CurationV2.get_merged_sorting(key)
+        expected_prefix = _manifest_prefix(
+            row, curated_sorting, recipe_row, role
+        )
+        base_folder = curation_analyzer_path(
+            row["sorting_id"],
+            row["curation_uuid"],
             role,
-            analyzer_folder=staging_folder,
+            expected_prefix["waveform_recipe_hash"],
+            si.__version__,
         )
-        inventory = _extension_inventory(analyzer, role)
-        manifest = CurationAnalyzerManifest(
-            **expected_prefix,
-            extension_inventory=inventory,
-            storage_fingerprint=_folder_storage_fingerprint(
-                Path(staging_folder)
-            ),
+
+        def _build_base(staging_folder):
+            analyzer = build_merged_analyzer(
+                key,
+                waveform_recipe,
+                role,
+                analyzer_folder=staging_folder,
+            )
+            inventory = _extension_inventory(analyzer, role)
+            manifest = CurationAnalyzerManifest(
+                **expected_prefix,
+                extension_inventory=inventory,
+                storage_fingerprint=_folder_storage_fingerprint(
+                    Path(staging_folder)
+                ),
+            )
+            _write_manifest(Path(staging_folder), manifest)
+
+        base = _resolve_published_analyzer(
+            base_folder,
+            row["sorting_id"],
+            expected_prefix,
+            role,
+            _build_base,
         )
-        _write_manifest(Path(staging_folder), manifest)
+        derived_request = {
+            name: params
+            for name, params in request.items()
+            if not extension_params_match(base, name, params)
+        }
+        if not derived_request:
+            return base
 
-    base = _resolve_published_analyzer(
-        base_folder,
-        row["sorting_id"],
-        expected_prefix,
-        role,
-        _build_base,
-    )
-    missing = [name for name in request if not base.has_extension(name)]
-    if not missing:
-        return base
-
-    # Disk-backed derivative: the base cache stays immutable; the requested
-    # extensions are computed once into a sibling folder keyed by the exact
-    # request and reused thereafter. Built by copying the base on disk
-    # (memmapped waveforms stream through np.save) and computing only the
-    # missing extensions with the recipe's job kwargs.
-    derived_request = {name: request[name] for name in missing}
+    # Disk-backed derivative: the base (shared raw analyzer or immutable
+    # per-generation cache) stays untouched; the requested extensions are
+    # computed once, with the requested parameters, into a sibling folder
+    # keyed by the exact request and reused thereafter. Built by copying the
+    # base on disk (memmapped waveforms stream through np.save) and computing
+    # only the requested extensions with the recipe's job kwargs.
     derived_prefix = dict(expected_prefix)
     derived_prefix["extension_request"] = derived_request
     derived_folder = curation_analyzer_path(
@@ -677,6 +739,12 @@ def _resolve_curation_analyzer(
             SorterParameters
             & (SortingSelection & {"sorting_id": row["sorting_id"]})
         ).fetch1("job_kwargs")
+        # A requested extension the base carries with DIFFERENT parameters
+        # must be recomputed: drop the copied version first (``ensure_extensions``
+        # is idempotent and would otherwise keep it).
+        for name in derived_request:
+            if derivative.has_extension(name):
+                derivative.delete_extension(name)
         ensure_extensions(
             derivative,
             list(derived_request),
@@ -684,7 +752,7 @@ def _resolve_curation_analyzer(
             extension_params=derived_request,
         )
         inventory = _extension_inventory(
-            derivative, role, tuple(derived_request)
+            derivative, role, tuple(derived_request), exact=False
         )
         manifest = CurationAnalyzerManifest(
             **derived_prefix,

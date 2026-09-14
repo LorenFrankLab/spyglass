@@ -493,6 +493,60 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         )
         assert _folder_content_hash(folder) == published_hash
 
+        # A PRESENT extension with different parameters is not "there": the
+        # base carries correlograms at the standard bin; requesting a finer
+        # bin must yield an analyzer whose correlograms use that bin, served
+        # from a derivative, while the base keeps its own.
+        base_bin = (
+            _resolve_curation_analyzer(merged, recipe)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+        )
+        assert base_bin != 0.2
+        with curation_analyzer_with_extensions(
+            merged, recipe, extra_extensions={"correlograms": {"bin_ms": 0.2}}
+        ) as fine:
+            assert fine.get_extension("correlograms").params["bin_ms"] == 0.2
+            assert Path(fine.folder) != folder
+        assert (
+            _resolve_curation_analyzer(merged, recipe)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+            == base_bin
+        )
+        assert _folder_content_hash(folder) == published_hash
+        # ... and on the RAW (root) curation: an ABSENT extension is persisted
+        # into the shared sort analyzer (SI default bin), while a request with
+        # DIFFERENT parameters is served from a derivative and never rewrites
+        # the shared analyzer's version.
+        with curation_analyzer_with_extensions(
+            root, recipe, extra_extensions={"correlograms": {}}
+        ):
+            pass
+        raw_base_bin = (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+        )
+        assert raw_base_bin != 0.2
+        with curation_analyzer_with_extensions(
+            root, recipe, extra_extensions={"correlograms": {"bin_ms": 0.2}}
+        ) as raw_fine:
+            assert (
+                raw_fine.get_extension("correlograms").params["bin_ms"] == 0.2
+            )
+            assert Path(raw_fine.folder) != Path(
+                Sorting().get_analyzer(sorting_key).folder
+            )
+        assert (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+            == raw_base_bin
+        )
+
         selection = CurationEvaluationSelection.insert_selection(
             {
                 **merged,
@@ -621,3 +675,33 @@ def test_preview_curation_requires_commit(
             _resolve_curation_analyzer(preview, recipe)
     finally:
         clear_curations_for(sorting_key)
+
+
+def test_extension_params_match_semantics():
+    """Partial requests constrain only their keys; mismatches are not present."""
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        extension_params_match,
+    )
+
+    class _Ext:
+        def __init__(self, params):
+            self.params = params
+
+    class _Analyzer:
+        def __init__(self, exts):
+            self._exts = exts
+
+        def has_extension(self, name):
+            return name in self._exts
+
+        def get_extension(self, name):
+            return _Ext(self._exts[name])
+
+    analyzer = _Analyzer({"correlograms": {"bin_ms": 1.0, "window_ms": 50.0}})
+    assert extension_params_match(analyzer, "correlograms", {})
+    assert extension_params_match(analyzer, "correlograms", {"bin_ms": 1})
+    assert not extension_params_match(analyzer, "correlograms", {"bin_ms": 0.2})
+    assert not extension_params_match(
+        analyzer, "correlograms", {"window_ms": 50.0, "bin_ms": 0.5}
+    )
+    assert not extension_params_match(analyzer, "spike_locations", {})

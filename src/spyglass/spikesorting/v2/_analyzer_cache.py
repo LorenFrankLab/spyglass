@@ -699,12 +699,14 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         curation_id = int(row["curation_id"])
         curation_by_key[(sorting_id, curation_id)] = row
         key = {"sorting_id": row["sorting_id"], "curation_id": curation_id}
-        if (
-            not (CurationV2.Unit & key)
-            or not CurationV2.is_committed_curation(key)
-            or CurationV2.matches_raw_namespace(key)
+        if not (CurationV2.Unit & key) or not CurationV2.is_committed_curation(
+            key
         ):
             continue
+        # A raw-namespace curation has no base cache of its own (it shares the
+        # sort analyzer), but a parameter-specific DERIVATIVE of it is keyed by
+        # its generation; referencing the would-be base path lets
+        # ``derivative_base_path`` recognize such derivatives as live.
         recipe_name = display_recipe_by_sorting[sorting_id]
         referenced_paths.add(
             str(
