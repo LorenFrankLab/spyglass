@@ -64,8 +64,8 @@ _STABLE_KEYS = (
     "root_curation_id",
     "root_merge_id",
     # Always present; None on a root-only run (stable None across reruns).
-    "analysis_curation_id",
-    "analysis_merge_id",
+    "auto_labeled_curation_id",
+    "auto_labeled_merge_id",
     "n_units",
 )
 _STATUS_KEYS = (
@@ -235,7 +235,7 @@ def test_ux_smoke_first_hour(first_hour):
     assert CurationV2.summarize_curation(root_key) == summary
 
     # 6. the sort resolves downstream and yields sane per-unit spike arrays.
-    #    A root-only run exposes the root via root_merge_id (analysis_merge_id
+    #    A root-only run exposes the root via root_merge_id (auto_labeled_merge_id
     #    is None until curated); the root is queryable for inspection.
     spike_times = SpikeSortingOutput().get_spike_times(
         {"merge_id": run_summary["root_merge_id"]}

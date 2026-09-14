@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+import uuid
 
 
 def test_public_curation_api_is_reexported():
@@ -77,6 +78,7 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
     from spyglass.spikesorting.v2.curation_api import (
         RunResult,
         create_initial_curation,
@@ -126,14 +128,30 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
             {
                 "sorting_id": root.sorting_id,
                 "root_curation_id": root.curation_id,
-                "analysis_curation_id": None,
+                "root_curation_uuid": root.curation_uuid,
+                "auto_labeled_curation_id": None,
+                "auto_labeled_curation_uuid": None,
             }
         )
         assert run["sorting_id"] == root.sorting_id
         assert run.root_curation == root
-        assert run.analysis_curation is None
-        run["analysis_curation_id"] = merged.curation_id
-        assert run.analysis_curation == merged
+        assert run.auto_labeled_curation is None
+        run["auto_labeled_curation_id"] = merged.curation_id
+        run["auto_labeled_curation_uuid"] = merged.curation_uuid
+        assert run.auto_labeled_curation == merged
+        # The receipt pins the GENERATION: a receipt carrying a stale uuid for
+        # the same numeric id must not resolve to a replacement row.
+        stale_receipt = RunResult(
+            {
+                "sorting_id": root.sorting_id,
+                "root_curation_id": merged.curation_id,
+                "root_curation_uuid": uuid.uuid4(),
+                "auto_labeled_curation_id": None,
+                "auto_labeled_curation_uuid": None,
+            }
+        )
+        with pytest.raises(CurationNotFoundError):
+            stale_receipt.root_curation
 
         # Delete and recreate the highest numeric id: the old ref must reject
         # the replacement generation even though the DataJoint PK is reused.

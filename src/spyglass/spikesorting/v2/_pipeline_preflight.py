@@ -213,6 +213,14 @@ class PreflightReport:
     checks
         Per-check detail; every check runs (the report is complete, not
         first-failure-only).
+    effective_config
+        What the sort stage would actually execute, as
+        ``EffectiveSortConfig.as_dict()`` (sorter, the kwargs handed to
+        SpikeInterface, external-whiten routing, seed, resolved job kwargs,
+        execution backend). Resolved by the SAME ``resolve_sort_config`` the
+        dispatcher runs, from the preset's ``SorterParameters`` row and the
+        ambient job-kwargs layer at preflight time. ``None`` when that row is
+        missing (``sorter_params_exist`` then reports the fix).
     """
 
     ok: bool
@@ -221,6 +229,7 @@ class PreflightReport:
     resolved_pipeline_preset: str
     expected_ids: dict
     checks: list["PreflightCheck"]
+    effective_config: "dict | None" = None
 
     def __bool__(self) -> bool:
         """Return ``True`` when the configuration is runnable (``ok``)."""
@@ -264,6 +273,39 @@ class PreflightSessionReport:
     def __bool__(self) -> bool:
         """Return ``True`` when every target group is runnable (``ok``)."""
         return self.ok
+
+
+def resolve_preset_sort_config(bundle) -> "dict | None":
+    """Resolve what a preset's sort stage would execute, or ``None`` if unset.
+
+    Fetches the preset's ``SorterParameters`` row and runs the dispatcher's own
+    ``resolve_sort_config`` over it with the ambient job-kwargs layer
+    (``utils._resolved_job_kwargs``), returning ``EffectiveSortConfig.as_dict()``.
+    Shared by ``preflight_v2_pipeline`` (single-session), the concat preflight
+    and ``run_v2_pipeline`` (which records it on the run receipt as
+    ``sorter_config``), so preflight, the receipt and execution describe the
+    same thing. ``None`` when the row does not exist.
+    """
+    from spyglass.spikesorting.v2._sorting_dispatch import resolve_sort_config
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+    rows = (
+        SorterParameters
+        & {
+            "sorter": bundle.sorter,
+            "sorter_params_name": bundle.sorter_params_name,
+        }
+    ).fetch(as_dict=True)
+    if len(rows) != 1:
+        return None
+    row = rows[0]
+    return resolve_sort_config(
+        row["sorter"],
+        row["params"],
+        job_kwargs=_resolved_job_kwargs(row["job_kwargs"]),
+        execution_params=row.get("execution_params"),
+    ).as_dict()
 
 
 def assert_preset_compute_rows(bundle, *, with_artifact: bool = True) -> None:
@@ -334,6 +376,20 @@ def assert_preset_compute_rows(bundle, *, with_artifact: bool = True) -> None:
             f"{bundle.sorter_params_name!r}) is missing. Run "
             "initialize_v2_defaults()."
         )
+    # Same wrapper-vocabulary check as the single-session preflight: a params
+    # key the installed SI wrapper rejects fails here, before the member /
+    # concat populate.
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_sorter_params_against_wrapper,
+    )
+
+    sorter_row = sorter_params_query.fetch1()
+    try:
+        validate_sorter_params_against_wrapper(
+            sorter_row["sorter"], sorter_row["params"]
+        )
+    except ValueError as exc:
+        raise PreflightError(f"run_v2_pipeline: {exc}") from exc
     display_waveform_params_name = waveform_params_for_preprocessing(
         bundle.preprocessing_params_name
     )[0]
@@ -805,6 +861,28 @@ def preflight_v2_pipeline(
         f"sorter_params_name={bundle.sorter_params_name!r}) is missing. "
         "Run initialize_v2_defaults().",
     )
+    # 7a. sorter_params_valid + the effective configuration. The row's params
+    # are re-checked against the installed SI wrapper's parameter vocabulary
+    # (a custom row inserted before the wrapper changed, or under a different
+    # SI, would otherwise fail minutes into the sort), and the effective
+    # configuration is resolved by the dispatcher's own resolver so the report
+    # states exactly what run_sorter would receive.
+    effective_config = None
+    if sorter_params_exist:
+        from spyglass.spikesorting.v2._params.sorter import (
+            validate_sorter_params_against_wrapper,
+        )
+
+        sorter_row = sorter_params_query.fetch1()
+        try:
+            validate_sorter_params_against_wrapper(
+                sorter_row["sorter"], sorter_row["params"]
+            )
+        except ValueError as exc:
+            _check("sorter_params_valid", False, str(exc))
+        else:
+            _check("sorter_params_valid", True, "")
+        effective_config = resolve_preset_sort_config(bundle)
     # The display analyzer recipe is region-resolved from the preprocessing
     # recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
     # its AnalyzerWaveformParameters row is missing. Gate it here (up front)
@@ -1070,6 +1148,7 @@ def preflight_v2_pipeline(
         resolved_pipeline_preset=pipeline_preset,
         expected_ids=expected_ids,
         checks=checks,
+        effective_config=effective_config,
     )
 
 

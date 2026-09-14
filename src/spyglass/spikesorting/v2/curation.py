@@ -1856,7 +1856,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``sorting_id`` + ``curation_id``; any extra keys are ignored
         (normalized to the ``(sorting_id, curation_id)`` PK before any
         restriction). A ``run_v2_pipeline`` summary names its curations
-        ``root_curation_id`` / ``analysis_curation_id`` (it has no bare
+        ``root_curation_id`` / ``auto_labeled_curation_id`` (it has no bare
         ``curation_id``, since one run can produce two curations), so build the
         key from the one you mean, e.g.
         ``{"sorting_id": s["sorting_id"], "curation_id": s["root_curation_id"]}``.
@@ -1867,7 +1867,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             A curation key carrying ``sorting_id`` and ``curation_id``
             (``curation_id`` is only unique within a sort). From a
             ``run_v2_pipeline`` summary, build it from ``root_curation_id`` or
-            ``analysis_curation_id``.
+            ``auto_labeled_curation_id``.
 
         Returns
         -------

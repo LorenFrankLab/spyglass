@@ -117,19 +117,32 @@ class _RunV2SummaryBase(TypedDict):
     # The ROOT (uncurated) curation the run always creates. Named ``root_*`` --
     # not bare ``merge_id`` / ``curation_id`` -- so a root-only run has nothing
     # called simply ``merge_id`` to copy downstream by mistake (the root is
-    # uncurated and not analysis-ready).
+    # uncurated and not a reviewed result).
     root_curation_id: int
     # A concat curation's synthetic-timeline row stays out of
     # SpikeSortingOutput; RunV2ConcatSummary exposes wall-clock-safe member rows.
     root_merge_id: "UUID | None"
-    # The ANALYSIS-ready (downstream-science) curation. Always present, so a
-    # consumer can branch on it: ``None`` on a root-only run
-    # (``auto_curate=False``) -- there is no analysis-ready id yet, curate first
-    # -- and equal to ``auto_curation_id`` / ``auto_merge_id`` when a
-    # single-session run uses ``auto_curate=True``. Concat carries the child
-    # curation id but leaves the merge id None.
-    analysis_curation_id: "int | None"
-    analysis_merge_id: "UUID | None"
+    # The AUTO-LABELED child curation. Always present, so a consumer can
+    # branch on it: ``None`` on a root-only run (``auto_curate=False``) and
+    # equal to ``auto_curation_id`` / ``auto_merge_id`` when a single-session
+    # run uses ``auto_curate=True``. Concat carries the child curation id but
+    # leaves the merge id None. Automatic labels are NOT scientific approval and
+    # its merge id is NOT a filtered unit set: every unit (noise / reject /
+    # artifact included) is still in the row. Downstream selection goes
+    # through ``select_units_for_analysis`` (SortedSpikesGroup +
+    # UnitSelectionParams), never straight through this merge id.
+    auto_labeled_curation_id: "int | None"
+    auto_labeled_merge_id: "UUID | None"
+    # Generation UUIDs of the root / auto-labeled CurationV2 rows at run time.
+    # ``RunResult.root_curation`` / ``.auto_labeled_curation`` pin these, so a
+    # receipt cannot silently resolve a deleted-and-recreated numeric id.
+    root_curation_uuid: UUID
+    auto_labeled_curation_uuid: "UUID | None"
+    # What the sort stage executes (``EffectiveSortConfig.as_dict()``): the
+    # kwargs handed to SpikeInterface, whiten routing, seed, resolved job
+    # kwargs, execution backend. ``None`` only when preflight was bypassed and
+    # the preset's SorterParameters row is absent.
+    sorter_config: "dict | None"
     n_units: int
     sorting_status: StageStatus
     curation_status: StageStatus
@@ -138,8 +151,8 @@ class _RunV2SummaryBase(TypedDict):
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
     # the CurationEvaluation suggestion selection PK, and the materialized child
     # CurationV2 (its curation_id + optional merge table id) whose labels are
-    # the evaluation's verdict. ``analysis_curation_id`` /
-    # ``analysis_merge_id`` mirror these when auto-curation ran.
+    # the evaluation's verdict. ``auto_labeled_curation_id`` /
+    # ``auto_labeled_merge_id`` mirror these when auto-curation ran.
     curation_evaluation_id: NotRequired[UUID]
     auto_curation_id: NotRequired[int]
     auto_merge_id: NotRequired["UUID | None"]

@@ -37,6 +37,7 @@ from spyglass.spikesorting.v2._pipeline_preflight import (
     assert_concat_preflight,
     preflight_v2_pipeline,
     preflight_v2_pipeline_session,
+    resolve_preset_sort_config,
 )
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
 from spyglass.spikesorting.v2._pipeline_reporting import (
@@ -276,11 +277,14 @@ def run_v2_pipeline(
         ``curation_evaluation_id`` (the suggestion selection PK),
         ``auto_curation_id`` / ``auto_merge_id`` (the materialized child
         curation), and ``auto_curation_status`` (these keys are absent when
-        ``auto_curate=False``). The always-present ``analysis_curation_id`` is
-        set to that child; ``analysis_merge_id`` is also set for a
+        ``auto_curate=False``). The always-present ``auto_labeled_curation_id`` is
+        set to that child; ``auto_labeled_merge_id`` is also set for a
         single-session run and remains ``None`` for concat. Both stay ``None``
-        on a root-only run. ``CurationEvaluation`` builds a whitened PCA
-        analyzer, so this adds the heaviest populate of the run.
+        on a root-only run. Automatic labels are suggestions written as labels,
+        not approval, and the child still holds EVERY unit -- select the
+        analysis population explicitly with ``select_units_for_analysis``.
+        ``CurationEvaluation`` builds a whitened PCA analyzer, so this adds
+        the heaviest populate of the run.
     preflight
         If True (default), run a fast, read-only prerequisite check before any
         populate; a failure raises ``PreflightError`` (with the exact fix). The
@@ -319,7 +323,8 @@ def run_v2_pipeline(
         Mapping-compatible run summary wrapping a
         ``RunV2SingleSessionSummary`` or ``RunV2ConcatSummary``. In addition to
         the preserved item keys it exposes ``root_curation`` and
-        ``analysis_curation`` identity-safe accessors. A concat run keeps its
+        ``auto_labeled_curation`` generation-pinned accessors (built from the
+        ``*_curation_uuid`` keys recorded at run time). A concat run keeps its
         synthetic-timeline root/analysis merge IDs unset and instead returns one
         session-safe merge ID per frozen member. The source-stage keys depend on
         the input mode, discriminated by ``source_mode``.
@@ -332,12 +337,18 @@ def run_v2_pipeline(
             ``root_curation_id``         : the ROOT (uncurated) CurationV2 PK
             ``root_merge_id``            : the root's SpikeSortingOutput PK;
                 ``None`` for a concat run
-            ``analysis_curation_id``     : the analysis-ready CurationV2 PK, or
-                ``None`` on a root-only run (curate first); equals
-                ``auto_curation_id`` when ``auto_curate=True``
-            ``analysis_merge_id``        : the analysis-ready SpikeSortingOutput
+            ``auto_labeled_curation_id``     : the auto-labeled child CurationV2
+                PK, or ``None`` on a root-only run; equals ``auto_curation_id``
+                when ``auto_curate=True``
+            ``auto_labeled_merge_id``        : that child's SpikeSortingOutput
                 PK, or ``None`` on a root-only or concat run; equals
                 ``auto_merge_id`` when single-session ``auto_curate=True``
+            ``root_curation_uuid`` / ``auto_labeled_curation_uuid`` : the
+                generation UUIDs the ``root_curation`` / ``auto_labeled_curation``
+                accessors are pinned to
+            ``sorter_config``            : what the sort stage executes
+                (``EffectiveSortConfig.as_dict()``: SI kwargs, whiten routing,
+                seed, job kwargs, backend)
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Single-session mode adds:
             ``recording_id``             : RecordingSelection PK
@@ -353,11 +364,13 @@ def run_v2_pipeline(
         ``build_figpack_view=True`` adds (unless the sort found zero units):
             ``figpack_uri``              : the published FigPack curation-view
                 URI (a local bundle path; offline only)
-        For downstream single-session science key off ``analysis_merge_id``
-        (the curated, analysis-ready handle) -- NOT ``root_merge_id``, the
-        uncurated root. For concat science, use the current member's
-        ``member_merge_ids[member_index]``. There is deliberately no bare
-        ``merge_id``. A zero-unit single-session sort yields an empty (but real)
+        Neither merge id is a filtered unit set: the auto-labeled child still
+        carries every unit, labels included. Hand a curation to analysis with
+        ``select_units_for_analysis(run.auto_labeled_curation, policy=...)``
+        (or the root / a manually curated child), which builds the
+        ``SortedSpikesGroup`` downstream reads and reports the included /
+        excluded unit ids. For concat sorts that helper uses the per-member
+        session-timeline rows. There is deliberately no bare ``merge_id``. A zero-unit single-session sort yields an empty (but real)
         root curation/merge row. A concat run leaves only its unsafe synthetic-
         timeline merge IDs ``None``; its member IDs are session-safe.
 
@@ -585,6 +598,13 @@ def run_v2_pipeline(
     # populate/insert with a monotonic clock, and on failure raise a stage-
     # aware PipelineStageError carrying the run summary built so far.
     run_summary: dict[str, Any] = {"pipeline_preset": pipeline_preset}
+    # Capture what the sort stage executes ONCE, up front, from the same
+    # resolver the dispatcher uses (``resolve_sort_config``): the receipt then
+    # states the effective sorter kwargs / whiten routing / seed / job kwargs /
+    # backend regardless of whether the stage is computed or reused this call.
+    # ``None`` only when the preset's SorterParameters row is absent (the
+    # preflight above already failed, or preflight=False bypassed it).
+    run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
     stage_seconds: dict[str, float] = {}
     # Point the run summary at the live stage_seconds dict NOW (not only at the
     # end) so a PipelineStageError's partial run summary -- a shallow copy --
@@ -857,11 +877,17 @@ def run_v2_pipeline(
     stage_seconds["curation"] = curation_seconds
     run_summary["root_curation_id"] = curation_key["curation_id"]
     run_summary["root_merge_id"] = merge_id
-    # Analysis-ready pointer: None until something curates the root. A default
+    # Pin the generation: the numeric curation_id is reusable after deletion,
+    # so the receipt records the row UUID the ``root_curation`` accessor checks.
+    run_summary["root_curation_uuid"] = (CurationV2 & curation_key).fetch1(
+        "curation_uuid"
+    )
+    # Auto-labeled pointer: None until something curates the root. A default
     # (root-only) run leaves these None on purpose, so downstream code can't
     # silently decode the uncurated root. ``auto_curate=True`` fills them below.
-    run_summary["analysis_curation_id"] = None
-    run_summary["analysis_merge_id"] = None
+    run_summary["auto_labeled_curation_id"] = None
+    run_summary["auto_labeled_merge_id"] = None
+    run_summary["auto_labeled_curation_uuid"] = None
 
     # Optional auto-curation: only when the caller opts in. Score the root
     # curation with the preset's metric + auto-curation rule rows, then
@@ -928,9 +954,13 @@ def run_v2_pipeline(
         ]
         run_summary["auto_curation_id"] = child["curation_id"]
         run_summary["auto_merge_id"] = auto_merge_id
-        # The auto-curated child IS the analysis-ready curation for this run.
-        run_summary["analysis_curation_id"] = child["curation_id"]
-        run_summary["analysis_merge_id"] = auto_merge_id
+        # The auto-curated child is the run's auto-labeled curation: labels
+        # only, every unit still present, no unit selection applied.
+        run_summary["auto_labeled_curation_id"] = child["curation_id"]
+        run_summary["auto_labeled_merge_id"] = auto_merge_id
+        run_summary["auto_labeled_curation_uuid"] = (CurationV2 & child).fetch1(
+            "curation_uuid"
+        )
 
     # A concat curation's own synthetic-timeline row remains gated, but its
     # final curation for this run (the auto-curated child when present,
@@ -941,8 +971,8 @@ def run_v2_pipeline(
         member_curation_key = {
             "sorting_id": sorting_key["sorting_id"],
             "curation_id": (
-                run_summary["analysis_curation_id"]
-                if run_summary["analysis_curation_id"] is not None
+                run_summary["auto_labeled_curation_id"]
+                if run_summary["auto_labeled_curation_id"] is not None
                 else run_summary["root_curation_id"]
             ),
         }

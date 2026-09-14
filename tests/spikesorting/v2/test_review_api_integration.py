@@ -95,11 +95,15 @@ def test_browser_review_preview_commit_resume_and_continue(
             {
                 "sorting_id": sorting_key["sorting_id"],
                 "root_curation_id": root_key["curation_id"],
-                "analysis_curation_id": None,
+                "root_curation_uuid": (CurationV2 & root_key).fetch1(
+                    "curation_uuid"
+                ),
+                "auto_labeled_curation_id": None,
+                "auto_labeled_curation_uuid": None,
             }
         )
         with pytest.raises(ValueError, match="source='root'"):
-            run.start_review(profile_name, source="analysis")
+            run.start_review(profile_name, source="auto_labeled")
 
         review = run.start_review(profile_name, source="root", upload=False)
         assert {stage.name: stage.status for stage in review.stages}[

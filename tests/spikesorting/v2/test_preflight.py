@@ -212,6 +212,33 @@ def test_preflight_all_pass(preflight_inputs):
     assert "raw_valid_times_exists" in {c.name for c in report.checks}
     # The default 'default' artifact params do real detection -> no warning.
     assert report.warnings == []
+    # Preflight describes what execution uses: the effective sorter config is
+    # resolved by the dispatcher's own ``resolve_sort_config`` over the
+    # preset's SorterParameters row, so the report and the sort cannot differ.
+    from spyglass.spikesorting.v2._sorting_dispatch import resolve_sort_config
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+    assert "sorter_params_valid" in {c.name for c in report.checks}
+    config = report.effective_config
+    assert config is not None
+    assert config["sorter"] == "mountainsort5"
+    assert config["external_whiten"] is True
+    assert config["si_sorter_params"]["whiten"] is False
+    assert config["execution_backend"] == "local"
+    rows = (SorterParameters & {"sorter": "mountainsort5"}).fetch(as_dict=True)
+    matching = [
+        r
+        for r in rows
+        if resolve_sort_config(
+            r["sorter"],
+            r["params"],
+            job_kwargs=_resolved_job_kwargs(r["job_kwargs"]),
+            execution_params=r.get("execution_params"),
+        ).as_dict()
+        == config
+    ]
+    assert matching, "effective_config must equal the dispatcher's resolution"
 
 
 @pytest.mark.database

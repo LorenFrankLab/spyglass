@@ -227,7 +227,7 @@ if run_custom_annotation_example:
 # the evaluation recipes, ordered metric columns, label palette, and import
 # mode. It evaluates/reuses the exact root, seeds its current committed labels,
 # and shows proposals plus applied-merge provenance as read-only context.
-# `source="analysis"` is also available when a run produced an analysis
+# `source="auto_labeled"` is also available when a run produced an analysis
 # curation; it never silently falls back to root.
 #
 # `upload=False` (default) creates a seeded local bundle. `upload=True` publishes
@@ -359,7 +359,9 @@ evaluation.metrics
 # complete verdict; choose `mode="overlay"` to retain existing labels.
 
 evaluation.plots.burst_pair_metrics()
-evaluation.burst_pair_metrics().sort_values("wf_similarity", ascending=False).head()
+evaluation.burst_pair_metrics().sort_values(
+    "wf_similarity", ascending=False
+).head()
 evaluation.proposed_labels
 
 # ### 3c. Manual merge, then the final evaluation pass (pass 2)

@@ -154,8 +154,8 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         "sorting_id",
         "root_curation_id",
         "root_merge_id",
-        "analysis_curation_id",
-        "analysis_merge_id",
+        "auto_labeled_curation_id",
+        "auto_labeled_merge_id",
         "n_units",
     }
     assert stable_keys <= set(run_summary.keys())
@@ -164,10 +164,37 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         == "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
     )
     assert run_summary["root_curation_id"] == 0  # root curation
-    # A default (root-only) run has no analysis-ready curation yet.
-    assert run_summary["analysis_curation_id"] is None
-    assert run_summary["analysis_merge_id"] is None
+    # A default (root-only) run has no auto-labeled child yet.
+    assert run_summary["auto_labeled_curation_id"] is None
+    assert run_summary["auto_labeled_merge_id"] is None
+    assert run_summary["auto_labeled_curation_uuid"] is None
     assert run_summary["n_units"] >= 1
+    # The receipt pins the root generation and records what the sort executed;
+    # both agree with preflight (same resolver) and with the stored row.
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import preflight_v2_pipeline
+
+    assert run_summary["root_curation_uuid"] == (
+        CurationV2
+        & {
+            "sorting_id": run_summary["sorting_id"],
+            "curation_id": run_summary["root_curation_id"],
+        }
+    ).fetch1("curation_uuid")
+    assert (
+        run_summary.root_curation.curation_uuid
+        == run_summary["root_curation_uuid"]
+    )
+    preflight = preflight_v2_pipeline(
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name="raw data valid times",
+        team_name="v2_test_team",
+        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+    )
+    assert run_summary["sorter_config"] == preflight.effective_config
+    assert run_summary["sorter_config"]["sorter"] == "mountainsort5"
+    assert run_summary["sorter_config"]["si_sorter_params"]["whiten"] is False
     # The smoke fixture's clusterless 100 uV default IS exercised in
     # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
     # gracefully`` -- it confirms a zero-unit sort still yields an empty
@@ -688,7 +715,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
             "sorting_id": first["sorting_id"],
             "curation_id": first["root_curation_id"],
         }
-        assert first.analysis_curation is None
+        assert first.auto_labeled_curation is None
         second = run_v2_pipeline(**common)
         assert (
             second["root_curation_id"] == first["root_curation_id"]
@@ -1155,8 +1182,8 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         assert key not in base
     assert "auto_curation" not in base["stage_seconds"]
     # ...and the always-present analysis pointer is None (nothing curated yet).
-    assert base["analysis_curation_id"] is None
-    assert base["analysis_merge_id"] is None
+    assert base["auto_labeled_curation_id"] is None
+    assert base["auto_labeled_merge_id"] is None
 
     # Pre-populate the evaluation WITHOUT accepting it, so the evaluation
     # already exists but the child curation does not -- the scenario where a
@@ -1192,9 +1219,9 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     assert curated["auto_curation_status"] == "computed"  # child created now
     # The analysis pointer now resolves to the auto-curated child (the
     # downstream-science handle), not the uncurated root.
-    assert curated["analysis_curation_id"] == curated["auto_curation_id"]
-    assert curated["analysis_merge_id"] == curated["auto_merge_id"]
-    assert curated["analysis_merge_id"] != curated["root_merge_id"]
+    assert curated["auto_labeled_curation_id"] == curated["auto_curation_id"]
+    assert curated["auto_labeled_merge_id"] == curated["auto_merge_id"]
+    assert curated["auto_labeled_merge_id"] != curated["root_merge_id"]
     assert curated["stage_seconds"]["auto_curation"] >= 0.0
 
     # The materialized child is a real CurationV2 child of the root, registered.
@@ -1303,7 +1330,7 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
     assert err.partial_run_summary is not None
     assert err.partial_run_summary.get("sorting_id") is not None
     assert err.partial_run_summary.get("root_curation_id") is not None
-    assert err.partial_run_summary.get("analysis_curation_id") is None
+    assert err.partial_run_summary.get("auto_labeled_curation_id") is None
 
 
 @pytest.mark.slow

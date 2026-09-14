@@ -2181,12 +2181,12 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             auto_curate=True,
         )
         assert (
-            auto_summary["analysis_curation_id"]
+            auto_summary["auto_labeled_curation_id"]
             == auto_summary["auto_curation_id"]
         )
         assert auto_summary["root_merge_id"] is None
         assert auto_summary["auto_merge_id"] is None
-        assert auto_summary["analysis_merge_id"] is None
+        assert auto_summary["auto_labeled_merge_id"] is None
         assert not (
             SpikeSortingOutput.CurationV2
             & {

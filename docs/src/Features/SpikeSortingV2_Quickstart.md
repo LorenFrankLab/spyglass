@@ -74,10 +74,10 @@ summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     auto_curate=True,
 )
-merge_id = summary["analysis_merge_id"]  # the handle to send downstream
+merge_id = summary["auto_labeled_merge_id"]  # the handle to send downstream
 ```
 
-`summary["analysis_merge_id"]` is the analysis-ready curation. (A default run
+`summary["auto_labeled_merge_id"]` is the analysis-ready curation. (A default run
 without `auto_curate=True` leaves it `None` and gives you only
 `summary["root_merge_id"]`, the **uncurated** root — fine for a quick look, not
 for analysis. There is deliberately no bare `merge_id` to copy by mistake.)

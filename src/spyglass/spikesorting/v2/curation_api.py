@@ -812,53 +812,67 @@ class MergeEvaluateReceipt:
 
 
 class RunResult(dict):
-    """Backward-compatible run summary with identity-safe curation accessors."""
+    """Mapping run receipt with generation-pinned curation accessors.
+
+    ``root_curation`` / ``auto_labeled_curation`` are built from the
+    ``*_curation_uuid`` keys the run recorded, so a receipt kept across a
+    delete-and-recreate of the same numeric ``curation_id`` raises
+    ``CurationNotFoundError`` instead of resolving the replacement row.
+    """
 
     @property
     def sorting_id(self) -> uuid.UUID:
         return _uuid(self["sorting_id"])
 
-    @property
-    def root_curation(self) -> CurationRef:
-        return CurationRef.from_key(
-            {
-                "sorting_id": self.sorting_id,
-                "curation_id": self["root_curation_id"],
-            }
+    def _pinned_ref(self, id_key: str, uuid_key: str) -> CurationRef:
+        ref = CurationRef(
+            sorting_id=self.sorting_id,
+            curation_id=int(self[id_key]),
+            curation_uuid=_uuid(self[uuid_key]),
         )
+        ref._current_row()
+        return ref
 
     @property
-    def analysis_curation(self) -> CurationRef | None:
-        curation_id = self.get("analysis_curation_id")
-        if curation_id is None:
+    def root_curation(self) -> CurationRef:
+        return self._pinned_ref("root_curation_id", "root_curation_uuid")
+
+    @property
+    def auto_labeled_curation(self) -> CurationRef | None:
+        """The auto-labeled child, or ``None`` for a root-only run.
+
+        Automatic labels are not approval and the row still holds every unit;
+        pass it to ``select_units_for_analysis`` to choose the analysis set.
+        """
+        if self.get("auto_labeled_curation_id") is None:
             return None
-        return CurationRef.from_key(
-            {"sorting_id": self.sorting_id, "curation_id": curation_id}
+        return self._pinned_ref(
+            "auto_labeled_curation_id", "auto_labeled_curation_uuid"
         )
 
     def start_review(
         self,
         profile,
         *,
-        source: Literal["analysis", "root"] = "analysis",
+        source: Literal["auto_labeled", "root"] = "auto_labeled",
         upload: bool = False,
         ephemeral: bool = False,
         annotation_sets=(),
     ):
         """Start the canonical review without silently changing its source."""
-        if source == "analysis":
-            curation = self.analysis_curation
+        if source == "auto_labeled":
+            curation = self.auto_labeled_curation
             if curation is None:
                 raise ValueError(
-                    "RunResult.start_review(source='analysis') requires an "
-                    "analysis curation, but this run did not auto-curate. Pass "
-                    "source='root' explicitly to review the root curation."
+                    "RunResult.start_review(source='auto_labeled') requires an "
+                    "auto-labeled child, but this run did not auto-curate. "
+                    "Pass source='root' explicitly to review the root curation."
                 )
         elif source == "root":
             curation = self.root_curation
         else:
             raise ValueError(
-                "RunResult.start_review source must be 'analysis' or 'root'; "
+                "RunResult.start_review source must be 'auto_labeled' or 'root'; "
                 f"got {source!r}."
             )
         return curation.start_review(

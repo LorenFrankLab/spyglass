@@ -250,7 +250,7 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
     # The curation stage failed before writing the root id, so neither the root
     # nor the (always-None-until-curated) analysis id is in the partial summary.
     assert "root_curation_id" not in err.partial_run_summary
-    assert "analysis_curation_id" not in err.partial_run_summary
+    assert "auto_labeled_curation_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
 
 

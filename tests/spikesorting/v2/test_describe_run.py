@@ -24,7 +24,7 @@ def _run_summary(*, n_units=3, warnings=None, analysis=False):
 
     ``analysis=False`` is a root-only run (``analysis_*`` are ``None``);
     ``analysis=True`` mimics ``auto_curate=True``, where ``analysis_*`` point at
-    the auto-curated child.
+    the auto-labeled child.
     """
     return {
         "pipeline_preset": "preset_x",
@@ -33,8 +33,8 @@ def _run_summary(*, n_units=3, warnings=None, analysis=False):
         "sorting_id": "sort",
         "root_curation_id": 0,
         "root_merge_id": "root-merge-1",
-        "analysis_curation_id": 1 if analysis else None,
-        "analysis_merge_id": "analysis-merge-1" if analysis else None,
+        "auto_labeled_curation_id": 1 if analysis else None,
+        "auto_labeled_merge_id": "analysis-merge-1" if analysis else None,
         "n_units": n_units,
         "recording_status": "computed",
         "artifact_detection_status": "computed",
@@ -65,7 +65,7 @@ def test_describe_run_single_columns_and_rows():
     assert summary["root_merge_id"] == "root-merge-1"
     # A root-only run has no analysis-ready id, and the status says so plainly
     # (so a user can't mistake the root for the downstream-science handle).
-    assert summary["analysis_merge_id"] is None
+    assert summary["auto_labeled_merge_id"] is None
     assert summary["status"] == "root only"
     assert summary["seconds"] == pytest.approx(3.5)  # 1 + 2 + 0 + 0.5
 
@@ -76,12 +76,12 @@ def test_describe_run_single_columns_and_rows():
 
 def test_describe_run_single_auto_curated_status():
     # auto_curate=True fills analysis_*; the receipt shows the analysis merge id
-    # and flips the summary status to "auto-curated".
+    # and flips the summary status to "auto-labeled".
     frame = describe_run(_run_summary(analysis=True))
     summary = frame.iloc[0]
     assert summary["root_merge_id"] == "root-merge-1"
-    assert summary["analysis_merge_id"] == "analysis-merge-1"
-    assert summary["status"] == "auto-curated"
+    assert summary["auto_labeled_merge_id"] == "analysis-merge-1"
+    assert summary["status"] == "auto-labeled"
 
 
 def test_describe_run_concat_lists_each_member_merge_id():
@@ -121,7 +121,7 @@ def _unit_match_summary():
 
 def test_describe_run_unit_match_summary_not_labeled_root_only():
     # run_v2_unit_match summaries flow through describe_run too, but have no
-    # analysis_merge_id. The "root only" / "auto-curated" status is a
+    # auto_labeled_merge_id. The "root only" / "auto-labeled" status is a
     # run_v2_pipeline concept -- a UnitMatch receipt must NOT be mislabeled
     # "root only"; its summary status stays blank.
     frame = describe_run(_unit_match_summary())
@@ -129,7 +129,7 @@ def test_describe_run_unit_match_summary_not_labeled_root_only():
     assert summary["row_type"] == "summary"
     assert pd.isna(summary["status"])
     assert summary["root_merge_id"] is None
-    assert summary["analysis_merge_id"] is None
+    assert summary["auto_labeled_merge_id"] is None
     # The match stages still render as their own rows.
     stages = set(frame[frame["row_type"] == "stage"]["stage"])
     assert {"unit_match", "tracked_unit"} <= stages
@@ -228,3 +228,36 @@ def test_curation_label_export_and_order():
     ]
     # lowercase, as documented (CurationLabel.mua, not CurationLabel.MUA)
     assert CurationLabel.mua.value == "mua"
+
+
+def test_describe_run_renders_sorter_config_rows():
+    """The receipt shows what the sort executed, from ``sorter_config``.
+
+    One ``config`` row per effective setting -- the SI kwargs, whiten routing,
+    seed, job kwargs and backend the run resolved once via
+    ``resolve_sort_config`` -- so a user reads the effective configuration
+    off the receipt instead of re-deriving it from parameter rows.
+    """
+    summary = _run_summary()
+    summary["sorter_config"] = {
+        "sorter": "mountainsort5",
+        "scientific_params": {"whiten": True, "scheme": "2"},
+        "si_sorter_params": {"whiten": False, "scheme": "2"},
+        "external_whiten": True,
+        "random_seed": 0,
+        "job_kwargs": {"n_jobs": 4, "chunk_duration": "1s"},
+        "execution_backend": "local",
+        "container_image": None,
+    }
+    frame = describe_run(summary)
+    config = frame[frame["row_type"] == "config"].set_index("setting")
+    assert config.loc["sorter", "value"] == "'mountainsort5'"
+    assert config.loc["external_whiten", "value"] == "True"
+    assert config.loc["job_kwargs", "value"] == repr(
+        {"n_jobs": 4, "chunk_duration": "1s"}
+    )
+    assert config.loc["si_sorter_params", "value"] == repr(
+        {"whiten": False, "scheme": "2"}
+    )
+    # A receipt without the key (e.g. a unit-match manifest) renders no config rows.
+    assert "config" not in describe_run(_run_summary())["row_type"].tolist()

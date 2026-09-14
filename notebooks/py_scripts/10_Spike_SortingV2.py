@@ -220,7 +220,7 @@ run_summary = run_v2_pipeline(
 # ## 6. Read the run summary
 #
 # `describe_run(run_summary)` renders the run as a receipt: a leading summary row
-# with `n_units`, `root_merge_id` (the uncurated root), and `analysis_merge_id`
+# with `n_units`, `root_merge_id` (the uncurated root), and `auto_labeled_merge_id`
 # (the downstream-ready handle — `None` until you curate), plus a `"root only"` /
 # `"auto-curated"` status; one row per stage (its `*_status` is `"computed"` if
 # the stage ran this call, `"reused"` if its row already existed, or `"skipped"`
@@ -240,7 +240,7 @@ run_summary = run_v2_pipeline(
 # deeper SNR / ISI / nearest-neighbour metrics are computed by the
 # curation-evaluation step in section 7 below (`CurationEvaluation`). The raw
 # `run_summary` dict carries the same fields programmatically
-# (`run_summary["root_merge_id"]`, `run_summary["analysis_merge_id"]`,
+# (`run_summary["root_merge_id"]`, `run_summary["auto_labeled_merge_id"]`,
 # `run_summary["n_units"]`).
 
 display(describe_run(run_summary))
@@ -272,7 +272,7 @@ CurationV2.summarize_curation(root_key)
 # root curation with the preset's metric + auto-curation rows and commits a child
 # curation whose labels ARE the rule set's verdict. The run summary then carries
 # `auto_curation_id` / `auto_merge_id` (the committed labeled curation) and points
-# `analysis_curation_id` / `analysis_merge_id` at that child — the analysis-ready
+# `auto_labeled_curation_id` / `auto_labeled_merge_id` at that child — the analysis-ready
 # handle — alongside the root keys. It is idempotent like the rest of the
 # pipeline, so this reuses the sort already computed above and only adds the
 # curation step.
@@ -286,16 +286,16 @@ auto_summary = run_v2_pipeline(
     auto_curate=True,
 )
 display(describe_run(auto_summary))
-# Key downstream code off `analysis_merge_id` (the analysis-ready handle the
+# Key downstream code off `auto_labeled_merge_id` (the analysis-ready handle the
 # auto-curation just filled), not the uncurated root.
-auto_summary["analysis_merge_id"]
+auto_summary["auto_labeled_merge_id"]
 
 # ## 8. Downstream: choose the output accessor
 #
 # The payoff: the sort is resolvable through the `SpikeSortingOutput` merge
 # table, so every existing downstream consumer (decoding, ripple detection,
 # `SortedSpikesGroup`) works on the v2 `merge_id` unchanged. Key off
-# `auto_summary["analysis_merge_id"]` (the analysis-ready handle the auto-curation
+# `auto_summary["auto_labeled_merge_id"]` (the analysis-ready handle the auto-curation
 # filled in section 7-auto), **not** `run_summary["root_merge_id"]`, which is the
 # uncurated root. (If you curate by hand instead, see the
 # [Curation how-to](./10_Spike_SortingV2_Curation.ipynb) and key off that
@@ -307,12 +307,12 @@ auto_summary["analysis_merge_id"]
 # | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
 # | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
 # | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
-# | Curation summary | `CurationV2.summarize_curation({"sorting_id": auto_summary["sorting_id"], "curation_id": auto_summary["analysis_curation_id"]})` |
+# | Curation summary | `CurationV2.summarize_curation({"sorting_id": auto_summary["sorting_id"], "curation_id": auto_summary["auto_labeled_curation_id"]})` |
 # | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
 #
 # Here we fetch spike times: one array of spike times (seconds) per unit.
 
-merge_id = auto_summary["analysis_merge_id"]  # the analysis-ready handle
+merge_id = auto_summary["auto_labeled_merge_id"]  # the analysis-ready handle
 spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
 print(f"{len(spike_times)} unit(s)")
 spike_times

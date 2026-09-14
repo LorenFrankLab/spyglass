@@ -517,3 +517,58 @@ def test_whiten_interception_allowlisted():
     # MS without a truthy whiten is not intercepted.
     assert not _should_external_whiten("mountainsort5", {"whiten": False})
     assert not _should_external_whiten("mountainsort5", {})
+
+
+@pytest.mark.medium
+def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
+    """Configured MS5 values reach ``run_sorter`` verbatim; whiten is routed.
+
+    The parameter-to-SI forwarding contract: the long-recording knobs are
+    passed through untouched, ``whiten=True`` is intercepted (external float64
+    whitening) and handed to SI as ``whiten=False``, and the dispatcher's
+    kwargs equal ``resolve_sort_config(...).si_sorter_params`` -- the same
+    resolution preflight reports.
+    """
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
+    from spyglass.spikesorting.v2._sorting_dispatch import resolve_sort_config
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        sis,
+        "run_sorter",
+        lambda **k: captured.update(k) or _tiny_numpy_sorting(),
+    )
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    params = MountainSort5Schema(
+        scheme="3",
+        scheme3_block_duration_sec=300,
+        scheme2_training_duration_sec=120,
+        npca_per_channel=5,
+    ).model_dump()
+    params.pop("schema_version")
+    job_kwargs = {"n_jobs": 2, "random_seed": 3}
+    Sorting._run_si_sorter(
+        "mountainsort5", params, rec, uuid.uuid4(), job_kwargs
+    )
+    assert captured["scheme"] == "3"
+    assert captured["scheme3_block_duration_sec"] == 300.0
+    assert captured["scheme2_training_duration_sec"] == 120.0
+    assert captured["npca_per_channel"] == 5
+    assert captured["whiten"] is False  # whitened externally, exactly once
+    assert "n_jobs" not in captured and "random_seed" not in captured
+    config = resolve_sort_config("mountainsort5", params, job_kwargs=job_kwargs)
+    forwarded = {
+        k: v for k, v in captured.items() if k in config.si_sorter_params
+    }
+    assert forwarded == config.si_sorter_params
+    assert config.external_whiten is True
+    assert config.random_seed == 3
+    assert config.job_kwargs == {"n_jobs": 2}

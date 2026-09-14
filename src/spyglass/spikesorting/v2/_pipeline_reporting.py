@@ -913,12 +913,14 @@ _RUN_COLUMNS = [
     "seconds",
     "n_units",
     "root_merge_id",
-    "analysis_merge_id",
+    "auto_labeled_merge_id",
     "member_index",
     "nwb_file_name",
     "member_merge_id",
     "warning",
     "error",
+    "setting",
+    "value",
 ]
 
 # Canonical stage order for the run receipt; extras (if any) append after.
@@ -987,15 +989,15 @@ def _describe_run_single_rows(
     stage_names += [s for s in stage_seconds if s not in stage_names]
 
     rows = []
-    analysis_merge_id = run_summary.get("analysis_merge_id")
+    auto_labeled_merge_id = run_summary.get("auto_labeled_merge_id")
     # The root-only / auto-curated status is a run_v2_pipeline concept, keyed on
     # its root_merge_id. Other dict summaries that flow through describe_run
     # (e.g. a run_v2_unit_match manifest) have no root_merge_id -- leave their
     # summary status blank rather than mislabeling them "root only".
     if "root_merge_id" in run_summary:
         summary_status = (
-            "auto-curated"
-            if run_summary.get("analysis_curation_id") is not None
+            "auto-labeled"
+            if run_summary.get("auto_labeled_curation_id") is not None
             else "root only"
         )
     else:
@@ -1008,7 +1010,7 @@ def _describe_run_single_rows(
         seconds=_run_stage_seconds_total(run_summary),
         n_units=run_summary.get("n_units"),
         root_merge_id=run_summary.get("root_merge_id"),
-        analysis_merge_id=analysis_merge_id,
+        auto_labeled_merge_id=auto_labeled_merge_id,
     )
     rows.append(header)
     for stage in stage_names:
@@ -1039,6 +1041,31 @@ def _describe_run_single_rows(
             warning=str(warning),
         )
         rows.append(row)
+    # What the sort stage executed, from the receipt's resolved sorter config
+    # (the same ``resolve_sort_config`` the dispatcher runs): one ``config``
+    # row per effective setting so the receipt shows the SI kwargs, whiten
+    # routing, seed, job kwargs and backend that produced this sort.
+    sorter_config = run_summary.get("sorter_config")
+    if isinstance(sorter_config, dict):
+        for setting in (
+            "sorter",
+            "external_whiten",
+            "random_seed",
+            "job_kwargs",
+            "execution_backend",
+            "container_image",
+            "si_sorter_params",
+        ):
+            if setting not in sorter_config:
+                continue
+            row = _run_blank_row()
+            row.update(
+                row_type="config",
+                sort_group_id=sort_group_id,
+                setting=setting,
+                value=repr(sorter_config[setting]),
+            )
+            rows.append(row)
     return rows
 
 
@@ -1065,12 +1092,12 @@ def describe_run(result) -> "pd.DataFrame":
     pandas.DataFrame
         Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
         ``"group"`` / ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
-        ``seconds``, ``n_units``, ``root_merge_id``, ``analysis_merge_id``,
+        ``seconds``, ``n_units``, ``root_merge_id``, ``auto_labeled_merge_id``,
         ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
         ``error``. For a
         ``run_v2_pipeline`` summary the ``summary`` row's
-        ``status`` is ``"root only"`` / ``"auto-curated"``. Single-session
-        runs expose the analysis-ready row through ``analysis_merge_id``;
+        ``status`` is ``"root only"`` / ``"auto-labeled"``. Single-session
+        runs expose the auto-labeled child through ``auto_labeled_merge_id``;
         concat runs leave that synthetic-timeline ID unset and expose their
         session-safe outputs through the ``member`` rows instead. For any other
         dict summary (e.g. ``run_v2_unit_match``, which has no
@@ -1100,8 +1127,8 @@ def describe_run(result) -> "pd.DataFrame":
             warnings = _run_warnings(entry, partial)
             n_units = _run_metadata(entry, partial, "n_units")
             root_merge_id = _run_metadata(entry, partial, "root_merge_id")
-            analysis_merge_id = _run_metadata(
-                entry, partial, "analysis_merge_id"
+            auto_labeled_merge_id = _run_metadata(
+                entry, partial, "auto_labeled_merge_id"
             )
             if outcome == "failed":
                 n_failed += 1
@@ -1140,7 +1167,7 @@ def describe_run(result) -> "pd.DataFrame":
                 seconds=seconds,
                 n_units=n_units,
                 root_merge_id=root_merge_id,
-                analysis_merge_id=analysis_merge_id,
+                auto_labeled_merge_id=auto_labeled_merge_id,
                 error=entry.get("error"),
             )
             rows.append(group)

@@ -28,6 +28,8 @@ imported lazily inside the functions, and none touches the DB at call time.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 # MATLAB-backed sorters in SpikeInterface (Kilosort 2.5 / 3, IronClust). Their
 # algorithm runtime is a compiled MATLAB binary that ships only as a container
 # image, so they CANNOT run on a ``backend="local"`` execution row -- a local
@@ -77,6 +79,126 @@ MATLAB_SORTER_STRIP_KWARGS = (
     "mp_context",
     "max_threads_per_process",
 )
+
+
+class EffectiveSortConfig(NamedTuple):
+    """What one sort actually executes, resolved once from its parameter row.
+
+    The single description of a sort's effective configuration, shared by the
+    dispatcher (``run_si_sorter`` / ``run_clusterless_thresholder``), preflight
+    (``PreflightReport.effective_config``) and the run receipt
+    (``RunResult["sorter_config"]`` via ``describe_run``), so the three cannot
+    disagree about what SpikeInterface receives.
+
+    Attributes
+    ----------
+    sorter
+        SpikeInterface sorter name (or ``clusterless_thresholder``).
+    scientific_params
+        The row's validated ``params`` blob minus ``schema_version`` -- the
+        tracked scientific parameters as the row states them.
+    si_sorter_params
+        Exactly the kwargs handed to ``sis.run_sorter`` (or to
+        ``detect_peaks`` for the clusterless path): ``scientific_params`` with
+        ``whiten`` forced to ``False`` when the runtime whitens externally, and
+        the MATLAB-container strip applied when relevant.
+    external_whiten
+        Whether the runtime whitens the recording itself (float64, seeded) and
+        turns the sorter's internal whitening off.
+    random_seed
+        The effective seed consumed by the external whitening / clusterless
+        noise sampling (``0`` when unset).
+    job_kwargs
+        The resolved SpikeInterface job kwargs the stage installs via
+        ``set_global_job_kwargs`` (``random_seed`` already removed).
+    execution_backend
+        ``"local"`` / ``"docker"`` / ``"singularity"``.
+    container_image
+        The pinned image for a container backend, else ``None``.
+    """
+
+    sorter: str
+    scientific_params: dict
+    si_sorter_params: dict
+    external_whiten: bool
+    random_seed: int
+    job_kwargs: dict
+    execution_backend: str
+    container_image: str | None
+
+    def as_dict(self) -> dict:
+        """Plain-dict form for receipts / reports (JSON-friendly values)."""
+        return {
+            "sorter": self.sorter,
+            "scientific_params": dict(self.scientific_params),
+            "si_sorter_params": dict(self.si_sorter_params),
+            "external_whiten": bool(self.external_whiten),
+            "random_seed": int(self.random_seed),
+            "job_kwargs": dict(self.job_kwargs),
+            "execution_backend": self.execution_backend,
+            "container_image": self.container_image,
+        }
+
+
+def resolve_sort_config(
+    sorter: str,
+    sorter_params,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+) -> EffectiveSortConfig:
+    """Resolve the effective configuration of one sort (pure, DB-free).
+
+    Parameters
+    ----------
+    sorter : str
+        Sorter name from the ``SorterParameters`` row.
+    sorter_params : Mapping
+        The row's validated ``params`` blob (``schema_version`` is dropped).
+    job_kwargs : Mapping or None
+        The ALREADY-RESOLVED job kwargs (``utils._resolved_job_kwargs`` --
+        ambient SI globals + ``dj.config`` + the row blob). ``random_seed`` is
+        read out of it and removed from the installed job kwargs.
+    execution_params : Mapping or None
+        The row's ``execution_params`` blob (``None`` -> local).
+
+    Returns
+    -------
+    EffectiveSortConfig
+    """
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_execution_params,
+    )
+
+    execution = validate_execution_params(execution_params)
+    scientific = {
+        k: v
+        for k, v in dict(sorter_params or {}).items()
+        if k != "schema_version"
+    }
+    resolved_jobs = dict(job_kwargs or {})
+    random_seed = int(resolved_jobs.pop("random_seed", 0))
+    external_whiten = _should_external_whiten(sorter, scientific)
+    si_params = dict(scientific)
+    if external_whiten:
+        si_params["whiten"] = False
+    if sorter.lower() in MATLAB_SORTERS and is_container_backend(execution):
+        si_params = {
+            k: v
+            for k, v in si_params.items()
+            if k not in MATLAB_SORTER_STRIP_KWARGS
+        }
+    return EffectiveSortConfig(
+        sorter=sorter,
+        scientific_params=scientific,
+        si_sorter_params=si_params,
+        external_whiten=external_whiten,
+        random_seed=random_seed,
+        job_kwargs=resolved_jobs,
+        execution_backend=execution["backend"],
+        container_image=execution["container_image"],
+    )
+
 
 #: Sorter name -> the installed distribution whose version identifies the
 #: producing code. SI-internal sorters (``spykingcircus2`` / ``tridesclous2``)
@@ -551,6 +673,15 @@ def run_si_sorter(
     execution_params = validate_execution_params(execution_params)
     assert_matlab_sorter_has_container_backend(sorter, execution_params)
     container_kwargs = build_run_sorter_container_kwargs(execution_params)
+    # ONE resolution of what this sort executes (whiten routing, seed, job
+    # kwargs, MATLAB-container strip) -- the same function preflight and the
+    # run receipt call, so what runs is what was described.
+    config = resolve_sort_config(
+        sorter,
+        sorter_params,
+        job_kwargs=job_kwargs,
+        execution_params=execution_params,
+    )
 
     sorter_temp_dir = tempfile.TemporaryDirectory(
         prefix=f"sort_{sorting_id}_",
@@ -582,7 +713,7 @@ def run_si_sorter(
             np.Inf = np.inf
             patched_numpy_inf = True
 
-        if _should_external_whiten(sorter, sorter_params):
+        if config.external_whiten:
             # Pin SI's random-chunk-based covariance estimate inside
             # ``sip.whiten`` to a deterministic seed (see ``pinned_whiten``).
             # Empirically verified: 3 v2 MS4 runs with seed=0 produce identical
@@ -591,10 +722,9 @@ def run_si_sorter(
             # ``SorterParameters.job_kwargs`` blob (for robustness studies);
             # Spyglass's default 0 makes re-runs of a parameter row reproducible
             # by default. Only the external-whitening sorters are intercepted;
-            # a generic sorter's ``whiten`` is passed through unchanged below.
-            _random_seed = (job_kwargs or {}).get("random_seed", 0)
-            recording = pinned_whiten(recording, random_seed=_random_seed)
-            sorter_params = {**sorter_params, "whiten": False}
+            # ``config.si_sorter_params`` already carries ``whiten=False`` for
+            # them and passes a generic sorter's ``whiten`` through unchanged.
+            recording = pinned_whiten(recording, random_seed=config.random_seed)
 
         # Resolved job_kwargs (n_jobs, chunk_duration, progress_bar,
         # etc.) install via ``si.set_global_job_kwargs`` and are
@@ -605,14 +735,10 @@ def run_si_sorter(
         # into the sorter and trip strict per-sorter validators
         # (MS4, MS5, KS4 all raise ``Invalid parameters: [...]``
         # for pool_engine / n_jobs / chunk_duration / progress_bar
-        # / mp_context / max_threads_per_worker).
-        sj_kwargs = dict(job_kwargs or {})
-        # ``random_seed`` is a Spyglass-side knob for SI's
-        # random-chunk sampling (consumed by the ``sip.whiten``
-        # call above and the clusterless ``random_slices_kwargs``
-        # pin); strip before installing as a job kwarg because
-        # SI's ``set_global_job_kwargs`` rejects unknown keys.
-        sj_kwargs.pop("random_seed", None)
+        # / mp_context / max_threads_per_worker). ``random_seed`` (a
+        # Spyglass-side knob) was already removed by ``resolve_sort_config``
+        # because SI's ``set_global_job_kwargs`` rejects unknown keys.
+        sj_kwargs = dict(config.job_kwargs)
         previous_global = dict(si.get_global_job_kwargs())
         if sj_kwargs:
             si.set_global_job_kwargs(**sj_kwargs)
@@ -639,19 +765,9 @@ def run_si_sorter(
             # so there is no collision with **effective_params below.
             **container_kwargs,
         )
-        # The MATLAB-sorter kwarg strip is needed only when one of those sorters
-        # actually runs in a container; it is gated on the selected backend, not
-        # the sorter name alone.
-        if sorter.lower() in MATLAB_SORTERS and is_container_backend(
-            execution_params
-        ):
-            effective_params = {
-                k: v
-                for k, v in sorter_params.items()
-                if k not in MATLAB_SORTER_STRIP_KWARGS
-            }
-        else:
-            effective_params = sorter_params
+        # The MATLAB-sorter kwarg strip (only when one of those sorters actually
+        # runs in a container) is folded into ``config.si_sorter_params``.
+        effective_params = config.si_sorter_params
         try:
             raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
             # run_sorter returns a sorting that READS from sorter_temp_dir,

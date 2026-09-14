@@ -232,7 +232,7 @@ deeper how-tos are split into companion notebooks —
    `populate`, returning a structured report with the exact fix for any missing
    prerequisite.
 4. **Pipeline** -- `run_v2_pipeline(...)` returns the run summary
-   (`root_merge_id` for a quick look; `analysis_merge_id` -- `None` until
+   (`root_merge_id` for a quick look; `auto_labeled_merge_id` -- `None` until
    curated, e.g. via `auto_curate=True` -- for downstream science).
 5. **Summary** --
    `CurationV2.summarize_curation(run_summary.root_curation.as_key())`.
@@ -294,10 +294,10 @@ run_summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
 # run_summary["root_merge_id"] is the UNCURATED root -- fine for a quick look,
-# but NOT analysis-ready. run_summary["analysis_merge_id"] is None on a
+# but NOT analysis-ready. run_summary["auto_labeled_merge_id"] is None on a
 # root-only run, so there is nothing called "merge_id" to copy into a decode.
 # For downstream science, curate first (auto_curate=True or by hand) and key
-# off analysis_merge_id (see "Downstream consumers").
+# off auto_labeled_merge_id (see "Downstream consumers").
 root_merge_id = run_summary["root_merge_id"]  # quick inspection only
 
 # Receipt: stages + warnings as explicit rows (a zero-unit sort can't hide in a
@@ -308,13 +308,13 @@ describe_units(run_summary["sorting_id"])
 ```
 
 `describe_run(run_summary)` renders the run as a receipt table: a summary row
-(`n_units`, `root_merge_id`, `analysis_merge_id`, with a `"root only"` /
+(`n_units`, `root_merge_id`, `auto_labeled_merge_id`, with a `"root only"` /
 `"auto-curated"` status), one row per stage (status + `seconds`), and one row
 per `warning` — so an easily-missed zero-unit advisory is its own row, not a
 value buried in the dict. The underlying `run_summary` dict carries the same
 data. Besides the stable keys (`pipeline_preset` / `recording_id` /
 `artifact_detection_id` / `sorting_id` / `root_curation_id` / `root_merge_id` /
-`analysis_curation_id` / `analysis_merge_id` / `n_units`), it carries per-stage
+`auto_labeled_curation_id` / `auto_labeled_merge_id` / `n_units`), it carries per-stage
 observability:
 `recording_status` / `artifact_detection_status` / `sorting_status` /
 `curation_status` (`"computed"` if the stage did work this call, `"reused"` if
@@ -569,7 +569,7 @@ context, and opens a FigPack view over that curation's actual analyzer.
 
 ```python
 review = run_summary.start_review(
-    source="root",  # use "analysis" only when the run produced one
+    source="root",  # use "auto_labeled" only when the run produced one
     profile="franklab_hippocampus_2026_06",
     upload=False,   # local seeded bundle; True publishes the same bundle
 )
@@ -598,7 +598,7 @@ final_merge_id = final.merge_id
 member_merge_ids = final.member_merge_ids  # populated for concat-backed sorts
 ```
 
-`RunResult.start_review(source="analysis")` never falls back to root: if no
+`RunResult.start_review(source="auto_labeled")` never falls back to root: if no
 analysis curation exists it raises and tells you to choose `source="root"`
 explicitly. `CurationRef.start_review(...)` and
 `EvaluationResult.start_review(...)` are lower-level forms. A lost Python
@@ -692,9 +692,9 @@ continuation review; compute/select child-scoped sets explicitly.
 ### Scripted curation facade (automation and debugging)
 
 `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its
-`root_curation` and `analysis_curation` attributes are generation-pinned
+`root_curation` and `auto_labeled_curation` attributes are generation-pinned
 `CurationRef`s, so callers no longer have to rename `root_curation_id` to
-`curation_id` by hand. `analysis_curation` is `None` until an analysis curation
+`curation_id` by hand. `auto_labeled_curation` is `None` until an analysis curation
 actually exists; it never silently falls back to the root.
 
 ```python
@@ -702,7 +702,7 @@ from spyglass.spikesorting.v2.curation_api import save_manual_curation
 from spyglass.spikesorting.v2.curation import CurationV2
 
 root = run_summary.root_curation
-assert run_summary.analysis_curation is None
+assert run_summary.auto_labeled_curation is None
 CurationV2.summarize_curation(root.as_key())
 
 # These manual child operations require a typed parent. The numeric root
@@ -1426,11 +1426,11 @@ through one `ConcatMemberCuration` row per frozen member; its synthetic parent
 remains
 behind the [downstream merge gate](#chronic-same-day-recordings) described
 above. **`run_summary["root_merge_id"]` is the uncurated root** — for downstream
-single-session science, use `run_summary["analysis_merge_id"]` instead. For a
+single-session science, use `run_summary["auto_labeled_merge_id"]` instead. For a
 concat run, use `run_summary["member_merge_ids"][member_index]`; the mapping
 points to the auto-curated child when `auto_curate=True`, otherwise the root.
-For a single-session run, the fastest way to fill `analysis_merge_id` is
-`run_v2_pipeline(..., auto_curate=True)`, whose summary sets `analysis_merge_id`
+For a single-session run, the fastest way to fill `auto_labeled_merge_id` is
+`run_v2_pipeline(..., auto_curate=True)`, whose summary sets `auto_labeled_merge_id`
 (equal to `auto_merge_id`, the auto-curated child); or build a curation by hand
 and carry its `merge_id` (see the [scripted evaluate → merge → evaluate →
 label flow](#the-scripted-evaluate-merge-evaluate-label-flow)). Pass whichever
@@ -1444,7 +1444,7 @@ analysis-ready `merge_id` you choose to the accessors below:
 | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
 | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
 | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
-| Curation summary (the curated result) | `CurationV2.summarize_curation(auto_summary.analysis_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root) |
+| Curation summary (the curated result) | `CurationV2.summarize_curation(auto_summary.auto_labeled_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root) |
 | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
 
 ```python
