@@ -386,8 +386,7 @@ def _refuse_preimported_spyglass(modules=None):
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
-    global NO_POSE
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_POSE
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -789,9 +788,9 @@ def mini_insert(
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
         SpikeSortingOutput,
-    )  # noqa: E402
+    )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()

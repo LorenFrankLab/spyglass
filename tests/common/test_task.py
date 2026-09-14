@@ -117,30 +117,30 @@ def test_get_valid_camera_names_all_valid(common):
 
 
 def test_get_valid_camera_names_partial(common):
-    """Only valid IDs are included in the result."""
+    """A dangling camera ID (no device in camera_names) is a data error."""
     camera_names = {1: "cam1"}
-    result = common.TaskEpoch._get_valid_camera_names([1, 99], camera_names)
-    assert result == [{"camera_name": "cam1"}]
+    with pytest.raises(ValueError, match="No camera device found"):
+        common.TaskEpoch._get_valid_camera_names([1, 99], camera_names)
 
 
 def test_get_valid_camera_names_none_valid(common):
-    """No matching IDs returns None."""
+    """No matching IDs raises, listing every unresolved ID."""
     camera_names = {1: "cam1"}
-    result = common.TaskEpoch._get_valid_camera_names([99, 100], camera_names)
-    assert result is None
+    with pytest.raises(ValueError, match="No camera device found"):
+        common.TaskEpoch._get_valid_camera_names([99, 100], camera_names)
 
 
 def test_get_valid_camera_names_empty_ids(common):
-    """Empty camera_ids list returns None without warning."""
+    """Empty camera_ids list returns an empty list, not None."""
     camera_names = {1: "cam1"}
     result = common.TaskEpoch._get_valid_camera_names([], camera_names)
-    assert result is None
+    assert result == []
 
 
 def test_get_valid_camera_names_empty_both(common):
-    """Empty IDs and empty names map both return None."""
+    """Empty IDs and empty names map both return an empty list."""
     result = common.TaskEpoch._get_valid_camera_names([], {})
-    assert result is None
+    assert result == []
 
 
 def test_get_valid_camera_names_single(common):

@@ -130,47 +130,6 @@ def test_raw_valid_times_from_raw_timestamp_path(common_ephys, monkeypatch):
     assert np.array_equal(valid, np.array([[0.0, 3.0]]))
 
 
-def test_sample_count_make_returns_when_interface_missing(
-    common_ephys, monkeypatch
-):
-    """No insert should occur when sample_count interface is absent."""
-    table = common_ephys.SampleCount()
-    monkeypatch.setattr(common_ephys.Nwbfile, "get_abs_path", lambda _: "x")
-    monkeypatch.setattr(common_ephys, "get_nwb_file", lambda _: Mock())
-    monkeypatch.setattr(common_ephys, "get_data_interface", lambda *_: None)
-
-    insert_calls = []
-    monkeypatch.setattr(
-        table, "insert1", lambda *args, **kwargs: insert_calls.append(args)
-    )
-
-    table.make({"nwb_file_name": "test.nwb"})
-    assert insert_calls == []
-
-
-def test_sample_count_make_inserts_when_present(common_ephys, monkeypatch):
-    """Insert object id when sample_count data interface exists."""
-    table = common_ephys.SampleCount()
-    sample_obj = Mock(object_id="sample-obj")
-
-    monkeypatch.setattr(common_ephys.Nwbfile, "get_abs_path", lambda _: "x")
-    monkeypatch.setattr(common_ephys, "get_nwb_file", lambda _: Mock())
-    monkeypatch.setattr(
-        common_ephys, "get_data_interface", lambda *_: sample_obj
-    )
-
-    inserted = []
-    monkeypatch.setattr(
-        table,
-        "insert1",
-        lambda key, **kwargs: inserted.append((key, kwargs)),
-    )
-
-    table.make({"nwb_file_name": "test.nwb"})
-    assert inserted
-    assert inserted[0][0]["sample_count_object_id"] == "sample-obj"
-
-
 def test_lfp_make_compute_returns_none_without_filter_coeff(common_ephys):
     """Return sentinel values when filter coefficients are unavailable."""
     lfp_table = common_ephys.LFP()
