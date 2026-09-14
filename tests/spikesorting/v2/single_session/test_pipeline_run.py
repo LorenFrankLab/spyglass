@@ -1161,12 +1161,18 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     # Pre-populate the evaluation WITHOUT accepting it, so the evaluation
     # already exists but the child curation does not -- the scenario where a
     # naive "reused = evaluation exists" classifier would mislabel the run.
+    # Use the preset's OWN evaluation recipe names so this pre-populated
+    # evaluation is the one the auto-curate run resolves (a different rules row
+    # would be a different evaluation identity).
+    from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
+
+    bundle = _PIPELINE_PRESETS[common["pipeline_preset"]]
     eval_key = CurationEvaluationSelection.insert_selection(
         {
             "sorting_id": base["sorting_id"],
             "curation_id": base["root_curation_id"],
-            "metric_params_name": "franklab_default",
-            "auto_curation_rules_name": "v1_default_nn_noise",
+            "metric_params_name": bundle.metric_params_name,
+            "auto_curation_rules_name": bundle.auto_curation_rules_name,
         }
     )
     CurationEvaluation.populate(eval_key)
@@ -1202,39 +1208,49 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         "merge_id": curated["auto_merge_id"]
     }
 
-    # The child's labels are the RULE applied to the REAL computed metrics, not
-    # just plumbing. v1_default_nn_noise flags nn_noise_overlap > 0.1 as BOTH
-    # "noise" and "reject". Recompute the expected flagged set independently
-    # from the evaluation's own metrics and assert the materialized child
-    # carries exactly that -- this catches an inverted operator or a mis-wired
-    # metric column, which the structural assertions above cannot.
+    # The child's labels are the RULES applied to the REAL computed metrics,
+    # not just plumbing. The preset's franklab_default_auto_curation_2026_06
+    # set labels nn_noise_overlap > 0.1 "noise" and isi_violation > 0.02
+    # "reject". Recompute the expected labels independently from the
+    # evaluation's own metrics and assert the materialized child carries
+    # exactly that -- this catches an inverted operator or a mis-wired metric
+    # column, which the structural assertions above cannot.
     metrics = CurationEvaluation.get_metrics(eval_key)
     assert "nn_noise_overlap" in metrics.columns
+    assert "isi_violation" in metrics.columns
     # Guard against a silently-inert metric: if every nn_noise_overlap is NaN
     # (e.g. the templates 'median' operator or the SI sparse fix regressed), the
     # expected/actual sets below would both be empty and this test would pass
     # vacuously while auto-curation flags nothing. Require at least one real
     # (finite) value so the rule is actually exercised.
     assert metrics["nn_noise_overlap"].notna().any()
-    expected_flagged = set()
-    for uid in metrics.index:
-        value = metrics.loc[uid, "nn_noise_overlap"]
+
+    def _finite_above(column: str, threshold: float) -> set[int]:
         # Non-finite metrics (None/NaN, e.g. low-spike units) are filtered by
-        # the rule engine, so they are never flagged -- mirror that here
-        # (``value == value`` is False for NaN).
-        if value is not None and value == value and float(value) > 0.1:
-            expected_flagged.add(int(uid))
+        # the rule engine (missing_policy='pass'), so they are never flagged
+        # -- mirror that here (``value == value`` is False for NaN).
+        flagged = set()
+        for uid in metrics.index:
+            value = metrics.loc[uid, column]
+            if (
+                value is not None
+                and value == value
+                and float(value) > threshold
+            ):
+                flagged.add(int(uid))
+        return flagged
+
+    expected_labels: dict[int, set] = {}
+    for uid in _finite_above("nn_noise_overlap", 0.1):
+        expected_labels.setdefault(uid, set()).add("noise")
+    for uid in _finite_above("isi_violation", 0.02):
+        expected_labels.setdefault(uid, set()).add("reject")
     child_labels: dict[int, set] = {}
     for row in (CurationV2.UnitLabel & child_pk).fetch(as_dict=True):
         child_labels.setdefault(int(row["unit_id"]), set()).add(
             row["curation_label"]
         )
-    assert set(child_labels) == expected_flagged, (
-        child_labels,
-        expected_flagged,
-    )
-    for uid in expected_flagged:
-        assert child_labels[uid] == {"noise", "reject"}, child_labels[uid]
+    assert child_labels == expected_labels, (child_labels, expected_labels)
 
     # Full no-op re-run: the evaluation AND the child already exist -> "reused".
     rerun = run_v2_pipeline(**common, auto_curate=True)
