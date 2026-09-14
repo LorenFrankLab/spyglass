@@ -25,6 +25,7 @@ Heavy (real MountainSort5 sorts + curation-evaluation PCA), hence
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -156,12 +157,22 @@ def test_single_session_notebook_runs(dj_conn):
         _NOTEBOOKS / "10_Spike_SortingV2.ipynb",
         _notebook_params(nwb_file_name, sort_group_id),
     )
-    # The walkthrough produced a real, merge-keyable auto-curated result. The
-    # notebook keys downstream off auto_labeled_merge_id (the analysis-ready handle
-    # auto-curation fills), not the uncurated root_merge_id.
+    # The walkthrough produced a real auto-labeled child and ended with the
+    # explicit unit-selection handoff: a receipt pinned to that child's
+    # generation whose group is what downstream reads, and (when the FigPack
+    # extra is installed) a review that was reopened from its persisted id.
     assert namespace["run_summary"]["n_units"] >= 0
     assert namespace["auto_summary"]["auto_labeled_merge_id"] is not None
-    assert namespace["merge_id"] is not None
+    receipt = namespace["receipt"]
+    assert receipt.curation == namespace["auto_summary"].auto_labeled_curation
+    assert receipt.policy_name == "v2_accepted_single_units"
+    assert set(receipt.included_unit_ids).isdisjoint(receipt.excluded_units)
+    assert len(namespace["spike_times"]) == len(receipt.included_unit_ids)
+    assert namespace["receipt"].group_key["unit_filter_params_name"] == (
+        "v2_accepted_single_units"
+    )
+    if importlib.util.find_spec("figpack") is not None:
+        assert namespace["reopened"].review_id == namespace["review"].review_id
 
 
 @pytest.mark.slow

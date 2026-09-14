@@ -1,7 +1,9 @@
 # Spike Sorting v2 — I have an ingested NWB, what do I run?
 
-The shortest safe path from an already-ingested session to **analysis-ready**
-spike times, using the v2 pipeline. For presets, curation, concatenation, and
+The supported path from an already-ingested session to **selected** spike
+times: configure → sort → review → curate → select units → analyze, using the
+v2 pipeline. The executable version is the
+[single-session notebook](../notebooks/10_Spike_SortingV2.ipynb). For presets, curation, concatenation, and
 cross-session matching, see the full [Spike Sorting v2](./SpikeSortingV2.md)
 reference and the [notebooks](../notebooks/10_Spike_SortingV2.ipynb).
 
@@ -15,6 +17,7 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
+    describe_run,
     describe_sort_groups,
     run_v2_pipeline,
 )
@@ -56,17 +59,18 @@ elif sort_group_id not in available_sort_group_ids:
 sort_groups
 ```
 
-## 2. Sort **and** auto-curate in one call
+## 2. Sort and auto-label in one call
 
 Pass `auto_curate=True` so the run doesn't stop at the uncurated root: it scores
-the sort and commits an auto-labeled child in the same call, giving you an
-**analysis-ready** curation to send downstream.
-For the preset below it applies `franklab_default_auto_curation_2026_06`; call
+the sort with the preset's metric and rule rows and commits an **auto-labeled**
+child curation in the same call. For the preset below the rules are
+`franklab_default_auto_curation_2026_06` (`nn_noise_overlap > 0.1` → `noise`,
+`isi_violation > 0.02` → `reject`); call
 `describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms5_2026_06")` to
-inspect the exact rules before running.
+inspect them before running.
 
 ```python
-summary = run_v2_pipeline(
+run = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
@@ -74,34 +78,105 @@ summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     auto_curate=True,
 )
-merge_id = summary["auto_labeled_merge_id"]  # the handle to send downstream
+describe_run(run)  # stages, warnings, and the effective sorter configuration
+auto_labeled = run.auto_labeled_curation  # a CurationRef pinned to this exact generation
 ```
 
-`summary["auto_labeled_merge_id"]` is the analysis-ready curation. (A default run
+Automatic labels are suggestions written as labels, not approval, and the
+auto-labeled child still holds **every** unit. `run["auto_labeled_merge_id"]`
+identifies that registered output; it is not a filtered population. (A run
 without `auto_curate=True` leaves it `None` and gives you only
-`summary["root_merge_id"]`, the **uncurated** root — fine for a quick look, not
-for analysis. There is deliberately no bare `merge_id` to copy by mistake.)
+`run.root_curation`, the uncurated root.)
 
-## 3. Use it downstream
+## 3. Review it in the browser — and reopen the review later
 
-Everything downstream keys off `merge_id`, unchanged from v0/v1:
+`start_review` evaluates the pinned curation with a named review profile and
+builds a seeded FigPack view (an offline bundle by default). Requires the
+`spikesorting-v2-curation` extra.
 
 ```python
-from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.v2.pipeline import FigPackReview
 
-spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+review = run.start_review(
+    "franklab_hippocampus_2026_06",   # review profile: metrics + rules + columns
+    source="auto_labeled",
+    upload=False,
+    display_options={"max_amplitudes_per_unit": 2000},  # display budget only
+)
+review.open()                        # browser: label / merge, then save
+print(review.review_id)
+
+# Later, in a fresh notebook: the same parent generation, profile, evaluation
+# and display budget come back from the persisted identity.
+review = FigPackReview.resume(review.review_id)
+changes = review.preview_import()    # diff of browser edits vs the parent
+curated = changes.commit().curation  # a new child CurationRef (labels + merges)
 ```
+
+If you skip the browser, `auto_labeled` (or a `save_manual_curation(...)` /
+`commit_merges(...)` child) is the curation you hand to analysis next.
+
+## 4. Select the analysis population, then analyze
+
+`SpikeSortingOutput().get_spike_times({"merge_id": ...})` returns every unit of
+a curation, labels ignored. The supported handoff is
+`select_units_for_analysis`: it applies a named `UnitSelectionParams` policy to
+the curation's labels, builds the `SortedSpikesGroup` that decoding and
+firing-rate consumers read, and returns a receipt naming the exact curation
+generation, the policy content, and every included / excluded unit with its
+reason.
+
+| Policy | Include | Deny |
+| --- | --- | --- |
+| `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
+| `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
+| `all_units` | everything (explicit expert choice) | — |
+
+Unlabeled units are excluded by both v2 policies and listed on the receipt.
+
+```python
+from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
+
+receipt = select_units_for_analysis(curated, policy="v2_accepted_single_units")
+receipt.describe()                     # per-unit verdict, labels, reason
+spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+receipt.group_key                      # the SortedSpikesGroup key downstream reads
+```
+
+For a concatenated (multi-member) sort the receipt holds one per-member group
+(`receipt.groups`), each on that member's own session timeline.
+
+## Supported workloads: what changes
+
+- **Tetrodes**: `franklab_tetrode_hippocampus_30khz_ms5_2026_06` (the same
+  parameter rows as the probe preset; `probe_type` is informational). The
+  analyzer sparsity default (radius 100 µm) is effectively dense on a tetrode.
+- **Polymer probes / drift**: sort same-day sessions together with the concat
+  presets (motion correction) — see the
+  [Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb);
+  `select_units_for_analysis` then returns one group per member.
+- **Clusterless decoding features**: run the `clusterless_thresholder` preset
+  and hand the root curation's `merge_id` to `UnitWaveformFeatures`; there is
+  no unit-selection step because the thresholder yields one "unit" per channel
+  group.
 
 ## That's it — where to go next
 
-- **Inspect the run:** `describe_run(summary)` renders a receipt (stages,
-  warnings, the root vs analysis merge ids) — a zero-unit sort can't hide in it.
+- **Inspect the run:** `describe_run(run)` renders a receipt (stages, warnings,
+  the effective sorter configuration, the root vs auto-labeled merge ids) — a
+  zero-unit sort can't hide in it.
 - **Fail fast first:** `preflight_v2_pipeline(...)` checks every prerequisite in
-  ~1 s before any compute; `run_v2_pipeline(..., preflight=True)` (the default)
-  runs it for you.
-- **Curate by hand, browse in FigPack, pick a different preset, concatenate, or
-  match units across sessions:** the full [Spike Sorting v2](./SpikeSortingV2.md)
-  reference and the how-to notebooks
+  ~1 s before any compute and reports the effective configuration
+  (`report.effective_config`); `run_v2_pipeline(..., preflight=True)` (the
+  default) runs it for you.
+- **Plot or export exactly what you curated:** every unit-level helper in
+  `spyglass.spikesorting.v2.visualization` takes a `CurationRef`
+  (`ssviz.plot_waveforms(curated, unit_ids=[...])`,
+  `ssviz.export_to_phy(curated, folder)` writes `spyglass_provenance.json`
+  beside the export).
+- **Curate by hand, pick a different preset, concatenate, or match units across
+  sessions:** the full [Spike Sorting v2](./SpikeSortingV2.md) reference and
+  the how-to notebooks
   ([Curation](../notebooks/10_Spike_SortingV2_Curation.ipynb),
   [Presets](../notebooks/10_Spike_SortingV2_Presets.ipynb),
   [Cross-Session](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)).

@@ -18,8 +18,8 @@
 # pipeline end-to-end on **one already-ingested session**, using the high-level
 # `run_v2_pipeline` orchestrator:
 #
-# > defaults → sort group → **preflight** → pipeline → curation summary →
-# > downstream fetch
+# > defaults → sort group → **preflight** → sort → auto-label → review (and
+# > reopen) → **select units** → analyze
 #
 # It assumes you have already configured your DataJoint connection (see
 # [Setup](./00_Setup.ipynb)) and ingested a session with `insert_sessions` (see
@@ -221,13 +221,15 @@ run_summary = run_v2_pipeline(
 #
 # `describe_run(run_summary)` renders the run as a receipt: a leading summary row
 # with `n_units`, `root_merge_id` (the uncurated root), and `auto_labeled_merge_id`
-# (the downstream-ready handle — `None` until you curate), plus a `"root only"` /
-# `"auto-curated"` status; one row per stage (its `*_status` is `"computed"` if
+# (the auto-labeled child — `None` until you curate), plus a `"root only"` /
+# `"auto-labeled"` status; one row per stage (its `*_status` is `"computed"` if
 # the stage ran this call, `"reused"` if its row already existed, or `"skipped"`
 # if the preset has no such stage (e.g. artifact detection for a no-artifact
 # preset), with the wall-clock `seconds` spent **this call** —
 # ≈0 on an idempotent re-run, not cumulative cost), and one row per advisory
-# `warning`. Because warnings are their own rows, a **zero-unit** sort — a
+# `warning`, and one `config` row per effective sorter setting (the kwargs
+# SpikeInterface received, whiten routing, seed, job kwargs, backend). Because
+# warnings are their own rows, a **zero-unit** sort — a
 # legitimate quiet-shank result that still writes an empty-but-real curation +
 # merge row — is impossible to miss. Pass `require_units=True` to
 # `run_v2_pipeline` to turn zero units into a hard error instead.
@@ -252,7 +254,7 @@ describe_units(run_summary["sorting_id"])
 # `CurationV2.summarize_curation` describes **one** curation and returns a plain
 # dict (`n_units`, `labels`, `merge_groups`, `merge_id`, ...); build its key from
 # the summary's `root_curation_id` (a run summary has no bare `curation_id`,
-# since one run can yield a root and an analysis curation).
+# since one run can yield a root and an auto-labeled child).
 #
 # The quickest path is **one-call auto-curation** below. For the other two paths —
 # labeling/merging **in a browser** with FigPack, and the hands-on **step-by-step**
@@ -272,10 +274,14 @@ CurationV2.summarize_curation(root_key)
 # root curation with the preset's metric + auto-curation rows and commits a child
 # curation whose labels ARE the rule set's verdict. The run summary then carries
 # `auto_curation_id` / `auto_merge_id` (the committed labeled curation) and points
-# `auto_labeled_curation_id` / `auto_labeled_merge_id` at that child — the analysis-ready
-# handle — alongside the root keys. It is idempotent like the rest of the
-# pipeline, so this reuses the sort already computed above and only adds the
-# curation step.
+# `auto_labeled_curation_id` / `auto_labeled_merge_id` at that child, alongside
+# the root keys. It is idempotent like the rest of the pipeline, so this reuses
+# the sort already computed above and only adds the curation step.
+#
+# Two things the name says on purpose: automatic labels are **suggestions written
+# as labels, not approval**, and the child still holds **every** unit -- noise,
+# reject and artifact included. Choosing the analysis population is a separate,
+# explicit step (section 9).
 
 auto_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
@@ -286,36 +292,81 @@ auto_summary = run_v2_pipeline(
     auto_curate=True,
 )
 display(describe_run(auto_summary))
-# Key downstream code off `auto_labeled_merge_id` (the analysis-ready handle the
-# auto-curation just filled), not the uncurated root.
-auto_summary["auto_labeled_merge_id"]
+# The receipt pins the exact curation generations it produced.
+auto_labeled = auto_summary.auto_labeled_curation
+auto_labeled
 
-# ## 8. Downstream: choose the output accessor
+# ## 8. Review in the browser, and reopen it later
 #
-# The payoff: the sort is resolvable through the `SpikeSortingOutput` merge
-# table, so every existing downstream consumer (decoding, ripple detection,
-# `SortedSpikesGroup`) works on the v2 `merge_id` unchanged. Key off
-# `auto_summary["auto_labeled_merge_id"]` (the analysis-ready handle the auto-curation
-# filled in section 7-auto), **not** `run_summary["root_merge_id"]`, which is the
-# uncurated root. (If you curate by hand instead, see the
-# [Curation how-to](./10_Spike_SortingV2_Curation.ipynb) and key off that
-# curation's `merge_id`.)
-#
-# | Goal | Call |
-# | --- | --- |
-# | Spike times | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})` |
-# | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
-# | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
-# | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
-# | Curation summary | `CurationV2.summarize_curation({"sorting_id": auto_summary["sorting_id"], "curation_id": auto_summary["auto_labeled_curation_id"]})` |
-# | Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
-#
-# Here we fetch spike times: one array of spike times (seconds) per unit.
+# `start_review` evaluates the pinned curation with a named review profile and
+# builds a seeded FigPack view (offline bundle by default). The review is
+# persisted by identity: `FigPackReview.resume(review_id)` reopens it from a
+# fresh process -- the same parent generation, profile snapshot, evaluation and
+# display budget -- and `preview_import()` shows the browser edits before
+# anything is committed. `review.open()` launches the bundle in a browser;
+# `review.preview_import().commit()` writes a new child curation. The review
+# packages are optional (`pip install "spyglass[spikesorting-v2-curation]"`),
+# so this cell is skipped when they are absent.
 
-merge_id = auto_summary["auto_labeled_merge_id"]  # the analysis-ready handle
-spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
-print(f"{len(spike_times)} unit(s)")
-spike_times
+# +
+import importlib.util
+
+from spyglass.spikesorting.v2.pipeline import FigPackReview
+
+if importlib.util.find_spec("figpack") is not None:
+    review = auto_summary.start_review(
+        "franklab_hippocampus_2026_06",
+        source="auto_labeled",
+        upload=False,
+        display_options={"max_amplitudes_per_unit": 2000},
+    )
+    print(review.uri)
+    reopened = FigPackReview.resume(review.review_id)
+    assert reopened.parent == review.parent
+    display(reopened.preview_import())
+else:
+    print("FigPack not installed; skipping the browser review cell.")
+# -
+
+# ## 9. Select the analysis population, then analyze
+#
+# `SpikeSortingOutput().get_spike_times({"merge_id": ...})` returns **every**
+# unit of a curation, labels ignored -- fine for a quick look, wrong for an
+# analysis. The supported handoff is `select_units_for_analysis`: it applies a
+# named `UnitSelectionParams` policy to the curation's labels, builds the
+# `SortedSpikesGroup` that decoding and firing-rate consumers read, and returns
+# a receipt naming the exact curation generation, the policy content, and every
+# included / excluded unit with its reason.
+#
+# | Policy | Include | Deny |
+# | --- | --- | --- |
+# | `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
+# | `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
+# | `all_units` | everything (explicit expert choice) | -- |
+#
+# Unlabeled units are excluded by both v2 policies; the receipt lists them.
+# Pass the root, the auto-labeled child, or a manually curated child -- the
+# curation you actually reviewed.
+
+# +
+from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
+
+receipt = select_units_for_analysis(
+    auto_labeled, policy="v2_accepted_single_units"
+)
+print(receipt.policy_name, dict(receipt.policy))
+print("included:", receipt.included_unit_ids)
+print("excluded:", dict(receipt.excluded_units))
+display(receipt.describe())
+# -
+
+# The receipt's group is the downstream handle; `fetch_spike_data` returns one
+# array of spike times (seconds) per SELECTED unit, through the same
+# `SortedSpikesGroup` API decoding uses.
+
+spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+print(f"{len(spike_times)} selected unit(s):", unit_ids)
+receipt.group_key
 
 
 # ## Next steps
@@ -328,6 +379,15 @@ spike_times
 #   [Cross-Session Spike Sorting](./10_Spike_SortingV2_CrossSession.ipynb).
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
-#   (`SortedSpikesGroup`).
+#   (`SortedSpikesGroup` -- `select_units_for_analysis` builds these groups
+#   for you).
+# - Supported workload differences: tetrodes use the
+#   `franklab_tetrode_hippocampus_30khz_ms5_2026_06` preset (same rows as the
+#   probe preset; `probe_type` is informational); polymer probes with drift use
+#   the concat presets in the Cross-Session notebook; clusterless decoding
+#   features run the `clusterless_thresholder` preset (see Presets) and hand
+#   the root curation's `merge_id` to `UnitWaveformFeatures` -- there is no
+#   unit selection step because the thresholder yields one "unit" per channel
+#   group.
 # - Stage-by-stage internals (ADC phase-shift, bad-channel handling, drift QC):
 #   see `docs/src/Features/SpikeSortingV2.md`.
