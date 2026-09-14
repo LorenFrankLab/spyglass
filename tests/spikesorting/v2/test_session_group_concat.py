@@ -2209,5 +2209,53 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             sorting_id=summary["sorting_id"]
         )
         assert auto_summary["warnings"].count(gate_message) == 1
+
+        # The downstream handoff for a concat sort builds one SortedSpikesGroup
+        # per frozen member, each on that member's own session timeline, never
+        # the synthetic concat timeline; every unit verdict is shared across
+        # members because the curation (and its labels) is one object.
+        from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+        from spyglass.spikesorting.v2.analysis_selection import (
+            select_units_for_analysis,
+        )
+        from spyglass.spikesorting.v2.concat_member_curation import (
+            ConcatMemberCuration,
+        )
+
+        receipt = select_units_for_analysis(
+            auto_summary.auto_labeled_curation, policy="all_units"
+        )
+        created_groups = [dict(g.group_key) for g in receipt.groups]
+        try:
+            assert len(receipt.groups) == 2
+            assert {g.member_index for g in receipt.groups} == set(
+                auto_summary["member_merge_ids"]
+            )
+            for group in receipt.groups:
+                assert (
+                    group.merge_id
+                    == auto_summary["member_merge_ids"][group.member_index]
+                )
+                member_row = (
+                    ConcatMemberCuration
+                    & child_key
+                    & {"member_index": group.member_index}
+                ).fetch1()
+                assert group.nwb_file_name == member_row["nwb_file_name"]
+                assert (
+                    group.group_key["nwb_file_name"]
+                    == member_row["nwb_file_name"]
+                )
+                # Spike data comes from the member's session-timeline row.
+                member_times = SpikeSortingOutput().get_spike_times(
+                    {"merge_id": group.merge_id}
+                )
+                group_times = group.fetch_spike_data()
+                assert len(group_times) == len(member_times)
+            with pytest.raises(ValueError, match="one group per member"):
+                receipt.group_key
+        finally:
+            for group_key in created_groups:
+                (SortedSpikesGroup & group_key).super_delete(warn=False)
     finally:
         presets_mod._PIPELINE_PRESETS.pop(preset_name, None)
