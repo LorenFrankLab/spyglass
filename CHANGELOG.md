@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.6.1] (Unreleased)
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+  files #1677
+
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
