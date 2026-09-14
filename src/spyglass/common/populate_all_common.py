@@ -78,6 +78,70 @@ def log_insert_error(
     )
 
 
+def ingestion_table_list() -> List[dj.Table]:
+    """Return every table ingested from an NWB file, parents before children.
+
+    One declared set, shared by the inserter and the planner. The order is
+    written out rather than derived: the schema is fixed at import time, so
+    sorting it on every call costs ~0.17s to rediscover an answer that cannot
+    change. `test_ingestion_table_list_is_dependency_ordered` checks the
+    order against DataJoint's foreign-key graph instead, so a table added in
+    the wrong place fails a test rather than an ingestion.
+
+    Returns
+    -------
+    list
+        SpyglassIngestion table classes, in dependency order.
+    """
+    from spyglass.lfp.lfp_imported import ImportedLFP
+    from spyglass.position.v1.imported_pose import ImportedPose
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    return [
+        # no parents among these
+        CameraDevice,
+        DataAcquisitionDeviceAmplifier,
+        DataAcquisitionDeviceSystem,
+        Institution,
+        Lab,
+        LabMember,
+        LabTeam,
+        OpticalFiberDevice,
+        ProbeType,
+        Subject,
+        Virus,
+        # devices and probes
+        DataAcquisitionDevice,  # -> DataAcq*Amplifier, DataAcq*System
+        Probe,  # -> ProbeType
+        Probe.Shank,  # -> Probe
+        Probe.Electrode,  # -> Probe.Shank
+        # the session, and what hangs from it
+        Session,  # -> Subject, Institution, Lab
+        Session.Experimenter,  # -> Session, LabMember
+        Session.DataAcquisitionDevice,  # -> Session, DataAcq*Device
+        VirusInjection,  # -> Session, Virus
+        ElectrodeGroup,  # -> Session
+        ImportedSpikeSorting,  # -> Session
+        IntervalList,  # -> Session
+        OpticalFiberImplant,  # -> Session, OpticalFiberDevice
+        PositionSource,  # -> Session, IntervalList
+        Raw,  # -> Session, IntervalList
+        RawCompassDirection,  # -> Session, IntervalList
+        SampleCount,  # -> Session
+        SensorData,  # -> Session, IntervalList
+        TaskEpoch,  # -> Session, Task, CameraDevice, IntervalList
+        VideoFile,  # -> TaskEpoch
+        # last: depend on the above
+        DIOEvents,  # -> Session, IntervalList
+        Electrode,  # -> ElectrodeGroup, Probe.Electrode
+        ImportedLFP,  # -> LFPElectrodeGroup, IntervalList
+        ImportedPose,  # -> IntervalList
+        OptogeneticProtocol,  # -> TaskEpoch
+        StateScriptFile,  # -> TaskEpoch
+        # NwbfileKachery, # Not used by default
+    ]
+
+
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
