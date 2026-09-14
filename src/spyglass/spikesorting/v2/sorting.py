@@ -302,6 +302,7 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             reject_internal_whiten,
             reject_reserved_execution_keys,
             validate_execution_params,
+            validate_sorter_params_against_wrapper,
         )
 
         valid_sorters = (
@@ -326,6 +327,10 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             # runtime's external float64 whitening. (KS4 self-guards in its
             # typed schema; MS4/MS5 use whiten=True deliberately.)
             reject_internal_whiten(sorter, row["params"])
+            # Permissive (``extra="allow"``) schemas pass unknown keys through;
+            # check them against the installed SI wrapper's own parameter
+            # vocabulary so a typo fails here, not minutes into the sort.
+            validate_sorter_params_against_wrapper(sorter, row["params"])
             # Container backend / install provenance is tracked ONLY on
             # ``execution_params`` -- reject the reserved execution keys from the
             # scientific ``params`` blob (the permissive ``extra="allow"`` sorter

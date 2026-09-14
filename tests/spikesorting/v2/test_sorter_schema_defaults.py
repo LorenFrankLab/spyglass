@@ -137,3 +137,105 @@ def test_clusterless_schema_default_is_production_uv():
         detect_threshold=100.0, threshold_unit="mad", noise_levels=[2.0]
     )
     assert override.noise_levels == [2.0]
+
+
+# ---------- MountainSort5 wrapper coverage ---------------------------------
+
+
+def _ms5_wrapper_defaults() -> dict:
+    """SI's MS5 algorithm defaults (no global job kwargs)."""
+    import spikeinterface.sorters as sis
+    from spikeinterface.core.job_tools import job_keys
+
+    return {
+        k: v
+        for k, v in sis.get_default_sorter_params("mountainsort5").items()
+        if k not in job_keys
+    }
+
+
+def test_ms5_schema_covers_wrapper():
+    """Every pinned-wrapper MS5 key is a schema field or a managed key.
+
+    A wrapper key that is neither would be a scientific knob users cannot
+    set (the pre-launch state for ``scheme2_training_duration_sec`` /
+    ``scheme3_block_duration_sec`` / the PCA and mask-radius fields); a
+    schema field the wrapper does not accept would fail at sort time.
+    """
+    from spyglass.spikesorting.v2._params.sorter import (
+        MS5_MANAGED_KEYS,
+        MountainSort5Schema,
+    )
+
+    wrapper = set(_ms5_wrapper_defaults())
+    fields = set(MountainSort5Schema.model_fields) - {"schema_version"}
+    assert fields & MS5_MANAGED_KEYS == set()
+    assert fields | MS5_MANAGED_KEYS == wrapper, {
+        "unexposed": sorted(wrapper - fields - MS5_MANAGED_KEYS),
+        "not_in_wrapper": sorted(fields - wrapper),
+    }
+
+
+def test_ms5_schema_defaults_match_wrapper_except_filter():
+    """Schema defaults equal the wrapper defaults, except the documented
+    ``filter=False`` override (the recording stage already bandpasses)."""
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
+
+    dump = MountainSort5Schema().model_dump()
+    dump.pop("schema_version")
+    wrapper = _ms5_wrapper_defaults()
+    for key, value in dump.items():
+        if key == "filter":
+            assert value is False and wrapper[key] is True
+            continue
+        assert value == wrapper[key], key
+
+
+def test_ms5_long_recording_knobs_round_trip_and_typo_rejected():
+    """Non-default long-recording values are accepted verbatim; typos fail."""
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
+
+    row = MountainSort5Schema(
+        scheme="3",
+        scheme3_block_duration_sec=300,
+        scheme2_training_duration_sec=120,
+        scheme2_training_recording_sampling_mode="initial",
+        npca_per_channel=5,
+        snippet_mask_radius=100,
+    ).model_dump()
+    assert row["scheme3_block_duration_sec"] == 300.0
+    assert row["scheme2_training_duration_sec"] == 120.0
+    assert row["scheme2_training_recording_sampling_mode"] == "initial"
+    assert row["npca_per_channel"] == 5
+    assert row["snippet_mask_radius"] == 100.0
+    with pytest.raises(pydantic.ValidationError):
+        MountainSort5Schema(scheme3_block_duration_secs=300)
+    with pytest.raises(pydantic.ValidationError):
+        MountainSort5Schema(delete_temporary_recording=False)
+    with pytest.raises(pydantic.ValidationError, match="freq_min"):
+        MountainSort5Schema(filter=True, freq_min=6000, freq_max=300)
+
+
+def test_wrapper_vocabulary_rejects_unknown_key_with_suggestion():
+    """Permissive schemas are checked against the installed SI wrapper."""
+    from spyglass.spikesorting.v2._params.sorter import (
+        sorter_wrapper_vocabulary,
+        validate_sorter_params_against_wrapper,
+    )
+
+    # SC2 has a permissive schema; its wrapper vocabulary is knowable.
+    assert "apply_preprocessing" in sorter_wrapper_vocabulary("spykingcircus2")
+    validate_sorter_params_against_wrapper(
+        "spykingcircus2", {"apply_preprocessing": False, "schema_version": 1}
+    )
+    with pytest.raises(ValueError, match="apply_preprocesing.*did you mean"):
+        validate_sorter_params_against_wrapper(
+            "spykingcircus2", {"apply_preprocesing": False}
+        )
+    # The clusterless path is not an SI sorter: vocabulary unknown -> no-op.
+    assert sorter_wrapper_vocabulary("clusterless_thresholder") is None
+    validate_sorter_params_against_wrapper(
+        "clusterless_thresholder", {"anything": 1}
+    )

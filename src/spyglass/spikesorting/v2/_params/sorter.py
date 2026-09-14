@@ -93,36 +93,77 @@ class MountainSort4Schema(BaseModel):
 
 
 class MountainSort5Schema(BaseModel):
-    """Validated schema for MountainSort 5.
+    """Validated schema for MountainSort 5 (SpikeInterface 0.104.3 wrapper).
 
-    MS5 assumes the input recording has already been bandpass-filtered and
-    whitened by the upstream recording stage. ``extra="forbid"`` catches
-    typos against the documented MS5 field set.
+    Every scientific parameter of SI's ``Mountainsort5Sorter`` is exposed here
+    with the wrapper's own default, except ``filter`` (see below). The one
+    wrapper key that is NOT a field is ``delete_temporary_recording``: it is an
+    execution/scratch detail managed by Spyglass (the sorter scratch dir is
+    always removed by ``run_si_sorter``), so it is listed in
+    :data:`MS5_MANAGED_KEYS` rather than accepted as science.
+    ``test_ms5_schema_covers_wrapper`` fails if the pinned wrapper grows a key
+    that is neither a field nor managed. ``extra="forbid"`` catches typos.
 
-    The SI 0.104 MS5 wrapper defaults both ``filter`` and ``whiten`` to
-    ``True`` (verified against ``Mountainsort5Sorter._default_params``); this
-    schema overrides ``filter`` to ``False`` because the recording stage
-    already bandpass-filters the input (300-6000 Hz + median CAR) -- leaving
-    MS5's internal filter on would double-filter the recording, narrowing the
-    spike band twice. ``whiten`` stays ``True``: a truthy ``whiten`` routes
-    through the external float64 whitening pin in ``Sorting._run_si_sorter``
-    (which then disables MS5's internal whitening so the recording is whitened
-    exactly once), matching the MS4 path. Both toggles are exposed so a user
-    feeding MS5 an un-preprocessed recording can re-enable the internal filter.
+    ``filter`` defaults to ``False`` (the wrapper default is ``True``) because
+    the recording stage already bandpass-filters the input; leaving MS5's
+    internal filter on would double-filter the recording. ``freq_min`` /
+    ``freq_max`` are therefore inert unless ``filter=True`` is set explicitly
+    (a user feeding MS5 an un-preprocessed recording). ``whiten`` stays
+    ``True``: a truthy ``whiten`` routes through the external float64 whitening
+    pin in ``run_si_sorter`` (which then disables MS5's internal whitening so
+    the recording is whitened exactly once), matching the MS4 path.
+
+    Long-recording knobs: ``scheme2_training_duration_sec`` /
+    ``scheme2_training_recording_sampling_mode`` bound the scheme-2 training
+    set, ``scheme3_block_duration_sec`` sets the scheme-3 block length, and
+    ``scheme2_max_num_snippets_per_training_batch`` bounds training memory.
+    ``schema_version`` 2 added these long-recording / PCA / spatial fields;
+    a version-1 row validates unchanged (every new field defaults to the
+    wrapper default the old rows already ran with).
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: int = 2
     scheme: Literal["1", "2", "3"] = "2"
     detect_sign: Literal[-1, 0, 1] = -1
     detect_threshold: float = Field(default=5.5, gt=0.0)
     detect_time_radius_msec: float = Field(default=0.5, gt=0.0)
     snippet_T1: int = Field(default=20, ge=1)
     snippet_T2: int = Field(default=20, ge=1)
+    snippet_mask_radius: float = Field(default=250.0, gt=0.0)
+    npca_per_channel: int = Field(default=3, ge=1)
+    npca_per_subdivision: int = Field(default=10, ge=1)
+    scheme1_detect_channel_radius: float = Field(default=150.0, gt=0.0)
     scheme2_phase1_detect_channel_radius: float = Field(default=200.0, gt=0.0)
     scheme2_detect_channel_radius: float = Field(default=50.0, gt=0.0)
+    scheme2_max_num_snippets_per_training_batch: int = Field(default=200, ge=1)
+    scheme2_training_duration_sec: float = Field(default=300.0, gt=0.0)
+    scheme2_training_recording_sampling_mode: Literal["initial", "uniform"] = (
+        "uniform"
+    )
+    scheme3_block_duration_sec: float = Field(default=1800.0, gt=0.0)
     filter: bool = False
+    freq_min: float = Field(default=300.0, gt=0.0, le=15000.0)
+    freq_max: float = Field(default=6000.0, gt=0.0, le=15000.0)
     whiten: bool = True
+
+    @model_validator(mode="after")
+    def _check_filter_band(self):
+        """A filter band is only meaningful when ``filter=True``, and ordered."""
+        if self.freq_min >= self.freq_max:
+            raise ValueError(
+                f"MountainSort5Schema: freq_min ({self.freq_min}) must be "
+                f"below freq_max ({self.freq_max})."
+            )
+        return self
+
+
+# Keys of SI's ``Mountainsort5Sorter`` default params that Spyglass manages
+# rather than exposing as scientific parameters. ``delete_temporary_recording``
+# only controls whether MS5 deletes its own temp cache; the whole sorter
+# scratch directory is removed by ``run_si_sorter`` regardless, so the value is
+# inert and must not be smuggled through the row.
+MS5_MANAGED_KEYS: frozenset[str] = frozenset({"delete_temporary_recording"})
 
 
 class Kilosort4Schema(BaseModel):
@@ -567,6 +608,84 @@ def reject_reserved_execution_keys(params, *, context: str) -> None:
             "SorterExecutionParamsSchema), not in the scientific params blob or "
             "job_kwargs. Move these to the execution_params blob."
         )
+
+
+def sorter_wrapper_vocabulary(sorter: str) -> "frozenset[str] | None":
+    """Return the scientific parameter names the installed SI wrapper accepts.
+
+    Reads the wrapper class's own default-parameter dict (``_dynamic_params``,
+    the algorithm knobs without SI's global job kwargs). Returns ``None`` when
+    the vocabulary is not knowable here: the name is not an SI-registered
+    sorter (the Spyglass ``clusterless_thresholder`` path validates against its
+    own typed schema), or the wrapper only learns its parameters from a
+    runtime that is not installed (Kilosort4 reads them from the ``kilosort``
+    package). ``None`` means "cannot check", never "anything goes" -- preflight
+    separately fails a selected sorter whose runtime is missing.
+
+    Parameters
+    ----------
+    sorter : str
+        SpikeInterface sorter name (e.g. ``"mountainsort5"``).
+
+    Returns
+    -------
+    frozenset[str] or None
+        The accepted top-level parameter names, or ``None`` if unknowable.
+    """
+    import spikeinterface.sorters as sis
+
+    sorter_class = sis.sorter_dict.get(sorter)
+    if sorter_class is None:
+        return None
+    default_params, _descriptions = sorter_class._dynamic_params()
+    if not default_params:
+        return None
+    return frozenset(default_params)
+
+
+def validate_sorter_params_against_wrapper(sorter: str, params) -> None:
+    """Raise if ``params`` carries a key the installed SI wrapper rejects.
+
+    The typed ``extra="forbid"`` schemas already catch typos for MS4 / MS5 /
+    clusterless; this guard closes the same gap for the permissive
+    ``extra="allow"`` schemas (Kilosort4, SpykingCircus2, Tridesclous2, and the
+    generic fallback), whose unknown keys would otherwise surface only as an
+    SI ``Invalid parameters`` error after the recording stage -- minutes into
+    a long job. It runs at ``SorterParameters`` insert and again in preflight.
+    Close-name suggestions come from ``difflib``. A ``None`` vocabulary (see
+    :func:`sorter_wrapper_vocabulary`) skips the check.
+
+    Parameters
+    ----------
+    sorter : str
+        The ``sorter`` column value of a ``SorterParameters`` row.
+    params : Mapping
+        The scientific ``params`` blob (``schema_version`` is ignored).
+
+    Raises
+    ------
+    ValueError
+        If any key is outside the wrapper's accepted parameter names.
+    """
+    import difflib
+
+    vocabulary = sorter_wrapper_vocabulary(sorter)
+    if vocabulary is None:
+        return
+    unknown = sorted(set(params or {}) - vocabulary - {"schema_version"})
+    if not unknown:
+        return
+    hints = []
+    for key in unknown:
+        close = difflib.get_close_matches(key, sorted(vocabulary), n=1)
+        hints.append(
+            f"{key!r}" + (f" (did you mean {close[0]!r}?)" if close else "")
+        )
+    raise ValueError(
+        f"SorterParameters params for sorter {sorter!r} carry key(s) the "
+        f"installed SpikeInterface {sorter!r} wrapper does not accept: "
+        f"{', '.join(hints)}. Accepted parameters: {sorted(vocabulary)}."
+    )
 
 
 def validate_execution_params(execution_params) -> dict:
