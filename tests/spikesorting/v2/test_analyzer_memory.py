@@ -1,6 +1,7 @@
 """Memory contract of the analyzer cache: extraction and load stay out of core.
 
-Real measurements (``ru_maxrss`` of a fresh subprocess), not mocks. The
+Real measurements (``ru_maxrss`` of a fresh subprocess, normalized to bytes:
+macOS reports bytes, Linux KiB), not mocks. The
 subprocess builds a dense analyzer whose waveform volume is a few hundred MB
 and reports the peak-RSS growth of (a) waveform extraction and (b) a later
 load + per-unit read through ``load_analyzer_folder``. On this SpikeInterface
@@ -41,7 +42,9 @@ _SCRIPT = textwrap.dedent("""
         seed=0,
     )
     def maxrss():
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return value * 1024 if sys.platform.startswith("linux") else value
     folder = workdir / f"gate{ANALYZER_FOLDER_SUFFIX}"
     params = {
         "ms_before": 1.0, "ms_after": 2.0, "max_spikes_per_unit": 20000,
@@ -76,7 +79,9 @@ _ZARR_SCRIPT = textwrap.dedent("""
         seed=0,
     )
     def maxrss():
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return value * 1024 if sys.platform.startswith("linux") else value
     base = maxrss()
     an = si.create_sorting_analyzer(
         sort, rec, format="zarr", folder=workdir / "gate.zarr", sparse=False,
@@ -100,7 +105,9 @@ _LOAD_SCRIPT = textwrap.dedent("""
     from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
     folder = sys.argv[1]
     def maxrss():
-        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # ru_maxrss is bytes on macOS but KiB on Linux (getrusage(2)).
+        value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return value * 1024 if sys.platform.startswith("linux") else value
     base = maxrss()
     analyzer = load_analyzer_folder(folder)
     ext = analyzer.get_extension("waveforms")
