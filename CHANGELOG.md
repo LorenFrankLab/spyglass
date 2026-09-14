@@ -180,15 +180,20 @@ data or the production `UnitSelectionParams` rows.
   buffer plus copy, and `load_analyzer_folder` maps `waveforms.npy` lazily on
   every load (measured on a 415 MB volume: extraction ~1.5x vs ~2.3x for zarr;
   lazy load + one unit read ~0.17x vs >= 1x eager). Pre-launch `.zarr` caches
-  are not read; delete them and let the caches rebuild. Merged-curation
-  extension requests build a disk-backed derivative once
-  (`..._ext_{request_hash}.analyzer`) and reuse it; whole-analyzer memory
-  copies are gone. Expert SI access is `open_curation_analyzer(...)`, a
-  context-managed disk-backed working copy. Browser reviews persist a
+  are not read; delete them and let the caches rebuild. Extension requests
+  are matched by name AND parameters: an absent extension is persisted into
+  a root curation's shared sort analyzer, while a request a merged cache (or
+  the shared analyzer) cannot satisfy with its stored parameters builds a
+  disk-backed derivative once (`..._ext_{request_hash}.analyzer`) and reuses
+  it; whole-analyzer memory copies are gone. Expert SI access is
+  `open_curation_analyzer(...)` / `CurationRef.open_analyzer(...)`, a
+  context-managed disk-backed working copy (exported from the pipeline
+  facade). Browser reviews persist a
   `ReviewDisplayOptions` budget (`max_amplitudes_per_unit` = 2000, seeded
   uniform sampling across the whole recording, `min_similarity_for_correlograms`)
-  in the review configuration; it is display-only and part of the review
-  identity.
+  in the review configuration; it is display-only, part of the review
+  identity, and carried onto the child review by
+  `ReviewImportReceipt.continue_review()`.
 - **Workflow.** Run receipts rename `analysis_curation_id` /
   `analysis_merge_id` / `RunResult.analysis_curation` /
   `start_review(source="analysis")` to `auto_labeled_*`, and pin
