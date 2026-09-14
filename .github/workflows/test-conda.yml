@@ -277,6 +277,21 @@ jobs:
         environment-file: environments/environment_spikesorting_v2.yml
         miniforge-version: latest
         use-mamba: true
+    - name: Verify the v2 environment (pip check + sorter runtime)
+      # A clean, reproducible modern install must be consistent (pip check)
+      # AND able to run the default sorter, not merely import its wrapper:
+      # run MountainSort5 on two seconds of synthetic data. A wrapper without
+      # a runnable algorithm (the old mountainsort4 default) is not a sorter.
+      run: |
+        pip check
+        python - <<'EOF'
+        import spikeinterface as si
+        import spikeinterface.sorters as sis
+        assert "mountainsort5" in sis.installed_sorters(), sis.installed_sorters()
+        rec = si.generate_recording(num_channels=4, durations=[2.0], sampling_frequency=30000.0)
+        sorting = sis.run_sorter("mountainsort5", rec, folder="/tmp/ms5_smoke", remove_existing_folder=True, filter=False, whiten=True)
+        print("mountainsort5 runtime ok:", sorting)
+        EOF
     - name: Cache downloaded MEArec fixtures
       # Avoid re-downloading the canonical fixtures from Box every run. Keyed
       # on the manifest (fixture bytes) + _fetch.py (Box URLs) so a fixture

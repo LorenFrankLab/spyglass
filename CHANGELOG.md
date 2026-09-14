@@ -148,6 +148,71 @@ DLCProject().alter()
 
 ### Breaking Changes
 
+#### Spike Sorting v2 launch: configuration, resource use, and the curation-to-analysis workflow
+
+The supported v2 workflow is configure → sort → review → curate → **select
+units** → analyze (see the rewritten quickstart and single-session notebook).
+Draft-v2 names, caches and APIs change directly; nothing here touches v0/v1
+data or the production `UnitSelectionParams` rows.
+
+- **Configuration.** `MountainSort5Schema` (schema_version 2) exposes every
+  scientific parameter of the pinned SpikeInterface 0.104.3 wrapper
+  (`scheme2_training_duration_sec`, `scheme2_training_recording_sampling_mode`,
+  `scheme2_max_num_snippets_per_training_batch`, `scheme3_block_duration_sec`,
+  `npca_per_channel`, `npca_per_subdivision`, `snippet_mask_radius`,
+  `scheme1_detect_channel_radius`, `freq_min` / `freq_max`) with the wrapper's
+  defaults; `delete_temporary_recording` is a Spyglass-managed key. Every
+  `SorterParameters` row is validated against the installed wrapper's
+  parameter vocabulary at insert and in preflight (close-name suggestions), so
+  a typo in a permissive schema fails before the sort. The inert
+  recording-stage `PreprocessingParamsSchema.whiten` is removed (schema_version
+  4): MS4/MS5 whiten once via their sorter row, the metric analyzer via
+  `AnalyzerWaveformParameters`. `AnalyzerWaveformParamsSchema` (schema_version
+  2) gains a `sparsity` block (`dense` / `radius` / `best_channels` plus SI's
+  estimation settings, all recorded); the default reproduces the previous
+  implicit radius/100 µm behavior. `resolve_sort_config` is the single
+  resolution of what a sort executes, shared by the dispatcher, preflight
+  (`PreflightReport.effective_config`, `sorter_params_valid`) and the run
+  receipt (`RunResult["sorter_config"]`, rendered by `describe_run`).
+- **Resource use.** Analyzer caches are SpikeInterface `binary_folder`
+  stores named `{sorting_id}__{payload}.analyzer` (was `.zarr`): waveform
+  extraction writes a memmap directly instead of a whole-volume shared-memory
+  buffer plus copy, and `load_analyzer_folder` maps `waveforms.npy` lazily on
+  every load (measured on a 415 MB volume: extraction ~1.5x vs ~2.3x for zarr;
+  lazy load + one unit read ~0.17x vs >= 1x eager). Pre-launch `.zarr` caches
+  are not read; delete them and let the caches rebuild. Merged-curation
+  extension requests build a disk-backed derivative once
+  (`..._ext_{request_hash}.analyzer`) and reuse it; whole-analyzer memory
+  copies are gone. Expert SI access is `open_curation_analyzer(...)`, a
+  context-managed disk-backed working copy. Browser reviews persist a
+  `ReviewDisplayOptions` budget (`max_amplitudes_per_unit` = 2000, seeded
+  uniform sampling across the whole recording, `min_similarity_for_correlograms`)
+  in the review configuration; it is display-only and part of the review
+  identity.
+- **Workflow.** Run receipts rename `analysis_curation_id` /
+  `analysis_merge_id` / `RunResult.analysis_curation` /
+  `start_review(source="analysis")` to `auto_labeled_*`, and pin
+  `root_curation_uuid` / `auto_labeled_curation_uuid` so a receipt cannot
+  resolve a recreated numeric curation id. Every unit-level plot / export in
+  `spikesorting.v2.visualization` (`plot_sorting_summary`, `plot_unit_summary`,
+  `plot_waveforms`, `plot_spikes_on_traces`, `plot_unit_locations`,
+  `export_si_report`, `export_to_phy`) takes an exact `CurationRef` (bare
+  sorting keys are rejected; `Sorting.root_curation(key)` resolves the raw
+  units); exports run on a working copy and write `spyglass_provenance.json`.
+  `select_units_for_analysis(curation, policy=...)` is the downstream handoff:
+  new additive `UnitSelectionParams` rows `v2_accepted_single_units` (require
+  `accept`; deny `mua`/`noise`/`reject`/`artifact`) and
+  `v2_accepted_neural_units` (require `accept` or `mua`; deny
+  `noise`/`reject`/`artifact`), unlabeled units excluded and listed, one
+  `SortedSpikesGroup` per session (per member for concat sorts), and a receipt
+  with included/excluded unit ids and reasons. `SortedSpikesGroup.filter_units`
+  delegates to the DB-free `analysis.v1._unit_filter.filter_units_by_labels`
+  so the receipt applies the exact downstream filter.
+- **Installation.** The `spikesorting-v2` extra no longer installs the
+  `mountainsort4` wrapper (its `ml_ms4alg` backend cannot run on NumPy 2);
+  MountainSort4 runs in the legacy environment or the containerized preset.
+  The v2 CI job now runs `pip check` and a MountainSort5 runtime smoke.
+
 #### Spike Sorting v2 curation identity and review-profile foundation
 
 `CurationV2` now carries a database-unique `curation_uuid` for each immutable
@@ -210,7 +275,7 @@ timeline and are unsafe for a downstream consumer scoped to one NWB session.
 Instead, `ConcatMemberCuration` materializes one wall-clock-aligned
 `SpikeSortingOutput` row per frozen member session, preserving the same curated
 unit IDs and labels across members. Concat pipeline summaries keep
-`root_merge_id` / `analysis_merge_id` unset and return the usable mapping as
+`root_merge_id` / `auto_labeled_merge_id` unset and return the usable mapping as
 `member_merge_ids[member_index]`. Trial databases should run
 `audit_concat_merge_rows()`, delete the unsafe rows it lists, and populate the
 member table using the release-note commands above.

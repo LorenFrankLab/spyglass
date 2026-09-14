@@ -32,6 +32,30 @@ rows.
 Both pipelines register on the same `SpikeSortingOutput` merge table, so
 downstream code keys off `merge_id` regardless of which produced the sort.
 
+### Two environments, one database
+
+| | Modern (supported v2 install) | Legacy (v0/v1 runtime) |
+| --- | --- | --- |
+| Install | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2 | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2 |
+| Runs | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`) | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
+| Sorters that run | MountainSort5 (default), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 (`ml_ms4alg`) and the v1 sorter set |
+| Check | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available` | `pip check`; the v1 tutorials |
+
+Both environments share the same MySQL database and the same `SPYGLASS_BASE_DIR`
+artifacts. The modern install no longer pulls the `mountainsort4` package: it
+installs only a wrapper (the sorter *looks* installed) while the algorithm
+backend `ml_ms4alg` does not build on NumPy 2, so it could never run. Run MS4 in
+the legacy environment or through the containerized MS4 preset
+(`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`).
+
+The legacy environment file currently requires relaxing the SI/NumPy pins in
+`pyproject.toml` before the environment build (see the comments at the top of
+that file). That is a development-time procedure for the legacy suite, **not**
+the normal user path: users who only need to *read* v0/v1 results use the modern
+install; users who must *produce* new v0/v1 output should follow the legacy file
+verbatim and restore `pyproject.toml` afterwards. Packaging both stacks as
+installable profiles from unchanged metadata is deferred.
+
 ### Upgrading a preproduction v2 database for curation review
 
 This release adds four columns and new lookup/annotation tables without
