@@ -248,13 +248,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
 
     _, merge_id = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
-    # ``DecodingParameters.insert_default`` is broken upstream
-    # (calls ``cls.super()`` which doesn't resolve). Insert through
-    # the instance method instead -- ``DecodingParameters.insert`` is
-    # overridden to convert classes to dicts on the way in.
-    DecodingParameters().insert(
-        DecodingParameters.contents, skip_duplicates=True
-    )
+    # ``contents`` became an instance property upstream (it short-circuits on a
+    # populated table); ``insert_default`` inserts ``_default_contents()``.
+    DecodingParameters.insert_default()
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
