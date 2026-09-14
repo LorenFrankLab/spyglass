@@ -138,6 +138,39 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert figure_config["review"]["profile_hash"] == (
             review.profile.profile_hash
         )
+        # The display budget is persisted with the review, resumes with it,
+        # and is part of its identity: different display options are a
+        # DIFFERENT review of the same parent/profile, not a silent reuse.
+        assert figure_config["review"]["display"] == (
+            review.display_options.as_dict()
+        )
+        assert resumed.display_options == review.display_options
+        bounded = run.start_review(
+            profile_name,
+            source="root",
+            upload=False,
+            display_options={
+                "max_amplitudes_per_unit": 5,
+                "amplitude_sampling_seed": 3,
+            },
+        )
+        assert bounded.review_id != review.review_id
+        assert bounded.display_options.max_amplitudes_per_unit == 5
+        assert (
+            FigPackReview.resume(bounded.review_id).display_options
+            == bounded.display_options
+        )
+        # Identical display options on a rebuilt bundle sample identically.
+        bounded_again = run.start_review(
+            profile_name,
+            source="root",
+            upload=False,
+            display_options={
+                "max_amplitudes_per_unit": 5,
+                "amplitude_sampling_seed": 3,
+            },
+        )
+        assert bounded_again.review_id == bounded.review_id
         assert figure_config["review"]["evaluation_spec"] == {
             "metric_params_name": "minimal",
             "auto_curation_rules_name": "none",

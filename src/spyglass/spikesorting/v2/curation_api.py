@@ -304,8 +304,13 @@ class CurationRef:
         upload: bool = False,
         ephemeral: bool = False,
         annotation_sets=(),
+        display_options=None,
     ):
-        """Start/reuse a seeded browser review over this exact generation."""
+        """Start/reuse a seeded browser review over this exact generation.
+
+        ``display_options`` (``ReviewDisplayOptions`` / mapping / ``None``)
+        bounds the browser payload and is persisted with the review.
+        """
         from spyglass.spikesorting.v2.review_api import start_review
 
         return start_review(
@@ -314,6 +319,7 @@ class CurationRef:
             upload=upload,
             ephemeral=ephemeral,
             annotation_sets=annotation_sets,
+            display_options=display_options,
         )
 
     def preview_merges(
@@ -757,6 +763,7 @@ class EvaluationResult:
         upload: bool = False,
         ephemeral: bool = False,
         annotation_sets=(),
+        display_options=None,
     ):
         """Start a review after verifying this evaluation matches its profile."""
         from spyglass.spikesorting.v2.review_api import start_review
@@ -768,6 +775,7 @@ class EvaluationResult:
             ephemeral=ephemeral,
             evaluation=self,
             annotation_sets=annotation_sets,
+            display_options=display_options,
         )
 
 
@@ -858,6 +866,7 @@ class RunResult(dict):
         upload: bool = False,
         ephemeral: bool = False,
         annotation_sets=(),
+        display_options=None,
     ):
         """Start the canonical review without silently changing its source."""
         if source == "auto_labeled":
@@ -880,6 +889,7 @@ class RunResult(dict):
             upload=upload,
             ephemeral=ephemeral,
             annotation_sets=annotation_sets,
+            display_options=display_options,
         )
 
 

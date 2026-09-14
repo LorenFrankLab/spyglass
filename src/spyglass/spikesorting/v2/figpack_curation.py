@@ -34,6 +34,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -368,6 +369,25 @@ def _assert_displayed_unit_properties_available(
         )
 
 
+@contextmanager
+def _seeded_numpy_random(seed: int):
+    """Pin numpy's global RNG for SI's display subsampling, then restore it.
+
+    ``AmplitudesWidget(max_spikes_per_unit=...)`` subsamples with the
+    unseeded global ``np.random.choice``; seeding it here (and restoring the
+    prior state) makes the displayed sample deterministic without touching
+    any scientific computation.
+    """
+    import numpy as np
+
+    state = np.random.get_state()
+    np.random.seed(int(seed))
+    try:
+        yield
+    finally:
+        np.random.set_state(state)
+
+
 def _build_curation_view(
     curation_key: dict,
     *,
@@ -375,14 +395,17 @@ def _build_curation_view(
     displayed_unit_properties,
     seed_labels=None,
     review_table=None,
+    display_options=None,
 ):
     """Build the FigPack curation view for a curation (minimal-attach).
 
     Lets SpikeInterface compose the whole sorting summary over the sort's
     display analyzer (ensuring the curation-view extensions and any explicitly
     requested unit-table columns are available), then attaches only the
-    ``SortingCuration`` control as a sibling. Returns the composed
-    ``figpack.views`` object.
+    ``SortingCuration`` control as a sibling. ``display_options``
+    (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
+    amplitude sample and the correlogram pair filter -- and is display-only.
+    Returns the composed ``figpack.views`` object.
     """
     import spikeinterface.widgets as sw
 
@@ -390,8 +413,10 @@ def _build_curation_view(
     from spyglass.spikesorting.v2._curation_analyzer import (
         curation_analyzer_with_extensions,
     )
+    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
 
     figpack_views, figpack_ss_views = _require_figpack()
+    display = ReviewDisplayOptions.from_mapping(display_options)
 
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
     waveform_recipe = (Sorting & sorting_key).fetch1(
@@ -412,14 +437,19 @@ def _build_curation_view(
         _assert_displayed_unit_properties_available(
             analyzer, analyzer_properties
         )
-        summary = sw.plot_sorting_summary(
-            analyzer,
-            backend="figpack",
-            curation=False,
-            displayed_unit_properties=analyzer_properties,
-            generate_url=False,
-            display=False,
-        ).view
+        with _seeded_numpy_random(display.amplitude_sampling_seed):
+            summary = sw.plot_sorting_summary(
+                analyzer,
+                backend="figpack",
+                curation=False,
+                displayed_unit_properties=analyzer_properties,
+                max_amplitudes_per_unit=display.max_amplitudes_per_unit,
+                min_similarity_for_correlograms=(
+                    display.min_similarity_for_correlograms
+                ),
+                generate_url=False,
+                display=False,
+            ).view
 
     control = figpack_ss_views.SortingCuration(
         default_label_options=list(label_options),
@@ -437,7 +467,9 @@ def _build_curation_view(
     )
     items = [
         figpack_views.LayoutItem(
-            view=summary, title="Sorting summary", stretch=1
+            view=summary,
+            title=f"Sorting summary ({display.describe()})",
+            stretch=1,
         )
     ]
     if review_table is not None:
@@ -948,6 +980,10 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
             displayed_unit_properties=displayed_unit_properties,
             seed_labels=seed_labels,
             review_table=_review_context_table(curation_key, review_config),
+            # Profile-backed reviews persist their display budget in the
+            # review configuration (part of the selection identity); an expert
+            # selection uses the defaults.
+            display_options=(review_config or {}).get("display"),
         )
         title = (
             f"Spyglass curation {curation_key['sorting_id']}"

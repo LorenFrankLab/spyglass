@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 
 from spyglass.spikesorting.v2._enums import CurationLabel
 from spyglass.spikesorting.v2._figpack_curation import (
@@ -225,3 +226,114 @@ def review_profile_label_policy(label_import_mode: str) -> str:
         "label_import_mode must be 'replace' or 'overlay'; "
         f"got {label_import_mode!r}."
     )
+
+
+REVIEW_DISPLAY_OPTIONS_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ReviewDisplayOptions:
+    """Browser payload budget for one FigPack review (display-only).
+
+    These settings bound what the bundle CONTAINS; they never touch the
+    scientific evaluation (metrics, waveform subsample, merge suggestions all
+    come from the persisted ``CurationEvaluation`` / analyzer recipes).
+
+    Attributes
+    ----------
+    max_amplitudes_per_unit
+        Per-unit cap on spike-amplitude points in the amplitude view. Points
+        are drawn uniformly at random from the unit's whole spike train (so a
+        long recording is sampled across its full duration, not truncated to
+        its start), seeded by ``amplitude_sampling_seed`` so a rebuilt bundle
+        shows the same points. ``None`` sends every spike.
+    amplitude_sampling_seed
+        Seed for the amplitude subsample.
+    min_similarity_for_correlograms
+        SpikeInterface's cross-correlogram pair filter: only unit pairs whose
+        template similarity reaches this value get a cross-correlogram, which
+        bounds the pair-heavy part of the bundle.
+    version
+        Payload version, persisted with the review configuration.
+    """
+
+    max_amplitudes_per_unit: int | None = 2000
+    amplitude_sampling_seed: int = 0
+    min_similarity_for_correlograms: float = 0.2
+    version: int = REVIEW_DISPLAY_OPTIONS_VERSION
+
+    def __post_init__(self):
+        if self.max_amplitudes_per_unit is not None and (
+            isinstance(self.max_amplitudes_per_unit, bool)
+            or int(self.max_amplitudes_per_unit) < 1
+        ):
+            raise ValueError(
+                "max_amplitudes_per_unit must be a positive int or None; got "
+                f"{self.max_amplitudes_per_unit!r}."
+            )
+        if isinstance(self.amplitude_sampling_seed, bool) or (
+            int(self.amplitude_sampling_seed) < 0
+        ):
+            raise ValueError(
+                "amplitude_sampling_seed must be a non-negative int; got "
+                f"{self.amplitude_sampling_seed!r}."
+            )
+        if not 0.0 <= float(self.min_similarity_for_correlograms) <= 1.0:
+            raise ValueError(
+                "min_similarity_for_correlograms must be within [0, 1]; got "
+                f"{self.min_similarity_for_correlograms!r}."
+            )
+        if int(self.version) != REVIEW_DISPLAY_OPTIONS_VERSION:
+            raise ValueError(
+                "ReviewDisplayOptions version "
+                f"{self.version!r} is not the supported "
+                f"{REVIEW_DISPLAY_OPTIONS_VERSION}."
+            )
+
+    @classmethod
+    def from_mapping(cls, value) -> "ReviewDisplayOptions":
+        """Build from ``None`` (defaults), a mapping, or an instance."""
+        if value is None:
+            return cls()
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, Mapping):
+            raise TypeError(
+                "display_options must be a ReviewDisplayOptions, a mapping, "
+                f"or None; got {type(value).__name__}."
+            )
+        unknown = sorted(set(value) - set(cls.__dataclass_fields__))
+        if unknown:
+            raise ValueError(
+                f"display_options has unknown field(s) {unknown}; accepted: "
+                f"{sorted(cls.__dataclass_fields__)}."
+            )
+        return cls(**dict(value))
+
+    def as_dict(self) -> dict:
+        """JSON-native form persisted in the review configuration."""
+        return {
+            "version": int(self.version),
+            "max_amplitudes_per_unit": (
+                None
+                if self.max_amplitudes_per_unit is None
+                else int(self.max_amplitudes_per_unit)
+            ),
+            "amplitude_sampling_seed": int(self.amplitude_sampling_seed),
+            "min_similarity_for_correlograms": float(
+                self.min_similarity_for_correlograms
+            ),
+        }
+
+    def describe(self) -> str:
+        """Short human-readable summary for view titles."""
+        cap = (
+            "all spikes"
+            if self.max_amplitudes_per_unit is None
+            else f"<= {int(self.max_amplitudes_per_unit)} sampled spikes/unit "
+            f"(seed {int(self.amplitude_sampling_seed)})"
+        )
+        return (
+            f"amplitudes: {cap}; cross-correlograms for pairs with template "
+            f"similarity >= {float(self.min_similarity_for_correlograms):g}"
+        )

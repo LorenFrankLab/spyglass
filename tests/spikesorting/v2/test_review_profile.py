@@ -196,3 +196,34 @@ def test_franklab_review_profile_is_shipped(dj_conn):
         "franklab_default_auto_curation_2026_06"
     )
     assert row["label_import_mode"] == "replace"
+
+
+def test_review_display_options_are_bounded_and_serializable():
+    """Display budget validates, round-trips, and stays display-only."""
+    from spyglass.spikesorting.v2._review_profile import (
+        REVIEW_DISPLAY_OPTIONS_VERSION,
+        ReviewDisplayOptions,
+    )
+
+    default = ReviewDisplayOptions()
+    assert default.max_amplitudes_per_unit == 2000
+    assert default.as_dict()["version"] == REVIEW_DISPLAY_OPTIONS_VERSION
+    assert ReviewDisplayOptions.from_mapping(default.as_dict()) == default
+    assert ReviewDisplayOptions.from_mapping(None) == default
+    custom = ReviewDisplayOptions.from_mapping(
+        {
+            "max_amplitudes_per_unit": None,
+            "min_similarity_for_correlograms": 0.5,
+        }
+    )
+    assert custom.max_amplitudes_per_unit is None
+    assert "all spikes" in custom.describe()
+    for bad in (
+        {"max_amplitudes_per_unit": 0},
+        {"amplitude_sampling_seed": -1},
+        {"min_similarity_for_correlograms": 1.5},
+        {"version": 99},
+        {"max_spikes_per_unit": 10},  # not a field: display != science
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            ReviewDisplayOptions.from_mapping(bad)

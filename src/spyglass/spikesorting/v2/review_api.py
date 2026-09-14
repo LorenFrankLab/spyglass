@@ -16,6 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
 
+from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
 from spyglass.spikesorting.v2._figpack_curation import (
     annotations_payload_hash,
     curation_annotations_to_labels_and_merges,
@@ -177,6 +178,9 @@ class FigPackReview:
     ephemeral: bool
     annotation_sets: tuple[Any, ...] = field(default_factory=tuple)
     stages: tuple[ReviewStageStatus, ...] = field(default_factory=tuple)
+    display_options: ReviewDisplayOptions = field(
+        default_factory=ReviewDisplayOptions
+    )
     _started_sibling_uuids: tuple[uuid.UUID, ...] = field(
         default_factory=tuple, repr=False, compare=False
     )
@@ -283,6 +287,9 @@ class FigPackReview:
                 ReviewStageStatus("evaluation_populated", "reused"),
                 ReviewStageStatus("verification_view_ready", "reused"),
             ),
+            display_options=ReviewDisplayOptions.from_mapping(
+                config.get("display")
+            ),
             _started_sibling_uuids=tuple(
                 _uuid(value)
                 for value in config.get("sibling_uuids_at_start", [])
@@ -365,6 +372,7 @@ def _review_config(
     upload: bool,
     ephemeral: bool,
     annotation_sets: Sequence[Any],
+    display_options: ReviewDisplayOptions,
 ) -> dict:
     config = _profile_snapshot(profile)
     config.update(
@@ -374,6 +382,9 @@ def _review_config(
                 "upload": bool(upload),
                 "ephemeral": bool(ephemeral if upload else False),
             },
+            # Display-only payload budget; part of the persisted review
+            # identity so a rebuilt bundle shows the same sample.
+            "display": display_options.as_dict(),
             "sibling_uuids_at_start": [
                 str(child.curation_uuid) for child in parent.children
             ],
@@ -413,8 +424,16 @@ def start_review(
     ephemeral: bool = False,
     evaluation: EvaluationResult | None = None,
     annotation_sets: Sequence[Any] = (),
+    display_options: ReviewDisplayOptions | Mapping | None = None,
 ) -> FigPackReview:
-    """Evaluate one pinned curation and build/reuse its seeded review view."""
+    """Evaluate one pinned curation and build/reuse its seeded review view.
+
+    ``display_options`` (:class:`ReviewDisplayOptions`; ``None`` = defaults)
+    bounds the browser payload -- per-unit amplitude sample and correlogram
+    pair filter -- and is persisted with the review, never affecting the
+    scientific evaluation.
+    """
+    resolved_display = ReviewDisplayOptions.from_mapping(display_options)
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
         FigPackCurationSelection,
@@ -473,6 +492,7 @@ def start_review(
         upload=upload,
         ephemeral=ephemeral,
         annotation_sets=resolved_annotation_sets,
+        display_options=resolved_display,
     )
     selection = FigPackCurationSelection.insert_selection(
         parent.as_key(),
