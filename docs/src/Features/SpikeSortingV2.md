@@ -231,12 +231,17 @@ deeper how-tos are split into companion notebooks —
    parameter rows, and sorter binary are present in ~1 s, *before* any
    `populate`, returning a structured report with the exact fix for any missing
    prerequisite.
-4. **Pipeline** -- `run_v2_pipeline(...)` returns the run summary
-   (`root_merge_id` for a quick look; `auto_labeled_merge_id` -- `None` until
-   curated, e.g. via `auto_curate=True` -- for downstream science).
-5. **Summary** --
-   `CurationV2.summarize_curation(run_summary.root_curation.as_key())`.
-6. **Fetch** -- `SpikeSortingOutput().get_spike_times({"merge_id": ...})`.
+4. **Pipeline** -- `run_v2_pipeline(...)` returns the run receipt
+   (`root_curation` / `auto_labeled_curation` generation-pinned refs;
+   `describe_run` shows the effective sorter configuration).
+5. **Review / curate** -- `run.start_review(profile, ...)` in the browser
+   (`FigPackReview.resume(review_id)` reopens it), or the scripted
+   evaluate → merge → label flow; automatic labels are suggestions, not approval.
+6. **Select units** -- `select_units_for_analysis(curation, policy=...)`
+   applies an explicit `UnitSelectionParams` policy and builds the
+   `SortedSpikesGroup` downstream reads; the receipt lists included / excluded
+   units with reasons.
+7. **Analyze** -- `receipt.fetch_spike_data()` / the group key in decoding.
 
 Each step is detailed below.
 
@@ -293,11 +298,11 @@ run_summary = run_v2_pipeline(
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
 )
-# run_summary["root_merge_id"] is the UNCURATED root -- fine for a quick look,
-# but NOT analysis-ready. run_summary["auto_labeled_merge_id"] is None on a
-# root-only run, so there is nothing called "merge_id" to copy into a decode.
-# For downstream science, curate first (auto_curate=True or by hand) and key
-# off auto_labeled_merge_id (see "Downstream consumers").
+# run_summary["root_merge_id"] is the UNCURATED root -- fine for a quick look.
+# run_summary["auto_labeled_merge_id"] is None on a root-only run, so there is
+# nothing called "merge_id" to copy into a decode. Neither merge id is a
+# filtered unit set: hand a curation to analysis with
+# select_units_for_analysis (see "Downstream consumers").
 root_merge_id = run_summary["root_merge_id"]  # quick inspection only
 
 # Receipt: stages + warnings as explicit rows (a zero-unit sort can't hide in a
@@ -1425,27 +1430,42 @@ ripple detection, etc.) keeps working unchanged. A concat v2 curation registers
 through one `ConcatMemberCuration` row per frozen member; its synthetic parent
 remains
 behind the [downstream merge gate](#chronic-same-day-recordings) described
-above. **`run_summary["root_merge_id"]` is the uncurated root** — for downstream
-single-session science, use `run_summary["auto_labeled_merge_id"]` instead. For a
-concat run, use `run_summary["member_merge_ids"][member_index]`; the mapping
-points to the auto-curated child when `auto_curate=True`, otherwise the root.
-For a single-session run, the fastest way to fill `auto_labeled_merge_id` is
-`run_v2_pipeline(..., auto_curate=True)`, whose summary sets `auto_labeled_merge_id`
-(equal to `auto_merge_id`, the auto-curated child); or build a curation by hand
-and carry its `merge_id` (see the [scripted evaluate → merge → evaluate →
-label flow](#the-scripted-evaluate-merge-evaluate-label-flow)). Pass whichever
-analysis-ready `merge_id` you choose to the accessors below:
+above. **Every merge id identifies a registered output, not a filtered
+population**: `SpikeSortingOutput().get_spike_times({"merge_id": ...})` returns
+every unit of that curation, labels ignored, and automatic labels are
+suggestions written as labels, not approval. The supported handoff is
+`select_units_for_analysis(curation, policy=...)` on the curation you actually
+reviewed (`run.auto_labeled_curation`, a `FigPackReview` commit, or a
+`save_manual_curation` / `commit_merges` child): it applies a named
+`UnitSelectionParams` policy (`v2_accepted_single_units` -- require `accept`,
+deny `mua`/`noise`/`reject`/`artifact`; `v2_accepted_neural_units` -- require
+`accept` or `mua`, deny `noise`/`reject`/`artifact`; `all_units` as the explicit
+expert choice; unlabeled units excluded and listed), builds the
+`SortedSpikesGroup` that decoding and firing-rate consumers read (one per member
+session for a concat sort), and returns a receipt with the pinned curation
+generation, the policy content, and every unit's verdict and reason.
+
+```python
+from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
+
+receipt = select_units_for_analysis(run.auto_labeled_curation)
+receipt.describe()          # unit_id -> included, labels, reason
+spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+receipt.group_key           # SortedSpikesGroup key for decoding
+```
 
 #### What do I call next?
 
 | Goal | Call |
 | --- | --- |
-| Spike times | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})` |
+| Selected spike times (the supported path) | `select_units_for_analysis(curation).fetch_spike_data()` |
+| All units of one registered output | `SpikeSortingOutput().get_spike_times({"merge_id": merge_id})` |
 | Recording | `SpikeSortingOutput().get_recording({"merge_id": merge_id})` |
 | Sorting | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})` |
 | Unit brain regions | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})` |
 | Curation summary (the curated result) | `CurationV2.summarize_curation(auto_summary.auto_labeled_curation.as_key())` (`auto_summary.root_curation.as_key()` inspects the uncurated root) |
-| Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` |
+| Unit-level plots / exports of an exact curation | `ssviz.plot_waveforms(curation, unit_ids=[...])`, `ssviz.export_to_phy(curation, folder)` |
+| Analyzer/debug internals | `Sorting().get_analyzer({"sorting_id": run_summary["sorting_id"]})` (raw sort); `open_curation_analyzer(curation, recipe)` for a disk-backed working copy |
 
 ```python
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput

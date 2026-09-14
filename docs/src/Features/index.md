@@ -17,7 +17,7 @@ Spyglass.
 - [Populate](./Populate.md) - Tri-part make pattern for long-running
     computations. Includes migration from deprecated `_use_transaction = False`.
 - [Spike Sorting v2 Quickstart](./SpikeSortingV2_Quickstart.md) - Shortest safe
-    path from an ingested NWB file to analysis-ready spike times.
+    path from an ingested NWB file to reviewed, selected spike times.
 - [Spike Sorting v2](./SpikeSortingV2.md) - Modern SpikeInterface 0.104-based
     spike sorting pipeline (`spyglass.spikesorting.v2`).
 - [Spike Sorting v1→v2 Migration](./SpikeSortingV2_Migration.md) - Task-oriented

@@ -185,7 +185,7 @@ if run_concat:
 # ### Group the sessions and sort each one
 #
 # Sort each member with the single-session preset and `auto_curate=True`, so each
-# member contributes an **analysis-ready** (auto-labeled) curation to the match
+# member contributes an **auto-labeled** curation to the match
 # rather than the uncurated root (these reuse anything already computed). We drive
 # Part B off the group's **persisted** members — the rows `create_group` stored —
 # not the parameter list, so editing the group (or a member carrying its own
