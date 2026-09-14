@@ -361,6 +361,9 @@ class ReviewImportReceipt:
             upload=self.changes.review.upload,
             ephemeral=self.changes.review.ephemeral,
             evaluation=self.evaluation,
+            # The display budget is part of the review the user configured;
+            # continuing onto the committed child must not silently revert it.
+            display_options=self.changes.review.display_options,
         )
 
 

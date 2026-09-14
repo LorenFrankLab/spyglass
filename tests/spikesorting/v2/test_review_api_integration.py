@@ -171,6 +171,15 @@ def test_browser_review_preview_commit_resume_and_continue(
             },
         )
         assert bounded_again.review_id == bounded.review_id
+        # Committing (no edits, confirmed) and CONTINUING the bounded review
+        # carries its display budget onto the child's review.
+        continued = (
+            bounded.preview_import()
+            .commit(confirm_no_changes=True)
+            .continue_review()
+        )
+        assert continued.display_options == bounded.display_options
+        assert continued.display_options.max_amplitudes_per_unit == 5
         assert figure_config["review"]["evaluation_spec"] == {
             "metric_params_name": "minimal",
             "auto_curation_rules_name": "none",
