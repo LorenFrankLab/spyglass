@@ -129,7 +129,7 @@ DecodingParameters()
 
 # ### 1D Decoding
 #
-# As in the clusterless notebook, we can decode 1D position if we specify the `track_graph`, `edge_order`, and `edge_spacing` parameters in the `Environment` class constructor. See the [clusterless decoding tutorial](./42_Decoding_Clusterless.ipynb) for more details.
+# As in the clusterless notebook, we can decode 1D position if we specify the `track_graph`, `edge_order`, and `edge_spacing` parameters in the `Environment` class constructor. See the [clusterless decoding tutorial](./41_Decoding_Clusterless.ipynb) for more details.
 
 # ## Decoding
 #

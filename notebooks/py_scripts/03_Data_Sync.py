@@ -40,7 +40,7 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - To fully demonstrate syncing features, we'll need to run some basic analyses.
 #   This can either be done with code in this notebook or by running another
-#   notebook (e.g., [LFP](./12_LFP.ipynb))
+#   notebook (e.g., [LFP](./30_LFP.ipynb))
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
 #   [these additional tutorials](https://github.com/datajoint/datajoint-tutorials)
@@ -375,6 +375,6 @@ LFPV1 & {
 # # Up Next
 #
 
-# In the [next notebook](./03_Merge_Tables.ipynb), we'll explore the details of a
+# In the [next notebook](./04_Merge_Tables.ipynb), we'll explore the details of a
 # table tier unique to Spyglass, Merge Tables.
 #

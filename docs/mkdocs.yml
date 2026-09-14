@@ -54,7 +54,6 @@ nav:
           - Insert Data: notebooks/02_Insert_Data.ipynb
           - Data Sync: notebooks/03_Data_Sync.ipynb
           - Merge Tables: notebooks/04_Merge_Tables.ipynb
-          - Export: notebooks/05_Export.ipynb
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
@@ -75,6 +74,7 @@ nav:
           - Decoding Sorted Spikes: notebooks/42_Decoding_SortedSpikes.ipynb
       - MUA Detection: notebooks/50_MUA_Detection.ipynb
       - Behavior Syllables: notebooks/60_MoSeq.ipynb
+      - Data Export: notebooks/05_Export.ipynb
   - Features:
     - Overview: Features/index.md
     - FigURL: Features/FigURL.md
