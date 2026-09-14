@@ -157,8 +157,8 @@ def preprocessing_default_contents() -> tuple:
             # reference, 1.0 s min-segment). Not a production recipe -- the
             # franklab production presets use the dated region rows below; this
             # is the generic default the clusterless preset and ad-hoc callers
-            # use. ``whiten`` defaults to None (whitening is deferred to the
-            # sorter), so the default-constructed schema needs no override.
+            # use. Whitening is not a recording-stage parameter (the sorter /
+            # analyzer rows own it), so the default schema needs no override.
             PreprocessingParamsSchema().model_dump(),
         ),
         _lookup_row(

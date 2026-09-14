@@ -47,11 +47,10 @@ FRANKLAB_50UV_P07_2026_06 = "franklab_50uv_p07_2026_06"
 # 6000 Hz low-pass; 1.5 ms (0.0015 s) min-segment (production keeps the short
 # interval slivers the shipped 1.0 s default drops); median common reference.
 FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS = {
-    "schema_version": 3,
+    "schema_version": 4,
     "phase_shift": None,
     "bandpass_filter": {"freq_min": 600.0, "freq_max": 6000.0},
     "common_reference": {"operator": "median"},
-    "whiten": None,
     "min_segment_length": 0.0015,
     "bad_channel_handling": "remove",
 }
@@ -59,11 +58,10 @@ FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS = {
 # Cortex: identical recipe with the 300 Hz high-pass (cortical waveforms are
 # wider).
 FRANKLAB_CORTEX_2026_06_PARAMS = {
-    "schema_version": 3,
+    "schema_version": 4,
     "phase_shift": None,
     "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
     "common_reference": {"operator": "median"},
-    "whiten": None,
     "min_segment_length": 0.0015,
     "bad_channel_handling": "remove",
 }

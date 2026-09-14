@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PREPROCESSING_SCHEMA_VERSION = 3
+PREPROCESSING_SCHEMA_VERSION = 4
 
 
 class BandpassFilterParams(BaseModel):
@@ -73,35 +73,19 @@ class CommonReferenceParams(BaseModel):
     operator: Literal["median", "average"] = "median"
 
 
-class WhitenParams(BaseModel):
-    """Forward-compatible preprocessing whitening options.
-
-    ``whiten`` is currently inert for recording caches: whitening is
-    deferred to the sorter/analyzer boundary so single-session and
-    concat-backed sorts share the same provenance. MS4/MS5 sorter
-    whitening is controlled by ``SorterParameters``; metric-analyzer
-    whitening is controlled by ``AnalyzerWaveformParameters``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    dtype: str = "float32"
-
-
 class PreprocessingParamsSchema(BaseModel):
     """Validated schema for the preprocessing parameter blob.
 
-    Split into two stages so motion correction never runs on whitened
-    data (SpikeInterface docs warn that whitening destroys the spatial
-    amplitude structure motion estimators rely on):
-
-    Stage 1 -- pre_motion (filter + reference): materialized to the
-        ``Recording`` NWB-resident artifact (the ``ElectricalSeries``
-        inside the ``AnalysisNwbfile``). This is what gets cached.
-    Stage 2 -- post_motion (whitening): retained only as an explicit
-        forward-compatible params field. ``Recording`` and
-        ``ConcatenatedRecording`` caches do not apply it; sorter
-        whitening and analyzer whitening are controlled by their own
-        parameter rows.
+    The recording stage owns phase-shift + bandpass filter + bad-channel
+    handling + common reference, materialized to the ``Recording``
+    NWB-resident artifact (the ``ElectricalSeries`` inside the
+    ``AnalysisNwbfile``). Whitening is deliberately NOT a recording-stage
+    parameter: motion correction must never run on whitened data, and each
+    consumer whitens exactly once under its own tracked row -- MS4/MS5 via
+    ``SorterParameters.params["whiten"]`` (the external float64 pin in
+    ``run_si_sorter``), the metric analyzer via
+    ``AnalyzerWaveformParameters.params["whiten"]``. A ``whiten`` key here is
+    rejected (``extra="forbid"``) rather than accepted as an inert field.
 
     ``schema_version`` history:
     * 2 added ``min_segment_length`` (drops sub-second slivers from
@@ -124,6 +108,9 @@ class PreprocessingParamsSchema(BaseModel):
       The blob shape only grows by an optional field that defaults to
       ``None``, so existing rows validate unchanged and ``schema_version``
       is again NOT bumped; dev rows are regenerated.
+    * 4 removed the inert ``whiten`` field (it was never applied by any
+      recording cache; whitening ownership is the sorter / analyzer rows
+      above). Dev rows are regenerated, not migrated.
     * 3 also added ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``,
       default ``"remove"``) controlling how curated ``Electrode.bad_channel``
       flags are handled at materialization. ``"remove"`` is byte-identical to
@@ -148,10 +135,6 @@ class PreprocessingParamsSchema(BaseModel):
     common_reference: CommonReferenceParams = Field(
         default_factory=CommonReferenceParams
     )
-    whiten: WhitenParams | None = Field(default=None)
-    # whiten defaults to None: recording caches stay unwhitened. Kilosort 4
-    # whitens internally; MS4/MS5 use the sorter-owned external float64
-    # whitening path; metric analyzers use AnalyzerWaveformParameters.
     min_segment_length: float = Field(default=1.0, ge=0.0)
     # Drop disjoint-interval slivers shorter than this many seconds
     # before the sorter sees them; passed through to
@@ -187,9 +170,3 @@ class PreprocessingParamsSchema(BaseModel):
             "common_reference": self.common_reference.model_dump(),
             "bad_channel_handling": self.bad_channel_handling,
         }
-
-    def to_post_motion_dict(self) -> dict:
-        """Return stage-2 params; recording caches must not apply them."""
-        if self.whiten is None:
-            return {}
-        return {"whiten": self.whiten.model_dump()}

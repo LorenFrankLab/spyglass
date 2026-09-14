@@ -12,11 +12,12 @@ import pytest
 def test_preprocessing_params_schema_default():
     """The preprocessing schema has the expected default shape and guards.
 
-    ``schema_version`` is 3 (the v2 shipping schema): v2 added
+    ``schema_version`` is 4 (the v2 shipping schema): v2 added
     ``min_segment_length`` and removed the dead ``common_reference.reference``
-    field; v3 made ``bandpass_filter`` optional, defaulted ``whiten`` to
-    ``None``, and added the ``phase_shift`` and ``bad_channel_handling``
-    fields. Defaults below reflect the schema as shipped.
+    field; v3 made ``bandpass_filter`` optional and added the ``phase_shift``
+    and ``bad_channel_handling`` fields; v4 removed the inert ``whiten`` field
+    (whitening is owned by the sorter / analyzer rows). Defaults below reflect
+    the schema as shipped.
     """
     import pydantic
 
@@ -25,11 +26,10 @@ def test_preprocessing_params_schema_default():
     )
 
     assert PreprocessingParamsSchema().model_dump() == {
-        "schema_version": 3,
+        "schema_version": 4,
         "phase_shift": None,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
-        "whiten": None,
         "min_segment_length": 1.0,
         "bad_channel_handling": "remove",
     }
@@ -52,7 +52,7 @@ def test_preprocessing_params_schema_default():
 
 
 def test_preprocessing_params_stage_split():
-    """The schema splits filtering/referencing from whitening."""
+    """The schema owns filtering/referencing; whitening is not accepted."""
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
     )
@@ -64,13 +64,14 @@ def test_preprocessing_params_stage_split():
         "common_reference": {"operator": "median"},
         "bad_channel_handling": "remove",
     }
-    # Whitening defaults to None (deferred to the sorter), so the
-    # post-motion stage is empty by default.
-    assert params.to_post_motion_dict() == {}
+    # Recording-stage whitening was an inert field: no recording cache ever
+    # applied it. It is rejected outright so a row cannot claim whitening it
+    # does not perform (the sorter / analyzer rows own whitening).
+    import pydantic
 
-    # Explicitly enabling whitening populates the post-motion stage.
-    whitened = PreprocessingParamsSchema(whiten={"dtype": "float32"})
-    assert whitened.to_post_motion_dict() == {"whiten": {"dtype": "float32"}}
+    with pytest.raises(pydantic.ValidationError, match="whiten"):
+        PreprocessingParamsSchema(whiten={"dtype": "float32"})
+    assert not hasattr(params, "to_post_motion_dict")
 
 
 def test_resolved_job_kwargs_merge(restore_custom_config):

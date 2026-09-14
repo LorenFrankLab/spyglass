@@ -66,12 +66,11 @@ def test_common_reference_field_removed_from_schema():
         CommonReferenceParams(reference="local")
 
 
-def test_default_whiten_none():
-    """``default`` preset ships ``whiten=None``.
+def test_default_has_no_recording_stage_whiten():
+    """``default`` preset carries no ``whiten`` key.
 
-    Matches the other two presets and the deferred-to-sorter
-    reality. The WhitenParams schema is preserved as
-    forward-compat scaffolding.
+    Whitening is owned by the sorter / analyzer rows; the recording stage
+    no longer accepts an inert ``whiten`` field.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -88,7 +87,7 @@ def test_default_whiten_none():
         ) in PreprocessingParameters._DEFAULT_CONTENTS
     }
     assert "default" in contents
-    assert contents["default"]["whiten"] is None
+    assert "whiten" not in contents["default"]
 
 
 def test_phase_shift_preset_neuropixels_on_franklab_off():

@@ -835,9 +835,12 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
 @schema
 class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
-    """Bandpass + reference + optional whitening parameters.
+    """Phase-shift + bandpass + bad-channel + reference parameters.
 
-    The ``params`` blob is validated by :class:`PreprocessingParamsSchema`.
+    Whitening is NOT a recording-stage parameter: MS4/MS5 whiten via their
+    ``SorterParameters`` row and the metric analyzer via
+    ``AnalyzerWaveformParameters``. The ``params`` blob is validated by
+    :class:`PreprocessingParamsSchema`.
     ``insert_default`` bulk-inserts the v2 default presets.
     """
 

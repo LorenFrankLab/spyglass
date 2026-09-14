@@ -53,7 +53,6 @@ def test_preprocessing_non_default_blob_round_trips():
         phase_shift={"margin_ms": 50.0},
         bandpass_filter={"freq_min": 250.0, "freq_max": 5000.0},
         common_reference={"operator": "average"},
-        whiten={"dtype": "float64"},
         min_segment_length=0.0015,
         bad_channel_handling="interpolate",
     )
@@ -67,7 +66,6 @@ def test_preprocessing_non_default_blob_round_trips():
     assert rebuilt["phase_shift"] == {"margin_ms": 50.0}
     assert rebuilt["bandpass_filter"] == {"freq_min": 250.0, "freq_max": 5000.0}
     assert rebuilt["common_reference"]["operator"] == "average"
-    assert rebuilt["whiten"] == {"dtype": "float64"}
     assert rebuilt["min_segment_length"] == 0.0015
     assert rebuilt["bad_channel_handling"] == "interpolate"
 
@@ -114,10 +112,9 @@ def test_phase_shift_off_by_default():
     assert schema.to_pre_motion_dict()["phase_shift"] is None
     # A pre-field blob (no ``phase_shift`` key) validates unchanged.
     legacy = {
-        "schema_version": 3,
+        "schema_version": 4,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
-        "whiten": None,
         "min_segment_length": 1.0,
     }
     assert PreprocessingParamsSchema.model_validate(legacy).phase_shift is None
@@ -151,10 +148,20 @@ def test_preprocessing_inverted_bandpass_rejected():
         )
 
 
-def test_preprocessing_whiten_disabled_dumps_empty_post_motion():
-    """KS4-style ``whiten=None`` produces an empty post-motion dict."""
-    schema = PreprocessingParamsSchema(whiten=None)
-    assert schema.to_post_motion_dict() == {}
+def test_preprocessing_rejects_recording_stage_whiten():
+    """A ``whiten`` key is rejected: no recording cache ever applied it.
+
+    Whitening ownership is unambiguous -- ``SorterParameters`` (external
+    float64 pin for MS4/MS5) and ``AnalyzerWaveformParameters`` (metric
+    analyzer). Accepting an inert field here would let a row claim whitening
+    it does not perform.
+    """
+    with pytest.raises(ValidationError, match="whiten"):
+        PreprocessingParamsSchema(whiten=None)
+    with pytest.raises(ValidationError, match="whiten"):
+        PreprocessingParamsSchema(whiten={"dtype": "float32"})
+    schema = PreprocessingParamsSchema()
+    assert "whiten" not in schema.model_dump()
     assert "bandpass_filter" in schema.to_pre_motion_dict()
     assert "common_reference" in schema.to_pre_motion_dict()
 
@@ -177,17 +184,10 @@ def test_preprocessing_no_filter_is_none():
     )
 
 
-def test_whiten_default_is_none():
-    """The default ``whiten`` is ``None`` to match the runtime.
-
-    Whitening is deferred to the sorter (the runtime applies it lazily
-    after motion correction), so a default-constructed schema must NOT
-    claim whitening is configured. ``to_post_motion_dict`` is empty by
-    default.
-    """
-    schema = PreprocessingParamsSchema()
-    assert schema.whiten is None
-    assert schema.to_post_motion_dict() == {}
+def test_preprocessing_schema_version_is_four():
+    """Removing the inert ``whiten`` field bumped the blob schema version."""
+    assert PREPROCESSING_SCHEMA_VERSION == 4
+    assert PreprocessingParamsSchema().schema_version == 4
 
 
 # ---------- artifact detection ---------------------------------------------
@@ -974,12 +974,12 @@ def test_schema_versions_bumped():
     """The schema-version markers reflect the current field sets.
 
     ``ClusterlessThresholderSchema`` gained ``threshold_unit`` (3 -> 4)
-    and ``PreprocessingParamsSchema`` made ``bandpass_filter`` optional +
-    flipped the ``whiten`` default (2 -> 3). An un-bumped marker would let
-    a stale row validate against the new field set.
+    and ``PreprocessingParamsSchema`` dropped the inert ``whiten`` field
+    (3 -> 4). An un-bumped marker would let a stale row validate against the
+    new field set.
     """
     assert ClusterlessThresholderSchema().schema_version == 4
-    assert PreprocessingParamsSchema().schema_version == 3
+    assert PreprocessingParamsSchema().schema_version == 4
 
 
 def test_shipped_rows_carry_current_params_schema_version(dj_conn):
@@ -1014,8 +1014,8 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
         row = (
             PreprocessingParameters & {"preprocessing_params_name": name}
         ).fetch1()
-        assert row["params_schema_version"] == 3, name
-        assert row["params"]["schema_version"] == 3, name
+        assert row["params_schema_version"] == 4, name
+        assert row["params"]["schema_version"] == 4, name
 
 
 # ---------- bulk-insert validation -----------------------------------------
@@ -1079,12 +1079,12 @@ _BULK_INSERT_CASES = [
         {
             "preprocessing_params_name": "_pytest_bulk_a",
             "params": PreprocessingParamsSchema().model_dump(),
-            "params_schema_version": 3,
+            "params_schema_version": PREPROCESSING_SCHEMA_VERSION,
         },
         {
             "preprocessing_params_name": "_pytest_bulk_b",
             "params": PreprocessingParamsSchema().model_dump(),
-            "params_schema_version": 3,
+            "params_schema_version": PREPROCESSING_SCHEMA_VERSION,
         },
         id="PreprocessingParameters",
     ),
