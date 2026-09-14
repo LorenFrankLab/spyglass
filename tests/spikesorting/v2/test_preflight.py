@@ -239,6 +239,13 @@ def test_preflight_all_pass(preflight_inputs):
         == config
     ]
     assert matching, "effective_config must equal the dispatcher's resolution"
+    # Known allocations / scratch / worker settings are stated from the
+    # tracked recipes (per unit -- no unit count exists before the sort).
+    notes = "\n".join(report.resource_notes)
+    assert "spikes/unit" in notes and "MiB per unit" in notes
+    assert "analyzer cache root" in notes
+    assert "sorter scratch" in notes
+    assert "n_jobs=" in notes and "external_whiten=True" in notes
 
 
 @pytest.mark.database

@@ -10,7 +10,7 @@ import paths are unchanged. Depends only on ``_pipeline_presets``
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
@@ -213,6 +213,13 @@ class PreflightReport:
     checks
         Per-check detail; every check runs (the report is complete, not
         first-failure-only).
+    resource_notes
+        Known large allocations and scratch requirements the run implies,
+        stated from the tracked recipes (no unit count is known before
+        sorting): the per-unit waveform buffer upper bound of the display
+        analyzer (``max_spikes_per_unit`` x window x channels x 4 bytes), the
+        analyzer cache and sorter scratch locations, and the effective worker /
+        chunk settings. Informational; never a blocking check.
     effective_config
         What the sort stage would actually execute, as
         ``EffectiveSortConfig.as_dict()`` (sorter, the kwargs handed to
@@ -230,6 +237,7 @@ class PreflightReport:
     expected_ids: dict
     checks: list["PreflightCheck"]
     effective_config: "dict | None" = None
+    resource_notes: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         """Return ``True`` when the configuration is runnable (``ok``)."""
@@ -1141,6 +1149,21 @@ def preflight_v2_pipeline(
         }
 
     errors = [c.fix for c in checks if not c.ok]
+    resource_notes = _resource_notes(
+        display_waveform_params_name,
+        n_channels=len(
+            SortGroupV2.SortGroupElectrode
+            & {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        ),
+        sampling_rate_hz=(
+            float(
+                (Raw & {"nwb_file_name": nwb_file_name}).fetch1("sampling_rate")
+            )
+            if Raw & {"nwb_file_name": nwb_file_name}
+            else None
+        ),
+        effective_config=effective_config,
+    )
     return PreflightReport(
         ok=not errors,
         errors=errors,
@@ -1149,7 +1172,86 @@ def preflight_v2_pipeline(
         expected_ids=expected_ids,
         checks=checks,
         effective_config=effective_config,
+        resource_notes=resource_notes,
     )
+
+
+def _resource_notes(
+    display_waveform_params_name: str,
+    *,
+    n_channels: int,
+    sampling_rate_hz: "float | None",
+    effective_config: "dict | None",
+) -> list[str]:
+    """Known allocations / scratch / worker settings, from tracked recipes.
+
+    Pre-sort the unit count is unknown, so the waveform bound is stated per
+    unit; multiply by the expected unit count for the buffer size. Channels
+    per unit are bounded by the sort group's channel count (radius / best
+    channels sparsity reduces it; dense uses all).
+    """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_root
+    from spyglass.spikesorting.v2._params.analyzer_waveform import (
+        SparsityParams,
+    )
+    from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
+    from spyglass.settings import temp_dir
+
+    notes: list[str] = []
+    rows = (
+        AnalyzerWaveformParameters
+        & {"waveform_params_name": display_waveform_params_name}
+    ).fetch(as_dict=True)
+    if len(rows) == 1 and sampling_rate_hz:
+        params = dict(rows[0]["params"])
+        sparsity = SparsityParams.model_validate(params.get("sparsity") or {})
+        n_samples = int(
+            round(
+                (float(params["ms_before"]) + float(params["ms_after"]))
+                * sampling_rate_hz
+                / 1000.0
+            )
+        )
+        if sparsity.method == "best_channels":
+            channels = min(int(sparsity.num_channels), int(n_channels))
+            channel_note = f"{channels} channels (best_channels)"
+        elif sparsity.method == "radius":
+            channels = int(n_channels)
+            channel_note = (
+                f"<= {channels} channels (radius {sparsity.radius_um:g} um; "
+                "fewer on wide groups)"
+            )
+        else:
+            channels = int(n_channels)
+            channel_note = f"{channels} channels (dense)"
+        per_unit = int(params["max_spikes_per_unit"]) * n_samples * channels * 4
+        notes.append(
+            "display analyzer waveforms: up to "
+            f"{int(params['max_spikes_per_unit'])} spikes/unit x {n_samples} "
+            f"samples x {channel_note} x 4 bytes = up to "
+            f"{per_unit / 1024**2:.1f} MiB per unit on disk (memmapped; "
+            "extraction peak ~1.5x the total, loads are lazy)."
+        )
+    notes.append(
+        f"analyzer cache root: {analyzer_cache_root()} (display analyzer, plus "
+        "a whitened metric analyzer when PC metrics are requested, plus one "
+        "per-generation cache per reviewed merged curation)."
+    )
+    notes.append(
+        f"sorter scratch: a per-sort temporary directory under {temp_dir}, "
+        "removed when the sort finishes; the preprocessed Recording is a "
+        "separate NWB artifact."
+    )
+    if effective_config:
+        jobs = effective_config.get("job_kwargs") or {}
+        notes.append(
+            "effective worker/chunk settings (sort + analyzer): "
+            f"n_jobs={jobs.get('n_jobs', 1)}, "
+            f"chunk_duration={jobs.get('chunk_duration', '1s')!r}, "
+            f"random_seed={effective_config.get('random_seed')}, "
+            f"external_whiten={effective_config.get('external_whiten')}."
+        )
+    return notes
 
 
 def _resolve_session_sort_group_ids(
