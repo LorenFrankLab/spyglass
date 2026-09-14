@@ -125,6 +125,19 @@ metrics are requested) metric analyzers, plus one per-generation cache (and
 its derivatives) per committed merged curation you review. The
 `SortingAnalyzerRecompute` tables report folder sizes.
 
+## Release workload measurement
+
+`tests/spikesorting/v2/scripts/measure_release_workflow.py` is the repeatable
+release run: it executes the supported workflow (prepare → sort → auto-label →
+review bundle and reopen → merge → reevaluate → waveform inspection → Phy
+export → unit selection → warm rerun) on one NWB file against a private MySQL
+container and base dir, sampling the whole process tree's RSS (workers
+included) and the scratch-disk footprint, and writes a JSON receipt with stage
+timings, peak memory, peak scratch, bundle bytes and the effective
+configuration. Run it on a lab Linux machine with one representative 1–3 h
+tetrode recording and one ≥1 h probe recording to set the supported machine
+budgets; short synthetic fixtures are not evidence of long-recording capacity.
+
 ## Upstream deletion cascades and analyzer folders
 
 `Sorting.delete()` removes the corresponding regeneratable analyzer folder when

@@ -63,6 +63,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 tests/_data/*
+tests/_data_release_measure/
 wget-log*
 
 # Translations
