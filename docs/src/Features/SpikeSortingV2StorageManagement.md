@@ -91,6 +91,40 @@ A completed comparison with `matched=0` records which objects differ in the
 are explicitly skipped, legacy/unverifiable, or fail regeneration instead put
 the reason in `err_msg` and have no synthetic diff rows.
 
+## Analyzer cache layout and memory
+
+Every analyzer cache folder is a SpikeInterface `binary_folder` analyzer named
+`{sorting_id}__{payload}.analyzer` under the analyzer root
+(`dj.config["custom"]["spikesorting_v2_analyzer_dir"]`, else
+`<temp_dir>/spikesorting_v2/analyzers`). The payload is the waveform recipe
+name for a sort's own display/metric analyzer, or
+`curation_{uuid}_{role}_{recipe_hash}_si_{si_hash}` for a committed merged
+curation's per-generation cache; a derivative that carries extra extensions
+with specific parameters appends `_ext_{request_hash}` and is reused on every
+later request with the same parameters.
+
+`binary_folder` is deliberate: it is the only SpikeInterface 0.104 format
+whose waveform extraction writes straight into a memmapped `waveforms.npy`
+(the `zarr` and `memory` formats extract into a shared-memory buffer sized
+for the whole waveform volume and then copy it). Every load goes through
+`load_analyzer_folder`, which maps `waveforms.npy` lazily instead of reading
+the whole volume into RAM. Measured on a 415 MB waveform volume
+(`test_analyzer_memory.py`): extraction peaks at ~1.5x the volume (file-backed
+dirty pages included) versus ~2.3x for `zarr`; a lazy load plus one unit's
+read costs ~0.17x versus >= 1x for an eager load. The scientific waveform
+sample (`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to
+meet a memory target -- only the storage and load paths changed.
+
+Folders written under the pre-launch `.zarr` convention are not read; they
+are disposable and rebuild on first access. Delete stale `*.zarr` folders under
+the analyzer root by hand.
+
+Scratch disk: budget for the preprocessed recording (`Recording`), the
+sorter's own scratch under `temp_dir` while it runs, the display and (when PC
+metrics are requested) metric analyzers, plus one per-generation cache (and
+its derivatives) per committed merged curation you review. The
+`SortingAnalyzerRecompute` tables report folder sizes.
+
 ## Upstream deletion cascades and analyzer folders
 
 `Sorting.delete()` removes the corresponding regeneratable analyzer folder when

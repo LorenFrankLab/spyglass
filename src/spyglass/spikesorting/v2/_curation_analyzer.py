@@ -7,10 +7,18 @@ the recipe content and SpikeInterface version, and a manifest validates the
 scientific inputs and every published extension before a folder is reused.
 
 Published merged-curation analyzers are immutable by ownership. Supported
-callers use the private resolver for reads, request a detached memory copy for
-direct access, or compute unusual extensions on a context-managed memory
-derivative. Raw-namespace curations instead share the sort analyzer and persist
-missing extensions through ``Sorting.add_extensions`` under its cache lock.
+callers use the private resolver for reads. Extra extensions with specific
+parameters are computed ONCE into a disk-backed DERIVATIVE cache keyed by the
+base identity plus the extension request (``derived_extension_request_hash``)
+and reused on every later request with the same parameters -- never a
+whole-analyzer memory copy. Expert callers that need a mutable SI object get a
+context-managed ``binary_folder`` working copy in a temp dir
+(``open_curation_analyzer``), so no path can mutate a published cache.
+Raw-namespace curations instead share the sort analyzer and persist missing
+extensions through ``Sorting.add_extensions`` under its cache lock.
+
+Every folder is a ``binary_folder`` analyzer loaded through
+``_analyzer_cache.load_analyzer_folder`` (memmapped waveforms).
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ from spyglass.spikesorting.v2._analyzer_cache import (
     analyzer_cache_lock,
     analyzer_folder_storage_fingerprint,
     curation_analyzer_path,
+    load_analyzer_folder,
     publish_analyzer_atomically,
     waveform_recipe_hash,
 )
@@ -54,6 +63,7 @@ class CurationAnalyzerManifest:
     source_artifact_hashes: dict[str, str]
     waveform_recipe_hash: str
     spikeinterface_version: str
+    extension_request: dict[str, dict]
     extension_inventory: dict[str, str]
     storage_fingerprint: str
 
@@ -280,7 +290,25 @@ def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
         "source_artifact_hashes": _source_artifact_hashes(row["sorting_id"]),
         "waveform_recipe_hash": waveform_recipe_hash(recipe_row),
         "spikeinterface_version": _spikeinterface_version(),
+        # The base cache carries no extra extensions; a derivative records the
+        # exact request (names + normalized params) it was built for.
+        "extension_request": {},
     }
+
+
+def normalize_extension_request(extra_extensions) -> dict[str, dict]:
+    """Return ``{name: params}`` with JSON-native params, sorted by name."""
+    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+
+    request = {}
+    for name in sorted(extra_extensions or {}):
+        request[str(name)] = _jsonable_blob(dict(extra_extensions[name] or {}))
+    return request
+
+
+def derived_extension_request_hash(extension_request: Mapping) -> str:
+    """16-hex identity of an extension request (names + parameters)."""
+    return _content_hash(normalize_extension_request(extension_request))[:16]
 
 
 def _spikeinterface_version() -> str:
@@ -289,18 +317,24 @@ def _spikeinterface_version() -> str:
     return str(si.__version__)
 
 
-def _expected_extensions(role: str) -> tuple[str, ...]:
+def _expected_extensions(
+    role: str, extra: tuple[str, ...] = ()
+) -> tuple[str, ...]:
     if role == "display":
-        return (
+        base = (
             *BASE_ANALYZER_EXTENSIONS,
             *STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
         )
-    return BASE_ANALYZER_EXTENSIONS
+    else:
+        base = BASE_ANALYZER_EXTENSIONS
+    return base + tuple(name for name in extra if name not in base)
 
 
-def _extension_inventory(analyzer, role: str) -> dict[str, str]:
+def _extension_inventory(
+    analyzer, role: str, extra: tuple[str, ...] = ()
+) -> dict[str, str]:
     """Validate the extension set and fingerprint its small parameters."""
-    expected = _expected_extensions(role)
+    expected = _expected_extensions(role, extra)
     saved = set(analyzer.get_saved_extension_names())
     if saved != set(expected):
         raise ValueError(
@@ -332,10 +366,9 @@ def _write_manifest(folder: Path, manifest: CurationAnalyzerManifest) -> None:
 
 def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
     """Return a validated cached analyzer, or ``None`` on any corruption."""
-    import spikeinterface as si
-
     from spyglass.utils import logger
 
+    extra = tuple(expected_prefix.get("extension_request", {}))
     try:
         stored = _read_manifest(folder)
         comparable = dict(stored)
@@ -365,8 +398,8 @@ def _load_valid_cached_analyzer(folder: Path, expected_prefix: dict, role: str):
                 current_storage_fingerprint,
             )
             return None
-        analyzer = si.load_sorting_analyzer(folder)
-        current_inventory = _extension_inventory(analyzer, role)
+        analyzer = load_analyzer_folder(folder)
+        current_inventory = _extension_inventory(analyzer, role, extra)
         if current_inventory != stored_inventory:
             logger.warning(
                 "Curation analyzer extension inventory mismatch at %s: "
@@ -435,8 +468,6 @@ def build_merged_analyzer(
     analyzer_folder,
 ):
     """Build one merged-curation analyzer through the shared low-level builder."""
-    import spikeinterface as si
-
     from spyglass.spikesorting.v2._sorting_analyzer import (
         build_analyzer,
         ensure_extensions,
@@ -490,7 +521,7 @@ def build_merged_analyzer(
         analyzer_folder=Path(analyzer_folder),
         waveform_params=dict(recipe_row["params"]),
     )
-    analyzer = si.load_sorting_analyzer(analyzer_folder)
+    analyzer = load_analyzer_folder(analyzer_folder)
     if not analyzer.has_recording():
         analyzer.set_temporary_recording(recording)
     if role == "display":
@@ -506,8 +537,18 @@ def _resolve_curation_analyzer(
     curation_ref,
     waveform_recipe: str,
     role: str = "display",
+    *,
+    extra_extensions: Mapping[str, dict] | None = None,
 ):
-    """Resolve the cache-backed analyzer for controlled internal reads."""
+    """Resolve the cache-backed analyzer for controlled internal reads.
+
+    Returns the PUBLISHED analyzer (raw namespace: the shared sort analyzer;
+    merged namespace: the immutable per-generation cache, or -- when
+    ``extra_extensions`` names extensions the base does not carry -- the
+    disk-backed derivative built for exactly that request). Callers must treat
+    the result as read-only; use :func:`open_curation_analyzer` for a mutable
+    working copy.
+    """
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -533,7 +574,26 @@ def _resolve_curation_analyzer(
             "SortingAnalyzer exists."
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
+    request = normalize_extension_request(extra_extensions)
     if namespace == "raw":
+        if request:
+            # Raw curations share the canonical sort analyzer. Persist requested
+            # extensions there under the per-sort cache lock so later view
+            # configurations reuse them without a copy/recompute.
+            analyzer = Sorting().get_analyzer(
+                {"sorting_id": row["sorting_id"]},
+                waveform_params_name=waveform_recipe,
+            )
+            missing = [
+                name for name in request if not analyzer.has_extension(name)
+            ]
+            if missing:
+                Sorting().add_extensions(
+                    {"sorting_id": row["sorting_id"]},
+                    missing,
+                    waveform_params_name=waveform_recipe,
+                    extension_params={name: request[name] for name in missing},
+                )
         return Sorting().get_analyzer(
             {"sorting_id": row["sorting_id"]},
             waveform_params_name=waveform_recipe,
@@ -541,7 +601,7 @@ def _resolve_curation_analyzer(
 
     curated_sorting = CurationV2.get_merged_sorting(key)
     expected_prefix = _manifest_prefix(row, curated_sorting, recipe_row, role)
-    folder = curation_analyzer_path(
+    base_folder = curation_analyzer_path(
         row["sorting_id"],
         row["curation_uuid"],
         role,
@@ -549,7 +609,7 @@ def _resolve_curation_analyzer(
         si.__version__,
     )
 
-    def _build(staging_folder):
+    def _build_base(staging_folder):
         analyzer = build_merged_analyzer(
             key,
             waveform_recipe,
@@ -566,28 +626,127 @@ def _resolve_curation_analyzer(
         )
         _write_manifest(Path(staging_folder), manifest)
 
-    return _resolve_published_analyzer(
-        folder,
+    base = _resolve_published_analyzer(
+        base_folder,
         row["sorting_id"],
         expected_prefix,
         role,
-        _build,
+        _build_base,
+    )
+    missing = [name for name in request if not base.has_extension(name)]
+    if not missing:
+        return base
+
+    # Disk-backed derivative: the base cache stays immutable; the requested
+    # extensions are computed once into a sibling folder keyed by the exact
+    # request and reused thereafter. Built by copying the base on disk
+    # (memmapped waveforms stream through np.save) and computing only the
+    # missing extensions with the recipe's job kwargs.
+    derived_request = {name: request[name] for name in missing}
+    derived_prefix = dict(expected_prefix)
+    derived_prefix["extension_request"] = derived_request
+    derived_folder = curation_analyzer_path(
+        row["sorting_id"],
+        row["curation_uuid"],
+        role,
+        expected_prefix["waveform_recipe_hash"],
+        si.__version__,
+        extension_request_hash=derived_extension_request_hash(derived_request),
+    )
+
+    def _build_derivative(staging_folder):
+        from spyglass.spikesorting.v2._sorting_analyzer import (
+            ensure_extensions,
+            reconstruct_recording_and_sorting,
+        )
+        from spyglass.spikesorting.v2.sorting import (
+            SorterParameters,
+            SortingSelection,
+        )
+        from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
+
+        derivative = base.save_as(
+            format="binary_folder", folder=Path(staging_folder)
+        )
+        if not derivative.has_recording():
+            recording, _sorting = reconstruct_recording_and_sorting(
+                Sorting(), {"sorting_id": row["sorting_id"]}
+            )
+            derivative.set_temporary_recording(recording)
+        sorter_job_kwargs = (
+            SorterParameters
+            & (SortingSelection & {"sorting_id": row["sorting_id"]})
+        ).fetch1("job_kwargs")
+        ensure_extensions(
+            derivative,
+            list(derived_request),
+            job_kwargs=_resolved_job_kwargs(sorter_job_kwargs),
+            extension_params=derived_request,
+        )
+        inventory = _extension_inventory(
+            derivative, role, tuple(derived_request)
+        )
+        manifest = CurationAnalyzerManifest(
+            **derived_prefix,
+            extension_inventory=inventory,
+            storage_fingerprint=_folder_storage_fingerprint(
+                Path(staging_folder)
+            ),
+        )
+        _write_manifest(Path(staging_folder), manifest)
+
+    return _resolve_published_analyzer(
+        derived_folder,
+        row["sorting_id"],
+        derived_prefix,
+        role,
+        _build_derivative,
     )
 
 
-def get_curation_analyzer(
+@contextmanager
+def open_curation_analyzer(
     curation_ref,
     waveform_recipe: str,
     role: str = "display",
+    *,
+    extra_extensions: Mapping[str, dict] | None = None,
 ):
-    """Return a detached memory analyzer for direct caller access.
+    """Yield a mutable, disk-backed WORKING COPY of a curation's analyzer.
 
-    The persistent object stays internal because SpikeInterface analyzers are
-    mutable. Mutating this returned copy cannot alter the published cache.
+    For expert SpikeInterface access (widgets that compute, exporters, ad-hoc
+    extensions). The copy is a ``binary_folder`` analyzer in a private temp
+    directory under Spyglass's temp dir; mutating it cannot alter the published
+    cache, and the directory is removed when the context exits. Waveforms are
+    copied on disk (streamed from the memmapped source), not held in memory.
+    Raw-namespace and merged-namespace curations resolve through the same
+    published caches (see :func:`_resolve_curation_analyzer`), so the copy
+    carries the exact curated unit ids and spike trains.
     """
-    return _resolve_curation_analyzer(
-        curation_ref, waveform_recipe, role
-    ).save_as(format="memory")
+    import shutil
+    import tempfile
+
+    from spyglass.settings import temp_dir as spyglass_temp_dir
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        ANALYZER_FOLDER_SUFFIX,
+    )
+
+    published = _resolve_curation_analyzer(
+        curation_ref, waveform_recipe, role, extra_extensions=extra_extensions
+    )
+    tmp = tempfile.mkdtemp(
+        prefix="v2_curation_analyzer_", dir=spyglass_temp_dir
+    )
+    try:
+        working = published.save_as(
+            format="binary_folder",
+            folder=Path(tmp) / f"working{ANALYZER_FOLDER_SUFFIX}",
+        )
+        if not working.has_recording() and published.has_recording():
+            working.set_temporary_recording(published.recording)
+        yield working
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @contextmanager
@@ -598,61 +757,14 @@ def curation_analyzer_with_extensions(
     *,
     extra_extensions: Mapping[str, dict] | None = None,
 ):
-    """Yield an analyzer with requested extensions.
+    """Yield the published (read-only) analyzer carrying ``extra_extensions``.
 
     Raw namespaces persist missing extensions to their shared sort analyzer;
-    merged namespaces retain immutable published caches and derive in memory.
+    merged namespaces resolve (building once if needed) the disk-backed
+    derivative keyed by the exact extension request. Nothing is copied into
+    memory. The yielded analyzer must not be mutated; use
+    :func:`open_curation_analyzer` for a working copy.
     """
-    from spyglass.spikesorting.v2._sorting_analyzer import ensure_extensions
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
+    yield _resolve_curation_analyzer(
+        curation_ref, waveform_recipe, role, extra_extensions=extra_extensions
     )
-    from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
-
-    base = _resolve_curation_analyzer(curation_ref, waveform_recipe, role)
-    requested = dict(extra_extensions or {})
-    missing = [name for name in requested if not base.has_extension(name)]
-    if not missing:
-        yield base
-        return
-
-    row = _resolve_curation_row(curation_ref)
-    if classify_curation_analyzer_namespace(row) == "raw":
-        # Raw curations share the canonical sort analyzer. Persist requested
-        # display extensions there under the per-sort cache lock so later view
-        # configurations reuse them without a multi-GB memory copy/recompute.
-        Sorting().add_extensions(
-            {"sorting_id": row["sorting_id"]},
-            missing,
-            waveform_params_name=waveform_recipe,
-            extension_params={name: requested[name] for name in missing},
-        )
-        yield _resolve_curation_analyzer(curation_ref, waveform_recipe, role)
-        return
-
-    derivative = base.save_as(format="memory")
-    if not derivative.has_recording():
-        from spyglass.spikesorting.v2._sorting_analyzer import (
-            reconstruct_recording_and_sorting,
-        )
-
-        recording, _sorting = reconstruct_recording_and_sorting(
-            Sorting(), {"sorting_id": row["sorting_id"]}
-        )
-        derivative.set_temporary_recording(recording)
-    sorter_job_kwargs = (
-        SorterParameters
-        & (SortingSelection & {"sorting_id": row["sorting_id"]})
-    ).fetch1("job_kwargs")
-    ensure_extensions(
-        derivative,
-        missing,
-        job_kwargs=_resolved_job_kwargs(sorter_job_kwargs),
-        extension_params={name: requested[name] for name in missing},
-    )
-    try:
-        yield derivative
-    finally:
-        del derivative

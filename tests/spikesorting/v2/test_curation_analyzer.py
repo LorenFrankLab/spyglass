@@ -185,7 +185,9 @@ def test_extension_inventory_never_reads_payload(monkeypatch):
             return self.extension
 
     monkeypatch.setattr(
-        resolver, "_expected_extensions", lambda _role: ("templates",)
+        resolver,
+        "_expected_extensions",
+        lambda _role, _extra=(): ("templates",),
     )
     analyzer = _Analyzer()
     original = resolver._extension_inventory(analyzer, "display")
@@ -259,20 +261,43 @@ def test_cache_rejects_storage_drift_before_loading_analyzer(
     assert loads == []
 
 
-def test_direct_curation_analyzer_access_is_detached(monkeypatch):
+def test_open_curation_analyzer_yields_disk_backed_working_copy(
+    monkeypatch, tmp_path
+):
+    """Expert access is a temp-dir ``binary_folder`` copy, removed on exit.
+
+    Never a memory copy (unbounded for long sorts) and never the published
+    cache itself (mutable SI object).
+    """
+    from spyglass import settings
     from spyglass.spikesorting.v2 import _curation_analyzer as resolver
 
-    detached = object()
+    seen: dict = {}
 
-    class _CacheBacked:
-        def save_as(self, *, format):
-            assert format == "memory"
-            return detached
+    class _Working:
+        def has_recording(self):
+            return True
 
+    class _Published:
+        def save_as(self, *, format, folder):
+            seen["format"] = format
+            seen["folder"] = Path(folder)
+            Path(folder).mkdir(parents=True)
+            return _Working()
+
+        def has_recording(self):
+            return True
+
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
     monkeypatch.setattr(
-        resolver, "_resolve_curation_analyzer", lambda *a, **k: _CacheBacked()
+        resolver, "_resolve_curation_analyzer", lambda *a, **k: _Published()
     )
-    assert resolver.get_curation_analyzer({}, "recipe") is detached
+    with resolver.open_curation_analyzer({}, "recipe") as working:
+        assert isinstance(working, _Working)
+        assert seen["format"] == "binary_folder"
+        assert seen["folder"].is_relative_to(tmp_path)
+        assert seen["folder"].exists()
+    assert not seen["folder"].parent.exists()
 
 
 def test_single_low_level_analyzer_builder():
@@ -317,7 +342,7 @@ def test_concurrent_resolve_builds_once(tmp_path):
     generation = uuid.uuid4().hex
     folder = tmp_path / (
         f"{sorting_id}__curation_{generation}_display_"
-        f"{'a' * 64}_si_{'b' * 16}.zarr"
+        f"{'a' * 64}_si_{'b' * 16}.analyzer"
     )
     start_event = context.Event()
     results = context.Queue()
@@ -356,7 +381,8 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         _resolve_curation_analyzer,
         curation_analyzer_cache_path,
         curation_analyzer_with_extensions,
-        get_curation_analyzer,
+        derived_extension_request_hash,
+        open_curation_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -417,24 +443,51 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         assert list(reused.unit_ids) == list(expected.unit_ids)
         assert _folder_content_hash(folder) == published_hash
 
-        # Direct access is detached. Even destructive mutation of that memory
-        # copy cannot remove an extension from the published zarr analyzer.
-        detached = get_curation_analyzer(merged, recipe)
-        detached.delete_extension("correlograms")
-        assert not detached.has_extension("correlograms")
+        # Expert access is a disk-backed working copy. Even destructive
+        # mutation of that copy cannot remove an extension from the published
+        # analyzer, and the copy is gone once the context exits.
+        with open_curation_analyzer(merged, recipe) as working:
+            working_folder = Path(working.folder)
+            assert working_folder != folder
+            working.delete_extension("correlograms")
+            assert not working.has_extension("correlograms")
+        assert not working_folder.exists()
         assert _resolve_curation_analyzer(merged, recipe).has_extension(
             "correlograms"
         )
         assert _folder_content_hash(folder) == published_hash
 
-        # An unusual plot-only extension is computed on a temporary in-memory
-        # derivative, never into the immutable published cache.
+        # An unusual plot-only extension is computed ONCE into a disk-backed
+        # derivative keyed by the exact request, never into the immutable
+        # published base cache, and reused on the next identical request.
+        request = {"spike_locations": {}}
+        derived_folder = curation_analyzer_cache_path(merged, recipe).with_name(
+            folder.name.replace(
+                folder.suffix,
+                f"_ext_{derived_extension_request_hash(request)}{folder.suffix}",
+            )
+        )
         with curation_analyzer_with_extensions(
             merged,
             recipe,
-            extra_extensions={"spike_locations": {}},
+            extra_extensions=request,
         ) as derivative:
             assert derivative.has_extension("spike_locations")
+            assert Path(derivative.folder) == derived_folder
+        assert derived_folder.exists()
+        derived_hash = _folder_content_hash(derived_folder)
+        with curation_analyzer_with_extensions(
+            merged,
+            recipe,
+            extra_extensions=request,
+        ) as reused_derivative:
+            assert Path(reused_derivative.folder) == derived_folder
+        assert _folder_content_hash(derived_folder) == derived_hash
+        # Different extension parameters are a different derivative.
+        other_request = {"spike_locations": {"method": "center_of_mass"}}
+        assert derived_extension_request_hash(
+            other_request
+        ) != derived_extension_request_hash(request)
         assert not _resolve_curation_analyzer(merged, recipe).has_extension(
             "spike_locations"
         )
@@ -478,9 +531,11 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # Every supported read above leaves the cache byte-identical.
         assert _folder_content_hash(folder) == published_hash
 
-        # The unified orphan collector recognizes this live curation reference.
+        # The unified orphan collector recognizes this live curation reference
+        # and its derivative (keyed by the same live generation).
         live_report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         assert str(folder) not in live_report["disk_side"]
+        assert str(derived_folder) not in live_report["disk_side"]
 
         # Missing/invalid manifest and incomplete extensions are never surfaced;
         # each state is rebuilt from the committed curation.

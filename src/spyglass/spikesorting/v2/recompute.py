@@ -780,7 +780,8 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     any whitened METRIC recipe a ``CurationEvaluationSelection`` references. The
     whitened and unwhitened analyzers for one ``sorting_id`` are inventoried
     (and recomputed) independently, keyed by ``waveform_params_name`` -- their
-    folders are ``{sorting_id}__{waveform_params_name}.zarr`` and never collide.
+    folders are ``{sorting_id}__{waveform_params_name}.analyzer`` and never
+    collide.
     """
 
     definition = """
@@ -1188,7 +1189,7 @@ def _analyzer_folder(sorting_id, waveform_params_name):
 
     Recompute inventories one folder per (sort, recipe); the folder-size
     accounting and delete target resolve the explicit ``waveform_params_name``
-    (display or whitened metric), keyed ``{sorting_id}__{name}.zarr``.
+    (display or whitened metric), keyed ``{sorting_id}__{name}.analyzer``.
     """
     from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
 
@@ -1266,8 +1267,6 @@ def _recompute_analyzer_hashes(
         return {}, {}  # zero-unit: nothing to verify -> trivially matched
     stored_hashes = hash_extension_data(stored, rounding=rounding)
 
-    import spikeinterface as si
-
     params = fetch_waveform_params(waveform_params_name)
     # Source sorting + recording from the CANONICAL units NWB + recording (the
     # shared resolver), NOT a self-healing analyzer load. This (a) never rebuilds
@@ -1293,15 +1292,21 @@ def _recompute_analyzer_hashes(
         # only the extensions this verify hashes (ANALYZER_RECOMPUTE_EXTENSIONS)
         # -- every one is seed-pinned, noise_levels included, so the rebuild is
         # content-identical.
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            ANALYZER_FOLDER_SUFFIX,
+            load_analyzer_folder,
+        )
+
+        fresh_folder = Path(tmp) / f"analyzer{ANALYZER_FOLDER_SUFFIX}"
         build_analyzer(
             sorting,
             recording,
             sort_key,
-            analyzer_folder=Path(tmp) / "analyzer.zarr",
+            analyzer_folder=fresh_folder,
             waveform_params=params,
             extensions=ANALYZER_RECOMPUTE_EXTENSIONS,
         )
-        fresh = si.load_sorting_analyzer(Path(tmp) / "analyzer.zarr")
+        fresh = load_analyzer_folder(fresh_folder)
         new_hashes = hash_extension_data(fresh, rounding=rounding)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1484,7 +1489,7 @@ def _delete_analyzer_folders(
 
     Deletion policy: the reproducibility audit hashes only the
     ``ANALYZER_RECOMPUTE_EXTENSIONS`` (random_spikes / templates / waveforms),
-    but this removes the WHOLE ``.zarr`` folder -- including derived
+    but this removes the WHOLE analyzer folder -- including derived
     curation/visualization extensions it never hashed (amplitudes,
     correlograms, principal_components, quality_metrics). That is intentional:
     the analyzer folder is regeneratable scratch (a valid ``Sorting`` row keeps

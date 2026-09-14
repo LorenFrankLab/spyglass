@@ -41,7 +41,7 @@ def test_analyzer_cache_root_honors_config(restore_custom_config):
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
     assert analyzer_cache_root() == Path("/tmp/v2_custom_an")
     assert analyzer_path("abc", "rec") == Path(
-        "/tmp/v2_custom_an/abc__rec.zarr"
+        "/tmp/v2_custom_an/abc__rec.analyzer"
     )
 
 
@@ -53,7 +53,7 @@ def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
     dj.config["custom"].pop("spikesorting_v2_analyzer_dir", None)
     expected = Path(temp_dir) / "spikesorting_v2" / "analyzers"
     assert analyzer_cache_root() == expected
-    assert analyzer_path("s1", "rec") == expected / "s1__rec.zarr"
+    assert analyzer_path("s1", "rec") == expected / "s1__rec.analyzer"
 
 
 def test_analyzer_path_includes_params_name(restore_custom_config):
@@ -71,7 +71,9 @@ def test_analyzer_path_includes_params_name(restore_custom_config):
     metric = analyzer_path("sid1", "franklab_hippocampus_metric_waveforms")
     assert display != metric
     assert display.parent == root and metric.parent == root
-    assert display == root / "sid1__franklab_hippocampus_actual_waveforms.zarr"
+    assert (
+        display == root / "sid1__franklab_hippocampus_actual_waveforms.analyzer"
+    )
 
 
 def test_empty_config_value_falls_back(restore_custom_config):
@@ -90,7 +92,7 @@ def test_empty_config_value_falls_back(restore_custom_config):
 def test_remove_analyzer_cache_removes_all_recipes(
     tmp_path, restore_custom_config
 ):
-    """``remove_analyzer_cache`` globs every ``{sid}__*.zarr`` recipe folder.
+    """``remove_analyzer_cache`` globs every ``{sid}__*.analyzer`` recipe folder.
 
     A sort has multiple analyzer recipes on disk (display + metric); deleting
     the sort must orphan every one. A different sort's folder is untouched.
@@ -301,7 +303,7 @@ class TestPublishAnalyzerAtomically:
     the canonical path.
 
     A directory rename is not a clean atomic swap (POSIX ``rename(2)`` needs an
-    empty destination), so a rebuild over an existing ``.zarr`` is published by
+    empty destination), so a rebuild over an existing ``.analyzer`` is published by
     moving the existing folder aside, moving the temp in, and removing the
     aside copy; a failed swap restores the original. The publisher holds the
     per-sort lock, so the brief move-aside window is reader-safe. These DB-free
@@ -324,7 +326,7 @@ class TestPublishAnalyzerAtomically:
         return build_into
 
     def _staging_is_empty(self, canonical):
-        # The build/trash siblings are hidden ``.{stem}.build|trash-*.zarr``
+        # The build/trash siblings are hidden ``.{stem}.build|trash-*.analyzer``
         # folders next to the canonical slot; none should survive a publish.
         return not any(canonical.parent.glob(f".{canonical.stem}.*"))
 
@@ -506,11 +508,11 @@ class TestPublishAnalyzerAtomically:
     def test_temp_build_is_a_hidden_sibling_of_canonical(
         self, tmp_path, restore_custom_config
     ):
-        """The temp build folder is a HIDDEN ``.zarr`` SIBLING of the canonical
+        """The temp build folder is a HIDDEN ``.analyzer`` SIBLING of the canonical
         slot (same parent directory), so (a) the move preserves the analyzer's
         recording path, relative to the analyzer folder, and (b) the leading
         ``.`` keeps the orphan scan from mistaking an in-flight build for a
-        stray ``{sid}__*.zarr`` analyzer."""
+        stray ``{sid}__*.analyzer`` analyzer."""
         self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         seen = {}
@@ -524,13 +526,13 @@ class TestPublishAnalyzerAtomically:
         temp = seen["temp"]
         assert temp.parent == canonical.parent, "temp must be a sibling"
         assert temp.name.startswith("."), "temp must be hidden"
-        assert temp.suffix == ".zarr"
+        assert temp.suffix == ".analyzer"
         assert temp.name != canonical.name
 
     def test_published_real_analyzer_keeps_its_recording(
         self, tmp_path, restore_custom_config
     ):
-        """A real SI zarr analyzer published via the move keeps its recording.
+        """A real SI binary_folder analyzer published via the move keeps its recording.
 
         SI stores the recording reference as a path RELATIVE to the analyzer
         folder, so the temp build folder MUST be a sibling of the canonical slot
@@ -552,7 +554,11 @@ class TestPublishAnalyzerAtomically:
 
         def build_into(folder):
             analyzer = si.create_sorting_analyzer(
-                sorting, recording, sparse=True, format="zarr", folder=folder
+                sorting,
+                recording,
+                sparse=True,
+                format="binary_folder",
+                folder=folder,
             )
             analyzer.compute(["random_spikes", "templates", "waveforms"])
 
@@ -594,7 +600,7 @@ def recording_3d_and_sorting():
 class TestBuildAnalyzerProbeProjection:
     def test_analyzer_probe_is_2d(self, recording_3d_and_sorting, tmp_path):
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.zarr"
+        folder = tmp_path / "sort.analyzer"
 
         build_analyzer(
             sorting,
@@ -615,7 +621,7 @@ class TestBuildAnalyzerProbeProjection:
         # Without the 2D projection this raises ValueError:
         # "could not broadcast input array from shape (3,) into shape (2,)".
         recording, sorting = recording_3d_and_sorting
-        folder = tmp_path / "sort.zarr"
+        folder = tmp_path / "sort.analyzer"
 
         build_analyzer(
             sorting,
@@ -661,7 +667,7 @@ class TestBuildAnalyzerWaveformParams:
         analyzer = self._build(
             recording,
             sorting,
-            tmp_path / "hippo.zarr",
+            tmp_path / "hippo.analyzer",
             {
                 "ms_before": 0.5,
                 "ms_after": 0.5,
@@ -681,7 +687,7 @@ class TestBuildAnalyzerWaveformParams:
         analyzer = self._build(
             recording,
             sorting,
-            tmp_path / "cortex.zarr",
+            tmp_path / "cortex.analyzer",
             {
                 "ms_before": 1.0,
                 "ms_after": 2.0,
@@ -732,13 +738,13 @@ class TestBuildAnalyzerWaveformParams:
         display = self._build(
             recording,
             sorting,
-            tmp_path / "display.zarr",
+            tmp_path / "display.analyzer",
             {**window, "whiten": False, "purpose": "display"},
         )
         metric = self._build(
             recording,
             sorting,
-            tmp_path / "metric.zarr",
+            tmp_path / "metric.analyzer",
             {**window, "whiten": True, "purpose": "metric"},
         )
         assert display.return_in_uV is True
@@ -775,7 +781,7 @@ class TestBuildAnalyzerWaveformParams:
         analyzer = self._build(
             rec,
             sort,
-            tmp_path / "metric.zarr",
+            tmp_path / "metric.analyzer",
             {
                 "ms_before": 1.0,
                 "ms_after": 2.0,

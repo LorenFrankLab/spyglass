@@ -2317,7 +2317,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         Job kwargs are resolved from this sort's ``SorterParameters`` row
         (per the Job-Kwargs Resolution convention); explicit ``kwargs`` win on
         conflict. The computed extensions persist to the on-disk analyzer
-        folder (SI's ``zarr`` format saves them automatically).
+        folder (SI's ``binary_folder`` format saves them automatically).
 
         Parameters
         ----------
@@ -2955,12 +2955,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         if sorting.get_num_units() == 0:
             return []
 
-        import spikeinterface as si
         from spikeinterface.core import template_tools
 
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            load_analyzer_folder,
+        )
         from spyglass.spikesorting.v2.utils import resolve_peak_sign
 
-        analyzer = si.load_sorting_analyzer(analyzer_folder)
+        analyzer = load_analyzer_folder(analyzer_folder)
         peak_sign = resolve_peak_sign(sorter_row["params"])
         peak_channels = template_tools.get_template_extremum_channel(
             analyzer, peak_sign=peak_sign, outputs="id"

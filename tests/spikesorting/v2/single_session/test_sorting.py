@@ -855,7 +855,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     assert (
         ck.get("return_in_uV") is True
     ), f"expected return_in_uV=True, got {ck}"
-    assert ck.get("format") == "zarr"
+    assert ck.get("format") == "binary_folder"
 
     # ``compute`` extension set (positional first arg). Assert the REQUIRED
     # extensions are present rather than pinning the exact set: a removal
@@ -890,6 +890,44 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     # The Spyglass-only random_seed knob is still stripped from the
     # forwarded job kwargs (SI.compute would reject it).
     assert "random_seed" not in captured["compute_kwargs"]
+    # Sparsity: the fixture omits ``sparsity`` -> SI's radius / 100 um default,
+    # passed EXPLICITLY (every effective value comes from the recipe).
+    assert ck.get("method") == "radius"
+    assert ck.get("radius_um") == 100.0
+    assert ck.get("peak_sign") == "neg"
+    assert ck.get("num_spikes_for_sparsity") == 100
+
+    # A best_channels recipe forwards its own settings; a dense recipe builds
+    # dense (``sparse=False``) with no estimate_sparsity kwargs at all.
+    for sparsity, expected in (
+        (
+            {"method": "best_channels", "num_channels": 6, "peak_sign": "both"},
+            {
+                "sparse": True,
+                "method": "best_channels",
+                "num_channels": 6,
+                "peak_sign": "both",
+            },
+        ),
+        ({"method": "dense"}, {"sparse": False}),
+    ):
+        captured.clear()
+        Sorting._build_analyzer(
+            _FakeSorting(),
+            _stub_recording_with_2d_probe(),
+            {"sorting_id": "test-sorting-id"},
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={"random_seed": 3, "n_jobs": 1},
+            analyzer_folder=tmp_path / "analyzer",
+            waveform_params={**_DISPLAY_PARAMS, "sparsity": sparsity},
+        )
+        ck = captured["create_kwargs"]
+        for key, value in expected.items():
+            assert ck.get(key) == value, (sparsity, key, ck)
+        if sparsity["method"] == "dense":
+            assert "radius_um" not in ck and "method" not in ck
+        else:
+            assert "radius_um" not in ck
 
 
 @pytest.mark.slow
@@ -969,8 +1007,8 @@ def test_analyzer_rebuild_is_seeded_reproducible(
         )
         return selected, peak_channels, peak_amplitudes
 
-    sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a.zarr")
-    sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b.zarr")
+    sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a.analyzer")
+    sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b.analyzer")
 
     # Subsampling actually fired: 500 selected per unit, strictly fewer
     # than the total available -- otherwise the seed is a no-op and the
@@ -1042,9 +1080,9 @@ def test_analyzer_random_seed_override_is_honored(
         analyzer = si.load_sorting_analyzer(folder)
         return np.asarray(analyzer.get_extension("random_spikes").get_data())
 
-    seed7_a = _selection_for_seed(tmp_path / "seed7_a.zarr", 7)
-    seed7_b = _selection_for_seed(tmp_path / "seed7_b.zarr", 7)
-    seed0 = _selection_for_seed(tmp_path / "seed0.zarr", 0)
+    seed7_a = _selection_for_seed(tmp_path / "seed7_a.analyzer", 7)
+    seed7_b = _selection_for_seed(tmp_path / "seed7_b.analyzer", 7)
+    seed0 = _selection_for_seed(tmp_path / "seed0.analyzer", 0)
 
     # Subsampling fired (otherwise the seed is a no-op and the override
     # can't be observed).

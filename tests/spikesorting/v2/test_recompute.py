@@ -1257,7 +1257,7 @@ def test_analyzer_recompute_round_trip(populated_sorting, clean_recompute):
     """The full analyzer reclamation round-trip -- the ``dry_run=False`` analog
     of ``test_delete_files_round_trip`` (recording).
 
-    populate -> recompute matched -> ``delete_files`` removes the ``.zarr``
+    populate -> recompute matched -> ``delete_files`` removes the ``.analyzer``
     folder + sets ``deleted=1`` -> ``get_analyzer`` rebuilds it from the
     canonical sort.
     """

@@ -96,7 +96,8 @@ def test_clusterless_waveform_features_use_configured_temp(
     monkeypatch, tmp_path
 ):
     """The clusterless decoding waveform-feature scratch (a v2-sort analyzer in
-    zarr) is created under the configured temp_dir, not the system ``/tmp``."""
+    binary_folder) is created under the configured temp_dir, not the system ``/tmp``.
+    """
     import spikeinterface.full as si
 
     from spyglass.decoding.v1 import waveform_features as wf

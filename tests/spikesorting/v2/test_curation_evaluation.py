@@ -681,7 +681,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
     }
 
     def _snr(sorting, name):
-        folder = tmp_path / f"{name}.zarr"
+        folder = tmp_path / f"{name}.analyzer"
         build_analyzer(
             sorting,
             rec,
@@ -693,9 +693,9 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
         )
         analyzer = si.load_sorting_analyzer(folder)
         # The planted recording is an in-memory NumpyRecording (not persistable),
-        # so the reloaded zarr analyzer has no recording; reattach it so the
+        # so the reloaded analyzer has no recording; reattach it so the
         # waveform extensions can compute. Production recordings are NWB-backed
-        # and persist into the zarr, so the real path needs no reattach (the
+        # and persist into the folder, so the real path needs no reattach (the
         # DB-backed merged tests cover that).
         analyzer.set_temporary_recording(rec)
         df = CurationEvaluation._compute_metrics(

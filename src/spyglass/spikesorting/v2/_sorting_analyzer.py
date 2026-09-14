@@ -166,9 +166,10 @@ def _load_analyzer_folder_or_rebuild(
     """
     import shutil
 
-    import spikeinterface as si
-
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_cache_lock,
+        load_analyzer_folder,
+    )
     from spyglass.spikesorting.v2.exceptions import (
         AnalyzerFolderInvalidError,
         AnalyzerFolderMissingError,
@@ -183,7 +184,7 @@ def _load_analyzer_folder_or_rebuild(
     with analyzer_cache_lock(sorting_id):
         if folder.exists():
             try:
-                return si.load_sorting_analyzer(folder)
+                return load_analyzer_folder(folder)
             except Exception as exc:
                 message = (
                     "Sorting.get_analyzer: analyzer folder for "
@@ -224,7 +225,7 @@ def _load_analyzer_folder_or_rebuild(
                     "reconstruct it."
                 )
             rebuild_fn()
-        return si.load_sorting_analyzer(folder)
+        return load_analyzer_folder(folder)
 
 
 def load_or_rebuild_analyzer(
@@ -658,7 +659,15 @@ def build_analyzer(
     waveform_params=None,
     extensions=None,
 ):
-    """Build the binary-folder SortingAnalyzer + base extensions.
+    """Build the ``binary_folder`` SortingAnalyzer + base extensions.
+
+    ``binary_folder`` is deliberate (see ``_analyzer_cache``): it is the only
+    SI 0.104.3 format whose waveform extraction writes straight into a
+    memmapped ``waveforms.npy`` instead of a shared-memory buffer sized for
+    the whole waveform volume, so the extraction peak is bounded by the
+    worker chunk buffers. The recipe's ``sparsity`` block selects the
+    channel-sparsity estimation (or a dense analyzer); every effective value,
+    including SI defaults, comes from the tracked row.
 
     ``sorter_row`` is the already-fetched ``SorterParameters`` row
     from ``make_fetch``; passing it through avoids three redundant
@@ -755,6 +764,16 @@ def build_analyzer(
     # projection, before ``create_sorting_analyzer``) and built with
     # ``return_in_uV=False`` (see below).
     whiten = bool(waveform_params.get("whiten"))
+    # Channel sparsity comes from the tracked recipe (``SparsityParams``); a
+    # blob predating the field means SI's radius/100 um default, which the
+    # schema default reproduces exactly.
+    from spyglass.spikesorting.v2._params.analyzer_waveform import (
+        SparsityParams,
+    )
+
+    sparsity_kwargs = SparsityParams.model_validate(
+        waveform_params.get("sparsity") or {}
+    ).si_create_kwargs()
 
     # Zero-unit short-circuit BEFORE any I/O or DB fetch:
     # ``create_sorting_analyzer(sparse=True)`` -> ``estimate_sparsity``
@@ -836,9 +855,9 @@ def build_analyzer(
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
             recording=recording,
-            sparse=True,
-            format="zarr",
+            format="binary_folder",
             folder=folder,
+            **sparsity_kwargs,
             # Display (unwhitened) -> True: real uV amplitudes. Metric
             # (whitened) -> False: ``sip.whiten`` preserves per-channel gains,
             # so a True readback would re-apply them and partially un-normalize

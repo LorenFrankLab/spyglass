@@ -527,3 +527,69 @@ def test_rebuild_reads_stored_window_never_re_resolves(
     assert (Sorting & populated_sorting).fetch1(
         "display_waveform_params_name"
     ) == stored_name
+
+
+def test_sparsity_params_default_matches_si_and_validates_methods():
+    """``sparsity`` defaults to SI's radius/100 um; method fields are checked.
+
+    The default must reproduce what ``create_sorting_analyzer(sparse=True)``
+    did before the field existed (numerical baseline unchanged), and every
+    effective value -- including SI's own defaults -- is recorded in the row.
+    """
+    import pydantic
+
+    from spyglass.spikesorting.v2._params.analyzer_waveform import (
+        ANALYZER_WAVEFORM_SCHEMA_VERSION,
+        AnalyzerWaveformParamsSchema,
+        SparsityParams,
+    )
+
+    assert ANALYZER_WAVEFORM_SCHEMA_VERSION == 2
+    default = AnalyzerWaveformParamsSchema().model_dump()["sparsity"]
+    assert default == {
+        "method": "radius",
+        "radius_um": 100.0,
+        "num_channels": None,
+        "peak_sign": "neg",
+        "num_spikes_for_sparsity": 100,
+        "ms_before": 1.0,
+        "ms_after": 2.5,
+    }
+    assert SparsityParams().si_create_kwargs() == {
+        "sparse": True,
+        "method": "radius",
+        "peak_sign": "neg",
+        "num_spikes_for_sparsity": 100,
+        "ms_before": 1.0,
+        "ms_after": 2.5,
+        "radius_um": 100.0,
+    }
+    # A pre-field blob (no ``sparsity`` key) validates to the same default.
+    legacy = {
+        k: v
+        for k, v in AnalyzerWaveformParamsSchema().model_dump().items()
+        if k != "sparsity"
+    }
+    assert (
+        AnalyzerWaveformParamsSchema.model_validate(legacy).sparsity
+        == SparsityParams()
+    )
+    assert SparsityParams(method="dense").si_create_kwargs() == {
+        "sparse": False
+    }
+    assert (
+        SparsityParams(
+            method="best_channels", num_channels=4
+        ).si_create_kwargs()["num_channels"]
+        == 4
+    )
+    with pytest.raises(pydantic.ValidationError, match="requires num_channels"):
+        SparsityParams(method="best_channels")
+    with pytest.raises(
+        pydantic.ValidationError, match="does not use num_channels"
+    ):
+        SparsityParams(method="radius", num_channels=3)
+    with pytest.raises(pydantic.ValidationError, match="every channel"):
+        SparsityParams(method="dense", radius_um=50.0)
+    with pytest.raises(pydantic.ValidationError):
+        SparsityParams(method="closest_channels")

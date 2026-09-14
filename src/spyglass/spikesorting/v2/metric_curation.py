@@ -1379,12 +1379,17 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 compute_key = {"sorting_id": sorting_id}
                 from spyglass.settings import temp_dir as spyglass_temp_dir
 
+                from spyglass.spikesorting.v2._analyzer_cache import (
+                    ANALYZER_FOLDER_SUFFIX,
+                    load_analyzer_folder,
+                )
+
                 with tempfile.TemporaryDirectory(dir=spyglass_temp_dir) as tmp:
-                    # ``.zarr`` suffix matches the SI zarr store create_sorting_
-                    # analyzer writes (SI forces it) so load_sorting_analyzer
-                    # resolves the same folder -- same convention as
-                    # analyzer_path for the canonical cache.
-                    display_folder = Path(tmp) / "display.zarr"
+                    # Same binary_folder convention (and memmap loader) as the
+                    # canonical cache, in a private temp folder.
+                    display_folder = Path(tmp) / (
+                        f"display{ANALYZER_FOLDER_SUFFIX}"
+                    )
                     build_analyzer(
                         curated_sorting,
                         recording,
@@ -1394,10 +1399,12 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                         analyzer_folder=display_folder,
                         waveform_params=display_waveform_params,
                     )
-                    display_analyzer = si.load_sorting_analyzer(display_folder)
+                    display_analyzer = load_analyzer_folder(display_folder)
                     metric_analyzer = None
                     if wants_pc:
-                        metric_folder = Path(tmp) / "metric.zarr"
+                        metric_folder = Path(tmp) / (
+                            f"metric{ANALYZER_FOLDER_SUFFIX}"
+                        )
                         build_analyzer(
                             curated_sorting,
                             recording,
@@ -1407,9 +1414,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             analyzer_folder=metric_folder,
                             waveform_params=metric_waveform_params,
                         )
-                        metric_analyzer = si.load_sorting_analyzer(
-                            metric_folder
-                        )
+                        metric_analyzer = load_analyzer_folder(metric_folder)
                     metrics_df, labels_by_unit, merge_groups = (
                         self._evaluate_analyzers(
                             display_analyzer,
@@ -2522,8 +2527,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """Yield a display analyzer without mutating its published cache.
 
         Standard display extensions are built before a merged analyzer is
-        published. Any unusual missing extension is computed on a temporary
-        in-memory derivative owned by this context, never into the shared zarr.
+        published. Any unusual missing extension is computed once into a
+        disk-backed derivative keyed by the exact request (see
+        ``_curation_analyzer``), never into the published base cache.
         """
         from spyglass.spikesorting.v2._curation_analyzer import (
             curation_analyzer_with_extensions,

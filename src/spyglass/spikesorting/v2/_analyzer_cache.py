@@ -21,6 +21,20 @@ Changing the root is an explicit cache-relocation choice: old folders simply
 become cache misses (``get_analyzer`` rebuilds into the new root) and can be
 cleaned by the operator -- never a stale-row inconsistency.
 
+Storage format. Every canonical cache folder is a SpikeInterface
+``binary_folder`` analyzer named ``{sorting_id}__{payload}.analyzer``
+(:data:`ANALYZER_FOLDER_SUFFIX`). ``binary_folder`` is the ONLY SI 0.104.3
+format whose waveform extraction writes straight into a memmapped
+``waveforms.npy`` (``zarr`` and ``memory`` extract into a shared-memory buffer
+sized for the whole waveform volume and then copy it), so the extraction peak
+is bounded by the worker chunk buffers rather than
+``n_spikes * n_samples * n_channels``. :func:`load_analyzer_folder` is the one
+loader: it maps ``waveforms.npy`` lazily (``mmap_mode="r"``) instead of SI's
+eager ``np.load``, so opening a cache for review or metrics does not read the
+whole waveform volume either. Pre-launch ``.zarr`` caches are not read; they
+are disposable and simply rebuild under this convention (delete the old
+``*.zarr`` folders under the analyzer root by hand).
+
 This module reads ``dj.config`` and ``temp_dir`` but opens no DB connection
 and activates no ``dj.schema``; the reads happen at call time so import stays
 side-effect free.
@@ -37,8 +51,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+#: Suffix of every canonical analyzer-cache folder (an SI ``binary_folder``
+#: store). Not ``.zarr``: SI's loader treats a ``.zarr`` suffix as the zarr
+#: format, and the cache is deliberately binary_folder (see the module doc).
+ANALYZER_FOLDER_SUFFIX = ".analyzer"
+
 # The recipe name is embedded in the analyzer cache folder
-# ``{sorting_id}__{waveform_params_name}.zarr`` (see ``analyzer_path``), so it
+# ``{sorting_id}__{waveform_params_name}.analyzer`` (see ``analyzer_path``), so it
 # must be path-safe -- no separators, dots, or traversal. Validated both at
 # insert (``AnalyzerWaveformParameters``) and at load (``get_analyzer`` accepts
 # an un-FK'd free-string recipe name). Lives here -- the DB-free owner of the
@@ -51,7 +70,8 @@ _CURATION_CACHE_RE = re.compile(
     r"(?P<curation_uuid>[0-9a-f]{32})_"
     r"(?P<role>display|metric)_"
     r"(?P<waveform_recipe_hash>[0-9a-f]{64})_"
-    r"si_(?P<spikeinterface_version_hash>[0-9a-f]{16})$"
+    r"si_(?P<spikeinterface_version_hash>[0-9a-f]{16})"
+    r"(?:_ext_(?P<extension_request_hash>[0-9a-f]{16}))?$"
 )
 
 
@@ -66,6 +86,7 @@ class AnalyzerCacheFolderIdentity:
     role: str | None = None
     waveform_recipe_hash: str | None = None
     spikeinterface_version_hash: str | None = None
+    extension_request_hash: str | None = None
 
 
 def analyzer_folder_storage_fingerprint(folder, *, exclude_names=()) -> str:
@@ -106,9 +127,10 @@ def assert_path_safe_waveform_params_name(name) -> None:
 def is_canonical_analyzer_folder_name(name: str) -> bool:
     """Whether ``name`` is a canonical analyzer-cache folder name.
 
-    Canonical analyzer folders are ``{sorting_id}__{waveform_params_name}.zarr``
-    (see :func:`analyzer_path`): a UUID sorting id, a ``__`` separator, a
-    path-safe recipe name, and the ``.zarr`` suffix. The disk-side orphan sweep
+    Canonical analyzer folders are
+    ``{sorting_id}__{waveform_params_name}.analyzer`` (see :func:`analyzer_path`):
+    a UUID sorting id, a ``__`` separator, a path-safe recipe name, and the
+    ``.analyzer`` suffix. The disk-side orphan sweep
     uses this to refuse deleting any directory under a (possibly misconfigured)
     analyzer root that is not a canonical analyzer cache.
     """
@@ -120,16 +142,19 @@ def analyzer_cache_folder_identity(
 ) -> AnalyzerCacheFolderIdentity | None:
     """Parse a raw- or curation-kind canonical cache folder name.
 
-    Raw cache names retain the established
-    ``{sorting_id}__{waveform_params_name}.zarr`` shape. Curation cache names
-    use the same outer shape with a structured, path-safe payload carrying the
-    immutable curation generation, analyzer role, recipe-content hash, and
-    SpikeInterface-version hash. Returning a typed identity lets cleanup share
-    one conservative canonical-name gate across both cache kinds.
+    Raw cache names have the ``{sorting_id}__{waveform_params_name}.analyzer``
+    shape. Curation cache names use the same outer shape with a structured,
+    path-safe payload carrying the immutable curation generation, analyzer
+    role, recipe-content hash, SpikeInterface-version hash and -- for a
+    derivative carrying extra extensions -- the extension-request hash.
+    Returning a typed identity lets cleanup share one conservative
+    canonical-name gate across both cache kinds.
     """
-    if not name.endswith(".zarr") or "__" not in name:
+    if not name.endswith(ANALYZER_FOLDER_SUFFIX) or "__" not in name:
         return None
-    sorting_id_text, _, payload = name[: -len(".zarr")].partition("__")
+    sorting_id_text, _, payload = name[
+        : -len(ANALYZER_FOLDER_SUFFIX)
+    ].partition("__")
     try:
         sorting_id = uuid.UUID(sorting_id_text)
     except (ValueError, TypeError):
@@ -145,6 +170,7 @@ def analyzer_cache_folder_identity(
             spikeinterface_version_hash=match.group(
                 "spikeinterface_version_hash"
             ),
+            extension_request_hash=match.group("extension_request_hash"),
         )
     if not _WAVEFORM_PARAMS_NAME_RE.fullmatch(payload):
         return None
@@ -190,7 +216,7 @@ def analyzer_cache_root() -> Path:
 def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     """Return the analyzer-cache folder for a ``(sorting_id, recipe)`` pair.
 
-    ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"``.
+    ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.analyzer"``.
     A sort may have more than one analyzer recipe (an unwhitened display recipe
     and a whitened metric recipe built on demand for PC/NN metrics), so the
     folder is keyed by both the ``sorting_id`` and the ``waveform_params_name``
@@ -201,9 +227,8 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     ``waveform_params_name`` is embedded in the folder name, so callers must
     pass a path-safe name; the ``AnalyzerWaveformParameters`` insert guard
     validates it (``^[A-Za-z0-9_]+$``) before any row -- and therefore any
-    folder -- can use it. The ``.zarr`` suffix matches the SI ``zarr`` store
-    ``create_sorting_analyzer`` writes (SI forces the ``.zarr`` suffix) and lets
-    ``load_sorting_analyzer`` auto-detect the format.
+    folder -- can use it. The folder is an SI ``binary_folder`` store (see the
+    module doc); load it with :func:`load_analyzer_folder`.
 
     Parameters
     ----------
@@ -217,7 +242,66 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     pathlib.Path
         The analyzer-cache folder path for this ``(sorting_id, recipe)`` pair.
     """
-    return analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.zarr"
+    return analyzer_cache_root() / (
+        f"{sorting_id}__{waveform_params_name}{ANALYZER_FOLDER_SUFFIX}"
+    )
+
+
+def load_analyzer_folder(folder, *, recording=None):
+    """Load a cached ``binary_folder`` analyzer with memmapped waveforms.
+
+    The single loader for every analyzer folder this package writes. SI's own
+    ``load_sorting_analyzer`` eagerly ``np.load``s every saved extension, which
+    for ``waveforms`` reads the whole ``n_spikes x n_samples x n_channels``
+    buffer into RAM on every open -- tens of GB for a long, unit-rich sort.
+    This loader opens the analyzer with ``load_extensions=False``, loads every
+    other saved extension exactly as SI would, and attaches ``waveforms`` as a
+    read-only ``np.memmap`` of ``extensions/waveforms/waveforms.npy``. SI's
+    consumers index the waveform buffer per unit (``get_waveforms_one_unit``,
+    template and PCA fitting), so each of them touches one unit's slice at a
+    time, and SI's binary ``_save_data`` already special-cases a memmapped
+    ``waveforms`` array (it is never re-written). Numerically nothing changes:
+    the same bytes are read, lazily.
+
+    Parameters
+    ----------
+    folder : path-like
+        A canonical or derivative analyzer-cache folder (``binary_folder``).
+    recording : spikeinterface.BaseRecording, optional
+        Override the recording reference stored in the folder.
+
+    Returns
+    -------
+    spikeinterface.SortingAnalyzer
+    """
+    import numpy as np
+    import spikeinterface as si
+    from spikeinterface.core.sortinganalyzer import get_extension_class
+
+    folder = Path(folder)
+    analyzer = si.SortingAnalyzer.load(
+        folder,
+        recording=recording,
+        load_extensions=False,
+        format="binary_folder",
+    )
+    for name in analyzer.get_saved_extension_names():
+        if name != "waveforms":
+            analyzer.load_extension(name)
+            continue
+        extension = get_extension_class("waveforms")(analyzer)
+        extension.load_params()
+        extension.load_run_info()
+        run_info = extension.run_info
+        data_file = extension._get_binary_extension_folder() / "waveforms.npy"
+        if (
+            run_info is not None and not run_info.get("run_completed", False)
+        ) or not data_file.is_file():
+            # Mirror SI: an incomplete / dataless extension is "not computed".
+            continue
+        extension.data["waveforms"] = np.load(data_file, mmap_mode="r")
+        analyzer.extensions["waveforms"] = extension
+    return analyzer
 
 
 def waveform_recipe_hash(recipe_row) -> str:
@@ -245,6 +329,7 @@ def curation_analyzer_path(
     role: str,
     waveform_recipe_hash_value: str,
     spikeinterface_version: str,
+    extension_request_hash: str | None = None,
 ) -> Path:
     """Return a per-curation analyzer path keyed by immutable generation.
 
@@ -252,6 +337,10 @@ def curation_analyzer_path(
     reused after deletion. Distinct curation generations, recipe content,
     analyzer roles, and SpikeInterface versions therefore cannot share a cache
     slot even when their human-readable recipe name is the same.
+    ``extension_request_hash`` (16 hex chars) names a DERIVATIVE of the base
+    cache that carries extra extensions with specific parameters (see
+    ``_curation_analyzer.derived_extension_request_hash``); ``None`` is the
+    base cache itself.
     """
     sorting_uuid = uuid.UUID(str(sorting_id))
     generation_uuid = uuid.UUID(str(curation_uuid))
@@ -270,7 +359,17 @@ def curation_analyzer_path(
         f"curation_{generation_uuid.hex}_{role}_{recipe_hash}_si_"
         f"{_spikeinterface_version_hash(spikeinterface_version)}"
     )
-    return analyzer_cache_root() / f"{sorting_uuid}__{payload}.zarr"
+    if extension_request_hash is not None:
+        if not re.fullmatch(r"[0-9a-f]{16}", str(extension_request_hash)):
+            raise ValueError(
+                "extension_request_hash must be 16 lowercase hex characters; "
+                f"got {extension_request_hash!r}."
+            )
+        payload += f"_ext_{extension_request_hash}"
+    return (
+        analyzer_cache_root()
+        / f"{sorting_uuid}__{payload}{ANALYZER_FOLDER_SUFFIX}"
+    )
 
 
 def analyzer_cache_lock(sorting_id):
@@ -283,7 +382,7 @@ def analyzer_cache_lock(sorting_id):
     ``CurationEvaluation`` raw-sort fast path (which loads the shared analyzer
     and persists extensions + ``quality_metrics`` into it). Holding the lock
     around the load/mutate/publish region lets ONE job touch a sort's analyzer
-    at a time, so a concurrent build never corrupts the shared zarr store and a
+    at a time, so a concurrent build never corrupts the shared store and a
     reader never observes the brief move-aside window of an atomic publish.
 
     The lock is keyed on ``sorting_id`` (which every recipe folder of that sort
@@ -345,17 +444,18 @@ analyzer_curation_lock = analyzer_cache_lock
 
 
 def _publish_sibling(canonical_folder, kind: str) -> Path:
-    """Return a hidden ``.zarr`` sibling of ``canonical_folder`` for staging.
+    """Return a hidden sibling of ``canonical_folder`` for staging.
 
     The build/move-aside folders MUST sit in the SAME directory as the canonical
-    slot (not a sub-directory): a SpikeInterface zarr ``SortingAnalyzer`` stores
-    its recording reference as a path RELATIVE to the analyzer folder, so the
-    publish ``os.replace`` only preserves that reference -- and therefore the
-    ability to (re)compute recording-dependent extensions like
-    ``spike_amplitudes`` after a load -- when the temp and the canonical slot are
-    at the same depth relative to the recording. A leading ``.`` keeps the
-    staging folder hidden from the orphan scan (which skips dotted entries) and
-    from ``remove_analyzer_cache``'s ``{sorting_id}__*.zarr`` glob, and the
+    slot (not a sub-directory): a SpikeInterface ``SortingAnalyzer`` folder
+    stores its recording reference as a path RELATIVE to the analyzer folder
+    (``recording.json`` is dumped ``relative_to=folder``), so the publish
+    ``os.replace`` only preserves that reference -- and therefore the ability
+    to (re)compute recording-dependent extensions like ``spike_amplitudes``
+    after a load -- when the temp and the canonical slot are at the same depth
+    relative to the recording. A leading ``.`` keeps the staging folder hidden
+    from the orphan scan (which skips dotted entries) and from
+    ``remove_analyzer_cache``'s ``{sorting_id}__*.analyzer`` glob, and the
     ``os.getpid()`` token avoids collisions across concurrent processes.
     """
     parent = canonical_folder.parent
@@ -367,18 +467,27 @@ def _publish_sibling(canonical_folder, kind: str) -> Path:
 def _sorting_id_from_analyzer_folder(canonical_folder) -> str:
     """Return the sorting id embedded in a canonical analyzer folder path."""
     folder = Path(canonical_folder)
-    if not folder.name.endswith(".zarr") or "__" not in folder.name:
+    if (
+        not folder.name.endswith(ANALYZER_FOLDER_SUFFIX)
+        or "__" not in folder.name
+    ):
         raise ValueError(
             "publish_analyzer_atomically requires a canonical analyzer-cache "
-            "folder named '{sorting_id}__{waveform_params_name}.zarr'; got "
-            f"{folder.name!r}."
+            "folder named '{sorting_id}__{payload}"
+            f"{ANALYZER_FOLDER_SUFFIX}'; got {folder.name!r}."
         )
-    sorting_id, _, _recipe = folder.name[: -len(".zarr")].partition("__")
-    if not sorting_id or not _WAVEFORM_PARAMS_NAME_RE.match(_recipe):
+    sorting_id, _, payload = folder.name[
+        : -len(ANALYZER_FOLDER_SUFFIX)
+    ].partition("__")
+    if not sorting_id or not (
+        _WAVEFORM_PARAMS_NAME_RE.match(payload)
+        or _CURATION_CACHE_RE.fullmatch(payload)
+    ):
         raise ValueError(
             "publish_analyzer_atomically requires a canonical analyzer-cache "
-            "folder named '{sorting_id}__{waveform_params_name}.zarr' with a "
-            f"path-safe waveform_params_name; got {folder.name!r}."
+            "folder named '{sorting_id}__{payload}"
+            f"{ANALYZER_FOLDER_SUFFIX}' with a path-safe waveform_params_name "
+            f"or a curation-cache payload; got {folder.name!r}."
         )
     return sorting_id
 
@@ -398,7 +507,7 @@ def publish_analyzer_atomically(canonical_folder, build_into):
 
     A directory rename is NOT a clean atomic swap: POSIX ``rename(2)`` requires
     the destination to be empty (else ``ENOTEMPTY``), so a rebuild over an
-    existing ``.zarr`` cannot ``os.replace`` straight onto it. The publish
+    existing folder cannot ``os.replace`` straight onto it. The publish
     sequence is therefore:
 
     - canonical **absent**  -> ``os.replace(temp, canonical)``;
@@ -480,10 +589,10 @@ def _publish_analyzer_atomically_unlocked(canonical_folder, build_into):
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
-    A sort can have several analyzer recipes on disk (the display recipe today;
-    the whitened metric recipe once that build lands), so this removes every
-    ``{sorting_id}__*.zarr`` folder under the cache root -- deleting the sort
-    orphans every recipe. The glob is anchored on the full
+    A sort can have several analyzer folders on disk (the display and metric
+    recipes, per-curation caches and their derivatives), so this removes every
+    ``{sorting_id}__*.analyzer`` folder under the cache root -- deleting the
+    sort orphans every one. The glob is anchored on the full
     ``sorting_id`` (a fixed-length UUID) followed by the ``__`` separator, so
     one sort's folders never match another's.
 
@@ -513,13 +622,12 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
         If no matching folder exists and ``missing_ok=False``.
     """
     root = analyzer_cache_root()
-    folders = (
-        sorted(root.glob(f"{sorting_id}__*.zarr")) if root.exists() else []
-    )
+    pattern = f"{sorting_id}__*{ANALYZER_FOLDER_SUFFIX}"
+    folders = sorted(root.glob(pattern)) if root.exists() else []
     if not folders:
         if missing_ok:
             return False
-        raise FileNotFoundError(root / f"{sorting_id}__*.zarr")
+        raise FileNotFoundError(root / pattern)
     for folder in folders:
         shutil.rmtree(folder, ignore_errors=False)
     return True
@@ -662,6 +770,18 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
     }
 
 
+def derivative_base_path(path) -> str:
+    """Return the base-cache path of a derivative folder path (or itself)."""
+    folder = Path(path)
+    identity = analyzer_cache_folder_identity(folder.name)
+    if identity is None or identity.extension_request_hash is None:
+        return str(folder)
+    base_name = folder.name.replace(
+        f"_ext_{identity.extension_request_hash}", "", 1
+    )
+    return str(folder.with_name(base_name))
+
+
 def classify_orphaned_analyzer_folders(
     units_bearing,
     referenced_paths,
@@ -722,5 +842,13 @@ def classify_orphaned_analyzer_folders(
         else:
             db_side.append(row)
     referenced = set(referenced_paths)
-    disk_side = [path for path in disk_dir_paths if path not in referenced]
+    # A derivative folder (``..._ext_{hash}.analyzer``) is referenced exactly
+    # when its base cache is: derivatives are keyed by the same live curation
+    # generation, so they are never enumerated separately by the collector.
+    disk_side = [
+        path
+        for path in disk_dir_paths
+        if path not in referenced
+        and derivative_base_path(path) not in referenced
+    ]
     return {"db_side": db_side, "disk_side": disk_side, "reclaimed": reclaimed}

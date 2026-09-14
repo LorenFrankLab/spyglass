@@ -98,17 +98,18 @@ def _record_lock_acquisitions(monkeypatch):
 def test_load_path_acquires_lock(monkeypatch, tmp_path):
     """The analyzer read/rebuild core acquires the per-sort lock around a load,
     so the atomic-publish move-aside window is never observed by a reader."""
-    import spikeinterface as si
-
+    from spyglass.spikesorting.v2 import _analyzer_cache
     from spyglass.spikesorting.v2._sorting_analyzer import (
         _load_analyzer_folder_or_rebuild,
     )
 
     acquired = _record_lock_acquisitions(monkeypatch)
-    folder = tmp_path / "sidX__rec.zarr"
+    folder = tmp_path / "sidX__rec.analyzer"
     folder.mkdir()
     sentinel = object()
-    monkeypatch.setattr(si, "load_sorting_analyzer", lambda f: sentinel)
+    monkeypatch.setattr(
+        _analyzer_cache, "load_analyzer_folder", lambda f, **k: sentinel
+    )
 
     result = _load_analyzer_folder_or_rebuild(
         folder,
@@ -133,7 +134,7 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
     from spyglass.spikesorting.v2 import recompute as rc
 
     acquired = _record_lock_acquisitions(monkeypatch)
-    folder = tmp_path / "sidY__rec.zarr"
+    folder = tmp_path / "sidY__rec.analyzer"
     folder.mkdir()
 
     artifact = {"sorting_id": "sidY", "waveform_params_name": "rec"}
@@ -168,7 +169,7 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_recompute_extension_deletion_policy(monkeypatch, tmp_path):
-    """Deleting an analyzer cache removes the FULL ``.zarr`` -- including the
+    """Deleting an analyzer cache removes the FULL ``.analyzer`` -- including the
     derived curation/visualization extensions the recompute does NOT hash --
     and logs that policy, so the full-folder regeneratable-scratch decision is
     explicit rather than a silent over-deletion.
@@ -178,7 +179,7 @@ def test_recompute_extension_deletion_policy(monkeypatch, tmp_path):
     """
     from spyglass.spikesorting.v2 import recompute as rc
 
-    folder = tmp_path / "sidZ__rec.zarr"
+    folder = tmp_path / "sidZ__rec.analyzer"
     folder.mkdir()
     artifact = {"sorting_id": "sidZ", "waveform_params_name": "rec"}
     monkeypatch.setattr(
@@ -405,7 +406,7 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 def test_rebuild_publishes_into_temp_not_canonical(
     populated_sorting, monkeypatch
 ):
-    """A rebuild builds into a private HIDDEN SIBLING ``.zarr`` of the canonical
+    """A rebuild builds into a private HIDDEN SIBLING ``.analyzer`` of the canonical
     slot and publishes it into the slot -- it NEVER writes the build straight
     into the canonical path (no ``overwrite=True`` into the live folder a reader
     might load), and the sibling location keeps the analyzer's recording path
@@ -436,7 +437,7 @@ def test_rebuild_publishes_into_temp_not_canonical(
         Sorting().get_analyzer(populated_sorting)  # rebuild via the publisher
         assert folder.exists(), "rebuild must publish the canonical folder"
         assert built_folders, "rebuild must build an analyzer"
-        # Each build targets a hidden ``.zarr`` sibling of the canonical slot,
+        # Each build targets a hidden ``.analyzer`` sibling of the canonical slot,
         # never the canonical path itself.
         for built in built_folders:
             built_path = Path(built)
@@ -452,7 +453,7 @@ def test_rebuild_publishes_into_temp_not_canonical(
 
 
 def test_find_orphaned_skips_hidden_staging(dj_conn):
-    """A hidden ``.zarr`` staging sibling (where the atomic publisher builds /
+    """A hidden ``.analyzer`` staging sibling (where the atomic publisher builds /
     moves-aside) is skipped by the orphan scan -- an in-flight build must not be
     reported as a stray analyzer folder."""
     import shutil
@@ -462,7 +463,7 @@ def test_find_orphaned_skips_hidden_staging(dj_conn):
 
     analyzer_root = analyzer_path("x", _DISPLAY).parent
     analyzer_root.mkdir(parents=True, exist_ok=True)
-    staging = analyzer_root / f".staging_probe__{_DISPLAY}.build-1.zarr"
+    staging = analyzer_root / f".staging_probe__{_DISPLAY}.build-1.analyzer"
     staging.mkdir(parents=True, exist_ok=True)
     try:
         report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
@@ -774,7 +775,7 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
 
 
 def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
-    """A canonical ``{sorting_id}__{recipe}.zarr`` folder referenced by no
+    """A canonical ``{sorting_id}__{recipe}.analyzer`` folder referenced by no
     Sorting row is reported as a disk-side orphan.
 
     The sweep only considers canonical analyzer-cache folders (it refuses to
@@ -801,7 +802,7 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
 
 
 def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
-    """A ``{sid}__{other_recipe}.zarr`` folder for an otherwise-valid sort is
+    """A ``{sid}__{other_recipe}.analyzer`` folder for an otherwise-valid sort is
     a disk-side orphan; the sort's own stored display-recipe folder is not.
 
     This is the orphan case the recipe-keyed cache introduces: deleting/changing
@@ -816,7 +817,7 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
 
     sid = uuid.uuid4()
     # The bypassed row records the cortex display recipe (_DISPLAY), so its
-    # referenced folder is {sid}__franklab_cortex_actual_waveforms.zarr.
+    # referenced folder is {sid}__franklab_cortex_actual_waveforms.analyzer.
     _insert_bypassed_sorting_row(sid, n_units=3)
     display_folder = analyzer_path(sid, _DISPLAY)
     stale_folder = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
@@ -827,7 +828,7 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
         disk = set(report["disk_side"])
         assert (
             str(stale_folder) in disk
-        ), "a {sid}__other_recipe.zarr folder must be a disk-side orphan"
+        ), "a {sid}__other_recipe.analyzer folder must be a disk-side orphan"
         assert (
             str(display_folder) not in disk
         ), "the sort's stored display-recipe folder is referenced, not orphan"
@@ -846,7 +847,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     retained; an unreferenced metric folder is a disk-side orphan.
 
     The whitened metric analyzer is built on demand for PC/NN metrics, so its
-    ``{sid}__{metric_recipe}.zarr`` folder is not a sort's display recipe -- but
+    ``{sid}__{metric_recipe}.analyzer`` folder is not a sort's display recipe -- but
     a referencing curation-evaluation selection means it is in active use and
     must NOT be swept as an orphan. An identically-shaped folder for a metric
     recipe no selection references still is an orphan.
@@ -929,7 +930,7 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
     Covers three things the per-recipe recompute must get right:
     - a PC-requesting selection (``skip_pc_metrics=False``) adds its metric
       recipe as an independent key for ITS sort (display + metric, distinct
-      ``{sid}__{name}.zarr`` folders);
+      ``{sid}__{name}.analyzer`` folders);
     - that metric recipe does NOT leak onto a different sort (``sorting_id`` is
       part of the match, not just the recipe name);
     - a skip-PC selection (``skip_pc_metrics=True``) never built a metric
@@ -1059,7 +1060,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
 
 
 def test_is_canonical_analyzer_folder_name():
-    """Only ``{sorting_id}__{recipe}.zarr`` (UUID id + path-safe recipe) names
+    """Only ``{sorting_id}__{recipe}.analyzer`` (UUID id + path-safe recipe) names
     are canonical analyzer-cache folders."""
     import uuid as uuidlib
 
@@ -1068,14 +1069,14 @@ def test_is_canonical_analyzer_folder_name():
     )
 
     sid = str(uuidlib.uuid4())
-    assert canon(f"{sid}__default.zarr")
-    assert canon(f"{sid}__metric_whitened.zarr")  # recipe may contain "_"
+    assert canon(f"{sid}__default.analyzer")
+    assert canon(f"{sid}__metric_whitened.analyzer")  # recipe may contain "_"
     # Not canonical: missing suffix, missing separator, non-UUID id, bad recipe.
     assert not canon(f"{sid}__default")
-    assert not canon(f"{sid}.zarr")
-    assert not canon("not_a_uuid__default.zarr")
+    assert not canon(f"{sid}.analyzer")
+    assert not canon("not_a_uuid__default.analyzer")
     assert not canon("important_user_data")
-    assert not canon(f"{sid}__bad-recipe.zarr")  # '-' not path-safe
+    assert not canon(f"{sid}__bad-recipe.analyzer")  # '-' not path-safe
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -1092,7 +1093,7 @@ def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
 
     # A canonical-named folder with no DB row -> a real disk-side orphan.
     sid = str(uuidlib.uuid4())
-    canonical = tmp_path / f"{sid}__default.zarr"
+    canonical = tmp_path / f"{sid}__default.analyzer"
     canonical.mkdir()
     # A non-analyzer directory that must NEVER be a deletion candidate.
     unrelated = tmp_path / "important_user_data"

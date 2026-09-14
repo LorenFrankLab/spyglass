@@ -202,8 +202,6 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
     monkeypatch, tmp_path
 ):
     """An existing but unloadable analyzer folder is not treated as healthy."""
-    import sys
-    import types
 
     from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
     from spyglass.spikesorting.v2._sorting_analyzer import (
@@ -211,7 +209,7 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
     )
     from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
 
-    folder = tmp_path / "bad.zarr"
+    folder = tmp_path / "bad.analyzer"
     folder.mkdir()
 
     class _OneUnitSortingRelation:
@@ -223,24 +221,20 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
             assert attrs == ("sorting_id", "n_units")
             return "s1", 1
 
-    def _raise_load(_folder):
-        raise RuntimeError("not a valid zarr store")
+    def _raise_load(_folder, **_kwargs):
+        raise RuntimeError("not a valid analyzer folder")
 
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
     )
+    # The load seam is the package's own memmap-aware loader.
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", _raise_load)
     # The recipe-row validation queries AnalyzerWaveformParameters; this unit
     # test mocks the rest of the load path, so stub it (the "display" name is a
     # placeholder, not a real shipped recipe row).
     monkeypatch.setattr(
         _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "spikeinterface",
-        types.SimpleNamespace(load_sorting_analyzer=_raise_load),
-    )
-
     with pytest.raises(AnalyzerFolderInvalidError, match="could not be loaded"):
         load_or_rebuild_analyzer(
             _OneUnitSortingRelation(),
@@ -255,12 +249,10 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
     monkeypatch, tmp_path
 ):
     """Default analyzer access removes an invalid cache folder and rebuilds it."""
-    import sys
-    import types
 
     from spyglass.spikesorting.v2 import _analyzer_cache, _sorting_analyzer
 
-    folder = tmp_path / "bad.zarr"
+    folder = tmp_path / "bad.analyzer"
     folder.mkdir()
     rebuilt_marker = folder / "rebuilt"
     loaded = object()
@@ -274,10 +266,10 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
             assert attrs == ("sorting_id", "n_units")
             return "s1", 1
 
-    def _load(_folder):
+    def _load(_folder, **_kwargs):
         if rebuilt_marker.exists():
             return loaded
-        raise RuntimeError("not a valid zarr store")
+        raise RuntimeError("not a valid analyzer folder")
 
     def _rebuild(_sorting_table, key, waveform_params_name=None):
         assert key == {"sorting_id": "s1"}
@@ -298,11 +290,7 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
     monkeypatch.setattr(
         _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "spikeinterface",
-        types.SimpleNamespace(load_sorting_analyzer=_load),
-    )
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", _load)
 
     analyzer = _sorting_analyzer.load_or_rebuild_analyzer(
         _OneUnitSortingRelation(),
