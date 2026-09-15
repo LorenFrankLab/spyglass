@@ -253,68 +253,50 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
     )
 
 
-# Each case builds its exception lazily inside the test (where ``datajoint``
-# is imported) from ``(error_name, args)`` so the parametrize decorator stays
-# pure data and the module-under-test's import boundary is unaffected.
+# Each case is a raw PyMySQL IntegrityError ``(errno, message)`` as the
+# connector raises it; the test passes it through DataJoint's own
+# ``translate_query_error`` so the predicate is exercised on exactly the
+# exception shapes that reach the selection helpers' ``except`` blocks.
 @pytest.mark.parametrize(
-    "error_name, args, expected",
+    "errno, message, expected",
     [
-        # DataJoint maps MySQL errno 1062 -> DuplicateError: that is the race.
+        # MySQL errno 1062 (ER_DUP_ENTRY) -> DuplicateError: that is the race.
         pytest.param(
-            "DuplicateError", ("Duplicate entry",), True, id="duplicate-error"
+            1062, "Duplicate entry 'x' for key 'PRIMARY'", True, id="dup-1062"
         ),
-        # FK violations surface as IntegrityError with no 1062 errno -- they
-        # MUST propagate, not be swallowed.
+        # FK violations (1451/1452) -> IntegrityError: they MUST propagate,
+        # not be swallowed -- even when the rendered message happens to
+        # contain the digits "1062" (a constraint name, a rendered UUID).
         pytest.param(
-            "IntegrityError",
-            (
-                "Cannot add or update a child row: a foreign key constraint "
-                "fails",
-            ),
+            1452,
+            "Cannot add or update a child row: a foreign key constraint "
+            "fails (`db`.`t`, CONSTRAINT `fk_1062`)",
             False,
-            id="fk-integrity-error",
+            id="fk-1452-message-containing-1062",
         ),
-        # Defensive: a raw, untranslated connector error carrying the
-        # structured errno 1062 as the first arg is recognized.
         pytest.param(
-            "IntegrityError",
-            (1062, "Duplicate entry 'x' for key 'PRIMARY'"),
-            True,
-            id="structured-errno-1062",
-        ),
-        # Rendered database messages alone are deliberately ignored: they vary
-        # by connector/version/locale and are not safe enough to recover from.
-        pytest.param(
-            "IntegrityError",
-            ("Duplicate entry 'x' for key 'PRIMARY'",),
+            1451,
+            "Cannot delete or update a parent row: a foreign key constraint "
+            "fails",
             False,
-            id="rendered-duplicate-message-only",
-        ),
-        # CRITICAL false-positive guard: an FK-violation IntegrityError whose
-        # message merely CONTAINS the digits "1062" (in a constraint name, a
-        # rendered UUID) must NOT be treated as a duplicate -- a bare "1062"
-        # substring match would silently swallow a real FK error.
-        pytest.param(
-            "IntegrityError",
-            (
-                "a foreign key constraint fails (`db`.`t`, "
-                "CONSTRAINT `fk_1062`)",
-            ),
-            False,
-            id="fk-error-containing-1062-substring",
+            id="fk-1451",
         ),
     ],
 )
-def test_is_duplicate_key_error_classifies_datajoint_exceptions(
-    error_name, args, expected
+def test_is_duplicate_key_error_classifies_translated_connector_errors(
+    errno, message, expected
 ):
     """``_is_duplicate_key_error`` is True only for a duplicate PRIMARY-KEY
-    violation, never for an FK / missing-source-part ``IntegrityError``."""
-    import datajoint as dj
+    violation as DataJoint translates it, never for an FK / missing-source-part
+    ``IntegrityError``."""
+    import pymysql
+    from datajoint.connection import translate_query_error
 
     from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
-    error = getattr(dj.errors, error_name)(*args)
+    error = translate_query_error(
+        pymysql.err.IntegrityError(errno, message), "INSERT ..."
+    )
     assert _is_duplicate_key_error(error) is expected
 
 

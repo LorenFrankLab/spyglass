@@ -132,22 +132,12 @@ def _is_duplicate_key_error(exc: BaseException) -> bool:
     ``dj.errors.IntegrityError`` (reserved for FK violations: errno
     1217/1451/1452). So a duplicate PK is a ``DuplicateError`` and a
     missing-source-part / FK violation is an ``IntegrityError``; only the
-    former is the race we recover from.
-
-    The ``IntegrityError`` branch is purely defensive -- for a raw
-    connector error surfacing before DataJoint's translation (which strips
-    the errno, so a *translated* 1062 never reaches ``IntegrityError`` at
-    all). It matches ONLY the structured errno (``exc.args[0] == 1062``),
-    not rendered database messages. Message matching is connector- and
+    former is the race we recover from. The exception type is the only
+    signal used: rendered database messages are connector- and
     locale-sensitive, and a false positive would silently swallow a genuine
-    integrity failure (e.g. an FK violation) that must propagate rather
-    than be treated as the recoverable duplicate-PK race.
+    integrity failure that must propagate.
     """
-    if isinstance(exc, dj.errors.DuplicateError):
-        return True
-    if isinstance(exc, dj.errors.IntegrityError):
-        return bool(exc.args and exc.args[0] == 1062)
-    return False
+    return isinstance(exc, dj.errors.DuplicateError)
 
 
 def _is_fk_violation(exc: BaseException) -> bool:
