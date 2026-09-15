@@ -37,10 +37,6 @@ schema = dj.schema("spikesorting_v2_metric_curation")
 
 FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_06"
 
-# Content aliases must be deliberate shipped compatibility names, never an
-# arbitrary caller opt-out. There are no aliases today; future shipped aliases
-# must be added as an explicit pair/group here and covered by a migration note.
-_SHIPPED_ALIAS_GROUPS: tuple[frozenset[str], ...] = ()
 _PROFILE_CONTENT_FIELDS = (
     "metric_params_name",
     "auto_curation_rules_name",
@@ -51,17 +47,13 @@ _PROFILE_CONTENT_FIELDS = (
 )
 
 
-def _is_shipped_alias(first: str, second: str) -> bool:
-    return any({first, second} <= group for group in _SHIPPED_ALIAS_GROUPS)
-
-
 @schema
 class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """One immutable recipe + display contract for browser curation.
 
     Insert through :meth:`insert`; a repeated name/content pair is
     idempotent, changed content requires a new name, and duplicate content under
-    a second name is refused unless both names are an explicitly shipped alias.
+    a second name is refused (reuse the existing profile name instead).
     List order is semantic and is preserved in both storage and ``profile_hash``.
     """
 
@@ -154,12 +146,12 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                     )
                 continue
             prior = claimed_hashes.get(row["profile_hash"])
-            if prior is not None and not _is_shipped_alias(prior, name):
+            if prior is not None:
                 raise DuplicateParameterContentError(
                     f"CurationReviewProfile {name!r} duplicates the content of "
                     f"{prior!r} (profile_hash {row['profile_hash'][:12]}). "
-                    "Reuse the existing profile name; aliases are permitted "
-                    "only through the explicit shipped-alias allowlist."
+                    "Reuse the existing profile name, or use a new name for "
+                    "changed content."
                 )
             claimed_hashes[row["profile_hash"]] = name
             stored[name] = row
