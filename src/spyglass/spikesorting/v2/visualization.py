@@ -498,7 +498,11 @@ def plot_si_template_metrics(
 
 
 def plot_suggested_merges(
-    curation_evaluation_key, *, backend="ipywidgets", **kwargs
+    curation_evaluation_key,
+    *,
+    backend="ipywidgets",
+    compute_missing=False,
+    **kwargs,
 ):
     """Plot the persisted suggested merge groups.
 
@@ -508,7 +512,10 @@ def plot_suggested_merges(
     candidates at plot time -- that could use a different analyzer / preset /
     kwargs than the persisted Spyglass suggestion row. SI's merge widget reads the
     display ``spike_amplitudes`` / ``correlograms`` extensions (already present
-    once auto-merge has run); a clear error is raised if they are absent.
+    once auto-merge has run); the read-only default raises a clear error if
+    they are absent, and ``compute_missing=True`` computes only those
+    display-safe extensions on this curation's analyzer (the suggestions
+    themselves are never recomputed).
 
     SI's ``PotentialMergesWidget`` supports ONLY the interactive ``ipywidgets``
     backend in SI 0.104.3 (notebook-local interactivity, not web publishing), so
@@ -534,7 +541,7 @@ def plot_suggested_merges(
     analyzer = _curation_analyzer_for_plot(
         _evaluation_curation(curation_evaluation_key),
         _viz.DISPLAY_WIDGET_EXTENSIONS["plot_suggested_merges"],
-        compute_missing=False,
+        compute_missing=compute_missing,
         caller="plot_suggested_merges",
     )
     return sw.plot_potential_merges(

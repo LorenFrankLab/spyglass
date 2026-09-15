@@ -652,6 +652,54 @@ def test_plot_suggested_merges_uses_persisted_merge_groups(
 
 
 @pytest.mark.db_unit
+def test_plot_suggested_merges_compute_missing_requests_display_extensions(
+    dj_conn, monkeypatch
+):
+    """The missing-extension advice (compute_missing=True) is honored here:
+    the opt-in requests exactly the widget's display-safe extensions on the
+    curation's analyzer, while the merge suggestions are still never
+    recomputed. The read-only default still raises."""
+    import spikeinterface.curation as sic
+    import spikeinterface.widgets as sw
+
+    from spyglass.spikesorting.v2._visualization import (
+        MissingDisplayExtensionError,
+    )
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    monkeypatch.setattr(
+        CurationEvaluation,
+        "get_suggested_merge_groups",
+        classmethod(lambda cls, key: [[1, 2]]),
+    )
+
+    def _must_not_recompute(*a, **k):
+        raise AssertionError("plot path must not recompute merge candidates")
+
+    monkeypatch.setattr(sic, "compute_merge_unit_groups", _must_not_recompute)
+    recorder: list = []
+    fake = _FakeAnalyzer([])  # nothing computed yet
+    _patch_curation_analyzer(monkeypatch, fake, recorder=recorder)
+    _forbid_add_extensions(monkeypatch)
+    monkeypatch.setattr(
+        sw, "plot_potential_merges", lambda analyzer, **k: "MERGES"
+    )
+
+    with pytest.raises(MissingDisplayExtensionError, match="compute_missing"):
+        ssviz.plot_suggested_merges({"curation_id": 0})
+    assert not _requested_extensions(recorder)
+
+    assert (
+        ssviz.plot_suggested_merges({"curation_id": 0}, compute_missing=True)
+        == "MERGES"
+    )
+    assert _requested_extensions(recorder) == {
+        "spike_amplitudes",
+        "correlograms",
+    }
+
+
+@pytest.mark.db_unit
 def test_plot_suggested_merges_errors_when_no_persisted_suggestions(
     dj_conn, monkeypatch
 ):

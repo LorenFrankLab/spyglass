@@ -178,7 +178,7 @@ _REGISTRY: tuple[dict, ...] = (
         # PotentialMergesWidget supports only the interactive ipywidgets backend.
         "implementation": "spikeinterface.widgets.plot_potential_merges",
         "backend_default": "ipywidgets",
-        "compute_missing": False,
+        "compute_missing": True,
         "description": (
             "Persisted merge-group suggestions (never recomputed; ipywidgets)"
         ),
