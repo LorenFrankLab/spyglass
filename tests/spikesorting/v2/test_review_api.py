@@ -93,3 +93,71 @@ def test_merge_resolution_may_keep_inherited_label_outside_palette():
     assert _unknown_conflict_resolution_labels(
         ("new-site-label",), palette, conflict
     ) == ["new-site-label"]
+
+
+def _change_set(**overrides):
+    import uuid
+
+    from spyglass.spikesorting.v2.review_api import (
+        CurationChangeSet,
+        MergeLabelConflict,
+    )
+
+    review = SimpleNamespace(
+        review_id=uuid.UUID(int=7),
+        parent=SimpleNamespace(curation_id=0, sorting_id=uuid.UUID(int=1)),
+        profile=SimpleNamespace(review_profile_name="minimal_profile"),
+    )
+    fields = dict(
+        review=review,
+        annotations_hash="abc",
+        labels_before={1: ("accept",), 2: ("noise",), 3: ()},
+        labels_after={1: ("accept",), 2: (), 3: ("accept",)},
+        merge_groups=((1, 3),),
+        unit_count_before=3,
+        unit_count_after=2,
+        label_conflicts=(
+            MergeLabelConflict(
+                merged_unit_id=4,
+                contributor_unit_ids=(1, 3),
+                contributor_labels={1: ("accept",), 3: ("mua",)},
+            ),
+        ),
+        newer_sibling_curations=(SimpleNamespace(curation_id=9),),
+        reviewed_parent_created_at=None,
+        reviewed_parent_created_by="tester",
+    )
+    fields.update(overrides)
+    return CurationChangeSet(**fields)
+
+
+def test_change_set_summary_and_changed_units_are_derived_from_fields():
+    """The compact summary / table replace the nested dataclass dump: label
+    additions/removals, proposed merges, counts, conflicts and siblings, all
+    from the preview's own fields (no database)."""
+    changes = _change_set()
+    assert changes.has_changes
+    table = changes.changed_units().set_index("unit_id")
+    assert list(table.index) == [1, 2, 3]
+    assert table.loc[2, "removed"] == "noise" and table.loc[2, "added"] == ""
+    assert table.loc[3, "added"] == "accept"
+    assert table.loc[1, "merge_group"] == "1,3"  # unchanged labels, merged
+    assert table.loc[2, "merge_group"] == ""
+    text = changes.summary()
+    assert "units: 3 -> 2" in text
+    assert "label changes: 2 unit(s)" in text
+    assert "proposed merges: 1,3" in text
+    assert "merged unit 4 <- 1:accept | 3:mua" in text
+    assert "newer sibling curation(s)" in text and "9" in text
+    assert "no changes" not in text
+
+    unchanged = _change_set(
+        labels_after={1: ("accept",), 2: ("noise",), 3: ()},
+        merge_groups=(),
+        unit_count_after=3,
+        label_conflicts=(),
+        newer_sibling_curations=(),
+    )
+    assert not unchanged.has_changes
+    assert unchanged.changed_units().empty
+    assert "confirm_no_changes=True" in unchanged.summary()

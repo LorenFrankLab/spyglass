@@ -13,7 +13,7 @@ import webbrowser
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
 from spyglass.spikesorting.v2._figpack_curation import (
@@ -37,6 +37,9 @@ from spyglass.spikesorting.v2.exceptions import (
 # "complete" only attests the step is done, without that classification
 # (the commit path reports its identity / edit / evaluation steps this way;
 # ``child_committed`` keeps computed / reused).
+if TYPE_CHECKING:
+    import pandas as pd
+
 ReviewStageState = Literal["computed", "reused", "complete"]
 
 
@@ -369,6 +372,102 @@ class CurationChangeSet:
     newer_sibling_curations: tuple[CurationRef, ...]
     reviewed_parent_created_at: Any
     reviewed_parent_created_by: str
+
+    @property
+    def has_changes(self) -> bool:
+        """Whether the browser edits differ from the committed parent."""
+        return bool(self.merge_groups) or dict(self.labels_before) != dict(
+            self.labels_after
+        )
+
+    def changed_units(self) -> "pd.DataFrame":
+        """One row per unit whose labels changed or that joins a merge.
+
+        Columns ``unit_id``, ``labels_before``, ``labels_after``,
+        ``added``, ``removed`` (comma-joined) and ``merge_group`` (the
+        proposed group the unit joins, or ``""``). Empty when nothing
+        changed. Derived from the preview's fields; no database access.
+        """
+        import pandas as pd
+
+        group_of = {
+            unit_id: ",".join(map(str, group))
+            for group in self.merge_groups
+            for unit_id in group
+        }
+        rows = []
+        for unit_id in sorted(
+            set(self.labels_before) | set(self.labels_after) | set(group_of)
+        ):
+            before = tuple(self.labels_before.get(unit_id, ()))
+            after = tuple(self.labels_after.get(unit_id, ()))
+            if before == after and unit_id not in group_of:
+                continue
+            rows.append(
+                {
+                    "unit_id": unit_id,
+                    "labels_before": ",".join(before),
+                    "labels_after": ",".join(after),
+                    "added": ",".join(sorted(set(after) - set(before))),
+                    "removed": ",".join(sorted(set(before) - set(after))),
+                    "merge_group": group_of.get(unit_id, ""),
+                }
+            )
+        return pd.DataFrame(
+            rows,
+            columns=[
+                "unit_id",
+                "labels_before",
+                "labels_after",
+                "added",
+                "removed",
+                "merge_group",
+            ],
+        )
+
+    def summary(self) -> str:
+        """A compact, human-readable account of the pending import."""
+        parent = self.review.parent
+        changed = self.changed_units()
+        n_label_changes = int(
+            ((changed["added"] != "") | (changed["removed"] != "")).sum()
+        )
+        lines = [
+            f"Review {self.review.review_id} of curation "
+            f"{parent.curation_id} (sorting {parent.sorting_id}, profile "
+            f"{self.review.profile.review_profile_name!r}):",
+            f"  units: {self.unit_count_before} -> {self.unit_count_after}",
+            f"  label changes: {n_label_changes} unit(s)",
+            "  proposed merges: "
+            + (
+                "; ".join(",".join(map(str, g)) for g in self.merge_groups)
+                or "none"
+            ),
+        ]
+        if self.label_conflicts:
+            conflicts = ", ".join(
+                f"merged unit {c.merged_unit_id} <- "
+                + " | ".join(
+                    f"{u}:{','.join(labels) or '-'}"
+                    for u, labels in c.contributor_labels.items()
+                )
+                for c in self.label_conflicts
+            )
+            lines.append(f"  label conflicts (resolve on commit): {conflicts}")
+        if self.newer_sibling_curations:
+            siblings = ", ".join(
+                str(ref.curation_id) for ref in self.newer_sibling_curations
+            )
+            lines.append(
+                f"  note: newer sibling curation(s) of the same parent exist: "
+                f"{siblings}"
+            )
+        if not self.has_changes:
+            lines.append(
+                "  no changes: commit(confirm_no_changes=True) records the "
+                "review as verified"
+            )
+        return "\n".join(lines)
 
     def commit(
         self,
