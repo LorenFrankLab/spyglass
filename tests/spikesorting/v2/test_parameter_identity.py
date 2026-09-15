@@ -24,13 +24,13 @@ def test_fingerprint_is_stable_and_dict_order_independent():
     fp1 = parameter_fingerprint(
         "PreprocessingParameters",
         params={"a": 1, "b": {"x": 1.0, "y": 2.0}},
-        params_schema_version=3,
+        params_schema_version=4,
         job_kwargs=None,
     )
     fp2 = parameter_fingerprint(
         "PreprocessingParameters",
         params={"b": {"y": 2.0, "x": 1.0}, "a": 1},
-        params_schema_version=3,
+        params_schema_version=4,
         job_kwargs=None,
     )
     assert fp1 == fp2
@@ -181,14 +181,14 @@ def test_shipped_recipe_fingerprints_are_locked():
             "PreprocessingParameters",
             rc.FRANKLAB_HIPPOCAMPUS_2026_06,
             rc.FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS,
-            3,
+            4,
             None,
         ),
         (
             "PreprocessingParameters",
             rc.FRANKLAB_CORTEX_2026_06,
             rc.FRANKLAB_CORTEX_2026_06_PARAMS,
-            3,
+            4,
             None,
         ),
         (
@@ -224,10 +224,13 @@ def test_shipped_recipe_fingerprints_are_locked():
     # numeric normalization (int-valued floats collapse to ints so 9 and 9.0
     # fingerprint alike) + ``allow_nan=False``. The lock still serves its
     # purpose: an in-place edit to a shipped recipe changes the recipe content
-    # and so the digest, failing here.
+    # and so the digest, failing here. The preprocessing digests were
+    # regenerated once more when schema_version 4 removed the inert
+    # recording-stage ``whiten`` field (no recording cache ever applied it, so
+    # the recipes' effective science is unchanged and the dated names stay).
     expected = {
-        rc.FRANKLAB_HIPPOCAMPUS_2026_06: "370e76eab686",
-        rc.FRANKLAB_CORTEX_2026_06: "9c3db4b5b525",
+        rc.FRANKLAB_HIPPOCAMPUS_2026_06: "a23acc3c06a9",
+        rc.FRANKLAB_CORTEX_2026_06: "2872d9dcb497",
         rc.FRANKLAB_100UV_P07_2026_06: "6e6ddbc7e5b7",
         rc.FRANKLAB_50UV_P07_2026_06: "a4a9158675e8",
         rc.FRANKLAB_30KHZ_MS4_2026_06: "7bd8d640c764",
@@ -767,13 +770,13 @@ def test_within_batch_duplicate_content_rejected(dj_conn):
         {
             "preprocessing_params_name": "batch_dup_a",
             "params": blob,
-            "params_schema_version": 3,
+            "params_schema_version": 4,
             "job_kwargs": None,
         },
         {
             "preprocessing_params_name": "batch_dup_b",
             "params": blob,
-            "params_schema_version": 3,
+            "params_schema_version": 4,
             "job_kwargs": None,
         },
     ]

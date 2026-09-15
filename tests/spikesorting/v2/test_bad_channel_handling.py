@@ -785,7 +785,7 @@ def test_remove_field_does_not_change_default_recording(
             {
                 "preprocessing_params_name": "_pytest_legacy_no_bad_channel_handling",
                 "params": legacy_blob,
-                "params_schema_version": 3,
+                "params_schema_version": 4,
                 "job_kwargs": None,
             },
             skip_duplicates=True,
