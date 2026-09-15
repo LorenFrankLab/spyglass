@@ -359,3 +359,94 @@ class AutoCurationRulesSchema(BaseModel):
                 "are applied, so two rules cannot share one."
             )
         return self
+
+
+def prepare_quality_metric_row(row: dict) -> dict:
+    """Validate one ``QualityMetricParameters`` insert input into its stored row.
+
+    Single source of the insert-input -> stored-column mapping, shared by
+    ``QualityMetricParameters.insert`` and the default-catalog audit so a new
+    validated field or default is filled identically on both paths.
+    ``template_metric_columns`` is forwarded only when the row sets it, so an
+    omitting row picks up the schema default (the conservative, window-safe
+    ``trough_half_width`` shape column).
+
+    Parameters
+    ----------
+    row : dict
+        Insert input: ``metric_params_name``, ``metric_names``, optional
+        ``metric_kwargs`` / ``skip_pc_metrics`` / ``template_metric_columns``
+        / ``params_schema_version`` / ``job_kwargs``.
+
+    Returns
+    -------
+    dict
+        The row in stored shape (every table column present).
+    """
+    payload = {
+        "schema_version": row.get(
+            "params_schema_version", QUALITY_METRIC_SCHEMA_VERSION
+        ),
+        "metric_names": row["metric_names"],
+        "metric_kwargs": row.get("metric_kwargs", {}),
+        "skip_pc_metrics": row.get("skip_pc_metrics", True),
+    }
+    if "template_metric_columns" in row:
+        payload["template_metric_columns"] = row["template_metric_columns"]
+    clean = QualityMetricParamsSchema.model_validate(payload).model_dump()
+    return {
+        "metric_params_name": row["metric_params_name"],
+        "metric_names": clean["metric_names"],
+        "metric_kwargs": clean["metric_kwargs"],
+        "template_metric_columns": clean["template_metric_columns"],
+        "skip_pc_metrics": clean["skip_pc_metrics"],
+        "params_schema_version": clean["schema_version"],
+        "job_kwargs": row.get("job_kwargs"),
+    }
+
+
+def prepare_auto_curation_rules(
+    row: dict, rule_rows: list[dict]
+) -> tuple[dict, list[dict]]:
+    """Validate an ``AutoCurationRules`` master + rule inputs into stored rows.
+
+    The complete ``{auto_merge_preset, auto_merge_kwargs, rules}`` payload is
+    validated together (a master never lands without its rules being checked).
+    Shared by ``AutoCurationRules.insert_rules`` and the default-catalog audit.
+
+    Parameters
+    ----------
+    row : dict
+        Master insert input: ``auto_curation_rules_name``,
+        ``auto_merge_preset``, optional ``auto_merge_kwargs`` /
+        ``params_schema_version`` / ``job_kwargs``.
+    rule_rows : list[dict]
+        Ordered ``Rule`` inputs (``rule_index`` values unique).
+
+    Returns
+    -------
+    tuple[dict, list[dict]]
+        ``(master, rule_inserts)`` in stored shape; each rule insert carries
+        the master's ``auto_curation_rules_name`` FK, in validated order.
+    """
+    name = row["auto_curation_rules_name"]
+    payload = {
+        "schema_version": row.get(
+            "params_schema_version", AUTO_CURATION_RULES_SCHEMA_VERSION
+        ),
+        "auto_merge_preset": row["auto_merge_preset"],
+        "auto_merge_kwargs": row.get("auto_merge_kwargs", {}),
+        "rules": rule_rows,
+    }
+    clean = AutoCurationRulesSchema.model_validate(payload).model_dump()
+    master = {
+        "auto_curation_rules_name": name,
+        "auto_merge_preset": clean["auto_merge_preset"],
+        "auto_merge_kwargs": clean["auto_merge_kwargs"],
+        "params_schema_version": clean["schema_version"],
+        "job_kwargs": row.get("job_kwargs"),
+    }
+    rule_inserts = [
+        {"auto_curation_rules_name": name, **rule} for rule in clean["rules"]
+    ]
+    return master, rule_inserts

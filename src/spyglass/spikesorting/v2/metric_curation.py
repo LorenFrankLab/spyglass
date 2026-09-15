@@ -47,11 +47,9 @@ from spyglass.spikesorting.v2._metric_curation_nwb import (
     write_analyzer_curation_tables,
 )
 from spyglass.spikesorting.v2._params.metric_curation import (
-    AUTO_CURATION_RULES_SCHEMA_VERSION,
-    QUALITY_METRIC_SCHEMA_VERSION,
-    AutoCurationRulesSchema,
-    QualityMetricParamsSchema,
     _available_pca_metric_names,
+    prepare_auto_curation_rules,
+    prepare_quality_metric_row,
     required_extensions_for_metrics,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
@@ -77,7 +75,6 @@ from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
     _jsonable_blob,
     _resolved_job_kwargs,
-    _validate_params,
     reject_duplicate_quality_metric_content,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -335,35 +332,7 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """
         if isinstance(rows, dict):
             rows = [rows]
-        validated = []
-        for row in rows:
-            payload = {
-                "schema_version": row.get(
-                    "params_schema_version", QUALITY_METRIC_SCHEMA_VERSION
-                ),
-                "metric_names": row["metric_names"],
-                "metric_kwargs": row.get("metric_kwargs", {}),
-                "skip_pc_metrics": row.get("skip_pc_metrics", True),
-            }
-            # Only forward template_metric_columns when the row sets it, so an
-            # omitting row picks up the schema default (the conservative,
-            # window-safe trough_half_width shape column).
-            if "template_metric_columns" in row:
-                payload["template_metric_columns"] = row[
-                    "template_metric_columns"
-                ]
-            clean = _validate_params(QualityMetricParamsSchema, payload)
-            validated.append(
-                {
-                    "metric_params_name": row["metric_params_name"],
-                    "metric_names": clean["metric_names"],
-                    "metric_kwargs": clean["metric_kwargs"],
-                    "template_metric_columns": clean["template_metric_columns"],
-                    "skip_pc_metrics": clean["skip_pc_metrics"],
-                    "params_schema_version": clean["schema_version"],
-                    "job_kwargs": row.get("job_kwargs"),
-                }
-            )
+        validated = [prepare_quality_metric_row(row) for row in rows]
         reject_duplicate_quality_metric_content(
             self.fetch(as_dict=True),
             validated,
@@ -502,26 +471,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         raises if the existing name maps to different rules.
         """
         name = row["auto_curation_rules_name"]
-        payload = {
-            "schema_version": row.get(
-                "params_schema_version", AUTO_CURATION_RULES_SCHEMA_VERSION
-            ),
-            "auto_merge_preset": row["auto_merge_preset"],
-            "auto_merge_kwargs": row.get("auto_merge_kwargs", {}),
-            "rules": rule_rows,
-        }
-        clean = _validate_params(AutoCurationRulesSchema, payload)
-        master = {
-            "auto_curation_rules_name": name,
-            "auto_merge_preset": clean["auto_merge_preset"],
-            "auto_merge_kwargs": clean["auto_merge_kwargs"],
-            "params_schema_version": clean["schema_version"],
-            "job_kwargs": row.get("job_kwargs"),
-        }
-        rule_inserts = [
-            {"auto_curation_rules_name": name, **rule}
-            for rule in clean["rules"]
-        ]
+        master, rule_inserts = prepare_auto_curation_rules(row, rule_rows)
         expected_payload = cls._payload_for_compare(master, rule_inserts)
         existing = cls & {"auto_curation_rules_name": name}
         if existing:

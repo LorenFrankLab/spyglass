@@ -459,78 +459,33 @@ def _canonical_quality_metric_rows(table) -> list[dict]:
 
     ``_default_rows`` is the raw insert INPUT -- it omits the columns the
     validated insert fills (``template_metric_columns``, ``params_schema_version``,
-    ``job_kwargs``). Mirror ``QualityMetricParameters.insert``'s row-building so
+    ``job_kwargs``). Run them through the same preparation the insert uses so
     every stored column joins the drift comparison, not just the raw inputs.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
-        QUALITY_METRIC_SCHEMA_VERSION,
-        QualityMetricParamsSchema,
+        prepare_quality_metric_row,
     )
-    from spyglass.spikesorting.v2.utils import _validate_params
 
-    rows = []
-    for row in table._default_rows():
-        payload = {
-            "schema_version": row.get(
-                "params_schema_version", QUALITY_METRIC_SCHEMA_VERSION
-            ),
-            "metric_names": row["metric_names"],
-            "metric_kwargs": row.get("metric_kwargs", {}),
-            "skip_pc_metrics": row.get("skip_pc_metrics", True),
-        }
-        if "template_metric_columns" in row:
-            payload["template_metric_columns"] = row["template_metric_columns"]
-        clean = _validate_params(QualityMetricParamsSchema, payload)
-        rows.append(
-            {
-                "metric_params_name": row["metric_params_name"],
-                "metric_names": clean["metric_names"],
-                "metric_kwargs": clean["metric_kwargs"],
-                "template_metric_columns": clean["template_metric_columns"],
-                "skip_pc_metrics": clean["skip_pc_metrics"],
-                "params_schema_version": clean["schema_version"],
-                "job_kwargs": row.get("job_kwargs"),
-            }
-        )
-    return rows
+    return [prepare_quality_metric_row(row) for row in table._default_rows()]
 
 
 def _canonical_autocuration_master_rows(table) -> list[dict]:
     """Shipped ``AutoCurationRules`` MASTER defaults in their STORED shape.
 
     ``_default_payloads`` masters omit the validated-fill columns
-    (``auto_merge_kwargs``, ``params_schema_version``, ``job_kwargs``). Mirror
-    ``AutoCurationRules.insert_rules``'s master-building so a drift in those
-    defaulted master columns is compared too (the ``Rule`` parts are compared
-    separately in ``verify_v2_default_catalog``).
+    (``auto_merge_kwargs``, ``params_schema_version``, ``job_kwargs``). Run
+    them through the same preparation ``insert_rules`` uses so a drift in
+    those defaulted master columns is compared too (the ``Rule`` parts are
+    compared separately in ``verify_v2_default_catalog``).
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
-        AUTO_CURATION_RULES_SCHEMA_VERSION,
-        AutoCurationRulesSchema,
+        prepare_auto_curation_rules,
     )
-    from spyglass.spikesorting.v2.utils import _validate_params
 
-    rows = []
-    for master, rule_rows in table._default_payloads():
-        payload = {
-            "schema_version": master.get(
-                "params_schema_version", AUTO_CURATION_RULES_SCHEMA_VERSION
-            ),
-            "auto_merge_preset": master["auto_merge_preset"],
-            "auto_merge_kwargs": master.get("auto_merge_kwargs", {}),
-            "rules": rule_rows,
-        }
-        clean = _validate_params(AutoCurationRulesSchema, payload)
-        rows.append(
-            {
-                "auto_curation_rules_name": master["auto_curation_rules_name"],
-                "auto_merge_preset": clean["auto_merge_preset"],
-                "auto_merge_kwargs": clean["auto_merge_kwargs"],
-                "params_schema_version": clean["schema_version"],
-                "job_kwargs": master.get("job_kwargs"),
-            }
-        )
-    return rows
+    return [
+        prepare_auto_curation_rules(master, rule_rows)[0]
+        for master, rule_rows in table._default_payloads()
+    ]
 
 
 def _shipped_default_rows(table) -> list[dict]:
