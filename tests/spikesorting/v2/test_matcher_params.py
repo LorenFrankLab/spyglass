@@ -134,7 +134,7 @@ def test_named_bundle_params_stored_distinctly():
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     MatcherParameters.insert_default()
-    wide = UnitMatchParamsSchema(ms_before=2.0).model_dump()
+    wide = UnitMatchParamsSchema(ms_before=2.0, ms_after=2.0).model_dump()
     MatcherParameters().insert1(
         {
             "matcher_params_name": "unitmatch_wide",
@@ -190,7 +190,9 @@ def test_bundle_params_reach_extract(monkeypatch):
         lambda name: type("_M", (), {"match": lambda self, si, p: []})(),
     )
 
-    params = UnitMatchParamsSchema(ms_before=2.0, seed=4).model_dump()
+    params = UnitMatchParamsSchema(
+        ms_before=2.0, ms_after=2.0, seed=4
+    ).model_dump()
     member_plan = [
         {
             "member_index": 0,

@@ -393,7 +393,7 @@ def _review_config(
             ],
         }
     )
-    # Preserve byte-for-byte Phase-3 identity when no custom set is selected.
+    # Keep the configuration byte-identical when no custom set is selected.
     if annotation_sets:
         config["annotation_sets"] = [ref.snapshot() for ref in annotation_sets]
     return config

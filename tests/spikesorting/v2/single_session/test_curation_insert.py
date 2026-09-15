@@ -1182,6 +1182,7 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
             {
                 "sorting_id": sid,
                 "curation_id": 0,
+                "curation_uuid": uuid.uuid4(),
                 "analysis_file_name": "a28_concat_curation_fake.nwb",
                 "object_id": "a28-concat-curation-object-id",
                 "description": "a28 concat anchor probe",

@@ -15,10 +15,17 @@ def test_add_extensions_idempotent(populated_sorting):
     extension computes nothing (returns ``[]``) and never recomputes
     waveforms/templates (which would cascade-delete derived extensions).
     """
+    from spyglass.spikesorting.v2._analyzer_cache import analyzer_cache_lock
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting = Sorting()
-    sorting.get_analyzer(populated_sorting)  # ensure the analyzer exists
+    analyzer = sorting.get_analyzer(populated_sorting)  # ensure it exists
+    # The shared package-scoped sort analyzer may already carry correlograms
+    # from an earlier module (e.g. a FigPack review persisted it); start from
+    # the absent state so the first call really computes.
+    with analyzer_cache_lock(populated_sorting["sorting_id"]):
+        if analyzer.has_extension("correlograms"):
+            analyzer.delete_extension("correlograms")
 
     added = sorting.add_extensions(populated_sorting, ["correlograms"])
     assert "correlograms" in added
