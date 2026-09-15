@@ -745,6 +745,47 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
+def _insert_bypassed_root_curation(sid):
+    """Plant a committed root CurationV2 over the bypassed sort (FK checks off).
+
+    One raw unit (``Sorting.Unit`` 0) mirrored by ``CurationV2.Unit`` 0 so the
+    curation is a committed raw-namespace curation. The caller holds
+    ``SET FOREIGN_KEY_CHECKS=0``; the Electrode / AnalysisNwbfile FK values are
+    stubs.
+    """
+    import uuid
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    unit = {
+        "sorting_id": sid,
+        "unit_id": 0,
+        "nwb_file_name": "a22_fake.nwb",
+        "electrode_group_name": "0",
+        "electrode_id": 0,
+        "peak_amplitude_uv": -100.0,
+        "n_spikes": 10,
+    }
+    Sorting.Unit.insert1(unit, allow_direct_insert=True)
+    CurationV2.insert1(
+        {
+            "sorting_id": sid,
+            "curation_id": 0,
+            "curation_uuid": uuid.uuid4(),
+            "parent_curation_id": -1,
+            "analysis_file_name": "a22_fake_curation.nwb",
+            "object_id": "a22-fake-curation-object-id",
+            "merges_applied": 0,
+            "description": "bypassed root for the orphan audit",
+        },
+        allow_direct_insert=True,
+    )
+    CurationV2.Unit.insert1(
+        {**unit, "curation_id": 0}, allow_direct_insert=True
+    )
+
+
 def test_find_orphaned_analyzer_folders_db_side(dj_conn):
     """A Sorting row (n_units > 0) whose analyzer folder is gone on disk
     is reported as a DB-side orphan -- and nothing is auto-deleted."""
@@ -876,13 +917,15 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
         folder.mkdir(parents=True, exist_ok=True)
 
     # Plant a PC-requesting curation-evaluation selection referencing the cortex
-    # metric recipe. Only (sorting_id, metric_params_name,
-    # metric_waveform_params_name) matter to the orphan finder's join, so the
-    # other FK fields are stubbed with FK checks off.
+    # metric recipe, over a committed ROOT curation of the bypassed sort (the
+    # reference collector joins the selection to its CurationV2 generation, so
+    # the curation must exist; a root that carries exactly the raw unit ids
+    # is the raw namespace, whose metric folder is the recipe-named one).
     conn = dj.conn()
     ceid = uuid.uuid4()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
+        _insert_bypassed_root_curation(sid)
         CurationEvaluationSelection.insert1(
             {
                 "curation_evaluation_id": ceid,
@@ -918,6 +961,11 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
             (
                 CurationEvaluationSelection & {"curation_evaluation_id": ceid}
             ).delete_quick()
+            from spyglass.spikesorting.v2.curation import CurationV2
+
+            (CurationV2.Unit & {"sorting_id": sid}).delete_quick()
+            (CurationV2 & {"sorting_id": sid}).delete_quick()
+            (Sorting.Unit & {"sorting_id": sid}).delete_quick()
             (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")

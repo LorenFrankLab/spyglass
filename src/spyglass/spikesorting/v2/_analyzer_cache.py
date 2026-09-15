@@ -670,9 +670,17 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         if int(row["n_units"]) > 0:
             units_bearing.append((row["sorting_id"], str(path), path.exists()))
 
-    pc_rows = CurationEvaluationSelection.pc_requesting().fetch(
+    # Join the selection to its CurationV2 row so each PC-requesting
+    # evaluation carries the generation UUID it belongs to: the FK guarantees
+    # a live selection has a curation, and one relational fetch cannot see a
+    # selection and its curation in different states.
+    pc_rows = (
+        CurationEvaluationSelection.pc_requesting()
+        * CurationV2.proj("curation_uuid")
+    ).fetch(
         "sorting_id",
         "curation_id",
+        "curation_uuid",
         "metric_waveform_params_name",
         as_dict=True,
     )
@@ -693,11 +701,9 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
     curation_rows = CurationV2.fetch(
         "sorting_id", "curation_id", "curation_uuid", as_dict=True
     )
-    curation_by_key: dict[tuple[str, int], dict] = {}
     for row in curation_rows:
         sorting_id = str(row["sorting_id"])
         curation_id = int(row["curation_id"])
-        curation_by_key[(sorting_id, curation_id)] = row
         key = {"sorting_id": row["sorting_id"], "curation_id": curation_id}
         if not (CurationV2.Unit & key) or not CurationV2.is_committed_curation(
             key
@@ -722,18 +728,6 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
 
     for row in pc_rows:
         recipe_name = row["metric_waveform_params_name"]
-        curation = curation_by_key.get(
-            (str(row["sorting_id"]), int(row["curation_id"]))
-        )
-        if curation is None:
-            # Preserve the established conservative behavior for legacy or
-            # partially planted selection rows: without a live curation UUID
-            # there is no safe merged-cache identity to derive, but the raw
-            # metric folder is still explicitly referenced by the selection.
-            referenced_paths.add(
-                str(analyzer_path(row["sorting_id"], recipe_name))
-            )
-            continue
         key = {
             "sorting_id": row["sorting_id"],
             "curation_id": int(row["curation_id"]),
@@ -751,7 +745,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
             str(
                 curation_analyzer_path(
                     row["sorting_id"],
-                    curation["curation_uuid"],
+                    row["curation_uuid"],
                     "metric",
                     _recipe_hash(recipe_name),
                     si.__version__,
