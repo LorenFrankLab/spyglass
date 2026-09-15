@@ -617,6 +617,8 @@ Commit the verification in a later cell, after inspecting; if that commit
 imports another merge, the result stays pending and the block is run again:
 
 ```python
+from spyglass.spikesorting.v2.pipeline import FigPackReview
+
 if pending_verification is not None:
     continuation = FigPackReview.resume(pending_verification.review_id)
     verification = continuation.preview_import()
