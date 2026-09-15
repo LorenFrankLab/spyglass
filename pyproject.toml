@@ -162,6 +162,13 @@ optional-dependencies.spikesorting-v2-curation = [
   "figpack==0.3.20",
   "figpack-spike-sorting==0.1.14",
 ]
+optional-dependencies.spikesorting-v2-curation-test = [
+  # Browser regression tests for the FigPack review journey (Python
+  # Playwright drives a headless Chromium against the bundle served by
+  # ``_review_delivery``). Test-only: never a runtime dependency. After
+  # installing, run ``playwright install chromium`` (CI: ``--with-deps``).
+  "playwright==1.55.0",
+]
 optional-dependencies.spikesorting-v2-validation = [
   "MEArec>=1.9",       # ground-truth simulated recordings
   "neuroconv[mearec]", # MEArec -> NWB conversion
