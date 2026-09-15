@@ -166,12 +166,14 @@ def test_missing_extensions_empty_when_all_present():
 
 @pytest.mark.unit
 def test_format_missing_extension_error_names_remediation():
-    """The error names the extensions, the opt-in, and the add_extensions call."""
+    """The error names the extensions and the curation-scoped opt-in; it does
+    not steer users to Sorting.add_extensions, which mutates the raw sort's
+    analyzer and cannot satisfy a merged curation's plot."""
     message = format_missing_extension_error(["unit_locations", "correlograms"])
     assert "unit_locations" in message
     assert "correlograms" in message
     assert "compute_missing=True" in message
-    assert "add_extensions" in message
+    assert "add_extensions" not in message
     # Default wording does not steer toward the metric overview.
     assert "plot_metrics" not in message
 

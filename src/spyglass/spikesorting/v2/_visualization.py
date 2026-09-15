@@ -253,20 +253,21 @@ def format_missing_extension_error(
 ) -> str:
     """Phrase the read-only missing-extension error.
 
-    Names the absent display-safe extensions, the ``compute_missing=True``
-    opt-in, and the explicit ``Sorting().add_extensions(...)`` call a user can
-    run themselves. When ``recommend_metrics`` is set (the SI-native metric
-    widgets), it also points back to the official Spyglass ``plot_metrics``
-    overview, since the SI quality/template-metric widgets read analyzer
-    extensions directly rather than the routed Spyglass metric table.
+    Names the absent display-safe extensions and the ``compute_missing=True``
+    opt-in, which computes them on the analyzer the plot actually reads (a
+    committed merged curation has its own analyzer, so adding extensions to
+    the raw sort would not satisfy the next call). When ``recommend_metrics``
+    is set (the SI-native metric widgets), it also points back to the
+    official Spyglass ``plot_metrics`` overview, since the SI quality /
+    template-metric widgets read analyzer extensions directly rather than
+    the routed Spyglass metric table.
     """
     missing_list = list(missing)
     lines = [
         "This visualization needs display-safe analyzer extension(s) that are "
         f"not yet computed: {missing_list}.",
         "Re-run with compute_missing=True to compute only these display-safe "
-        "extensions, or add them yourself first with "
-        f"Sorting().add_extensions(sorting_key, {missing_list}).",
+        "extensions on the analyzer this curation's plots read.",
     ]
     if recommend_metrics:
         lines.append(
