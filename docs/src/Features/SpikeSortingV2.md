@@ -599,27 +599,42 @@ changes.changed_units()         # one row per changed / merged unit
 receipt = changes.commit(
     conflict_resolutions={12: ("accept",)},
 )
-final_curation = receipt.curation
 
 # A merge is automatically re-evaluated with the same profile, and the merged
 # child is NOT the result until you have looked at it. open() does not wait:
-# stop here, inspect (edit + Save Annotations if a merge was wrong), and
-# commit the verification in a later cell.
+# stop here and inspect (edit + Save Annotations if a merge was wrong). A
+# label-only review has nothing to verify.
+pending_verification = None
 if receipt.needs_merge_verification:
-    continuation = receipt.continue_review()
-    continuation.open()
+    pending_verification = receipt.continue_review()
+    pending_verification.open()
     final_curation = None  # pending
+else:
+    final_curation = receipt.curation
+```
 
-# Later, after inspecting:
-continuation = FigPackReview.resume(continuation.review_id)
-verification = continuation.preview_import()
-verification_receipt = verification.commit(
-    confirm_no_changes=not verification.has_changes
-)
-final_curation = verification_receipt.curation
-# A verification that imported another merge needs the same loop again
-# (verification_receipt.needs_merge_verification).
+Commit the verification in a later cell, after inspecting; if that commit
+imports another merge, the result stays pending and the block is run again:
 
+```python
+if pending_verification is not None:
+    continuation = FigPackReview.resume(pending_verification.review_id)
+    verification = continuation.preview_import()
+    verification_receipt = verification.commit(
+        confirm_no_changes=not verification.has_changes
+    )
+    if verification_receipt.needs_merge_verification:
+        pending_verification = verification_receipt.continue_review()
+        pending_verification.open()  # inspect, then run this block again
+    else:
+        pending_verification = None
+        final_curation = verification_receipt.curation
+```
+
+Only once nothing is pending (`final_curation is not None`) is the result
+usable downstream:
+
+```python
 final_merge_id = final_curation.merge_id
 member_merge_ids = final_curation.member_merge_ids  # concat-backed sorts
 ```

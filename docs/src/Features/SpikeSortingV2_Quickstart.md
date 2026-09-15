@@ -119,26 +119,36 @@ review = FigPackReview.resume(review.review_id)
 changes = review.preview_import()    # reads the saved annotations.json
 print(changes.summary())             # labels +/-, merges, counts, conflicts
 receipt = changes.commit()           # or commit(confirm_no_changes=True)
-final_curation = receipt.curation    # the committed child (labels + merges)
 
 # A merge is re-evaluated with the same profile; the merged child is NOT the
-# result yet. Open the merged units and STOP here -- open() does not wait.
+# result until you have looked at it. Open the merged units and STOP here --
+# open() does not wait. A label-only review has nothing to verify.
+pending_verification = None
 if receipt.needs_merge_verification:
-    verification = receipt.continue_review()
-    verification.open()
-    final_curation = None  # pending until the look is committed below
+    pending_verification = receipt.continue_review()
+    pending_verification.open()
+    final_curation = None            # pending until the look is committed
+else:
+    final_curation = receipt.curation  # the committed child (labels + merges)
 ```
 
-Inspect the merged units (edit and **Save Annotations** if one is wrong). Then,
-in a later cell or session, commit that look explicitly:
+If a verification is pending: inspect the merged units (edit and **Save
+Annotations** if one is wrong), then, in a later cell or session, commit that
+look explicitly. Run this block again if the commit imports another merge.
 
 ```python
-verification = FigPackReview.resume(verification.review_id)
-changes = verification.preview_import()
-verification_receipt = changes.commit(confirm_no_changes=not changes.has_changes)
-final_curation = verification_receipt.curation
-# If this commit imported another merge, needs_merge_verification is True
-# again: continue_review(), inspect, and repeat before using the result.
+if pending_verification is not None:
+    verification = FigPackReview.resume(pending_verification.review_id)
+    changes = verification.preview_import()
+    verification_receipt = changes.commit(
+        confirm_no_changes=not changes.has_changes
+    )
+    if verification_receipt.needs_merge_verification:
+        pending_verification = verification_receipt.continue_review()
+        pending_verification.open()  # another merge: inspect, run again
+    else:
+        pending_verification = None
+        final_curation = verification_receipt.curation
 ```
 
 Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port>
