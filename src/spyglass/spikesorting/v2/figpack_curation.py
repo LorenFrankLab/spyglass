@@ -41,7 +41,7 @@ from pathlib import Path
 import datajoint as dj
 
 from spyglass.spikesorting.v2._figpack_curation import (
-    FIGPACK_INSTALL_HINT,
+    FIGPACK_INSTALL_HINT,  # noqa: F401 -- re-exported for callers
     FIGURE_CONFIG_FILENAME,
     curation_annotations_to_labels_and_merges,
     default_label_options,
@@ -50,6 +50,10 @@ from spyglass.spikesorting.v2._figpack_curation import (
     normalize_displayed_unit_properties,
     pack_display_config,
     unpack_display_config,
+)
+from spyglass.spikesorting.v2._review_view import (
+    coerce_units_table_ids as _coerce_units_table_ids,
+    require_figpack,
 )
 from spyglass.spikesorting.v2._selection_identity import (
     assert_supplied_id_matches,
@@ -86,17 +90,8 @@ class FigPackBuildResult:
 
 
 def _require_figpack():
-    """Return ``(figpack.views, figpack_spike_sorting.views)`` or raise.
-
-    Raises ``ImportError`` with the install hint if either optional package is
-    missing, so the failure is actionable rather than a bare ``ModuleNotFound``.
-    """
-    try:
-        import figpack.views as figpack_views
-        import figpack_spike_sorting.views as figpack_ss_views
-    except ImportError as exc:  # pragma: no cover - exercised via gated tests
-        raise ImportError(FIGPACK_INSTALL_HINT) from exc
-    return figpack_views, figpack_ss_views
+    """Return ``(figpack.views, figpack_spike_sorting.views)`` or raise."""
+    return require_figpack()
 
 
 def _curation_control_accepts_label_choices() -> bool:
@@ -307,40 +302,6 @@ def _assert_figure_identity(
     return config
 
 
-def _coerce_units_table_ids(view) -> None:
-    """Coerce ``UnitsTable`` unit ids to Python ``int`` in place (bug workaround).
-
-    ``figpack_spike_sorting``'s ``UnitsTable.write_to_zarr_group`` ``json.dumps``
-    its rows directly, and SpikeInterface's ``generate_unit_table_view`` builds
-    each ``UnitsTableRow`` from ``sorting.unit_ids`` WITHOUT coercion -- so a real
-    v2 analyzer (integer unit ids stored as ``numpy.int32``) raises
-    ``TypeError: Object of type int32 is not JSON serializable`` at save/upload.
-    Walk the composed view and coerce every ``UnitsTableRow.unit_id`` and
-    ``UnitSimilarityScore`` id to ``int``. Remove once upstream serializes these
-    (e.g. via ``check_json``).
-    """
-    import figpack_spike_sorting.views as figpack_ss_views
-
-    seen: set[int] = set()
-
-    def walk(obj):
-        if obj is None or id(obj) in seen:
-            return
-        seen.add(id(obj))
-        if isinstance(obj, figpack_ss_views.UnitsTable):
-            for row in obj.rows:
-                row.unit_id = int(row.unit_id)
-            for score in obj.similarity_scores or []:
-                score.unit_id1 = int(score.unit_id1)
-                score.unit_id2 = int(score.unit_id2)
-        for attr in ("item1", "item2", "view"):
-            walk(getattr(obj, attr, None))
-        for child in getattr(obj, "items", None) or []:
-            walk(child)
-
-    walk(view)
-
-
 def _available_displayed_unit_properties(analyzer) -> list[str]:
     """Return unit-table columns SpikeInterface can render for ``analyzer``."""
     from spikeinterface.widgets.utils import make_units_table_from_analyzer
@@ -405,7 +366,15 @@ def _build_curation_view(
     ``SortingCuration`` control as a sibling. ``display_options``
     (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
     amplitude sample and the correlogram pair filter -- and is display-only.
-    Returns the composed ``figpack.views`` object.
+
+    A profile-backed review passes ``review_table`` (the selected
+    evaluation's metrics, annotation columns and proposals, indexed by unit
+    id). Its columns are shown in SpikeInterface's selectable unit table via
+    ``extra_unit_properties`` -- the table that drives unit selection for
+    the curation control -- in the requested order and INSTEAD of SI's
+    default columns, so the official evaluation stays authoritative even
+    when the display analyzer carries a same-named property. Returns the
+    composed ``figpack.views`` object.
     """
     import spikeinterface.widgets as sw
 
@@ -414,8 +383,15 @@ def _build_curation_view(
         curation_analyzer_with_extensions,
     )
     from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2._review_unit_properties import (
+        review_unit_properties,
+    )
+    from spyglass.spikesorting.v2._review_view import (
+        compose_review_layout,
+        curation_control,
+    )
 
-    figpack_views, figpack_ss_views = _require_figpack()
+    _require_figpack()
     display = ReviewDisplayOptions.from_mapping(display_options)
 
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
@@ -429,11 +405,17 @@ def _build_curation_view(
         "display",
         extra_extensions={name: {} for name in required},
     ) as analyzer:
-        # Profile-backed metrics live in the adjacent read-only review table;
-        # the expert path still selects analyzer-native SI unit properties.
-        analyzer_properties = (
-            None if review_table is not None else displayed_unit_properties
-        )
+        if review_table is not None:
+            # Profile-backed: exactly the review columns, no SI defaults.
+            analyzer_properties: list[str] | None = []
+            extra_properties = review_unit_properties(
+                review_table, analyzer.unit_ids
+            )
+        else:
+            # Expert path: analyzer-native SI unit properties (or SI's
+            # defaults when None).
+            analyzer_properties = displayed_unit_properties
+            extra_properties = None
         _assert_displayed_unit_properties_available(
             analyzer, analyzer_properties
         )
@@ -443,6 +425,7 @@ def _build_curation_view(
                 backend="figpack",
                 curation=False,
                 displayed_unit_properties=analyzer_properties,
+                extra_unit_properties=extra_properties,
                 max_amplitudes_per_unit=display.max_amplitudes_per_unit,
                 min_similarity_for_correlograms=(
                     display.min_similarity_for_correlograms
@@ -451,42 +434,15 @@ def _build_curation_view(
                 display=False,
             ).view
 
-    control = figpack_ss_views.SortingCuration(
-        default_label_options=list(label_options),
-        curation={
-            "labelsByUnit": {
-                str(unit_id): list(labels)
-                for unit_id, labels in (seed_labels or {}).items()
-            },
-            # Applied merge provenance belongs in the read-only review table.
-            # Only new browser edits may populate this field.
-            "mergeGroups": [],
-            "isClosed": False,
-            "labelChoices": list(label_options),
-        },
-    )
-    items = [
-        figpack_views.LayoutItem(
-            view=summary,
-            title=f"Sorting summary ({display.describe()})",
-            stretch=1,
-        )
-    ]
+    control = curation_control(label_options, seed_labels)
+    summary_title = f"Sorting summary ({display.describe()})"
     if review_table is not None:
-        items.append(
-            figpack_views.LayoutItem(
-                view=figpack_views.DataFrame(review_table.reset_index()),
-                title="Review properties and suggestions (read-only)",
-                max_size=300,
-            )
+        summary_title = (
+            "Sorting summary -- unit table: official metrics / proposals of "
+            f"committed curation {int(curation_key['curation_id'])} "
+            f"({display.describe()})"
         )
-    items.append(
-        figpack_views.LayoutItem(view=control, title="Curation", max_size=260)
-    )
-    view = figpack_views.Box(
-        direction="vertical",
-        items=items,
-    )
+    view = compose_review_layout(summary, control, summary_title=summary_title)
     _coerce_units_table_ids(view)
     return view
 
