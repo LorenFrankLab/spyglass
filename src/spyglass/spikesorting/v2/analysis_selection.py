@@ -176,10 +176,10 @@ class UnitSelectionReceipt:
             ):
                 lines.append(
                     "empty selection: no unit carries a required label "
-                    f"({include}). Accept units in a review and hand over "
-                    "that child, or choose an exclude-only policy such as "
-                    "'v2_unflagged_units' to keep everything the rules did "
-                    "not flag."
+                    f"(one of {include}). Apply one of those labels in a "
+                    "review and hand over that child, or choose an "
+                    "exclude-only policy such as 'v2_unflagged_units' to "
+                    "keep everything the rules did not flag."
                 )
             else:
                 lines.append(

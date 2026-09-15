@@ -252,8 +252,16 @@ def test_receipt_summary_explains_counts_and_empty_selections(monkeypatch):
     # No unit carries a required label -> the actionable explanation.
     text = receipt("v2_accepted_single_units", single, [2, 3, 4]).summary()
     assert "0 selected" in text
-    assert "no unit carries a required label (['accept'])" in text
+    assert "no unit carries a required label (one of ['accept'])" in text
+    assert "Apply one of those labels" in text
     assert "v2_unflagged_units" in text
+    # A valid MUA-only policy gets the same policy-derived guidance, not an
+    # instruction to accept units.
+    mua_only = {"include_labels": ["mua"], "exclude_labels": ["noise"]}
+    text = receipt("mua_only", mua_only, [1, 3, 4]).summary()
+    assert "(one of ['mua'])" in text and "accept" not in text.lower().replace(
+        "accepted", ""
+    )
     # Everything excluded although a required label exists (accept + denied).
     labels[5] = ["accept", "noise"]
     text = receipt("v2_accepted_single_units", single, [5]).summary()
