@@ -56,7 +56,7 @@ def _assert_tetrode_gate_noop(
     )
 
 
-def test_tetrode_geometry_gate_three_channel(dj_conn, caplog):
+def test_tetrode_geometry_gate_three_channel(caplog):
     """A 3-channel sort group (e.g. after a bad-channel drop) is not a
     tetrode; the gate no-ops and logs the channel-count condition."""
     _assert_tetrode_gate_noop(
@@ -68,7 +68,7 @@ def test_tetrode_geometry_gate_three_channel(dj_conn, caplog):
     )
 
 
-def test_tetrode_geometry_gate_mixed_probe(dj_conn, caplog):
+def test_tetrode_geometry_gate_mixed_probe(caplog):
     """A sort group spanning two probe types is not a single tetrode;
     the gate no-ops and logs the multiple-probe-types condition."""
     _assert_tetrode_gate_noop(
@@ -85,7 +85,7 @@ def test_tetrode_geometry_gate_mixed_probe(dj_conn, caplog):
     )
 
 
-def test_tetrode_geometry_gate_renamed_probe(dj_conn, caplog):
+def test_tetrode_geometry_gate_renamed_probe(caplog):
     """A single-probe group whose probe string is not exactly
     ``tetrode_12.5`` (e.g. a renamed ``tetrode_12.5_v2``) is not patched; the
     gate no-ops and logs the probe-type-mismatch condition."""
@@ -98,7 +98,7 @@ def test_tetrode_geometry_gate_renamed_probe(dj_conn, caplog):
     )
 
 
-def test_tetrode_geometry_gate_multi_group(dj_conn, caplog):
+def test_tetrode_geometry_gate_multi_group(caplog):
     """Four channels split across two electrode groups is not a single
     tetrode; the gate no-ops and logs the multiple-groups condition."""
     _assert_tetrode_gate_noop(

@@ -44,7 +44,6 @@ def _fresh_unit_producing_selection(populated_sorting):
     )
 
 
-@pytest.mark.usefixtures("dj_conn")
 def test_filtering_description_reflects_actual_steps():
     """The persisted ``ElectricalSeries.filtering`` provenance is built from
     the preprocessing steps that ACTUALLY ran, not the old hardcoded
