@@ -17,7 +17,11 @@ from typing import Any, Literal
 
 import pandas as pd
 
-StageStatus = Literal["computed", "reused"]
+# Whether THIS call materialized a row ("computed") or found it already
+# present ("reused"). Distinct from the pipeline-level ``StageStatus`` in
+# ``_pipeline_types`` (which adds "skipped") and from the review layer's
+# ``ReviewStageState`` (which adds "complete").
+MaterializationStatus = Literal["computed", "reused"]
 CommitStatus = Literal["preview", "committed"]
 
 
@@ -747,7 +751,7 @@ class EvaluationResult:
             merge_groups=normalized,
             reuse_existing=True,
         )
-        curation_status: StageStatus = (
+        curation_status: MaterializationStatus = (
             "reused"
             if int(child_key["curation_id"]) in existing_children
             else "computed"
@@ -829,7 +833,7 @@ class MergedCuration:
 
     curation: CurationRef
     merge_groups: tuple[tuple[int, ...], ...]
-    status: StageStatus
+    status: MaterializationStatus
 
 
 @dataclass(frozen=True)
@@ -840,9 +844,9 @@ class MergeEvaluateReceipt:
     evaluation: EvaluationResult
     merge_groups: tuple[tuple[int, ...], ...]
     warnings: tuple[str, ...]
-    curation_status: StageStatus
-    evaluation_selection_status: StageStatus
-    evaluation_status: StageStatus
+    curation_status: MaterializationStatus
+    evaluation_selection_status: MaterializationStatus
+    evaluation_status: MaterializationStatus
 
     @property
     def merged(self) -> MergedCuration:
@@ -853,7 +857,7 @@ class MergeEvaluateReceipt:
         )
 
     @property
-    def stage_statuses(self) -> Mapping[str, StageStatus]:
+    def stage_statuses(self) -> Mapping[str, MaterializationStatus]:
         return MappingProxyType(
             {
                 "curation": self.curation_status,
