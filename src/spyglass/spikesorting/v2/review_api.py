@@ -12,7 +12,6 @@ import uuid
 import webbrowser
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -195,12 +194,60 @@ class FigPackReview:
         default_factory=tuple, repr=False, compare=False
     )
 
-    def open(self) -> None:
-        """Open the hosted URL or local bundle in the default browser."""
-        target = self.uri
-        if not target.startswith(("http://", "https://", "file://")):
-            target = Path(target).resolve().as_uri()
-        webbrowser.open(target)
+    @property
+    def is_hosted(self) -> bool:
+        """Whether the review lives at a hosted (figpack.org) URL."""
+        return self.uri.startswith(("http://", "https://"))
+
+    def open(
+        self, *, open_browser: bool = True, port: int | None = None
+    ) -> str:
+        """Deliver the review to a browser and return its URL.
+
+        A hosted review opens its persisted URL. A local review is served
+        from this Python process over loopback -- the exact saved bundle
+        (``self.uri``), so **Save Annotations** in the browser writes the
+        same ``annotations.json`` that :meth:`preview_import` reads; nothing
+        is copied, rebuilt or uploaded to open it. Repeated calls reuse the
+        running server; after a kernel restart, ``resume()`` + ``open()``
+        starts delivery again over the same files (the port is process
+        state, never persisted).
+
+        In the browser: **Curate Figure** enables editing, select units in
+        the unit table, add/remove labels or propose merges in the Curation
+        pane, then **Save Annotations**. (**Finalize Curation** is a browser
+        state flag only -- it neither saves nor commits.) Then run
+        ``preview_import()`` / ``commit()`` in Python.
+
+        Parameters
+        ----------
+        open_browser : bool, optional
+            Launch the default browser (default). ``False`` only returns the
+            URL -- for a notebook printing it, a test driving its own
+            browser, or an SSH-forwarded remote kernel (forward the printed
+            port, e.g. ``ssh -L <port>:localhost:<port> host``, and open the
+            same ``http://localhost:<port>/`` locally; the FigPack frontend
+            enables local editing only for a ``localhost`` origin).
+        port : int, optional
+            Loopback port for a local review's server (default: a free
+            port). Ignored when the bundle is already being served.
+
+        Returns
+        -------
+        str
+            The URL that was (or can be) opened.
+        """
+        if self.is_hosted:
+            url = self.uri
+        else:
+            from spyglass.spikesorting.v2._review_delivery import (
+                serve_review_bundle,
+            )
+
+            url = serve_review_bundle(self.uri, port=port)
+        if open_browser:
+            webbrowser.open(url)
+        return url
 
     def preview_import(self) -> "CurationChangeSet":
         """Read, verify, and diff browser edits without mutating state."""
