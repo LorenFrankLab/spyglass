@@ -697,7 +697,10 @@ def register_pipeline_preset(
         Registry name. Must not already exist (refuses to silently overwrite a
         built-in or a prior registration).
     preset : dict or _PipelinePreset
-        The preset bundle (a dict is validated into a ``_PipelinePreset``).
+        The preset bundle. The registry stores its OWN freshly validated
+        ``_PipelinePreset`` built from the supplied content, so later
+        mutation of a caller-supplied model does not change the registered
+        recipe, and a model whose fields were made invalid is rejected.
     validate_rows : bool, optional
         If True (default), verify the referenced Lookup rows exist (requires a
         database connection). Pass False to register without the DB check.
@@ -725,11 +728,10 @@ def register_pipeline_preset(
             f"pipeline preset {name!r} is already registered. Choose a fresh "
             f"name; existing presets: {sorted(_PIPELINE_PRESETS)}."
         )
-    validated = (
-        preset
-        if isinstance(preset, _PipelinePreset)
-        else _PipelinePreset(**preset)
+    content = (
+        preset.model_dump() if isinstance(preset, _PipelinePreset) else preset
     )
+    validated = _PipelinePreset(**content)
     if validate_rows:
         _assert_preset_rows_exist(name, validated)
     _PIPELINE_PRESETS[name] = validated

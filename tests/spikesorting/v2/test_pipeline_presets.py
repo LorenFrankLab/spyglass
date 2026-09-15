@@ -396,6 +396,35 @@ def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     assert "lab_custom_2026_06" in list_pipeline_presets()
 
 
+def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
+    """The registry keeps its own validated model: mutating the caller's
+    model afterwards does not change the registered recipe, and a model whose
+    fields were made invalid before registration is rejected."""
+    import spyglass.spikesorting.v2._pipeline_presets as presets_mod
+    from spyglass.spikesorting.v2._pipeline_presets import _PipelinePreset
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        dict(presets_mod._PIPELINE_PRESETS),
+    )
+    supplied = _PipelinePreset(**_custom_spec())
+    original_sorter = supplied.sorter
+    register_pipeline_preset("lab_owned_2026_06", supplied, validate_rows=False)
+    supplied.sorter = "mutated_after_registration"
+    registered = presets_mod._PIPELINE_PRESETS["lab_owned_2026_06"]
+    assert registered is not supplied
+    assert registered.sorter == original_sorter
+
+    broken = _PipelinePreset(**_custom_spec())
+    broken.sorter = None
+    with pytest.raises(ValueError):
+        register_pipeline_preset(
+            "lab_broken_2026_06", broken, validate_rows=False
+        )
+    assert "lab_broken_2026_06" not in presets_mod._PIPELINE_PRESETS
+
+
 def test_register_pipeline_preset_rejects_duplicate():
     """Re-registering an existing name raises rather than overwriting."""
     existing = next(iter(_PIPELINE_PRESETS))
