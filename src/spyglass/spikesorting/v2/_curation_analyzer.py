@@ -617,6 +617,10 @@ def _resolve_curation_analyzer(
             "SortingAnalyzer exists."
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
+    # The COMPLETE normalized request is the derivative's identity and its
+    # required result; the subset that actually needs computing is a separate
+    # local (``needs_compute``) so a later, larger request never reuses a
+    # smaller derivative.
     request = normalize_extension_request(extra_extensions)
     if namespace == "raw":
         # Raw curations share the canonical sort analyzer. An ABSENT requested
@@ -642,18 +646,7 @@ def _resolve_curation_analyzer(
                 {"sorting_id": row["sorting_id"]},
                 waveform_params_name=waveform_recipe,
             )
-        mismatched = {
-            name: params
-            for name, params in request.items()
-            if not extension_params_match(base, name, params)
-        }
-        if not mismatched:
-            return base
-        sorting_for_manifest = base.sorting
-        expected_prefix = _manifest_prefix(
-            row, sorting_for_manifest, recipe_row, role
-        )
-        derived_request = mismatched
+        expected_prefix = _manifest_prefix(row, base.sorting, recipe_row, role)
     else:
         curated_sorting = CurationV2.get_merged_sorting(key)
         expected_prefix = _manifest_prefix(
@@ -691,34 +684,34 @@ def _resolve_curation_analyzer(
             role,
             _build_base,
         )
-        derived_request = {
-            name: params
-            for name, params in request.items()
-            if not extension_params_match(base, name, params)
-        }
-        if not derived_request:
-            return base
+
+    needs_compute = {
+        name: params
+        for name, params in request.items()
+        if not extension_params_match(base, name, params)
+    }
+    if not needs_compute:
+        return base
 
     # Disk-backed derivative: the base (shared raw analyzer or immutable
-    # per-generation cache) stays untouched; the requested extensions are
-    # computed once, with the requested parameters, into a sibling folder
-    # keyed by the exact request and reused thereafter. Built by copying the
-    # base on disk (memmapped waveforms stream through np.save) and computing
-    # only the requested extensions with the recipe's job kwargs.
+    # per-generation cache) stays untouched; the derivative is keyed by the
+    # COMPLETE request, carries every requested extension at the requested
+    # parameters, and is reused thereafter. Built by copying the base on disk
+    # (memmapped waveforms stream through np.save) and computing only what the
+    # copy lacks -- plus whatever SpikeInterface invalidates downstream of it.
     derived_prefix = dict(expected_prefix)
-    derived_prefix["extension_request"] = derived_request
+    derived_prefix["extension_request"] = request
     derived_folder = curation_analyzer_path(
         row["sorting_id"],
         row["curation_uuid"],
         role,
         expected_prefix["waveform_recipe_hash"],
         si.__version__,
-        extension_request_hash=derived_extension_request_hash(derived_request),
+        extension_request_hash=derived_extension_request_hash(request),
     )
 
     def _build_derivative(staging_folder):
         from spyglass.spikesorting.v2._sorting_analyzer import (
-            ensure_extensions,
             reconstruct_recording_and_sorting,
         )
         from spyglass.spikesorting.v2.sorting import (
@@ -739,20 +732,14 @@ def _resolve_curation_analyzer(
             SorterParameters
             & (SortingSelection & {"sorting_id": row["sorting_id"]})
         ).fetch1("job_kwargs")
-        # A requested extension the base carries with DIFFERENT parameters
-        # must be recomputed: drop the copied version first (``ensure_extensions``
-        # is idempotent and would otherwise keep it).
-        for name in derived_request:
-            if derivative.has_extension(name):
-                derivative.delete_extension(name)
-        ensure_extensions(
+        _compute_request_on_copy(
             derivative,
-            list(derived_request),
+            request,
+            needs_compute,
             job_kwargs=_resolved_job_kwargs(sorter_job_kwargs),
-            extension_params=derived_request,
         )
         inventory = _extension_inventory(
-            derivative, role, tuple(derived_request), exact=False
+            derivative, role, tuple(request), exact=False
         )
         manifest = CurationAnalyzerManifest(
             **derived_prefix,
@@ -770,6 +757,80 @@ def _resolve_curation_analyzer(
         role,
         _build_derivative,
     )
+
+
+# ``templates`` copies its window from ``waveforms`` when ``ms_before`` /
+# ``ms_after`` are left unset; when it is restored after a waveform-window
+# change those stored values must NOT be replayed (SpikeInterface re-derives
+# them from the new parent). Every other extension's stored parameters are its
+# own and are replayed verbatim.
+_PARENT_DERIVED_WINDOW_KEYS = {"templates": ("ms_before", "ms_after")}
+
+
+def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
+    """Compute ``needs_compute`` on a working copy, restoring what SI removes.
+
+    SpikeInterface deletes every extension that depends on a recomputed one
+    (``compute_one_extension`` -> ``_get_children_dependencies``). The
+    required result is the base extension set plus every requested extension;
+    any required extension downstream of a recomputed one is recomputed too --
+    at the caller's parameters when it was requested, otherwise at its stored
+    parameters (window keys derived from a parent are left for SI to
+    re-derive). Only descendants of the recomputed set are touched, so a
+    correlogram-only change never re-extracts waveforms. The result is checked
+    against the whole request before returning.
+    """
+    from spikeinterface.core.sortinganalyzer import (
+        _get_children_dependencies,
+        _sort_extensions_by_dependency,
+    )
+
+    required = set(BASE_ANALYZER_EXTENSIONS) | set(request)
+    stored = {
+        name: dict(analyzer.get_extension(name).params or {})
+        for name in required
+        if analyzer.has_extension(name)
+    }
+    plan = {name: dict(params) for name, params in needs_compute.items()}
+    frontier = list(plan)
+    while frontier:
+        name = frontier.pop()
+        for child in _get_children_dependencies(name):
+            if child in required and child not in plan:
+                if child in request:
+                    plan[child] = dict(request[child])
+                else:
+                    params = dict(stored.get(child, {}))
+                    for key in _PARENT_DERIVED_WINDOW_KEYS.get(child, ()):
+                        params.pop(key, None)
+                    plan[child] = params
+                frontier.append(child)
+    ordered = _sort_extensions_by_dependency(plan)
+    compute_kwargs = {
+        k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
+    }
+    for name in ordered:
+        if analyzer.has_extension(name):
+            analyzer.delete_extension(name)
+    analyzer.compute(
+        list(ordered),
+        extension_params={name: params for name, params in ordered.items()},
+        **compute_kwargs,
+    )
+    missing = sorted(
+        name for name in required if not analyzer.has_extension(name)
+    )
+    unmet = sorted(
+        name
+        for name, params in request.items()
+        if not extension_params_match(analyzer, name, params)
+    )
+    if missing or unmet:
+        raise ValueError(
+            "curation analyzer derivative does not satisfy its request: "
+            f"missing {missing}, parameter mismatch {unmet} (request "
+            f"{request}, computed {sorted(ordered)})."
+        )
 
 
 @contextmanager

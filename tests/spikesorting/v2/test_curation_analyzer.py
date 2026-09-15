@@ -546,6 +546,34 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
             .params["bin_ms"]
             == raw_base_bin
         )
+        # A LARGER request that includes the same fine bins plus an extension
+        # the shared analyzer did not carry yet must not reuse the smaller
+        # derivative: its identity is the complete request, and the result
+        # carries every requested extension.
+        assert (
+            not Sorting()
+            .get_analyzer(sorting_key)
+            .has_extension("template_similarity")
+        )
+        with curation_analyzer_with_extensions(
+            root,
+            recipe,
+            extra_extensions={
+                "correlograms": {"bin_ms": 0.2},
+                "template_similarity": {},
+            },
+        ) as raw_both:
+            assert raw_both.has_extension("template_similarity")
+            assert (
+                raw_both.get_extension("correlograms").params["bin_ms"] == 0.2
+            )
+            assert Path(raw_both.folder) != Path(raw_fine.folder)
+        # ... and the absent extension was persisted to the shared analyzer.
+        assert (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .has_extension("template_similarity")
+        )
 
         selection = CurationEvaluationSelection.insert_selection(
             {
@@ -705,3 +733,92 @@ def test_extension_params_match_semantics():
         analyzer, "correlograms", {"window_ms": 50.0, "bin_ms": 0.5}
     )
     assert not extension_params_match(analyzer, "spike_locations", {})
+
+
+def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
+    """Recomputing a parent restores every required dependent (real SI).
+
+    ``templates`` with new operators + ``template_similarity`` requested:
+    similarity is invalidated by SI and must come back; a waveform-window
+    change restores templates from the new window; a correlogram-only change
+    never re-extracts waveforms.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._analyzer_cache import load_analyzer_folder
+    from spyglass.spikesorting.v2._curation_analyzer import (
+        _compute_request_on_copy,
+        extension_params_match,
+    )
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[10.0], num_units=4, num_channels=8, seed=0
+    )
+    base = si.create_sorting_analyzer(
+        sort, rec, format="binary_folder", folder=tmp_path / "base.analyzer"
+    )
+    base.compute(
+        [
+            "random_spikes",
+            "noise_levels",
+            "waveforms",
+            "templates",
+            "correlograms",
+            "template_similarity",
+        ],
+        n_jobs=1,
+        progress_bar=False,
+    )
+
+    def _copy(name):
+        return load_analyzer_folder(
+            base.save_as(format="binary_folder", folder=tmp_path / name).folder
+        )
+
+    # 1. parent recompute + requested dependent
+    request = {
+        "templates": {"operators": ["average", "median"]},
+        "template_similarity": {},
+    }
+    copy1 = _copy("c1.analyzer")
+    wf_mtime = (
+        (tmp_path / "c1.analyzer/extensions/waveforms/waveforms.npy")
+        .stat()
+        .st_mtime_ns
+    )
+    _compute_request_on_copy(
+        copy1, request, {"templates": request["templates"]}, job_kwargs={}
+    )
+    assert copy1.has_extension("template_similarity")
+    assert set(copy1.get_extension("templates").params["operators"]) >= {
+        "average",
+        "median",
+    }
+    assert (
+        tmp_path / "c1.analyzer/extensions/waveforms/waveforms.npy"
+    ).stat().st_mtime_ns == wf_mtime  # waveforms untouched
+
+    # 2. waveform window change restores templates from the new window
+    request = {"waveforms": {"ms_before": 0.5, "ms_after": 1.0}}
+    copy2 = _copy("c2.analyzer")
+    _compute_request_on_copy(copy2, request, dict(request), job_kwargs={})
+    assert extension_params_match(copy2, "waveforms", request["waveforms"])
+    templates = copy2.get_extension("templates")
+    assert templates.nbefore == copy2.get_extension("waveforms").nbefore
+    for name in ("random_spikes", "noise_levels", "templates", "waveforms"):
+        assert copy2.has_extension(name)
+
+    # 3. leaf change: correlograms only, waveforms never re-extracted
+    request = {"correlograms": {"bin_ms": 0.2}}
+    copy3 = _copy("c3.analyzer")
+    wf_mtime = (
+        (tmp_path / "c3.analyzer/extensions/waveforms/waveforms.npy")
+        .stat()
+        .st_mtime_ns
+    )
+    _compute_request_on_copy(copy3, request, dict(request), job_kwargs={})
+    assert copy3.get_extension("correlograms").params["bin_ms"] == 0.2
+    assert copy3.has_extension("template_similarity")
+    assert (
+        tmp_path / "c3.analyzer/extensions/waveforms/waveforms.npy"
+    ).stat().st_mtime_ns == wf_mtime
