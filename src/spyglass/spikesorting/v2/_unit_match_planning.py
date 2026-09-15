@@ -321,6 +321,13 @@ def build_unit_match_plan(
             "planner picks the curations for the other strategies."
         )
 
+    if manual_curation_choices is not None:
+        # Keys go through the same lossless rule as the ids: True / 1.0 hash
+        # equal to 1 and would otherwise silently select member 1.
+        manual_curation_choices = {
+            lossless_int(key, "manual_curation_choices member index"): value
+            for key, value in manual_curation_choices.items()
+        }
     curation_choices: dict[int, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
     warnings: list[str] = []

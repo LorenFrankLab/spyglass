@@ -251,6 +251,22 @@ def test_manual_pin_ids_are_normalized_losslessly():
                     0: {"sorting_id": _S0, "curation_id": bad}
                 },
             )
+    # Mapping KEYS obey the same rule: True / 1.0 hash equal to 1 and would
+    # otherwise silently pin member 1.
+    two = [
+        _member(0, "day1.nwb", [_cur(_S0, 0, -1)]),
+        _member(1, "day2.nwb", [_cur(_S1, 0, -1)]),
+    ]
+    for bad_key in (True, 1.0):
+        with pytest.raises(ValueError, match="member index must be an integer"):
+            _plan(
+                two,
+                "manual",
+                manual_curation_choices={
+                    0: {"sorting_id": _S0, "curation_id": 0},
+                    bad_key: {"sorting_id": _S1, "curation_id": 0},
+                },
+            )
 
 
 def test_manual_rejects_extra_member_indices():
