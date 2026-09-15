@@ -68,6 +68,46 @@ def test_non_root_facade_requires_typed_parent():
                 function(parent_curation={"curation_id": -1}, groups=[[0, 1]])
 
 
+def test_merge_group_normalization_is_lossless():
+    """Malformed merge requests fail loudly instead of selecting other units.
+
+    ``int()`` truncated ``1.9`` to ``1``, accepted ``True`` as ``1`` and split
+    the string group ``"12"`` into units 1 and 2 -- all of which could pass
+    membership checks as a merge the caller never asked for. Only integers
+    (Python or NumPy) in non-string containers are accepted; the shape checks
+    run before any database read.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.curation_api import (
+        _lossless_int,
+        _normalize_merge_groups,
+    )
+
+    assert _normalize_merge_groups([[1, 2], (3, 4)]) == [[1, 2], [3, 4]]
+    assert _normalize_merge_groups([np.array([5, 6], dtype=np.int64)]) == [
+        [5, 6]
+    ]
+    assert _normalize_merge_groups([[np.int32(7), np.uint8(8)]]) == [[7, 8]]
+    for malformed, match in (
+        ([[1.9, 2.9]], "unit id must be an integer"),
+        ([[True, 2]], "unit id must be an integer"),
+        ([["1", "2"]], "unit id must be an integer"),
+        (["12"], "sequence of unit ids"),
+        ("12", "sequence of unit-id sequences"),
+        ([{"a": 1, "b": 2}], "sequence of unit ids"),
+        ([], "at least one group"),
+        ([[1]], "at least two"),
+        ([[1, 1]], "duplicate"),
+        ([[1, 2], [2, 3]], "disjoint"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            _normalize_merge_groups(malformed)
+    assert _lossless_int(np.int64(3), "curation_id") == 3
+    with pytest.raises(ValueError, match="curation_id must be an integer"):
+        _lossless_int(3.5, "curation_id")
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_ref_state_operation_lineage_and_merge_id(

@@ -10,8 +10,10 @@ this module deliberately has no optional FigPack imports.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from numbers import Integral
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -28,6 +30,62 @@ CommitStatus = Literal["preview", "committed"]
 def _uuid(value) -> uuid.UUID:
     """Normalize UUID-like values returned by DataJoint drivers."""
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _lossless_int(value, what: str) -> int:
+    """Convert a caller-supplied identifier to ``int`` without changing it.
+
+    Accepts Python and NumPy integers; rejects booleans, fractional numbers
+    and strings so ``1.9`` / ``True`` / ``"12"`` cannot silently become a
+    different (or differently shaped) identifier than the caller meant.
+    """
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return int(value)
+    raise ValueError(
+        f"{what} must be an integer; got {value!r} ({type(value).__name__})."
+    )
+
+
+def _normalize_merge_groups(groups) -> list[list[int]]:
+    """Validate merge-group SHAPE (DB-free): containers, ids, disjointness."""
+    if isinstance(groups, (str, bytes, Mapping)) or not isinstance(
+        groups, Iterable
+    ):
+        raise ValueError(
+            "merge groups must be a sequence of unit-id sequences; got "
+            f"{type(groups).__name__}."
+        )
+    normalized: list[list[int]] = []
+    for group in groups:
+        if isinstance(group, (str, bytes, Mapping)) or not isinstance(
+            group, Iterable
+        ):
+            raise ValueError(
+                "each merge group must be a sequence of unit ids; got "
+                f"{group!r} ({type(group).__name__})."
+            )
+        normalized.append(
+            [_lossless_int(unit_id, "unit id") for unit_id in group]
+        )
+    if not normalized:
+        raise ValueError("merge groups must contain at least one group.")
+    for group in normalized:
+        if len(group) < 2:
+            raise ValueError(
+                "each merge group must contain at least two unit ids; "
+                f"got {group}."
+            )
+        if len(set(group)) != len(group):
+            raise ValueError(
+                f"merge group contains duplicate unit ids: {group}."
+            )
+    counts = Counter(unit_id for group in normalized for unit_id in group)
+    repeated = sorted(unit_id for unit_id, n in counts.items() if n > 1)
+    if repeated:
+        raise ValueError(
+            f"merge groups must be disjoint; repeated unit ids: {repeated}."
+        )
+    return normalized
 
 
 def _require_outside_merge_evaluation_transaction() -> None:
@@ -110,7 +168,7 @@ class CurationRef:
 
         dj_key = {
             "sorting_id": key["sorting_id"],
-            "curation_id": int(key["curation_id"]),
+            "curation_id": _lossless_int(key["curation_id"], "curation_id"),
         }
         rows = (CurationV2 & dj_key).fetch("curation_uuid")
         if len(rows) != 1:
@@ -951,36 +1009,12 @@ def _validate_merge_groups(
     """Validate merge shape and membership before any facade write."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
+    normalized = _normalize_merge_groups(groups)
     key = parent_curation.as_key()
-    try:
-        normalized = [list(map(int, group)) for group in groups]
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "merge groups must be a sequence of unit-id sequences."
-        ) from exc
-    if not normalized:
-        raise ValueError("merge groups must contain at least one group.")
-    for group in normalized:
-        if len(group) < 2:
-            raise ValueError(
-                "each merge group must contain at least two unit ids; "
-                f"got {group}."
-            )
-        if len(set(group)) != len(group):
-            raise ValueError(
-                f"merge group contains duplicate unit ids: {group}."
-            )
-    flattened = [unit_id for group in normalized for unit_id in group]
-    repeated = sorted(
-        {unit_id for unit_id in flattened if flattened.count(unit_id) > 1}
-    )
-    if repeated:
-        raise ValueError(
-            "merge groups must be disjoint; repeated unit ids: " f"{repeated}."
-        )
     available = {
         int(value) for value in (CurationV2.Unit & key).fetch("unit_id")
     }
+    flattened = [unit_id for group in normalized for unit_id in group]
     unknown = sorted(set(flattened) - available)
     if unknown:
         raise ValueError(
