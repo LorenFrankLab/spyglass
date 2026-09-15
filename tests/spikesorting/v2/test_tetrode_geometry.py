@@ -1,6 +1,6 @@
 """Tetrode-geometry gate negative cases.
 
-``Recording._maybe_apply_tetrode_geometry`` only rewrites a sort group's probe
+``maybe_apply_tetrode_geometry`` only rewrites a sort group's probe
 to the 12.5 µm tetrode square when the group is unambiguously a single
 ``tetrode_12.5`` with four channels in one electrode group. These pin that the
 gate no-ops (and logs the failing condition) for every disqualifying setup.
@@ -14,7 +14,7 @@ import numpy as np
 def _assert_tetrode_gate_noop(
     caplog, probe_types, electrode_group_names, channel_ids, reason_substr
 ):
-    """Call ``_maybe_apply_tetrode_geometry`` with a failing-gate setup and
+    """Call ``maybe_apply_tetrode_geometry`` with a failing-gate setup and
     assert (a) the recording geometry is untouched and (b) an INFO log names
     the condition that failed.
 
@@ -26,7 +26,9 @@ def _assert_tetrode_gate_noop(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._recording_geometry import (
+        maybe_apply_tetrode_geometry,
+    )
 
     rec = si.generate_recording(
         num_channels=len(channel_ids),
@@ -35,7 +37,7 @@ def _assert_tetrode_gate_noop(
     )
     before = rec.get_channel_locations().copy()
     with caplog.at_level(logging.INFO):
-        result = Recording._maybe_apply_tetrode_geometry(
+        result = maybe_apply_tetrode_geometry(
             rec, probe_types, electrode_group_names, channel_ids
         )
     after = result.get_channel_locations()
@@ -46,7 +48,7 @@ def _assert_tetrode_gate_noop(
     skip_msgs = [
         r.getMessage()
         for r in caplog.records
-        if "_maybe_apply_tetrode_geometry skipped" in r.getMessage()
+        if "maybe_apply_tetrode_geometry skipped" in r.getMessage()
     ]
     assert any(reason_substr in m for m in skip_msgs), (
         f"expected an INFO log naming the failed condition "

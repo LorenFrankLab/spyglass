@@ -234,7 +234,7 @@ def maybe_apply_tetrode_geometry(
     )
     for failed, reason in gates:
         if failed:
-            logger.info("_maybe_apply_tetrode_geometry skipped: %s", reason)
+            logger.info("maybe_apply_tetrode_geometry skipped: %s", reason)
             return recording
 
     import numpy as np

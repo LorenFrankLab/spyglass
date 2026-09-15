@@ -54,26 +54,28 @@ def test_filtering_description_reflects_actual_steps():
     from spyglass.spikesorting.v2._params.preprocessing import (
         BandpassFilterParams,
     )
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        filtering_description,
+    )
 
     bp = BandpassFilterParams(freq_min=300.0, freq_max=6000.0)
     no_ps = {"phase_shift": False}
 
     # No preprocessing at all -> must not claim a filter or a reference step.
-    none = Recording._filtering_description(None, "none", no_ps)
+    none = filtering_description(None, "none", no_ps)
     assert none == "none (raw, no preprocessing)"
     assert "bandpass" not in none.lower()
     assert "common reference" not in none.lower()
 
     # Bandpass only (reference_mode='none') -> no reference claim.
-    bp_only = Recording._filtering_description(bp, "none", no_ps)
+    bp_only = filtering_description(bp, "none", no_ps)
     assert "bandpass filter 300-6000 Hz" in bp_only
     assert "common reference" not in bp_only
 
     # Bandpass + common reference -> both steps named, in the RUNTIME APPLY
     # order (bandpass first, then reference -- the order is non-commutative on
     # the global-median branch, so the provenance must track the apply order).
-    both = Recording._filtering_description(bp, "global_median", no_ps)
+    both = filtering_description(bp, "global_median", no_ps)
     assert "bandpass filter 300-6000 Hz" in both
     assert "common reference (global_median)" in both
     assert both.index("bandpass filter") < both.index(
@@ -83,9 +85,7 @@ def test_filtering_description_reflects_actual_steps():
     # Phase-shift is named ONLY when the applied-step report says it ran, and
     # listed first; a requested-but-skipped phase-shift (report False) is not
     # claimed -- the provenance tracks what RAN, not what was requested.
-    with_ps = Recording._filtering_description(
-        bp, "global_median", {"phase_shift": True}
-    )
+    with_ps = filtering_description(bp, "global_median", {"phase_shift": True})
     assert with_ps.startswith("phase-shift (ADC); bandpass filter 300-6000 Hz")
     assert "phase-shift" not in both
 
@@ -254,7 +254,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
 # --------------------------------------------------------------------------- #
 # channel_name resolution on a real-NWB-shape fixture.
 #
-# ``Recording._spikeinterface_channel_ids`` resolves channel ids from the raw
+# ``spikeinterface_channel_ids`` resolves channel ids from the raw
 # NWB ``channel_name`` column when present and falls back to the integer
 # ``electrode_id`` when absent. This exercises both branches on a fixture built
 # to match production Frank-lab NWB shape.
@@ -267,7 +267,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
 def test_channel_name_resolution_path_real_nwb(
     dj_conn, tmp_path, monkeypatch, channel_names
 ):
-    """``_spikeinterface_channel_ids`` resolves channel ids from the raw
+    """``spikeinterface_channel_ids`` resolves channel ids from the raw
     NWB ``channel_name`` column when present, and falls back to integer
     ``electrode_id`` when absent.
 
@@ -287,7 +287,9 @@ def test_channel_name_resolution_path_real_nwb(
         _add_probe_and_electrodes,
         tetrode_probe_layout,
     )
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._recording_geometry import (
+        spikeinterface_channel_ids,
+    )
 
     nwbfile = pynwb.NWBFile(
         session_description="channel_name resolution fixture",
@@ -304,14 +306,14 @@ def test_channel_name_resolution_path_real_nwb(
     with pynwb.NWBHDF5IO(str(out), mode="w") as io:
         io.write(nwbfile)
 
-    # _spikeinterface_channel_ids resolves the raw path via Nwbfile; redirect
+    # spikeinterface_channel_ids resolves the raw path via Nwbfile; redirect
     # it to our standalone fixture (no ingestion needed for the lookup).
     monkeypatch.setattr(
         Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(out))
     )
 
     spyglass_ids = [0, 1, 2, 3]
-    resolved = Recording._spikeinterface_channel_ids(
+    resolved = spikeinterface_channel_ids(
         "a19_channel_name_fixture.nwb", spyglass_ids
     )
 
@@ -391,7 +393,9 @@ def test_channel_name_maps_by_electrode_id_not_row(
     and 10. Requesting ids ``[12, 10]`` must return their own channel names.
     """
     from spyglass.common import Nwbfile
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._recording_geometry import (
+        spikeinterface_channel_ids,
+    )
 
     ids_in_row_order = [10, 11, 12, 13]
     names_in_row_order = ["c10", "c11", "c12", "c13"]
@@ -403,9 +407,7 @@ def test_channel_name_maps_by_electrode_id_not_row(
         Nwbfile, "get_abs_path", staticmethod(lambda *a, **k: str(path))
     )
 
-    resolved = Recording._spikeinterface_channel_ids(
-        "noncontiguous_ids.nwb", [12, 10]
-    )
+    resolved = spikeinterface_channel_ids("noncontiguous_ids.nwb", [12, 10])
     assert resolved == ["c12", "c10"], (
         "channel_name lookup must map electrode id -> table row (id 12 -> row "
         "2 -> 'c12', id 10 -> row 0 -> 'c10'), not index the column by the id "
@@ -423,7 +425,9 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
     id->row mapping has no entry for those ids and must raise.
     """
     from spyglass.common import Nwbfile
-    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._recording_geometry import (
+        spikeinterface_channel_ids,
+    )
 
     path = tmp_path / "missing_id.nwb"
     _write_electrode_table_nwb(
@@ -434,7 +438,7 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
     )
 
     with pytest.raises(ValueError, match="electrodes table"):
-        Recording._spikeinterface_channel_ids("missing_id.nwb", [1, 2])
+        spikeinterface_channel_ids("missing_id.nwb", [1, 2])
 
 
 @pytest.mark.slow

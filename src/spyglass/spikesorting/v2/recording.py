@@ -38,7 +38,6 @@ from spyglass.spikesorting.v2._recording_geometry import (
     fetch_interior_bad_channel_ids,
     fetch_sort_group_probe_info,
     maybe_apply_tetrode_geometry,
-    spikeinterface_channel_ids,
 )
 from spyglass.spikesorting.v2._recording_nwb import (
     raw_eseries_path_and_timestamp_mode,
@@ -53,9 +52,7 @@ from spyglass.spikesorting.v2._selection_identity import (
 
 # Aliased: the bare ``filtering_description`` name would be shadowed by the
 # ``filtering_description`` keyword-only param of the ``_write_nwb_artifact``
-# delegator (and the same-named local in ``_compute_recording_artifact``),
-# a latent readability hazard. The ``_filtering_description`` delegator
-# calls this alias.
+# delegator (and the same-named local in ``_compute_recording_artifact``).
 from spyglass.spikesorting.v2._recording_preprocessing import (
     filtering_description as _filtering_description_svc,
 )
@@ -1389,7 +1386,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # legacy ``tetrode_12.5`` probe-geometry patch applies. Fetched
         # here so ``make_compute`` stays DB-I/O free per the tri-part
         # contract.
-        probe_types, electrode_group_names = self._fetch_sort_group_probe_info(
+        probe_types, electrode_group_names = fetch_sort_group_probe_info(
             nwb_file_name, channel_ids
         )
         # The sort group's interior curated-bad channels to re-include and fill
@@ -2156,12 +2153,11 @@ class Recording(SpyglassMixin, dj.Computed):
             recording=recording,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
-            sort_group_channel_ids=channel_ids,
             validated=preprocessing_params,
             bad_channel_handling=preprocessing_params.bad_channel_handling,
             bad_channel_ids=bad_channel_ids,
         )
-        recording = self._maybe_apply_tetrode_geometry(
+        recording = maybe_apply_tetrode_geometry(
             recording=recording,
             probe_types=probe_types,
             electrode_group_names=electrode_group_names,
@@ -2173,7 +2169,7 @@ class Recording(SpyglassMixin, dj.Computed):
         # hardcoded "Bandpass filter + common reference" misdescribed the saved
         # artifact for the no_filter preset or reference_mode='none' (DANDI /
         # archival), and a requested-but-skipped phase-shift must not be listed.
-        filtering_description = self._filtering_description(
+        filtering_description = _filtering_description_svc(
             preprocessing_params.bandpass_filter, reference_mode, applied_steps
         )
 
@@ -2241,77 +2237,6 @@ class Recording(SpyglassMixin, dj.Computed):
             saved_end=saved_end,
             n_channels=n_channels,
             duration_s=duration_s,
-        )
-
-    @staticmethod
-    def _spikeinterface_channel_ids(nwb_file_name: str, spyglass_ids):
-        """Map Spyglass electrode_ids onto SpikeInterface channel ids.
-
-        Thin delegator to
-        :func:`._recording_geometry.spikeinterface_channel_ids`;
-        kept as a ``Recording`` staticmethod for the public/tested
-        channel-name resolution boundary. Resolves the raw NWB
-        electrodes-table ``channel_name`` mapping (or the integer 1-1
-        fallback) in the service module.
-        """
-        return spikeinterface_channel_ids(nwb_file_name, spyglass_ids)
-
-    @staticmethod
-    def _fetch_sort_group_probe_info(
-        nwb_file_name: str, channel_ids
-    ) -> tuple[tuple, tuple]:
-        """Fetch per-channel ``probe_type`` + ``electrode_group_name``.
-
-        Thin delegator to
-        :func:`._recording_geometry.fetch_sort_group_probe_info`;
-        kept as a ``Recording`` staticmethod because ``make_fetch`` calls
-        ``self._fetch_sort_group_probe_info(...)`` and
-        ``test_fetch_sort_group_probe_info_stable_order`` calls it directly.
-        The DeepHash-stable, ``order_by="electrode_id"`` ``Electrode *
-        Probe`` fetch lives in the service module.
-        """
-        return fetch_sort_group_probe_info(nwb_file_name, channel_ids)
-
-    @staticmethod
-    def _maybe_apply_tetrode_geometry(
-        recording,
-        probe_types: tuple,
-        electrode_group_names: tuple,
-        sort_group_channel_ids: list,
-    ):
-        """Attach the ``tetrode_12.5`` probe geometry when the sort group fits.
-
-        Thin delegator to
-        :func:`._recording_geometry.maybe_apply_tetrode_geometry`;
-        kept as a ``Recording`` staticmethod because
-        ``_compute_recording_artifact`` calls
-        ``self._maybe_apply_tetrode_geometry(...)`` and the v2 tests call it
-        directly. The gate checks (single tetrode_12.5, 4 channels, single
-        group) + probeinterface geometry live in the service module.
-        """
-        return maybe_apply_tetrode_geometry(
-            recording,
-            probe_types,
-            electrode_group_names,
-            sort_group_channel_ids,
-        )
-
-    @staticmethod
-    def _filtering_description(
-        bandpass_filter, reference_mode: str, applied_steps: dict
-    ) -> str:
-        """``ElectricalSeries.filtering`` provenance from steps ACTUALLY run.
-
-        Thin delegator to
-        :func:`._recording_preprocessing.filtering_description`; kept as a
-        ``Recording`` staticmethod because ``_compute_recording_artifact``
-        calls ``self._filtering_description(...)`` and the v2 tests call it
-        directly. ``applied_steps`` is the report from
-        ``apply_pre_motion_preprocessing`` so a requested-but-skipped
-        phase-shift is not falsely listed.
-        """
-        return _filtering_description_svc(
-            bandpass_filter, reference_mode, applied_steps
         )
 
     @staticmethod

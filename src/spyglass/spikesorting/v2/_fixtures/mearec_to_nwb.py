@@ -511,7 +511,7 @@ def _add_probe_and_electrodes(
         strings (one per contact, in electrode order). Production Frank-lab
         NWBs carry this column and SpikeInterface 0.104's
         ``read_nwb_recording`` then uses it as the channel id (see
-        ``Recording._spikeinterface_channel_ids``); the MEArec fixtures omit
+        ``_recording_geometry.spikeinterface_channel_ids``); the MEArec fixtures omit
         it by default and fall through to the integer ``electrode_id`` path.
         Must have exactly ``layout.n_contacts`` entries.
     """

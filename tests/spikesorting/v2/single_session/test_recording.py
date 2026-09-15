@@ -136,7 +136,7 @@ def test_tetrode_geometry_attached(tetrode_60s_session):
     """A 4-channel ``tetrode_12.5`` sort group gets the explicit tetrode
     probe geometry, and it survives the NWB round-trip.
 
-    Exercises the all-true branch of ``_maybe_apply_tetrode_geometry``
+    Exercises the all-true branch of ``maybe_apply_tetrode_geometry``
     (single ``tetrode_12.5`` probe, exactly 4 channels, single
     electrode group) end-to-end: a geometry-aware sorter calling
     ``get_recording`` must see the 4 contacts at the
@@ -678,7 +678,7 @@ def test_recording_over_request_multi_interval_clips_with_warning(
 def test_fetch_sort_group_probe_info_stable_order(
     polymer_smoke_session, monkeypatch
 ):
-    """``_fetch_sort_group_probe_info`` returns a deterministic,
+    """``fetch_sort_group_probe_info`` returns a deterministic,
     electrode_id-ordered result.
 
     The tri-part populate contract hashes the ``RecordingFetched`` tuple
@@ -692,7 +692,10 @@ def test_fetch_sort_group_probe_info_stable_order(
 
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
-    from spyglass.spikesorting.v2.recording import Recording, SortGroupV2
+    from spyglass.spikesorting.v2._recording_geometry import (
+        fetch_sort_group_probe_info,
+    )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
     if not (SortGroupV2 & polymer_smoke_session):
@@ -733,8 +736,8 @@ def test_fetch_sort_group_probe_info_stable_order(
 
     monkeypatch.setattr(Fetch, "__call__", _spy_fetch)
 
-    first = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
-    second = Recording._fetch_sort_group_probe_info(nwb_file_name, channel_ids)
+    first = fetch_sort_group_probe_info(nwb_file_name, channel_ids)
+    second = fetch_sort_group_probe_info(nwb_file_name, channel_ids)
     assert fetch_order_by, "probe-info fetch issued no explicitly-ordered fetch"
     assert all(ob == "electrode_id" for ob in fetch_order_by), (
         "probe-info fetch issued a non-electrode_id ordered fetch; the "
