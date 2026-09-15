@@ -155,6 +155,29 @@ units** → analyze (see the rewritten quickstart and single-session notebook).
 Draft-v2 names, caches and APIs change directly; nothing here touches v0/v1
 data or the production `UnitSelectionParams` rows.
 
+- **Browser review that saves.** `FigPackReview.open()` now serves the exact
+  saved bundle from the Python process at `http://localhost:<port>/` (the
+  FigPack frontend enables in-place editing only for a `localhost` origin; a
+  `file://` bundle showed a directory listing) and returns the URL;
+  `open(open_browser=False, port=...)` supports notebooks, tests and
+  SSH-forwarded kernels. The server is loopback-only, serves one bundle and
+  accepts writes only to its `annotations.json`, so **Save Annotations** lands
+  in the file `preview_import()` reads; `review.uri` stays the durable
+  location and `resume()` + `open()` re-serves it after a kernel restart. The
+  review's official metrics, annotation columns, `proposed_labels` /
+  `proposed_merge_groups` and `merged_from` now live in SpikeInterface's
+  selectable unit table (`extra_unit_properties`, aligned to the analyzer's
+  unit ids, gaps kept empty) instead of a separate read-only pane whose rows
+  selected nothing, and the curation control has a fixed, reachable height
+  (it previously collapsed to its title). `CurationChangeSet.summary()` /
+  `changed_units()` replace the nested dataclass dump. The curation notebook
+  carries ONE `final_curation` through preview, commit, merged-unit
+  verification (`continue_review()` + `confirm_no_changes=True`) and
+  `select_units_for_analysis`; the scripted loop is an opt-in appendix with
+  its own names. Browser regression tests (Python Playwright, test-only
+  `spikesorting-v2-curation-test` extra) drive the real frontend through
+  label / merge / save / reload and the database-backed journey.
+
 - **Configuration.** `MountainSort5Schema` (schema_version 2) exposes every
   scientific parameter of the pinned SpikeInterface 0.104.3 wrapper
   (`scheme2_training_duration_sec`, `scheme2_training_recording_sampling_mode`,

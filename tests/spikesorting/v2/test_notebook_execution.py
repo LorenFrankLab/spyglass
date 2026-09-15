@@ -179,20 +179,36 @@ def test_single_session_notebook_runs(dj_conn):
 def test_curation_notebook_runs(dj_conn):
     """``10_Spike_SortingV2_Curation`` runs end-to-end on the smoke session.
 
-    Self-contained: it sets up, sorts to a root curation, then exercises the
-    FigPack browser path (self-skips without the curation extra) and the
-    step-by-step evaluate -> merge -> re-evaluate loop, producing a final
-    curated, merge-keyable result.
+    Self-contained: it sets up, sorts to a root curation, starts the FigPack
+    browser review (self-skips without the curation extra), previews it
+    (no browser edits in run-all, no commit), and hands ONE deliberate
+    ``final_curation`` -- here the reviewed parent itself -- to
+    ``select_units_for_analysis``. The opt-in scripted appendix runs too and
+    must not replace that result.
     """
     nwb_file_name, sort_group_id = _prepare_notebook_session(
         dj_conn, "notebook_curation.nwb"
     )
     namespace = _execute_notebook(
         _NOTEBOOKS / "10_Spike_SortingV2_Curation.ipynb",
-        _notebook_params(nwb_file_name, sort_group_id),
+        {
+            **_notebook_params(nwb_file_name, sort_group_id),
+            "run_scripted_curation_example": True,
+        },
     )
     assert namespace["run_summary"]["n_units"] >= 0
     assert namespace["final_merge_id"] is not None
+    final_curation = namespace["final_curation"]
+    assert final_curation == namespace["run_summary"].root_curation
+    selection = namespace["selection"]
+    assert selection.curation == final_curation
+    assert selection.policy_name == "v2_accepted_single_units"
+    assert selection.included_unit_ids == ()  # unreviewed: nothing accepted
+    assert "no unit carries a required label" in selection.summary()
+    # The scripted appendix produced its own, distinct result.
+    scripted = namespace["scripted_curation"]
+    assert scripted is not None and scripted != final_curation
+    assert namespace["final_curation"] == final_curation
 
 
 @pytest.mark.slow
@@ -355,13 +371,21 @@ def test_cross_session_notebook_runs(dj_conn):
     assert len(namespace["concat_summary"]["member_recording_ids"]) == 2
     member_merge_ids = namespace["concat_summary"]["member_merge_ids"]
     assert len(member_merge_ids) == 2
-    assert namespace["member_merge_id"] in member_merge_ids.values()
+    # The automatic-only concat result is handed to analysis through an
+    # explicit unflagged policy over the auto-labeled curation, one group per
+    # member on that member's own merge id.
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
-    assert SortedSpikesGroup & {
-        "nwb_file_name": namespace["member_nwb_file_name"],
-        "sorted_spikes_group_name": "notebook_concat_member_units",
-    }
+    selection = namespace["concat_selection"]
+    assert selection.policy_name == "v2_unflagged_units"
+    assert (
+        selection.curation == namespace["concat_summary"].auto_labeled_curation
+    )
+    assert {g.merge_id for g in selection.groups} == set(
+        member_merge_ids.values()
+    )
+    for member_group in selection.groups:
+        assert SortedSpikesGroup & dict(member_group.group_key)
     # Part B matched units into tracked units (only where UnitMatchPy is present).
     if unitmatch_available:
         assert namespace["match_summary"]["n_tracked_units"] >= 1

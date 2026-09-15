@@ -40,10 +40,6 @@ import datajoint as dj
 from IPython.display import display
 
 from spyglass.common import LabTeam
-from spyglass.spikesorting.analysis.v1.group import (
-    SortedSpikesGroup,
-    UnitSelectionParams,
-)
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_run,
@@ -51,6 +47,7 @@ from spyglass.spikesorting.v2.pipeline import (
     plan_v2_unit_match,
     run_v2_pipeline,
     run_v2_unit_match,
+    select_units_for_analysis,
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup
 
@@ -161,19 +158,24 @@ if run_concat:
         f"{len(concat_summary['member_merge_ids'])} session-safe outputs"
     )
 
-    # Feed one session's wall-clock-aligned output into the existing downstream
-    # group API. Every member output has the same curated unit IDs, while spike
-    # times are expressed on this member's own NWB clock.
-    member_index = 0
-    member_nwb_file_name = same_day_members[0]["nwb_file_name"]
-    member_merge_id = concat_summary["member_merge_ids"][member_index]
-    UnitSelectionParams.insert_default()
-    SortedSpikesGroup().create_group(
-        group_name=f"{concat_group_name}_member_units",
-        nwb_file_name=member_nwb_file_name,
-        unit_filter_params_name="all_units",
-        keys=[{"spikesorting_merge_id": member_merge_id}],
+    # Hand the auto-labeled concat curation to analysis with an EXPLICIT
+    # policy. The rule set only flags bad units (it never writes `accept`), so
+    # this automatic-only run names `v2_unflagged_units`: everything not
+    # flagged, MUA and unlabeled included. The receipt carries one
+    # SortedSpikesGroup per member (same curated unit ids; spike times on that
+    # member's own NWB clock) -- `all_units` remains the explicit expert
+    # choice that ignores labels entirely.
+    concat_selection = select_units_for_analysis(
+        concat_summary.auto_labeled_curation, policy="v2_unflagged_units"
     )
+    print(concat_selection.summary())
+    for member_group in concat_selection.groups:
+        print(
+            f"member {member_group.member_index} ({member_group.nwb_file_name}): "
+            f"{member_group.status} group {dict(member_group.group_key)}"
+        )
+    member_spikes = concat_selection.groups[0].fetch_spike_data()
+    print(f"member 0: {len(member_spikes)} selected unit(s)")
 
 # ## Part B — Match units across sessions
 #

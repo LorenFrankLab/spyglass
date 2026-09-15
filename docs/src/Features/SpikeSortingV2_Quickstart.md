@@ -91,8 +91,14 @@ without `auto_curate=True` leaves it `None` and gives you only
 ## 3. Review it in the browser — and reopen the review later
 
 `start_review` evaluates the pinned curation with a named review profile and
-builds a seeded FigPack view (an offline bundle by default). Requires the
-`spikesorting-v2-curation` extra.
+saves a seeded FigPack bundle (local by default). `review.open()` serves that
+exact bundle from your kernel at `http://localhost:<port>/` and returns the
+URL. In the browser: **Curate Figure**, select units in the unit table (its
+columns are the profile's official metrics and the rule set's proposals for
+the curation under review), tick labels or **Merge Selected** in the
+Curation pane, then **Save Annotations** (**Finalize Curation** is only a
+browser flag; it commits nothing). Requires the `spikesorting-v2-curation`
+extra.
 
 ```python
 from spyglass.spikesorting.v2.pipeline import FigPackReview
@@ -103,18 +109,35 @@ review = run.start_review(
     upload=False,
     display_options={"max_amplitudes_per_unit": 2000},  # display budget only
 )
-review.open()                        # browser: label / merge, then save
-print(review.review_id)
+url = review.open()                  # serves the bundle; opens the browser
+print(review.review_id, url)         # open_browser=False just returns the URL
 
 # Later, in a fresh notebook: the same parent generation, profile, evaluation
-# and display budget come back from the persisted identity.
+# and display budget come back from the persisted identity, and open() serves
+# the same bundle again -- saved edits included.
 review = FigPackReview.resume(review.review_id)
-changes = review.preview_import()    # diff of browser edits vs the parent
-curated = changes.commit().curation  # a new child CurationRef (labels + merges)
+changes = review.preview_import()    # reads the saved annotations.json
+print(changes.summary())             # labels +/-, merges, counts, conflicts
+receipt = changes.commit()           # or commit(confirm_no_changes=True)
+final_curation = receipt.curation    # the committed child (labels + merges)
+
+# A merge is re-evaluated with the same profile; look at the merged units
+# before using them, then commit that look explicitly.
+if receipt.needs_merge_verification:
+    verification = receipt.continue_review()
+    verification.open()
+    # ... inspect (edit + save if something is wrong) ...
+    final_curation = (
+        verification.preview_import().commit(confirm_no_changes=True).curation
+    )
 ```
 
-If you skip the browser, `auto_labeled` (or a `save_manual_curation(...)` /
-`commit_merges(...)` child) is the curation you hand to analysis next.
+Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port>
+host`) and open the same `localhost` URL locally -- the frontend enables
+editing only for a `localhost` origin. If you skip the browser, `auto_labeled`
+(or a `save_manual_curation(...)` / `commit_merges(...)` child) is the
+curation you hand to analysis next -- name it `final_curation` deliberately;
+never infer it from the latest child.
 
 ## 4. Select the analysis population, then analyze
 
@@ -142,7 +165,7 @@ excluded by the `accepted` policies and listed on the receipt either way.
 ```python
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
-receipt = select_units_for_analysis(curated, policy="v2_accepted_single_units")
+receipt = select_units_for_analysis(final_curation, policy="v2_accepted_single_units")
 print(receipt.summary())               # source, policy content, counts, why if empty
 receipt.describe()                     # per-unit verdict, labels, reason
 spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)

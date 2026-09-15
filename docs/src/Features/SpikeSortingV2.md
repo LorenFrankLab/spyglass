@@ -569,8 +569,14 @@ reproducible. Two guards keep names honest:
 The normal hands-on workflow is one profile-backed review. The profile binds
 the exact evaluation recipes, ordered metric columns, label palette, and label
 import mode. The review evaluates or reuses the requested curation, seeds its
-current labels, shows metric-derived label/merge suggestions as **read-only**
-context, and opens a FigPack view over that curation's actual analyzer.
+current labels, and builds a FigPack view over that curation's actual
+analyzer whose **unit table** carries the profile's official evaluation
+metrics, any selected annotation columns, the rule set's `proposed_labels` /
+`proposed_merge_groups`, and `merged_from` (applied merge provenance) -- so
+selecting a metric-bearing row selects that unit for curation. Those values
+describe the **committed curation under review**; a merge proposed in the
+browser has no merged metrics until it is committed and the continued review
+shows them.
 
 ```python
 review = run_summary.start_review(
@@ -578,30 +584,50 @@ review = run_summary.start_review(
     profile="franklab_hippocampus_2026_06",
     upload=False,   # local seeded bundle; True publishes the same bundle
 )
-review.open()
+url = review.open()  # serves review.uri at http://localhost:<port>/ and opens it
 
-# After saving edits in FigPack, preview is a pure read: no rows or files change.
+# In the browser: Curate Figure -> select units in the table -> tick labels /
+# Merge Selected in the Curation pane -> Save Annotations. ("Finalize
+# Curation" is a browser state flag, not a Spyglass commit.)
+
+# Preview is a pure read of the saved annotations.json: no rows or files change.
 changes = review.preview_import()
-print(changes.labels_before, changes.labels_after)
-print(changes.merge_groups)
-print(changes.unit_count_before, changes.unit_count_after)
-print(changes.label_conflicts, changes.newer_sibling_curations)
+print(changes.summary())        # counts, label +/- per unit, merges, conflicts
+changes.changed_units()         # one row per changed / merged unit
 
 # If contributors have incompatible labels, resolve every predicted merged id.
 receipt = changes.commit(
     conflict_resolutions={12: ("accept",)},
 )
-final = receipt.curation
+final_curation = receipt.curation
 
 # A merge is automatically re-evaluated with the same profile. Inspect the
-# actual merged waveform/correlogram in a continuation review before final use.
+# actual merged waveform/correlogram in a continuation review, then commit
+# that verification explicitly (edits + save first if a merge was wrong).
 if receipt.needs_merge_verification:
     continuation = receipt.continue_review()
     continuation.open()
+    verification = continuation.preview_import()
+    final_curation = verification.commit(
+        confirm_no_changes=not verification.has_changes
+    ).curation
 
-final_merge_id = final.merge_id
-member_merge_ids = final.member_merge_ids  # populated for concat-backed sorts
+final_merge_id = final_curation.merge_id
+member_merge_ids = final_curation.member_merge_ids  # concat-backed sorts
 ```
+
+`review.open()` starts (or reuses) a loopback server in the Python process
+over the exact saved bundle, so a browser save writes the same
+`annotations.json` the importer reads; nothing is copied or rebuilt. The port
+is process state, never persisted: after a kernel restart,
+`FigPackReview.resume(review_id).open()` serves the same files again with
+every saved edit. `open(open_browser=False, port=...)` returns the URL for a
+notebook, a test, or a remote kernel (forward the port with
+`ssh -L <port>:localhost:<port> host` and open the same `localhost` URL; the
+frontend enables in-place editing only for a `localhost` origin, so a generic
+Jupyter proxy URL is not equivalent). The server accepts writes only to the
+bundle's `annotations.json`. A missing bundle raises with the recovery step
+(start the review again, which rebuilds it).
 
 `RunResult.start_review(source="auto_labeled")` never falls back to root: if no
 analysis curation exists it raises and tells you to choose `source="root"`
@@ -677,7 +703,7 @@ properties = read_unit_properties(
 display(properties)
 display(root.summarize(evaluation=None, annotation_sets=[annotation_set]))
 
-# The selected custom column appears in the read-only review table and its
+# The selected custom column appears in the review's unit table and its
 # set_hash becomes part of this figure's identity.
 review = root.start_review(
     "franklab_hippocampus_2026_06",
@@ -1577,10 +1603,12 @@ all run end-to-end through `run_v2_pipeline` / `run_v2_unit_match` and the
 underlying tables.
 
 FigPack curation is profile-backed and local by default. Call
-`run_summary.start_review(...)`, edit the seeded bundle in the browser, inspect
-`review.preview_import()`, and commit the exact verified change set. Merged and
-label-only curations render in their own unit namespace; evaluation suggestions
-and already-applied merge provenance are read-only context. Hosted delivery
+`run_summary.start_review(...)`, `review.open()` to serve the seeded bundle to
+the browser, edit and **Save Annotations**, inspect `review.preview_import()`,
+and commit the exact verified change set. Merged and label-only curations
+render in their own unit namespace; evaluation metrics, suggestions and
+already-applied merge provenance are columns of the selectable unit table
+(context about the committed curation, not editable). Hosted delivery
 publishes the identical seeded/identity-bearing bundle and requires
 `FIGPACK_API_KEY` unless `ephemeral=True`. The lower-level
 `FigPackCurationSelection` / `FigPackCuration` methods remain available for

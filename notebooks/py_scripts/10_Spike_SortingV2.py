@@ -298,14 +298,19 @@ auto_labeled
 # ## 8. Review in the browser, and reopen it later
 #
 # `start_review` evaluates the pinned curation with a named review profile and
-# builds a seeded FigPack view (offline bundle by default). The review is
+# builds a seeded FigPack view (a local bundle by default). The review is
 # persisted by identity: `FigPackReview.resume(review_id)` reopens it from a
 # fresh process -- the same parent generation, profile snapshot, evaluation and
-# display budget -- and `preview_import()` shows the browser edits before
-# anything is committed. `review.open()` launches the bundle in a browser;
-# `review.preview_import().commit()` writes a new child curation. The review
-# packages are optional (`pip install "spyglass[spikesorting-v2-curation]"`),
-# so this cell is skipped when they are absent.
+# display budget. `review.open()` serves the bundle from this kernel at a
+# `http://localhost:<port>/` URL and returns it (`open_browser=False` only
+# prints it); in the browser, **Curate Figure**, select units, edit labels /
+# merges, **Save Annotations**. `preview_import()` then shows exactly those
+# saved edits, and `.commit()` writes a new child curation. The full
+# walkthrough -- commit, merged-unit verification, and handing the reviewed
+# result to analysis -- is the [Curation](./10_Spike_SortingV2_Curation.ipynb)
+# notebook. The review packages are optional
+# (`pip install "spyglass[spikesorting-v2-curation]"`), so this cell is
+# skipped when they are absent.
 
 # +
 import importlib.util
@@ -319,10 +324,10 @@ if importlib.util.find_spec("figpack") is not None:
         upload=False,
         display_options={"max_amplitudes_per_unit": 2000},
     )
-    print(review.uri)
+    print("Open in a browser:", review.open(open_browser=False))
     reopened = FigPackReview.resume(review.review_id)
     assert reopened.parent == review.parent
-    display(reopened.preview_import())
+    print(reopened.preview_import().summary())
 else:
     print("FigPack not installed; skipping the browser review cell.")
 # -

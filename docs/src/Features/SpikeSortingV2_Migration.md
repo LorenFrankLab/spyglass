@@ -310,12 +310,15 @@ surface that stays v1-only is the stored per-pair burst metrics
   concatenate-and-sort.
 - **Available in v2** — `RunResult.start_review(...)` is the browser-first v1
   FigURL replacement. One immutable review profile evaluates the selected
-  curation, seeds current labels, displays suggestions as read-only context,
-  and returns a resumable FigPack handle. `preview_import()` shows the exact
-  diff; `commit()` verifies the figure's immutable parent UUID and creates a
-  sibling child; a merge is automatically re-evaluated and
-  `continue_review()` opens its actual merged analyzer. Local delivery is the
-  default; `upload=True` publishes the identical seeded bundle
+  curation, seeds current labels, puts its metrics and suggestions in the
+  selectable unit table, and returns a resumable FigPack handle.
+  `review.open()` serves the saved bundle at `http://localhost:<port>/` (the
+  v1 FigURL link becomes a local URL; saves land in the bundle's
+  `annotations.json`). `preview_import()` shows the exact diff; `commit()`
+  verifies the figure's immutable parent UUID and creates a sibling child; a
+  merge is automatically re-evaluated and `continue_review()` opens its
+  actual merged analyzer for an explicit verification commit. Local delivery
+  is the default; `upload=True` publishes the identical seeded bundle
   (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
   `spikesorting-v2-curation` extra. The table-level `FigPackCurationSelection`
   and `FigPackCuration` APIs remain the expert layer.
