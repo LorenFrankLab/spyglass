@@ -357,10 +357,8 @@ else:
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
 receipt = select_units_for_analysis(auto_labeled, policy="v2_unflagged_units")
-print(receipt.policy_name, dict(receipt.policy))
-print("included:", receipt.included_unit_ids)
-print("excluded:", dict(receipt.excluded_units))
-display(receipt.describe())
+print(receipt.summary())  # source, policy content, counts, why if empty
+display(receipt.describe())  # per-unit verdict, labels, reason
 # -
 
 # The receipt's group is the downstream handle; `fetch_spike_data` returns one

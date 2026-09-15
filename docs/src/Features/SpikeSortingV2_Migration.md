@@ -97,13 +97,26 @@ declares their net-new tables without changing either recipe table.
    `merge_id` to grab).
 3. Curate from that root — evaluate + label, then merge (see the
    [curation flow](./SpikeSortingV2.md#the-scripted-evaluate-merge-evaluate-label-flow)),
-   or pass `auto_curate=True` to fill `auto_labeled_merge_id` in one call. The
-   **final curated** `CurationV2` row is the one you carry forward, not the root.
-4. Key downstream analysis and export off the **final** curation's `merge_id`
-   (the run summary's `auto_labeled_merge_id`, or a hand-curated curation's
-   `merge_id`) via the same
-   `SpikeSortingOutput.get_spike_times({"merge_id": ...})` accessor used for v1
-   sorts.
+   review in the browser (`run.start_review(...)`), or pass `auto_curate=True`
+   to get an auto-labeled child in one call. The **final curated** `CurationV2`
+   row is the one you carry forward, not the root; automatic labels are
+   suggestions, not approval.
+4. Select the analysis population explicitly, then read the filtered result:
+
+   ```python
+   from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
+
+   receipt = select_units_for_analysis(curated, policy="v2_accepted_single_units")
+   receipt.summary()                       # counts by verdict + the policy content
+   spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+   ```
+
+   The receipt's `SortedSpikesGroup` is what decoding reads. A curation's
+   `merge_id` still resolves through `SpikeSortingOutput` like a v1 row, but
+   `SpikeSortingOutput.get_spike_times({"merge_id": ...})` returns **every**
+   unit, labels ignored — use it for inspection, not analysis. Exports
+   (`ssviz.export_to_phy(curated, ...)`) are curation-scoped and do not apply
+   the selection policy either.
 
 ## 1. What you call differently
 
@@ -208,11 +221,12 @@ declares their net-new tables without changing either recipe table.
 
 ## 3. What's faster, safer, or more reproducible
 
-- **Chunked artifact detection.** v2 runs a memory-bounded
-  `ChunkRecordingExecutor` pass (controlled by
-  `ArtifactDetectionParameters.job_kwargs`, default `chunk_duration='1s'`,
-  `n_jobs=1`) instead of loading the full trace array into RAM. Output is
-  frame-identical to the old path.
+- **Artifact detection stays chunked, with tracked job settings.** Like v1,
+  v2 runs a memory-bounded `ChunkRecordingExecutor` pass; the difference is
+  that the chunk / worker settings are a tracked column
+  (`ArtifactDetectionParameters.job_kwargs`, default `chunk_duration='1s'`,
+  `n_jobs=1`) and the artifact mask is applied through the artifact-detection
+  interval rather than a separate recording copy.
 - **Hash-verifiable Recording rebuild.** The preprocessed `Recording`
   cache carries a representation-blind `content_hash` (a content
   fingerprint of traces / timestamps / geometry / scaling metadata),
@@ -265,10 +279,13 @@ surface that stays v1-only is the stored per-pair burst metrics
 - **Available in v2** — `metric_curation` now provides
   `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`,
   and `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
-  metrics, auto-labels, and merge suggestions. Unlike v1 (which scored the raw
-  sort), `CurationEvaluation` scores a **committed `CurationV2`** row in that
-  curation's own unit namespace, and its `accept_evaluation_outputs` /
-  `use_evaluation_labels` helpers accept the proposals into a committed child.
+  metrics, auto-labels, and merge suggestions. Both score a curated sorting
+  (v1 `MetricCurationSelection` keys on `CurationV1`); what changes in v2 is
+  that `CurationEvaluation` scores a **committed `CurationV2`** generation in
+  that curation's own unit namespace (merged units included), records the
+  exact recipe pair it used, and its `accept_evaluation_outputs` /
+  `use_evaluation_labels` helpers accept the proposals into a committed child
+  rather than mutating the scored row.
   Like v1's
   `WaveformParameters` whitened/unwhitened split, PC / cluster-separation
   metrics (`nn_advanced`, `d_prime`, `nearest_neighbor`, `mahalanobis`,

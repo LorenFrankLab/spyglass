@@ -128,6 +128,67 @@ class UnitSelectionReceipt:
             )
         return self.groups[0].fetch_spike_data(**kwargs)
 
+    def summary(self) -> str:
+        """Compact notebook-friendly summary of this handoff.
+
+        Derived from the receipt's own verdicts and the curation's labels:
+        the source generation, the policy and its content, included /
+        excluded counts, how many included units are MUA or unlabeled, and --
+        when nothing was selected -- why, with the relevant next step. An
+        empty selection is a valid result; nothing is raised or changed.
+        """
+        labels = _labels_by_unit(self.curation)
+        n_total = len(self.included_unit_ids) + len(self.excluded_units)
+        included_mua = sum(
+            1 for u in self.included_unit_ids if "mua" in labels.get(u, [])
+        )
+        include = list(self.policy["include_labels"])
+        exclude = list(self.policy["exclude_labels"])
+        policy_text = (
+            f"require one of {include}; " if include else "no required label; "
+        ) + (f"deny {exclude}" if exclude else "deny nothing")
+        lines = [
+            f"curation: sorting_id={self.curation.sorting_id} "
+            f"curation_id={self.curation.curation_id} "
+            f"(generation {self.curation.curation_uuid})",
+            f"policy: {self.policy_name} -- {policy_text}",
+            f"units: {n_total} total, {len(self.included_unit_ids)} selected, "
+            f"{len(self.excluded_units)} excluded "
+            f"({len(self.unlabeled_unit_ids)} unlabeled overall)",
+            f"selected: {included_mua} labeled mua, "
+            f"{len(self.included_unlabeled_unit_ids)} unlabeled",
+            "groups: "
+            + ", ".join(
+                f"{g.group_key['sorted_spikes_group_name']} "
+                f"[{g.nwb_file_name}, {g.status}]"
+                for g in self.groups
+            ),
+        ]
+        if not self.included_unit_ids:
+            if n_total == 0:
+                lines.append(
+                    "empty selection: the curation holds no units (zero-unit "
+                    "sort); there is nothing to select."
+                )
+            elif include and not any(
+                set(labels.get(u, [])) & set(include)
+                for u in self.excluded_units
+            ):
+                lines.append(
+                    "empty selection: no unit carries a required label "
+                    f"({include}). Accept units in a review and hand over "
+                    "that child, or choose an exclude-only policy such as "
+                    "'v2_unflagged_units' to keep everything the rules did "
+                    "not flag."
+                )
+            else:
+                lines.append(
+                    "empty selection: every unit was excluded by the policy "
+                    "(see describe() for each unit's reason); review the "
+                    "labels or choose a different policy."
+                )
+        return "\n".join(lines)
+
     def describe(self):
         """One row per unit: verdict, labels, reason."""
         import pandas as pd

@@ -143,6 +143,7 @@ excluded by the `accepted` policies and listed on the receipt either way.
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
 
 receipt = select_units_for_analysis(curated, policy="v2_accepted_single_units")
+print(receipt.summary())               # source, policy content, counts, why if empty
 receipt.describe()                     # per-unit verdict, labels, reason
 spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
 receipt.group_key                      # the SortedSpikesGroup key downstream reads

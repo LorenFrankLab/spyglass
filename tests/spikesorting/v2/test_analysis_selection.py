@@ -197,3 +197,67 @@ def test_select_units_for_analysis_round_trip(
         for group_key in created:
             (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
         clear_curations_for(sorting_key)
+
+
+def test_receipt_summary_explains_counts_and_empty_selections(monkeypatch):
+    """``summary()`` reports counts from the receipt and names why a
+    selection is empty, without raising or changing anything."""
+    import uuid
+    from types import MappingProxyType
+
+    from spyglass.spikesorting.v2 import analysis_selection as mod
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    ref = CurationRef(
+        sorting_id=uuid.uuid4(), curation_id=3, curation_uuid=uuid.uuid4()
+    )
+    labels = {1: ["accept"], 2: ["mua"], 3: ["reject"], 4: []}
+    monkeypatch.setattr(mod, "_labels_by_unit", lambda curation: labels)
+    group = mod.SelectedGroup(
+        nwb_file_name="s.nwb",
+        group_key=MappingProxyType(
+            {
+                "nwb_file_name": "s.nwb",
+                "sorted_spikes_group_name": "g",
+                "unit_filter_params_name": "v2_unflagged_units",
+            }
+        ),
+        merge_id=uuid.uuid4(),
+        member_index=None,
+        status="created",
+    )
+
+    def receipt(policy_name, policy, unit_ids):
+        included, excluded = mod.apply_unit_selection_policy(
+            labels, unit_ids, policy
+        )
+        return mod.UnitSelectionReceipt(
+            curation=ref,
+            policy_name=policy_name,
+            policy=MappingProxyType(policy),
+            included_unit_ids=included,
+            excluded_units=MappingProxyType(excluded),
+            unlabeled_unit_ids=tuple(u for u in unit_ids if not labels.get(u)),
+            groups=(group,),
+        )
+
+    unflagged = mod.V2_UNIT_SELECTION_POLICIES["v2_unflagged_units"]
+    text = receipt("v2_unflagged_units", unflagged, [1, 2, 3, 4]).summary()
+    assert "4 total, 3 selected, 1 excluded (1 unlabeled overall)" in text
+    assert "selected: 1 labeled mua, 1 unlabeled" in text
+    assert "deny ['noise', 'reject', 'artifact']" in text
+    assert "empty selection" not in text
+
+    single = mod.V2_UNIT_SELECTION_POLICIES["v2_accepted_single_units"]
+    # No unit carries a required label -> the actionable explanation.
+    text = receipt("v2_accepted_single_units", single, [2, 3, 4]).summary()
+    assert "0 selected" in text
+    assert "no unit carries a required label (['accept'])" in text
+    assert "v2_unflagged_units" in text
+    # Everything excluded although a required label exists (accept + denied).
+    labels[5] = ["accept", "noise"]
+    text = receipt("v2_accepted_single_units", single, [5]).summary()
+    assert "every unit was excluded by the policy" in text
+    # Zero-unit curation.
+    text = receipt("v2_accepted_single_units", single, []).summary()
+    assert "holds no units" in text
