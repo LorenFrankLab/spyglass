@@ -144,6 +144,60 @@ def test_explicit_builtin_replacement_survives_lookups(clean_registry):
     assert type(mp.get_matcher("unitmatch")) is builtin_cls
 
 
+_FRESH_PROCESS_CLAIM = """
+import sys
+from spyglass.spikesorting.v2 import matcher_protocol as mp
+
+assert "spyglass.spikesorting.v2._unitmatch_backend" not in sys.modules
+assert not mp.is_registered("unitmatch")
+
+
+class Impostor:
+    name = "unitmatch"
+
+    def match(self, session_inputs, params):
+        return []
+
+
+class Schema:
+    pass
+
+
+replace = sys.argv[1] == "replace"
+try:
+    mp.register_matcher(Impostor(), Schema, replace=replace)
+except ValueError as exc:
+    assert not replace, exc
+    assert "already registered" in str(exc)
+    assert type(mp.get_matcher("unitmatch")).__name__ == "UnitMatchBackend"
+    print("rejected")
+else:
+    assert replace
+    assert isinstance(mp.get_matcher("unitmatch"), Impostor)
+    assert mp._get_matcher_schema("unitmatch") is Schema
+    print("replaced")
+"""
+
+
+@pytest.mark.parametrize("flag", ["noreplace", "replace"])
+def test_builtin_replacement_rule_holds_before_backend_import(flag):
+    """Claiming a built-in name in a fresh process, BEFORE the backend module
+    was ever imported, obeys the same rule as afterwards: refused without
+    ``replace=True`` (the built-in is loaded first and stays installed),
+    honored with it."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", _FRESH_PROCESS_CLAIM, flag],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = "replaced" if flag == "replace" else "rejected"
+    assert result.stdout.strip().splitlines()[-1] == expected
+
+
 def test_get_matcher_unknown_raises_with_guidance(clean_registry):
     mp = clean_registry
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError

@@ -101,6 +101,10 @@ class MatcherProtocol(Protocol):
 _MATCHER_REGISTRY: dict[str, MatcherProtocol] = {}
 #: name -> per-matcher Pydantic params schema (validates ``MatcherParameters``)
 _SCHEMA_REGISTRY: dict[str, type] = {}
+#: Names owned by shipped backends. Registering one of these loads the
+#: built-in first so the replacement rule applies regardless of import order.
+_BUILTIN_MATCHER_NAMES: frozenset[str] = frozenset({"unitmatch"})
+_bootstrapping = False
 
 
 def register_matcher(
@@ -140,6 +144,14 @@ def register_matcher(
             f"{matcher!r} does not satisfy MatcherProtocol (needs a `name` "
             "attribute and a callable `match(session_inputs, params)` method)."
         )
+    if (
+        matcher.name in _BUILTIN_MATCHER_NAMES
+        and matcher.name not in _MATCHER_REGISTRY
+    ):
+        # A built-in name claimed before its backend was imported would
+        # otherwise bypass the replacement rule below (startup order must
+        # not decide whether persisted MatcherParameters rows re-route).
+        register_default_matchers()
     existing = _MATCHER_REGISTRY.get(matcher.name)
     if (
         existing is not None
@@ -175,12 +187,20 @@ def register_default_matchers() -> None:
     object and an explicit ``register_matcher(..., replace=True)`` of a
     built-in name survives later lookups.
     """
-    # Function-level import avoids an import cycle (the backend imports this
-    # module) and keeps the optional UnitMatchPy import lazy (the backend only
-    # imports UnitMatchPy when its match()/extract path actually runs).
-    from spyglass.spikesorting.v2 import _unitmatch_backend
+    global _bootstrapping
+    if _bootstrapping:  # re-entered from the built-in's own register_matcher
+        return
+    _bootstrapping = True
+    try:
+        # Function-level import avoids an import cycle (the backend imports
+        # this module) and keeps the optional UnitMatchPy import lazy (the
+        # backend only imports UnitMatchPy when its match()/extract path
+        # actually runs).
+        from spyglass.spikesorting.v2 import _unitmatch_backend
 
-    _unitmatch_backend.register()
+        _unitmatch_backend.register()
+    finally:
+        _bootstrapping = False
 
 
 def _registered_matchers() -> frozenset[str]:
