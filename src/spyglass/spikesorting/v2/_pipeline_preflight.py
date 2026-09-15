@@ -726,8 +726,10 @@ def preflight_v2_pipeline(
     from spyglass.spikesorting.v2._selection_identity import (
         artifact_detection_identity_payload,
         deterministic_id,
-        recording_identity_payload,
-        sorting_identity_payload,
+    )
+    from spyglass.spikesorting.v2._selection_plan import (
+        build_recording_selection_plan,
+        build_sorting_selection_plan,
     )
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -1067,27 +1069,23 @@ def preflight_v2_pipeline(
     if not (sort_group_exists and preprocessing_params_exist):
         expected_ids = {}
     else:
-        recording_id = deterministic_id(
-            "recording",
+        # The SAME DB-free builders insert_selection uses assemble the ids, so
+        # the preview cannot drift from the insert; only the input hash is
+        # resolved here (it needs the live sort-group / electrode rows).
+        recording_id = build_recording_selection_plan(
             {
-                **recording_identity_payload(
-                    {
-                        "nwb_file_name": nwb_file_name,
-                        "sort_group_id": sort_group_id,
-                        "interval_list_name": interval_list_name,
-                        "preprocessing_params_name": (
-                            bundle.preprocessing_params_name
-                        ),
-                        "team_name": team_name,
-                    }
-                ),
-                "recording_input_hash": resolve_recording_input_hash(
-                    nwb_file_name,
-                    sort_group_id,
-                    bundle.preprocessing_params_name,
-                ),
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+                "interval_list_name": interval_list_name,
+                "preprocessing_params_name": bundle.preprocessing_params_name,
+                "team_name": team_name,
             },
-        )
+            recording_input_hash=resolve_recording_input_hash(
+                nwb_file_name,
+                sort_group_id,
+                bundle.preprocessing_params_name,
+            ),
+        ).recording_id
         # A None artifact name means no artifact-detection pass: the sort's
         # identity carries artifact_detection_id=None (matching
         # build_sorting_selection_plan), so the expected sorting_id derives from
@@ -1102,15 +1100,14 @@ def preflight_v2_pipeline(
                     recording_id=recording_id,
                 ),
             )
-        sorting_id = deterministic_id(
-            "sorting",
-            sorting_identity_payload(
-                recording_id=recording_id,
-                sorter=bundle.sorter,
-                sorter_params_name=bundle.sorter_params_name,
-                artifact_detection_id=artifact_detection_id,
-            ),
-        )
+        sorting_id = build_sorting_selection_plan(
+            {
+                "recording_id": recording_id,
+                "sorter": bundle.sorter,
+                "sorter_params_name": bundle.sorter_params_name,
+                "artifact_detection_id": artifact_detection_id,
+            }
+        ).sorting_id
         # Per stage, ``exists`` is whether the SELECTION row exists (the run
         # would reuse this PK) and ``computed_exists`` whether the COMPUTED
         # output row exists (the populate already ran -- a reused, near-zero-cost
