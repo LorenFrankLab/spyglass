@@ -37,32 +37,42 @@ so the handoff builds one group per member and the receipt lists them.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
 from spyglass.spikesorting.v2.curation_api import CurationRef
 
-# New v2 policies (see the module doc). Inserted into ``UnitSelectionParams``
-# on first use by ``ensure_v2_unit_selection_policies`` -- additive only.
-V2_UNIT_SELECTION_POLICIES: Mapping[str, Mapping[str, list[str]]] = (
-    MappingProxyType(
+#: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples
+#: behind a mapping proxy, so neither the shipped catalog nor a receipt's
+#: policy snapshot can be edited through a shallow copy.
+LabelPolicy = Mapping[str, tuple[str, ...]]
+
+
+def _label_policy(include, exclude) -> LabelPolicy:
+    return MappingProxyType(
         {
-            "v2_accepted_single_units": {
-                "include_labels": ["accept"],
-                "exclude_labels": ["mua", "noise", "reject", "artifact"],
-            },
-            "v2_accepted_neural_units": {
-                "include_labels": ["accept", "mua"],
-                "exclude_labels": ["noise", "reject", "artifact"],
-            },
-            "v2_unflagged_units": {
-                "include_labels": [],
-                "exclude_labels": ["noise", "reject", "artifact"],
-            },
+            "include_labels": tuple(str(v) for v in include),
+            "exclude_labels": tuple(str(v) for v in exclude),
         }
     )
+
+
+# New v2 policies (see the module doc). Inserted into ``UnitSelectionParams``
+# on first use by ``ensure_v2_unit_selection_policies`` -- additive only.
+V2_UNIT_SELECTION_POLICIES: Mapping[str, LabelPolicy] = MappingProxyType(
+    {
+        "v2_accepted_single_units": _label_policy(
+            ["accept"], ["mua", "noise", "reject", "artifact"]
+        ),
+        "v2_accepted_neural_units": _label_policy(
+            ["accept", "mua"], ["noise", "reject", "artifact"]
+        ),
+        "v2_unflagged_units": _label_policy(
+            [], ["noise", "reject", "artifact"]
+        ),
+    }
 )
 
 DEFAULT_UNIT_SELECTION_POLICY = "v2_accepted_single_units"
@@ -93,7 +103,7 @@ class UnitSelectionReceipt:
 
     curation: CurationRef
     policy_name: str
-    policy: Mapping[str, list[str]]
+    policy: LabelPolicy
     included_unit_ids: tuple[int, ...]
     excluded_units: Mapping[int, str]
     unlabeled_unit_ids: tuple[int, ...]
@@ -238,8 +248,8 @@ def _labels_by_unit(curation: CurationRef) -> dict[int, list[str]]:
     return CurationV2._labels_by_unit(curation.as_key())
 
 
-def _resolve_policy(policy_name: str) -> dict[str, list[str]]:
-    """Return the stored include/exclude lists of a ``UnitSelectionParams`` row."""
+def _resolve_policy(policy_name: str) -> LabelPolicy:
+    """Return the stored include/exclude labels of a ``UnitSelectionParams`` row."""
     from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
     ensure_v2_unit_selection_policies()
@@ -258,16 +268,15 @@ def _resolve_policy(policy_name: str) -> dict[str, list[str]]:
             f"UnitSelectionParams row {policy_name!r} carries unit_criteria; "
             "select_units_for_analysis applies label policies only."
         )
-    return {
-        "include_labels": [str(v) for v in (row["include_labels"] or [])],
-        "exclude_labels": [str(v) for v in (row["exclude_labels"] or [])],
-    }
+    return _label_policy(
+        row["include_labels"] or [], row["exclude_labels"] or []
+    )
 
 
 def apply_unit_selection_policy(
     labels_by_unit: Mapping[int, list[str]],
     unit_ids,
-    policy: Mapping[str, list[str]],
+    policy: Mapping[str, Sequence[str]],
 ) -> tuple[tuple[int, ...], dict[int, str]]:
     """Apply a label policy to units; return (included, {excluded: reason}).
 
@@ -454,7 +463,7 @@ def select_units_for_analysis(
     return UnitSelectionReceipt(
         curation=ref,
         policy_name=policy,
-        policy=MappingProxyType(resolved_policy),
+        policy=resolved_policy,
         included_unit_ids=included,
         excluded_units=MappingProxyType(excluded),
         unlabeled_unit_ids=unlabeled,

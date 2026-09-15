@@ -57,7 +57,7 @@ def test_v2_policies_deny_unusable_labels_and_make_mua_explicit():
     # Auto-label-only handoff: nothing flagged is kept, MUA and unlabeled
     # included (explicitly).
     unflagged = V2_UNIT_SELECTION_POLICIES["v2_unflagged_units"]
-    assert unflagged["include_labels"] == []
+    assert unflagged["include_labels"] == ()
     included, excluded = apply_unit_selection_policy(
         labels, range(1, 9), unflagged
     )
@@ -70,6 +70,47 @@ def test_v2_policies_deny_unusable_labels_and_make_mua_explicit():
         labels, range(1, 9), all_units
     )
     assert included == tuple(range(1, 9)) and not excluded
+
+
+def test_shipped_policies_and_receipt_policy_are_read_only():
+    """Deriving a custom policy from a shallow copy of a shipped one cannot
+    edit the catalog, and a receipt's policy snapshot cannot be edited
+    independently of its recorded verdicts."""
+    from types import MappingProxyType
+
+    from spyglass.spikesorting.v2 import analysis_selection as mod
+
+    shipped = mod.V2_UNIT_SELECTION_POLICIES["v2_accepted_single_units"]
+    custom = dict(shipped)
+    with pytest.raises((AttributeError, TypeError)):
+        custom["exclude_labels"].remove("mua")
+    custom["exclude_labels"] = tuple(
+        v for v in shipped["exclude_labels"] if v != "mua"
+    )
+    assert "mua" in shipped["exclude_labels"]
+    assert (
+        "mua"
+        in mod.V2_UNIT_SELECTION_POLICIES["v2_accepted_single_units"][
+            "exclude_labels"
+        ]
+    )
+    with pytest.raises(TypeError):
+        shipped["exclude_labels"] = ()
+
+    receipt = mod.UnitSelectionReceipt(
+        curation=None,
+        policy_name="v2_accepted_single_units",
+        policy=mod._label_policy(["accept"], ["mua"]),
+        included_unit_ids=(1,),
+        excluded_units=MappingProxyType({2: "denied label(s): mua"}),
+        unlabeled_unit_ids=(),
+        groups=(),
+    )
+    with pytest.raises((AttributeError, TypeError)):
+        receipt.policy["exclude_labels"].clear()
+    with pytest.raises(TypeError):
+        receipt.policy["exclude_labels"] = ()
+    assert receipt.policy["exclude_labels"] == ("mua",)
 
 
 @pytest.mark.slow
