@@ -32,7 +32,6 @@ def apply_pre_motion_preprocessing(
     recording,
     reference_mode: str,
     reference_electrode_id: int | None,
-    sort_group_channel_ids: list,
     validated,
     bad_channel_handling: str = "remove",
     bad_channel_ids=(),
@@ -72,8 +71,6 @@ def apply_pre_motion_preprocessing(
     reference_electrode_id : int or None
         Electrode id subtracted on the ``"specific"`` path and dropped
         from the surface afterward; ignored otherwise.
-    sort_group_channel_ids : list
-        Spyglass electrode ids of the sort group's declared members.
     validated : PreprocessingParamsSchema
         Pre-validated preprocessing params (phase-shift, bandpass,
         common-reference operator) read once in ``make_fetch``.

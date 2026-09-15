@@ -199,7 +199,6 @@ def test_interpolate_runs_between_filter_and_reference(monkeypatch):
         rec,
         "global_median",
         None,
-        [0, 1, 2, 3],
         _validated(),
         bad_channel_handling="interpolate",
         bad_channel_ids=[2],
@@ -225,7 +224,7 @@ def test_remove_default_is_a_noop(monkeypatch):
     rec = _FakeRecording([0, 1, 2, 3], calls)
 
     _out, applied_steps = apply_pre_motion_preprocessing(
-        rec, "global_median", None, [0, 1, 2, 3], _validated()
+        rec, "global_median", None, _validated()
     )
 
     assert "interpolate_bad_channels" not in [c[0] for c in calls]
@@ -246,7 +245,6 @@ def test_reference_is_never_interpolated(monkeypatch):
         rec,
         "specific",
         99,
-        [0, 1, 2],
         _validated(),
         bad_channel_handling="interpolate",
         bad_channel_ids=[2, 99],  # 99 must be filtered out
@@ -272,7 +270,6 @@ def test_interpolate_needs_channel_locations(monkeypatch):
             rec,
             "none",
             None,
-            [0, 1, 2, 3],
             _validated(),
             bad_channel_handling="interpolate",
             bad_channel_ids=[2],
@@ -293,7 +290,6 @@ def test_invalid_bad_channel_handling_raises(monkeypatch):
             rec,
             "none",
             None,
-            [0, 1, 2],
             _validated(),
             bad_channel_handling="interpoltae",  # typo -> loud, not silent no-op
         )

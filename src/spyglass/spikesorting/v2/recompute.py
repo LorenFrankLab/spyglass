@@ -151,7 +151,6 @@ class AnalyzerVersionsComputed(NamedTuple):
 
 def _recompute_compute(
     parent_key,
-    rounding,
     xfail_reason,
     unverifiable_reason,
     *,
@@ -600,7 +599,6 @@ class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
 
         return _recompute_compute(
             parent_key,
-            rounding,
             xfail_reason,
             unverifiable_reason,
             regen=_regen,
@@ -1099,7 +1097,6 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
         """Regenerate the analyzer folder + hash extensions off the transaction."""
         return _recompute_compute(
             parent_key,
-            rounding,
             xfail_reason,
             unverifiable_reason,
             regen=lambda: _recompute_analyzer_hashes(

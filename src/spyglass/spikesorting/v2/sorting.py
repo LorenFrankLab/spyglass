@@ -157,14 +157,11 @@ class SortingComputed(NamedTuple):
 
     NONE of these fields are ``Sorting`` columns -- they are values threaded
     from ``make_compute`` into ``make_insert`` (NWB staging, lookups,
-    unit-part inserts). ``analyzer_folder`` is special only in WHY it is
-    threaded: it is the EXACT folder ``_build_analyzer`` wrote, so
-    ``make_insert`` / ``_populate_unit_part`` load and clean up that folder
-    rather than recomputing a path a mid-populate config / path-policy
-    change could divert. The analyzer cache folder is deliberately NOT a DB
-    column; every code path WITHOUT an in-memory folder
-    (``get_analyzer``, ``delete``, ``find_orphaned_analyzer_folders``)
-    resolves the canonical location from ``sorting_id`` via
+    unit-part inserts). The analyzer folder ``_build_analyzer`` wrote is
+    NOT carried: ``make_compute`` already derives the unit rows from it, and
+    insertion neither reads nor cleans it. The analyzer cache folder is
+    deliberately not a DB column either; every code path resolves the
+    canonical location from ``sorting_id`` via
     ``_analyzer_cache.analyzer_path``.
 
     NOTE: the field ORDER here is a positional wire contract -- the tri-part
@@ -182,10 +179,6 @@ class SortingComputed(NamedTuple):
         Staged-but-unregistered AnalysisNwbfile holding the units.
     units_object_id : str
         NWB object id of the units table inside that file.
-    analyzer_folder : pathlib.Path
-        Exact on-disk analyzer folder ``_build_analyzer`` wrote; threaded so
-        ``make_insert`` loads/cleans that folder rather than recomputing a
-        path.
     nwb_file_name : str
         Source NWB file backing the recording selection.
     display_waveform_params_name : str
@@ -208,7 +201,6 @@ class SortingComputed(NamedTuple):
     sorting_obj: "si.BaseSorting"
     analysis_file_name: str
     units_object_id: str
-    analyzer_folder: Path
     nwb_file_name: str
     display_waveform_params_name: str
     effective_random_seed: int
@@ -1933,7 +1925,6 @@ class Sorting(SpyglassMixin, dj.Computed):
             sorting_obj=sorting_obj,
             analysis_file_name=analysis_file_name,
             units_object_id=units_object_id,
-            analyzer_folder=analyzer_folder,
             nwb_file_name=nwb_file_name,
             display_waveform_params_name=display_waveform_params_name,
             effective_random_seed=effective_random_seed,
@@ -1948,7 +1939,6 @@ class Sorting(SpyglassMixin, dj.Computed):
         sorting_obj,
         analysis_file_name,
         units_object_id,
-        analyzer_folder,
         nwb_file_name,
         display_waveform_params_name,
         effective_random_seed,
@@ -1981,8 +1971,6 @@ class Sorting(SpyglassMixin, dj.Computed):
             Staged AnalysisNwbfile registered here.
         units_object_id : str
             NWB object id of the units table inside that file.
-        analyzer_folder : pathlib.Path
-            On-disk analyzer folder used to load peak channels.
         nwb_file_name : str
             Source NWB file backing the recording selection.
         display_waveform_params_name : str

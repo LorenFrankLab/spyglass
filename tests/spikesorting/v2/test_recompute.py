@@ -27,7 +27,6 @@ def test_operator_xfail_is_not_inferred_as_automatic_unverifiable(dj_conn):
 
     result = _recompute_compute(
         {"sorting_id": "sort"},
-        6,
         "legacy/unverifiable is an operator-authored explanation",
         None,
         regen=lambda: pytest.fail("an xfail must not regenerate"),
@@ -38,7 +37,6 @@ def test_operator_xfail_is_not_inferred_as_automatic_unverifiable(dj_conn):
 
     automatic = _recompute_compute(
         {"sorting_id": "sort"},
-        6,
         None,
         "legacy/unverifiable: unseeded noise_levels",
         regen=lambda: pytest.fail("an unverifiable row must not regenerate"),

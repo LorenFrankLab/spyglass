@@ -49,9 +49,7 @@ def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
     return model_cls.model_validate(payload).model_dump()
 
 
-def _assert_schema_version_matches(
-    row: dict, model_cls: type[BaseModel], *, table_name: str
-) -> None:
+def _assert_schema_version_matches(row: dict, *, table_name: str) -> None:
     """Raise if outer and inner Pydantic ``schema_version`` disagree.
 
     Each Lookup table stores a ``params_schema_version`` column
@@ -67,10 +65,8 @@ def _assert_schema_version_matches(
     row : dict
         The full row dict being inserted. Must have a ``params``
         entry that already contains a ``schema_version`` (i.e. the
-        caller has already run ``_validate_params``).
-    model_cls : type[pydantic.BaseModel]
-        The schema class. Its default ``schema_version`` is used as
-        the fallback when the row omits ``params_schema_version``.
+        caller has already run ``_validate_params``). A row that omits
+        ``params_schema_version`` has nothing to disagree with and passes.
     table_name : str
         Human-readable table name for the error message.
 
@@ -144,7 +140,7 @@ def validate_lookup_rows(
         # trips on a real outer/inner mismatch.
         if row.get("params_schema_version", 0) == 0:
             row["params_schema_version"] = int(row["params"]["schema_version"])
-        _assert_schema_version_matches(row, schema_cls, table_name=table_name)
+        _assert_schema_version_matches(row, table_name=table_name)
         validated.append(row)
     return validated
 

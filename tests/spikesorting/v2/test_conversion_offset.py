@@ -108,7 +108,6 @@ def test_no_filter_reference_zeroes_channel_offset(
         rec,
         reference_mode=reference_mode,
         reference_electrode_id=reference_id,
-        sort_group_channel_ids=[0, 1, 2, 3],
         validated=_no_filter_params(),
     )
     np.testing.assert_array_equal(
@@ -130,7 +129,6 @@ def test_no_filter_no_reference_preserves_offset():
         rec,
         reference_mode="none",
         reference_electrode_id=None,
-        sort_group_channel_ids=[0, 1, 2, 3],
         validated=_no_filter_params(),
     )
     np.testing.assert_array_equal(

@@ -129,7 +129,7 @@ def test_specific_filters_then_references_then_drops(monkeypatch):
     rec = _FakeRecording([0, 1, 2, 99], calls)
 
     out, applied_steps = apply_pre_motion_preprocessing(
-        rec, "specific", 99, [0, 1, 2], _validated()
+        rec, "specific", 99, _validated()
     )
 
     assert [c[0] for c in calls] == [
@@ -151,7 +151,7 @@ def test_global_median_filters_then_references(monkeypatch):
     rec = _FakeRecording([0, 1, 2, 3], calls)
 
     apply_pre_motion_preprocessing(
-        rec, "global_median", None, [0, 1, 2, 3], _validated(operator="median")
+        rec, "global_median", None, _validated(operator="median")
     )
 
     assert [c[0] for c in calls] == ["bandpass_filter", "common_reference"]
@@ -168,9 +168,7 @@ def test_global_median_single_channel_raises(monkeypatch):
     rec = _FakeRecording([0], calls)
 
     with pytest.raises(ValueError, match="zeroes the signal"):
-        apply_pre_motion_preprocessing(
-            rec, "global_median", None, [0], _validated()
-        )
+        apply_pre_motion_preprocessing(rec, "global_median", None, _validated())
 
 
 def test_none_reference_still_filters(monkeypatch):
@@ -178,9 +176,7 @@ def test_none_reference_still_filters(monkeypatch):
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 3], calls)
 
-    apply_pre_motion_preprocessing(
-        rec, "none", None, [0, 1, 2, 3], _validated()
-    )
+    apply_pre_motion_preprocessing(rec, "none", None, _validated())
 
     assert [c[0] for c in calls] == ["bandpass_filter"]
 
@@ -191,7 +187,7 @@ def test_no_filter_still_references_and_drops(monkeypatch):
     rec = _FakeRecording([0, 1, 2, 99], calls)
 
     out, _ = apply_pre_motion_preprocessing(
-        rec, "specific", 99, [0, 1, 2], _validated(bandpass=False)
+        rec, "specific", 99, _validated(bandpass=False)
     )
 
     # bandpass_filter=None disables the filter, but referencing + drop run.
@@ -207,9 +203,7 @@ def test_invalid_reference_mode_raises(monkeypatch):
     # The internal defensive guard (distinct from the SortGroupV2 insert-time
     # ReferenceMode validator) rejects an unknown mode.
     with pytest.raises(ValueError, match="invalid reference_mode"):
-        apply_pre_motion_preprocessing(
-            rec, "banana", None, [0, 1, 2], _validated()
-        )
+        apply_pre_motion_preprocessing(rec, "banana", None, _validated())
 
 
 def test_specific_reference_absent_after_referencing_raises(monkeypatch):
@@ -221,9 +215,7 @@ def test_specific_reference_absent_after_referencing_raises(monkeypatch):
     rec = _FakeRecording([0, 1, 2], calls)
 
     with pytest.raises(RuntimeError, match="absent after referencing"):
-        apply_pre_motion_preprocessing(
-            rec, "specific", 99, [0, 1, 2], _validated()
-        )
+        apply_pre_motion_preprocessing(rec, "specific", 99, _validated())
 
 
 # ---- ADC phase-shift ordering / gating --------------------------------------
@@ -240,7 +232,7 @@ def test_phase_shift_runs_before_bandpass(monkeypatch):
     )
 
     out, applied_steps = apply_pre_motion_preprocessing(
-        rec, "none", None, [0, 1, 2, 3], _validated(phase_shift=100.0)
+        rec, "none", None, _validated(phase_shift=100.0)
     )
 
     # phase-shift precedes the bandpass (the deliberate AIND ordering).
@@ -264,7 +256,7 @@ def test_phase_shift_skipped_when_property_absent(monkeypatch, caplog):
 
     with caplog.at_level("WARNING"):
         _out, applied_steps = apply_pre_motion_preprocessing(
-            rec, "none", None, [0, 1, 2, 3], _validated(phase_shift=100.0)
+            rec, "none", None, _validated(phase_shift=100.0)
         )
 
     assert "phase_shift" not in [c[0] for c in calls]
@@ -289,7 +281,7 @@ def test_phase_shift_off_by_default_ignores_property(monkeypatch):
 
     # _validated() leaves phase_shift off (None).
     _out, applied_steps = apply_pre_motion_preprocessing(
-        rec, "none", None, [0, 1, 2, 3], _validated()
+        rec, "none", None, _validated()
     )
 
     assert "phase_shift" not in [c[0] for c in calls]
@@ -314,13 +306,9 @@ def test_bandpass_freq_max_at_or_above_nyquist_raises():
     validated = _validated(bandpass=True)
     validated.bandpass_filter.freq_max = 12000.0  # above the 10 kHz Nyquist
     with pytest.raises(ValueError, match="Nyquist"):
-        apply_pre_motion_preprocessing(
-            rec, "none", None, [0, 1, 2, 3], validated
-        )
+        apply_pre_motion_preprocessing(rec, "none", None, validated)
     # The boundary itself: freq_max EXACTLY AT Nyquist must also raise (the
     # guard is ``freq_max >= fs/2``; scipy needs strictly ``< fs/2``).
     validated.bandpass_filter.freq_max = fs / 2.0  # == 10 kHz Nyquist
     with pytest.raises(ValueError, match="Nyquist"):
-        apply_pre_motion_preprocessing(
-            rec, "none", None, [0, 1, 2, 3], validated
-        )
+        apply_pre_motion_preprocessing(rec, "none", None, validated)
