@@ -125,14 +125,9 @@ class AnnotationSetRef:
                 "AnnotationSetRef.from_key is missing required field(s) "
                 f"{sorted(missing)}."
             )
+        # A supplied curation_uuid pins the generation (CurationRef.from_key
+        # raises CurationNotFoundError on a stale one).
         curation = CurationRef.from_key(key)
-        if "curation_uuid" in key and curation.curation_uuid != _uuid(
-            key["curation_uuid"]
-        ):
-            raise LookupError(
-                "Annotation set key carries a stale curation_uuid for its "
-                "numeric curation key."
-            )
         dj_key = {
             **curation.as_key(),
             "annotation_name": str(key["annotation_name"]),
@@ -157,12 +152,12 @@ class AnnotationSetRef:
     @classmethod
     def from_snapshot(cls, snapshot: Mapping[str, Any]) -> "AnnotationSetRef":
         """Rehydrate an exact set from a persisted review snapshot."""
-        ref = cls.from_key(snapshot)
-        expected_uuid = _uuid(snapshot["curation_uuid"])
-        if ref.curation.curation_uuid != expected_uuid:
+        if "curation_uuid" not in snapshot:
             raise LookupError(
-                "Annotation set snapshot targets a different curation UUID."
+                "Annotation set snapshot must carry curation_uuid so it pins "
+                "one curation generation."
             )
+        ref = cls.from_key(snapshot)  # raises on a stale curation_uuid
         if str(snapshot.get("value_type")) != ref.value_type:
             raise LookupError(
                 "Annotation set snapshot value_type does not match its "

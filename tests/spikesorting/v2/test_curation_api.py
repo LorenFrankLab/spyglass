@@ -80,6 +80,7 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
     from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
         RunResult,
         create_initial_curation,
         save_manual_curation,
@@ -169,6 +170,21 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
 
         with pytest.raises(CurationNotFoundError, match="was replaced"):
             stale.as_key()
+        # Serializing a ref preserves its identity guarantee: a mapping that
+        # carries the stale curation_uuid is refused too, a mapping carrying
+        # the replacement's uuid resolves it, and a bare numeric key resolves
+        # the CURRENT generation.
+        from dataclasses import asdict
+
+        with pytest.raises(CurationNotFoundError, match="stale curation_uuid"):
+            CurationRef.from_key(asdict(stale))
+        assert CurationRef.from_key(asdict(replacement)) == replacement
+        assert (
+            CurationRef.from_key(
+                {"sorting_id": root.sorting_id, "curation_id": stale_id}
+            )
+            == replacement
+        )
     finally:
         clear_curations_for(sorting_key)
 

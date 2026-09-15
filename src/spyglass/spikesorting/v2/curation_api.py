@@ -94,7 +94,15 @@ class CurationRef:
 
     @classmethod
     def from_key(cls, key: Mapping[str, Any] | "CurationRef") -> "CurationRef":
-        """Validate a curation key and pin its current generation UUID."""
+        """Validate a curation key and pin its generation UUID.
+
+        A bare ``{sorting_id, curation_id}`` key resolves the CURRENT
+        generation of that numeric id. A key that also carries
+        ``curation_uuid`` (a ``CurationRef``, its ``dataclasses.asdict``
+        form, a fetched row, a persisted snapshot) pins THAT generation:
+        if the numeric id was deleted and reused, ``CurationNotFoundError``
+        is raised rather than silently resolving the replacement row.
+        """
         if isinstance(key, cls):
             key._current_row()
             return key
@@ -118,10 +126,21 @@ class CurationRef:
                 f"sorting_id={dj_key['sorting_id']}, "
                 f"curation_id={dj_key['curation_id']}."
             )
+        current_uuid = _uuid(rows[0])
+        supplied = key.get("curation_uuid")
+        if supplied is not None and _uuid(supplied) != current_uuid:
+            raise CurationNotFoundError(
+                "CurationRef.from_key: key carries a stale curation_uuid for "
+                f"sorting_id={dj_key['sorting_id']}, "
+                f"curation_id={dj_key['curation_id']} (supplied "
+                f"{_uuid(supplied)}, current {current_uuid}); the numeric id "
+                "was replaced. Resolve a fresh CurationRef from the intended "
+                "curation."
+            )
         return cls(
             sorting_id=_uuid(dj_key["sorting_id"]),
             curation_id=dj_key["curation_id"],
-            curation_uuid=_uuid(rows[0]),
+            curation_uuid=current_uuid,
         )
 
     def _unchecked_key(self) -> dict[str, Any]:

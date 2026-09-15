@@ -88,7 +88,9 @@ def test_typed_annotation_sets_and_explicit_common_reader(
         assert len(CurationUnitAnnotationSet & root.as_key()) == 1
         stale_snapshot = score.snapshot()
         stale_snapshot["curation_uuid"] = "00000000-0000-0000-0000-000000000001"
-        with pytest.raises(LookupError, match="stale curation_uuid"):
+        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+
+        with pytest.raises(CurationNotFoundError, match="stale curation_uuid"):
             AnnotationSetRef.from_key(stale_snapshot)
         round_trip = score.to_dataframe()
         assert round_trip.index.tolist() == unit_ids
