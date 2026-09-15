@@ -518,7 +518,17 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # ... and on the RAW (root) curation: an ABSENT extension is persisted
         # into the shared sort analyzer (SI default bin), while a request with
         # DIFFERENT parameters is served from a derivative and never rewrites
-        # the shared analyzer's version.
+        # the shared analyzer's version. The sort analyzer is package-scoped
+        # (an earlier browser review may have persisted display extensions),
+        # so establish the states this block relies on first.
+        from spyglass.spikesorting.v2._analyzer_cache import (
+            analyzer_cache_lock,
+        )
+
+        with analyzer_cache_lock(sorting_key["sorting_id"]):
+            shared = Sorting().get_analyzer(sorting_key)
+            if shared.has_extension("template_similarity"):
+                shared.delete_extension("template_similarity")
         with curation_analyzer_with_extensions(
             root, recipe, extra_extensions={"correlograms": {}}
         ):

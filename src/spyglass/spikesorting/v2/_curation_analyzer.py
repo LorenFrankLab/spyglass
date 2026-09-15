@@ -646,7 +646,10 @@ def _resolve_curation_analyzer(
                 {"sorting_id": row["sorting_id"]},
                 waveform_params_name=waveform_recipe,
             )
-        expected_prefix = _manifest_prefix(row, base.sorting, recipe_row, role)
+        # The manifest (spike-content hash + provenance) is only needed if a
+        # derivative must be built; an ordinary read must not scan spike
+        # trains. Resolved lazily below.
+        expected_prefix = None
     else:
         curated_sorting = CurationV2.get_merged_sorting(key)
         expected_prefix = _manifest_prefix(
@@ -692,6 +695,8 @@ def _resolve_curation_analyzer(
     }
     if not needs_compute:
         return base
+    if expected_prefix is None:
+        expected_prefix = _manifest_prefix(row, base.sorting, recipe_row, role)
 
     # Disk-backed derivative: the base (shared raw analyzer or immutable
     # per-generation cache) stays untouched; the derivative is keyed by the
@@ -759,64 +764,43 @@ def _resolve_curation_analyzer(
     )
 
 
-# ``templates`` copies its window from ``waveforms`` when ``ms_before`` /
-# ``ms_after`` are left unset; when it is restored after a waveform-window
-# change those stored values must NOT be replayed (SpikeInterface re-derives
-# them from the new parent). Every other extension's stored parameters are its
-# own and are replayed verbatim.
-_PARENT_DERIVED_WINDOW_KEYS = {"templates": ("ms_before", "ms_after")}
-
-
 def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     """Compute ``needs_compute`` on a working copy, restoring what SI removes.
 
-    SpikeInterface deletes every extension that depends on a recomputed one
-    (``compute_one_extension`` -> ``_get_children_dependencies``). The
-    required result is the base extension set plus every requested extension;
-    any required extension downstream of a recomputed one is recomputed too --
-    at the caller's parameters when it was requested, otherwise at its stored
-    parameters (window keys derived from a parent are left for SI to
-    re-derive). Only descendants of the recomputed set are touched, so a
-    correlogram-only change never re-extracts waveforms. The result is checked
-    against the whole request before returning.
+    SpikeInterface deletes every (transitive) dependent of a recomputed
+    extension (``compute_one_extension`` -> ``_get_children_dependencies``).
+    The required result is the base extension set plus every requested
+    extension, so each required dependent of the computed set is recomputed
+    too -- at the caller's parameters when requested, otherwise at its stored
+    parameters (SI's ``templates`` re-derives its window from the waveforms
+    extension regardless of stored values). ``analyzer.compute`` orders the
+    plan by dependency. Only descendants of the recomputed set are touched, so
+    a correlogram-only change never re-extracts waveforms. The result is
+    checked against the whole request before returning.
     """
-    from spikeinterface.core.sortinganalyzer import (
-        _get_children_dependencies,
-        _sort_extensions_by_dependency,
-    )
+    from spikeinterface.core.sortinganalyzer import _get_children_dependencies
 
     required = set(BASE_ANALYZER_EXTENSIONS) | set(request)
-    stored = {
-        name: dict(analyzer.get_extension(name).params or {})
-        for name in required
-        if analyzer.has_extension(name)
-    }
     plan = {name: dict(params) for name, params in needs_compute.items()}
-    frontier = list(plan)
-    while frontier:
-        name = frontier.pop()
+    for name in list(plan):
         for child in _get_children_dependencies(name):
             if child in required and child not in plan:
-                if child in request:
-                    plan[child] = dict(request[child])
-                else:
-                    params = dict(stored.get(child, {}))
-                    for key in _PARENT_DERIVED_WINDOW_KEYS.get(child, ()):
-                        params.pop(key, None)
-                    plan[child] = params
-                frontier.append(child)
-    ordered = _sort_extensions_by_dependency(plan)
+                plan[child] = dict(
+                    request.get(child)
+                    or (
+                        analyzer.get_extension(child).params
+                        if analyzer.has_extension(child)
+                        else {}
+                    )
+                    or {}
+                )
     compute_kwargs = {
         k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
     }
-    for name in ordered:
+    for name in plan:
         if analyzer.has_extension(name):
             analyzer.delete_extension(name)
-    analyzer.compute(
-        list(ordered),
-        extension_params={name: params for name, params in ordered.items()},
-        **compute_kwargs,
-    )
+    analyzer.compute(list(plan), extension_params=plan, **compute_kwargs)
     missing = sorted(
         name for name in required if not analyzer.has_extension(name)
     )
@@ -829,7 +813,7 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
         raise ValueError(
             "curation analyzer derivative does not satisfy its request: "
             f"missing {missing}, parameter mismatch {unmet} (request "
-            f"{request}, computed {sorted(ordered)})."
+            f"{request}, computed {sorted(plan)})."
         )
 
 
