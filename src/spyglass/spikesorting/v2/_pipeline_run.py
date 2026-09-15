@@ -275,12 +275,11 @@ def run_v2_pipeline(
         (``CurationEvaluation``) and materializes a committed child curation
         whose labels ARE the evaluation's verdict. The summary then carries
         ``curation_evaluation_id`` (the suggestion selection PK),
-        ``auto_curation_id`` / ``auto_merge_id`` (the materialized child
-        curation), and ``auto_curation_status`` (these keys are absent when
-        ``auto_curate=False``). The always-present ``auto_labeled_curation_id`` is
-        set to that child; ``auto_labeled_merge_id`` is also set for a
-        single-session run and remains ``None`` for concat. Both stay ``None``
-        on a root-only run. Automatic labels are suggestions written as labels,
+        and ``auto_curation_status`` (both absent when ``auto_curate=False``),
+        and the always-present ``auto_labeled_curation_id`` /
+        ``auto_labeled_curation_uuid`` name the materialized child;
+        ``auto_labeled_merge_id`` is also set for a single-session run and
+        remains ``None`` for concat. All stay ``None`` on a root-only run. Automatic labels are suggestions written as labels,
         not approval, and the child still holds EVERY unit -- select the
         analysis population explicitly with ``select_units_for_analysis``.
         ``CurationEvaluation`` builds a whitened PCA analyzer, so this adds
@@ -338,11 +337,9 @@ def run_v2_pipeline(
             ``root_merge_id``            : the root's SpikeSortingOutput PK;
                 ``None`` for a concat run
             ``auto_labeled_curation_id``     : the auto-labeled child CurationV2
-                PK, or ``None`` on a root-only run; equals ``auto_curation_id``
-                when ``auto_curate=True``
+                PK, or ``None`` on a root-only run
             ``auto_labeled_merge_id``        : that child's SpikeSortingOutput
-                PK, or ``None`` on a root-only or concat run; equals
-                ``auto_merge_id`` when single-session ``auto_curate=True``
+                PK, or ``None`` on a root-only or concat run
             ``root_curation_uuid`` / ``auto_labeled_curation_uuid`` : the
                 generation UUIDs the ``root_curation`` / ``auto_labeled_curation``
                 accessors are pinned to
@@ -892,10 +889,9 @@ def run_v2_pipeline(
     # Optional auto-curation: only when the caller opts in. Score the root
     # curation with the preset's metric + auto-curation rule rows, then
     # materialize a committed child curation whose labels ARE the evaluation's
-    # verdict. The default (auto_curate=False) leaves the run
-    # initial-curation-only, so a convenience call never silently commits
-    # suggested labels. These keys are added to the summary only when opted in
-    # (they are NotRequired), so a default run's summary is unchanged.
+    # verdict and point the canonical auto-labeled keys (initialized to None
+    # above) at it. The evaluation id and stage status are added only when
+    # opted in (NotRequired keys).
     if auto_curate:
         from spyglass.spikesorting.v2.exceptions import PipelineStageError
         from spyglass.spikesorting.v2.metric_curation import (
@@ -952,8 +948,6 @@ def run_v2_pipeline(
         run_summary["curation_evaluation_id"] = eval_key[
             "curation_evaluation_id"
         ]
-        run_summary["auto_curation_id"] = child["curation_id"]
-        run_summary["auto_merge_id"] = auto_merge_id
         # The auto-curated child is the run's auto-labeled curation: labels
         # only, every unit still present, no unit selection applied.
         run_summary["auto_labeled_curation_id"] = child["curation_id"]

@@ -180,8 +180,6 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
     }
     _SUMMARY_OPTIONAL = {
         "curation_evaluation_id",
-        "auto_curation_id",
-        "auto_merge_id",
         "auto_curation_status",
         "figpack_uri",
         "figpack_status",

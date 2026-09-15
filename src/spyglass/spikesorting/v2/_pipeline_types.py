@@ -123,13 +123,12 @@ class _RunV2SummaryBase(TypedDict):
     # SpikeSortingOutput; RunV2ConcatSummary exposes wall-clock-safe member rows.
     root_merge_id: "UUID | None"
     # The AUTO-LABELED child curation. Always present, so a consumer can
-    # branch on it: ``None`` on a root-only run (``auto_curate=False``) and
-    # equal to ``auto_curation_id`` / ``auto_merge_id`` when a single-session
-    # run uses ``auto_curate=True``. Concat carries the child curation id but
-    # leaves the merge id None. Automatic labels are NOT scientific approval and
-    # its merge id is NOT a filtered unit set: every unit (noise / reject /
-    # artifact included) is still in the row. Downstream selection goes
-    # through ``select_units_for_analysis`` (SortedSpikesGroup +
+    # branch on it: ``None`` on a root-only run (``auto_curate=False``), set
+    # when a run uses ``auto_curate=True``. Concat carries the child curation
+    # id but leaves the merge id None. Automatic labels are NOT scientific
+    # approval and its merge id is NOT a filtered unit set: every unit (noise /
+    # reject / artifact included) is still in the row. Downstream selection
+    # goes through ``select_units_for_analysis`` (SortedSpikesGroup +
     # UnitSelectionParams), never straight through this merge id.
     auto_labeled_curation_id: "int | None"
     auto_labeled_merge_id: "UUID | None"
@@ -149,13 +148,9 @@ class _RunV2SummaryBase(TypedDict):
     stage_seconds: PipelineStageSeconds
     warnings: list[str]
     # Auto-curation keys, present only when ``run_v2_pipeline(auto_curate=True)``:
-    # the CurationEvaluation suggestion selection PK, and the materialized child
-    # CurationV2 (its curation_id + optional merge table id) whose labels are
-    # the evaluation's verdict. ``auto_labeled_curation_id`` /
-    # ``auto_labeled_merge_id`` mirror these when auto-curation ran.
+    # the CurationEvaluation suggestion selection PK and the stage status. The
+    # materialized child itself is the always-present ``auto_labeled_*`` pair.
     curation_evaluation_id: NotRequired[UUID]
-    auto_curation_id: NotRequired[int]
-    auto_merge_id: NotRequired["UUID | None"]
     auto_curation_status: NotRequired[StageStatus]
     # FigPack keys, present only when
     # ``run_v2_pipeline(build_figpack_view=True)``: the published curation-view

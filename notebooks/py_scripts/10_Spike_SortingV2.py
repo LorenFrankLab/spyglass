@@ -272,10 +272,9 @@ CurationV2.summarize_curation(root_key)
 # When you trust the rule set for a batch, `auto_curate=True` folds the
 # evaluate-and-accept steps into the `run_v2_pipeline` call itself: it scores the
 # root curation with the preset's metric + auto-curation rows and commits a child
-# curation whose labels ARE the rule set's verdict. The run summary then carries
-# `auto_curation_id` / `auto_merge_id` (the committed labeled curation) and points
-# `auto_labeled_curation_id` / `auto_labeled_merge_id` at that child, alongside
-# the root keys. It is idempotent like the rest of the pipeline, so this reuses
+# curation whose labels ARE the rule set's verdict. The run summary then points
+# `auto_labeled_curation_id` / `auto_labeled_merge_id` (and the pinned
+# `auto_labeled_curation_uuid`) at that child, alongside the root keys. It is idempotent like the rest of the pipeline, so this reuses
 # the sort already computed above and only adds the curation step.
 #
 # Two things the name says on purpose: automatic labels are **suggestions written

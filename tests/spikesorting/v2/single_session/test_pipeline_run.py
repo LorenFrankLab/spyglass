@@ -1171,8 +1171,6 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     )
     auto_keys = (
         "curation_evaluation_id",
-        "auto_curation_id",
-        "auto_merge_id",
         "auto_curation_status",
     )
 
@@ -1217,22 +1215,26 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         curated["curation_evaluation_id"] == eval_key["curation_evaluation_id"]
     )  # reused the pre-populated evaluation
     assert curated["auto_curation_status"] == "computed"  # child created now
-    # The analysis pointer now resolves to the auto-curated child (the
-    # downstream-science handle), not the uncurated root.
-    assert curated["auto_labeled_curation_id"] == curated["auto_curation_id"]
-    assert curated["auto_labeled_merge_id"] == curated["auto_merge_id"]
+    # The auto-labeled pointer resolves to the materialized child, a NEW
+    # registered output distinct from the uncurated root.
+    assert curated["auto_labeled_curation_id"] is not None
+    assert curated["auto_labeled_curation_id"] != curated["root_curation_id"]
     assert curated["auto_labeled_merge_id"] != curated["root_merge_id"]
+    assert (
+        curated.auto_labeled_curation.curation_uuid
+        == curated["auto_labeled_curation_uuid"]
+    )
     assert curated["stage_seconds"]["auto_curation"] >= 0.0
 
     # The materialized child is a real CurationV2 child of the root, registered.
     child_pk = {
         "sorting_id": curated["sorting_id"],
-        "curation_id": curated["auto_curation_id"],
+        "curation_id": curated["auto_labeled_curation_id"],
     }
     parent = (CurationV2 & child_pk).fetch1("parent_curation_id")
     assert parent == base["root_curation_id"]  # child of the root curation
     assert SpikeSortingOutput.CurationV2 & {
-        "merge_id": curated["auto_merge_id"]
+        "merge_id": curated["auto_labeled_merge_id"]
     }
 
     # The child's labels are the RULES applied to the REAL computed metrics,
@@ -1281,7 +1283,9 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
 
     # Full no-op re-run: the evaluation AND the child already exist -> "reused".
     rerun = run_v2_pipeline(**common, auto_curate=True)
-    assert rerun["auto_curation_id"] == curated["auto_curation_id"]
+    assert (
+        rerun["auto_labeled_curation_id"] == curated["auto_labeled_curation_id"]
+    )
     assert rerun["auto_curation_status"] == "reused"
 
 

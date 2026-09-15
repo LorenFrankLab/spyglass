@@ -2180,23 +2180,19 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             pipeline_preset=preset_name,
             auto_curate=True,
         )
-        assert (
-            auto_summary["auto_labeled_curation_id"]
-            == auto_summary["auto_curation_id"]
-        )
+        assert auto_summary["auto_labeled_curation_id"] is not None
         assert auto_summary["root_merge_id"] is None
-        assert auto_summary["auto_merge_id"] is None
         assert auto_summary["auto_labeled_merge_id"] is None
         assert not (
             SpikeSortingOutput.CurationV2
             & {
                 "sorting_id": auto_summary["sorting_id"],
-                "curation_id": auto_summary["auto_curation_id"],
+                "curation_id": auto_summary["auto_labeled_curation_id"],
             }
         )
         child_key = {
             "sorting_id": auto_summary["sorting_id"],
-            "curation_id": auto_summary["auto_curation_id"],
+            "curation_id": auto_summary["auto_labeled_curation_id"],
         }
         assert len(ConcatMemberCuration & child_key) == 2
         assert len(auto_summary["member_merge_ids"]) == 2
