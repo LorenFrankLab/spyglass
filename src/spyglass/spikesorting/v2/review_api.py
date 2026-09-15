@@ -36,7 +36,8 @@ from spyglass.spikesorting.v2.exceptions import (
 # "computed" / "reused" say whether THIS call materialized the step or found
 # it already present (the curation layer's ``MaterializationStatus``);
 # "complete" only attests the step is done, without that classification
-# (the post-merge commit path reports every step this way).
+# (the commit path reports its identity / edit / evaluation steps this way;
+# ``child_committed`` keeps computed / reused).
 ReviewStageState = Literal["computed", "reused", "complete"]
 
 

@@ -21,10 +21,11 @@ from typing import Literal
 # Stored as a ``varchar(32)`` on ``SortGroupV2`` validated against this
 # Literal at insert time (NOT a MySQL enum). The set may grow --
 # SpikeInterface also supports ``global_average`` / CAR and local per-group
-# referencing -- and a varchar lets a new mode be added by extending this
-# Literal alone, without changing the column definition of a populated
-# table. The Literal gives identical typo protection at the ``insert1``
-# boundary; same decision as ``CurationLabel``. It replaced a single
+# referencing -- and a varchar lets a new mode be added in Python (this
+# Literal, ``_VALID_REFERENCE_MODES`` below, and its preprocessing branch)
+# without changing the column definition of a populated table. The Literal
+# gives identical typo protection at the ``insert1`` boundary; same decision
+# as ``CurationLabel``. It replaced a single
 # ``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
 # global median, >=0 specific) conflated the mode with the channel id.
 ReferenceMode = Literal["none", "global_median", "specific"]
