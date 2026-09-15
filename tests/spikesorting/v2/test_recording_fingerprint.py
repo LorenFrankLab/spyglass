@@ -236,7 +236,7 @@ class TestRecordingArtifactLock:
     A rebuild (``get_recording`` read-repair / ``_rebuild_nwb_artifact``) and a
     reclamation (``RecordingArtifactRecompute.delete_files``) of the SAME
     recording must never interleave; different recordings stay free to run
-    concurrently. Mirrors the ``analyzer_curation_lock`` contention contract.
+    concurrently. Mirrors the ``analyzer_cache_lock`` contention contract.
     DB-free: only ``analyzer_cache_root`` resolves (via the custom config dir).
     """
 

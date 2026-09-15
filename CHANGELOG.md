@@ -502,7 +502,7 @@ compatibility, and compute-time integrity. No schema, identity, or
 
 - **Analyzer cache is lock-guarded + (dir-)atomic-published**, mirroring the
   recording artifact. The per-sort `analyzer_cache_lock` (renamed from
-  `analyzer_curation_lock`, alias kept) now wraps every canonical-folder
+  `analyzer_curation_lock`) now wraps every canonical-folder
   read/rebuild/delete/extension-compute path and is process-reentrant
   (memoized `FileLock`) so the read path can nest inside the
   `CurationEvaluation` compute lock without self-deadlock. Builds publish via a

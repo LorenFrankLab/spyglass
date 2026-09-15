@@ -98,10 +98,7 @@ def _available_quality_metric_names() -> list[str]:
     Imported lazily so this module stays importable without paying the
     SpikeInterface import cost until a metric name is actually validated.
     """
-    try:
-        from spikeinterface.metrics.quality import get_quality_metric_list
-    except ImportError:  # pragma: no cover - pinned 0.104 always has this
-        from spikeinterface.qualitymetrics import get_quality_metric_list
+    from spikeinterface.metrics.quality import get_quality_metric_list
 
     return list(get_quality_metric_list())
 
@@ -119,12 +116,7 @@ def _available_pca_metric_names() -> tuple[str, ...]:
     returned because ``lru_cache`` results must not be mutated -- callers wrap
     it in a ``set``.
     """
-    try:
-        from spikeinterface.metrics.quality import (
-            get_quality_pca_metric_list,
-        )
-    except ImportError:  # pragma: no cover - pinned 0.104 always has this
-        from spikeinterface.qualitymetrics import get_quality_pca_metric_list
+    from spikeinterface.metrics.quality import get_quality_pca_metric_list
 
     return tuple(get_quality_pca_metric_list())
 
@@ -150,14 +142,9 @@ def required_extensions_for_metrics(
     analyzer separately), so every returned extension is display-safe.
     Order-preserving and idempotent against ``present_extensions``.
     """
-    try:
-        from spikeinterface.metrics.quality.quality_metrics import (
-            ComputeQualityMetrics,
-        )
-    except ImportError:  # pragma: no cover - pinned 0.104 layout
-        from spikeinterface.qualitymetrics.quality_metric_calculator import (
-            ComputeQualityMetrics,
-        )
+    from spikeinterface.metrics.quality.quality_metrics import (
+        ComputeQualityMetrics,
+    )
 
     present = set(present_extensions)
     needed: list[str] = []

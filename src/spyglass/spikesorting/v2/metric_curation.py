@@ -1223,7 +1223,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         import spikeinterface as si
 
         from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_curation_lock,
+            analyzer_cache_lock,
         )
         from spyglass.spikesorting.v2._nwb_provenance import (
             CURATION_EVALUATION_PROVENANCE,
@@ -1328,7 +1328,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 raw_sorting = self._sorting_from_units_nwb(
                     raw_units_abs_path, recording_row, fs
                 )
-                with analyzer_curation_lock(sorting_id):
+                with analyzer_cache_lock(sorting_id):
                     display_analyzer = load_or_rebuild_analyzer_from_resolved(
                         sorting_id=sorting_id,
                         n_units=raw_n_units,

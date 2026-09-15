@@ -279,23 +279,6 @@ class TestAnalyzerCacheLock:
         lock = analyzer_cache_lock("sid-A")
         assert Path(lock.lock_file).parent == analyzer_cache_root()
 
-    def test_curation_lock_is_compatibility_alias(
-        self, tmp_path, restore_custom_config
-    ):
-        """``analyzer_curation_lock`` is retained as an alias for the renamed
-        ``analyzer_cache_lock`` (its callers predate the rename)."""
-        import datajoint as dj
-
-        from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_lock,
-            analyzer_curation_lock,
-        )
-
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
-        assert analyzer_curation_lock is analyzer_cache_lock
-        # The alias resolves to the same memoized instance.
-        assert analyzer_curation_lock("sid-A") is analyzer_cache_lock("sid-A")
-
 
 class TestPublishAnalyzerAtomically:
     """``publish_analyzer_atomically`` builds into a private temp folder, then

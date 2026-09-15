@@ -238,7 +238,7 @@ def recording_content_fingerprint(
 def recording_artifact_lock(recording_id, *, timeout: float = -1):
     """Return a cross-process lock serializing one recording's artifact slot.
 
-    Mirrors :func:`._analyzer_cache.analyzer_curation_lock`: a per-
+    Mirrors :func:`._analyzer_cache.analyzer_cache_lock`: a per-
     ``recording_id`` ``filelock.FileLock`` so a rebuild (``get_recording`` read-
     repair / ``_rebuild_nwb_artifact``) and a reclamation
     (``RecordingArtifactRecompute.delete_files``) of the *same* recording can
@@ -248,7 +248,7 @@ def recording_artifact_lock(recording_id, *, timeout: float = -1):
     The lock file lives under the shared analyzer/lock root
     (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path --
     NOT a per-worker temp -- so all workers on a machine contend on the same
-    file. As with ``analyzer_curation_lock`` this serializes processes on ONE
+    file. As with ``analyzer_cache_lock`` this serializes processes on ONE
     machine; it does not coordinate across hosts sharing an NFS mount.
 
     Parameters

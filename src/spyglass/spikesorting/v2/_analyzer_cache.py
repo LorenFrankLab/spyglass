@@ -437,12 +437,6 @@ def analyzer_cache_lock(sorting_id):
         return lock
 
 
-# Backwards-compatible alias: callers predating the cache-wide rename (the
-# ``CurationEvaluation`` fast path, the recording-lock docstring cross-ref) used
-# ``analyzer_curation_lock`` when the lock guarded only ``AnalyzerCuration``.
-analyzer_curation_lock = analyzer_cache_lock
-
-
 def _publish_sibling(canonical_folder, kind: str) -> Path:
     """Return a hidden sibling of ``canonical_folder`` for staging.
 
