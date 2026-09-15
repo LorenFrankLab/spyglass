@@ -33,7 +33,6 @@ from spyglass.spikesorting.v2.curation_api import CurationRef
 from spyglass.spikesorting.v2.utils import (
     FactoryOnlyMaster,
     ImmutableParamsLookup,
-    transaction_or_noop,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -393,11 +392,15 @@ class CurationUnitAnnotationSet(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             for unit_id, value in values
         ]
         try:
-            with transaction_or_noop(cls.connection):
+            with cls.connection.transaction:
                 cls.insert1(master_row, allow_direct_insert=True)
                 if value_rows:
                     cls.Value.insert(value_rows, allow_direct_insert=True)
-        except Exception:
+        except dj.errors.DuplicateError:
+            # A concurrent caller inserted the same content-addressed set
+            # between the reuse check above and this insert: adopt the
+            # winner (after the same provenance / stored-value checks).
+            # Any other failure propagates; the transaction rolled back.
             existing = cls._reuse_existing(
                 key,
                 producer=producer,

@@ -233,3 +233,110 @@ def test_typed_annotation_sets_and_explicit_common_reader(
         assert root.curation_uuid == CurationRef.from_key(root).curation_uuid
     finally:
         clear_curations_for(sorting_key)
+
+
+def test_from_dataframe_adopts_duplicate_winner_and_propagates_other_failures(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """Only a duplicate-key race is recovered by adopting the winner.
+
+    A concurrent caller landing the same content-addressed set between the
+    reuse check and the insert surfaces as ``DuplicateError``; the factory
+    then returns the winner (after the provenance / stored-value checks). Any
+    other insert failure propagates unchanged, rolls the transaction back
+    (no master row is left behind) and triggers no extra recovery query.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+    )
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        unit_ids = sorted(
+            map(int, (Sorting.Unit & sorting_key).fetch("unit_id"))
+        )
+        definition = UnitAnnotationDefinition.insert_definition(
+            "recovery_score", 1, "float"
+        )
+        frame = pd.DataFrame(
+            {"recovery_score": [0.5, 1.5]},
+            index=pd.Index(unit_ids, name="unit_id"),
+        )
+        kwargs = dict(producer="race-test", producer_version="1")
+        winner = CurationUnitAnnotationSet.from_dataframe(
+            root, definition, frame, **kwargs
+        )
+
+        # Simulate the race: the pre-insert reuse check sees nothing (as if
+        # the winner landed a moment later), so the insert collides on the
+        # content-addressed PK and the factory adopts the winner.
+        real_reuse = CurationUnitAnnotationSet._reuse_existing.__func__
+        calls: list[str] = []
+
+        def _racing_reuse(cls, key, **kw):
+            calls.append("reuse")
+            if len(calls) == 1:
+                return None
+            return real_reuse(cls, key, **kw)
+
+        monkeypatch.setattr(
+            CurationUnitAnnotationSet,
+            "_reuse_existing",
+            classmethod(_racing_reuse),
+        )
+        adopted = CurationUnitAnnotationSet.from_dataframe(
+            root, definition, frame, **kwargs
+        )
+        assert adopted == winner
+        assert calls == ["reuse", "reuse"]
+        assert len(CurationUnitAnnotationSet & root.as_key()) == 1
+        monkeypatch.undo()
+
+        # An unrelated failure inside the transaction propagates as-is, leaves
+        # no master row, and does not run the recovery query.
+        calls.clear()
+        monkeypatch.setattr(
+            CurationUnitAnnotationSet,
+            "_reuse_existing",
+            classmethod(
+                lambda cls, key, **kw: (
+                    calls.append("reuse"),
+                    real_reuse(cls, key, **kw),
+                )[1]
+            ),
+        )
+
+        def _failing_value_insert(self, rows, **kw):
+            raise ValueError("simulated value-row failure")
+
+        monkeypatch.setattr(
+            CurationUnitAnnotationSet.Value, "insert", _failing_value_insert
+        )
+        other_frame = frame.copy()
+        other_frame.iloc[0, 0] = 9.5
+        with pytest.raises(ValueError, match="simulated value-row failure"):
+            CurationUnitAnnotationSet.from_dataframe(
+                root, definition, other_frame, **kwargs
+            )
+        assert calls == ["reuse"], "no recovery query after a non-duplicate"
+        assert len(CurationUnitAnnotationSet & root.as_key()) == 1
+        monkeypatch.undo()
+        assert (
+            CurationUnitAnnotationSet.from_dataframe(
+                root, definition, other_frame, **kwargs
+            ).set_hash
+            != winner.set_hash
+        )
+        assert len(CurationUnitAnnotationSet & root.as_key()) == 2
+    finally:
+        clear_curations_for(sorting_key)
