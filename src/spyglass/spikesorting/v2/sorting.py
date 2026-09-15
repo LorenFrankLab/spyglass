@@ -1966,8 +1966,10 @@ class Sorting(SpyglassMixin, dj.Computed):
         is explicitly forbidden.
 
         Failure-mode B: if the registration raises after a
-        successful ``make_compute``, the staged units NWB AND the
-        analyzer folder are removed before propagating.
+        successful ``make_compute``, the attempt-owned staged units
+        NWB is removed before propagating; the analyzer folder is
+        shared by ``sorting_id`` and deliberately kept (an orphan is
+        reclaimed by ``find_orphaned_analyzer_folders``).
 
         Parameters
         ----------
@@ -1980,8 +1982,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         units_object_id : str
             NWB object id of the units table inside that file.
         analyzer_folder : pathlib.Path
-            On-disk analyzer folder used to load peak channels and for
-            Mode-B rollback cleanup.
+            On-disk analyzer folder used to load peak channels.
         nwb_file_name : str
             Source NWB file backing the recording selection.
         display_waveform_params_name : str
