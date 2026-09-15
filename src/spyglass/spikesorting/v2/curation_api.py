@@ -120,16 +120,19 @@ class CurationRef:
                 f"curation_id={dj_key['curation_id']}."
             )
         current_uuid = _uuid(rows[0])
-        supplied = key.get("curation_uuid")
-        if supplied is not None and _uuid(supplied) != current_uuid:
-            raise CurationNotFoundError(
-                "CurationRef.from_key: key carries a stale curation_uuid for "
-                f"sorting_id={dj_key['sorting_id']}, "
-                f"curation_id={dj_key['curation_id']} (supplied "
-                f"{_uuid(supplied)}, current {current_uuid}); the numeric id "
-                "was replaced. Resolve a fresh CurationRef from the intended "
-                "curation."
-            )
+        # Presence, not truthiness: a supplied null/invalid uuid is refused by
+        # _uuid rather than silently treated as an omitted field.
+        if "curation_uuid" in key:
+            supplied = _uuid(key["curation_uuid"])
+            if supplied != current_uuid:
+                raise CurationNotFoundError(
+                    "CurationRef.from_key: key carries a stale curation_uuid "
+                    f"for sorting_id={dj_key['sorting_id']}, "
+                    f"curation_id={dj_key['curation_id']} (supplied "
+                    f"{supplied}, current {current_uuid}); the numeric id was "
+                    "replaced. Resolve a fresh CurationRef from the intended "
+                    "curation."
+                )
         return cls(
             sorting_id=_uuid(dj_key["sorting_id"]),
             curation_id=dj_key["curation_id"],
