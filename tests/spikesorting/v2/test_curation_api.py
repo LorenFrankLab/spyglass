@@ -79,10 +79,8 @@ def test_merge_group_normalization_is_lossless():
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2.curation_api import (
-        _lossless_int,
-        _normalize_merge_groups,
-    )
+    from spyglass.spikesorting.v2._lookup_validation import lossless_int
+    from spyglass.spikesorting.v2.curation_api import _normalize_merge_groups
 
     assert _normalize_merge_groups([[1, 2], (3, 4)]) == [[1, 2], [3, 4]]
     assert _normalize_merge_groups([np.array([5, 6], dtype=np.int64)]) == [
@@ -103,9 +101,9 @@ def test_merge_group_normalization_is_lossless():
     ):
         with pytest.raises(ValueError, match=match):
             _normalize_merge_groups(malformed)
-    assert _lossless_int(np.int64(3), "curation_id") == 3
+    assert lossless_int(np.int64(3), "curation_id") == 3
     with pytest.raises(ValueError, match="curation_id must be an integer"):
-        _lossless_int(3.5, "curation_id")
+        lossless_int(3.5, "curation_id")
 
 
 @pytest.mark.slow

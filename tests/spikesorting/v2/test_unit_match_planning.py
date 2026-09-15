@@ -226,6 +226,33 @@ def test_manual_rejects_a_pin_not_among_the_members_choices():
     assert any("member 0" in e for e in plan.errors)
 
 
+def test_manual_pin_ids_are_normalized_losslessly():
+    """A fractional / boolean manual curation_id is rejected rather than
+    truncated into a (possibly valid) different curation; Python and NumPy
+    integers pin as themselves."""
+    import numpy as np
+
+    members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1), _cur(_S0, 1, 0)])]
+    for good in (1, np.int64(1)):
+        plan = _plan(
+            members,
+            "manual",
+            manual_curation_choices={
+                0: {"sorting_id": _S0, "curation_id": good}
+            },
+        )
+        assert plan.ok and plan.curation_choices[0]["curation_id"] == 1
+    for bad in (1.9, True):
+        with pytest.raises(ValueError, match="member 0 curation_id"):
+            _plan(
+                members,
+                "manual",
+                manual_curation_choices={
+                    0: {"sorting_id": _S0, "curation_id": bad}
+                },
+            )
+
+
 def test_manual_rejects_extra_member_indices():
     # A manual_curation_choices entry for a member index that is not in the group
     # (stale / mistyped) is a blocking error -- exact coverage, not silently

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from numbers import Integral
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2._parameter_identity import parameter_fingerprint
@@ -24,6 +25,22 @@ from spyglass.spikesorting.v2.exceptions import (
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+
+def lossless_int(value, what: str) -> int:
+    """Convert a caller-supplied identifier to ``int`` without changing it.
+
+    The rule for user-facing ids (unit ids, curation ids, member indices):
+    Python and NumPy integers are accepted; booleans, fractional numbers and
+    strings are rejected so ``1.9`` / ``True`` / ``"12"`` cannot silently
+    become a different identifier than the caller meant. Not for values
+    already read from integer database columns.
+    """
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return int(value)
+    raise ValueError(
+        f"{what} must be an integer; got {value!r} ({type(value).__name__})."
+    )
 
 
 def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:

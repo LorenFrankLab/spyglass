@@ -13,11 +13,12 @@ import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from numbers import Integral
 from types import MappingProxyType
 from typing import Any, Literal
 
 import pandas as pd
+
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
 # Whether THIS call materialized a row ("computed") or found it already
 # present ("reused"). Distinct from the pipeline-level ``StageStatus`` in
@@ -30,20 +31,6 @@ CommitStatus = Literal["preview", "committed"]
 def _uuid(value) -> uuid.UUID:
     """Normalize UUID-like values returned by DataJoint drivers."""
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
-
-
-def _lossless_int(value, what: str) -> int:
-    """Convert a caller-supplied identifier to ``int`` without changing it.
-
-    Accepts Python and NumPy integers; rejects booleans, fractional numbers
-    and strings so ``1.9`` / ``True`` / ``"12"`` cannot silently become a
-    different (or differently shaped) identifier than the caller meant.
-    """
-    if isinstance(value, Integral) and not isinstance(value, bool):
-        return int(value)
-    raise ValueError(
-        f"{what} must be an integer; got {value!r} ({type(value).__name__})."
-    )
 
 
 def _normalize_merge_groups(groups) -> list[list[int]]:
@@ -65,7 +52,7 @@ def _normalize_merge_groups(groups) -> list[list[int]]:
                 f"{group!r} ({type(group).__name__})."
             )
         normalized.append(
-            [_lossless_int(unit_id, "unit id") for unit_id in group]
+            [lossless_int(unit_id, "unit id") for unit_id in group]
         )
     if not normalized:
         raise ValueError("merge groups must contain at least one group.")
@@ -168,7 +155,7 @@ class CurationRef:
 
         dj_key = {
             "sorting_id": key["sorting_id"],
-            "curation_id": _lossless_int(key["curation_id"], "curation_id"),
+            "curation_id": lossless_int(key["curation_id"], "curation_id"),
         }
         rows = (CurationV2 & dj_key).fetch("curation_uuid")
         if len(rows) != 1:

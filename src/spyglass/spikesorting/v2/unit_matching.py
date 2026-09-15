@@ -48,6 +48,7 @@ from spyglass.spikesorting.v2.exceptions import (
     UnknownMatcherError,
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 from spyglass.spikesorting.v2.utils import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
@@ -334,10 +335,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"rows for {group_key}. Create the group first via "
                 "SessionGroup.create_group()."
             )
-        choices_by_member = {
-            int(idx): (choice["sorting_id"], int(choice["curation_id"]))
-            for idx, choice in curation_choices.items()
-        }
+        choices_by_member = normalize_curation_choices(curation_choices)
         # Validate coverage + per-member ownership BEFORE minting any row (a
         # wrong-member choice raises here, before the master or part inserts).
         _validate_member_curations(members, choices_by_member, ValueError)
@@ -1603,6 +1601,21 @@ def _curation_member_identity(sorting_id, *, exc_class=ValueError):
     return _normalize_member_identity(
         nwb_file_name, sort_group_id, interval_list_name, team_name
     )
+
+
+def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
+    """``{member_index: {sorting_id, curation_id}}`` -> ``{int: (sid, int)}``.
+
+    Caller-supplied ids go through the lossless integer rule (a fractional
+    or boolean member index / curation id is rejected, not truncated).
+    """
+    return {
+        lossless_int(idx, "member_index"): (
+            choice["sorting_id"],
+            lossless_int(choice["curation_id"], f"member {idx} curation_id"),
+        )
+        for idx, choice in curation_choices.items()
+    }
 
 
 def _validate_member_curations(members, choices_by_member, exc_class):

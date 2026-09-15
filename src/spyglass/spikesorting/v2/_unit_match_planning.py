@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -215,7 +217,9 @@ def _resolve_member(
             )
         pinned = {
             "sorting_id": chosen["sorting_id"],
-            "curation_id": int(chosen["curation_id"]),
+            "curation_id": lossless_int(
+                chosen["curation_id"], f"member {idx} curation_id"
+            ),
         }
         available = {(c["sorting_id"], c["curation_id"]) for c in choices}
         if (pinned["sorting_id"], pinned["curation_id"]) not in available:
