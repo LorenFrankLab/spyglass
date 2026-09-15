@@ -121,15 +121,24 @@ print(changes.summary())             # labels +/-, merges, counts, conflicts
 receipt = changes.commit()           # or commit(confirm_no_changes=True)
 final_curation = receipt.curation    # the committed child (labels + merges)
 
-# A merge is re-evaluated with the same profile; look at the merged units
-# before using them, then commit that look explicitly.
+# A merge is re-evaluated with the same profile; the merged child is NOT the
+# result yet. Open the merged units and STOP here -- open() does not wait.
 if receipt.needs_merge_verification:
     verification = receipt.continue_review()
     verification.open()
-    # ... inspect (edit + save if something is wrong) ...
-    final_curation = (
-        verification.preview_import().commit(confirm_no_changes=True).curation
-    )
+    final_curation = None  # pending until the look is committed below
+```
+
+Inspect the merged units (edit and **Save Annotations** if one is wrong). Then,
+in a later cell or session, commit that look explicitly:
+
+```python
+verification = FigPackReview.resume(verification.review_id)
+changes = verification.preview_import()
+verification_receipt = changes.commit(confirm_no_changes=not changes.has_changes)
+final_curation = verification_receipt.curation
+# If this commit imported another merge, needs_merge_verification is True
+# again: continue_review(), inspect, and repeat before using the result.
 ```
 
 Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port>

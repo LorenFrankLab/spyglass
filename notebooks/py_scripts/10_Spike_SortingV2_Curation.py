@@ -298,50 +298,79 @@ if review is not None:
 #
 # Every imported merge is re-evaluated with the same profile, and the receipt
 # says `needs_merge_verification=True`: the merged units have NOT been looked
-# at yet. Until a commit lands, `final_curation` is the reviewed parent itself.
+# at yet, so the merged child is NOT the result -- `final_curation` becomes
+# `None` (pending) until the verification below is committed, and the
+# analysis section refuses to run on a pending result. Until any commit
+# lands, `final_curation` is the reviewed parent itself.
 
 final_curation = root_curation if review is None else review.parent
 browser_receipt = None
-verification_review = None
+pending_verification = None  # a review over merged units awaiting your look
 if browser_changes is not None and commit_browser_review:
     conflict_resolutions = {}
     browser_receipt = browser_changes.commit(
         conflict_resolutions=conflict_resolutions,
         confirm_no_changes=not browser_changes.has_changes,
     )
-    final_curation = browser_receipt.curation
-    print("Committed curation:", final_curation.curation_id)
-    print("Merge id:", final_curation.merge_id)
-    print("Needs merge verification:", browser_receipt.needs_merge_verification)
+    print("Committed curation:", browser_receipt.curation.curation_id)
+    print("Merge id:", browser_receipt.curation.merge_id)
     if browser_receipt.needs_merge_verification:
-        # Continue directly into a seeded review over the ACTUAL merged
-        # waveforms / correlograms / metrics, not the pre-merge contributors.
-        verification_review = browser_receipt.continue_review()
-        verification_url = verification_review.open(
-            open_browser=open_review_in_browser
+        # Continue into a seeded review over the ACTUAL merged waveforms /
+        # correlograms / metrics, not the pre-merge contributors. Opening is
+        # non-blocking: the result stays pending until you commit the look.
+        pending_verification = browser_receipt.continue_review()
+        final_curation = None
+        print(
+            "Merged units await verification -- inspect:",
+            pending_verification.open(open_browser=open_review_in_browser),
         )
-        print("Merged-unit verification review:", verification_review.review_id)
-        print("Open in a browser:", verification_url)
+    else:
+        final_curation = browser_receipt.curation
 
 # Inspect the merged units in that second review (their `merged_from` column
-# names the contributors). If they look right, save nothing and commit the
-# verification with `confirm_no_changes=True`; if one merge was wrong, label
-# or re-merge in the browser and save first -- the same preview/commit then
-# imports those edits. Either way the commit is explicit: nothing marks a
-# merge verified silently. Set `commit_merge_verification=True` after looking.
+# names the contributors). If they look right, save nothing; if one merge was
+# wrong, label or re-merge in the browser and **Save Annotations**. THEN set
+# `commit_merge_verification=True` and run this cell: it previews and commits
+# the verification (`confirm_no_changes` when you saved nothing). If that
+# commit imports another merge, the result stays pending and a further review
+# opens -- inspect it and run this cell again. Nothing marks a merge verified
+# silently.
 
-if verification_review is not None and commit_merge_verification:
+# +
+if pending_verification is not None and commit_merge_verification:
     verification = FigPackReview.resume(
-        verification_review.review_id
+        pending_verification.review_id
     ).preview_import()
     print(verification.summary())
     verification_receipt = verification.commit(
         confirm_no_changes=not verification.has_changes
     )
-    final_curation = verification_receipt.curation
-    print("Verified curation:", final_curation.curation_id)
     if verification_receipt.needs_merge_verification:
-        print("New merges were imported; continue_review() once more.")
+        pending_verification = verification_receipt.continue_review()
+        print(
+            "New merges were imported and await verification -- inspect:",
+            pending_verification.open(open_browser=open_review_in_browser),
+            "then run this cell again.",
+        )
+    else:
+        pending_verification = None
+        final_curation = verification_receipt.curation
+        print("Verified curation:", final_curation.curation_id)
+
+
+def require_verified_result():
+    """Stop here while a merged curation is still awaiting verification."""
+    if final_curation is None:
+        raise RuntimeError(
+            "final_curation is pending: merged units in review "
+            f"{pending_verification.review_id} have not been verified. "
+            "Inspect them, set commit_merge_verification=True, and re-run "
+            "the verification cell before labeling or selecting units."
+        )
+
+
+# -
+
 
 # ### 3-hand-label. Override specific units (optional)
 #
@@ -355,6 +384,7 @@ if verification_review is not None and commit_merge_verification:
 manual_labels = {}  # e.g. {5: ["noise"], 12: ["mua"]} after inspecting
 
 if manual_labels:
+    require_verified_result()
     final_curation = save_manual_curation(
         parent_curation=final_curation,
         labels=manual_labels,
@@ -381,8 +411,10 @@ if manual_labels:
 #
 # Rule sets only flag bad units and never write `accept`, so an unreviewed or
 # automatic-only curation selects nothing under the `accepted` policies -- the
-# receipt says so and names the alternatives.
+# receipt says so and names the alternatives. This cell stops while a merged
+# curation is still pending verification.
 
+require_verified_result()
 final_summary = CurationV2.summarize_curation(final_curation.as_key())
 final_merge_id = final_curation.merge_id
 print(
@@ -434,6 +466,7 @@ ssviz.plot_recording_traces(recording_key, time_range=[0.0, 1.0])
 
 # Unit-level plots take the exact final curation, so a merged unit is plotted
 # as the merged unit.
+require_verified_result()
 final_unit_ids = list(
     CurationV2.get_sorting(final_curation.as_key()).get_unit_ids()
 )

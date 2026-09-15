@@ -601,16 +601,24 @@ receipt = changes.commit(
 )
 final_curation = receipt.curation
 
-# A merge is automatically re-evaluated with the same profile. Inspect the
-# actual merged waveform/correlogram in a continuation review, then commit
-# that verification explicitly (edits + save first if a merge was wrong).
+# A merge is automatically re-evaluated with the same profile, and the merged
+# child is NOT the result until you have looked at it. open() does not wait:
+# stop here, inspect (edit + Save Annotations if a merge was wrong), and
+# commit the verification in a later cell.
 if receipt.needs_merge_verification:
     continuation = receipt.continue_review()
     continuation.open()
-    verification = continuation.preview_import()
-    final_curation = verification.commit(
-        confirm_no_changes=not verification.has_changes
-    ).curation
+    final_curation = None  # pending
+
+# Later, after inspecting:
+continuation = FigPackReview.resume(continuation.review_id)
+verification = continuation.preview_import()
+verification_receipt = verification.commit(
+    confirm_no_changes=not verification.has_changes
+)
+final_curation = verification_receipt.curation
+# A verification that imported another merge needs the same loop again
+# (verification_receipt.needs_merge_verification).
 
 final_merge_id = final_curation.merge_id
 member_merge_ids = final_curation.member_merge_ids  # concat-backed sorts
