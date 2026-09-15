@@ -46,10 +46,13 @@ from spyglass.spikesorting.v2._pipeline_reporting import (
 )
 from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
 from spyglass.spikesorting.v2._pipeline_types import (
+    RunV2PipelineSessionFailed,
+    RunV2PipelineSessionOk,
     RunV2PipelineSessionResult,
     RunV2UnitMatchSummary,
     StageStatus,
     UnitMatchMemberChoices,
+    UnitMatchStageSeconds,
 )
 
 # Closed vocabulary for the per-stage ``*_status`` run-summary keys. A stage is
@@ -1141,9 +1144,13 @@ def run_v2_pipeline_session(
     -------
     list[RunV2PipelineSessionResult]
         One entry per target group, in ascending ``sort_group_id`` order.
-        A successful entry is the single-group run summary (see
-        :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``.
-        A failed entry is ``{"sort_group_id", "pipeline_preset",
+        A successful entry is a :class:`RunResult` (a ``dict`` subclass with
+        the generation-pinned ``root_curation`` / ``auto_labeled_curation``
+        accessors) whose keys are the single-group run summary (see
+        :func:`run_v2_pipeline`) plus ``sort_group_id`` and ``outcome="ok"``
+        (``RunV2PipelineSessionOk``). A failed entry is a plain dict with
+        the ``RunV2PipelineSessionFailed`` keys and no accessors:
+        ``{"sort_group_id", "pipeline_preset",
         "outcome": "failed", "error_type", "error", "stage",
         "original_error_type", "partial_run_summary", "warnings"}``. For a stage
         failure (:class:`PipelineStageError`) ``stage`` names the failing stage,
@@ -1184,7 +1191,7 @@ def run_v2_pipeline_session(
         caller="run_v2_pipeline_session",
     )
 
-    results: list[dict[str, Any]] = []
+    results: list[RunV2PipelineSessionResult] = []
     failed_preflight_ids: set[int] = set()
     preflight_warnings_by_group: dict[int, list[str]] = {}
 
@@ -1222,21 +1229,21 @@ def run_v2_pipeline_session(
                     f"{row['errors']}"
                 )
                 results.append(
-                    {
-                        "sort_group_id": sort_group_id,
-                        "pipeline_preset": pipeline_preset,
-                        "outcome": "failed",
-                        "error_type": "PreflightError",
-                        "error": "\n".join(row["errors"]),
+                    RunV2PipelineSessionFailed(
+                        sort_group_id=sort_group_id,
+                        pipeline_preset=pipeline_preset,
+                        outcome="failed",
+                        error_type="PreflightError",
+                        error="\n".join(row["errors"]),
                         # A preflight failure is not a stage failure -- keep the
                         # structured fields present (shape-consistent) but None.
-                        "stage": None,
-                        "original_error_type": None,
-                        "partial_run_summary": None,
+                        stage=None,
+                        original_error_type=None,
+                        partial_run_summary=None,
                         # Carry this group's advisories too, so describe_run /
                         # the batch warning count do not under-report failures.
-                        "warnings": list(row.get("warnings", [])),
-                    }
+                        warnings=list(row.get("warnings", [])),
+                    )
                 )
 
     # Per-group compute. Groups covered by the session preflight (or skipped via
@@ -1270,29 +1277,27 @@ def run_v2_pipeline_session(
                 f"{sort_group_id} failed: {exc!r}"
             )
             results.append(
-                {
-                    "sort_group_id": sort_group_id,
-                    "pipeline_preset": pipeline_preset,
-                    "outcome": "failed",
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
+                RunV2PipelineSessionFailed(
+                    sort_group_id=sort_group_id,
+                    pipeline_preset=pipeline_preset,
+                    outcome="failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
                     # Surface the failing STAGE and the underlying error type (a
                     # PipelineStageError wraps e.g. an IndexError) so a batch
                     # caller can triage without re-parsing the message. Both are
                     # None for non-stage failures (preflight / zero-unit).
-                    "stage": getattr(exc, "stage", None),
-                    "original_error_type": getattr(exc, "original_type", None),
-                    "partial_run_summary": getattr(
+                    stage=getattr(exc, "stage", None),
+                    original_error_type=getattr(exc, "original_type", None),
+                    partial_run_summary=getattr(
                         exc, "partial_run_summary", None
                     ),
                     # This group passed preflight (ran with preflight=False) but
                     # failed mid-run; keep its preflight advisories visible. Any
                     # stage warnings live on partial_run_summary, which
                     # _run_warnings reads too.
-                    "warnings": preflight_warnings_by_group.get(
-                        sort_group_id, []
-                    ),
-                }
+                    warnings=preflight_warnings_by_group.get(sort_group_id, []),
+                )
             )
         else:
             # Fold this group's preflight advisories (captured above) into its
@@ -1306,17 +1311,18 @@ def run_v2_pipeline_session(
                     "run_v2_pipeline_session: sort_group_id="
                     f"{sort_group_id} preflight: {warning}"
                 )
-            results.append(
-                RunResult(
-                    {
-                        **summary,
-                        "sort_group_id": sort_group_id,
-                        "outcome": "ok",
-                        "warnings": list(summary.get("warnings", []))
-                        + group_preflight_warnings,
-                    }
-                )
+            # The successful entry is the RunResult itself (keeps the
+            # curation accessors); its keys are RunV2PipelineSessionOk.
+            ok_entry = RunResult(
+                {
+                    **summary,
+                    "sort_group_id": sort_group_id,
+                    "outcome": "ok",
+                    "warnings": list(summary.get("warnings", []))
+                    + group_preflight_warnings,
+                }
             )
+            results.append(cast(RunV2PipelineSessionOk, ok_entry))
 
     # Stable, group-ordered result (preflight-failed entries were appended
     # first; restore ascending sort_group_id order).
@@ -1353,7 +1359,7 @@ def run_v2_pipeline_session(
         f"{n_warn} with warnings. "
         "Call describe_run(results) for the per-group receipt."
     )
-    return cast(list[RunV2PipelineSessionResult], results)
+    return results
 
 
 def run_v2_unit_match(
@@ -1503,6 +1509,9 @@ def run_v2_unit_match(
             "register a custom matcher row first."
         )
 
+    # Partial receipt accumulated for error reporting: _run_stage snapshots
+    # it into PipelineStageError.partial_run_summary when a stage fails. The
+    # complete RunV2UnitMatchSummary is assembled explicitly at the end.
     run_summary: dict[str, Any] = {
         "session_group_owner": session_group_owner,
         "session_group_name": session_group_name,
@@ -1570,8 +1579,21 @@ def run_v2_unit_match(
     )
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
 
-    run_summary["stage_seconds"] = stage_seconds
-    return cast(RunV2UnitMatchSummary, run_summary)
+    return RunV2UnitMatchSummary(
+        session_group_owner=session_group_owner,
+        session_group_name=session_group_name,
+        matcher_params_name=matcher_params_name,
+        unit_match_id=run_summary["unit_match_id"],
+        unit_match_status=run_summary["unit_match_status"],
+        n_pairs=run_summary["n_pairs"],
+        tracked_unit_status=run_summary["tracked_unit_status"],
+        n_tracked_units=run_summary["n_tracked_units"],
+        stage_seconds=UnitMatchStageSeconds(
+            unit_match=stage_seconds["unit_match"],
+            tracked_unit=stage_seconds["tracked_unit"],
+        ),
+        warnings=warnings,
+    )
 
 
 def plan_v2_unit_match(
