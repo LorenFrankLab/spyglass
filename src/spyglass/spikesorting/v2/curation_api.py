@@ -10,7 +10,7 @@ this module deliberately has no optional FigPack imports.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal
@@ -38,22 +38,11 @@ def _require_outside_merge_evaluation_transaction() -> None:
 
 
 @dataclass(frozen=True)
-class CurationOperation(Mapping[str, str]):
+class CurationOperation:
     """Schema-free provenance summary for one curation operation."""
 
     producer: str
     change_kind: str
-
-    def __getitem__(self, key: str) -> str:
-        if key not in ("producer", "change_kind"):
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(("producer", "change_kind"))
-
-    def __len__(self) -> int:
-        return 2
 
 
 @dataclass(frozen=True)
