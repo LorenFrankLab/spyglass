@@ -139,11 +139,11 @@ def _resolve_curation_row(curation_ref) -> dict:
     return relation.fetch1()
 
 
-def classify_curation_analyzer_namespace(curation_ref) -> str:
-    """Classify one curation as raw, merged, preview, or zero-unit."""
+def _classify_curation_row(row: Mapping) -> str:
+    """Classify an already-resolved CurationV2 row: raw / merged / preview /
+    zero-unit. The caller resolved the row; this does not fetch it again."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    row = _resolve_curation_row(curation_ref)
     key = {
         "sorting_id": row["sorting_id"],
         "curation_id": int(row["curation_id"]),
@@ -602,7 +602,7 @@ def _resolve_curation_analyzer(
         "sorting_id": row["sorting_id"],
         "curation_id": int(row["curation_id"]),
     }
-    namespace = classify_curation_analyzer_namespace(key)
+    namespace = _classify_curation_row(row)
     if namespace == "preview":
         CurationV2.assert_committed_curation(
             key,

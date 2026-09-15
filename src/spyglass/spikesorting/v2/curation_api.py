@@ -200,14 +200,25 @@ class CurationRef:
         from spyglass.spikesorting.v2.curation import CurationV2
 
         self._current_row()
+        # One fetch carries each child's generation UUID; building the refs
+        # from these rows pins exactly the generations seen in this read.
         rows = (
             CurationV2
             & {
                 "sorting_id": self.sorting_id,
                 "parent_curation_id": self.curation_id,
             }
-        ).fetch("KEY", order_by="curation_id")
-        return tuple(type(self).from_key(row) for row in rows)
+        ).fetch(
+            "curation_id", "curation_uuid", order_by="curation_id", as_dict=True
+        )
+        return tuple(
+            type(self)(
+                sorting_id=self.sorting_id,
+                curation_id=int(row["curation_id"]),
+                curation_uuid=_uuid(row["curation_uuid"]),
+            )
+            for row in rows
+        )
 
     @property
     def commit_status(self) -> CommitStatus:
