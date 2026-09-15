@@ -36,6 +36,7 @@ from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 from spyglass.spikesorting.v2.matcher_protocol import (
     MatchPair,
     SessionMatcherInput,
+    is_registered,
     register_matcher,
 )
 
@@ -502,16 +503,18 @@ class UnitMatchBackend:
 
 
 def register() -> None:
-    """Register the UnitMatch backend + schema (idempotent).
+    """Install the UnitMatch backend + schema if ``"unitmatch"`` is missing.
 
     Called at import for the usual side-effect path, and re-callable by
     ``matcher_protocol.register_default_matchers`` so the registry self-heals
-    even if it was cleared (e.g. by a test fixture). No ``replace`` flag: this
-    re-registers the SAME ``UnitMatchBackend`` class, which ``register_matcher``
-    treats as idempotent. ``replace`` is reserved for a deliberate maintenance
-    swap to genuinely different code, so the built-in path never masks a real
-    name collision.
+    if it was cleared (e.g. by a test fixture). Fill-only: whatever is
+    already registered under the name -- the built-in instance, or a
+    deliberate ``register_matcher(..., replace=True)`` swap -- is kept, so
+    lookups return one stable object and never raise a collision against
+    an explicit replacement.
     """
+    if is_registered(UnitMatchBackend.name):
+        return
     register_matcher(UnitMatchBackend(), UnitMatchParamsSchema)
 
 

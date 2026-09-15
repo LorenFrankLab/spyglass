@@ -158,14 +158,22 @@ def register_matcher(
     _SCHEMA_REGISTRY[matcher.name] = schema
 
 
+def is_registered(name: str) -> bool:
+    """Return whether ``name`` is currently registered (no bootstrap)."""
+    return name in _MATCHER_REGISTRY
+
+
 def register_default_matchers() -> None:
-    """Register the built-in matcher backends (idempotent, self-healing).
+    """Install any built-in matcher backend that is MISSING (fill-only).
 
     The backends register themselves as an import side effect, so the registry
     is empty until a backend module is imported. This makes that bootstrap
     explicit -- callers (and the lookups below) can ensure the built-ins are
-    present without depending on import order -- and re-registers them even if
-    the registry was cleared (e.g. by a test fixture).
+    present without depending on import order -- and re-installs a built-in
+    if the registry was cleared (e.g. by a test fixture). A name that is
+    already registered is left alone, so lookups never swap the installed
+    object and an explicit ``register_matcher(..., replace=True)`` of a
+    built-in name survives later lookups.
     """
     # Function-level import avoids an import cycle (the backend imports this
     # module) and keeps the optional UnitMatchPy import lazy (the backend only

@@ -114,6 +114,36 @@ def test_same_backend_reregisters_idempotently(clean_registry):
     assert type(mp.get_matcher("unitmatch")) is builtin_cls
 
 
+def test_lookups_return_one_stable_builtin_instance(clean_registry):
+    """Lookups read the registry; they do not re-install the built-in."""
+    mp = clean_registry
+    first = mp.get_matcher("unitmatch")
+    assert mp.get_matcher("unitmatch") is first
+    mp._registered_matchers()
+    mp._get_matcher_schema("unitmatch")
+    assert mp.get_matcher("unitmatch") is first
+
+
+def test_explicit_builtin_replacement_survives_lookups(clean_registry):
+    """A deliberate replace=True swap of the built-in name is what later
+    lookups return; bootstrap fills only a MISSING name and must not raise a
+    collision against the replacement. After the registry is cleared the
+    built-in is re-installed."""
+    mp = clean_registry
+    mp.register_default_matchers()
+    builtin_cls = type(mp.get_matcher("unitmatch"))
+    replacement = _dummy_matcher(mp, name="unitmatch")
+    mp.register_matcher(replacement, DummySchema, replace=True)
+    assert mp.get_matcher("unitmatch") is replacement
+    assert mp._get_matcher_schema("unitmatch") is DummySchema
+    mp.register_default_matchers()
+    assert mp.get_matcher("unitmatch") is replacement
+
+    mp._MATCHER_REGISTRY.clear()
+    mp._SCHEMA_REGISTRY.clear()
+    assert type(mp.get_matcher("unitmatch")) is builtin_cls
+
+
 def test_get_matcher_unknown_raises_with_guidance(clean_registry):
     mp = clean_registry
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
