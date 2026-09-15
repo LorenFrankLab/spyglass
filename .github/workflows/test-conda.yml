@@ -454,11 +454,22 @@ jobs:
         # failure would leave them skipping while CI stayed green -- exactly the
         # gap this lane closes.
         conda run -n spyglass_v2_curation pip install \
-          -e ".[test,spikesorting-v2,spikesorting-v2-curation]"
+          -e ".[test,spikesorting-v2,spikesorting-v2-curation,spikesorting-v2-curation-test]"
+        # Headless Chromium for the Playwright browser tests (pinned with the
+        # playwright package in the curation-test extra).
+        conda run -n spyglass_v2_curation playwright install --with-deps chromium
         conda run -n spyglass_v2_curation python \
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
-        conda run -n spyglass_v2_curation pytest \
+        # SPYGLASS_REQUIRE_BROWSER_TESTS makes a missing figpack / playwright /
+        # browser FAIL the browser tests instead of skipping them, so this
+        # required lane cannot go green on skips.
+        SPYGLASS_REQUIRE_BROWSER_TESTS=1 conda run -n spyglass_v2_curation pytest \
           tests/spikesorting/v2/test_figpack_curation_integration.py \
+          tests/spikesorting/v2/test_review_api_integration.py \
+          tests/spikesorting/v2/test_review_delivery.py \
+          tests/spikesorting/v2/test_review_unit_properties.py \
+          tests/spikesorting/v2/test_review_browser.py \
+          tests/spikesorting/v2/test_review_browser_journey.py \
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_publishes_offline_view" \
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_zero_units_skips_view" \
           tests/spikesorting/v2/test_notebook_execution.py::test_curation_notebook_runs \
