@@ -3291,3 +3291,119 @@ def test_describe_unit_match_choices_excludes_other_team(
         (Recording & other_rec).super_delete(warn=False)
         (RecordingSelection & other_rec).super_delete(warn=False)
         (LabTeam & {"team_name": other_team}).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_describe_unit_match_choices_unsorted_member_and_multiple_recordings(
+    two_session_curated_group, chronic_2_session_minirec, monkeypatch
+):
+    """Discovery offers every curation across a member's recordings and an
+    empty choice list for a member with no recording or sort yet.
+
+    A member sorted under two preprocessing recipes (two ``RecordingSelection``
+    rows on the same full member identity) has BOTH sorts' curations offered,
+    ordered by ``(sorting_id, curation_id)``; a member with no recording at all
+    still appears, with no choices (``describe_unit_match_choices`` shows it as
+    one null-curation row so it reads "sort me first").
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2._pipeline_run import (
+        _unit_match_member_choices,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.pipeline import describe_unit_match_choices
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    grp = two_session_curated_group
+    sub = chronic_2_session_minirec
+    owner = grp["owner"]
+    group_name = "unitmatch_discovery_shapes"
+    sorted_member = grp["members"][0]
+    own_choice = grp["choices"][0]
+    unsorted_member = sub["next_day_member"]
+
+    (
+        SessionGroup
+        & {"session_group_owner": owner, "session_group_name": group_name}
+    ).super_delete(warn=False)
+    SessionGroup.create_group(
+        owner,
+        group_name,
+        [sorted_member, unsorted_member],
+        allow_multi_day=True,
+    )
+    # A second recording of the SAME member identity (same team) under another
+    # preprocessing recipe: a distinct recording_id, sorted and root-curated.
+    second_rec = RecordingSelection.insert_selection(
+        {
+            **sorted_member,
+            "preprocessing_params_name": "no_filter",
+            "team_name": owner,
+        }
+    )
+    second_sort = None
+    try:
+        if not (Recording & second_rec):
+            Recording.populate(second_rec, reserve_jobs=False)
+        monkeypatch.setattr(
+            Sorting, "_run_sorter", staticmethod(_plant_single_unit)
+        )
+        second_sort = SortingSelection.insert_selection(
+            {
+                "recording_id": second_rec["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": _ensure_minirec_ms5_params(),
+            }
+        )
+        if not (Sorting & second_sort):
+            Sorting.populate(second_sort, reserve_jobs=False)
+        clear_curations_for(second_sort)
+        second_curation = CurationV2.insert_curation(
+            sorting_key={"sorting_id": second_sort["sorting_id"]}
+        )
+
+        members = _unit_match_member_choices(owner, group_name)
+        assert [m["member_index"] for m in members] == [0, 1]
+        offered = [
+            (c["sorting_id"], c["curation_id"]) for c in members[0]["choices"]
+        ]
+        assert (own_choice["sorting_id"], own_choice["curation_id"]) in offered
+        assert (
+            second_curation["sorting_id"],
+            second_curation["curation_id"],
+        ) in offered
+        assert offered == sorted(
+            offered
+        ), "choices ordered by sorting_id, curation_id"
+        assert members[1]["choices"] == []
+        assert members[1]["nwb_file_name"] == unsorted_member["nwb_file_name"]
+
+        described = describe_unit_match_choices(owner, group_name)
+        unsorted_rows = described[described["member_index"] == 1]
+        assert len(unsorted_rows) == 1
+        assert unsorted_rows["curation_id"].isna().all()
+        assert len(described[described["member_index"] == 0]) == len(offered)
+    finally:
+        (
+            SessionGroup
+            & {"session_group_owner": owner, "session_group_name": group_name}
+        ).super_delete(warn=False)
+        if second_sort is not None:
+            for mid in (SpikeSortingOutput.CurationV2 & second_sort).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            (CurationV2 & second_sort).super_delete(warn=False)
+            (Sorting & second_sort).super_delete(warn=False)
+            (SortingSelection & second_sort).super_delete(warn=False)
+        (Recording & second_rec).super_delete(warn=False)
+        (RecordingSelection & second_rec).super_delete(warn=False)

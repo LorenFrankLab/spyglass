@@ -1713,30 +1713,22 @@ def _unit_match_member_choices(
         # team_name. UnitMatchSelection's ownership validator compares the whole
         # (nwb_file_name, sort_group_id, interval_list_name, team_name) tuple, so
         # a curation sorted under a different team tag would be rejected at run
-        # time -- surfacing it here would offer an un-pickable choice.
-        recording_ids = list(
-            (RecordingSelection & member_id).fetch("recording_id")
+        # time -- surfacing it here would offer an un-pickable choice. One
+        # relational read: every single-session sort of any of the member's
+        # recordings, then that sort set's curations (empty when the member
+        # has no recording or no sort yet).
+        member_sortings = SortingSelection.RecordingSource * (
+            RecordingSelection & member_id
         )
-        choices: list[dict] = []
-        if recording_ids:
-            sorting_ids = list(
-                (
-                    SortingSelection.RecordingSource
-                    & [{"recording_id": rid} for rid in recording_ids]
-                ).fetch("sorting_id")
-            )
-            if sorting_ids:
-                choices = (
-                    CurationV2 & [{"sorting_id": sid} for sid in sorting_ids]
-                ).fetch(
-                    "sorting_id",
-                    "curation_id",
-                    "parent_curation_id",
-                    "curation_source",
-                    "description",
-                    as_dict=True,
-                    order_by="sorting_id, curation_id",
-                )
+        choices = (CurationV2 & member_sortings).fetch(
+            "sorting_id",
+            "curation_id",
+            "parent_curation_id",
+            "curation_source",
+            "description",
+            as_dict=True,
+            order_by="sorting_id, curation_id",
+        )
         out.append(
             {
                 "member_index": int(member["member_index"]),
