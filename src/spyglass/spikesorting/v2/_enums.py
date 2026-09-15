@@ -50,8 +50,8 @@ class CurationLabel(str, Enum):
     column is a ``varchar(32)``, not a MySQL enum: DataJoint *can*
     declare an enum column (``curation_source`` on ``CurationV2`` is
     one), but v2 chooses varchar because the label set is open-ended --
-    a lab adding a custom label later would otherwise need a forbidden
-    ``ALTER TABLE`` under the zero-migration policy. The typo guard is
+    a lab adding a custom label later extends this vocabulary without
+    changing the column definition of a populated table. The typo guard is
     enforced in Python on every insert path instead: both
     ``CurationV2.insert_curation`` and a direct
     ``CurationV2.UnitLabel.insert1`` / ``insert`` validate against this

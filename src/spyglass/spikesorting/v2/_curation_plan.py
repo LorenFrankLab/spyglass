@@ -19,9 +19,6 @@ the summary formatting unit-testable without a DataJoint transaction.
 
 Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and the
 shared spyglass logger.
-
-Naming note: "plan" here is a domain noun -- the computed set of rows/labels to
-insert, like a query plan -- NOT a project-phase or milestone reference.
 """
 
 from __future__ import annotations

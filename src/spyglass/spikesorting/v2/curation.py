@@ -1,6 +1,6 @@
 """Curation of sorted units.
 
-Tables (all final-shape under the zero-migration policy):
+Tables:
     CurationV2 (+ Unit + UnitLabel) -- Manual; lineage via parent_curation_id.
 
 ``curation_source`` is restricted to true CurationV2 provenance values
@@ -162,8 +162,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         DataJoint *can* declare an enum column (``curation_source`` on the
         master is one); v2 deliberately uses ``varchar`` + Python-side
         validation because the label set is open-ended -- a lab adding a
-        custom label later would otherwise need a forbidden ``ALTER
-        TABLE`` under the zero-migration policy. Pass
+        custom label later extends the Python vocabulary without changing
+        the column definition of a populated table. Pass
         ``allow_custom_labels=True`` on either path to insert a label
         outside the canonical set.
         """

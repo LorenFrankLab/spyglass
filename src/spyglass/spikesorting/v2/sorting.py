@@ -1,6 +1,6 @@
 """Spike sorting and per-unit brain-region metadata.
 
-Tables (all final-shape under the zero-migration policy):
+Tables:
     SorterParameters          -- Per-sorter Pydantic-validated params.
     SortingSelection          -- Source-polymorphic sorting request.
         .RecordingSource          -- single-session source.

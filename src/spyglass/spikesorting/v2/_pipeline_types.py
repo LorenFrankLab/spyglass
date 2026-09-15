@@ -238,10 +238,12 @@ RunV2PipelineSessionResult: TypeAlias = (
 
 
 class UnitMatchCurationChoice(TypedDict):
-    """One pickable curation for a SessionGroup member.
+    """One discovered curation candidate for a SessionGroup member.
 
-    A committed ``CurationV2`` the user may pin for this member; one such curation
-    is one row of the ``describe_unit_match_choices`` table.
+    Any ``CurationV2`` row sorted from one of the member's recordings -- NOT
+    pre-validated for matching (a preview or a wrong-member pin is rejected
+    later by ``UnitMatchSelection.insert_selection``); one such candidate is
+    one row of the ``describe_unit_match_choices`` table.
     ``parent_curation_id == -1`` marks a root curation.
     """
 

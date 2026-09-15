@@ -1,6 +1,6 @@
 """Preprocessed recording materialization for spike sorting.
 
-Tables (all final-shape under the zero-migration policy):
+Tables:
     SortGroupV2          -- per-session electrode grouping.
     PreprocessingParameters -- Pydantic-validated preprocessing blob.
     RecordingSelection   -- one row per (raw, sort group, interval, params).
