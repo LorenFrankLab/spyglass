@@ -91,7 +91,14 @@ def test_browser_review_commit_verify_and_select(
                 h.lower()
                 for h in browser.row_texts(page.get_by_role("row").first)
             ]
-            assert headers[4:6] == ["snr", "firing_rate"]
+            # Actionable columns first, then the profile's metrics in order.
+            assert headers[4:9] == [
+                "proposed_labels",
+                "proposed_merge_groups",
+                "merged_from",
+                "snr",
+                "firing_rate",
+            ]
             assert browser.row_texts(browser.unit_row(page, unit_b))[2] == (
                 "noise"
             )
@@ -167,6 +174,56 @@ def test_browser_review_commit_verify_and_select(
             d["spikesorting_merge_id"] == final_curation.merge_id for d in ids
         )
         assert len(spikes) == 1 and len(spikes[0]) > 0
+
+        # 6. Recovery: the merge was a mistake. Find the PARENT's review
+        #    without its id (a fresh start_review would begin a new review
+        #    now that a child exists), undo the proposal in the browser, save,
+        #    and commit a replacement sibling; the labels saved along with
+        #    the merge are kept, the merged branch stays as history.
+        found = FigPackReview.find(root, profile=profile)
+        assert [r.review_id for r in found] == [review.review_id]
+        assert FigPackReview.find(merged) == (resumed,)
+        again = found[0]
+        assert again.preview_import().has_changes  # the saved edits
+        with browser.review_page(
+            again.open(open_browser=False), artifacts=tmp_path / "recover"
+        ) as page:
+            browser.start_curating(page)
+            browser.select_units(page, unit_a, unit_b)
+            page.get_by_role(
+                "button", name="Unmerge Selected", exact=True
+            ).click()
+            page.get_by_text("2 unmerged unit(s) selected").wait_for()
+            assert browser.save_annotations(page) in (200, 201)
+        recovery = again.preview_import()
+        assert recovery.merge_groups == ()
+        assert recovery.labels_after[unit_a] == ("accept",)
+        assert recovery.labels_after[unit_b] == ("accept",)
+        assert merged in recovery.newer_sibling_curations
+        assert "Browser edits saved, not committed" in recovery.next_step()
+        replacement = recovery.commit().curation
+        assert replacement.parent == root and replacement != merged
+        assert sorted(
+            map(int, (CurationV2.Unit & replacement.as_key()).fetch("unit_id"))
+        ) == [unit_a, unit_b]
+        assert {c.curation_id for c in root.children} >= {
+            merged.curation_id,
+            replacement.curation_id,
+        }
+        # The abandoned branch (merged child + its verification) can be
+        # removed leaf-first once nothing downstream refers to it.
+        for group_key in created_groups:
+            (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
+        created_groups.clear()
+        preview = merged.preview_curation_delete()
+        assert [r.curation_id for r in preview.leaf_first] == [
+            final_curation.curation_id,
+            merged.curation_id,
+        ]
+        merged.delete_subtree(safemode=False)
+        assert {c.curation_id for c in root.children} == {
+            replacement.curation_id
+        }
     finally:
         for group_key in created_groups:
             (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)

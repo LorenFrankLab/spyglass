@@ -176,7 +176,14 @@ data or the production `UnitSelectionParams` rows.
   `select_units_for_analysis`; the scripted loop is an opt-in appendix with
   its own names. Browser regression tests (Python Playwright, test-only
   `spikesorting-v2-curation-test` extra) drive the real frontend through
-  label / merge / save / reload and the database-backed journey.
+  label / merge / save / reload and the database-backed journey, including
+  undoing a committed merge from the parent's reused review. The curation
+  pane is collapsible (full height for the scientific views while
+  inspecting) and the unit table leads with the actionable columns
+  (`proposed_labels`, `proposed_merge_groups`, `merged_from`) before the
+  profile's metrics; `CurationChangeSet.next_step()` /
+  `ReviewImportReceipt.next_step()` state the four workflow states in one
+  line each.
 
 - **Configuration.** `MountainSort5Schema` (schema_version 2) exposes every
   scientific parameter of the pinned SpikeInterface 0.104.3 wrapper

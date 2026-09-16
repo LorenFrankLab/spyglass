@@ -654,6 +654,53 @@ Jupyter proxy URL is not equivalent). The server accepts writes only to the
 bundle's `annotations.json`. A missing bundle raises with the recovery step
 (start the review again, which rebuilds it).
 
+#### Where am I, and how do I undo a merge?
+
+`changes.next_step()` and `receipt.next_step()` say, in one line each, which
+of the four states applies -- *browser edits saved, not committed* / *no saved
+edits differ* / *merged result awaiting verification* / *result available for
+analysis* -- and what to do next. The browser's **Save Annotations** only
+writes the bundle; **Finalize Curation** only flips a browser flag; nothing
+reaches Spyglass before `commit()`.
+
+**A pending merge proposal** (saved, not committed): select its units in the
+browser, **Unmerge Selected**, **Save Annotations**; `preview_import()` then
+shows no merge.
+
+**A committed merge that was wrong** is a branch, not an edit: the merged
+child (and any verification child under it) stays as history, and the fix is
+a replacement sibling from the same parent. Go back to the parent's review,
+undo the proposal there, and commit again:
+
+```python
+from spyglass.spikesorting.v2.pipeline import FigPackReview
+
+(review,) = FigPackReview.find(parent, profile=profile)  # the review whose
+review.open()                                            # edits you saved
+# browser: select the merged units -> Unmerge Selected -> Save Annotations
+changes = review.preview_import()          # merge gone; your labels kept;
+print(changes.summary())                   # newer_sibling_curations lists the
+replacement = changes.commit().curation    # abandoned merged child
+```
+
+(`parent.start_review(profile)` would start a *new* review here: a review's
+identity includes the parent's children at its start, so after a commit the
+same call seeds a fresh bundle rather than reusing the edited one.)
+
+Edits made in the merged child's own verification review live on that
+branch; redo them on the replacement. Once nothing downstream refers to the
+abandoned branch, `merged.preview_curation_delete()` lists it leaf-first and
+`merged.delete_subtree()` removes it (a `SortedSpikesGroup` built from it
+must be deleted first).
+
+**Finding yesterday's review** needs no id: `FigPackReview.find(parent)`
+returns every built profile-backed review of that curation, oldest first
+(`profile=` narrows it), each with its `uri` and saved edits
+(`preview_import().has_changes` says which one holds uncommitted work);
+`FigPackReview.resume(review_id)` rebuilds a handle from an id printed
+earlier. Before any child is committed, `parent.start_review(profile)` also
+returns the existing review (its stages say `reused`).
+
 `RunResult.start_review(source="auto_labeled")` never falls back to root: if no
 analysis curation exists it raises and tells you to choose `source="root"`
 explicitly. `CurationRef.start_review(...)` and

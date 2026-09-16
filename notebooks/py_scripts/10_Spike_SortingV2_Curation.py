@@ -285,6 +285,9 @@ if review is not None:
 
     review = FigPackReview.resume(review.review_id)
     browser_changes = review.preview_import()
+    print(
+        browser_changes.next_step()
+    )  # saved-not-committed / nothing to commit
     print(browser_changes.summary())
     display(browser_changes.changed_units())
 
@@ -312,7 +315,7 @@ if browser_changes is not None and commit_browser_review:
         conflict_resolutions=conflict_resolutions,
         confirm_no_changes=not browser_changes.has_changes,
     )
-    print("Committed curation:", browser_receipt.curation.curation_id)
+    print(browser_receipt.next_step())  # awaiting verification / available
     print("Merge id:", browser_receipt.curation.merge_id)
     if browser_receipt.needs_merge_verification:
         # Continue into a seeded review over the ACTUAL merged waveforms /
@@ -328,13 +331,22 @@ if browser_changes is not None and commit_browser_review:
         final_curation = browser_receipt.curation
 
 # Inspect the merged units in that second review (their `merged_from` column
-# names the contributors). If they look right, save nothing; if one merge was
-# wrong, label or re-merge in the browser and **Save Annotations**. THEN set
+# names the contributors). If they look right, save nothing, THEN set
 # `commit_merge_verification=True` and run this cell: it previews and commits
 # the verification (`confirm_no_changes` when you saved nothing). If that
 # commit imports another merge, the result stays pending and a further review
 # opens -- inspect it and run this cell again. Nothing marks a merge verified
 # silently.
+#
+# If a committed merge was WRONG, do not label around it: a committed merge
+# is a branch. Go back to the parent's review -- `FigPackReview.find(
+# root_curation, profile=review_profile)` returns it with every edit you
+# saved (a fresh `start_review` would begin a new review now that a child
+# exists) -- select the merged units, **Unmerge Selected**, **Save
+# Annotations**, and preview/commit again: the replacement sibling keeps your
+# labels and the abandoned merged branch stays as history (the preview lists
+# it under `newer_sibling_curations`). Recovery is spelled out in the
+# reference ("Where am I, and how do I undo a merge?").
 
 # +
 if pending_verification is not None and commit_merge_verification:
@@ -345,6 +357,7 @@ if pending_verification is not None and commit_merge_verification:
     verification_receipt = verification.commit(
         confirm_no_changes=not verification.has_changes
     )
+    print(verification_receipt.next_step())
     if verification_receipt.needs_merge_verification:
         pending_verification = verification_receipt.continue_review()
         print(
