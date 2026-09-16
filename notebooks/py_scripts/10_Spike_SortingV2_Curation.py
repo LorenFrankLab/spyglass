@@ -65,6 +65,9 @@ run_custom_annotation_example = False
 # Opt-in scripted curation appendix (separate result names; never overwrites
 # the browser result).
 run_scripted_curation_example = False
+# Undo a committed merge that was wrong: name the receipt it came from
+# ("browser_receipt" or "verification_receipt") in section 3-recover.
+undo_merge_from_receipt = None
 # Sort group (shank) to sort. None auto-picks only when the session has exactly
 # one sort group; otherwise set it deliberately after reviewing step 2.
 sort_group_id = None
@@ -342,15 +345,7 @@ if browser_changes is not None and commit_browser_review:
 # is a branch, and the fix is a replacement sibling from THAT merge's parent
 # (a merge committed during verification has the earlier merged child as its
 # parent -- going back to the root would discard the earlier, valid merge).
-# The review it came from is on its receipt: `bad_receipt.changes.review`
-# (`browser_receipt` or `verification_receipt` above; or
-# `FigPackReview.resume(<printed id>)`). `open()` it, select the merged
-# units, **Unmerge Selected**, **Save Annotations**, then
-# `preview_import().commit(confirm_no_changes=not changes.has_changes)` --
-# unmerging alone restores the parent exactly, which is a confirmed
-# no-change commit. Other saved edits are kept; the abandoned branch stays as
-# history (`newer_sibling_curations`). Recovery is spelled out in the
-# reference ("Where am I, and how do I undo a merge?").
+# Section 3-recover below does this from the receipt the merge came from.
 
 # +
 if pending_verification is not None and commit_merge_verification:
@@ -388,6 +383,57 @@ def require_verified_result():
 
 # -
 
+
+# ### 3-recover. Undo a committed merge that was wrong (opt-in)
+#
+# Set `undo_merge_from_receipt` to the name of the receipt the bad merge came
+# from -- `"browser_receipt"` (the first commit) or `"verification_receipt"`
+# (a merge made during verification) -- and run this cell twice: the first
+# run opens that merge's own review (its parent is the merge's parent, not
+# the root; its bundle still holds your other saved edits) and tells you to
+# select the merged units, **Unmerge Selected** and **Save Annotations**; the
+# second run sees the merge gone, commits the replacement sibling
+# (`confirm_no_changes` when unmerging restored the parent exactly), and
+# switches `pending_verification` / `final_curation` to the replacement
+# branch, so the verification and analysis cells below no longer touch the
+# abandoned merge. The abandoned branch stays as history
+# (`newer_sibling_curations`); remove it later with
+# `bad_merge.delete_subtree()` once nothing downstream refers to it.
+
+bad_merge_receipt = (
+    globals().get(undo_merge_from_receipt) if undo_merge_from_receipt else None
+)
+if bad_merge_receipt is not None:
+    recovery_review = bad_merge_receipt.changes.review
+    bad_merge = bad_merge_receipt.curation
+    mistaken_groups = set(bad_merge_receipt.changes.merge_groups)
+    recovery_changes = recovery_review.preview_import()
+    if mistaken_groups & set(recovery_changes.merge_groups):
+        print(
+            "Undo the merge in the browser, Save Annotations, then run this "
+            "cell again:",
+            recovery_review.open(open_browser=open_review_in_browser),
+        )
+    else:
+        replacement_receipt = recovery_changes.commit(
+            confirm_no_changes=not recovery_changes.has_changes
+        )
+        print(replacement_receipt.next_step())
+        print(
+            f"Replacement curation {replacement_receipt.curation.curation_id} "
+            f"(parent {bad_merge.parent.curation_id}); abandoned merge "
+            f"{bad_merge.curation_id} kept as history."
+        )
+        if replacement_receipt.needs_merge_verification:
+            pending_verification = replacement_receipt.continue_review()
+            final_curation = None
+            print(
+                "Its remaining merges await verification -- inspect:",
+                pending_verification.open(open_browser=open_review_in_browser),
+            )
+        else:
+            pending_verification = None
+            final_curation = replacement_receipt.curation
 
 # ### 3-hand-label. Override specific units (optional)
 #

@@ -685,14 +685,23 @@ review.open()                            # its bundle still holds your edits
 changes = review.preview_import()        # merge gone; other saved edits kept
 print(changes.summary())                 # newer_sibling_curations lists the
                                          # abandoned merged child
-replacement = changes.commit(
+replacement_receipt = changes.commit(
     # unmerging alone restores the parent exactly: that is a no-change
     # commit and must be confirmed (labels changed too -> a plain commit)
     confirm_no_changes=not changes.has_changes,
-).curation
+)
+# Switch to the replacement branch so nothing downstream resumes or
+# approves the abandoned merge: the same pending / final rule as after any
+# commit.
+if replacement_receipt.needs_merge_verification:
+    pending_verification = replacement_receipt.continue_review()
+    final_curation = None
+else:
+    pending_verification = None
+    final_curation = replacement_receipt.curation
 ```
 
-`replacement.parent` is the mistaken merge's parent. Without the receipt in
+`replacement_receipt.curation.parent` is the mistaken merge's parent. Without the receipt in
 hand, `FigPackReview.resume(review_id)` (the id printed when the review
 started) or `FigPackReview.find(bad_merge.parent, profile=profile)` gets
 you there; `find` may return several reviews of that parent (each

@@ -262,7 +262,9 @@ def test_browser_review_commit_verify_and_select(
         assert bad_merge in undone.newer_sibling_curations
         with pytest.raises(ValueError, match="confirm_no_changes"):
             undone.commit()
-        verified_replacement = undone.commit(confirm_no_changes=True).curation
+        replacement_receipt = undone.commit(confirm_no_changes=True)
+        assert not replacement_receipt.needs_merge_verification
+        verified_replacement = replacement_receipt.curation
         assert verified_replacement.parent == replacement
         assert sorted(
             map(
@@ -272,6 +274,21 @@ def test_browser_review_commit_verify_and_select(
                 ),
             )
         ) == [unit_a, unit_b]
+        # The analysis handoff follows the replacement branch: both units
+        # (still accept) from the replacement's merge id, not the bad merge.
+        recovered = select_units_for_analysis(
+            verified_replacement, policy="v2_accepted_single_units"
+        )
+        created_groups.extend(g.group_key for g in recovered.groups)
+        assert recovered.curation == verified_replacement
+        assert recovered.included_unit_ids == (unit_a, unit_b)
+        assert recovered.groups[0].merge_id == verified_replacement.merge_id
+        assert recovered.groups[0].merge_id != bad_merge.merge_id
+        _, ids = recovered.fetch_spike_data(return_unit_ids=True)
+        assert [d["unit_id"] for d in ids] == [unit_a, unit_b]
+        for group_key in created_groups:
+            (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
+        created_groups.clear()
         bad_merge.delete_subtree(safemode=False)
     finally:
         for group_key in created_groups:
