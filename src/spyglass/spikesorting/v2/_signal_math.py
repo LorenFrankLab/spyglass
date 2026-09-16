@@ -538,7 +538,7 @@ def _base_intervals_from_timestamps(timestamps, fs):
 # Chunked / affine timestamp helpers (no full-vector materialization).
 #
 # A persisted v2 recording loads its timestamps as a LAZY vector
-# (``read_nwb_recording(load_time_vector=True)`` stores the h5py-backed pynwb
+# (``read_recording_nwb`` retains the h5py-backed pynwb
 # ``timestamps`` object; a saved recording mmaps it). SpikeInterface's
 # ``recording.get_times()`` calls ``np.asarray(time_vector)`` -- it materializes
 # the whole ``n_samples``-length float64 vector (~824 MB for 1 h @ 30 kHz, 8

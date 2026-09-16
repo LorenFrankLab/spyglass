@@ -1,8 +1,12 @@
-"""NWB-write service behind ``Recording``.
+"""NWB artifact I/O behind ``Recording``.
 
+``read_recording_nwb`` opens an explicit series with lazy timestamp access,
+including when workers or analyzers reconstruct the extractor.
 ``write_nwb_artifact`` streams the preprocessed traces and the wall-clock
 timestamps vector into an ``AnalysisNwbfile`` for ``Recording.make_compute``
 (and the rebuild path), then hashes the persisted file for the cache contract.
+``install_rebuilt_recording`` installs verified single/concatenated recording
+rebuilds and reconciles their tracked byte checksums.
 The table threads already-fetched DB state in (the tri-part
 ``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
 compute), and the file row is registered by the caller inside its DataJoint
@@ -27,6 +31,57 @@ path resolution + file create). It also lazily imports the
 """
 
 from __future__ import annotations
+
+
+def read_recording_nwb(
+    path, *, electrical_series_path: str, load_time_vector: bool = True
+):
+    """Read an explicit NWB series without materializing its timestamps.
+
+    SI 0.104.3's default HDF5 backend reads the entire timestamp dataset to
+    estimate the sampling rate. Its PyNWB backend reads only a short prefix
+    and retains the dataset for lazy time access. Preserve that choice in
+    worker/analyzer serialization too: this SI version omits ``use_pynwb``
+    from the extractor's reconstruction kwargs.
+    """
+    import spikeinterface.extractors as se
+
+    recording = se.read_nwb_recording(
+        str(path),
+        electrical_series_path=electrical_series_path,
+        load_time_vector=load_time_vector,
+        use_pynwb=True,
+    )
+    recording._kwargs["use_pynwb"] = True
+    return recording
+
+
+def install_rebuilt_recording(
+    temp_abs: str, canonical_abs: str, analysis_file_name: str
+) -> None:
+    """Install a verified rebuild and refresh its tracked byte checksum.
+
+    The caller holds the recording's artifact lock and has checked that the
+    temp's content fingerprint matches the stored recording. Replace the file
+    atomically, refresh its checksum, then verify that it resolves. On failure,
+    remove the temp or installed file so the next read can retry the rebuild.
+    """
+    import os
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    try:
+        os.replace(temp_abs, canonical_abs)
+    except Exception:
+        Path(temp_abs).unlink(missing_ok=True)
+        raise
+    try:
+        AnalysisNwbfile()._resolve_external(analysis_file_name)
+        AnalysisNwbfile.get_abs_path(analysis_file_name)
+    except Exception:
+        Path(canonical_abs).unlink(missing_ok=True)
+        raise
 
 
 def raw_eseries_path_and_timestamp_mode(

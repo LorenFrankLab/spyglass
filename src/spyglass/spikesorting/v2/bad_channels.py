@@ -14,7 +14,7 @@ Two helpers:
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: SpikeInterface / spyglass (``Electrode``,
-``read_raw_nwb_recording``, ``spikeinterface_channel_ids``, ``logger``)
+``read_recording_nwb``, ``spikeinterface_channel_ids``, ``logger``)
 dependencies are imported lazily inside the functions. ``suggest_bad_channels``
 does touch the DB at CALL time (an ``Electrode`` fetch, plus ``Electrode.update1``
 when ``persist=True``) via those lazy imports -- mirroring
@@ -286,10 +286,11 @@ def suggest_bad_channels(
 
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.utils import read_raw_nwb_recording
     from spyglass.spikesorting.v2._recording_geometry import (
         spikeinterface_channel_ids,
     )
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
 
     # 1. Electrode metadata, grouped by physical shank (fail loud on a missing
     #    shank). ``probe_shank`` is read exactly as ``set_group_by_shank`` reads
@@ -319,7 +320,12 @@ def suggest_bad_channels(
     #    ``coherence+psd`` (which asserts ``has_scaleable_traces``) is satisfied.
     #    Resolve every electrode_id -> SI channel id in a single NWB read (not
     #    once per shank).
-    rec = read_raw_nwb_recording(Nwbfile.get_abs_path(nwb_file_name))
+    raw_path = Nwbfile.get_abs_path(nwb_file_name)
+    rec = read_recording_nwb(
+        raw_path,
+        electrical_series_path=get_raw_eseries_path(raw_path),
+        load_time_vector=False,
+    )
     # freq_max must be below the recording's Nyquist (fs/2); a value at/above
     # it fails opaquely inside scipy's filter design (shared check with
     # apply_pre_motion_preprocessing).

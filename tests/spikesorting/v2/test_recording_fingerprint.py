@@ -68,6 +68,55 @@ def test_recording_content_fingerprint_deterministic(tmp_path):
     assert _aggregate(path, es_path) == _aggregate(path, es_path)
 
 
+def test_timestamp_hash_is_bounded_and_matches_whole_vector(
+    tmp_path, monkeypatch
+):
+    """Streaming includes chunk boundaries and retains the persisted hash format."""
+    import hashlib
+
+    import h5py
+    from spikeinterface.core import BaseRecording
+
+    from spyglass.spikesorting.v2._recompute import combined_hash
+    from spyglass.spikesorting.v2._recording_fingerprint import (
+        TIMESTAMP_ROUNDING,
+        recording_content_fingerprint,
+    )
+
+    n_frames = 600_017
+    times = np.arange(n_frames, dtype=float) / 30_000.0 + 1234.0
+    times[300_000:] += 0.5
+    times[-1] += 0.1
+    path, es_path = _baseline(
+        tmp_path / "chunked.nwb",
+        traces=np.zeros((n_frames, 4), dtype=np.float32),
+        timestamps=times,
+    )
+    expected = hashlib.md5(
+        np.round(times, TIMESTAMP_ROUNDING).astype("<f8").tobytes()
+    ).hexdigest()
+    getitem = h5py.Dataset.__getitem__
+    sizes = []
+
+    def bounded_getitem(dataset, index):
+        result = getitem(dataset, index)
+        if dataset.name.endswith("/timestamps"):
+            sizes.append(np.size(result))
+            assert np.size(result) <= 300_000
+        return result
+
+    def no_get_times(*args, **kwargs):
+        pytest.fail("fingerprinting must not materialize the time vector")
+
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", bounded_getitem)
+    monkeypatch.setattr(BaseRecording, "get_times", no_get_times)
+    components = recording_content_fingerprint(
+        path, electrical_series_path=es_path
+    )
+    assert sizes
+    assert components["timestamps"] == combined_hash({"segment_0": expected})
+
+
 def test_recording_content_fingerprint_discriminates(tmp_path):
     """Every scientifically-meaningful perturbation changes the aggregate;
     sub-``TRACE_ROUNDING`` float noise does not."""
@@ -211,8 +260,7 @@ def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
     """A degenerate readback (zero segments) is refused, not hashed to a
     content-free constant -- two distinct broken/truncated readbacks must never
     report 'no drift' on traces that were never actually read."""
-    import spikeinterface.extractors as se
-
+    from spyglass.spikesorting.v2 import _recording_nwb
     from spyglass.spikesorting.v2._recording_fingerprint import (
         recording_content_fingerprint,
     )
@@ -224,7 +272,9 @@ def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
             return 0
 
     monkeypatch.setattr(
-        se, "read_nwb_recording", lambda *a, **k: _ZeroSegmentRecording()
+        _recording_nwb,
+        "read_recording_nwb",
+        lambda *a, **k: _ZeroSegmentRecording(),
     )
     with pytest.raises(ValueError, match="no trace samples"):
         recording_content_fingerprint(path, electrical_series_path=es_path)

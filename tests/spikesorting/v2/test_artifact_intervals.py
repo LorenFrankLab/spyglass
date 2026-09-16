@@ -1119,10 +1119,10 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
     from datetime import datetime, timezone
 
     import pynwb
-    import spikeinterface.extractors as se
     from hdmf.backends.hdf5.h5_utils import H5DataIO
     from pynwb.ecephys import ElectricalSeries
 
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
     from spyglass.spikesorting.v2._signal_math import (
         base_intervals_and_gaps,
         timestamp_fingerprint,
@@ -1158,15 +1158,14 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
         io.write(nwbf)
 
     def _peak(op):
-        # recording built OUTSIDE the window (production: get_recording builds
-        # it once), re-read per op so get_times()'s caching cannot pollute.
-        rec = se.read_nwb_recording(
-            str(path),
-            electrical_series_path="acquisition/es",
-            load_time_vector=True,
-        )
+        # Include construction: the backend must not eagerly read timestamps
+        # before the chunked helper even runs. Reopen to isolate SI's caches.
         gc.collect()
         tracemalloc.start()
+        rec = read_recording_nwb(
+            str(path),
+            electrical_series_path="acquisition/es",
+        )
         keep = op(rec)
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()

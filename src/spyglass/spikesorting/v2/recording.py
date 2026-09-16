@@ -1792,7 +1792,7 @@ class Recording(SpyglassMixin, dj.Computed):
             The preprocessed (bandpass-filtered, common-referenced)
             recording, annotated ``is_filtered=True``.
         """
-        import spikeinterface.extractors as se
+        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -1805,10 +1805,9 @@ class Recording(SpyglassMixin, dj.Computed):
         # NWB (e.g., LFP next to raw) would silently pick the wrong
         # source under auto-detect. The stored ``electrical_series_path``
         # is the authoritative pointer to the persisted series, not a hint.
-        rec = se.read_nwb_recording(
+        rec = read_recording_nwb(
             abs_path,
             electrical_series_path=row["electrical_series_path"],
-            load_time_vector=True,
         )
         # The cached preprocessed artifact is bandpass-filtered + common-
         # referenced; without this annotation a downstream SI
@@ -1866,11 +1865,13 @@ class Recording(SpyglassMixin, dj.Computed):
         write's inputs. Safe to call directly (it takes the lock itself) and
         from ``get_recording`` (which does not hold the lock).
         """
-        import os
         import time
 
         from spyglass.spikesorting.v2._recording_fingerprint import (
             recording_artifact_lock,
+        )
+        from spyglass.spikesorting.v2._recording_nwb import (
+            install_rebuilt_recording,
         )
         from spyglass.spikesorting.v2.exceptions import (
             RecordingContentDriftError,
@@ -1945,32 +1946,9 @@ class Recording(SpyglassMixin, dj.Computed):
                     "repopulating the Recording row (and its downstream)."
                 )
 
-            # Verified content match: atomically install the temp into the
-            # canonical slot, then reconcile the byte checksum so the next
-            # checksum-validated get_abs_path read succeeds.
-            try:
-                os.replace(temp_abs, canonical_abs)
-            except Exception:
-                Path(temp_abs).unlink(missing_ok=True)
-                raise
-            try:
-                AnalysisNwbfile()._resolve_external(analysis_file_name)
-            except Exception:
-                # os.replace already ran; return the slot to MISSING so the
-                # next (locked) get_recording retries cleanly rather than
-                # leaving byte-different content under a stale checksum.
-                Path(canonical_abs).unlink(missing_ok=True)
-                raise
-            # Confirm the reconciled slot now resolves through the
-            # checksum-validating path. get_recording re-reads after this, but a
-            # DIRECT caller has no follow-on read, so a botched reconcile (e.g.
-            # the checksum refreshed the wrong external row) would otherwise stay
-            # silent until the next reader. Unlink + raise if it does not.
-            try:
-                AnalysisNwbfile.get_abs_path(analysis_file_name)
-            except Exception:
-                Path(canonical_abs).unlink(missing_ok=True)
-                raise
+            install_rebuilt_recording(
+                temp_abs, canonical_abs, analysis_file_name
+            )
 
             logger.info(
                 "Recording.get_recording: rebuilt + reconciled "
@@ -2111,20 +2089,17 @@ class Recording(SpyglassMixin, dj.Computed):
         row (its ``content_hash``) plus the raw NWB always allow the next
         ``get_recording`` to regenerate it.
         """
-        from spyglass.spikesorting.utils import read_raw_nwb_recording
+        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
         from spyglass.spikesorting.v2.utils import _get_recording_timestamps
 
-        # Read via the shared raw-acquisition wrapper so the raw
-        # ElectricalSeries is named explicitly: SI >= 0.100 raises when a
-        # raw file also stores LFP under ``processing`` and the series is
-        # not named.
+        # Name the exact raw acquisition, including when the file also has LFP.
         # Rate-based raw ElectricalSeries can reconstruct selected timestamps
         # lazily from (t_start, sampling_frequency, frame index). Explicit
-        # timestamp series may be irregular, so keep the old eager load there.
+        # timestamp series may be irregular, so retain their explicit vector.
         raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
             raw_path, raw_object_id
         )
-        recording = read_raw_nwb_recording(
+        recording = read_recording_nwb(
             raw_path,
             load_time_vector=load_time_vector,
             electrical_series_path=raw_series_path,

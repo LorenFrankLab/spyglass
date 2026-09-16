@@ -14,6 +14,154 @@ import numpy as np
 import pytest
 
 
+@pytest.mark.parametrize("timestamp_mode", ["explicit", "rate"])
+@pytest.mark.parametrize("channel_names", [False, True])
+def test_nwb_reader_is_lazy_and_preserves_metadata(
+    tmp_path, monkeypatch, timestamp_mode, channel_names
+):
+    """Reader and serialized reload preserve traces, timing and channel metadata."""
+    import h5py
+    import pynwb
+    import spikeinterface as si
+    import spikeinterface.extractors as se
+
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from tests.spikesorting.v2._ingest_helpers import (
+        write_processed_recording_nwb,
+    )
+
+    fs, n_frames = 30_000.0, 20_000
+    times = np.arange(n_frames) / fs + 2.0
+    times[10_000:] += 0.5  # Explicit timing must preserve the gap.
+    path, series_path = write_processed_recording_nwb(
+        tmp_path / "reader.nwb",
+        traces=np.arange(n_frames * 4, dtype=np.float32).reshape(-1, 4),
+        timestamps=times,
+        rel_positions=[[0, 0], [0, 20], [10, 40], [10, 60]],
+        channel_ids=[10, 30, 20, 50],
+        conversion=2e-6,
+        offset=1e-6,
+    )
+    with h5py.File(path, "a") as file:
+        series = file[series_path]
+        series.create_dataset("channel_conversion", data=[1.0, 2.0, 3.0, 4.0])
+        if timestamp_mode == "rate":
+            del series["timestamps"]
+            start = series.create_dataset("starting_time", data=2.0)
+            start.attrs["rate"] = fs
+            start.attrs["unit"] = "seconds"
+    if channel_names:
+        with pynwb.NWBHDF5IO(str(path), "a") as io:
+            nwb = io.read()
+            nwb.add_electrode_column(
+                "channel_name", "channel identifiers", data=["a", "b", "c", "d"]
+            )
+            io.write(nwb)
+
+    original = se.read_nwb_recording(
+        str(path), electrical_series_path=series_path, load_time_vector=True
+    )
+    dataset_getitem = h5py.Dataset.__getitem__
+
+    def bounded_getitem(dataset, index):
+        if dataset.name.endswith("/timestamps") and isinstance(index, slice):
+            assert len(range(*index.indices(len(dataset)))) <= 1000
+        return dataset_getitem(dataset, index)
+
+    with monkeypatch.context() as guard:
+        guard.setattr(h5py.Dataset, "__getitem__", bounded_getitem)
+        recording = read_recording_nwb(path, electrical_series_path=series_path)
+        reloaded = si.load(recording.to_dict())
+
+    for candidate in (recording, reloaded):
+        assert (
+            candidate.get_sampling_frequency()
+            == original.get_sampling_frequency()
+        )
+        assert candidate.get_dtype() == original.get_dtype()
+        np.testing.assert_array_equal(
+            candidate.get_channel_ids(), original.get_channel_ids()
+        )
+        assert set(candidate.get_property_keys()) == set(
+            original.get_property_keys()
+        )
+        for name in original.get_property_keys():
+            np.testing.assert_array_equal(
+                candidate.get_property(name), original.get_property(name)
+            )
+        for scaled in (False, True):
+            np.testing.assert_array_equal(
+                candidate.get_traces(
+                    start_frame=9950, end_frame=10050, return_in_uV=scaled
+                ),
+                original.get_traces(
+                    start_frame=9950, end_frame=10050, return_in_uV=scaled
+                ),
+            )
+        frames = np.array([0, 9999, 10000, n_frames - 1])
+        np.testing.assert_array_equal(
+            candidate.sample_index_to_time(frames),
+            original.sample_index_to_time(frames),
+        )
+
+
+@pytest.mark.parametrize("failure", [None, "replace", "refresh", "verify"])
+def test_rebuilt_recording_install_leaves_retryable_state(
+    tmp_path, monkeypatch, failure
+):
+    """Publish verified bytes, or leave no partial file after an install failure."""
+    import os
+    import sys
+    from types import ModuleType
+
+    from spyglass.spikesorting.v2._recording_nwb import (
+        install_rebuilt_recording,
+    )
+
+    temp = tmp_path / "rebuilt.nwb"
+    canonical = tmp_path / "canonical.nwb"
+    temp.write_bytes(b"verified recording")
+    events = []
+
+    def reached(stage):
+        events.append(stage)
+        if failure == stage:
+            raise RuntimeError(f"injected {stage} failure")
+
+    class AnalysisNwbfile:
+        def _resolve_external(self, name):
+            assert name == canonical.name
+            assert not temp.exists()
+            assert canonical.read_bytes() == b"verified recording"
+            reached("refresh")
+
+        @staticmethod
+        def get_abs_path(name):
+            assert name == canonical.name
+            reached("verify")
+            return str(canonical)
+
+    module = ModuleType("spyglass.common.common_nwbfile")
+    module.AnalysisNwbfile = AnalysisNwbfile
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    replace = os.replace
+
+    def install(src, dst):
+        reached("replace")
+        replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", install)
+    if failure:
+        with pytest.raises(RuntimeError, match=f"injected {failure} failure"):
+            install_rebuilt_recording(str(temp), str(canonical), canonical.name)
+        assert not canonical.exists()
+    else:
+        install_rebuilt_recording(str(temp), str(canonical), canonical.name)
+        assert canonical.read_bytes() == b"verified recording"
+        assert events == ["replace", "refresh", "verify"]
+    assert not temp.exists()
+
+
 def test_truncation_tolerance_scales_with_interval_count():
     from spyglass.spikesorting.v2._recording_restriction import (
         truncation_tolerance,

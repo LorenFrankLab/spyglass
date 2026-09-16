@@ -1339,17 +1339,16 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         """
         from pathlib import Path
 
-        import spikeinterface.extractors as se
+        from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
 
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         if not Path(abs_path).exists():
             self._rebuild_nwb_artifact(key)
             abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-        rec = se.read_nwb_recording(
+        rec = read_recording_nwb(
             abs_path,
             electrical_series_path=row["electrical_series_path"],
-            load_time_vector=True,
         )
         rec.annotate(is_filtered=True)
         return rec
@@ -1382,11 +1381,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         Safe to call directly (it takes the lock itself) and from
         ``get_recording`` (which does not hold the lock).
         """
-        import os
         from pathlib import Path
 
         from spyglass.spikesorting.v2._concat_recording import (
             concat_recording_artifact_lock,
+        )
+        from spyglass.spikesorting.v2._recording_nwb import (
+            install_rebuilt_recording,
         )
         from spyglass.spikesorting.v2.exceptions import (
             RecordingContentDriftError,
@@ -1435,31 +1436,9 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "the ConcatenatedRecording row (and its downstream)."
                 )
 
-            # Verified content match: atomically install the temp into the
-            # canonical slot, then reconcile the byte checksum so the next
-            # checksum-validated get_abs_path read succeeds.
-            try:
-                os.replace(temp_abs, canonical_abs)
-            except Exception:
-                Path(temp_abs).unlink(missing_ok=True)
-                raise
-            try:
-                AnalysisNwbfile()._resolve_external(analysis_file_name)
-            except Exception:
-                # os.replace already ran; return the slot to MISSING so the next
-                # (locked) get_recording retries cleanly rather than leaving
-                # byte-different content under a stale checksum.
-                Path(canonical_abs).unlink(missing_ok=True)
-                raise
-            # Confirm the reconciled slot resolves through the checksum-
-            # validating path. get_recording re-reads after this, but a DIRECT
-            # caller has no follow-on read, so a botched reconcile would
-            # otherwise stay silent until the next reader. Unlink + raise if so.
-            try:
-                AnalysisNwbfile.get_abs_path(analysis_file_name)
-            except Exception:
-                Path(canonical_abs).unlink(missing_ok=True)
-                raise
+            install_rebuilt_recording(
+                temp_abs, canonical_abs, analysis_file_name
+            )
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.

@@ -445,15 +445,13 @@ def reconstruct_recording_for_sorting_from_resolved(
     si.BaseRecording
         The (artifact-masked) filtered-annotated recording.
     """
-    import spikeinterface.extractors as se
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
 
     abs_path = AnalysisNwbfile.get_abs_path(recording_row["analysis_file_name"])
-    recording = se.read_nwb_recording(
+    recording = read_recording_nwb(
         abs_path,
         electrical_series_path=recording_row["electrical_series_path"],
-        load_time_vector=True,
     )
     # Match Recording().get_recording: the cached artifact is already bandpass +
     # common-referenced, so annotate is_filtered to stop a downstream SI consumer

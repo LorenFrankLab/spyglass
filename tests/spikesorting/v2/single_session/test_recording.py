@@ -1957,7 +1957,7 @@ def test_raw_source_series_pinned_to_raw_object_id(
 
     from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
 
-    from spyglass.spikesorting import utils as ss_utils
+    from spyglass.spikesorting.v2 import _recording_nwb
     from spyglass.spikesorting.v2.recording import Recording
 
     path = tmp_path / "two_eseries.nwb"
@@ -1975,7 +1975,7 @@ def test_raw_source_series_pinned_to_raw_object_id(
         )
         raise _StopAfterRead
 
-    monkeypatch.setattr(ss_utils, "read_raw_nwb_recording", _capture_read)
+    monkeypatch.setattr(_recording_nwb, "read_recording_nwb", _capture_read)
 
     with pytest.raises(_StopAfterRead):
         Recording()._compute_recording_artifact(

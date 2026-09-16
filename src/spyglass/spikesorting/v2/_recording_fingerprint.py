@@ -133,21 +133,21 @@ def recording_content_fingerprint(
 
     import numpy as np
     import pynwb
-    import spikeinterface.extractors as se
 
     from spyglass.spikesorting.v2._recompute import (
         combined_hash,
         hash_recording_traces,
     )
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._signal_math import _segment_times_at
 
     analysis_abs_path = str(analysis_abs_path)
     series_name = electrical_series_path.rsplit("/", 1)[-1]
 
     # --- traces / timestamps / scaling+shape metadata via SpikeInterface ---
-    recording = se.read_nwb_recording(
+    recording = read_recording_nwb(
         analysis_abs_path,
         electrical_series_path=electrical_series_path,
-        load_time_vector=True,
     )
     # Fail closed on a degenerate readback (zero segments / zero frames): an
     # empty trace loop would hash to a content-free constant, so two distinct
@@ -170,14 +170,17 @@ def recording_content_fingerprint(
 
     timestamp_hashes: dict[str, str] = {}
     for segment in range(recording.get_num_segments()):
-        times = np.round(
-            np.asarray(
-                recording.get_times(segment_index=segment), dtype=np.float64
-            ),
-            timestamp_rounding,
-        )
         digest = hashlib.md5()
-        digest.update(np.ascontiguousarray(times.astype("<f8")).tobytes())
+        n_frames = recording.get_num_frames(segment_index=segment)
+        # Feed the same rounded, little-endian bytes as the former whole-vector
+        # hash, in bounded chunks so existing content fingerprints stay valid.
+        for start in range(0, n_frames, 300_000):
+            frames = np.arange(start, min(start + 300_000, n_frames))
+            times = np.round(
+                _segment_times_at(recording, frames, segment_index=segment),
+                timestamp_rounding,
+            )
+            digest.update(np.ascontiguousarray(times, dtype="<f8").tobytes())
         timestamp_hashes[f"segment_{segment}"] = digest.hexdigest()
     timestamps_hash = combined_hash(timestamp_hashes)
 
