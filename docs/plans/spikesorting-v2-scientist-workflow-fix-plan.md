@@ -1,10 +1,29 @@
 # Spike sorting v2: scientist workflow fixes before merge
 
-Proposed September 16, 2026, against `21690fa1`. This is an implementation plan,
-not a record of completed UX changes. The preceding six commits contain the
-existing Python, curation, annotation, recording, and health-check fixes.
-Revised at the user's request: artifact detection and masking for concatenated
-recordings are required before merge, alongside the existing standalone path.
+Proposed September 16, 2026, against `21690fa1`; implemented through `3755817c`.
+Artifact detection and masking for concatenated recordings are included,
+alongside the existing standalone path. The numbered sections below retain the
+agreed specification. See the
+[validation record](spikesorting-v2-sorting-ux-validation.md#september-16-scientist-workflow-implementation)
+for completed checks, measurements, and remaining release gates.
+
+## Implementation status
+
+| Item                                            | Status                                                                                                                                                                                    |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Scientific setup and recipe claims           | Implemented: preflight/run output resolves execution settings; no-mask Kilosort and diagnostic drift are explicit                                                                         |
+| 2. Artifact detection in both source modes      | Implemented: frozen member detections, masking before/after motion, observation intervals, reproducible rebuild/retry, and member exports                                                 |
+| 3. Whole-session analysis path                  | Implemented: exact final-curation mapping, consistent policy, per-group receipts, and verified combined population                                                                        |
+| 4. Browser saves versus Python commits          | Implemented: readable help, review identity, and merged-child continuation                                                                                                                |
+| 5. QC meaning and unavailable evidence          | Implemented: selected-evaluation coverage, per-unit missing inputs, and ISI/missing-policy explanations                                                                                   |
+| 6. Detailed inspection and selection boundaries | Implemented: targeted traces, raster, pair diagnostics, and a final-evaluation SNR filter with provenance                                                                                 |
+| 7. Release validation                           | Bounded integration, notebook, and browser checks completed; representative long recordings, target Linux/backends, v1 scientific comparisons, and observed scientist walkthroughs remain |
+
+The concat schema intentionally changes on this pre-production branch. Recreate
+affected disposable schemas/artifacts; no legacy concat compatibility layer was
+added. SI duration-based metrics and shared decoding consumers do not
+automatically apply the stored observation intervals; their current limitations
+are documented, without changing thresholds or claiming a different metric.
 
 ## Objective and scope
 
