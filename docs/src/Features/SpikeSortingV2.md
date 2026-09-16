@@ -224,13 +224,16 @@ deeper how-tos are split into companion notebooks —
 (concatenate + cross-session matching). In prose, the first-sort path is:
 
 1. **Defaults** -- `initialize_v2_defaults()` seeds every parameter row.
-2. **Sort group** -- `SortGroupV2.set_group_by_shank(nwb_file_name=...)`,
-   then inspect `describe_sort_groups(nwb_file_name)` before choosing the
-   `sort_group_id`.
+2. **Channels, references, and sort groups** -- review bad-channel flags and
+   the reference choice before `SortGroupV2.set_group_by_shank(...)` (see the
+   [quickstart](./SpikeSortingV2_Quickstart.md)). Grouping excludes flagged
+   channels; later flag edits do not change existing membership. Inspect
+   `describe_sort_groups(nwb_file_name)` before choosing the `sort_group_id`.
 3. **Preflight** -- `preflight_v2_pipeline(...)` confirms the session, team,
    parameter rows, and sorter binary are present in ~1 s, *before* any
    `populate`, returning a structured report with the exact fix for any missing
-   prerequisite.
+   prerequisite. `print(report.summary())` shows blockers, warnings, stages to
+   compute/reuse, the effective sorter configuration, and resource notes.
 4. **Pipeline** -- `run_v2_pipeline(...)` returns the run receipt
    (`root_curation` / `auto_labeled_curation` generation-pinned refs;
    `describe_run` shows the effective sorter configuration).
@@ -281,8 +284,13 @@ IntervalList & {"nwb_file_name": nwb_file_name}
 # (For "sort every shank", use run_v2_pipeline_session below instead.)
 # set_group_by_shank refuses to overwrite existing sort groups, so guard the
 # re-run (or delete them first via the inspect-before-destroy contract).
+# Finalize bad-channel flags first. None inherits stored references; replace
+# with a reviewed electrode-group-to-reference mapping when needed.
+references = None
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
-    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, references=references
+    )
 sort_groups = describe_sort_groups(nwb_file_name)
 plot_sort_group_geometry(nwb_file_name)
 sort_groups  # inspect membership, brain_region, and geometry, then:
@@ -347,20 +355,28 @@ from spyglass.spikesorting.v2.pipeline import (
 )
 
 # Read-only: one PreflightReport per sort group, aggregated.
+sort_group_ids = None  # every group; or an explicit subset such as [0, 2]
 report = preflight_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
+    sort_group_ids=sort_group_ids,
 )
-assert report.ok, report.errors
+print(report.summary())
+target_sort_group_ids = [row["sort_group_id"] for row in report.group_reports]
+```
 
+Inspect the plan before running the next cell. The resolved target list keeps
+the displayed, checked, and executed groups aligned:
+
+```python
 results = run_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name="raw data valid times",
     team_name="my_team",
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
-    sort_group_ids=None,        # None = every sort group; or pass a subset
+    sort_group_ids=target_sort_group_ids,
     continue_on_error=True,     # record per-group failures instead of stopping
 )
 
@@ -531,13 +547,16 @@ reproducible. Two guards keep names honest:
       team_name="my_team",
       pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
   )
+  print(report.summary())
   for check in report.checks:
       print(check.name, check.ok, check.fix)
   ```
 
 - **A compute stage fails.** Catch `PipelineStageError`; `err.stage` names the
   failed stage and `err.partial_run_summary` shows which IDs were already
-  created.
+  created. Correct the cause and rerun with the same inputs to reuse completed
+  stages. A failed sorter restarts its stage; it does not resume an internal
+  checkpoint. The same applies to rerunning a whole-session batch.
 
   ```python
   from spyglass.spikesorting.v2.exceptions import PipelineStageError
@@ -1099,8 +1118,11 @@ where the parent left off) and the absorbed raw units are not resurrected.
 
 ### Stage-by-stage (custom pipeline preset)
 
-`run_v2_pipeline` is a convenience wrapper. The underlying stages can be
-driven directly when a built-in pipeline preset does not apply:
+`run_v2_pipeline` is a convenience wrapper. Drive the underlying stages
+directly when a built-in pipeline preset does not apply, or pause after
+preprocessing and artifact detection to inspect their outputs before sorting.
+Use the parameter-row names shown in `describe_pipeline_presets()` for your
+chosen recipe; a later pipeline call with those same inputs reuses these stages.
 
 ```python
 from spyglass.spikesorting.v2.recording import (
@@ -1118,7 +1140,7 @@ nwb_file_name = "your_session.nwb"  # same session as above
 
 recording_key = RecordingSelection.insert_selection({
     "nwb_file_name": nwb_file_name,
-    "sort_group_id": 0,
+    "sort_group_id": sort_group_id,  # reviewed above
     "interval_list_name": "raw data valid times",
     "preprocessing_params_name": "franklab_hippocampus_2026_06",
     "team_name": "my_team",
@@ -1134,7 +1156,25 @@ artifact_detection_key = RecordingArtifactSelection.insert_selection({
     "artifact_detection_params_name": "default",
 })
 RecordingArtifactDetection.populate(artifact_detection_key)
+```
 
+Inspect a short trace window and the **retained valid intervals** after artifact
+removal. `plot_traces` defaults to the first second; pass `time_range=(start,
+stop)` in recording seconds to inspect other windows. This plot shows the
+preprocessed recording before artifact masking; compare it with the retained
+intervals to check the masking decision.
+
+```python
+Recording().plot_traces(recording_key)
+valid_intervals = RecordingArtifactDetection().get_artifact_removed_intervals(
+    artifact_detection_key
+)
+valid_intervals
+```
+
+Once satisfied, continue with the matching pipeline preset or sort directly:
+
+```python
 sorting_key = SortingSelection.insert_selection({
     "recording_id": recording_key["recording_id"],
     "sorter": "mountainsort5",

@@ -10,15 +10,19 @@ reference and the [notebooks](../notebooks/10_Spike_SortingV2.ipynb).
 This assumes you have already ingested the session with `insert_sessions` (see
 [Insert Data](../notebooks/02_Insert_Data.ipynb)).
 
-## 1. One-time setup (3 things)
+## 1. Review channels and references, then create sort groups
 
 ```python
-from spyglass.common.common_lab import LabTeam
+import pandas as pd
+
+from spyglass.common import Electrode, LabTeam
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
+    describe_pipeline_presets,
     describe_run,
     describe_sort_groups,
+    preflight_v2_pipeline,
     run_v2_pipeline,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -29,16 +33,52 @@ initialize_v2_defaults()  # install the default parameter rows
 LabTeam.insert1(
     {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
 )
+
+electrode_config = pd.DataFrame(
+    (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+        "electrode_group_name", "electrode_id", "bad_channel",
+        "original_reference_electrode", as_dict=True,
+    )
+)
+electrode_config
+```
+
+Inspect the bad-channel flags and reference metadata **before grouping**.
+Grouping excludes flagged channels; changing flags afterward does not change
+existing membership. The [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)
+includes an optional `suggest_bad_channels(..., persist=False)` inspection step
+followed by explicit persistence of the reviewed suggestions. Its detector
+thresholds come from Neuropixels: inspect polymer-probe suggestions and do not
+rely on a clean result for small tetrode groups.
+
+Choose the reference deliberately. `references=None` inherits acquisition
+metadata, which may need changing for sorting. To override it, pass a mapping
+from each included `electrode_group_name` to a reference electrode ID
+(`-1`/`None`: none; `-2`: global median; nonnegative: specific electrode).
+For hippocampal polymer probes, prefer a quiet anatomical reference when
+available and inspect common-median choices carefully.
+
+```python
+references = None  # reviewed above; or a mapping covering every included group
 # set_group_by_shank refuses to overwrite existing sort groups, so guard the
-# re-run (or delete the groups first; see the reference).
+# re-run. For changes, inspect preview_existing_entries before recreating them.
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
-    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, references=references
+    )
 
 # Inspect the scientific grouping before choosing a shank. Set sort_group_id
 # explicitly when the session has more than one candidate.
 sort_groups = describe_sort_groups(nwb_file_name)
 if sort_groups.empty:
     raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
+sort_groups
+```
+
+After reviewing the table, choose the group in a separate cell. To sort every
+group or a subset, use the [whole-session notebook](../notebooks/10_Spike_SortingV2_Presets.ipynb).
+
+```python
 available_sort_group_ids = [
     int(value) for value in sort_groups["sort_group_id"]
 ]
@@ -56,10 +96,22 @@ elif sort_group_id not in available_sort_group_ids:
         f"sort_group_id={sort_group_id} is not one of "
         f"{available_sort_group_ids} for {nwb_file_name!r}."
     )
-sort_groups
 ```
 
-## 2. Sort and auto-label in one call
+## 2. Choose a recipe, inspect the plan, then sort
+
+The notebook default is the supported MountainSort5 alternative. For
+hippocampal polymer probes, the lab production recipe is MountainSort4:
+
+| Recipe | Runtime requirement |
+| --- | --- |
+| Local MountainSort4 production preset | MS4 backend in a compatible `numpy<2` environment |
+| Container MountainSort4 production preset | Singularity/Apptainer and the catalog's container image |
+| MountainSort5 alternative (below) | Standard v2 environment |
+
+Use `describe_pipeline_presets()` to match the region, sampling rate, and
+probe type and read each recipe's runtime notes. Selecting a preset never
+silently switches its sorter or backend.
 
 Pass `auto_curate=True` so the run doesn't stop at the uncurated root: it scores
 the sort with the preset's metric and rule rows and commits an **auto-labeled**
@@ -70,7 +122,7 @@ child curation in the same call. For the preset below the rules are
 inspect them before running.
 
 ```python
-run = run_v2_pipeline(
+run_kwargs = dict(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
     interval_list_name="raw data valid times",
@@ -78,9 +130,27 @@ run = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms5_2026_06",
     auto_curate=True,
 )
+report = preflight_v2_pipeline(**run_kwargs)
+print(report.summary())
+```
+
+Inspect blockers, warnings, stages to compute or reuse, the effective sorter
+configuration, workers/chunks, and scratch/cache notes. Resource notes describe
+known allocations; they do not predict total memory or runtime. Then run in a
+separate cell. For a new recording setup, the optional
+[stage-by-stage recipe](./SpikeSortingV2.md#stage-by-stage-custom-pipeline-preset)
+lets you inspect preprocessed traces and retained artifact intervals before
+starting the sorter.
+
+```python
+run = run_v2_pipeline(**run_kwargs)
 describe_run(run)  # stages, warnings, and the effective sorter configuration
 auto_labeled = run.auto_labeled_curation  # a CurationRef pinned to this exact generation
 ```
+
+After a failure, correct the reported cause and rerun with the same inputs.
+Completed stages are reused; a failed sorter restarts its stage, without
+resuming internal checkpoints.
 
 Automatic labels are suggestions written as labels, not approval, and the
 auto-labeled child still holds **every** unit. `run["auto_labeled_merge_id"]`
@@ -213,9 +283,9 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
 - **Inspect the run:** `describe_run(run)` renders a receipt (stages, warnings,
   the effective sorter configuration, the root vs auto-labeled merge ids) — a
   zero-unit sort can't hide in it.
-- **Fail fast first:** `preflight_v2_pipeline(...)` checks every prerequisite in
-  ~1 s before any compute and reports the effective configuration
-  (`report.effective_config`); `run_v2_pipeline(..., preflight=True)` (the
+- **Fail fast first:** `preflight_v2_pipeline(...)` checks prerequisites
+  before any compute; `print(report.summary())` shows the execution plan and
+  actionable findings. `run_v2_pipeline(..., preflight=True)` (the
   default) runs it for you.
 - **Plot or export exactly what you curated:** every unit-level helper in
   `spyglass.spikesorting.v2.visualization` takes a `CurationRef`

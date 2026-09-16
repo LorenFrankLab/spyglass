@@ -25,8 +25,9 @@
 
 # +
 import datajoint as dj
+import pandas as pd
 
-from spyglass.common import LabTeam
+from spyglass.common import Electrode, LabTeam
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.pipeline import (
@@ -50,56 +51,75 @@ nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
-# Sort group (shank) to sort. None auto-picks only when the session has exactly
-# one sort group; otherwise set it deliberately after reviewing step 2.
-sort_group_id = None
+references = None  # inherit stored references; review before creating groups
+# None sorts every group; set an explicit subset such as [0, 2] if needed.
+sort_group_ids = None
 # -
 
 # ## 1. One-time setup
 #
-# `initialize_v2_defaults()` installs every default parameter row the pipeline
-# needs (preprocessing / artifact / sorter), so there is no per-table
-# `insert_default()` to remember. The owning `LabTeam` and the per-shank sort
-# groups are session-specific user input, so we create them here.
-# `describe_sort_groups()` and `plot_sort_group_geometry()` then show the membership,
-# metadata, and physical layout you should inspect before deciding which group
-# to sort. With one sort group the cell auto-selects it; with several it makes
-# you set `sort_group_id` deliberately (above) rather than defaulting to the
-# first shank, and validates your choice against the available groups.
-#
+# Install default parameters and the owning team, review channel quality
+# and references, then create and inspect the sort groups.
 
 initialize_v2_defaults()
 LabTeam.insert1(
     {"team_name": team_name, "team_description": "spike sorting"},
     skip_duplicates=True,
 )
+
+# ### Review channels and references before creating groups
+#
+# Inspect the existing bad-channel flags and acquisition reference metadata.
+# Finalize any bad-channel edits BEFORE creating groups: grouping omits
+# flagged channels, and later flags do not change existing membership.
+# If groups already exist, inspect `SortGroupV2.preview_existing_entries(
+# nwb_file_name)` before explicitly recreating them; this notebook reuses them.
+
+electrode_config = pd.DataFrame(
+    (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
+        "electrode_group_name",
+        "electrode_id",
+        "bad_channel",
+        "original_reference_electrode",
+        as_dict=True,
+    )
+)
+electrode_config
+
+# Automated detection is optional. Its coherence/PSD thresholds are derived
+# from Neuropixels; inspect suggestions for polymer probes and do not rely
+# on a clean result for small tetrode groups. To propose changes:
+#
+# ```python
+# from spyglass.spikesorting.v2.bad_channels import suggest_bad_channels
+# reviewed_report = suggest_bad_channels(nwb_file_name, persist=False)
+# reviewed_report
+# ```
+#
+# After inspecting the report, persist exactly those suggestions separately:
+#
+# ```python
+# suggest_bad_channels(
+#     nwb_file_name, persist=True, reviewed_report=reviewed_report
+# )
+# ```
+#
+# Choose the sorting reference before grouping. `references=None` inherits
+# each group's stored reference (`-1`/None: none, `-2`: global median,
+# nonnegative: that electrode). To override it, set `references` to a mapping
+# from every included `electrode_group_name` to its reference electrode ID
+# or sentinel. The acquisition reference is not automatically a suitable
+# sorting reference; inspect the resulting group table and geometry below.
+
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
-    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, references=references
+    )
 sort_groups = describe_sort_groups(nwb_file_name)
 if sort_groups.empty:
     raise ValueError(f"No SortGroupV2 rows found for {nwb_file_name!r}.")
-available_sort_group_ids = [int(g) for g in sort_groups["sort_group_id"]]
 plot_sort_group_geometry(nwb_file_name)
 sort_groups
-
-
-# Validate the chosen sort group only after the table and geometry are visible.
-if sort_group_id is None:
-    if len(available_sort_group_ids) == 1:
-        sort_group_id = available_sort_group_ids[0]
-    else:
-        raise ValueError(
-            f"{nwb_file_name!r} has multiple sort groups "
-            f"{available_sort_group_ids}; set sort_group_id explicitly after "
-            "reviewing the table and geometry plot below — don't default to "
-            "the first shank."
-        )
-elif sort_group_id not in available_sort_group_ids:
-    raise ValueError(
-        f"sort_group_id={sort_group_id} is not one of "
-        f"{available_sort_group_ids} for {nwb_file_name!r}."
-    )
-sort_group_id
 
 
 # ## 2. Pick a pipeline preset
@@ -108,6 +128,22 @@ sort_group_id
 # preset does — the sorter, the parameter rows each stage uses, the intended
 # use, and (a known footgun) the units of the detection threshold — so you can
 # choose one without reading the module source.
+
+# The default is the runnable MS5 alternative, not an automatic choice of
+# the lab's preferred scientific recipe. For hippocampal polymer probes:
+#
+# | Choice | Recommendation | Runtime requirement |
+# | --- | --- | --- |
+# | MountainSort4, local | Lab production recipe | MS4 backend in a compatible `numpy<2` environment |
+# | MountainSort4, container | Same production recipe on a modern host | Singularity/Apptainer and the catalog's container image |
+# | MountainSort5 | Alternative; notebook default | Standard v2 environment |
+#
+# Match the catalog's region, sampling rate and probe metadata to your
+# recording. `production` means lab-recommended, `alternative` is a supported
+# substitute, and `experimental` needs scientific validation for your use.
+# Inspect `notes` for the exact execution requirements; selecting a preset
+# never silently switches its sorter or backend.
+#
 
 describe_pipeline_presets()
 
@@ -176,13 +212,23 @@ session_report = preflight_v2_pipeline_session(
     interval_list_name=interval_list_name,
     team_name=team_name,
     pipeline_preset=pipeline_preset,
+    sort_group_ids=sort_group_ids,
 )
-print("session preflight ok:", session_report.ok)
+# Freeze the validated target list so execution uses exactly these groups.
+target_sort_group_ids = [
+    row["sort_group_id"] for row in session_report.group_reports
+]
+print(session_report.summary())
+sort_groups[sort_groups["sort_group_id"].isin(target_sort_group_ids)]
+
+# Inspect the plan above before running this cell. Groups run sequentially;
+# completed stages are reused on a retry, while a failed stage starts again.
 session_results = run_v2_pipeline_session(
     nwb_file_name=nwb_file_name,
     interval_list_name=interval_list_name,
     team_name=team_name,
     pipeline_preset=pipeline_preset,
+    sort_group_ids=target_sort_group_ids,
     continue_on_error=True,
 )
 describe_run(session_results)

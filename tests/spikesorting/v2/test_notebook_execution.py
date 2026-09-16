@@ -212,23 +212,38 @@ def test_curation_notebook_runs(dj_conn):
 
 
 @pytest.mark.slow
-def test_presets_notebook_runs(dj_conn):
+@pytest.mark.parametrize("subset", [False, True], ids=["all-groups", "subset"])
+def test_presets_notebook_runs(dj_conn, subset):
     """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session.
 
     Self-contained: setup, then customize a preset (clone + register) and sort
     the whole session at once with ``run_v2_pipeline_session``.
     """
     nwb_file_name, sort_group_id = _prepare_notebook_session(
-        dj_conn, "notebook_presets.nwb"
+        dj_conn, f"notebook_presets_{'subset' if subset else 'all'}.nwb"
     )
+    parameters = _notebook_params(nwb_file_name, sort_group_id)
+    parameters.pop("sort_group_id")  # a whole-session run needs no single ID
+    if subset:
+        parameters["sort_group_ids"] = [sort_group_id]
     namespace = _execute_notebook(
         _NOTEBOOKS / "10_Spike_SortingV2_Presets.ipynb",
-        _notebook_params(nwb_file_name, sort_group_id),
+        parameters,
     )
     # The clone is registered, and the whole-session sweep returns per-group rows.
     assert "my_lab_ms5_lower_threshold" in namespace["list_pipeline_presets"]()
     assert isinstance(namespace["session_results"], list)
     assert namespace["session_results"]
+    expected_ids = (
+        [sort_group_id]
+        if subset
+        else sorted(namespace["sort_groups"]["sort_group_id"].tolist())
+    )
+    assert namespace["target_sort_group_ids"] == expected_ids
+    assert [
+        row["sort_group_id"] for row in namespace["session_results"]
+    ] == expected_ids
+    assert all(row["outcome"] == "ok" for row in namespace["session_results"])
 
 
 class _NotebookMatcherParams(BaseModel):
