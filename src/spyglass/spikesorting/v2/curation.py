@@ -457,7 +457,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         return result
 
     @classmethod
-    def audit_orphaned_lineage(cls) -> list[dict]:
+    def audit_orphaned_lineage(cls, *, sorting_id=None) -> list[dict]:
         """Return child curations whose ``parent_curation_id`` names a missing parent.
 
         The lineage-integrity audit for the boundary documented on :meth:`delete`:
@@ -469,6 +469,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         (``parent_curation_id != -1``) whose ``(sorting_id, parent_curation_id)``
         is not itself a ``CurationV2`` row. An empty list means every recorded
         lineage edge resolves -- run it as a strict/maintenance gate.
+        Pass ``sorting_id`` to audit only that sorting's lineage.
 
         Returns
         -------
@@ -478,8 +479,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         """
         # Antijoin: children whose (sorting_id, parent_curation_id) has no
         # matching (sorting_id, curation_id) among existing curations.
-        children = cls & "parent_curation_id != -1"
-        existing_parents = cls.proj(parent_curation_id="curation_id")
+        curations = cls & (
+            {} if sorting_id is None else {"sorting_id": sorting_id}
+        )
+        children = curations & "parent_curation_id != -1"
+        existing_parents = curations.proj(parent_curation_id="curation_id")
         orphaned = children - existing_parents
         return orphaned.fetch(
             "sorting_id", "curation_id", "parent_curation_id", as_dict=True

@@ -745,7 +745,7 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
-def _insert_bypassed_root_curation(sid):
+def _insert_bypassed_root_curation(sid, *, parent_curation_id=-1):
     """Plant a committed root CurationV2 over the bypassed sort (FK checks off).
 
     One raw unit (``Sorting.Unit`` 0) mirrored by ``CurationV2.Unit`` 0 so the
@@ -773,7 +773,7 @@ def _insert_bypassed_root_curation(sid):
             "sorting_id": sid,
             "curation_id": 0,
             "curation_uuid": uuid.uuid4(),
-            "parent_curation_id": -1,
+            "parent_curation_id": parent_curation_id,
             "analysis_file_name": "a22_fake_curation.nwb",
             "object_id": "a22-fake-curation-object-id",
             "merges_applied": 0,
@@ -784,6 +784,67 @@ def _insert_bypassed_root_curation(sid):
     CurationV2.Unit.insert1(
         {**unit, "curation_id": 0}, allow_direct_insert=True
     )
+
+
+def test_curation_health_report_is_scoped_to_sorting(dj_conn):
+    """Local health excludes other sorts; the global audit still includes both."""
+    import uuid
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_path,
+        curation_analyzer_path,
+    )
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort_ids = [uuid.uuid4(), uuid.uuid4()]
+    strays = {}
+    try:
+        for sid in sort_ids:
+            _insert_bypassed_sorting_row(sid, n_units=1)
+            dj_conn.query("SET FOREIGN_KEY_CHECKS=0")
+            try:
+                # An administrative bypass can leave a missing parent. Each
+                # sort gets an orphan so filtering must happen in the audit.
+                _insert_bypassed_root_curation(sid, parent_curation_id=99)
+            finally:
+                dj_conn.query("SET FOREIGN_KEY_CHECKS=1")
+            strays[sid] = [
+                analyzer_path(sid, "unused_health_test_recipe"),
+                curation_analyzer_path(
+                    sid, uuid.uuid4(), "display", "a" * 64, si.__version__
+                ),
+            ]
+            for path in strays[sid]:
+                path.mkdir(parents=True)
+
+        selected = CurationRef.from_key(
+            {"sorting_id": sort_ids[0], "curation_id": 0}
+        )
+        report = selected.health_report()
+        assert {row["sorting_id"] for row in report["orphaned_lineage"]} == {
+            sort_ids[0]
+        }
+        cache = report["analyzer_cache"]
+        assert {row["sorting_id"] for row in cache["db_side"]} == {sort_ids[0]}
+        assert set(cache["disk_side"]) == set(map(str, strays[sort_ids[0]]))
+
+        global_report = Sorting.find_orphaned_analyzer_folders()
+        assert set(sort_ids) <= {
+            row["sorting_id"] for row in global_report["db_side"]
+        }
+        assert {
+            str(path) for paths in strays.values() for path in paths
+        } <= set(global_report["disk_side"])
+    finally:
+        for paths in strays.values():
+            for path in paths:
+                path.rmdir()
+        (SortingSelection & [{"sorting_id": sid} for sid in sort_ids]).delete(
+            safemode=False
+        )
 
 
 def test_find_orphaned_analyzer_folders_db_side(dj_conn):

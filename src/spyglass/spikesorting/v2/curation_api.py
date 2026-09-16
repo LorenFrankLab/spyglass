@@ -505,12 +505,10 @@ class CurationRef:
         from spyglass.spikesorting.v2.sorting import Sorting
 
         self._current_row()
-        lineage = [
-            row
-            for row in CurationV2.audit_orphaned_lineage()
-            if _uuid(row["sorting_id"]) == self.sorting_id
-        ]
-        analyzer = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        lineage = CurationV2.audit_orphaned_lineage(sorting_id=self.sorting_id)
+        analyzer = Sorting.find_orphaned_analyzer_folders(
+            sorting_id=self.sorting_id, dry_run=True
+        )
         return MappingProxyType(
             {"orphaned_lineage": tuple(lineage), "analyzer_cache": analyzer}
         )

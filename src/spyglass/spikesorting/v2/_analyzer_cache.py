@@ -628,14 +628,15 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
 
 
 def collect_analyzer_cache_references(sorting_table) -> dict:
-    """Collect every live raw- and curation-kind analyzer cache reference.
+    """Collect live analyzer references for the supplied sorting relation.
 
     This is the single DB-backed reference collector for the analyzer cache.
     Raw references cover each sort's display recipe and PC-requesting
     evaluation metric recipes. Curation references cover the per-generation
     display cache for every live committed curation outside the raw namespace,
     plus its PC-requesting metric recipes. The caller supplies ``sorting_table``
-    to keep this module free of schema activation at import time.
+    to keep this module free of schema activation at import time. Its
+    restriction applies to all curation, evaluation, and reclamation queries.
 
     Missing curation folders are not DB-side orphans: they are lazy,
     regeneratable caches built on first interactive use. ``units_bearing``
@@ -651,6 +652,8 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerRecompute
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
+    sorting_keys = sorting_table.proj()
+    curations = CurationV2 & sorting_keys
     units_bearing = []
     sorting_rows = sorting_table.fetch(
         "sorting_id", "display_waveform_params_name", "n_units", as_dict=True
@@ -670,7 +673,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
     # selection and its curation in different states.
     pc_rows = (
         CurationEvaluationSelection.pc_requesting()
-        * CurationV2.proj("curation_uuid")
+        * curations.proj("curation_uuid")
     ).fetch(
         "sorting_id",
         "curation_id",
@@ -692,7 +695,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         str(row["sorting_id"]): row["display_waveform_params_name"]
         for row in sorting_rows
     }
-    curation_rows = CurationV2.fetch(
+    curation_rows = curations.fetch(
         "sorting_id", "curation_id", "curation_uuid", as_dict=True
     )
     for row in curation_rows:
@@ -749,9 +752,9 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
 
     reclaimed_paths = {
         str(analyzer_path(row["sorting_id"], row["waveform_params_name"]))
-        for row in (SortingAnalyzerRecompute & "deleted=1").fetch(
-            "sorting_id", "waveform_params_name", as_dict=True
-        )
+        for row in (
+            SortingAnalyzerRecompute & sorting_keys & "deleted=1"
+        ).fetch("sorting_id", "waveform_params_name", as_dict=True)
     }
     return {
         "units_bearing": units_bearing,

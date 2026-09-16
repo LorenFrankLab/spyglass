@@ -2560,7 +2560,9 @@ class Sorting(SpyglassMixin, dj.Computed):
                     remove_analyzer_cache(row["sorting_id"], missing_ok=True)
 
     @classmethod
-    def find_orphaned_analyzer_folders(cls, *, dry_run: bool = True) -> dict:
+    def find_orphaned_analyzer_folders(
+        cls, *, sorting_id=None, dry_run: bool = True
+    ) -> dict:
         """Audit 5-50 GB analyzer-folder disk leaks; never auto-delete DB rows.
 
         Each populated sort writes a 5-50 GB ``analyzer_folder`` of
@@ -2595,6 +2597,9 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
+        sorting_id : UUID or str, optional
+            Restrict database queries and cache candidates to this sorting.
+            Omit to audit all sortings, including folders for deleted sorts.
         dry_run : bool, optional
             When True (default) only report the two orphan lists. When False,
             after interactive confirmation (``dj.utils.user_choice``), delete
@@ -2626,7 +2631,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         # One collector owns references for BOTH cache kinds. Keeping this out
         # of the filesystem loop prevents a new curation cache from being
         # accidentally classified as garbage by a raw-sort-only sweep.
-        references = collect_analyzer_cache_references(cls)
+        if sorting_id is not None:
+            sorting_id = uuid.UUID(str(sorting_id))
+        references = collect_analyzer_cache_references(
+            cls & ({} if sorting_id is None else {"sorting_id": sorting_id})
+        )
         analyzer_root = analyzer_cache_root()
         # Only typed canonical raw/curation directories are deletion candidates.
         # Hidden atomic-publisher siblings and unrelated directories are never
@@ -2634,7 +2643,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         disk_dir_paths = (
             [
                 str(c)
-                for c in sorted(analyzer_root.iterdir())
+                for c in sorted(
+                    analyzer_root.iterdir()
+                    if sorting_id is None
+                    else analyzer_root.glob(f"{sorting_id}*")
+                )
                 if c.is_dir()
                 and not c.name.startswith(".")
                 and is_canonical_analyzer_folder_name(c.name)
