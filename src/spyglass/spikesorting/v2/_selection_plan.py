@@ -62,8 +62,8 @@ class SortingSelectionPlan(NamedTuple):
 
     ``artifact_detection_id`` is the normalized (``uuid.UUID``) value threaded
     for find-existing; it is ``None`` when no artifact-detection pass was
-    requested -- always the case for a concat source, which has no artifact
-    pass. The ``ArtifactDetectionSource`` part row itself is built by
+    requested at the sorting stage. Concat masks are frozen upstream in
+    the source selection. The ``ArtifactDetectionSource`` part row itself is built by
     ``insert_selection`` (it carries the merge id resolved DB-side after the
     detection is registered into ``ArtifactDetectionOutput``), not here.
 
@@ -184,18 +184,15 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
 
     if has_concat:
-        # Concat sorts reuse per-member Recording artifacts; concat-wide
-        # artifact detection is a later feature, so a concat request that
-        # also asks for an artifact pass is rejected here (the contract is
-        # "no ArtifactDetectionSource row" for concat sorts). The identity
-        # helper enforces the same invariant; this raise keeps the message
-        # at the user-facing insert boundary.
+        # A concat already owns frozen member masks. A single detection here
+        # cannot describe that source; the identity helper enforces the same
+        # invariant for callers that bypass this selection boundary.
         if artifact_detection_id is not None:
             raise ValueError(
                 "SortingSelection.insert_selection: a concat_recording_id "
                 "source cannot supply an artifact_detection_id. Concat sorts "
-                "reuse per-member Recording artifacts and have no concat-wide "
-                "artifact-detection pass."
+                "own per-member masks through ConcatenatedRecordingSelection; "
+                "supply the detections when selecting the concat source."
             )
         source_restriction = {"concat_recording_id": key["concat_recording_id"]}
         identity = sorting_identity_payload(

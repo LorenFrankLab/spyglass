@@ -94,6 +94,7 @@ class PipelineStageSeconds(TypedDict):
     artifact_detection: NotRequired[float]
     # Concat source stages (concat mode only).
     member_recording: NotRequired[float]
+    member_artifact_detection: NotRequired[float]
     concat_recording: NotRequired[float]
     member_curation: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
@@ -113,6 +114,7 @@ class _RunV2SummaryBase(TypedDict):
     """
 
     pipeline_preset: str
+    scientific_config: dict
     sorting_id: UUID
     # The ROOT (uncurated) curation the run always creates. Named ``root_*`` --
     # not bare ``merge_id`` / ``curation_id`` -- so a root-only run has nothing
@@ -177,18 +179,30 @@ class RunV2SingleSessionSummary(_RunV2SummaryBase):
     artifact_detection_status: StageStatus
 
 
+class MemberArtifactSummary(TypedDict):
+    """Exact per-member detection and frame-based masked duration."""
+
+    member_index: int
+    artifact_detection_id: UUID
+    status: StageStatus
+    masked_duration_s: float
+
+
 class RunV2ConcatSummary(_RunV2SummaryBase):
     """``run_v2_pipeline`` summary for a concat (SessionGroup) run.
 
     ``source_mode == "concat"``. Carries the per-member recording PKs and the
     ConcatenatedRecording keys in place of the single-session recording keys,
-    one wall-clock-aligned merge ID per member session, and no artifact stage
-    (a concat SortingSelection has no ArtifactDetectionSource row).
+    one wall-clock-aligned merge ID per member session, and per-member artifact
+    results. Masks belong to the concat source, not SortingSelection.
     """
 
     source_mode: Literal["concat"]
     member_recording_status: StageStatus
     member_recording_ids: list[UUID]
+    member_artifact_detection_status: StageStatus
+    member_artifacts: list[MemberArtifactSummary]
+    artifact_masked_duration_s: float
     concat_recording_id: UUID
     concat_recording_status: StageStatus
     member_curation_status: StageStatus

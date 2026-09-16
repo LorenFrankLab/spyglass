@@ -1138,7 +1138,7 @@ def test_assert_preset_compute_rows_passes_for_seeded_concat_preset(dj_conn):
     initialize_v2_defaults()
     bundle = _PIPELINE_PRESETS[_CONCAT_PRESET]
     # No raise: every param row is seeded and mountainsort5 is a local SI sorter.
-    assert_preset_compute_rows(bundle, with_artifact=False)
+    assert_preset_compute_rows(bundle)
 
 
 @pytest.mark.database
@@ -1160,7 +1160,7 @@ def test_assert_preset_compute_rows_raises_on_missing_sorter_row(dj_conn):
         update={"sorter_params_name": "does_not_exist_xyz"}
     )
     with pytest.raises(PreflightError, match="SorterParameters row"):
-        assert_preset_compute_rows(bundle, with_artifact=False)
+        assert_preset_compute_rows(bundle)
 
 
 @pytest.mark.database
@@ -1180,7 +1180,7 @@ def test_assert_preset_compute_rows_raises_on_missing_preprocessing_row(
         update={"preprocessing_params_name": "does_not_exist_xyz"}
     )
     with pytest.raises(PreflightError, match="PreprocessingParameters row"):
-        assert_preset_compute_rows(bundle, with_artifact=False)
+        assert_preset_compute_rows(bundle)
 
 
 _CONTAINER_PRESET = "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
@@ -1230,7 +1230,7 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
         lambda: (False, "docker not installed"),
     )
     with pytest.raises(PreflightError, match="not runnable here"):
-        assert_preset_compute_rows(bundle, with_artifact=False)
+        assert_preset_compute_rows(bundle)
 
     # Runtime available -> the container check passes (no local install needed).
     monkeypatch.setattr(
@@ -1239,4 +1239,41 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
     monkeypatch.setattr(
         preflight_mod, "_docker_runtime_available", lambda: (True, "ok")
     )
-    assert_preset_compute_rows(bundle, with_artifact=False)
+    assert_preset_compute_rows(bundle)
+
+
+@pytest.mark.database
+def test_scientific_setup_uses_execution_rows(preflight_inputs):
+    from spyglass.spikesorting.v2 import _pipeline_presets as pl
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        describe_scientific_setup,
+    )
+    from spyglass.spikesorting.v2._recipe_catalog import DEFAULT_PIPELINE_PRESET
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    bundle = pl._PIPELINE_PRESETS[DEFAULT_PIPELINE_PRESET]
+    group = {
+        field: preflight_inputs[field]
+        for field in ("nwb_file_name", "sort_group_id")
+    }
+    setup = describe_scientific_setup(bundle, [group])
+    assert setup["preprocessing"] == (
+        PreprocessingParameters
+        & {"preprocessing_params_name": bundle.preprocessing_params_name}
+    ).fetch1("params")
+    assert setup["artifact_detection"] == (
+        ArtifactDetectionParameters
+        & {
+            "artifact_detection_params_name": bundle.artifact_detection_params_name
+        }
+    ).fetch1("params")
+    assert len(setup["references"]) == 1
+    no_mask = bundle.model_copy(
+        update={"sorter": "kilosort4", "artifact_detection_params_name": None}
+    )
+    setup = describe_scientific_setup(
+        no_mask, [group], {"si_sorter_params": {"nblocks": 0}}
+    )
+    assert setup["artifact_detection"] is None
+    assert setup["motion"]["nblocks"] == 0

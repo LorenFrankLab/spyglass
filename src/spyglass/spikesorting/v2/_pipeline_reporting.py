@@ -724,17 +724,10 @@ def _observed_duration_s(sorting_id) -> float:
     sorting_key = {"sorting_id": sorting_id}
     source = SortingSelection.resolve_source(sorting_key)
     if source.kind == "concatenated_recording":
-        # A concat sort observes the whole concatenated recording (concat sorts
-        # carry no artifact pass), so its observed duration is the materialized
-        # cache's total_duration_s -- there is no per-member RecordingSelection
-        # to fetch for a concat-only key.
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
+        from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
-        return float(
-            (ConcatenatedRecording & source.key).fetch1("total_duration_s")
-        )
+        intervals = (ConcatenatedRecording & source.key).fetch1("obs_intervals")
+        return float(np.diff(intervals, axis=1).sum())
     recording_id = source.key["recording_id"]
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         sorting_key
@@ -866,6 +859,7 @@ _RUN_STAGE_ORDER = (
     # recording/artifact_detection instead; the receipt lists only the stages a
     # run actually has), so order them here to keep the receipt chronological.
     "member_recording",
+    "member_artifact_detection",
     "concat_recording",
     "sorting",
     "curation",
@@ -956,6 +950,33 @@ def _describe_run_single_rows(
             stage=stage,
             status=run_summary.get(f"{stage}_status"),
             seconds=stage_seconds.get(stage),
+        )
+        rows.append(row)
+    for setting, value in (run_summary.get("scientific_config") or {}).items():
+        row = _run_blank_row()
+        row.update(
+            row_type="config",
+            sort_group_id=sort_group_id,
+            setting=setting,
+            value=repr(value),
+        )
+        rows.append(row)
+    for artifact in run_summary.get("member_artifacts", []):
+        row = _run_blank_row()
+        row.update(
+            row_type="member_artifact",
+            member_index=artifact["member_index"],
+            status=artifact["status"],
+            setting="artifact_detection_id",
+            value=f"{artifact['artifact_detection_id']}; masked {artifact['masked_duration_s']:.6g} s",
+        )
+        rows.append(row)
+    if "artifact_masked_duration_s" in run_summary:
+        row = _run_blank_row()
+        row.update(
+            row_type="config",
+            setting="artifact_masked_duration_s",
+            value=str(run_summary["artifact_masked_duration_s"]),
         )
         rows.append(row)
     for member_index, member_merge_id in sorted(

@@ -239,6 +239,7 @@ class PreflightReport:
     checks: list["PreflightCheck"]
     effective_config: "dict | None" = None
     resource_notes: list[str] = field(default_factory=list)
+    scientific_config: dict = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         """Return ``True`` when the configuration is runnable (``ok``)."""
@@ -255,6 +256,7 @@ class PreflightReport:
                 self.expected_ids,
                 self.effective_config,
                 self.resource_notes,
+                self.scientific_config,
             )
         )
 
@@ -317,17 +319,29 @@ class PreflightSessionReport:
                     row["expected_ids"],
                     row["effective_config"],
                     row["resource_notes"],
+                    row["scientific_config"],
                 )
             )
         return "\n".join(lines)
 
 
 def _preflight_details(
-    errors, warnings, expected_ids, effective_config, resources
+    errors,
+    warnings,
+    expected_ids,
+    effective_config,
+    resources,
+    scientific_config=None,
 ):
     """Format fields shared by single-group and session preflight reports."""
     lines = [f"  ERROR: {message}" for message in errors]
     lines.extend(f"  Warning: {message}" for message in warnings)
+    if scientific_config:
+        lines.append("  Scientific setup:")
+        lines.extend(
+            f"    {line}"
+            for line in pformat(scientific_config, width=76).splitlines()
+        )
     for key, selection in expected_ids.items():
         if selection["id"] is None:
             action = "skip"
@@ -346,6 +360,66 @@ def _preflight_details(
         lines.append("  Resources:")
         lines.extend(f"    {note}" for note in resources)
     return lines
+
+
+def describe_scientific_setup(bundle, group_keys, effective_config=None):
+    """Resolve the preprocessing and artifact rows execution uses for display."""
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        SortGroupV2,
+    )
+
+    preprocessing = (
+        PreprocessingParameters
+        & {"preprocessing_params_name": bundle.preprocessing_params_name}
+    ).fetch("params")
+    artifacts = (
+        (
+            ArtifactDetectionParameters
+            & {
+                "artifact_detection_params_name": bundle.artifact_detection_params_name
+            }
+        ).fetch("params")
+        if bundle.artifact_detection_params_name is not None
+        else []
+    )
+    result = {
+        "preprocessing_recipe": bundle.preprocessing_params_name,
+        "preprocessing": dict(preprocessing[0]) if len(preprocessing) else None,
+        "references": (SortGroupV2 & group_keys).fetch(
+            "nwb_file_name",
+            "sort_group_id",
+            "reference_mode",
+            "reference_electrode_id",
+            as_dict=True,
+        ),
+        "artifact_recipe": bundle.artifact_detection_params_name,
+        "artifact_detection": dict(artifacts[0]) if len(artifacts) else None,
+        "motion": "No external correction; DriftEstimate is diagnostic only.",
+    }
+    if bundle.motion_correction_params_name is not None:
+        from spyglass.spikesorting.v2.session_group import (
+            MotionCorrectionParameters,
+        )
+
+        rows = (
+            MotionCorrectionParameters
+            & {
+                "motion_correction_params_name": bundle.motion_correction_params_name
+            }
+        ).fetch("params")
+        result["motion"] = dict(rows[0]) if len(rows) else None
+        result["artifact_application"] = (
+            "Per member before concatenation and motion correction."
+        )
+    elif bundle.sorter == "kilosort4":
+        params = (effective_config or {}).get("si_sorter_params", {})
+        result["motion"] = {
+            "sorter": "kilosort4",
+            "nblocks": params.get("nblocks"),
+        }
+    return result
 
 
 def resolve_preset_sort_config(bundle) -> "dict | None":
@@ -381,15 +455,15 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
     ).as_dict()
 
 
-def assert_preset_compute_rows(bundle, *, with_artifact: bool = True) -> None:
+def assert_preset_compute_rows(bundle) -> None:
     """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
     are missing.
 
     The mode-independent half of ``preflight_v2_pipeline``: the preset's
     preprocessing / (optional) artifact / sorter / display-analyzer-waveform
     Lookup rows plus the sorter binary/runtime. ``run_v2_pipeline``'s concat
-    preflight calls this (``with_artifact=False`` -- a concat sort runs no
-    artifact stage) so a concat run fails fast on a missing row instead of deep
+    preflight calls this, including its member artifact recipe, so a concat
+    run fails fast on a missing row instead of deep
     in the member/concat populate, matching the single-session preflight. The
     param-row existence queries mirror ``preflight_v2_pipeline``'s (kept in its
     report-building form there); the sorter binary/runtime check reuses the
@@ -424,7 +498,7 @@ def assert_preset_compute_rows(bundle, *, with_artifact: bool = True) -> None:
             f"{bundle.preprocessing_params_name!r} is missing. Run "
             "initialize_v2_defaults()."
         )
-    if with_artifact and bundle.artifact_detection_params_name is not None:
+    if bundle.artifact_detection_params_name is not None:
         if not (
             ArtifactDetectionParameters
             & {
@@ -531,10 +605,9 @@ def assert_concat_preflight(
     sort-group-electrode / sampling-rate prerequisites, plus the preset's
     motion-correction row, the ``auto_curate`` metric/rule/metric-waveform rows
     (when opted in), and the compute-time param rows + sorter binary via
-    :func:`assert_preset_compute_rows` (``with_artifact=False`` -- a concat sort
-    runs no artifact stage). Fails fast BEFORE the heavy member / concat populate
-    rather than deep in a member ``populate`` with an opaque error. Returns the
-    advisory-warning list (currently always empty) for symmetry with
+    :func:`assert_preset_compute_rows`, including member artifact parameters.
+    Fails before member/concat populate. Returns advisory warnings (including
+    explicitly disabled artifact masking) for symmetry with
     :func:`preflight_v2_pipeline`.
     """
     from spyglass.common import IntervalList, Raw
@@ -682,7 +755,9 @@ def assert_concat_preflight(
                 "initialize_v2_defaults()."
             )
 
-    assert_preset_compute_rows(bundle, with_artifact=False)
+    assert_preset_compute_rows(bundle)
+    if bundle.artifact_detection_params_name in (None, "none"):
+        return ["No artifact masking selected for the concatenated members."]
     return []
 
 
@@ -913,8 +988,7 @@ def preflight_v2_pipeline(
         f"PreprocessingParameters row {bundle.preprocessing_params_name!r} is "
         "missing. Run initialize_v2_defaults().",
     )
-    # A None artifact name means the preset runs no artifact stage (skip /
-    # concat), so there is no ArtifactDetectionParameters row to require.
+    # An explicit no-mask preset has no artifact parameter row to require.
     if bundle.artifact_detection_params_name is not None:
         _check(
             "artifact_detection_params_exist",
@@ -1115,10 +1189,10 @@ def preflight_v2_pipeline(
     # Non-blocking advisory: the "none" artifact params are a no-op
     # pass-through (no masking). "default" performs real amplitude-threshold
     # detection and is the legitimate built-in choice, so it is NOT warned.
-    if bundle.artifact_detection_params_name == "none":
+    if bundle.artifact_detection_params_name in (None, "none"):
         warnings.append(
-            "artifact_detection_params_name='none': no artifact masking will be "
-            "applied for this run."
+            f"artifact_detection_params_name={bundle.artifact_detection_params_name!r}: "
+            "no artifact masking will be applied for this run."
         )
 
     # expected_ids: the deterministic selection PKs this run would produce, via
@@ -1235,6 +1309,11 @@ def preflight_v2_pipeline(
         checks=checks,
         effective_config=effective_config,
         resource_notes=resource_notes,
+        scientific_config=describe_scientific_setup(
+            bundle,
+            [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
+            effective_config,
+        ),
     )
 
 
@@ -1490,6 +1569,7 @@ def preflight_v2_pipeline_session(
                 "checks": report.checks,
                 "effective_config": report.effective_config,
                 "resource_notes": report.resource_notes,
+                "scientific_config": report.scientific_config,
             }
         )
         errors.extend(

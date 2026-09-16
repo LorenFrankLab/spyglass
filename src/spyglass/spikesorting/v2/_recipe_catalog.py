@@ -766,27 +766,20 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "row applies the ADC phase-shift KS4 cannot, plus a bandpass; "
                 "because KS4 also common-references (do_CAR=true), set the sort "
                 "group's reference_mode='none' to avoid double-referencing before "
-                "KS4. Artifact detection is 'none' (KS4's internal preprocessing "
-                "and drift handling stand in for amplitude masking)."
+                "KS4. Artifact detection is 'none': this preset applies no "
+                "Spyglass artifact mask. Internal preprocessing and drift correction "
+                "do not substitute for artifact rejection."
             ),
         ),
         # Containerized (Singularity, 30 kHz) MS4 -- the one shipped container
         # path; its execution backend lives on the referenced
         # SorterParameters.execution_params row, not on this preset.
         MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
-        # Same-day concatenated chronic sort (SessionGroup +
-        # ConcatenatedRecording). It runs NO artifact detection
-        # (artifact_detection_params_name is None -- a concat sort carries no
-        # ArtifactDetectionSource row) and pins motion correction to the
-        # "auto_default" row (preset "auto", which resolves to rigid_fast for a
-        # same-day group). Otherwise the same MS5 hippocampus recipe as the
-        # single-session default. Run it via run_v2_pipeline's concat mode
-        # (concat_session_group_owner / concat_session_group_name); a
-        # motion-pinned preset like this one is required there and is rejected
-        # for single-session inputs.
+        # Same-day chronic sort: detect/mask each member before concatenation
+        # and motion correction; otherwise the single-session MS5 recipe.
         "franklab_concat_hippocampus_30khz_ms5_2026_06": dict(
             preprocessing_params_name=HIPPOCAMPUS_PREPROC,
-            artifact_detection_params_name=None,
+            artifact_detection_params_name=ARTIFACT_100UV,
             sorter="mountainsort5",
             sorter_params_name=MS5_30KHZ,
             metric_params_name="franklab_default",
@@ -806,9 +799,8 @@ def pipeline_preset_specs() -> dict[str, dict]:
             ),
             threshold_units="sigma of the whitened signal (~5.5)",
             notes=(
-                "Concatenated sorts run NO artifact detection "
-                "(artifact_detection_params_name is None -- there is no "
-                "ArtifactDetectionSource row), and motion correction is pinned "
+                "Detect and mask artifacts per member before concatenation and "
+                "motion correction. Motion correction is pinned "
                 "to the 'auto_default' row (preset 'auto', which resolves to "
                 "rigid_fast for a same-day group). Otherwise the same MS5 "
                 "hippocampus recipe as the single-session default; MS5 runs "

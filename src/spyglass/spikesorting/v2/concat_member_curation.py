@@ -15,7 +15,6 @@ from spyglass.spikesorting.v2._concat_recording import (
     split_unit_spike_trains,
 )
 from spyglass.spikesorting.v2._units_nwb import (
-    _base_intervals_from_recording,
     _write_curated_units_nwb_body,
     numpysorting_from_abs_times,
     read_units_abs_times_and_sample_indices,
@@ -390,9 +389,11 @@ class ConcatMemberCuration(SpyglassMixin, dj.Computed):
             int(unit_id): timestamps[np.asarray(frames, dtype=np.int64)]
             for unit_id, frames in local_frames.items()
         }
-        member_recording = Recording().get_recording(recording_key)
-        fs = float(recording_row["sampling_frequency"])
-        member_obs = _base_intervals_from_recording(member_recording, fs)
+        member_obs = (
+            ConcatenatedRecording.MemberBoundary
+            & concat_key
+            & {"member_index": member_index}
+        ).fetch1("member_valid_times")
         obs_intervals_by_uid = {
             int(unit_id): member_obs for unit_id in local_frames
         }

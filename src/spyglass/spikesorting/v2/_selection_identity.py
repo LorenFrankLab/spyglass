@@ -417,8 +417,8 @@ def sorting_identity_payload(
     ValueError
         If neither or both of ``recording_id`` and ``concat_recording_id``
         are given (exactly one source is required), or if a concat source is
-        combined with an ``artifact_detection_id`` (concat sorts have no
-        artifact-detection pass).
+        combined with an ``artifact_detection_id`` (concat member masks belong
+        to the concat selection).
     """
     if (recording_id is None) == (concat_recording_id is None):
         raise ValueError(
@@ -429,7 +429,7 @@ def sorting_identity_payload(
         if artifact_detection_id is not None:
             raise ValueError(
                 "sorting_identity_payload: a concat source cannot carry an "
-                "artifact_detection_id; concat sorts have no artifact pass."
+                "artifact_detection_id; configure member masks on the concat selection."
             )
         return {
             "source_kind": "concat",

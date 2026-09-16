@@ -24,10 +24,10 @@ touches no DB at call time.
 from __future__ import annotations
 
 
-def apply_artifact_mask(
+def artifact_frame_ranges(
     recording, valid_times, *, artifact_detection_id=None, recording_id=None
 ):
-    """Zero out the complement of ``valid_times`` on the recording.
+    """Map excluded periods to half-open frame ranges with bounded memory.
 
     ``valid_times`` is the artifact-removed (start, end) seconds
     array from the upstream ``IntervalList``; ``make_fetch``
@@ -41,8 +41,8 @@ def apply_artifact_mask(
     Parameters
     ----------
     recording : si.BaseRecording
-        The recording to mask; the complement of ``valid_times`` is
-        zeroed in place of the kept intervals.
+        The recording whose actual timestamps define frame coordinates.
+        This mapping function does not modify it.
     valid_times : numpy.ndarray
         Artifact-removed ``(n, 2)`` array of (start, end) seconds,
         sorted by start and non-overlapping.
@@ -55,9 +55,8 @@ def apply_artifact_mask(
 
     Returns
     -------
-    si.BaseRecording
-        The artifact-masked recording, or the input recording
-        unchanged when no artifact frames need zeroing.
+    list[tuple[int, int]]
+        Excluded half-open frame ranges; empty when every frame is valid.
 
     Raises
     ------
@@ -75,7 +74,6 @@ def apply_artifact_mask(
         input is intentional -- silent sort/merge is deferred.)
     """
     import numpy as np
-    import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._signal_math import (
         _segment_times_at,
@@ -269,7 +267,7 @@ def apply_artifact_mask(
     ]
 
     if not frame_ranges:
-        return recording
+        return []
 
     # Data-sanity guard: a valid_times that keeps almost nothing makes the
     # artifact complement span most of the recording. The interval-native
@@ -283,6 +281,29 @@ def apply_artifact_mask(
         n_samples,
         context="apply_artifact_mask: ",
     )
+
+    return frame_ranges
+
+
+def apply_artifact_mask(
+    recording, valid_times, *, artifact_detection_id=None, recording_id=None
+):
+    """Mask excluded periods lazily, preserving frames and timestamps."""
+    ranges = artifact_frame_ranges(
+        recording,
+        valid_times,
+        artifact_detection_id=artifact_detection_id,
+        recording_id=recording_id,
+    )
+    return silence_frame_ranges(recording, ranges)
+
+
+def silence_frame_ranges(recording, frame_ranges):
+    """Silence validated half-open frame ranges without expanding sample indices."""
+    import spikeinterface.preprocessing as sip
+
+    if not len(frame_ranges):
+        return recording
 
     # Mask the artifact RANGES with the interval-native ``silence_periods``
     # rather than expanding them to one trigger per sample. ``list_periods``

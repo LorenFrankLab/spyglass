@@ -874,34 +874,38 @@ class _ArtifactDetectionMixin:
         return result
 
     def _merge_registration(self, row):
-        """Return ``(merge_id, n_referencing_sortings)`` for a detection row.
+        """Return merge registration and count of sorting/concat dependencies.
 
-        ``(None, 0)`` when the detection is not registered in
-        ``ArtifactDetectionOutput`` (so nothing references it through the merge).
+        Concat member FKs can reference a detection directly even if its merge
+        registration is absent.
         """
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecordingSelection,
+        )
         from spyglass.spikesorting.v2.sorting import SortingSelection
 
         det_key = {"artifact_detection_id": row["artifact_detection_id"]}
+        n_concat = len(ConcatenatedRecordingSelection.MemberSnapshot & det_key)
         try:
             merge_id = ArtifactDetectionOutput.get_merge_id(det_key)
         except KeyError:
-            return None, 0
+            return None, n_concat
         n = len(
             SortingSelection.ArtifactDetectionSource
             & {"artifact_detection_merge_id": merge_id}
         )
-        return merge_id, n
+        return merge_id, n + n_concat
 
     def delete(self, *args, safemode=None, _cascade_sorts=False, **kwargs):
         """Delete detection rows, their ``ArtifactDetectionOutput`` registration,
         and their owned ``IntervalList`` rows -- coordinated with the merge.
 
         Deletion is REFUSED (``ValueError``) when a detection is referenced by a
-        ``SortingSelection`` through the merge, so an existing sort does not
-        silently lose its artifact pass. Delete the dependent sorts first, or use
+        ``SortingSelection`` or frozen ``ConcatenatedRecordingSelection``
+        member. Delete those selections and their outputs first, or use
         :meth:`cascade_delete` to remove them too. A per-detection advisory lock
         (the same one ``SortingSelection.insert_selection`` takes when it links
         an artifact) serializes delete-vs-select on a detection, so a CONCURRENT
@@ -974,10 +978,8 @@ class _ArtifactDetectionMixin:
                     )
                 )
 
-            # Refuse to delete a detection a sorting references (unless
-            # cascading): a sort must not silently lose its artifact pass.
-            # ``_merge_registration`` returns the referencing-sort count via the
-            # merge; under the lock the count is stable through the cascade.
+            # Count standalone and concat dependencies under the lifecycle
+            # lock so a concurrent selection cannot slip past this check.
             if not _cascade_sorts:
                 referenced = [
                     str(row["artifact_detection_id"])
@@ -987,8 +989,9 @@ class _ArtifactDetectionMixin:
                 if referenced:
                     raise ValueError(
                         f"{detection_cls.__name__}.delete: refusing to delete "
-                        "artifact detection(s) referenced by a SortingSelection:"
-                        f" {referenced}. Delete those sorts first, or call "
+                        "artifact detection(s) referenced by a SortingSelection "
+                        "or ConcatenatedRecordingSelection:"
+                        f" {referenced}. Delete those selections and outputs first, or call "
                         "cascade_delete() to remove them too."
                     )
 

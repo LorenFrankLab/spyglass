@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+
 
 @pytest.fixture(scope="module")
 def concat_member_curation(chronic_2_session_minirec):
@@ -42,7 +44,7 @@ def concat_member_curation(chronic_2_session_minirec):
     SessionGroup.create_group(
         owner, group_key["session_group_name"], sub["same_day_members"]
     )
-    concat_key = ConcatenatedRecordingSelection.insert_selection(
+    concat_key = select_unmasked_concat(
         {
             **group_key,
             "preprocessing_params_name": sub["preprocessing_params_name"],

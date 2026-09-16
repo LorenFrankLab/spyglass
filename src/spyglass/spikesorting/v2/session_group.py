@@ -16,6 +16,8 @@ Tables:
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
@@ -25,6 +27,10 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.motion_correction import (
     MOTION_CORRECTION_SCHEMA_VERSION,
     MotionCorrectionParamsSchema,
+)
+from spyglass.spikesorting.v2.artifact import (
+    RecordingArtifactDetection,
+    RecordingArtifactSelection,
 )
 from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,  # noqa: F401
@@ -486,7 +492,8 @@ class ConcatenatedRecordingSelection(
         logical identity AND its resolved ``Recording`` (``recording_id`` +
         ``recording_content_hash``) here, and folds the ordered LOGICAL set into
         ``concat_recording_id`` via :func:`._concat_recording.member_set_hash`.
-        Stored as PLAIN columns (no foreign keys) so the snapshot is genuinely
+        Member identity columns are snapshots; the selected artifact detection
+        has a foreign key so it cannot silently disappear. The identity stays
         frozen: a later edit to ``SessionGroup.Member`` or the member's
         ``RecordingSelection`` cannot cascade into it. Concat read /
         materialization paths read THIS, never the live ``SessionGroup.Member``
@@ -506,6 +513,7 @@ class ConcatenatedRecordingSelection(
         team_name: varchar(80)
         recording_id: uuid
         recording_content_hash: char(64)
+        -> [nullable] RecordingArtifactDetection
         """
 
     #: The logical-identity fields (everything but the minted PK). A concat
@@ -521,7 +529,12 @@ class ConcatenatedRecordingSelection(
     )
 
     @classmethod
-    def insert_selection(cls, key: dict) -> dict:
+    def insert_selection(
+        cls,
+        key: dict,
+        *,
+        artifact_detection_ids: Mapping[int, uuid.UUID | str | None],
+    ) -> dict:
         """Find-existing-or-insert a concat selection; return a PK-only dict.
 
         Enforces, BEFORE inserting, that every ``SessionGroup.Member`` has a
@@ -544,6 +557,10 @@ class ConcatenatedRecordingSelection(
             ``preprocessing_params_name``, ``motion_correction_params_name``.
             A caller-supplied ``concat_recording_id`` is ignored; the id is
             minted/found here.
+        artifact_detection_ids : mapping
+            Exact populated detection ID for every member index. An explicit
+            ``None`` disables masking for that member. Each detection must
+            belong to that member's recording; populate detections first.
 
         Returns
         -------
@@ -607,6 +624,20 @@ class ConcatenatedRecordingSelection(
                 f"{group_key} has no members. Create it via "
                 "SessionGroup.create_group() with at least one member first."
             )
+        from spyglass.spikesorting.v2._lookup_validation import lossless_int
+
+        artifacts = {
+            lossless_int(index, "member_index"): (
+                None if value is None else uuid.UUID(str(value))
+            )
+            for index, value in artifact_detection_ids.items()
+        }
+        expected_members = {int(member["member_index"]) for member in members}
+        if set(artifacts) != expected_members:
+            raise ValueError(
+                "artifact_detection_ids must name every member exactly once: "
+                f"expected {sorted(expected_members)}, got {sorted(artifacts)}."
+            )
         # Reject members in different physical electrode spaces (different sort
         # group electrodes / brain regions). The concat result is read in the
         # anchor member's electrode frame, so this must hold regardless of
@@ -633,6 +664,15 @@ class ConcatenatedRecordingSelection(
             if rec_pk is None or len(content_hashes) == 0:
                 missing.append(rec_sel_key)
                 continue
+            artifact_id = artifacts[int(member["member_index"])]
+            if artifact_id is not None and not (
+                RecordingArtifactDetection * RecordingArtifactSelection
+                & {**rec_pk, "artifact_detection_id": artifact_id}
+            ):
+                raise ValueError(
+                    f"Member {member['member_index']}: artifact detection "
+                    f"{artifact_id} must be populated for recording {rec_pk}."
+                )
             snapshot_rows.append(
                 {
                     "member_index": int(member["member_index"]),
@@ -642,6 +682,7 @@ class ConcatenatedRecordingSelection(
                     "team_name": member["team_name"],
                     "recording_id": str(rec_pk["recording_id"]),
                     "recording_content_hash": str(content_hashes[0]),
+                    "artifact_detection_id": artifact_id,
                 }
             )
         if missing:
@@ -674,24 +715,46 @@ class ConcatenatedRecordingSelection(
             {"concat_recording_id": concat_recording_id, **row}
             for row in snapshot_rows
         ]
+        from contextlib import ExitStack
+
+        from spyglass.spikesorting.v2._db_locking import required_advisory_lock
+        from spyglass.spikesorting.v2.artifact_output import (
+            ArtifactDetectionOutput,
+        )
         from spyglass.spikesorting.v2.utils import transaction_or_noop
 
+        detection_ids = sorted(
+            {value for value in artifacts.values() if value is not None}
+        )
+        if detection_ids and cls.connection.in_transaction:
+            raise ValueError(
+                "Create an artifact-backed concat selection outside a caller-owned "
+                "transaction so its artifact lifecycle locks cover the commit."
+            )
         try:
             # allow_direct_insert: this helper IS the validation boundary (it
             # has already checked every member's Recording exists, frozen the
             # snapshot, and minted the deterministic id), so it bypasses the
             # master insert guard. Master + snapshot land in one transaction so
             # a concat id never exists without its frozen member set.
-            with transaction_or_noop(cls.connection):
-                cls.insert1(
-                    {
-                        **identity,
-                        "member_set_hash": set_hash,
-                        "concat_recording_id": concat_recording_id,
-                    },
-                    allow_direct_insert=True,
-                )
-                cls.MemberSnapshot.insert(snapshot_inserts)
+            with ExitStack() as locks:
+                for detection_id in detection_ids:
+                    locks.enter_context(
+                        required_advisory_lock(
+                            ArtifactDetectionOutput,
+                            {"artifact_detection_id": detection_id},
+                        )
+                    )
+                with transaction_or_noop(cls.connection):
+                    cls.insert1(
+                        {
+                            **identity,
+                            "member_set_hash": set_hash,
+                            "concat_recording_id": concat_recording_id,
+                        },
+                        allow_direct_insert=True,
+                    )
+                    cls.MemberSnapshot.insert(snapshot_inserts)
         except dj.errors.DuplicateError:
             existing = cls._find_existing_pk(
                 identity, set_hash, concat_recording_id
@@ -785,6 +848,7 @@ class ConcatRecordingComputed(NamedTuple):
     content_hash: str
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
+    obs_intervals: object
     # The RESOLVED motion-correction preset string ("rigid_fast" for an "auto"
     # same-day request, the explicit preset otherwise, "none" when skipped) --
     # resolved in make_compute and persisted so the row records what actually
@@ -816,6 +880,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     n_samples: bigint            # concat sample count; exact integer basis for the MemberBoundary back-mapping
     content_hash: char(64)
     motion_preset: varchar(64)   # RESOLVED motion preset ('rigid_fast' for 'auto' same-day, the explicit preset, or 'none')
+    obs_intervals: longblob     # kept intervals on the synthetic concat timeline, in seconds
     """
 
     class MemberBoundary(SpyglassMixinPart):
@@ -826,6 +891,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         member_index: int
         ---
         end_sample: bigint
+        member_valid_times: longblob  # kept intervals on the original member timeline
         """
 
     @staticmethod
@@ -906,6 +972,22 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "nwb_file_name": row["nwb_file_name"],
                     "interval_list_name": row["interval_list_name"],
                     "recording_pk": {"recording_id": str(recording_id)},
+                    "artifact_detection_id": (
+                        str(row["artifact_detection_id"])
+                        if row["artifact_detection_id"] is not None
+                        else None
+                    ),
+                    "valid_times": (
+                        RecordingArtifactDetection().get_artifact_removed_intervals(
+                            {
+                                "artifact_detection_id": row[
+                                    "artifact_detection_id"
+                                ]
+                            }
+                        )
+                        if row["artifact_detection_id"] is not None
+                        else None
+                    ),
                 }
             )
         if missing:
@@ -1109,13 +1191,34 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._concat_recording import (
             build_concatenated_recording,
             cumulative_member_boundaries,
+            mask_member_recordings,
+            observation_intervals,
             resolve_motion_correction,
         )
         from spyglass.spikesorting.v2._recording_nwb import write_nwb_artifact
+        from spyglass.spikesorting.v2._sorting_artifact_mask import (
+            silence_frame_ranges,
+        )
+        from spyglass.spikesorting.v2._units_nwb import (
+            _base_intervals_from_recording,
+        )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         recordings, member_sample_counts, member_indices = (
             self._load_member_recordings(member_plan)
+        )
+        member_valid_times = [
+            (
+                plan["valid_times"]
+                if plan["valid_times"] is not None
+                else _base_intervals_from_recording(
+                    recording, recording.get_sampling_frequency()
+                )
+            )
+            for plan, recording in zip(member_plan, recordings, strict=True)
+        ]
+        recordings, artifact_ranges = mask_member_recordings(
+            recordings, [plan["valid_times"] for plan in member_plan]
         )
 
         # Resolve the Spyglass 'auto' alias against the group's (fetch-time)
@@ -1154,6 +1257,11 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "would be wrong."
             )
         sampling_frequency = float(corrected.get_sampling_frequency())
+        # Keep the same excluded frames after spatial interpolation as before it.
+        corrected = silence_frame_ranges(corrected, artifact_ranges)
+        obs_intervals = observation_intervals(
+            corrected_n_samples, sampling_frequency, artifact_ranges
+        )
         n_channels = int(corrected.get_num_channels())
         total_duration_s = corrected_n_samples / sampling_frequency
 
@@ -1183,6 +1291,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "recording_id": str(plan["recording_pk"]["recording_id"]),
                     "nwb_file_name": plan["nwb_file_name"],
                     "interval_list_name": plan["interval_list_name"],
+                    "artifact_detection_id": plan["artifact_detection_id"]
+                    or "none",
                     "start_sample": 0,
                     "end_sample": int(n_samples),
                     "concat_start_sample": int(concat_start),
@@ -1200,6 +1310,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     "motion_kwargs": preset_kwargs,
                     "anchor_nwb_file_name": anchor_nwb_file_name,
                     "n_members": len(member_plan),
+                    "artifact_frame_ranges": artifact_ranges,
+                    "obs_intervals": obs_intervals.tolist(),
                 },
             ),
             build_long_provenance_table(
@@ -1210,6 +1322,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                     ("recording_id", str),
                     ("nwb_file_name", str),
                     ("interval_list_name", str),
+                    ("artifact_detection_id", str),
                     ("start_sample", int),
                     ("end_sample", int),
                     ("concat_start_sample", int),
@@ -1223,13 +1336,20 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             filtering_description=(
                 f"Concatenated {len(recordings)} member recording(s) "
                 f"(preprocessing_params={preprocessing_params_name!r}); "
-                f"motion correction preset={preset_label!r}; unwhitened"
+                f"motion correction preset={preset_label!r}; member artifact "
+                "masks applied before motion correction; unwhitened"
             ),
             provenance_tables=provenance_tables,
         )
         member_boundaries = [
-            {"member_index": member_index, "end_sample": int(end_sample)}
-            for member_index, end_sample in zip(member_indices, boundaries)
+            {
+                "member_index": member_index,
+                "end_sample": int(end_sample),
+                "member_valid_times": valid_times,
+            }
+            for member_index, end_sample, valid_times in zip(
+                member_indices, boundaries, member_valid_times, strict=True
+            )
         ]
         return ConcatRecordingComputed(
             analysis_file_name=analysis_file_name,
@@ -1245,6 +1365,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
             member_boundaries=member_boundaries,
+            obs_intervals=obs_intervals,
             # Persist the RESOLVED preset ("rigid_fast" for "auto" same-day),
             # not the alias; ``preset_label`` already maps a None (skip) to "none".
             motion_preset=preset_label,
@@ -1262,6 +1383,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         content_hash,
         anchor_nwb_file_name,
         member_boundaries,
+        obs_intervals,
         motion_preset,
     ):
         """Atomically register the staged concat artifact + boundary rows.
@@ -1283,6 +1405,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 **key,
                 "member_index": boundary["member_index"],
                 "end_sample": int(boundary["end_sample"]),
+                "member_valid_times": boundary["member_valid_times"],
             }
             for boundary in member_boundaries
         ]
@@ -1301,6 +1424,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                         "n_samples": n_samples,
                         "content_hash": content_hash,
                         "motion_preset": motion_preset,
+                        "obs_intervals": obs_intervals,
                     }
                 )
                 self.MemberBoundary.insert(boundary_rows)

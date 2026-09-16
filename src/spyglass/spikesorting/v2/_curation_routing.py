@@ -217,10 +217,8 @@ def classify_and_normalize_restriction(
     }
     curation_restriction = {k: key[k] for k in _CURATION_KEYS if k in key}
 
-    # In the v2 design the presence/absence of an ``ArtifactDetectionSource``
-    # row IS the artifact-detection state, so ``artifact_detection_id=None``
-    # means "no artifact-detection pass" (anti-join); an absent key is a
-    # wildcard (no artifact restriction at all).
+    # None excludes both standalone detections and concat member detections;
+    # an absent key is a wildcard. The table boundary assembles those joins.
     if "artifact_detection_id" in key:
         artifact_detection_id = key["artifact_detection_id"]
     else:

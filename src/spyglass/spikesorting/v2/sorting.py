@@ -1025,7 +1025,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Matches a master with the same sorter + source AND the same
         artifact-detection-source state
         (present-with-this-``artifact_detection_id`` vs absent -- a concat
-        source always has no artifact pass), so an artifact-detection-backed
+        source has no additional sorting-stage artifact pass), so an artifact-detection-backed
         and an artifact-detection-free selection never alias. Splits the
         matches by primary key:
 
@@ -1357,7 +1357,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         anchors to its own ``RecordingSelection``; a concat source anchors
         deterministically to the FIRST frozen ``MemberSnapshot`` member (so the
         per-unit ``Electrode`` FK and the analysis-NWB parent both resolve to the
-        anchor member) and observes no artifact pass. All returned values are
+        anchor member) and reads the concat-owned observation intervals. All returned values are
         deterministic bytes (DataJoint fetches inline dicts) so DataJoint's
         tri-part DeepHash integrity check across the two fetches stays stable.
 
@@ -1388,7 +1388,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # see the artifact-detection id without re-querying. Without this the
         # ``sel_row.get("artifact_detection_id")`` reads would always be None
         # and every artifact-backed sort would silently skip artifact masking.
-        # (A concat source never has an artifact pass, so this is None there.)
+        # (Concat member masks are already materialized, so this is None there.)
         sel_row["artifact_detection_id"] = (
             SortingSelection.resolve_artifact_detection(key)
         )
@@ -1447,8 +1447,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             else:
                 obs_intervals = None
         else:  # concatenated_recording
-            # A concat source has no artifact pass: concat sorts reuse the
-            # per-member Recording artifacts and observe the full recording.
+            # Concat artifacts are masked before motion correction and carry
+            # their own member detection provenance and kept intervals.
             # ``insert_selection`` rejects a concat source carrying an
             # artifact_detection_id, but a direct insert of a
             # ConcatenatedRecordingSource + ArtifactDetectionSource pair can
@@ -1464,18 +1464,23 @@ class Sorting(SpyglassMixin, dj.Computed):
                     "Sorting.make_fetch: concat source for sorting_id="
                     f"{key.get('sorting_id')!r} carries artifact_detection_id="
                     f"{sel_row['artifact_detection_id']!r}, but a concat sort "
-                    "has no artifact-detection pass (concat sorts reuse "
-                    "per-member Recording artifacts). The ArtifactDetectionSource "
+                    "owns its member masks through ConcatenatedRecordingSelection. "
+                    "The ArtifactDetectionSource "
                     "part was inserted without SortingSelection.insert_selection "
-                    "(schema bypass); the sort would otherwise run unmasked "
-                    "while claiming artifact metadata. Re-create the selection "
+                    "(schema bypass) and cannot describe all concat members. Re-create the selection "
                     "via insert_selection, or drop the stray "
                     "ArtifactDetectionSource row."
                 )
             recording_id, nwb_file_name, preprocessing_params_name = (
                 self._resolve_concat_anchor(source.key)
             )
-            obs_intervals = None
+            from spyglass.spikesorting.v2.session_group import (
+                ConcatenatedRecording,
+            )
+
+            obs_intervals = (ConcatenatedRecording & source.key).fetch1(
+                "obs_intervals"
+            )
 
         # Resolve the DISPLAY analyzer recipe from the source preprocessing
         # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
@@ -1742,7 +1747,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         # Recording; a concat source reads the materialized ConcatenatedRecording
         # cache. ``recording_id`` is the anchor (threaded from make_fetch) used
         # for the per-unit Electrode FK, NOT necessarily the loaded recording's
-        # own id. Concat sorts have no artifact pass, so the mask block is
+        # own id. Concat masks are already materialized, so the mask block is
         # skipped (obs_intervals is None there).
         if source.kind == "recording":
             recording = Recording().get_recording(

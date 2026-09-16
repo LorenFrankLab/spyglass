@@ -121,7 +121,10 @@ def test_concat_selection_member_snapshot_part_shape():
     ):
         assert column in attrs, column
     assert "member_index" in snapshot.primary_key
-    # Frozen snapshot: the only foreign-key parent is its own master.
-    assert snapshot.parents() == [
-        ConcatenatedRecordingSelection.full_table_name
-    ]
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+
+    assert set(snapshot.parents()) == {
+        ConcatenatedRecordingSelection.full_table_name,
+        RecordingArtifactDetection.full_table_name,
+    }
+    assert attrs["artifact_detection_id"].nullable

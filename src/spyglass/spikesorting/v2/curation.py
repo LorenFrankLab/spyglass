@@ -2349,8 +2349,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         supply either the bare ``artifact_detection_id`` or the
         artifact-detection IntervalList and both resolve.
         ``artifact_detection_id=None`` means "no artifact-detection pass"
-        (anti-join to sorts with no ``ArtifactDetectionSource`` row), NOT
-        "match anything" -- only an absent key is a wildcard.
+        (no standalone or concat-member detection selected), NOT "match
+        anything" -- only an absent key is a wildcard. A detection ID matches
+        a concat if any frozen member uses it.
 
         Parameters
         ----------
@@ -2457,20 +2458,23 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # other (the bug that omitted concat-backed curations from broad v2
             # merge queries).
             sort_master = SortingSelection
-        # ``artifact_detection_id`` lives on the optional ``SortingSelection.
-        # ArtifactDetectionSource`` part, NOT on ``SortingSelection`` -- it is
-        # absent from ``sort_master``'s heading, so a dict restriction with it
-        # is silently dropped. Apply the non-artifact sort keys directly, then
-        # resolve ``artifact_detection_id`` through the part: a ``None`` id
-        # anti-joins (no artifact-detection pass), a UUID intersects, and the
-        # NO_ARTIFACT_RESTRICTION sentinel leaves the query unrestricted (only
-        # an absent key is a wildcard).
+        # Artifact dependencies live on the standalone sort's optional part
+        # or on frozen concat members. None excludes both; a UUID matches any
+        # selected detection; only an absent key leaves the query unrestricted.
         sort_master = sort_master & plan.sort_restriction
         if plan.artifact_detection_id is not NO_ARTIFACT_RESTRICTION:
+            member_artifacts = ConcatenatedRecordingSelection.MemberSnapshot
             if plan.artifact_detection_id is None:
+                masked_concats = (
+                    SortingSelection.ConcatenatedRecordingSource
+                    & (
+                        member_artifacts & "artifact_detection_id IS NOT NULL"
+                    ).proj()
+                )
                 sort_master = (
                     sort_master
                     - SortingSelection.ArtifactDetectionSource.proj()
+                    - masked_concats.proj()
                 )
             else:
                 # ``ArtifactDetectionSource`` now stores the
@@ -2495,7 +2499,17 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     SortingSelection.ArtifactDetectionSource
                     & {"artifact_detection_merge_id": art_merge_id}
                 )
-                sort_master = sort_master & artifact_detection_source.proj()
+                concat_match = (
+                    SortingSelection.ConcatenatedRecordingSource
+                    & (
+                        member_artifacts
+                        & {"artifact_detection_id": plan.artifact_detection_id}
+                    ).proj()
+                )
+                sort_master = sort_master & [
+                    artifact_detection_source.proj(),
+                    concat_match.proj(),
+                ]
 
         return (
             cls * sort_master.proj("sorting_id")

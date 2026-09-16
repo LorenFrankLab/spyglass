@@ -170,6 +170,7 @@ def test_preflight_session_all_groups(monkeypatch):
             "checks",
             "effective_config",
             "resource_notes",
+            "scientific_config",
         }
         assert row["ok"] is True
         assert row["expected_ids"]  # carried through from the per-group report
@@ -736,6 +737,7 @@ def test_preflight_session_real_all_ok(session_inputs):
             "checks",
             "effective_config",
             "resource_notes",
+            "scientific_config",
         }
         assert row["ok"] is True
         assert row["resource_notes"]

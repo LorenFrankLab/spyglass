@@ -420,7 +420,7 @@ def reconstruct_recording_for_sorting_from_resolved(
     annotates ``is_filtered=True``, and applies the artifact mask for a
     single-recording artifact-backed sort -- exactly the recording
     ``build_analyzer`` starts from. A concat source observes the full recording
-    (no artifact pass), matching ``reconstruct_recording_and_sorting``.
+    (its member masks are already materialized), matching ``reconstruct_recording_and_sorting``.
 
     Parameters
     ----------
@@ -513,7 +513,7 @@ def reconstruct_recording_and_sorting(sorting_table, key):
         recording = Recording().get_recording(
             {"recording_id": source.key["recording_id"]}
         )
-    else:  # concatenated_recording: runs over the concat cache, no artifact pass
+    else:  # concatenated_recording: member masks are already in the concat cache
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
         )

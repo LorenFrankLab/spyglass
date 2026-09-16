@@ -182,8 +182,8 @@ def run_v2_pipeline(
     Two input modes, exactly one required. Single-session mode (recording ->
     optional artifact detection -> sort -> curation) needs ``nwb_file_name``,
     ``sort_group_id``, ``interval_list_name``, ``team_name``. Concat mode
-    (member recordings -> ConcatenatedRecording -> sort -> curation, no artifact
-    stage) needs ``concat_session_group_owner`` + ``concat_session_group_name``
+    (member recordings -> member artifact masks -> ConcatenatedRecording ->
+    sort -> curation) needs ``concat_session_group_owner`` + ``concat_session_group_name``
     and rejects the single-session fields (member teams come from
     ``SessionGroup.Member``). Supplying both, neither, or part of a mode raises
     ``PipelineInputError``.
@@ -236,7 +236,7 @@ def run_v2_pipeline(
         member's ``Recording``, concatenates them via ``ConcatenatedRecording``
         (using the preset's motion-correction recipe), and sorts the result.
         Requires a concat preset (one whose ``motion_correction_params_name`` is
-        set); concat sorts run no artifact detection.
+        set); the artifact recipe is applied independently to each member.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
         ``franklab_probe_hippocampus_30khz_ms5_2026_06`` (MountainSort5),
@@ -294,7 +294,7 @@ def run_v2_pipeline(
           members, and the preset's motion-correction row, plus the preset's
           preprocessing / sorter / analyzer-waveform param rows and the sorter
           binary/runtime (the compute-row checks shared with the single-session
-          preflight; a concat sort runs no artifact stage).
+          preflight; concat applies it per member before motion correction).
 
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
@@ -350,7 +350,7 @@ def run_v2_pipeline(
             ``artifact_detection_id``    : RecordingArtifactSelection PK, or
                 ``None`` when the preset runs no artifact detection
                 (``artifact_detection_params_name`` is ``None``)
-        Concat mode adds instead (no artifact stage):
+        Concat mode adds member artifact detection and concat stages:
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
             ``member_merge_ids``         : frozen ``member_index`` to
@@ -578,7 +578,7 @@ def run_v2_pipeline(
         # Concat preflight: the SessionGroup + members + each member's
         # raw/valid-times/sort-group/rate prerequisites + the preset's
         # motion-correction row (+ auto-curation rows when opted in) + the
-        # compute-time param rows and sorter binary (no artifact stage), all
+        # compute-time param rows and sorter binary, all
         # BEFORE the heavy member / concat populate. Raises PreflightError with
         # the exact fix on the first missing prerequisite.
         preflight_warnings = assert_concat_preflight(
@@ -600,6 +600,16 @@ def run_v2_pipeline(
     # ``None`` only when the preset's SorterParameters row is absent (the
     # preflight above already failed, or preflight=False bypassed it).
     run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        describe_scientific_setup,
+    )
+
+    if is_single:
+        run_summary["scientific_config"] = describe_scientific_setup(
+            bundle,
+            [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
+            run_summary["sorter_config"],
+        )
     stage_seconds: dict[str, float] = {}
     # Point the run summary at the live stage_seconds dict NOW (not only at the
     # end) so a PipelineStageError's partial run summary -- a shallow copy --
@@ -704,10 +714,7 @@ def run_v2_pipeline(
             }
         )
     else:
-        # Concat: populate each member's Recording, then concatenate, then sort.
-        # The concat SortingSelection carries no ArtifactDetectionSource row, so
-        # the manifest omits the artifact stage and carries concat_recording_id
-        # in place of recording_id.
+        # Member detections are inputs to the masked, motion-corrected concat.
         run_summary["source_mode"] = "concat"
         from spyglass.spikesorting.v2.session_group import (
             ConcatenatedRecording,
@@ -727,6 +734,20 @@ def run_v2_pipeline(
         # the same contract as every other stage. Order by member_index so
         # member_recording_ids is deterministic and matches the concat
         # identity/snapshot ordering, not the implicit DB fetch order.
+        members = (SessionGroup.Member & group_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        run_summary["scientific_config"] = describe_scientific_setup(
+            bundle,
+            [
+                {
+                    "nwb_file_name": member["nwb_file_name"],
+                    "sort_group_id": member["sort_group_id"],
+                }
+                for member in members
+            ],
+            run_summary["sorter_config"],
+        )
         member_recording_keys = [
             RecordingSelection.insert_selection(
                 {
@@ -737,9 +758,7 @@ def run_v2_pipeline(
                     "team_name": member["team_name"],
                 }
             )
-            for member in (SessionGroup.Member & group_key).fetch(
-                as_dict=True, order_by="member_index"
-            )
+            for member in members
         ]
 
         def _populate_member_recordings():
@@ -761,6 +780,67 @@ def run_v2_pipeline(
             key["recording_id"] for key in member_recording_keys
         ]
 
+        artifact_ids = {int(member["member_index"]): None for member in members}
+        run_summary["member_artifacts"] = []
+        if bundle.artifact_detection_params_name is None:
+            run_summary["member_artifact_detection_status"] = "skipped"
+            stage_seconds["member_artifact_detection"] = 0.0
+        else:
+            artifact_keys = [
+                RecordingArtifactSelection.insert_selection(
+                    {
+                        **recording_key,
+                        "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                    }
+                )
+                for recording_key in member_recording_keys
+            ]
+
+            def _populate_member_artifacts():
+                from spyglass.spikesorting.v2._sorting_artifact_mask import (
+                    artifact_frame_ranges,
+                )
+
+                for member, artifact_key, recording_key in zip(
+                    members, artifact_keys, member_recording_keys, strict=True
+                ):
+                    reused = bool(RecordingArtifactDetection & artifact_key)
+                    _populate_once(RecordingArtifactDetection, artifact_key)
+                    artifact_id = artifact_key["artifact_detection_id"]
+                    artifact_ids[int(member["member_index"])] = artifact_id
+                    member_recording = Recording().get_recording(recording_key)
+                    kept = RecordingArtifactDetection().get_artifact_removed_intervals(
+                        artifact_key
+                    )
+                    # Count frames actually masked, excluding wall-clock gaps.
+                    excluded = artifact_frame_ranges(member_recording, kept)
+                    masked_duration = (
+                        sum(end - start for start, end in excluded)
+                        / member_recording.get_sampling_frequency()
+                    )
+                    run_summary["member_artifacts"].append(
+                        {
+                            "member_index": int(member["member_index"]),
+                            "artifact_detection_id": artifact_id,
+                            "status": "reused" if reused else "computed",
+                            "masked_duration_s": masked_duration,
+                        }
+                    )
+
+            (
+                _,
+                run_summary["member_artifact_detection_status"],
+                stage_seconds["member_artifact_detection"],
+            ) = _run_stage(
+                "member_artifact_detection",
+                all(
+                    bool(RecordingArtifactDetection & key)
+                    for key in artifact_keys
+                ),
+                _populate_member_artifacts,
+                run_summary,
+            )
+
         concat_key = ConcatenatedRecordingSelection.insert_selection(
             {
                 "session_group_owner": concat_session_group_owner,
@@ -769,7 +849,8 @@ def run_v2_pipeline(
                 "motion_correction_params_name": (
                     bundle.motion_correction_params_name
                 ),
-            }
+            },
+            artifact_detection_ids=artifact_ids,
         )
         (
             _,
@@ -782,6 +863,13 @@ def run_v2_pipeline(
             run_summary,
         )
         run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
+        concat_row = (ConcatenatedRecording & concat_key).fetch1()
+        valid_duration = sum(
+            end - start for start, end in concat_row["obs_intervals"]
+        )
+        run_summary["artifact_masked_duration_s"] = float(
+            concat_row["total_duration_s"] - valid_duration
+        )
 
         sorting_key = SortingSelection.insert_selection(
             {

@@ -105,6 +105,7 @@ MEMBER_SNAPSHOT_LOGICAL_FIELDS = (
     "interval_list_name",
     "team_name",
     "recording_id",
+    "artifact_detection_id",
 )
 
 
@@ -592,6 +593,53 @@ def assert_concat_compatible(recordings: list) -> None:
         )
 
 
+def mask_member_recordings(recordings, member_valid_times):
+    """Mask each member and map its excluded frames into the concat timeline.
+
+    Uses the standalone mask's frame mapping, including disjoint timestamps.
+    The result scales with interval count rather than recording duration.
+    ``None`` explicitly means no artifact detection for that member.
+    """
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        artifact_frame_ranges,
+        silence_frame_ranges,
+    )
+
+    masked, concat_ranges = [], []
+    offset = 0
+    for recording, valid_times in zip(
+        recordings, member_valid_times, strict=True
+    ):
+        ranges = (
+            []
+            if valid_times is None
+            else artifact_frame_ranges(recording, valid_times)
+        )
+        masked.append(silence_frame_ranges(recording, ranges))
+        concat_ranges.extend(
+            (start + offset, end + offset) for start, end in ranges
+        )
+        offset += recording.get_num_samples()
+    return masked, concat_ranges
+
+
+def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
+    """Return kept concat intervals in seconds from ordered half-open ranges."""
+    import numpy as np
+
+    intervals = []
+    cursor = 0
+    for start, end in artifact_ranges:
+        if start > cursor:
+            intervals.append((cursor, start))
+        cursor = end
+    if cursor < n_samples:
+        intervals.append((cursor, n_samples))
+    return (
+        np.asarray(intervals, dtype=float).reshape(-1, 2) / sampling_frequency
+    )
+
+
 def build_concatenated_recording(
     recordings: list,
     *,
@@ -678,10 +726,18 @@ def build_concatenated_recording(
     # in both ``preset_kwargs`` and the resolved ``job_kwargs`` -- does not
     # raise ``TypeError: got multiple values for keyword`` from a double splat.
     motion_kwargs = {**(preset_kwargs or {}), **resolved_job_kwargs}
-    return correct_motion(
+    corrected = correct_motion(
         concatenated,
         preset=motion_preset,
         output_motion=False,
         output_motion_info=False,
         **motion_kwargs,
     )
+    if corrected.get_num_channels() == 0:
+        raise ValueError(
+            "Motion correction removed every channel at the probe border. "
+            "Inspect the motion estimate and choose suitable "
+            "interpolate_motion_kwargs in MotionCorrectionParameters, or "
+            "explicitly select the no-motion recipe."
+        )
+    return corrected

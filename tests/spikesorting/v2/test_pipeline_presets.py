@@ -888,16 +888,15 @@ def test_every_preset_declares_curation_params():
 
 
 def test_concat_preset_is_registered_and_shaped():
-    """The same-day concat preset ships with no artifact stage + pinned motion.
-
-    It is the one shipped preset whose ``artifact_detection_params_name`` is
-    None (concat sorts carry no ArtifactDetectionSource row) and whose
-    ``motion_correction_params_name`` is set ("auto" -> rigid_fast for a
-    same-day group). Otherwise it is the MS5 hippocampus recipe.
-    """
+    """The concat preset enables member artifacts before pinned motion."""
     assert _CONCAT_PRESET in list_pipeline_presets()
     preset = _PIPELINE_PRESETS[_CONCAT_PRESET]
-    assert preset.artifact_detection_params_name is None
+    assert (
+        preset.artifact_detection_params_name
+        == _PIPELINE_PRESETS[
+            "franklab_probe_hippocampus_30khz_ms5_2026_06"
+        ].artifact_detection_params_name
+    )
     assert preset.motion_correction_params_name == "auto_default"
     assert preset.sorter == "mountainsort5"
     assert preset.metric_params_name == "franklab_default"
@@ -1190,7 +1189,12 @@ def test_preset_model_artifact_optional_and_motion_field():
         auto_curation_rules_name="v1_default_nn_noise",
         motion_correction_params_name="auto",
     )
-    assert preset.artifact_detection_params_name is None
+    assert (
+        preset.artifact_detection_params_name
+        == _PIPELINE_PRESETS[
+            "franklab_probe_hippocampus_30khz_ms5_2026_06"
+        ].artifact_detection_params_name
+    )
     assert preset.motion_correction_params_name == "auto"
 
     with pytest.raises(ValueError):
@@ -1340,7 +1344,7 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
 def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     """Cloning a no-artifact preset works and forks only the touched stage.
 
-    The concat preset runs no artifact stage, so a clone that tunes the sorter
+    An explicitly no-artifact concat preset lets a clone tune the sorter
     must not try to fetch a base artifact row; only the sorter stage is forked
     and the clone inherits the None artifact.
     """
@@ -1349,7 +1353,12 @@ def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     new_name = "lab_concat_thresh_2026_06"
     clone_env.append(new_name)
 
-    clone_pipeline_preset(_CONCAT_PRESET, new_name, detect_threshold=4.0)
+    base_name = "test_concat_no_artifacts"
+    clone_env.append(base_name)
+    presets_mod._PIPELINE_PRESETS[base_name] = presets_mod._PIPELINE_PRESETS[
+        _CONCAT_PRESET
+    ].model_copy(update={"artifact_detection_params_name": None})
+    clone_pipeline_preset(base_name, new_name, detect_threshold=4.0)
 
     clone = presets_mod._PIPELINE_PRESETS[new_name]
     assert clone.artifact_detection_params_name is None

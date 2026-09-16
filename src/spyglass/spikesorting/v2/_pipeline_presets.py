@@ -47,9 +47,8 @@ class _PipelinePreset(BaseModel):
     metric_params_name: str
     auto_curation_rules_name: str
     # artifact_detection_params_name is optional: None means the preset runs no
-    # artifact detection (a skip-artifact single-session preset, or a concat
-    # preset -- concat sorts carry no ArtifactDetectionSource row). A non-None
-    # value names the ArtifactDetectionParameters row.
+    # artifact detection in either source mode. A non-None value names the
+    # ArtifactDetectionParameters row (applied per member for concat).
     artifact_detection_params_name: "str | None" = None
     # motion_correction_params_name is optional: None for ordinary single-
     # session presets (motion is selected per recording); a concat preset sets
@@ -642,7 +641,7 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
         ),
     ]
     # artifact detection is optional: a None name means the preset runs no
-    # artifact stage (skip / concat), so there is no row to require.
+    # artifact stage (explicitly disabled), so there is no row to require.
     if preset.artifact_detection_params_name is not None:
         checks.append(
             (
@@ -876,7 +875,7 @@ def clone_pipeline_preset(
     # the extra ``SorterParameters`` primary-key column / ``execution_params``
     # carrier); it is None for the single-key Lookups. The artifact-detection
     # stage is included only when the base preset runs one (a None artifact name
-    # means no artifact stage -- a skip-artifact or concat preset -- so there is
+    # means no artifact stage -- an explicit skip-artifact preset -- so there is
     # no base row to fetch and no artifact key to override).
     stages = {
         "preprocessing": {

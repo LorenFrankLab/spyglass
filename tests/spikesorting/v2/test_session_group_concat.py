@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+
 logger = logging.getLogger(__name__)
 
 
@@ -394,10 +396,10 @@ def test_concat_selection_inserts_and_is_idempotent(same_day_group):
         "preprocessing_params_name": grp["preprocessing_params_name"],
         "motion_correction_params_name": "none",
     }
-    pk = ConcatenatedRecordingSelection.insert_selection(request)
+    pk = select_unmasked_concat(request)
     assert set(pk) == {"concat_recording_id"}
     assert isinstance(pk["concat_recording_id"], uuid.UUID)
-    again = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    again = select_unmasked_concat(dict(request))
     assert again["concat_recording_id"] == pk["concat_recording_id"]
 
 
@@ -414,7 +416,7 @@ def test_concat_id_folds_member_set(same_day_group):
     )
 
     grp = same_day_group
-    pk = ConcatenatedRecordingSelection.insert_selection(
+    pk = select_unmasked_concat(
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
@@ -451,7 +453,7 @@ def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
     )
 
     grp = same_day_group
-    pk = ConcatenatedRecordingSelection.insert_selection(
+    pk = select_unmasked_concat(
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
@@ -481,7 +483,7 @@ def test_concat_id_changes_with_member_set(same_day_group):
     )
 
     grp = same_day_group
-    both = ConcatenatedRecordingSelection.insert_selection(
+    both = select_unmasked_concat(
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],
@@ -494,7 +496,7 @@ def test_concat_id_changes_with_member_set(same_day_group):
     SessionGroup.create_group(
         owner, "sg_concat_subset", [grp["same_day_members"][0]]
     )
-    subset = ConcatenatedRecordingSelection.insert_selection(
+    subset = select_unmasked_concat(
         {
             "session_group_owner": owner,
             "session_group_name": "sg_concat_subset",
@@ -527,7 +529,7 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
         "preprocessing_params_name": grp["preprocessing_params_name"],
         "motion_correction_params_name": "none",
     }
-    original = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    original = select_unmasked_concat(dict(request))
     original_snapshot = (
         ConcatenatedRecordingSelection.MemberSnapshot & original
     ).fetch(as_dict=True, order_by="member_index")
@@ -539,7 +541,7 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
     ).delete_quick()
 
     # Re-selection over the now-different live member set mints a DIFFERENT id.
-    edited = ConcatenatedRecordingSelection.insert_selection(dict(request))
+    edited = select_unmasked_concat(dict(request))
     assert edited["concat_recording_id"] != original["concat_recording_id"]
 
     # The original concat's frozen snapshot is untouched by the live edit -- the
@@ -577,7 +579,7 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
     SessionGroup.create_group(owner, name, members, allow_multi_day=True)
     try:
         with pytest.raises(MissingRecordingForConcatError, match="populate"):
-            ConcatenatedRecordingSelection.insert_selection(
+            select_unmasked_concat(
                 {
                     "session_group_owner": owner,
                     "session_group_name": name,
@@ -639,7 +641,7 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
     )
 
     # The members match at selection time (insert_selection's check passes).
-    key = ConcatenatedRecordingSelection.insert_selection(
+    key = select_unmasked_concat(
         {
             **same_day_group["group_key"],
             "preprocessing_params_name": same_day_group[
@@ -772,10 +774,10 @@ def test_concat_selection_distinct_for_distinct_motion_params(same_day_group):
         **grp["group_key"],
         "preprocessing_params_name": grp["preprocessing_params_name"],
     }
-    none_pk = ConcatenatedRecordingSelection.insert_selection(
+    none_pk = select_unmasked_concat(
         {**base, "motion_correction_params_name": "none"}
     )
-    rigid_pk = ConcatenatedRecordingSelection.insert_selection(
+    rigid_pk = select_unmasked_concat(
         {**base, "motion_correction_params_name": "rigid_fast_default"}
     )
     assert none_pk["concat_recording_id"] != rigid_pk["concat_recording_id"]
@@ -793,7 +795,7 @@ def _concat_selection(group_key, preprocessing_params_name, motion="none"):
 
     if motion != "none":
         MotionCorrectionParameters.insert_default()
-    return ConcatenatedRecordingSelection.insert_selection(
+    return select_unmasked_concat(
         {
             **group_key,
             "preprocessing_params_name": preprocessing_params_name,
@@ -846,7 +848,7 @@ def _member_snapshot(grp):
         ConcatenatedRecordingSelection,
     )
 
-    sel = ConcatenatedRecordingSelection.insert_selection(
+    sel = select_unmasked_concat(
         {
             **grp["group_key"],
             "preprocessing_params_name": grp["preprocessing_params_name"],

@@ -925,8 +925,8 @@ def _write_curated_units_nwb_body(
     error wrapper stays a thin try/except. Returns ``(analysis_file_name,
     units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
     (``{unit_id: (n, 2) array}`` or ``None`` for a legacy source) carries the
-    per-unit observation window forward so a curated export keeps the correct
-    firing-rate / presence-ratio / duration denominator.
+    per-unit observation window forward for consumers that explicitly use
+    valid observation time. SI quality metrics do not automatically use it.
     """
     import numpy as np
     import pynwb
@@ -1049,6 +1049,14 @@ def _write_curated_units_nwb_body(
                         "readback without reading the full timestamp vector."
                     ),
                     index=True,
+                    # A concat member can retain units while every local
+                    # train is empty. HDMF needs an explicit numeric dtype
+                    # then; keep list-backed accumulation for nonempty data.
+                    data=(
+                        []
+                        if any(len(spec[2]) for spec in write_specs)
+                        else np.empty(0, dtype=np.int64)
+                    ),
                 )
             all_labels: list[list[str]] = []
             for unit_id, spike_times, spike_indices, obs in write_specs:
@@ -1064,9 +1072,10 @@ def _write_curated_units_nwb_body(
                         spike_indices, dtype=np.int64
                     )
                 # Carry the per-unit observation window forward so a
-                # curated export keeps the correct firing-rate / presence-ratio
-                # / duration denominator. Omitted only for a legacy source NWB
-                # that had no obs_intervals column (obs is None).
+                # curated export retains its valid observation time. Consumers
+                # must explicitly use these intervals in duration calculations.
+                # Omitted only for a legacy source NWB that had no obs_intervals
+                # column (obs is None).
                 if obs is not None:
                     unit_kwargs["obs_intervals"] = np.asarray(
                         obs, dtype=np.float64

@@ -217,6 +217,7 @@ def _snap(member_index, recording_id, content_hash="c" * 64, **over):
         "team_name": "team_a",
         "recording_id": recording_id,
         "recording_content_hash": content_hash,
+        "artifact_detection_id": None,
     }
     row.update(over)
     return row
@@ -558,3 +559,19 @@ def test_electrode_signature_marks_missing_region_as_none():
         [{"electrode_group_name": "probeA", "electrode_id": 0}], {}
     )
     assert sig == (("probeA", 0, None),)
+
+
+def test_motion_removing_all_channels_has_actionable_error(monkeypatch):
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sp
+
+    rec = si.NumpyRecording(
+        [np.zeros((100, 4), dtype=np.float32)], sampling_frequency=30_000
+    )
+    monkeypatch.setattr(
+        sp,
+        "correct_motion",
+        lambda recording, **kwargs: recording.select_channels([]),
+    )
+    with pytest.raises(ValueError, match="removed every channel.*probe border"):
+        build_concatenated_recording([rec], motion_preset="rigid_fast")
