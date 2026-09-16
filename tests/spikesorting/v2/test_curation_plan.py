@@ -15,6 +15,7 @@ in ``_DB_FREE_SERVICE_MODULES``).
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from spyglass.spikesorting.v2._curation_plan import (
@@ -23,6 +24,7 @@ from spyglass.spikesorting.v2._curation_plan import (
     validate_label_unit_ids,
 )
 from spyglass.spikesorting.v2._curation_transforms import (
+    build_curated_unit_rows,
     normalize_curation_payload,
 )
 
@@ -118,6 +120,38 @@ def test_normalize_curation_payload_rejects_scalar_label_value():
     """A string label must be wrapped in a list; do not split characters."""
     with pytest.raises(ValueError, match="must be a list of labels"):
         normalize_curation_payload({"labelsByUnit": {"1": "noise"}})
+
+
+@pytest.mark.parametrize("bad_id", [1.9, 1.0, True, False])
+def test_curation_payload_rejects_non_integer_ids(bad_id):
+    """No transport spelling may truncate an ID or interpret a bool as a unit."""
+    payloads = [
+        {"labelsByUnit": {bad_id: ["accept"]}},
+        {"labelsByUnit": {bad_id: None}},
+        {"mergeGroups": [[bad_id, 2]]},
+        {"mergeGroups": {bad_id: [2]}},
+        {"mergeGroups": {2: [bad_id]}},
+    ]
+    for payload in payloads:
+        with pytest.raises(ValueError, match="unit_id must be an integer"):
+            normalize_curation_payload(payload)
+    with pytest.raises(ValueError, match="unit_id must be an integer"):
+        normalize_curation_payload(labels={bad_id: ["accept"]})
+    with pytest.raises(ValueError, match="unit_id must be an integer"):
+        normalize_curation_payload(merge_groups=[[bad_id, 2]])
+    with pytest.raises(ValueError, match="unit_id must be an integer"):
+        build_curated_unit_rows(
+            "s", [_unit(1), _unit(2)], [[bad_id, 2]], 1, True
+        )
+
+
+def test_curation_payload_accepts_numpy_integer_ids():
+    labels, groups = normalize_curation_payload(
+        labels={np.int64(1): ["accept"]},
+        merge_groups=[[np.int64(1), np.int32(2)]],
+    )
+    assert labels == {1: ["accept"]}
+    assert groups == [[1, 2]]
 
 
 # ---------- validate_label_unit_ids (stray-label matrix) -------------------

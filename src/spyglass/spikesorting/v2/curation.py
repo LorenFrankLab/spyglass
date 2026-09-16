@@ -32,6 +32,7 @@ from spyglass.spikesorting.v2._curation_transforms import (
     validate_curation_label_rows,
     validate_labels,
 )
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 from spyglass.spikesorting.v2._signal_math import _MERGE_DEDUP_DELTA_MS
 from spyglass.spikesorting.v2._units_nwb import (
     abs_spike_times_dataframe,
@@ -531,10 +532,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         sorting_key
             ``{sorting_id}`` of the upstream Sorting row.
         labels
-            Dict ``unit_id -> [label, ...]``. Each label is validated
-            against the ``CurationLabel`` enum. ``None`` (the default)
-            and ``{}`` are equivalent and produce a curation with no
-            ``UnitLabel`` rows.
+            Dict ``unit_id -> [label, ...]`` with integer unit IDs. Use
+            ``save_manual_curation`` to import JSON with string IDs.
+            Each label is validated against the ``CurationLabel`` enum.
+            ``None`` (the default) and ``{}`` are equivalent and produce a
+            curation with no ``UnitLabel`` rows.
         parent_curation_id
             ``-1`` for a root curation; otherwise must reference an
             existing CurationV2 row for the same sorting.
@@ -945,11 +947,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> tuple[dict, str]:
         """Normalize + validate ``labels`` and ``curation_source``.
 
-        Returns ``(labels, curation_source)`` with ``labels`` coerced to a
-        ``{int unit_id: [label, ...]}`` dict (``None`` -> ``{}``) and
-        ``curation_source`` coerced to its canonical ``CurationSource``
-        value. Raises ``ValueError`` on a scalar label value, a label that
-        fails ``validate_labels``, or an invalid ``curation_source``.
+        Returns ``(labels, curation_source)`` with integer label keys,
+        list values (``None`` becomes ``{}``), and the canonical
+        ``CurationSource`` value. Raises ``ValueError`` on a scalar label
+        value, an unrecognized label, a non-integer ID, or an invalid source.
         """
         if labels is None:
             # ``None`` is semantically equivalent to "no labels".
@@ -970,7 +971,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 )
         # Normalize label keys to int once so the rest of the helper
         # can do straight ``labels.get(int_uid, [])`` lookups.
-        labels = {int(uid): list(lbls) for uid, lbls in labels.items()}
+        labels = {
+            lossless_int(uid, "label unit_id"): list(lbls)
+            for uid, lbls in labels.items()
+        }
 
         validate_labels(labels, allow_custom_labels=allow_custom_labels)
 

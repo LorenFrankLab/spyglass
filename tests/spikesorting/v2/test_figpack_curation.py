@@ -27,6 +27,13 @@ from spyglass.spikesorting.v2._figpack_curation import (
 _SORTING_ID = "11111111-2222-3333-4444-555555555555"
 
 
+@pytest.mark.parametrize("bad_id", [1.9, 1.0, True, False])
+def test_annotations_reject_non_integer_merge_ids(bad_id):
+    annotations = labels_and_merges_to_annotations({}, [[bad_id, 2]])
+    with pytest.raises(ValueError, match="unit_id must be an integer"):
+        curation_annotations_to_labels_and_merges(annotations)
+
+
 def _hash(**overrides):
     base = dict(
         sorting_id=_SORTING_ID,

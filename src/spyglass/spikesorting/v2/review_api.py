@@ -15,12 +15,16 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
-from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+from spyglass.spikesorting.v2._curation_transforms import (
+    allocate_merged_unit_ids,
+)
 from spyglass.spikesorting.v2._figpack_curation import (
     annotations_payload_hash,
     curation_annotations_to_labels_and_merges,
     unpack_display_config,
 )
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
+from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
 from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,
@@ -789,28 +793,32 @@ def start_review(
     )
 
 
+def _read_parent_units_and_labels(parent_key):
+    """Read the unit namespace and labels after the caller validates identity."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    unit_ids = {
+        int(value) for value in (CurationV2.Unit & parent_key).fetch("unit_id")
+    }
+    return unit_ids, _label_snapshot(CurationV2._labels_by_unit(parent_key))
+
+
 def _normalize_review_edits(
-    review: FigPackReview, labels: dict, merge_groups: list
+    profile: ReviewProfileRef,
+    labels: dict,
+    merge_groups: list,
+    *,
+    unit_ids: set[int],
+    labels_before: Mapping[int, tuple[str, ...]],
 ) -> tuple[
     Mapping[int, tuple[str, ...]],
     tuple[tuple[int, ...], ...],
     tuple[MergeLabelConflict, ...],
     int,
 ]:
-    """Validate edits and compute effective parent labels + merge conflicts."""
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    parent_key = review.parent.as_key()
-    unit_ids = {
-        int(value) for value in (CurationV2.Unit & parent_key).fetch("unit_id")
-    }
-    before = {
-        int(unit_id): tuple(sorted(map(str, values)))
-        for unit_id, values in CurationV2._labels_by_unit(parent_key).items()
-        if values
-    }
+    """Validate edits against fetched parent state without database access."""
     edited: dict[int, tuple[str, ...]] = {}
-    valid_labels = set(review.profile.label_options)
+    valid_labels = set(profile.label_options)
     for unit_id, unit_labels in labels.items():
         uid = int(unit_id)
         values = tuple(sorted(map(str, unit_labels)))
@@ -822,7 +830,7 @@ def _normalize_review_edits(
         # when the active review profile does not offer that label as a new
         # choice. Preserve those inherited labels on their original unit while
         # still rejecting an out-of-palette label newly added to another unit.
-        inherited_labels = set(before.get(uid, ()))
+        inherited_labels = set(labels_before.get(uid, ()))
         unknown_labels = sorted(set(values) - valid_labels - inherited_labels)
         if unknown_labels:
             raise ValueError(
@@ -858,10 +866,10 @@ def _normalize_review_edits(
             f"curation: {unknown_units}. Available units: {sorted(unit_ids)}."
         )
 
-    if review.profile.label_import_mode == "replace":
+    if profile.label_import_mode == "replace":
         after = {uid: values for uid, values in edited.items() if values}
     else:
-        after = dict(before)
+        after = dict(labels_before)
         for uid, values in edited.items():
             if values:
                 after[uid] = values
@@ -869,14 +877,15 @@ def _normalize_review_edits(
                 after.pop(uid, None)
 
     conflicts = []
-    next_id = max(unit_ids) + 1 if unit_ids else 0
-    for offset, group in enumerate(normalized_groups):
+    for merged_id, group in allocate_merged_unit_ids(
+        unit_ids, normalized_groups
+    ).items():
         contributor_labels = {uid: after.get(uid, ()) for uid in group}
         if len(set(contributor_labels.values())) > 1:
             conflicts.append(
                 MergeLabelConflict(
-                    merged_unit_id=next_id + offset,
-                    contributor_unit_ids=group,
+                    merged_unit_id=merged_id,
+                    contributor_unit_ids=tuple(group),
                     contributor_labels=contributor_labels,
                 )
             )
@@ -892,14 +901,14 @@ def _normalize_review_edits(
 
 
 def _preview_review(review: FigPackReview) -> CurationChangeSet:
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCurationSelection,
         _assert_figure_identity,
         _load_annotations_json,
     )
 
-    parent_key = review.parent.as_key()
+    parent_row = review.parent._current_row()
+    parent_key = review.parent._unchecked_key()
     selection = (
         FigPackCurationSelection & {"figpack_curation_id": review.review_id}
     ).fetch1()
@@ -910,10 +919,14 @@ def _preview_review(review: FigPackReview) -> CurationChangeSet:
     )
     annotations = _load_annotations_json(review.uri)
     labels, groups = curation_annotations_to_labels_and_merges(annotations)
+    parent_units, before = _read_parent_units_and_labels(parent_key)
     labels_after, groups, conflicts, count_after = _normalize_review_edits(
-        review, labels, groups
+        review.profile,
+        labels,
+        groups,
+        unit_ids=parent_units,
+        labels_before=before,
     )
-    before = _label_snapshot(CurationV2._labels_by_unit(parent_key))
     current_siblings = {
         child.curation_uuid: child for child in review.parent.children
     }
@@ -928,41 +941,35 @@ def _preview_review(review: FigPackReview) -> CurationChangeSet:
         labels_before=before,
         labels_after=labels_after,
         merge_groups=groups,
-        unit_count_before=len((CurationV2.Unit & parent_key).fetch("unit_id")),
+        unit_count_before=len(parent_units),
         unit_count_after=count_after,
         label_conflicts=conflicts,
         newer_sibling_curations=newer,
-        reviewed_parent_created_at=review.parent.created_at,
-        reviewed_parent_created_by=review.parent.created_by,
+        reviewed_parent_created_at=parent_row["created_at"],
+        reviewed_parent_created_by=str(parent_row["created_by"]),
     )
 
 
 def _child_labels(
     changes: CurationChangeSet,
     resolutions: Mapping[int, tuple[str, ...]],
+    *,
+    parent_units: set[int],
 ) -> dict[int, list[str]]:
     """Translate effective parent labels into the committed child namespace."""
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    parent_units = {
-        int(value)
-        for value in (CurationV2.Unit & changes.review.parent.as_key()).fetch(
-            "unit_id"
-        )
-    }
     absorbed = {unit_id for group in changes.merge_groups for unit_id in group}
     labels = {
         unit_id: list(values)
         for unit_id, values in changes.labels_after.items()
         if unit_id not in absorbed and values
     }
-    next_id = max(parent_units) + 1 if parent_units else 0
     conflicts = {
         conflict.merged_unit_id: conflict
         for conflict in changes.label_conflicts
     }
-    for offset, group in enumerate(changes.merge_groups):
-        merged_id = next_id + offset
+    for merged_id, group in allocate_merged_unit_ids(
+        parent_units, changes.merge_groups
+    ).items():
         if merged_id in conflicts:
             values = tuple(resolutions[merged_id])
         else:
@@ -1009,8 +1016,15 @@ def _commit_change_set(
             "committing."
         )
     labels, groups = curation_annotations_to_labels_and_merges(annotations)
+    parent_units, before = _read_parent_units_and_labels(parent_key)
     current_after, current_groups, current_conflicts, _ = (
-        _normalize_review_edits(changes.review, labels, groups)
+        _normalize_review_edits(
+            changes.review.profile,
+            labels,
+            groups,
+            unit_ids=parent_units,
+            labels_before=before,
+        )
     )
     if (
         dict(current_after) != dict(changes.labels_after)
@@ -1033,7 +1047,9 @@ def _commit_change_set(
         )
 
     provided = {
-        int(unit_id): tuple(map(str, values))
+        lossless_int(unit_id, "conflict resolution unit_id"): tuple(
+            map(str, values)
+        )
         for unit_id, values in (conflict_resolutions or {}).items()
     }
     required = {conflict.merged_unit_id for conflict in changes.label_conflicts}
@@ -1071,7 +1087,7 @@ def _commit_change_set(
             }
         ).fetch("curation_id")
     }
-    child_labels = _child_labels(changes, provided)
+    child_labels = _child_labels(changes, provided, parent_units=parent_units)
     child_key = CurationV2.save_manual_curation(
         {"sorting_id": changes.review.parent.sorting_id},
         parent_curation_id=changes.review.parent.curation_id,
@@ -1086,6 +1102,9 @@ def _commit_change_set(
         ),
         reuse_existing=True,
         label_policy="replace",
+        # Review validation above restricts new labels to the profile palette
+        # and allows inherited labels. Preserve those custom values on write.
+        allow_custom_labels=True,
     )
     child = CurationRef.from_key(child_key)
     child_status: ReviewStageState = (

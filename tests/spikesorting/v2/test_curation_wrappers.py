@@ -272,6 +272,49 @@ def test_merge_wrappers_forward_args(populated_sorting):
 
 
 @pytest.mark.database
+def test_curation_rejects_lossy_unit_ids(planted_two_unit_sort):
+    """Expert and payload writes reject lossy IDs before creating a child."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    a, b = _unit_ids(sorting_key)
+    try:
+        root = CurationV2.create_initial_curation(
+            sorting_key, labels={np.int64(a): ["mua"]}
+        )
+        for writer in (
+            CurationV2.insert_curation,
+            CurationV2.save_manual_curation,
+        ):
+            for bad_id in (a + 0.9, float(a), True, False):
+                for edits in (
+                    {"labels": {bad_id: ["accept"]}},
+                    {"merge_groups": [[bad_id, b]]},
+                ):
+                    with pytest.raises(
+                        ValueError, match="unit_id must be an integer"
+                    ):
+                        writer(
+                            sorting_key,
+                            parent_curation_id=root["curation_id"],
+                            **edits,
+                        )
+        assert len(CurationV2 & sorting_key) == 1
+
+        child = CurationV2.save_manual_curation(
+            sorting_key,
+            parent_curation_id=root["curation_id"],
+            payload={"labelsByUnit": {str(a): ["accept"]}},
+        )
+        assert CurationV2._labels_by_unit(child) == {a: ["accept"]}
+    finally:
+        clear_curations_for(sorting_key)
+
+
+@pytest.mark.database
 def test_save_manual_curation_label_payload_child(populated_sorting):
     """``save_manual_curation`` stores FigURL/FigPack label payloads as a child."""
     from spyglass.spikesorting.v2.curation import CurationV2

@@ -6,8 +6,8 @@ config hash, the default label set, and the translation between FigPack's
 ``sorting_curation`` annotation state and v2's ``(labels, merge_groups)`` form,
 and small FigPack config normalization helpers.
 
-DB-FREE BY CONTRACT. Imports only the standard library plus the pure
-``_enums`` module; it never imports DataJoint, SpikeInterface, or figpack, and
+DB-FREE BY CONTRACT. Imports only the standard library and dependency-light
+curation helpers; it never imports DataJoint, SpikeInterface, or figpack, and
 opens no database connection at import (mirrors ``_selection_identity``).
 """
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from spyglass.spikesorting.v2._curation_transforms import parse_curation_unit_id
 from spyglass.spikesorting.v2._enums import CurationLabel
 
 #: Install hint surfaced when the optional FigPack packages are missing.
@@ -277,10 +278,10 @@ def curation_annotations_to_labels_and_merges(
     ``sorting_curation`` annotation FigPack writes when a user edits and saves a
     curation, and returns it in the exact shape
     ``CurationV2.insert_curation(labels=..., merge_groups=...)`` consumes. Unit
-    ids are coerced to ``int`` (v2 unit ids are integers; FigPack stores the
-    ``labelsByUnit`` keys as strings). A missing/empty payload, a missing
-    ``sorting_curation`` entry, or an empty state all yield ``({}, [])`` rather
-    than raising, so a pristine (never-edited) figure round-trips cleanly.
+    ids accept integers and integer strings (FigPack stores the ``labelsByUnit``
+    keys as strings); floats and booleans are rejected. A missing/empty payload,
+    a missing ``sorting_curation`` entry, or an empty state all yield
+    ``({}, [])`` rather than raising, so a pristine figure round-trips cleanly.
 
     Parameters
     ----------
@@ -303,11 +304,11 @@ def curation_annotations_to_labels_and_merges(
     state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
 
     labels = {
-        int(unit_id): list(unit_labels)
+        parse_curation_unit_id(unit_id): list(unit_labels)
         for unit_id, unit_labels in (state.get("labelsByUnit") or {}).items()
     }
     merge_groups = [
-        [int(unit_id) for unit_id in group]
+        [parse_curation_unit_id(unit_id) for unit_id in group]
         for group in (state.get("mergeGroups") or [])
     ]
     return labels, merge_groups

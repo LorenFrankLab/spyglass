@@ -23,8 +23,8 @@ direction as ``_artifact_compute`` / ``_selection_identity`` /
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
 and activates no ``dj.schema`` at import. Its own imports are limited to
-the standard library plus the ``CurationLabel`` enum, taken from the
-stdlib-only ``_enums`` module rather than through ``utils`` (which imports
+the standard library and dependency-light enum / validation helpers,
+rather than through ``utils`` (which imports
 DataJoint / SpikeInterface at load). So the transform layer itself does
 not depend on the heavy table-support module. (Importing it as a
 ``spyglass`` submodule still triggers ``spyglass``'s package ``__init__``,
@@ -35,9 +35,10 @@ own.)
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 from spyglass.spikesorting.v2._enums import CurationLabel
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 
 
 def validate_curation_label_rows(
@@ -140,6 +141,17 @@ def _payload_value(payload: Mapping, field_names: tuple[str, ...]):
     return value
 
 
+def parse_curation_unit_id(value) -> int:
+    """Parse a transport unit ID, allowing integer strings used by JSON.
+
+    Numeric values must already be integers; floats and booleans must not
+    silently become another unit's ID.
+    """
+    if isinstance(value, str):
+        return int(value)
+    return lossless_int(value, "unit_id")
+
+
 def _normalize_payload_labels(labels) -> dict[int, list[str]]:
     """Normalize transport labels to ``{int unit_id: [label, ...]}``."""
     if labels is None:
@@ -152,8 +164,9 @@ def _normalize_payload_labels(labels) -> dict[int, list[str]]:
 
     normalized: dict[int, list[str]] = {}
     for unit_id, unit_labels in labels.items():
+        unit_id = parse_curation_unit_id(unit_id)
         if unit_labels is None:
-            normalized[int(unit_id)] = []
+            normalized[unit_id] = []
             continue
         if isinstance(unit_labels, str) or not isinstance(
             unit_labels, (list, tuple)
@@ -162,7 +175,7 @@ def _normalize_payload_labels(labels) -> dict[int, list[str]]:
                 "Curation payload labels[unit_id] must be a list of labels; "
                 f"got {type(unit_labels).__name__} for unit_id={unit_id}."
             )
-        normalized[int(unit_id)] = [
+        normalized[unit_id] = [
             CurationLabel.normalize(label) for label in unit_labels
         ]
     return normalized
@@ -175,7 +188,7 @@ def _iter_payload_merge_group(group) -> list[int]:
             "Curation payload merge groups must be lists of unit ids; got "
             f"{type(group).__name__}."
         )
-    return [int(unit_id) for unit_id in group]
+    return [parse_curation_unit_id(unit_id) for unit_id in group]
 
 
 def _union_intersecting(groups: list[set[int]]) -> list[set[int]]:
@@ -218,7 +231,7 @@ def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
     if isinstance(merge_groups, Mapping):
         association_sets: list[set[int]] = []
         for unit_id, associated in merge_groups.items():
-            members = {int(unit_id)}
+            members = {parse_curation_unit_id(unit_id)}
             if associated is not None and not (
                 isinstance(associated, str) and associated == ""
             ):
@@ -231,7 +244,7 @@ def _normalize_payload_merge_groups(merge_groups) -> list[list[int]]:
                         isinstance(member, str) and member == ""
                     ):
                         continue
-                    members.add(int(member))
+                    members.add(parse_curation_unit_id(member))
             association_sets.append(members)
         return [
             sorted(group)
@@ -258,8 +271,9 @@ def normalize_curation_payload(
     Accepts the v1/FigURL JSON spellings (``labelsByUnit`` / ``mergeGroups``)
     and the v2/Python spellings (``labels_by_unit`` / ``merge_groups``), plus
     explicit ``labels=`` / ``merge_groups=`` kwargs for already-unpacked
-    payloads. Unit ids are coerced to ``int``; label values are coerced through
-    :class:`CurationLabel`; merge-group shape validation is left to
+    payloads. Unit ids must be integers or integer strings; floats and booleans
+    are rejected. Label values are coerced through :class:`CurationLabel`;
+    merge-group shape validation is left to
     ``CurationV2.insert_curation`` so typos still produce the same errors there.
     """
     if payload is None:
@@ -375,6 +389,26 @@ def compose_curation_labels(
     return {k: v for k, v in composed.items() if v}
 
 
+def allocate_merged_unit_ids(
+    source_unit_ids: Iterable[int],
+    merge_groups: Iterable[Sequence[int]],
+) -> dict[int, list[int]]:
+    """Map fresh IDs to validated merge groups in min-contributor order.
+
+    This order matches the stored preview's merge leaders, so preview,
+    committed rows, and review labels agree on each merged unit's ID.
+    Contributor order within a group is preserved for metadata tie-breaking.
+    Callers validate group membership, size, uniqueness, and disjointness.
+    """
+    next_id = max(source_unit_ids, default=-1) + 1
+    return {
+        unit_id: list(group)
+        for unit_id, group in enumerate(
+            sorted(merge_groups, key=min), start=next_id
+        )
+    }
+
+
 def build_curated_unit_rows(
     sorting_id,
     sorting_units: list[dict],
@@ -434,40 +468,9 @@ def build_curated_unit_rows(
     """
     by_id = {int(row["unit_id"]): row for row in sorting_units}
 
-    # Build mapping ``kept_unit_id -> contributors``:
-    #   apply_merge=True multi-contributor group: kept id is a fresh
-    #     ``max(source unit_ids) + 1`` (sequentially incremented per
-    #     multi-merge group). The user's first element is one of the
-    #     contributors, NOT the kept id.
-    #   apply_merge=False: kept id is ``min(group)`` -- the proposed
-    #     merge leader recorded in MergeGroup until the merge is
-    #     applied via get_merged_sorting.
-    # A unit may appear in at most one merge group: the overlap
-    # check below would otherwise silently double-count spikes when
-    # apply_merge=True and ambiguate the kept-unit choice.
-    #
-    # CANONICAL-ORDER NOTE (preview==apply contract). The fresh
-    # ``max+1`` ids are assigned in ascending MIN-CONTRIBUTOR order,
-    # NOT user-provided order. This is deliberate: the lazy merge path
-    # (``get_merged_sorting`` on an apply_merge=False preview) reads
-    # MergeGroup ordered by ``unit_id`` and so numbers merges by
-    # ascending kept-uid (== ascending min(group), since the preview
-    # stores ``min(group)`` as each kept id). Numbering the applied
-    # path the same way guarantees apply_merge=True and the lazy
-    # preview assign the SAME fresh id to the SAME content group, even
-    # when the user lists groups out of min order. The merged-unit
-    # integer id is an arbitrary fresh label, so spike content and unit
-    # count are unchanged regardless of input order -- only which group
-    # receives ``max+1`` differs for reordered input, and matching the
-    # two paths is the more important contract.
-    # Validate merge groups and stage their (key, contributors) pairs
-    # WITHOUT inserting them yet -- kept_to_contributors's insertion
-    # order is "surviving source units first (in original source
-    # order), then merged kept ids appended in ascending-min order,"
-    # matching SI's lazy MergeUnitsSorting (originals retained + merged
-    # appended) at the SHAPE level (survivor-then-appended).
     normalized_groups: list[list[int]] = [
-        [int(u) for u in g] for g in merge_groups
+        [lossless_int(u, "merge group unit_id") for u in g]
+        for g in merge_groups
     ]
     # Validate ALL merge groups eagerly -- BEFORE any early return
     # below -- so a zero-unit sort with non-empty merge_groups raises
@@ -516,28 +519,21 @@ def build_curated_unit_rows(
         # (Non-empty merge groups already raised above.)
         return [], {}
 
-    # All groups validated; assign keys. Iterate in ascending
-    # min-contributor order (NOT user-provided order) so the fresh
-    # ``max+1`` ids match the lazy ``get_merged_sorting`` preview path
-    # -- see the canonical-order NOTE above.
-    merge_specs: list[tuple[int, list[int]]] = []
-    next_merged_id = max(by_id) + 1
-    for int_group in sorted(normalized_groups, key=min):
-        if apply_merge and len(int_group) > 1:
-            key = next_merged_id
-            next_merged_id += 1
-        else:
-            key = min(int_group)
-        merge_specs.append((key, int_group))
+    # Committed groups get fresh IDs; previews keep min(group) as the
+    # proposed merge leader while retaining every source unit.
+    merge_specs = (
+        allocate_merged_unit_ids(by_id, normalized_groups)
+        if apply_merge
+        else {min(g): g for g in sorted(normalized_groups, key=min)}
+    )
 
     kept_to_contributors: dict[int, list[int]] = {}
     # Non-merged units FIRST, in original source order.
     for uid in by_id:
         if uid not in merged_ids:
             kept_to_contributors[uid] = [uid]
-    # Then merge groups, appended in input order.
-    for key, int_group in merge_specs:
-        kept_to_contributors[key] = int_group
+    # Then merged units, in canonical min-contributor order (SI parity).
+    kept_to_contributors.update(merge_specs)
 
     # Symmetric provenance for apply_merge=False: absorbed
     # contributors still get a CurationV2.Unit row (preview parity),

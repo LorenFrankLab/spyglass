@@ -2,53 +2,28 @@
 
 from __future__ import annotations
 
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
 
-class _UnitRelation:
-    def __and__(self, _restriction):
-        return self
-
-    def fetch(self, attribute):
-        assert attribute == "unit_id"
-        return [1, 2]
-
-
-class _FakeCurationV2:
-    Unit = _UnitRelation()
-
-    @staticmethod
-    def _labels_by_unit(_key):
-        return {1: ["artifact"]}
-
-
-def _review():
+def _profile():
     return SimpleNamespace(
-        parent=SimpleNamespace(
-            as_key=lambda: {"sorting_id": "sort", "curation_id": 0}
-        ),
-        profile=SimpleNamespace(
-            label_options=("accept", "mua", "noise"),
-            label_import_mode="replace",
-        ),
+        label_options=("accept", "mua", "noise"),
+        label_import_mode="replace",
     )
 
 
-def test_review_import_preserves_inherited_label_outside_palette(monkeypatch):
+def test_review_import_preserves_inherited_label_outside_palette():
     """A valid parent label need not be offered as a new review choice."""
     from spyglass.spikesorting.v2.review_api import _normalize_review_edits
 
-    fake_module = ModuleType("spyglass.spikesorting.v2.curation")
-    fake_module.CurationV2 = _FakeCurationV2
-    monkeypatch.setitem(
-        sys.modules, "spyglass.spikesorting.v2.curation", fake_module
-    )
-
     labels, groups, conflicts, count = _normalize_review_edits(
-        _review(), {1: ["artifact"], 2: ["noise"]}, []
+        _profile(),
+        {1: ["artifact"], 2: ["noise"]},
+        [],
+        unit_ids={1, 2},
+        labels_before={1: ("artifact",)},
     )
 
     assert dict(labels) == {1: ("artifact",), 2: ("noise",)}
@@ -57,19 +32,17 @@ def test_review_import_preserves_inherited_label_outside_palette(monkeypatch):
     assert count == 2
 
 
-def test_review_import_rejects_new_label_outside_palette(monkeypatch):
+def test_review_import_rejects_new_label_outside_palette():
     """An inherited label cannot be copied to a different unit."""
     from spyglass.spikesorting.v2.review_api import _normalize_review_edits
 
-    fake_module = ModuleType("spyglass.spikesorting.v2.curation")
-    fake_module.CurationV2 = _FakeCurationV2
-    monkeypatch.setitem(
-        sys.modules, "spyglass.spikesorting.v2.curation", fake_module
-    )
-
     with pytest.raises(ValueError, match="new labels outside"):
         _normalize_review_edits(
-            _review(), {1: ["artifact"], 2: ["artifact"]}, []
+            _profile(),
+            {1: ["artifact"], 2: ["artifact"]},
+            [],
+            unit_ids={1, 2},
+            labels_before={1: ("artifact",)},
         )
 
 
@@ -93,6 +66,69 @@ def test_merge_resolution_may_keep_inherited_label_outside_palette():
     assert _unknown_conflict_resolution_labels(
         ("new-site-label",), palette, conflict
     ) == ["new-site-label"]
+
+
+def test_review_and_persistence_agree_on_multiple_merge_ids():
+    """Reordered groups with gaps in source IDs keep conflicts and labels aligned."""
+    from spyglass.spikesorting.v2._curation_transforms import (
+        build_curated_unit_rows,
+    )
+    from spyglass.spikesorting.v2.review_api import (
+        _child_labels,
+        _normalize_review_edits,
+    )
+
+    unit_ids = (1, 4, 6, 9, 12)
+    groups = [[9, 6], [4, 1]]
+    labels, normalized_groups, conflicts, count = _normalize_review_edits(
+        _profile(),
+        {
+            1: ["accept"],
+            4: ["accept"],
+            6: ["accept"],
+            9: ["noise"],
+            12: ["mua"],
+        },
+        groups,
+        unit_ids=set(unit_ids),
+        labels_before={1: ("artifact",)},
+    )
+    assert count == 3
+    assert [(c.merged_unit_id, c.contributor_unit_ids) for c in conflicts] == [
+        (14, (6, 9))
+    ]
+    changes = _change_set(
+        labels_after=labels,
+        merge_groups=normalized_groups,
+        label_conflicts=conflicts,
+    )
+    assert _child_labels(
+        changes, {14: ("noise",)}, parent_units=set(unit_ids)
+    ) == {
+        12: ["mua"],
+        13: ["accept"],
+        14: ["noise"],
+    }
+
+    source_rows = [
+        {
+            "unit_id": uid,
+            "nwb_file_name": "test.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": uid,
+            "peak_amplitude_uv": 10.0,
+            "n_spikes": 100,
+        }
+        for uid in unit_ids
+    ]
+    rows, contributors = build_curated_unit_rows(
+        "sort", source_rows, groups, 1, True
+    )
+    assert contributors == {12: [12], 13: [4, 1], 14: [9, 6]}
+    assert [row["unit_id"] for row in rows] == [12, 13, 14]
+    # Within-group order breaks equal-amplitude ties, independently of the
+    # canonical order used to allocate the groups' new IDs.
+    assert [row["electrode_id"] for row in rows] == [12, 4, 9]
 
 
 def _change_set(**overrides):

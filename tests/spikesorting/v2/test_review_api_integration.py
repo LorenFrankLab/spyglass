@@ -56,10 +56,13 @@ def _ensure_test_profile() -> str:
     return name
 
 
+@pytest.mark.parametrize("inherited_label", ["artifact", "custom_cell"])
 def test_browser_review_preview_commit_resume_and_continue(
-    planted_two_unit_sort, curation_evaluation_defaults
+    planted_two_unit_sort, curation_evaluation_defaults, inherited_label
 ):
     """The full review journey is pinned, pure, resumable, and merge-safe."""
+    from unittest.mock import patch
+
     from spyglass.spikesorting.v2._figpack_curation import (
         curation_annotations_to_labels_and_merges,
     )
@@ -84,12 +87,12 @@ def test_browser_review_preview_commit_resume_and_continue(
         root_key = CurationV2.create_initial_curation(
             sorting_key,
             labels={
-                # ``artifact`` is a valid CurationLabel but is intentionally
-                # absent from this review profile's palette. The seeded label
-                # must survive a no-change preview/import.
-                unit_ids[0]: ["artifact"],
+                # Canonical and custom labels outside the profile palette
+                # must survive both a no-change import and a resolved merge.
+                unit_ids[0]: [inherited_label],
                 unit_ids[1]: ["noise"],
             },
+            allow_custom_labels=True,
         )
         run = RunResult(
             {
@@ -187,11 +190,22 @@ def test_browser_review_preview_commit_resume_and_continue(
 
         pristine_bytes = (Path(review.uri) / "annotations.json").read_bytes()
         children_before = len(review.parent.children)
-        no_change = review.preview_import()
+        connection = CurationV2.connection
+        with patch.object(connection, "query", wraps=connection.query) as query:
+            no_change = review.preview_import()
+        for table in (CurationV2.Unit, CurationV2.UnitLabel):
+            assert (
+                sum(
+                    call.args[0].lstrip().upper().startswith("SELECT")
+                    and table.full_table_name in call.args[0]
+                    for call in query.call_args_list
+                )
+                == 1
+            )
         assert no_change.reviewed_parent_created_at == review.parent.created_at
         assert no_change.reviewed_parent_created_by == review.parent.created_by
         assert dict(no_change.labels_before) == dict(no_change.labels_after)
-        assert no_change.labels_after[unit_ids[0]] == ("artifact",)
+        assert no_change.labels_after[unit_ids[0]] == (inherited_label,)
         assert no_change.merge_groups == ()
         assert len(review.parent.children) == children_before
         assert (Path(review.uri) / "annotations.json").read_bytes() == (
@@ -199,7 +213,7 @@ def test_browser_review_preview_commit_resume_and_continue(
         )
         _write_edits(
             review.uri,
-            {unit_ids[0]: ["artifact"], unit_ids[1]: ["artifact"]},
+            {unit_ids[0]: [inherited_label], unit_ids[1]: [inherited_label]},
             [],
         )
         with pytest.raises(ValueError, match="new labels outside"):
@@ -208,6 +222,12 @@ def test_browser_review_preview_commit_resume_and_continue(
         with pytest.raises(ValueError, match="confirm_no_changes"):
             no_change.commit()
         no_change_receipt = no_change.commit(confirm_no_changes=True)
+        assert CurationV2._labels_by_unit(
+            no_change_receipt.curation.as_key()
+        ) == {
+            unit_ids[0]: [inherited_label],
+            unit_ids[1]: ["noise"],
+        }
         assert no_change_receipt.curation.parent == review.parent
         assert not no_change_receipt.needs_merge_verification
         assert (
@@ -220,7 +240,7 @@ def test_browser_review_preview_commit_resume_and_continue(
         )
 
         first_edits = {
-            unit_ids[0]: ["artifact"],
+            unit_ids[0]: [inherited_label],
             unit_ids[1]: ["noise"],
         }
         _write_edits(review.uri, first_edits, [unit_ids])
@@ -246,8 +266,18 @@ def test_browser_review_preview_commit_resume_and_continue(
         with pytest.raises(UnresolvedMergeLabelConflictError):
             changes.commit()
 
+        children_before = len(review.parent.children)
+        for bad_id in (max(unit_ids) + 1.9, True, str(max(unit_ids) + 1)):
+            with pytest.raises(ValueError, match="unit_id must be an integer"):
+                changes.commit(conflict_resolutions={bad_id: ("accept",)})
+        with pytest.raises(ValueError, match="new labels outside"):
+            changes.commit(
+                conflict_resolutions={max(unit_ids) + 1: ("new_custom_cell",)}
+            )
+        assert len(review.parent.children) == children_before
+
         receipt = changes.commit(
-            conflict_resolutions={max(unit_ids) + 1: ("artifact",)}
+            conflict_resolutions={max(unit_ids) + 1: (inherited_label,)}
         )
         assert receipt.curation.parent == review.parent
         assert receipt.curation != no_change_receipt.curation
@@ -272,7 +302,7 @@ def test_browser_review_preview_commit_resume_and_continue(
             _load_annotations_json(continuation.uri)
         )
         assert pending_merges == []
-        assert labels == {max(unit_ids) + 1: ["artifact"]}
+        assert labels == {max(unit_ids) + 1: [inherited_label]}
     finally:
         clear_curations_for(sorting_key)
 
