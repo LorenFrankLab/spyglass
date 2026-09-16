@@ -161,3 +161,42 @@ def test_change_set_summary_and_changed_units_are_derived_from_fields():
     assert not unchanged.has_changes
     assert unchanged.changed_units().empty
     assert "confirm_no_changes=True" in unchanged.summary()
+
+
+def test_next_step_lines_name_the_state_consistently():
+    """Saved-not-committed, nothing-to-commit, awaiting verification, and
+    available-for-analysis each get one consistent line."""
+    from spyglass.spikesorting.v2.review_api import ReviewImportReceipt
+
+    edited = _change_set()
+    line = edited.next_step()
+    assert line.startswith("Browser edits saved, not committed")
+    assert "commit()" in line and "conflict_resolutions" in line
+    clean = _change_set(
+        labels_after={1: ("accept",), 2: ("noise",), 3: ()},
+        merge_groups=(),
+        unit_count_after=3,
+        label_conflicts=(),
+    )
+    assert "confirm_no_changes=True" in clean.next_step()
+
+    def receipt(needs):
+        return ReviewImportReceipt(
+            curation=SimpleNamespace(curation_id=5),
+            evaluation=None,
+            changes=edited,
+            warnings=(),
+            stages=(),
+            needs_merge_verification=needs,
+        )
+
+    assert (
+        receipt(True)
+        .next_step()
+        .startswith("Merged result (curation 5) awaiting verification")
+    )
+    assert (
+        receipt(False)
+        .next_step()
+        .startswith("Result available for analysis: curation 5")
+    )

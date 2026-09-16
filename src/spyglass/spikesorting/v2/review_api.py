@@ -257,6 +257,59 @@ class FigPackReview:
         return _preview_review(self)
 
     @classmethod
+    def find(
+        cls, curation, *, profile: "str | ReviewProfileRef | None" = None
+    ) -> tuple["FigPackReview", ...]:
+        """Every built, profile-backed review of ``curation``, oldest first.
+
+        The way back to "the review I was editing" without its id: a
+        review's identity includes the parent's children at the time it
+        started, so once a child has been committed ``start_review`` over
+        the same parent begins a NEW review (fresh seeded bundle) rather
+        than reusing the one holding your saved edits. Resume the earlier
+        one from here (``preview_import().has_changes`` tells which holds
+        uncommitted edits). Expert (non-profile) views are not listed.
+
+        Parameters
+        ----------
+        curation : CurationRef or mapping
+            The reviewed parent.
+        profile : str or ReviewProfileRef, optional
+            Keep only reviews of this profile.
+
+        Returns
+        -------
+        tuple of FigPackReview
+            Ordered by the number of siblings that existed when each review
+            started (a proxy for start order; the tables carry no timestamp).
+        """
+        from spyglass.spikesorting.v2.figpack_curation import (
+            FigPackCuration,
+            FigPackCurationSelection,
+        )
+
+        parent = CurationRef.from_key(curation)
+        wanted = (
+            None
+            if profile is None
+            else ReviewProfileRef.resolve(profile).review_profile_name
+        )
+        found = []
+        for row in (FigPackCurationSelection & parent.as_key()).fetch(
+            as_dict=True
+        ):
+            _, config = unpack_display_config(row["displayed_unit_properties"])
+            if config is None or not (
+                FigPackCuration
+                & {"figpack_curation_id": row["figpack_curation_id"]}
+            ):
+                continue
+            if wanted is not None and config["review_profile_name"] != wanted:
+                continue
+            found.append(cls.resume(row["figpack_curation_id"]))
+        return tuple(sorted(found, key=lambda r: len(r._started_sibling_uuids)))
+
+    @classmethod
     def resume(cls, review_id) -> "FigPackReview":
         """Reconstruct a review from its selection, bundle, and profile."""
         from spyglass.spikesorting.v2.figpack_curation import (
@@ -425,6 +478,33 @@ class CurationChangeSet:
             ],
         )
 
+    def next_step(self) -> str:
+        """One line saying where this review stands and what to do next.
+
+        The browser's **Save Annotations** only writes the bundle and
+        **Finalize Curation** only flips a browser flag; nothing reaches
+        Spyglass until ``commit()``. This states that consistently.
+        """
+        if self.has_changes:
+            merges = len(self.merge_groups)
+            return (
+                "Browser edits saved, not committed: "
+                f"{len(self.changed_units())} changed unit(s), {merges} "
+                "proposed merge(s). Next: inspect summary() and run "
+                "commit() in Python"
+                + (
+                    " with conflict_resolutions for every listed conflict."
+                    if self.label_conflicts
+                    else "."
+                )
+            )
+        return (
+            "No saved browser edits differ from curation "
+            f"{self.review.parent.curation_id}. Next: edit and Save "
+            "Annotations in the browser, or commit(confirm_no_changes=True) "
+            "to record this curation as reviewed."
+        )
+
     def summary(self) -> str:
         """A compact, human-readable account of the pending import."""
         parent = self.review.parent
@@ -503,6 +583,20 @@ class ReviewImportReceipt:
     def created_by(self) -> str:
         """Database user recorded for the committed/reused child."""
         return self.curation.created_by
+
+    def next_step(self) -> str:
+        """One line saying whether the committed result is usable yet."""
+        child = self.curation.curation_id
+        if self.needs_merge_verification:
+            return (
+                f"Merged result (curation {child}) awaiting verification: "
+                "continue_review().open(), inspect the merged units, then "
+                "preview_import().commit(...) that look before using it."
+            )
+        return (
+            f"Result available for analysis: curation {child}. Next: "
+            "select_units_for_analysis(receipt.curation, policy=...)."
+        )
 
     def continue_review(self) -> FigPackReview:
         """Open/reuse a verification review over the actual child.
