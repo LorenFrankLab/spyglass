@@ -1027,7 +1027,6 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
-            _is_duplicate_key_error,
         )
 
         # Validate the FK set up front (clean errors before any DB read).
@@ -1069,9 +1068,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         try:
             # allow_direct_insert: this helper IS the validation boundary.
             cls.insert1(new_key, allow_direct_insert=True)
-        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
-            if not _is_duplicate_key_error(exc):
-                raise
+        except dj.errors.DuplicateError:
             # Lost a concurrent race: another caller inserted the same
             # deterministic recording_id first. Refetch and return it.
             # (Top-level recovery only -- see transaction_or_noop.)

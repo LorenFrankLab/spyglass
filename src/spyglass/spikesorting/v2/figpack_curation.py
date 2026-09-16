@@ -71,7 +71,6 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
-    _is_duplicate_key_error,
 )
 from spyglass.utils import SpyglassMixin, logger
 
@@ -844,9 +843,7 @@ class FigPackCurationSelection(
         }
         try:
             cls.insert1(new_row, allow_direct_insert=True)
-        except Exception as exc:  # noqa: BLE001 - re-raised unless dup-PK race
-            if not _is_duplicate_key_error(exc):
-                raise
+        except dj.errors.DuplicateError:
             existing = cls._find_existing_pk(identity, deterministic_figpack_id)
             if existing is None:
                 raise

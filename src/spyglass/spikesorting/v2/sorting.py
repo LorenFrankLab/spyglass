@@ -845,8 +845,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
         from spyglass.spikesorting.v2.utils import (
             _ensure_lookup_row_exists,
-            _is_duplicate_key_error,
-            _is_fk_violation,
         )
 
         _ensure_lookup_row_exists(
@@ -981,47 +979,35 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                             }
                         )
                 return {k: plan.master_row[k] for k in cls.primary_key}
-            except Exception as exc:  # noqa: BLE001 -- classified below
-                # Duplicate PK (1062 / DuplicateError) is the recoverable race:
-                # the deterministic sorting_id collides on the master insert (the
-                # first statement, before any part is written), so refetch and
-                # return the winner. Checked FIRST so a defensive
-                # untranslated-1062 is not mis-read as an FK violation.
-                if _is_duplicate_key_error(exc):
-                    existing = cls._find_existing_pk(
-                        plan.master_restriction,
-                        plan.source_restriction,
-                        plan.artifact_detection_id,
-                        plan.sorting_id,
-                        source_part,
-                    )
-                    if existing is not None:
-                        return existing
-                    raise SchemaBypassError(
-                        f"SortingSelection master {plan.sorting_id} exists but "
-                        "its source/artifact parts do not match this selection: "
-                        "the master was inserted without insert_selection (a "
-                        "raw-insert orphan). Use insert_selection(), or drop the "
-                        "orphan master."
-                    ) from exc
-                # FK-violation catch is a TYPE check, NOT an errno test:
-                # translate_query_error strips the errno, so args[0]==1452 never
-                # matches. The reachable no-referenced-row case is the recording
-                # source part FK (-> Recording / ConcatenatedRecording) for an
-                # unpopulated recording -- the artifact merge id was already
-                # resolved above -- or a concurrent delete of a referenced row.
-                if _is_fk_violation(exc):
-                    raise SchemaBypassError(
-                        "SortingSelection: an input foreign key is unsatisfied "
-                        f"for source {plan.source_restriction} / "
-                        f"artifact_detection_id={plan.artifact_detection_id} -- "
-                        "the referenced Recording / ConcatenatedRecording or "
-                        "ArtifactDetectionOutput row is missing (a raw insert "
-                        "bypassing insert_selection, or a concurrent delete "
-                        "mid-insert). Populate the input, or retry if a "
-                        "transient race."
-                    ) from exc
-                raise
+            except dj.errors.DuplicateError as exc:
+                # A concurrent caller may have inserted the same selection.
+                existing = cls._find_existing_pk(
+                    plan.master_restriction,
+                    plan.source_restriction,
+                    plan.artifact_detection_id,
+                    plan.sorting_id,
+                    source_part,
+                )
+                if existing is not None:
+                    return existing
+                raise SchemaBypassError(
+                    f"SortingSelection master {plan.sorting_id} exists but "
+                    "its source/artifact parts do not match this selection: "
+                    "the master was inserted without insert_selection (a "
+                    "raw-insert orphan). Use insert_selection(), or drop the "
+                    "orphan master."
+                ) from exc
+            except dj.errors.IntegrityError as exc:
+                raise SchemaBypassError(
+                    "SortingSelection: an input foreign key is unsatisfied "
+                    f"for source {plan.source_restriction} / "
+                    f"artifact_detection_id={plan.artifact_detection_id} -- "
+                    "the referenced Recording / ConcatenatedRecording or "
+                    "ArtifactDetectionOutput row is missing (a raw insert "
+                    "bypassing insert_selection, or a concurrent delete "
+                    "mid-insert). Populate the input, or retry if a "
+                    "transient race."
+                ) from exc
 
     @classmethod
     def _find_existing_pk(

@@ -114,57 +114,6 @@ def transaction_or_noop(connection):
             yield
 
 
-def _is_duplicate_key_error(exc: BaseException) -> bool:
-    """Return whether ``exc`` is a duplicate-PRIMARY-KEY violation.
-
-    The deterministic-id selection helpers (``RecordingSelection`` /
-    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
-    ``SortingSelection`` ``insert_selection``) derive each master PK from the
-    selection's logical identity, then insert. Two callers racing on the same
-    logical selection compute the SAME PK, so the loser's insert violates the PK
-    uniqueness constraint; the helper catches that, refetches the winner's
-    row, and returns it. This predicate decides whether a caught exception
-    is that benign race (refetch + return) or a different integrity
-    failure that MUST propagate.
-
-    DataJoint translates MySQL errno 1062 (``ER_DUP_ENTRY``) to
-    ``dj.errors.DuplicateError`` -- a SIBLING of, not a subclass of,
-    ``dj.errors.IntegrityError`` (reserved for FK violations: errno
-    1217/1451/1452). So a duplicate PK is a ``DuplicateError`` and a
-    missing-source-part / FK violation is an ``IntegrityError``; only the
-    former is the race we recover from. The exception type is the only
-    signal used: rendered database messages are connector- and
-    locale-sensitive, and a false positive would silently swallow a genuine
-    integrity failure that must propagate.
-    """
-    return isinstance(exc, dj.errors.DuplicateError)
-
-
-def _is_fk_violation(exc: BaseException) -> bool:
-    """Return whether ``exc`` is a foreign-key (no-referenced-row) violation.
-
-    ``SortingSelection.insert_selection`` resolves the artifact merge id BEFORE
-    its transaction, so the transaction inserts only the master + a recording
-    source part (``-> Recording`` / ``-> ConcatenatedRecording``) + an optional
-    ``ArtifactDetectionSource`` part (``-> ArtifactDetectionOutput``). The
-    reachable no-referenced-row violation is therefore a raw insert or a
-    concurrent delete of one of those referenced rows (in practice the recording
-    source-part FK for an unpopulated recording -- the common case is pre-checked
-    and raises a clearer ``ValueError`` first). This predicate lets the helper
-    translate the residual case into an actionable natural-key message.
-
-    This is a DISTINCT predicate from :func:`_is_duplicate_key_error`, NOT an
-    errno test. DataJoint's ``translate_query_error`` STRIPS the errno
-    (``datajoint/connection.py``), so ``exc.args[0] == 1452`` never matches a
-    translated error -- the pattern ``_is_duplicate_key_error`` uses for 1062
-    does not transfer. On an INSERT the only ``dj.errors.IntegrityError`` is the
-    no-referenced-row (errno 1452) case -- a duplicate PK is a sibling
-    ``DuplicateError``, and 1451 is delete-time -- so the type check is the
-    correct predicate here.
-    """
-    return isinstance(exc, dj.errors.IntegrityError)
-
-
 def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     """Peel leading restriction positionals off a ``delete`` arg tuple.
 

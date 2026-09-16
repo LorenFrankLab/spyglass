@@ -576,7 +576,6 @@ class ConcatenatedRecordingSelection(
             Recording,
             RecordingSelection,
         )
-        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
         missing_fields = [f for f in cls._IDENTITY_FIELDS if f not in key]
         if missing_fields:
@@ -693,9 +692,7 @@ class ConcatenatedRecordingSelection(
                     allow_direct_insert=True,
                 )
                 cls.MemberSnapshot.insert(snapshot_inserts)
-        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK
-            if not _is_duplicate_key_error(exc):
-                raise
+        except dj.errors.DuplicateError:
             existing = cls._find_existing_pk(
                 identity, set_hash, concat_recording_id
             )

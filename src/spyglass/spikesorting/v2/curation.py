@@ -51,7 +51,6 @@ from spyglass.spikesorting.v2.utils import (
     CurationLabel,
     CurationSource,
     FactoryOnlyMaster,
-    _is_duplicate_key_error,
     transaction_or_noop,
     unit_brain_region_df,
 )
@@ -806,7 +805,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 # above; any non-duplicate error propagates.
                 if (
                     parent_curation_id != -1
-                    and _is_duplicate_key_error(exc)
+                    and isinstance(exc, dj.errors.DuplicateError)
                     and attempt < _CURATION_ID_RACE_RETRIES
                 ):
                     # If reuse is on and a concurrent insert created the SAME

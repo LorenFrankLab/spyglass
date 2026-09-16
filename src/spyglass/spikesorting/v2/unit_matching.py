@@ -320,7 +320,6 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         from spyglass.spikesorting.v2._selection_identity import (
             deterministic_id,
         )
-        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
         group_key = {
             "session_group_owner": session_group_owner,
@@ -412,9 +411,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 # deterministic id), so it bypasses the master insert guard.
                 cls().insert1(master_row, allow_direct_insert=True)
                 cls.MemberCuration.insert(part_rows)
-        except Exception as exc:  # noqa: BLE001 -- re-raised unless dup-PK race
-            if not _is_duplicate_key_error(exc):
-                raise
+        except dj.errors.DuplicateError:
             # Lost a concurrent race on the same deterministic unitmatch_id;
             # refetch and return the winner's row.
             existing = cls._find_existing_pk(identity, unitmatch_id)

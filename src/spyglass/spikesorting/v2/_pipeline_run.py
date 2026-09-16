@@ -128,17 +128,12 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
     the failed row committed, and a genuine duplicate could be swallowed. Every
     call site passes a full selection PK, so this holds.
     """
-    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+    import datajoint as dj
 
     try:
         table.populate(key, reserve_jobs=False)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 -- narrowed to the benign race below
-        # Only swallow a duplicate-PK violation whose row is now present; every
-        # other error (including a duplicate with no row -- a real integrity
-        # failure) propagates.
-        if not (_is_duplicate_key_error(exc) and (table & key)):
+    except dj.errors.DuplicateError:
+        if not (table & key):
             raise
 
 

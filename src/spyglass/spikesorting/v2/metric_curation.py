@@ -751,7 +751,6 @@ class CurationEvaluationSelection(
             assert_supplied_id_matches,
             deterministic_id,
         )
-        from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
 
         metric_waveform_params_name = key.get("metric_waveform_params_name")
         if metric_waveform_params_name is None:
@@ -810,9 +809,7 @@ class CurationEvaluationSelection(
         }
         try:
             cls.insert1(new_key, allow_direct_insert=True)
-        except Exception as exc:  # noqa: BLE001 - re-raised unless dup-PK race
-            if not _is_duplicate_key_error(exc):
-                raise
+        except dj.errors.DuplicateError:
             existing = cls._find_existing_pk(identity, curation_evaluation_id)
             if existing is None:
                 raise

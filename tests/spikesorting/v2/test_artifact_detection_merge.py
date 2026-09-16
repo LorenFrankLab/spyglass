@@ -969,7 +969,6 @@ def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
     import datajoint as dj
 
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.utils import _is_fk_violation
 
     rec_pk = ingested_recording["rec_pk"]
     # An artifact-FREE master to hang a bogus artifact part on.
@@ -981,15 +980,12 @@ def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
         }
     )
     try:
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(dj.errors.IntegrityError):
             SortingSelection.ArtifactDetectionSource.insert1(
                 {
                     "sorting_id": sort_pk["sorting_id"],
                     "artifact_detection_merge_id": uuid.uuid4(),
                 }
             )
-        assert _is_fk_violation(excinfo.value) or isinstance(
-            excinfo.value, dj.errors.IntegrityError
-        ), f"expected an FK/integrity error, got {excinfo.value!r}"
     finally:
         (SortingSelection & sort_pk).super_delete(warn=False)

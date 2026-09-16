@@ -481,7 +481,6 @@ def _insert_artifact_selection(
     )
     from spyglass.spikesorting.v2.utils import (
         _ensure_lookup_row_exists,
-        _is_duplicate_key_error,
     )
 
     payload = artifact_detection_identity_payload(
@@ -512,9 +511,7 @@ def _insert_artifact_selection(
         with transaction_or_noop(selection_cls.connection):
             # allow_direct_insert: insert_selection IS the validation boundary.
             selection_cls.insert1(row, allow_direct_insert=True)
-    except Exception as exc:  # noqa: BLE001 -- re-raised unless a dup-PK race
-        if not _is_duplicate_key_error(exc):
-            raise
+    except dj.errors.DuplicateError:
         # A concurrent caller won the deterministic-id race; its row is the
         # same content-addressed selection, so return the shared PK.
         logger.debug(

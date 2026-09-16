@@ -253,87 +253,42 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
     )
 
 
-# Each case is a raw PyMySQL IntegrityError ``(errno, message)`` as the
-# connector raises it; the test passes it through DataJoint's own
-# ``translate_query_error`` so the predicate is exercised on exactly the
-# exception shapes that reach the selection helpers' ``except`` blocks.
 @pytest.mark.parametrize(
-    "errno, message, expected",
+    "errno, message, recoverable",
     [
-        # MySQL errno 1062 (ER_DUP_ENTRY) -> DuplicateError: that is the race.
-        pytest.param(
-            1062, "Duplicate entry 'x' for key 'PRIMARY'", True, id="dup-1062"
-        ),
-        # FK violations (1451/1452) -> IntegrityError: they MUST propagate,
-        # not be swallowed -- even when the rendered message happens to
-        # contain the digits "1062" (a constraint name, a rendered UUID).
-        pytest.param(
-            1452,
-            "Cannot add or update a child row: a foreign key constraint "
-            "fails (`db`.`t`, CONSTRAINT `fk_1062`)",
-            False,
-            id="fk-1452-message-containing-1062",
-        ),
-        pytest.param(
-            1451,
-            "Cannot delete or update a parent row: a foreign key constraint "
-            "fails",
-            False,
-            id="fk-1451",
-        ),
+        (1062, "Duplicate entry 'x' for key 'PRIMARY'", True),
+        (1452, "Foreign key constraint fk_1062 fails", False),
+        (1451, "Cannot delete or update a parent row", False),
     ],
 )
-def test_is_duplicate_key_error_classifies_translated_connector_errors(
-    errno, message, expected
+def test_populate_recovery_classifies_translated_errors(
+    errno, message, recoverable
 ):
-    """``_is_duplicate_key_error`` is True only for a duplicate PRIMARY-KEY
-    violation as DataJoint translates it, never for an FK / missing-source-part
-    ``IntegrityError``."""
+    """Only translated duplicate errors with an existing row are recovered."""
     import pymysql
     from datajoint.connection import translate_query_error
 
-    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+    from spyglass.spikesorting.v2._pipeline_run import (
+        _populate_tolerating_concurrent_duplicate,
+    )
 
     error = translate_query_error(
         pymysql.err.IntegrityError(errno, message), "INSERT ..."
     )
-    assert _is_duplicate_key_error(error) is expected
 
+    class Table:
+        def populate(self, key, **kwargs):
+            raise error
 
-def test_is_duplicate_key_error_ignores_unrelated_exception():
-    """An unrelated exception is not a duplicate-key error."""
-    from spyglass.spikesorting.v2.utils import _is_duplicate_key_error
+        def __and__(self, key):
+            return True
 
-    assert not _is_duplicate_key_error(ValueError("unrelated"))
-
-
-def test_is_fk_violation_classifies_datajoint_exceptions():
-    """``_is_fk_violation`` is True for a (FK) IntegrityError and nothing else.
-
-    ``translate_query_error`` maps only errno 1452/1451/1217 to
-    ``IntegrityError`` (all FK-related) and 1062 to the SIBLING
-    ``DuplicateError``, and strips the errno -- so a bare *type* check is the
-    correct predicate, and a duplicate (even a defensively-untranslated
-    errno-1062 ``IntegrityError``, which ``insert_selection`` classifies as a
-    duplicate FIRST) must not be read here as an FK violation.
-    """
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2.utils import _is_fk_violation
-
-    # Any IntegrityError is an FK violation by type (errno stripped, so a
-    # message/args check would be wrong). On an INSERT the only IntegrityError
-    # is the no-referenced-row (1452) case.
-    assert _is_fk_violation(
-        dj.errors.IntegrityError("a foreign key constraint fails")
-    )
-    assert _is_fk_violation(dj.errors.IntegrityError(1452, "no referenced row"))
-    assert _is_fk_violation(dj.errors.IntegrityError())
-    # A duplicate is a SIBLING of IntegrityError, never an FK violation.
-    assert not _is_fk_violation(dj.errors.DuplicateError("Duplicate entry"))
-    # Unrelated exceptions are not FK violations.
-    assert not _is_fk_violation(ValueError("unrelated"))
-    assert not _is_fk_violation(KeyError("x"))
+    if recoverable:
+        _populate_tolerating_concurrent_duplicate(Table(), {"id": 1})
+    else:
+        with pytest.raises(type(error)) as raised:
+            _populate_tolerating_concurrent_duplicate(Table(), {"id": 1})
+        assert raised.value is error
 
 
 def test_bool_not_collapsed_to_int_in_identity():
