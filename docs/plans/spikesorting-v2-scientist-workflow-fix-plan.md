@@ -3,6 +3,8 @@
 Proposed September 16, 2026, against `21690fa1`. This is an implementation
 plan, not a record of completed UX changes. The preceding six commits contain
 the existing Python, curation, annotation, recording, and health-check fixes.
+Revised at the user's request: artifact detection and masking for concatenated
+recordings are required before merge, alongside the existing standalone path.
 
 ## Objective and scope
 
@@ -13,9 +15,12 @@ clear what was computed, what was merely suggested, what was saved, and which
 curation and units analysis will use.
 
 Keep the current architecture and public workflow. The main remaining work is
-completing the session example, clarifying scientific and browser semantics,
-making existing inspection tools discoverable, and measuring realistic use.
-No schema change is required for the default scope below.
+completing artifact handling for concatenated recordings, completing the
+session example, clarifying scientific and browser semantics, making existing
+inspection tools discoverable, and measuring realistic use. Small v2 schema
+changes needed to represent artifact dependencies correctly are in scope;
+this branch is pre-production. A production migration or compatibility layer
+for the old unmasked concat design is not required.
 
 Earlier plans are historical context, not an additional backlog to execute:
 
@@ -56,12 +61,14 @@ Implementation:
 2. Show a compact scientific setup summary alongside the existing effective
    sorter configuration: selected reference, preprocessing recipe, artifact
    handling, and motion treatment. Resolve it from the same rows used by
-   execution. For concatenation, expose the limitation in its existing recipe
-   and run output; do not build a new concat preflight API for this patch.
-3. Explain that a standalone member's artifact mask is not carried into a
-   concatenated run. Keep concat and Kilosort recipes experimental. Recommend
-   the validated single-session path for launch workloads requiring the
-   existing artifact handling.
+   execution. Extend the existing concat checks and run output to describe
+   member artifact detection and masking; do not build a separate preflight
+   framework.
+3. Update concat documentation with the implemented artifact flow from item 2.
+   Explain that the selected member detections are explicit inputs, rather
+   than automatically inheriting whichever standalone sorting ran previously.
+   Keep concat and Kilosort recipes experimental until their scientific
+   validation justifies changing that status.
 4. Replace unmeasured workstation/long-recording performance promises with
    supported settings and links to measured evidence. Describe display
    sampling as a display budget, not a bound on every analyzer or browser cost.
@@ -73,12 +80,130 @@ Primary files: `src/spyglass/spikesorting/v2/_recipe_catalog.py`,
 Acceptance: examples for an ordinary MS5 run, no-mask Kilosort run, and concat
 run state the treatment actually executed. Extend existing preset/preflight
 checks for the derived fields and routing. Do not add tests that merely pin
-paragraph wording. No sorter defaults change as part of this copy/summary fix.
+paragraph wording. No sorter defaults change as part of this copy/summary fix;
+item 2 changes the concat preset's artifact configuration deliberately.
 
-**Excluded:** implementing concatenated artifact masks or changing correction
-algorithms. Those require their own scientific and time-coordinate validation.
+## 2. Support artifact detection and masking in both source modes
 
-## 2. Finish the whole-session path through analysis
+**Priority: required before merge.** Concatenated sorting must provide the same
+artifact-detection capability as standalone sorting. A warning or an
+experimental label does not satisfy this requirement.
+
+Use the existing per-recording detection and masking services. The intended
+concat flow is:
+
+```text
+Each member: preprocess Recording -> detect artifacts -> apply its mask
+Then: concatenate masked members -> motion correction -> sort -> curate
+Finally: map spikes and artifact-aware observation intervals to each session
+```
+
+Detection uses each member's existing preprocessed recording, matching the
+standalone path. The saved standalone `Recording` remains reusable and
+unmodified; masking is a view applied to the concat input. Do not invent a
+second detector or redetect on the combined synthetic timeline for this fix.
+
+Implementation:
+
+1. **Make detection a normal stage in both modes.** Give the shipped concat
+   preset an enabled artifact recipe. Populate or reuse the existing member
+   `RecordingArtifactDetection` results before building the concat artifact.
+   Report per-member detection results, masked duration, and stage failures
+   through the existing run summary/retry mechanisms. Preserve explicitly
+   requested no-mask configurations with the same visible semantics as the
+   standalone path; concatenation itself must never cause an implicit skip.
+2. **Persist the exact artifact dependencies.** Add the necessary selection
+   and member links to the existing concat schema, referencing the selected
+   artifact outputs with real foreign keys. Include the ordered member
+   artifact choices in the concat selection identity because they affect the
+   input to motion correction and the materialized recording. Changing a
+   member's artifact choice must produce a different concat identity and
+   downstream sort; identical requests must reuse completed work. Validate
+   ownership against the member recording using existing artifact ownership
+   rules. Do not choose detections by recency or attach one arbitrary member's
+   detection ID as if it described the whole concat.
+3. **Mask before motion estimation.** Apply the existing lazy mask to each
+   member before concatenation and `correct_motion`, preserving all sample
+   counts and member boundaries. Ensure excluded samples remain masked in the
+   corrected output; if correction changes those samples, reapply the known
+   mask rather than redetecting. Validate both motion-enabled and motion-off
+   paths. Do not change the motion algorithm or remove time from the signal.
+4. **Map intervals by frames.** Resolve each member's kept intervals against
+   its actual retained timestamps, including disjoint source intervals. Offset
+   those frame ranges using the frozen member boundaries to obtain concat
+   ranges. Reuse existing timestamp/frame mapping and masking helpers, adding
+   only the small pure mapping operation needed here. Preserve half-open frame
+   boundaries; adding wall-clock start offsets is insufficient. Avoid full
+   timestamp arrays or one index per masked sample.
+5. **Carry the same treatment through sorting and analysis.** Replace current
+   assumptions that concat implies no artifact treatment in sorting,
+   evaluation/analyzer reconstruction, and exports. Read the concat-owned
+   artifact provenance rather than bypassing the guard with a standalone
+   `artifact_detection_id`. Write concat observation intervals in its
+   synthetic timeline and member output intervals in each original session
+   timeline, intersected with retained recording intervals. Curation and
+   per-member exports must preserve those exclusions instead of falling back
+   to the member's full recording intervals. Audit the affected duration-based
+   QC and downstream accessors: distinguish valid observation time from
+   time merely occupied by zeroed samples, and do not claim a consumer honors
+   exclusions if it still ignores them.
+6. **Make rebuilds reproducible.** Initial computation, missing-file rebuild,
+   analyzer reconstruction, and cache reuse must resolve the same frozen
+   detections and masking semantics. Update the affected fingerprints/cache
+   manifests and deletion dependencies. Existing pre-production unmasked
+   artifacts must not satisfy a new masked request. Use the branch's existing
+   schema reset/version mechanism where needed, rather than a legacy fallback.
+7. **Teach and expose the result.** Update concat presets, notebook/script,
+   preflight/run summaries, and reference documentation together. Show the
+   detector settings, affected member intervals, and masking before motion
+   correction. Link the existing trace/interval inspection tools so a user can
+   verify the result before trusting a sort.
+
+Primary files under `src/spyglass/spikesorting/v2/`: `session_group.py`,
+`_concat_recording.py`, `_selection_identity.py`, `_pipeline_run.py`,
+`_pipeline_preflight.py`, `_pipeline_types.py`, `_recipe_catalog.py`,
+`sorting.py`, `_sorting_analyzer.py`, and `concat_member_curation.py`.
+Reuse `artifact.py`, `_artifact_compute.py`, `_artifact_intervals.py`, and
+`_sorting_artifact_mask.py`. Update the actual cache/provenance and downstream
+interval consumers identified by tracing these paths; avoid a general
+artifact-framework rewrite.
+
+Acceptance checks:
+
+- Use a small two-member fixture with known detectable artifacts at different
+  times. The same member/recipe yields the same detected intervals standalone
+  and in concat preparation. Assert that the inputs actually passed to motion
+  correction and sorting are masked; checking for detection rows alone is not
+  sufficient.
+- Verify exact frame mapping for a disjoint member and artifacts touching a
+  member boundary. No neighboring valid samples are masked, no recording
+  samples are deleted, and spike timestamps map back to the correct session.
+  Test the real motion-enabled path as well as a motion-off path.
+- Verify stored per-member observation intervals exclude the detected periods
+  after sorting, a curation merge, and export. Check affected duration-based
+  calculations against known valid durations instead of treating zeroed time
+  as valid recording time.
+- Change one member's artifact selection and verify that the old concat,
+  sorting, and analyzer caches are not reused. An identical rerun does reuse
+  them. Rebuild a missing concat artifact and compare its masked content and
+  interval provenance with the original.
+- Exercise failure/retry at member detection using the existing stage model.
+  Preserve the existing clear failure for a member with no usable retained
+  time; do not silently omit a member. Keep the standalone artifact tests
+  passing and cover an explicit no-mask request without introducing an
+  implicit no-mask fallback.
+- Extend the long-recording validation to cover actual nonempty artifact
+  intervals in both source modes. An artifact-free fixture does not exercise
+  masking or its memory behavior.
+
+Extend existing artifact, concat, selection-identity, and integration suites,
+especially `test_artifact_mask.py`, `test_artifact_intervals.py`,
+`test_session_group_concat.py`, and `test_session_concat_schema.py`. Add a
+focused concat-artifact integration module if that keeps the workflow tests
+coherent. Full lab-scale validation remains item 7; the bounded correctness
+checks above are part of this implementation's merge requirement.
+
+## 3. Finish the whole-session path through analysis
 
 **Priority: before merge.** The presets notebook currently ends at the batch
 sorting report. A scientist with multiple tetrodes or shanks still has to
@@ -124,7 +249,7 @@ after one group has a committed merge. Cover the normal partial-batch case and
 an identical rerun. Preserve separate session timelines for concat examples;
 do not pool multiple member sessions into one session group.
 
-## 3. Clarify what the browser saves and Python commits
+## 4. Clarify what the browser saves and Python commits
 
 **Priority: before merge.** The right semantics already exist, but the browser
 currently packs its instructions into a long pane title.
@@ -158,7 +283,7 @@ reachable controls, saved edits surviving reload, preview/commit, and opening
 the merged child's review. Reuse existing recovery tests. No new persisted
 workflow state or requirement to click Finalize before import.
 
-## 4. Explain QC meaning and expose unavailable evidence
+## 5. Explain QC meaning and expose unavailable evidence
 
 **Priority: before merge.** An unflagged unit is not necessarily a unit with
 complete QC. The shipped rules use `missing_policy='pass'`, while a missing
@@ -196,7 +321,7 @@ rule inputs makes the difference visible in both its summary and selectable
 unit table. Unit order and IDs remain correct. A merged child's coverage is
 derived from its new evaluation. Numeric absence remains absence, not zero.
 
-## 5. Make detailed inspection and selection boundaries usable
+## 6. Make detailed inspection and selection boundaries usable
 
 **Priority: a bounded notebook/documentation addition before merge.** The
 browser is a summary, and much of the necessary detailed inspection already
@@ -252,7 +377,7 @@ If that capability is required by a launch analysis, promote it to a separate
 prerequisite with that full contract; the expert data-filtering example is not
 an equivalent decoder handoff.
 
-## 6. Validate the supported workload and scientific workflow
+## 7. Validate the supported workload and scientific workflow
 
 **Priority: before declaring release readiness.** The current evidence is
 useful but does not establish hour-long or high-unit-count performance.
@@ -272,6 +397,7 @@ Use the existing `measure_release_workflow.py` and browser infrastructure:
 | --- | --- |
 | Representative 1–3 hour tetrode recording | Sustained sorting, QC, review, and selected-data retrieval on lab data |
 | At least one-hour probe recording on target Linux hardware | Actual channel/unit-count scaling and storage needs |
+| Concatenated members with actual detected artifact intervals | Masking before motion/sorting, valid-time propagation, retry/rebuild consistency, and memory behavior |
 | Short 64- and 256-unit synthetic review bundles | Browser load, selection, labeling, save/reload, and payload scaling independently of sorter runtime |
 | Small multi-unit end-to-end run | Merge, reevaluation, continuation, wrong-merge recovery, and analysis membership |
 | Bounded v1/v2 comparison and adjudicated lab examples | Time/scaling correctness and plausible scientific decisions, with sorter/version differences documented |
@@ -304,15 +430,19 @@ that work. Do not preemptively replace the browser or add arbitrary hard caps.
 
 Extend [the validation record](spikesorting-v2-sorting-ux-validation.md) with
 new results and remaining limits. Lab data and deployment hardware are external
-dependencies, not prerequisites for completing items 1–5. If they are not
+dependencies, not prerequisites for completing items 1–6. If they are not
 available before merge, document that limitation and withhold broad capacity
 claims; release support for those workloads remains unverified.
 
 ## Delivery order and implementation discipline
 
-Deliver items 1–5 as separate logical commits, with the relevant behavioral
-checks, then record item 6 evidence separately. Within item 5, keep any facade
-addition separate from documentation if it warrants code changes. At the final
+Deliver items 1–6 as logical commits, with the relevant behavioral checks, then
+record item 7 evidence separately. Split item 2 into coherent commits for
+artifact dependency/identity schema, execution and interval propagation, and
+end-to-end validation/documentation as the implementation permits; each commit
+must preserve its supported contracts. Complete item 2 before claiming the
+concat workflow is ready to merge. Within item 6, keep any facade addition
+separate from documentation if it warrants code changes. At the final
 implementation commit, run affected notebook, browser, selection, and
 integration checks plus repository-required checks; capture failures or skips.
 
@@ -331,6 +461,7 @@ inspection, without calling it a supported edit round trip. If an observed
 launch workflow requires one of these operations, it is a release-scope
 decision rather than a small UX polish task.
 
-The default merge scope is therefore five bounded workflow improvements and
-the validation possible on available data. It does not attempt feature parity
-with every SpikeInterface operation or every external curation application.
+The merge scope is therefore the required concat artifact-handling feature,
+five bounded workflow improvements, and the validation possible on available
+data. It does not attempt feature parity with every SpikeInterface operation
+or every external curation application.
