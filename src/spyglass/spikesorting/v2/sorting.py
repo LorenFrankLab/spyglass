@@ -49,16 +49,12 @@ from spyglass.spikesorting.v2._sorting_analyzer import (
 )
 from spyglass.spikesorting.v2._sorting_artifact_mask import apply_artifact_mask
 from spyglass.spikesorting.v2._sorting_dispatch import (
-    _clusterless_noise_levels,  # noqa: F401  re-exported for tests
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
     sorter_distribution_version,
 )
-from spyglass.spikesorting.v2._sorting_units import (
-    _to_int_unit_id,  # noqa: F401  re-exported for tests
-    build_sorting_unit_rows,
-)
+from spyglass.spikesorting.v2._sorting_units import build_sorting_unit_rows
 from spyglass.spikesorting.v2._units_nwb import (
     abs_spike_times_dataframe,
     empty_spike_times_dataframe,

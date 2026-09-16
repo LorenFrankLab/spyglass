@@ -938,8 +938,8 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
             }
         )
         fetched = CurationEvaluation().make_fetch(sel)
-        assert "snr" in fetched.metric_names
-        assert fetched.metric_kwargs["snr"]["peak_sign"] == "neg"
+        assert "snr" in fetched.metric_inputs.metric_names
+        assert fetched.metric_inputs.metric_kwargs["snr"]["peak_sign"] == "neg"
     finally:
         clear_curations_for(planted_two_unit_sort)
 

@@ -182,19 +182,9 @@ def _assert_is_metric_recipe(waveform_params_name: str) -> None:
         )
 
 
-class CurationEvaluationFetched(NamedTuple):
-    """DB inputs for ``CurationEvaluation.make_compute`` (no DB INPUT resolution
-    in compute; it still stages its OUTPUT via ``AnalysisNwbfile``).
+class EvaluationRecordingInputs(NamedTuple):
+    """Recording reconstruction and artifact-mask inputs."""
 
-    Everything ``make_compute`` needs to reconstruct the recording + curated /
-    raw sorting and load-or-build the analyzers is resolved here (the only stage
-    allowed to resolve DB inputs). ``use_fast_path`` records the committed-state routing
-    decision (root/label-only -> cached raw-sort analyzer; merged -> temp
-    curation analyzer) so the worker does not re-query the curation.
-    """
-
-    sorting_id: str
-    curation_id: int
     nwb_file_name: str
     source_kind: str
     recording_id: str | None
@@ -202,15 +192,38 @@ class CurationEvaluationFetched(NamedTuple):
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
     recording_row: dict
     fs: float
+
+
+class EvaluationSortingInputs(NamedTuple):
+    """Committed unit namespace and raw/curated spike-train inputs."""
+
+    sorting_id: str
+    curation_id: int
     raw_units_abs_path: str
     raw_n_units: int
     curated_units_abs_path: str
     expected_unit_ids: list[int]
     use_fast_path: bool
+
+
+class EvaluationAnalyzerInputs(NamedTuple):
+    """Resolved display/metric analyzer recipes and execution settings."""
+
+    display_waveform_params_name: str
     display_waveform_params: dict
     display_analyzer_folder: str
+    metric_waveform_params_name: str
     metric_waveform_params: dict
     metric_analyzer_folder: str
+    sorter_row: dict
+    analyzer_job_kwargs: dict
+
+
+class EvaluationMetricInputs(NamedTuple):
+    """Metric computation, merge suggestions, and automatic label rules."""
+
+    metric_params_name: str
+    auto_curation_rules_name: str
     metric_names: list[str]
     metric_kwargs: dict[str, dict]
     template_metric_columns: list[str]
@@ -218,15 +231,20 @@ class CurationEvaluationFetched(NamedTuple):
     auto_merge_preset: str
     auto_merge_kwargs: dict
     rule_rows: list[dict]
-    sorter_row: dict
-    analyzer_job_kwargs: dict
     metric_job_kwargs: dict
-    # Recipe / param names re-emitted into the artifact NWB (provenance, not
-    # used in compute -- the resolved params/recipes above drive the work).
-    metric_params_name: str
-    auto_curation_rules_name: str
-    display_waveform_params_name: str
-    metric_waveform_params_name: str
+
+
+class CurationEvaluationFetched(NamedTuple):
+    """Resolved inputs grouped by responsibility for DataJoint dispatch.
+
+    The outer tuple is unpacked into make_compute; inner records are read by
+    name and remain part of DataJoint's fetch-consistency hash.
+    """
+
+    recording_inputs: EvaluationRecordingInputs
+    sorting_inputs: EvaluationSortingInputs
+    analyzer_inputs: EvaluationAnalyzerInputs
+    metric_inputs: EvaluationMetricInputs
 
 
 class CurationEvaluationComputed(NamedTuple):
@@ -1078,81 +1096,65 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         ).fetch1()
 
         return CurationEvaluationFetched(
-            sorting_id=sorting_id,
-            curation_id=curation_id,
-            nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
-            source_kind=source.kind,
-            recording_id=recording_id,
-            artifact_detection_id=artifact_detection_id,
-            artifact_valid_times=artifact_valid_times,
-            recording_row=recording_row,
-            fs=fs,
-            raw_units_abs_path=raw_units_abs_path,
-            raw_n_units=raw_n_units,
-            curated_units_abs_path=curated_units_abs_path,
-            expected_unit_ids=expected_unit_ids,
-            use_fast_path=use_fast_path,
-            display_waveform_params=display_waveform_params,
-            display_analyzer_folder=str(
-                analyzer_path(sorting_id, display_waveform_params_name)
+            recording_inputs=EvaluationRecordingInputs(
+                nwb_file_name=_nwb_file_name_for_sorting(sorting_key),
+                source_kind=source.kind,
+                recording_id=recording_id,
+                artifact_detection_id=artifact_detection_id,
+                artifact_valid_times=artifact_valid_times,
+                recording_row=recording_row,
+                fs=fs,
             ),
-            metric_waveform_params=metric_waveform_params,
-            metric_analyzer_folder=str(
-                analyzer_path(sorting_id, metric_waveform_params_name)
+            sorting_inputs=EvaluationSortingInputs(
+                sorting_id=sorting_id,
+                curation_id=curation_id,
+                raw_units_abs_path=raw_units_abs_path,
+                raw_n_units=raw_n_units,
+                curated_units_abs_path=curated_units_abs_path,
+                expected_unit_ids=expected_unit_ids,
+                use_fast_path=use_fast_path,
             ),
-            metric_names=metric_names,
-            metric_kwargs=metric_kwargs,
-            template_metric_columns=list(qm["template_metric_columns"] or []),
-            skip_pc_metrics=bool(qm["skip_pc_metrics"]),
-            auto_merge_preset=acr["auto_merge_preset"],
-            auto_merge_kwargs=dict(acr["auto_merge_kwargs"] or {}),
-            rule_rows=list(rule_rows),
-            sorter_row=sorter_row,
-            analyzer_job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
-            metric_job_kwargs=_resolved_job_kwargs(
-                qm["job_kwargs"], acr["job_kwargs"]
+            analyzer_inputs=EvaluationAnalyzerInputs(
+                display_waveform_params_name=display_waveform_params_name,
+                display_waveform_params=display_waveform_params,
+                display_analyzer_folder=str(
+                    analyzer_path(sorting_id, display_waveform_params_name)
+                ),
+                metric_waveform_params_name=metric_waveform_params_name,
+                metric_waveform_params=metric_waveform_params,
+                metric_analyzer_folder=str(
+                    analyzer_path(sorting_id, metric_waveform_params_name)
+                ),
+                sorter_row=sorter_row,
+                analyzer_job_kwargs=_resolved_job_kwargs(
+                    sorter_row["job_kwargs"]
+                ),
             ),
-            metric_params_name=sel["metric_params_name"],
-            auto_curation_rules_name=sel["auto_curation_rules_name"],
-            display_waveform_params_name=display_waveform_params_name,
-            metric_waveform_params_name=metric_waveform_params_name,
+            metric_inputs=EvaluationMetricInputs(
+                metric_params_name=sel["metric_params_name"],
+                auto_curation_rules_name=sel["auto_curation_rules_name"],
+                metric_names=metric_names,
+                metric_kwargs=metric_kwargs,
+                template_metric_columns=list(
+                    qm["template_metric_columns"] or []
+                ),
+                skip_pc_metrics=bool(qm["skip_pc_metrics"]),
+                auto_merge_preset=acr["auto_merge_preset"],
+                auto_merge_kwargs=dict(acr["auto_merge_kwargs"] or {}),
+                rule_rows=list(rule_rows),
+                metric_job_kwargs=_resolved_job_kwargs(
+                    qm["job_kwargs"], acr["job_kwargs"]
+                ),
+            ),
         )
 
     def make_compute(
         self,
         key,
-        sorting_id,
-        curation_id,
-        nwb_file_name,
-        source_kind,
-        recording_id,
-        artifact_detection_id,
-        artifact_valid_times,
-        recording_row,
-        fs,
-        raw_units_abs_path,
-        raw_n_units,
-        curated_units_abs_path,
-        expected_unit_ids,
-        use_fast_path,
-        display_waveform_params,
-        display_analyzer_folder,
-        metric_waveform_params,
-        metric_analyzer_folder,
-        metric_names,
-        metric_kwargs,
-        template_metric_columns,
-        skip_pc_metrics,
-        auto_merge_preset,
-        auto_merge_kwargs,
-        rule_rows,
-        sorter_row,
-        analyzer_job_kwargs,
-        metric_job_kwargs,
-        metric_params_name,
-        auto_curation_rules_name,
-        display_waveform_params_name,
-        metric_waveform_params_name,
+        recording_inputs: EvaluationRecordingInputs,
+        sorting_inputs: EvaluationSortingInputs,
+        analyzer_inputs: EvaluationAnalyzerInputs,
+        metric_inputs: EvaluationMetricInputs,
     ) -> CurationEvaluationComputed:
         """Compute metrics / merges / labels over the committed curation.
 
@@ -1185,12 +1187,12 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
 
         spikeinterface_version = si.__version__
         analysis_file_name = AnalysisNwbfile().create(
-            nwb_file_name,
+            recording_inputs.nwb_file_name,
             restrict_permission=True,  # 0o644, not world-writable 0o666
         )
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        wants_pc = (not skip_pc_metrics) and bool(
-            _requested_pc_metrics(metric_names)
+        wants_pc = (not metric_inputs.skip_pc_metrics) and bool(
+            _requested_pc_metrics(metric_inputs.metric_names)
         )
 
         # Concat sources carry no single recording_id (recording_id is None);
@@ -1198,8 +1200,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         # the file identifies its upstream standalone. recording_content_hash is
         # the source row's content_hash either way (the concat's, for a concat).
         concat_recording_id = (
-            str(recording_row["concat_recording_id"])
-            if source_kind == "concatenated_recording"
+            str(recording_inputs.recording_row["concat_recording_id"])
+            if recording_inputs.source_kind == "concatenated_recording"
             else None
         )
 
@@ -1208,21 +1210,23 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         # is added per-path (a manifest on the fast path, None for a zero-unit
         # or merged-temp-analyzer evaluation).
         base_provenance = {
-            "sorting_id": str(sorting_id),
-            "curation_id": int(curation_id),
-            "metric_params_name": metric_params_name,
-            "auto_curation_rules_name": auto_curation_rules_name,
-            "display_waveform_params_name": display_waveform_params_name,
-            "metric_waveform_params_name": metric_waveform_params_name,
-            "metric_names": list(metric_names),
-            "metric_kwargs": metric_kwargs,
-            "auto_merge_preset": auto_merge_preset,
-            "auto_merge_kwargs": auto_merge_kwargs,
-            "auto_curation_rules": rule_rows,
-            "source_kind": source_kind,
-            "recording_id": recording_id,
+            "sorting_id": str(sorting_inputs.sorting_id),
+            "curation_id": int(sorting_inputs.curation_id),
+            "metric_params_name": metric_inputs.metric_params_name,
+            "auto_curation_rules_name": metric_inputs.auto_curation_rules_name,
+            "display_waveform_params_name": analyzer_inputs.display_waveform_params_name,
+            "metric_waveform_params_name": analyzer_inputs.metric_waveform_params_name,
+            "metric_names": list(metric_inputs.metric_names),
+            "metric_kwargs": metric_inputs.metric_kwargs,
+            "auto_merge_preset": metric_inputs.auto_merge_preset,
+            "auto_merge_kwargs": metric_inputs.auto_merge_kwargs,
+            "auto_curation_rules": metric_inputs.rule_rows,
+            "source_kind": recording_inputs.source_kind,
+            "recording_id": recording_inputs.recording_id,
             "concat_recording_id": concat_recording_id,
-            "recording_content_hash": recording_row["content_hash"],
+            "recording_content_hash": recording_inputs.recording_row[
+                "content_hash"
+            ],
             "spikeinterface_version": spikeinterface_version,
         }
 
@@ -1241,10 +1245,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             # Zero-unit committed curation: nothing to analyze; write empty
             # metric/merge/label tables (SI cannot build an analyzer over zero
             # units). Write empty metric/merge/label tables.
-            if not expected_unit_ids:
+            if not sorting_inputs.expected_unit_ids:
                 logger.warning(
                     "CurationEvaluation: curation "
-                    f"(sorting_id={sorting_id}, curation_id={curation_id}) has "
+                    f"(sorting_id={sorting_inputs.sorting_id}, curation_id={sorting_inputs.curation_id}) has "
                     "zero units; writing empty metric/merge/label tables."
                 )
                 object_ids = self._write_empty(
@@ -1253,66 +1257,70 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 return CurationEvaluationComputed(
                     analysis_file_name,
                     *object_ids,
-                    nwb_file_name,
+                    recording_inputs.nwb_file_name,
                     spikeinterface_version,
                     None,
                 )
 
             recording = reconstruct_recording_for_sorting_from_resolved(
-                recording_row=recording_row,
-                source_kind=source_kind,
-                artifact_valid_times=artifact_valid_times,
-                artifact_detection_id=artifact_detection_id,
-                recording_id=recording_id,
+                recording_row=recording_inputs.recording_row,
+                source_kind=recording_inputs.source_kind,
+                artifact_valid_times=recording_inputs.artifact_valid_times,
+                artifact_detection_id=recording_inputs.artifact_detection_id,
+                recording_id=recording_inputs.recording_id,
             )
 
-            if use_fast_path:
+            if sorting_inputs.use_fast_path:
                 # Root / label-only: the cached raw-sort analyzers already carry
                 # this curation's unit set. Hold the per-sort lock around the
                 # canonical-folder load/rebuild + metric-extension mutation
                 # (_compute_metrics / _compute_merge_groups mutate the shared
                 # analyzer in place).
                 raw_sorting = self._sorting_from_units_nwb(
-                    raw_units_abs_path, recording_row, fs
+                    sorting_inputs.raw_units_abs_path,
+                    recording_inputs.recording_row,
+                    recording_inputs.fs,
                 )
-                with analyzer_cache_lock(sorting_id):
+                with analyzer_cache_lock(sorting_inputs.sorting_id):
                     display_analyzer = load_or_rebuild_analyzer_from_resolved(
-                        sorting_id=sorting_id,
-                        n_units=raw_n_units,
-                        analyzer_folder=Path(display_analyzer_folder),
-                        waveform_params=display_waveform_params,
+                        sorting_id=sorting_inputs.sorting_id,
+                        n_units=sorting_inputs.raw_n_units,
+                        analyzer_folder=Path(
+                            analyzer_inputs.display_analyzer_folder
+                        ),
+                        waveform_params=analyzer_inputs.display_waveform_params,
                         recording=recording,
                         sorting=raw_sorting,
-                        sorter_row=sorter_row,
-                        job_kwargs=analyzer_job_kwargs,
+                        sorter_row=analyzer_inputs.sorter_row,
+                        job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                     )
                     metric_analyzer = None
                     if wants_pc:
-                        metric_analyzer = (
-                            load_or_rebuild_analyzer_from_resolved(
-                                sorting_id=sorting_id,
-                                n_units=raw_n_units,
-                                analyzer_folder=Path(metric_analyzer_folder),
-                                waveform_params=metric_waveform_params,
-                                recording=recording,
-                                sorting=raw_sorting,
-                                sorter_row=sorter_row,
-                                job_kwargs=analyzer_job_kwargs,
-                            )
+                        metric_analyzer = load_or_rebuild_analyzer_from_resolved(
+                            sorting_id=sorting_inputs.sorting_id,
+                            n_units=sorting_inputs.raw_n_units,
+                            analyzer_folder=Path(
+                                analyzer_inputs.metric_analyzer_folder
+                            ),
+                            waveform_params=analyzer_inputs.metric_waveform_params,
+                            recording=recording,
+                            sorting=raw_sorting,
+                            sorter_row=analyzer_inputs.sorter_row,
+                            job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                         )
                     metrics_df, labels_by_unit, merge_groups = (
                         self._evaluate_analyzers(
                             display_analyzer,
                             metric_analyzer,
-                            metric_names=metric_names,
-                            metric_kwargs=metric_kwargs,
-                            skip_pc_metrics=skip_pc_metrics,
-                            metric_job_kwargs=metric_job_kwargs,
-                            template_metric_columns=template_metric_columns,
-                            auto_merge_preset=auto_merge_preset,
-                            auto_merge_kwargs=auto_merge_kwargs,
-                            rule_rows=rule_rows,
-                            expected_unit_ids=expected_unit_ids,
+                            metric_names=metric_inputs.metric_names,
+                            metric_kwargs=metric_inputs.metric_kwargs,
+                            skip_pc_metrics=metric_inputs.skip_pc_metrics,
+                            metric_job_kwargs=metric_inputs.metric_job_kwargs,
+                            template_metric_columns=metric_inputs.template_metric_columns,
+                            auto_merge_preset=metric_inputs.auto_merge_preset,
+                            auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
+                            rule_rows=metric_inputs.rule_rows,
+                            expected_unit_ids=sorting_inputs.expected_unit_ids,
                         )
                     )
             else:
@@ -1321,9 +1329,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 # analyzer cache (identity is curation-scoped, not sorting-
                 # scoped); cleaned on success and failure by TemporaryDirectory.
                 curated_sorting = self._sorting_from_units_nwb(
-                    curated_units_abs_path, recording_row, fs
+                    sorting_inputs.curated_units_abs_path,
+                    recording_inputs.recording_row,
+                    recording_inputs.fs,
                 )
-                compute_key = {"sorting_id": sorting_id}
+                compute_key = {"sorting_id": sorting_inputs.sorting_id}
                 from spyglass.settings import temp_dir as spyglass_temp_dir
 
                 from spyglass.spikesorting.v2._analyzer_cache import (
@@ -1341,10 +1351,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                         curated_sorting,
                         recording,
                         compute_key,
-                        sorter_row=sorter_row,
-                        job_kwargs=analyzer_job_kwargs,
+                        sorter_row=analyzer_inputs.sorter_row,
+                        job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                         analyzer_folder=display_folder,
-                        waveform_params=display_waveform_params,
+                        waveform_params=analyzer_inputs.display_waveform_params,
                     )
                     display_analyzer = load_analyzer_folder(display_folder)
                     metric_analyzer = None
@@ -1356,25 +1366,25 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             curated_sorting,
                             recording,
                             compute_key,
-                            sorter_row=sorter_row,
-                            job_kwargs=analyzer_job_kwargs,
+                            sorter_row=analyzer_inputs.sorter_row,
+                            job_kwargs=analyzer_inputs.analyzer_job_kwargs,
                             analyzer_folder=metric_folder,
-                            waveform_params=metric_waveform_params,
+                            waveform_params=analyzer_inputs.metric_waveform_params,
                         )
                         metric_analyzer = load_analyzer_folder(metric_folder)
                     metrics_df, labels_by_unit, merge_groups = (
                         self._evaluate_analyzers(
                             display_analyzer,
                             metric_analyzer,
-                            metric_names=metric_names,
-                            metric_kwargs=metric_kwargs,
-                            skip_pc_metrics=skip_pc_metrics,
-                            metric_job_kwargs=metric_job_kwargs,
-                            template_metric_columns=template_metric_columns,
-                            auto_merge_preset=auto_merge_preset,
-                            auto_merge_kwargs=auto_merge_kwargs,
-                            rule_rows=rule_rows,
-                            expected_unit_ids=expected_unit_ids,
+                            metric_names=metric_inputs.metric_names,
+                            metric_kwargs=metric_inputs.metric_kwargs,
+                            skip_pc_metrics=metric_inputs.skip_pc_metrics,
+                            metric_job_kwargs=metric_inputs.metric_job_kwargs,
+                            template_metric_columns=metric_inputs.template_metric_columns,
+                            auto_merge_preset=metric_inputs.auto_merge_preset,
+                            auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
+                            rule_rows=metric_inputs.rule_rows,
+                            expected_unit_ids=sorting_inputs.expected_unit_ids,
                         )
                     )
 
@@ -1390,7 +1400,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             # committed curation + recipe, so None.
             source_analyzer_hashes = (
                 analyzer_role_hashes(display_analyzer, metric_analyzer)
-                if use_fast_path
+                if sorting_inputs.use_fast_path
                 else None
             )
             # Self-describing provenance: the evaluation inputs + the source
@@ -1407,7 +1417,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             return CurationEvaluationComputed(
                 analysis_file_name,
                 *object_ids,
-                nwb_file_name,
+                recording_inputs.nwb_file_name,
                 spikeinterface_version,
                 source_analyzer_hashes,
             )

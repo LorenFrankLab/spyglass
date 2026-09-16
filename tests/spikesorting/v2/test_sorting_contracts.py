@@ -11,15 +11,14 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.usefixtures("dj_conn")
 def test_to_int_unit_id_raises_typed_error_on_non_integer():
     """A sorter unit_id that does not convert to int raises the typed
     ``NonIntegerUnitIDError`` (a ValueError subclass), naming the offending id
     and the remap guidance -- not a bare ``int()`` ValueError or a silent
     coercion.
     """
+    from spyglass.spikesorting.v2._sorting_units import _to_int_unit_id
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
-    from spyglass.spikesorting.v2.sorting import _to_int_unit_id
 
     # Convertible ids pass through.
     assert _to_int_unit_id(3) == 3
@@ -89,10 +88,9 @@ def test_curation_evaluation_tuples_match_make_signatures():
     The dispatch splats ``make_fetch`` -> ``make_compute(key, *fetched)`` and
     ``make_compute`` -> ``make_insert(key, *computed)`` positionally, so the
     field order of ``CurationEvaluationFetched`` / ``CurationEvaluationComputed``
-    must match the corresponding parameter order. The fetched carrier is long
-    (30 fields, several str-adjacent: abs paths / folders / recipe blobs), so a
-    reorder -- or a dropped/added field on only one side -- would silently
-    mis-bind later slots without a TypeError. Pin it.
+    must match the corresponding parameter order. The fetched carrier groups
+    recording, sorting, analyzer, and metric inputs into named records; only
+    those four records cross the positional dispatch boundary.
     """
     import inspect
 

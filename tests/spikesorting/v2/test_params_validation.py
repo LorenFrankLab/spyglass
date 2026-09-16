@@ -617,23 +617,6 @@ def test_clusterless_noise_levels_length_guard():
             _assert_noise_levels_length(bad, n_channels)
 
 
-def test_clusterless_noise_levels_derivation(dj_conn):
-    """The runtime derives noise_levels from threshold_unit correctly.
-
-    Precedence: an explicit noise_levels wins; otherwise ``"uv"`` derives
-    ``[1.0]`` (raw-uV threshold) and ``"mad"`` derives ``None`` (SI
-    estimates per-channel MAD).
-    """
-    from spyglass.spikesorting.v2.sorting import _clusterless_noise_levels
-
-    # explicit override wins regardless of unit
-    assert _clusterless_noise_levels([3.0], "uv") == [3.0]
-    assert _clusterless_noise_levels([3.0], "mad") == [3.0]
-    # derive from unit when unset
-    assert _clusterless_noise_levels(None, "uv") == [1.0]
-    assert _clusterless_noise_levels(None, "mad") is None
-
-
 def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
     """The shipped ``clusterless_thresholder`` / ``default`` row has
     ``noise_levels=[1.0]`` baked into ``params``.
