@@ -6,22 +6,22 @@ round-trip showing it can be regenerated from its stored lineage. Two artifact
 families have recompute machinery:
 
 - the preprocessed **recording** (`Recording`, an NWB-resident
-  `ElectricalSeries` inside an `AnalysisNwbfile`); and
+    `ElectricalSeries` inside an `AnalysisNwbfile`); and
 - the per-sort **SortingAnalyzer** folder (`Sorting`, a `binary_folder` of
-  waveform/template/extension data).
+    waveform/template/extension data).
 
-Both are regeneratable: `Recording.get_recording()` rebuilds a missing
-recording from its `RecordingSelection` lineage, and `Sorting.get_analyzer()`
-rebuilds a missing analyzer folder from the stored sort. The recompute tables
-verify that regeneration *before* anything is deleted.
+Both are regeneratable: `Recording.get_recording()` rebuilds a missing recording
+from its `RecordingSelection` lineage, and `Sorting.get_analyzer()` rebuilds a
+missing analyzer folder from the stored sort. The recompute tables verify that
+regeneration *before* anything is deleted.
 
 ## The recompute trios
 
-| Recording | SortingAnalyzer | Role |
-| --- | --- | --- |
-| `RecordingArtifactVersions` | `SortingAnalyzerVersions` | Inventory dependencies + a reference content hash. |
+| Recording                             | SortingAnalyzer                     | Role                                                                                                          |
+| ------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `RecordingArtifactVersions`           | `SortingAnalyzerVersions`           | Inventory dependencies + a reference content hash.                                                            |
 | `RecordingArtifactRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` (a `rounding` precision applies to the analyzer trio only). |
-| `RecordingArtifactRecompute` | `SortingAnalyzerRecompute` | Regenerate, compare content hashes, record `matched` / `deleted`. |
+| `RecordingArtifactRecompute`          | `SortingAnalyzerRecompute`          | Regenerate, compare content hashes, record `matched` / `deleted`.                                             |
 
 The comparison uses reproducible **content** — for recordings the content
 fingerprint (traces, timestamps, persisted probe geometry, and scaling metadata)
@@ -60,8 +60,8 @@ RecordingArtifactRecompute.populate(rec_key)
 RecordingArtifactRecompute().get_disk_space(rec_key)
 
 # 5. Reclaim (matched=1 + current environment + > days_since_creation old).
-RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)    # preview
-RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)   # delete
+RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)  # preview
+RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)  # delete
 
 # Later: get_recording() rebuilds + reconciles the deleted artifact on demand.
 ```
@@ -80,10 +80,10 @@ path/size/mtime fingerprint, without reading waveform payloads.
 
 - A `matched=0` row never authorizes deletion.
 - A `matched=1` row from a *different* environment (e.g. a verification that
-  succeeded months ago under an older SpikeInterface pin) is not evidence the
-  current environment can regenerate the artifact. The default raises
-  `StaleEnvMatchedError` naming the stale env(s). Pass `force_stale_env=True`
-  (audit-logged) to override deliberately.
+    succeeded months ago under an older SpikeInterface pin) is not evidence the
+    current environment can regenerate the artifact. The default raises
+    `StaleEnvMatchedError` naming the stale env(s). Pass `force_stale_env=True`
+    (audit-logged) to override deliberately.
 - Recently-created artifacts are skipped (`days_since_creation`, default 7).
 
 A completed comparison with `matched=0` records which objects differ in the
@@ -96,47 +96,47 @@ the reason in `err_msg` and have no synthetic diff rows.
 Every analyzer cache folder is a SpikeInterface `binary_folder` analyzer named
 `{sorting_id}__{payload}.analyzer` under the analyzer root
 (`dj.config["custom"]["spikesorting_v2_analyzer_dir"]`, else
-`<temp_dir>/spikesorting_v2/analyzers`). The payload is the waveform recipe
-name for a sort's own display/metric analyzer, or
+`<temp_dir>/spikesorting_v2/analyzers`). The payload is the waveform recipe name
+for a sort's own display/metric analyzer, or
 `curation_{uuid}_{role}_{recipe_hash}_si_{si_hash}` for a committed merged
-curation's per-generation cache; a derivative that carries extra extensions
-with specific parameters appends `_ext_{request_hash}` and is reused on every
-later request with the same parameters.
+curation's per-generation cache; a derivative that carries extra extensions with
+specific parameters appends `_ext_{request_hash}` and is reused on every later
+request with the same parameters.
 
-`binary_folder` is deliberate: it is the only SpikeInterface 0.104 format
-whose waveform extraction writes straight into a memmapped `waveforms.npy`
-(the `zarr` and `memory` formats extract into a shared-memory buffer sized
-for the whole waveform volume and then copy it). Every load goes through
-`load_analyzer_folder`, which maps `waveforms.npy` lazily instead of reading
-the whole volume into RAM. Measured on a 415 MB waveform volume
+`binary_folder` is deliberate: it is the only SpikeInterface 0.104 format whose
+waveform extraction writes straight into a memmapped `waveforms.npy` (the `zarr`
+and `memory` formats extract into a shared-memory buffer sized for the whole
+waveform volume and then copy it). Every load goes through
+`load_analyzer_folder`, which maps `waveforms.npy` lazily instead of reading the
+whole volume into RAM. Measured on a 415 MB waveform volume
 (`test_analyzer_memory.py`): extraction peaks at ~1.5x the volume (file-backed
-dirty pages included) versus ~2.3x for `zarr`; a lazy load plus one unit's
-read costs ~0.17x versus >= 1x for an eager load. The scientific waveform
-sample (`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to
-meet a memory target -- only the storage and load paths changed.
+dirty pages included) versus ~2.3x for `zarr`; a lazy load plus one unit's read
+costs ~0.17x versus >= 1x for an eager load. The scientific waveform sample
+(`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to meet a
+memory target -- only the storage and load paths changed.
 
-Folders written under the pre-launch `.zarr` convention are not read; they
-are disposable and rebuild on first access. Delete stale `*.zarr` folders under
-the analyzer root by hand.
+Folders written under the pre-launch `.zarr` convention are not read; they are
+disposable and rebuild on first access. Delete stale `*.zarr` folders under the
+analyzer root by hand.
 
-Scratch disk: budget for the preprocessed recording (`Recording`), the
-sorter's own scratch under `temp_dir` while it runs, the display and (when PC
-metrics are requested) metric analyzers, plus one per-generation cache (and
-its derivatives) per committed merged curation you review. The
-`SortingAnalyzerRecompute` tables report folder sizes.
+Scratch disk: budget for the preprocessed recording (`Recording`), the sorter's
+own scratch under `temp_dir` while it runs, the display and (when PC metrics are
+requested) metric analyzers, plus one per-generation cache (and its derivatives)
+per committed merged curation you review. The `SortingAnalyzerRecompute` tables
+report folder sizes.
 
 ## Release workload measurement
 
 `tests/spikesorting/v2/scripts/measure_release_workflow.py` is the repeatable
 release run: it executes the supported workflow (prepare → sort → auto-label →
-review bundle and reopen → merge → reevaluate → waveform inspection → Phy
-export → unit selection → warm rerun) on one NWB file against a private MySQL
-container and base dir, sampling the whole process tree's RSS (workers
-included) and the scratch-disk footprint, and writes a JSON receipt with stage
-timings, peak memory, peak scratch, bundle bytes and the effective
-configuration. Run it on a lab Linux machine with one representative 1–3 h
-tetrode recording and one ≥1 h probe recording to set the supported machine
-budgets; short synthetic fixtures are not evidence of long-recording capacity.
+review bundle and reopen → merge → reevaluate → waveform inspection → Phy export
+→ unit selection → warm rerun) on one NWB file against a private MySQL container
+and base dir, sampling the whole process tree's RSS (workers included) and the
+scratch-disk footprint, and writes a JSON receipt with stage timings, peak
+memory, peak scratch, bundle bytes and the effective configuration. Run it on a
+lab Linux machine with one representative 1–3 h tetrode recording and one ≥1 h
+probe recording to set the supported machine budgets; short synthetic fixtures
+are not evidence of long-recording capacity.
 
 ## Upstream deletion cascades and analyzer folders
 
@@ -191,58 +191,59 @@ regeneratable family, with the same fail-closed lifecycle as the single-session
 recording — plus a frozen member set tied into its identity.
 
 - **Identity = the ordered member set.** `concat_recording_id` is content-
-  addressed from the group + parameter names **and** a SHA-256 of the ordered
-  *logical* member set (`member_set_hash`). When you create the selection,
-  `ConcatenatedRecordingSelection.insert_selection` freezes each member's logical
-  identity and its resolved `Recording` (`recording_id` + `content_hash`) into the
-  `ConcatenatedRecordingSelection.MemberSnapshot` part. A different ordered member
-  set is therefore a *different* concat; editing `SessionGroup.Member` afterward
-  does not change or invalidate an existing concat — it just mints a new id on the
-  next `insert_selection`.
+    addressed from the group + parameter names **and** a SHA-256 of the ordered
+    *logical* member set (`member_set_hash`). When you create the selection,
+    `ConcatenatedRecordingSelection.insert_selection` freezes each member's
+    logical identity and its resolved `Recording` (`recording_id` +
+    `content_hash`) into the `ConcatenatedRecordingSelection.MemberSnapshot`
+    part. A different ordered member set is therefore a *different* concat;
+    editing `SessionGroup.Member` afterward does not change or invalidate an
+    existing concat — it just mints a new id on the next `insert_selection`.
 - **Reads use the frozen snapshot.** Materialization and split read the frozen
-  `MemberSnapshot`, never the live group, so a later group edit cannot silently
-  re-point an existing concat. If a frozen member's underlying `Recording` is gone
-  or its `content_hash` has drifted from the snapshot, materialization/rebuild
-  raises `MissingRecordingForConcatError` / `ConcatMemberDriftError` rather than
-  building from changed inputs.
+    `MemberSnapshot`, never the live group, so a later group edit cannot
+    silently re-point an existing concat. If a frozen member's underlying
+    `Recording` is gone or its `content_hash` has drifted from the snapshot,
+    materialization/rebuild raises `MissingRecordingForConcatError` /
+    `ConcatMemberDriftError` rather than building from changed inputs.
 - **Checksum-validated reads + content-verified rebuild-on-missing.**
-  `ConcatenatedRecording.get_recording()` mirrors `Recording.get_recording()`: a
-  present cache file is read through `AnalysisNwbfile`'s `~external` byte-checksum
-  validation, and a missing cache file is rebuilt through a locked
-  (`concat_recording_artifact_lock`), atomic (`os.replace`),
-  content-`hash`-verified path, raising `RecordingContentDriftError` on a
-  fingerprint mismatch instead of installing drifted bytes (the canonical slot is
-  left untouched). A motion-corrected concat is only byte-reproducible insofar as
-  `correct_motion` is deterministic; an irreproducible rebuild fails loudly here
-  rather than silently.
+    `ConcatenatedRecording.get_recording()` mirrors `Recording.get_recording()`:
+    a present cache file is read through `AnalysisNwbfile`'s `~external`
+    byte-checksum validation, and a missing cache file is rebuilt through a
+    locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
+    content-`hash`-verified path, raising `RecordingContentDriftError` on a
+    fingerprint mismatch instead of installing drifted bytes (the canonical slot
+    is left untouched). A motion-corrected concat is only byte-reproducible
+    insofar as `correct_motion` is deterministic; an irreproducible rebuild
+    fails loudly here rather than silently.
 - **Split-back conserves spikes.** `split_sorting_by_session()` back-maps a
-  concat-frame sorting into per-member local frames; it asserts one strictly-
-  increasing boundary per frozen member and that every input spike lands in
-  exactly one member, raising `ConcatSplitError` rather than dropping spikes that
-  fall outside a member's range.
+    concat-frame sorting into per-member local frames; it asserts one strictly-
+    increasing boundary per frozen member and that every input spike lands in
+    exactly one member, raising `ConcatSplitError` rather than dropping spikes
+    that fall outside a member's range.
 - **Per-member curated outputs are regenerable.** `ConcatMemberCuration` derives
-  each session-aligned Units table entirely from the chosen concat `CurationV2`
-  NWB, frozen member boundaries, and member recording timestamps. The supported
-  `ConcatMemberCuration.delete()` and `CurationV2.delete()` paths list the member
-  rows, merge IDs, and analysis files in a dry run; after a confirmed delete they
-  remove the downstream member/merge rows and reclaim only `AnalysisNwbfile`
-  entries (and external files) that became true orphans. Administrative bypasses
-  such as `super_delete`, raw SQL, or an upstream `FreeTable` cascade do not call
-  these Python cleanup hooks; after such a bypass, review
-  `AnalysisNwbfile().cleanup(dry_run=True)` before applying cleanup.
-- **Recompute/reclamation: deferred.** There is no `ConcatenatedRecordingArtifact*`
-  recompute trio yet — a concat cache that is deleted out of band is rebuilt and
-  verified on demand by `get_recording()`, which covers correctness. A dedicated
-  audit + `delete_files` reclamation surface (the analogue of the recording trio
-  above) is deferred until concat outputs are first retained at scale, and should
-  reuse the shared recompute helpers rather than a bespoke table family.
+    each session-aligned Units table entirely from the chosen concat
+    `CurationV2` NWB, frozen member boundaries, and member recording timestamps.
+    The supported `ConcatMemberCuration.delete()` and `CurationV2.delete()`
+    paths list the member rows, merge IDs, and analysis files in a dry run;
+    after a confirmed delete they remove the downstream member/merge rows and
+    reclaim only `AnalysisNwbfile` entries (and external files) that became true
+    orphans. Administrative bypasses such as `super_delete`, raw SQL, or an
+    upstream `FreeTable` cascade do not call these Python cleanup hooks; after
+    such a bypass, review `AnalysisNwbfile().cleanup(dry_run=True)` before
+    applying cleanup.
+- **Recompute/reclamation: deferred.** There is no
+    `ConcatenatedRecordingArtifact*` recompute trio yet — a concat cache that is
+    deleted out of band is rebuilt and verified on demand by `get_recording()`,
+    which covers correctness. A dedicated audit + `delete_files` reclamation
+    surface (the analogue of the recording trio above) is deferred until concat
+    outputs are first retained at scale, and should reuse the shared recompute
+    helpers rather than a bespoke table family.
 
 ## Admin surface
 
 `attempt_all`, `remove_matched` (on the `*RecomputeSelection` tables) and
-`with_names`, `get_parent_key`, `recheck`, `get_disk_space`,
-`update_secondary` (on the `*Recompute` tables) port the v1
-`RecordingRecompute` operations.
+`with_names`, `get_parent_key`, `recheck`, `get_disk_space`, `update_secondary`
+(on the `*Recompute` tables) port the v1 `RecordingRecompute` operations.
 
 ## Test safety
 
