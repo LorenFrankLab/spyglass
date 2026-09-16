@@ -309,8 +309,12 @@ surface that stays v1-only is the stored per-pair burst metrics
 - **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned
     as a new DataJoint table. Its notebook plotting helpers are available from
     `CurationEvaluation` (`plot_correlograms`, `investigate_pair_xcorrel`,
-    `investigate_pair_peaks`, `plot_peak_over_time`), while per-pair
-    quantitative `BurstPairUnit` tables remain v1-only.
+    `investigate_pair_peaks`, `plot_peak_over_time`). Retrieve per-pair numbers
+    with `evaluation.burst_pair_metrics(pairs=[...])`; v2 computes this
+    DataFrame on demand rather than storing a `BurstPairUnit` table. Its ISI
+    fraction uses violating intervals / (`spikes - 1`) and the evaluation's
+    refractory window, matching v2 unit QC. The legacy v1 burst utility divides
+    by spike count.
 - **Available in v2** — `RecordingRecompute` is replaced by two explicit
     verification families: `RecordingArtifactRecompute*` for recording/artifact
     NWB files and `SortingAnalyzerRecompute*` for analyzer folders.

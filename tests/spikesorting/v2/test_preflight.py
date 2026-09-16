@@ -1277,3 +1277,28 @@ def test_scientific_setup_uses_execution_rows(preflight_inputs):
     )
     assert setup["artifact_detection"] is None
     assert setup["motion"]["nblocks"] == 0
+
+
+@pytest.mark.database
+@pytest.mark.parametrize("artifact_recipe", [None, "none"])
+def test_concat_scientific_setup_reports_explicit_no_mask(
+    preflight_inputs, artifact_recipe
+):
+    from spyglass.spikesorting.v2 import _pipeline_presets as pl
+    from spyglass.spikesorting.v2._pipeline_preflight import (
+        describe_scientific_setup,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        MotionCorrectionParameters,
+    )
+
+    MotionCorrectionParameters.insert_default()
+    bundle = pl._PIPELINE_PRESETS[
+        "franklab_concat_hippocampus_30khz_ms5_2026_06"
+    ].model_copy(update={"artifact_detection_params_name": artifact_recipe})
+    group = {
+        field: preflight_inputs[field]
+        for field in ("nwb_file_name", "sort_group_id")
+    }
+    setup = describe_scientific_setup(bundle, [group])
+    assert setup["artifact_application"] == "No artifact masking selected."

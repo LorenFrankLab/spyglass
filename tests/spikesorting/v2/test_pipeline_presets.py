@@ -857,8 +857,7 @@ def test_every_preset_declares_curation_params():
         assert preset.auto_curation_rules_name.strip(), f"{name}.rules blank"
 
     # The single-session presets run an artifact stage and leave motion
-    # correction unset; the same-day concat preset is the inverse (no artifact
-    # stage, motion pinned).
+    # correction unset; the shipped concat preset also pins motion correction.
     for name, preset in _PIPELINE_PRESETS.items():
         if name == _CONCAT_PRESET:
             continue

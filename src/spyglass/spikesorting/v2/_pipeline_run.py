@@ -189,9 +189,9 @@ def run_v2_pipeline(
     ``PipelineInputError``.
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
-    call. Idempotent: re-running with the same inputs returns the same
-    run summary (same root_merge_id, same intermediate PKs) without
-    duplicating rows.
+    call. Idempotent: re-running with the same inputs reuses the same scientific
+    outputs (same root_merge_id and intermediate PKs) without duplicating rows.
+    Reported statuses and timings describe the current call.
 
     Prerequisites (set these up first, in order)
     --------------------------------------------
@@ -813,7 +813,12 @@ def run_v2_pipeline(
                         artifact_key
                     )
                     # Count frames actually masked, excluding wall-clock gaps.
-                    excluded = artifact_frame_ranges(member_recording, kept)
+                    excluded = artifact_frame_ranges(
+                        member_recording,
+                        kept,
+                        artifact_detection_id=artifact_id,
+                        recording_id=recording_key["recording_id"],
+                    )
                     masked_duration = (
                         sum(end - start for start, end in excluded)
                         / member_recording.get_sampling_frequency()

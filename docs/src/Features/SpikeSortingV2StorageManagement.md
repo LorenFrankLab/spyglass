@@ -194,17 +194,28 @@ recording — plus a frozen member set tied into its identity.
     addressed from the group + parameter names **and** a SHA-256 of the ordered
     *logical* member set (`member_set_hash`). When you create the selection,
     `ConcatenatedRecordingSelection.insert_selection` freezes each member's
-    logical identity and its resolved `Recording` (`recording_id` +
-    `content_hash`) into the `ConcatenatedRecordingSelection.MemberSnapshot`
-    part. A different ordered member set is therefore a *different* concat;
-    editing `SessionGroup.Member` afterward does not change or invalidate an
-    existing concat — it just mints a new id on the next `insert_selection`.
+    logical identity, resolved `Recording` (`recording_id` + `content_hash`),
+    and exact `artifact_detection_id` (or explicit `None`) into the
+    `ConcatenatedRecordingSelection.MemberSnapshot` part. Member artifact
+    choices participate in `member_set_hash`; changing a mask creates a
+    different concat and downstream sort. A different ordered member set is also
+    a different concat; editing `SessionGroup.Member` afterward does not change
+    or invalidate an existing concat — it just mints a new id on the next
+    `insert_selection`.
 - **Reads use the frozen snapshot.** Materialization and split read the frozen
     `MemberSnapshot`, never the live group, so a later group edit cannot
     silently re-point an existing concat. If a frozen member's underlying
     `Recording` is gone or its `content_hash` has drifted from the snapshot,
     materialization/rebuild raises `MissingRecordingForConcatError` /
     `ConcatMemberDriftError` rather than building from changed inputs.
+- **Artifact dependencies and valid time are preserved.** The selected member
+    detections are foreign-key dependencies; ordinary deletion refuses
+    referenced detections, while explicit `cascade_delete()` removes dependent
+    concat and sorting outputs. Materialization and rebuild apply the same masks
+    before motion correction and preserve masked samples afterward.
+    `obs_intervals` stores valid time on the concat timeline;
+    `MemberBoundary.member_valid_times` stores it in original session timestamps
+    for member exports.
 - **Checksum-validated reads + content-verified rebuild-on-missing.**
     `ConcatenatedRecording.get_recording()` mirrors `Recording.get_recording()`:
     a present cache file is read through `AnalysisNwbfile`'s `~external`

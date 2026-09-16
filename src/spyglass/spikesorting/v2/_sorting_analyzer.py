@@ -419,8 +419,8 @@ def reconstruct_recording_for_sorting_from_resolved(
     recording NWB directly (the same series ``Recording().get_recording`` reads),
     annotates ``is_filtered=True``, and applies the artifact mask for a
     single-recording artifact-backed sort -- exactly the recording
-    ``build_analyzer`` starts from. A concat source observes the full recording
-    (its member masks are already materialized), matching ``reconstruct_recording_and_sorting``.
+    ``build_analyzer`` starts from. A concat cache already contains its member
+    masks, matching ``reconstruct_recording_and_sorting``.
 
     Parameters
     ----------
@@ -430,7 +430,7 @@ def reconstruct_recording_for_sorting_from_resolved(
         ``electrical_series_path``.
     source_kind : str
         ``"recording"`` or ``"concatenated_recording"``; only a single-recording
-        source has an artifact pass.
+        source needs an additional mask at reconstruction.
     artifact_valid_times : np.ndarray, optional
         The artifact-removed valid-times array (shape ``(n_intervals, 2)``)
         resolved in make_fetch; required when masking applies.

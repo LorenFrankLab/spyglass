@@ -114,8 +114,9 @@ class ArtifactDetectionParameters(
     production Frank-lab recipes ``"franklab_100uv_p07_2026_06"`` (100 uV, 0.7
     proportion) and ``"franklab_50uv_p07_2026_06"`` (50 uV, 0.7). A preset that
     omits ``artifact_detection_params_name`` runs no detection at all (no
-    ``ArtifactDetectionSource`` row), which is the only valid shape for a concat
-    sort.
+    ``ArtifactDetectionSource`` row on a standalone sort, or all-null member
+    detections on a concat selection). Concat presets otherwise apply this
+    detector independently to each member before motion correction.
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
     governs the chunked detection scan
@@ -1020,12 +1021,12 @@ class _ArtifactDetectionMixin:
                 remove_artifact_interval_rows(interval_rows_to_remove)
 
     def cascade_delete(self, *args, safemode=None, **kwargs):
-        """Delete these detections AND every sorting that references them.
+        """Delete these detections and their dependent sorts and concats.
 
         The explicit force path for :meth:`delete`'s refuse-if-referenced
-        default: removes the dependent ``SortingSelection`` rows (and their
-        downstream ``Sorting`` / ``CurationV2`` / ``SpikeSortingOutput``
-        cascade), then the merge registration, then the detection.
+        default: removes dependent ``ConcatenatedRecordingSelection`` and
+        ``SortingSelection`` rows and their downstream outputs, including
+        per-member curations, as well as the artifact merge registration.
         """
         return self.delete(
             *args, safemode=safemode, _cascade_sorts=True, **kwargs

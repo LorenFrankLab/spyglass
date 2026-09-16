@@ -411,7 +411,10 @@ def describe_scientific_setup(bundle, group_keys, effective_config=None):
         ).fetch("params")
         result["motion"] = dict(rows[0]) if len(rows) else None
         result["artifact_application"] = (
-            "Per member before concatenation and motion correction."
+            "No artifact masking selected."
+            if bundle.artifact_detection_params_name is None
+            or (len(artifacts) and not artifacts[0].get("detect", True))
+            else "Per member before concatenation and motion correction."
         )
     elif bundle.sorter == "kilosort4":
         params = (effective_config or {}).get("si_sorter_params", {})

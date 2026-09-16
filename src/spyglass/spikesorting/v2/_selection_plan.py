@@ -141,9 +141,9 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     optional on the recording path and, when present, normalized to a
     ``uuid.UUID`` so a caller-supplied ``str`` shares one identity with the
     stored value. A concat source must NOT carry an ``artifact_detection_id``:
-    concat sorts reuse per-member ``Recording`` artifacts and have no
-    concat-wide artifact pass, so they have no ``ArtifactDetectionSource``
-    row.
+    concat member masks are already materialized in the source and frozen by
+    ``ConcatenatedRecordingSelection``, so there is no additional
+    ``ArtifactDetectionSource`` row at the sorting stage.
 
     Raises
     ------

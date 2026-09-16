@@ -20,35 +20,41 @@ v2 ships the single-session sorting chain plus same-day concatenation and
 cross-session unit matching:
 
 ```
-SortGroupV2
-   |
-   v
-RecordingSelection --> Recording          (bandpass + common reference)
-                          |
-                          |   ConcatenatedRecording  (same-day chronic concat)
-                          |            |
-   Recording -> RecordingArtifactSelection -> RecordingArtifactDetection --+
-   SharedArtifactGroup                                                     |
-        -> SharedGroupArtifactSelection -> SharedGroupArtifactDetection ---+--> ArtifactDetectionOutput (merge)
-                                                                                          |
-   SortingSelection (recording XOR concat source part + optional ArtifactDetectionOutput) --> Sorting
-                                                                                                          |
-                                                                                                          v
-                                                                             CurationV2 -+--> SpikeSortingOutput.CurationV2
-                                                                                  |
-                                                                                  v
-                                                                  CurationEvaluationSelection --> CurationEvaluation
+Recording preparation:
+  SortGroupV2 -> RecordingSelection -> Recording (bandpass + reference)
+
+Artifact choices for single-recording sorting:
+  Recording -> RecordingArtifactSelection -> RecordingArtifactDetection
+  SharedArtifactGroup -> SharedGroupArtifactSelection -> SharedGroupArtifactDetection
+  Both detection types register in ArtifactDetectionOutput.
+
+Single-recording path:
+  Recording + optional ArtifactDetectionOutput
+    -> SortingSelection -> Sorting -> CurationV2
+    -> SpikeSortingOutput.CurationV2
+
+Concat path:
+  Member Recordings + explicit per-member RecordingArtifactDetection choices
+    -> ConcatenatedRecordingSelection.MemberSnapshot
+    -> ConcatenatedRecording (mask -> concatenate -> motion correction)
+    -> SortingSelection (concat source) -> Sorting -> CurationV2
+    -> ConcatMemberCuration (original session timestamps) -> SpikeSortingOutput
+
+Both curation paths:
+  CurationV2 -> CurationEvaluationSelection -> CurationEvaluation
 ```
 
 `SortingSelection` takes its recording source through one of two
 mutually-exclusive source part tables -- `RecordingSource` (a single-session
 `Recording`) or `ConcatenatedRecordingSource` (a same-day chronic
-`ConcatenatedRecording`) -- plus an optional artifact-detection pass through the
-internal `ArtifactDetectionOutput` merge (a single-recording
-`RecordingArtifactDetection` or a cross-recording
-`SharedGroupArtifactDetection`). The artifact merge is internal to the sorting
-stage -- user workflows never import it; recording access stays
-`SpikeSortingOutput.get_recording`.
+`ConcatenatedRecording`). Single-recording sorts can add an artifact-detection
+pass through the internal `ArtifactDetectionOutput` merge (a
+`RecordingArtifactDetection` or `SharedGroupArtifactDetection`). Concat sources
+already contain their frozen member masks, applied before motion correction;
+they accept no additional sorting-stage artifact input. The artifact merge is
+internal -- user workflows never import it. Recording access stays
+`SpikeSortingOutput.get_recording`; use the selected curation's analyzer for the
+masked, sorting-aligned traces used by QC.
 
 All v2 tables live in dedicated DataJoint schemas (`spikesorting_v2_recording`,
 `spikesorting_v2_artifact`, `spikesorting_v2_artifact_output`,
@@ -105,24 +111,27 @@ coexist under one merge surface.
     result tables (`RecordingArtifactDetection` /
     `SharedGroupArtifactDetection`). `SortingSelection.ArtifactDetectionSource`
     carries one optional foreign key to it. Deleting a registered result is
-    refused while a `SortingSelection` references it (use `cascade_delete` to
-    remove the dependent sorts too). It stays internal to the sorting stage --
-    user code never imports it.
+    refused while a `SortingSelection` or a frozen concat member references the
+    detection (use `cascade_delete` to remove the dependent outputs too). Concat
+    members reference `RecordingArtifactDetection` directly. The merge stays
+    internal -- user code never imports it.
 - **`SortingSelection` / `Sorting`** -- runs the configured sorter through
     SpikeInterface over the selection's recording source part (`RecordingSource`
     for a single session or `ConcatenatedRecordingSource` for a same-day chronic
-    concatenation), plus an optional artifact pass through the
-    `ArtifactDetectionOutput` merge. Dispatches `clusterless_thresholder` (peak
-    detection only) vs the SI sorter registry (`mountainsort4`, `mountainsort5`,
-    ...). The Unit part table stores per-unit summary stats (n_spikes,
-    peak_amplitude_uv) so quick filtering does not require loading the NWB.
+    concatenation). Single-recording sorts can add an artifact pass through the
+    `ArtifactDetectionOutput` merge; concat masks are already materialized.
+    Dispatches `clusterless_thresholder` (peak detection only) vs the SI sorter
+    registry (`mountainsort4`, `mountainsort5`, ...). The Unit part table stores
+    per-unit summary stats (n_spikes, peak_amplitude_uv) so quick filtering does
+    not require loading the NWB.
 - **`CurationV2`** -- versioned curation rows (labels + merge groups) chained by
     `parent_curation_id`. `insert_curation` is the single entry point; each
     inserted generation has an immutable, database-unique `curation_uuid` (the
     numeric `curation_id` remains the ergonomic query key but can be reused
-    after deletion); every row is automatically registered on
-    `SpikeSortingOutput.CurationV2` so downstream consumers can key off
-    `merge_id`.
+    after deletion). Single-recording curations register on
+    `SpikeSortingOutput.CurationV2`. Concat curations instead produce
+    `ConcatMemberCuration` outputs with one merge ID per member, keeping
+    downstream spike times aligned to the original sessions.
 - **`CurationEvaluationSelection` / `CurationEvaluation`** -- post-sort SI
     analyzer extension growth, quality metrics, auto-curation labels, merge
     suggestions, and BurstPair-style plots over a **committed** `CurationV2`
@@ -1065,6 +1074,13 @@ and `unit_distance` columns. It is computed from the display analyzer on each
 call, not stored, so restrict with `pairs=[...]` when you only need a few
 candidates; `plots.burst_pair_metrics()` draws from the same frame.
 
+Pair `isi_violation` uses violating intervals / (`spikes - 1`), as unit QC does,
+and defaults to the selected evaluation's refractory window. Pass
+`isi_threshold_ms=...` for an explicit diagnostic override. Pairs with fewer
+than two combined spikes have unavailable ISI evidence (`NaN`). This differs
+from the legacy v1 burst utility's spike-count denominator. Commit and
+reevaluate to score the actual merged train after duplicate-spike handling.
+
 These analyzer-backed plots route through the curation analyzer resolver. A
 committed merged curation therefore renders its actual merged unit namespace; it
 never silently falls back to the raw analyzer. Preview curations remain
@@ -1795,7 +1811,7 @@ DB-derivable; only the producing params are written.
 | Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage` | the chosen concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, with curated unit IDs preserved across members                                                                                      |
 | UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_members`     | run/group/matcher header (matcher backend + versions) and the per-member `(sorting_id, curation_id, session_start_time)` map                                                                                                                                      |
 | CurationEvaluation          | `spyglass_v2_curation_evaluation_provenance`                             | metric set + recipe names, auto-merge preset/rules, evaluated curation, the `source_analyzer_hashes` manifest, SI version, upstream recording/concat `content_hash`                                                                                               |
-| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`           | resolved motion preset **+ kwargs** (not the displacement field) and the ordered member map with per-member frame boundaries (`split_sorting_by_session` is reconstructable from these)                                                                           |
+| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`           | resolved motion preset **+ kwargs**, member artifact detection IDs, excluded frame ranges, valid observation intervals, and the ordered member frame boundaries used for session mapping                                                                          |
 
 ```python
 import pynwb

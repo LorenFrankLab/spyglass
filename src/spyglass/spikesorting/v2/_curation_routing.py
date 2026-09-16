@@ -59,9 +59,9 @@ _CONCAT_KEYS = (
 # silently drop concat-backed curations). It NEVER triggers the
 # concat-vs-recording contradiction, since it is not exclusive to either.
 _SHARED_SOURCE_KEYS = ("preprocessing_params_name",)
-# Sort-level keys (``artifact_detection_id`` lives on the optional
-# ``SortingSelection.ArtifactDetectionSource`` part, so it is resolved
-# separately from the other sort keys by the join assembly).
+# Sort-level keys. Artifact dependencies live on the standalone sort's optional
+# part or its concat source's frozen members, so the join assembly resolves them
+# separately from the other sort keys.
 _SORT_KEYS = (
     "sorter",
     "sorter_params_name",
@@ -75,8 +75,8 @@ _ALLOWED_KEYS = frozenset(
 
 # Sentinel distinguishing "the restriction names no artifact_detection_id"
 # (a wildcard -- no artifact restriction) from an explicit
-# ``artifact_detection_id=None`` (an anti-join to sorts with no
-# ``ArtifactDetectionSource`` row). A bare ``None`` is already taken for the
+# ``artifact_detection_id=None`` (no standalone or concat-member detection).
+# A bare ``None`` is already taken for the
 # anti-join, so absence needs its own marker; only an absent key is a wildcard.
 NO_ARTIFACT_RESTRICTION = object()
 
@@ -89,10 +89,9 @@ class RestrictionPlan(NamedTuple):
     ``shared_restriction`` carries cross-source keys (the preprocessing recipe)
     present on both source selections: the join assembly applies it to whichever
     family routes, or matches both families when no source-specific key is
-    given. ``artifact_detection_id`` is the resolved id the optional
-    ``SortingSelection.ArtifactDetectionSource`` part is restricted by: a
-    ``uuid.UUID`` intersects that part, ``None`` anti-joins it (sorts with no
-    artifact-detection pass), and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
+    given. ``artifact_detection_id`` restricts standalone or frozen concat-member
+    detections: a ``uuid.UUID`` matches either dependency, ``None`` excludes both,
+    and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
     means the restriction named no artifact id at all (a wildcard -- no
     artifact restriction). ``restrict_by_artifact`` is the caller's flag,
     threaded through unchanged. ``unresolved_name_warning`` is the message the
@@ -207,9 +206,8 @@ def classify_and_normalize_restriction(
             "source. Restrict by one source family."
         )
 
-    # ``artifact_detection_id`` is resolved through the part by the join
-    # assembly, NOT applied directly to ``sort_master``; the other sort keys go
-    # on the master.
+    # Artifact restrictions resolve through standalone or concat-member
+    # dependencies; only the other sort keys apply directly to the master.
     sort_restriction = {
         k: key[k]
         for k in _SORT_KEYS

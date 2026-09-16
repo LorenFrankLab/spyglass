@@ -1975,11 +1975,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return the cached preprocessed recording for a CurationV2 row.
 
-        Resolves the upstream ``Recording`` via
-        ``SortingSelection.resolve_source`` and delegates to
-        ``Recording().get_recording`` (which already applies the
-        ``is_filtered=True`` annotation). Repeating the annotation
-        here is harmless.
+        Resolves the source via ``SortingSelection.resolve_source``. A
+        standalone source returns its reusable preprocessed ``Recording``;
+        its sorting-stage artifact mask is not applied here. A concat source
+        returns the materialized ``ConcatenatedRecording``, which includes
+        member masks and motion correction. Use ``CurationRef.open_analyzer``
+        for the masked traces used by sorting/QC in either mode.
 
         ``@classmethod`` so the merge-table dispatcher's
         ``source_table.get_recording(merge_key)`` call (which binds

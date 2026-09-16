@@ -115,9 +115,10 @@ class SortingFetched(NamedTuple):
         Anchor NWB file (the single-recording session, or the first concat
         member's session).
     obs_intervals : numpy.ndarray or None
-        Artifact-removed valid-times window, or ``None`` when no
-        artifact-detection pass is configured (always ``None`` for a concat
-        source).
+        Valid observation intervals on the source's timeline. Concat sources
+        supply their stored synthetic-time intervals; standalone sources
+        supply detected valid times, or ``None`` to derive recording intervals
+        when no artifact detection was selected.
     display_waveform_params_name : str
         The DISPLAY ``AnalyzerWaveformParameters`` recipe resolved from the
         source preprocessing recipe (region), stored on the ``Sorting`` row.
@@ -797,8 +798,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ------
         ValueError
             If zero or both source keys are supplied, or if a concat source
-            also supplies an ``artifact_detection_id`` (concat sorts have no
-            artifact pass).
+            also supplies an ``artifact_detection_id`` (concat member masks
+            are configured on ``ConcatenatedRecordingSelection``).
         DuplicateSelectionError
             If any matching master has a non-deterministic ``sorting_id``
             (a raw ``insert`` bypass or a pre-determinism legacy row) --
@@ -1212,9 +1213,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         the ``ArtifactDetectionOutput`` ``artifact_detection_merge_id`` -- and
         resolves it back to the per-source ``artifact_detection_id`` (the
         id-of-record folded into ``sorting_id`` and naming the IntervalList).
-        Returns ``None`` (no ``ArtifactDetectionSource`` row) when no
-        artifact-detection pass was configured. This is the single accessor
-        every reader uses instead of a nullable-FK column lookup; its
+        Returns ``None`` when no sorting-stage artifact input was configured.
+        This includes concat sorts, whose detections instead live on frozen
+        ``ConcatenatedRecordingSelection.MemberSnapshot`` rows. ``None`` here
+        does not imply that a concat source is unmasked. This is the accessor
+        for the optional sorting-stage input; its
         natural-key contract (return the ``artifact_detection_id`` or ``None``)
         is unchanged by the merge hop.
 
@@ -1402,8 +1405,8 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         # Resolve the anchor recording_id / nwb file / preprocessing recipe.
         # Single-recording: the sort's own RecordingSelection. Concat: the
-        # first member (deterministic parent anchor). Concat sorts observe the
-        # full recording (no artifact pass).
+        # first member (deterministic parent anchor). Valid observation times
+        # are resolved separately from this metadata anchor.
         if source.kind == "recording":
             recording_id = source.key["recording_id"]
             nwb_file_name, preprocessing_params_name = (
@@ -1416,7 +1419,8 @@ class Sorting(SpyglassMixin, dj.Computed):
             # actually observed -- without it the units NWB looks like the unit
             # was observed across the full session even where the artifact mask
             # blanked the signal. When ``artifact_detection_id`` is unset,
-            # make_compute falls back to the recording's full envelope.
+            # make_compute derives the retained recording intervals, preserving
+            # gaps between disjoint source intervals.
             if sel_row.get("artifact_detection_id") is not None:
                 # Route through the strict ownership helper instead of
                 # fetching the IntervalList directly by reconstructed name. The
@@ -1747,8 +1751,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         # Recording; a concat source reads the materialized ConcatenatedRecording
         # cache. ``recording_id`` is the anchor (threaded from make_fetch) used
         # for the per-unit Electrode FK, NOT necessarily the loaded recording's
-        # own id. Concat masks are already materialized, so the mask block is
-        # skipped (obs_intervals is None there).
+        # own id. Concat masks are already materialized, so only standalone
+        # sources need masking here. Both modes pass observation intervals to
+        # the units writer.
         if source.kind == "recording":
             recording = Recording().get_recording(
                 {"recording_id": recording_id}

@@ -664,13 +664,12 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
 
 def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
     """A bypass-inserted concat sort carrying an ``ArtifactDetectionSource`` row
-    raises ``SchemaBypassError`` at ``make_fetch`` instead of sorting unmasked.
+    raises ``SchemaBypassError`` at ``make_fetch``.
 
     ``insert_selection`` rejects a concat source combined with an
     ``artifact_detection_id``, but a direct insert of the part rows bypasses it.
-    A concat sort observes the full recording (``obs_intervals=None``), so a
-    stray artifact id would otherwise be silently ignored while the sort claims
-    artifact metadata -- the compute-boundary re-check catches it.
+    Member masks belong to the concat source; a stray sorting-stage artifact id
+    cannot describe those dependencies and must not be silently ignored.
     """
     import uuid
 
@@ -1538,10 +1537,8 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     )
     units_df = describe_units(sort_pk["sorting_id"])
     assert len(units_df) == int(row["n_units"])
-    # Firing rate is computed against the CONCAT recording's total_duration_s
-    # (concat sorts have no artifact pass), not a per-member recording: assert
-    # the exact denominator, not merely > 0, so a regression to any positive
-    # duration would fail.
+    # This fixture explicitly selects no member detections, so valid duration
+    # equals the whole concat duration rather than one member's duration.
     concat_total_duration_s = (ConcatenatedRecording & concat_pk).fetch1(
         "total_duration_s"
     )
@@ -2073,11 +2070,10 @@ def test_concat_applied_merge_through_curation_and_evaluation(
 def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
 
-    With a concat preset (motion pinned -> concat-mode, no artifact stage), the
-    orchestrator populates each member's Recording, concatenates them, sorts,
-    and curates -- returning a concat-shaped manifest (concat_recording_id +
-    member_recording_ids, no recording_id / artifact keys), no unsafe merge
-    registration, and an actionable warning. The run is idempotent on rerun.
+    This custom preset explicitly disables member detection. The orchestrator
+    populates each member's Recording, concatenates them, sorts, and curates.
+    Its manifest has per-member source keys and a skipped artifact stage; only
+    session-aligned member outputs enter the merge. The run reuses work on retry.
     """
     import spyglass.spikesorting.v2._pipeline_presets as presets_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput

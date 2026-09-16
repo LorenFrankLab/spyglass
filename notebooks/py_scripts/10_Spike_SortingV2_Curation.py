@@ -601,6 +601,9 @@ if inspection_unit_ids:
 # Compare targeted cross-correlograms, peak distributions and amplitude over
 # time. Use the browser commit/continuation above, then rerun these cells with
 # the committed merged unit selected. The same evaluation follows that child.
+# Pair ISI diagnostics use the evaluation's refractory window and the same
+# violating-interval fraction as unit QC. Commit and reevaluate to score the
+# actual merged train, including the merge's duplicate-spike handling.
 
 if inspection_pair:
     if len(inspection_pair) != 2:

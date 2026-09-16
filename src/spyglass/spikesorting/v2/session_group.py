@@ -467,7 +467,7 @@ class MotionCorrectionParameters(
 class ConcatenatedRecordingSelection(
     SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
 ):
-    """One row per (SessionGroup, PreprocessingParameters, motion params).
+    """One selection per group, recipes, and frozen member/artifact choices.
 
     UUID-keyed so downstream FKs are single-column (mirrors the
     single-session ``RecordingSelection`` / ``Recording`` shape). The
@@ -517,10 +517,9 @@ class ConcatenatedRecordingSelection(
         """
 
     #: The logical-identity fields (everything but the minted PK). A concat
-    #: selection is one (SessionGroup, PreprocessingParameters,
-    #: MotionCorrectionParameters) tuple; find-existing keys on all four plus the
-    #: derived ``member_set_hash`` (so the same group name over a different frozen
-    #: member set is a distinct selection, not a collision).
+    #: selection combines group and recipe names with ``member_set_hash``.
+    #: The hash includes ordered members and their artifact choices, so changing
+    #: either creates a distinct selection under the same group name.
     _IDENTITY_FIELDS = (
         "session_group_owner",
         "session_group_name",
@@ -926,7 +925,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             member_index-ordered plan dicts ``{"member_index" (int),
             "nwb_file_name" (str), "interval_list_name" (str), "recording_pk"
             (dict whose ``recording_id`` is the str UUID -- DeepHash-stable for
-            the tri-part carrier)}``.
+            the tri-part carrier), ``artifact_detection_id`` (str or None),
+            and ``valid_times`` (array or None for explicit no-mask)}``.
 
         Raises
         ------
@@ -1336,7 +1336,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             filtering_description=(
                 f"Concatenated {len(recordings)} member recording(s) "
                 f"(preprocessing_params={preprocessing_params_name!r}); "
-                f"motion correction preset={preset_label!r}; member artifact "
+                f"motion correction preset={preset_label!r}; selected member artifact "
                 "masks applied before motion correction; unwhitened"
             ),
             provenance_tables=provenance_tables,

@@ -84,7 +84,8 @@ class PipelineStageSeconds(TypedDict):
 
     The source-stage keys depend on the input mode: single-session runs carry
     ``recording`` (+ ``artifact_detection``), concat runs carry
-    ``concat_recording`` instead. ``sorting`` / ``curation`` are always present.
+    ``member_recording``, ``member_artifact_detection``, ``concat_recording``,
+    and ``member_curation`` instead. ``sorting`` / ``curation`` are always present.
     """
 
     sorting: float

@@ -269,6 +269,51 @@ python tests/spikesorting/v2/scripts/measure_release_workflow.py \
 
 The temporary container was stopped and removed after the measurement.
 
+### Follow-up pipeline consistency audit
+
+The consistency audit traced source selection, masking, concat identity,
+analyzer reconstruction, curation, member exports, review QC, and analysis
+handoff. It found and corrected two behavior mismatches:
+
+- Pair `isi_violation` diagnostics used the legacy v1 spike-count denominator
+    while stored v2 unit QC uses the interval count (`spikes - 1`). V2 pair
+    diagnostics now reuse the unit-QC fraction helper, including `NaN` when
+    fewer than two spikes provide no interval evidence. Their default refractory
+    window comes from the selected evaluation's metric recipe; an explicit
+    `isi_threshold_ms` still overrides it. Browser help and pair diagnostics
+    resolve that window through the same parameter owner. Commit: `b3035b42`.
+    Stored unit metrics, auto-curation thresholds, and the shared v1 utility are
+    unchanged; the corrected values are the on-demand v2 pair diagnostics.
+- An explicitly unmasked concat recipe's scientific summary still said masks
+    were applied. Both `artifact_detection_params_name=None` and the `none`
+    parameter row now report that no masking was selected.
+
+Comments, the architecture overview, storage guidance, and the paired curation
+notebook now consistently distinguish source-owned concat masks from optional
+standalone sorting-stage masks. They also distinguish reusable member/source
+recording access from the masked traces in a curation analyzer. No additional
+schema changes were made.
+
+**Validation:** 85 checks passed across `test_concat_artifacts.py`,
+`test_metric_curation_plots.py`, `test_preflight.py`,
+`test_curation_routing.py`, and `test_describe_run.py`. The expanded concat
+tests verify both analyzer reconstruction routes against masked materialized
+traces and verify that an explicit artifact cascade removes dependent concat
+masters, sorts, curations, and member merge registrations. Two further checks
+passed: the full Playwright review/merge/recovery/selection journey and the
+notebook's targeted inspection and final-evaluation metric filter. These used
+disposable databases on port 3318. Notebook/script pairing and
+repository-configured checks passed.
+
+A focused rerun of the member-detection retry test also passed after adding
+coverage for a populated detection that leaves no usable time. The stage error
+now includes that member's recording and detection IDs and preserves the first
+member's completed result in its partial summary.
+
+This audit adds correctness evidence, not new long-recording performance or
+human-usability measurements. The recorded timed run remains tied to its
+original implementation revision above.
+
 ### Remaining release gates and scientific limits
 
 - Run representative 1–3 hour tetrode and at least one-hour probe workloads on

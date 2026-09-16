@@ -276,6 +276,24 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     )
     monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(sort_masked))
     Sorting.populate(sorting_key, reserve_jobs=False)
+    # Both analyzer rebuild routes must see the exact materialized mask, not
+    # reload an unmasked member or apply member wall-clock intervals to concat.
+    from spyglass.spikesorting.v2._sorting_analyzer import (
+        reconstruct_recording_and_sorting,
+        reconstruct_recording_for_sorting_from_resolved,
+    )
+
+    rebuilt, canonical_sorting = reconstruct_recording_and_sorting(
+        Sorting(), sorting_key
+    )
+    resolved = reconstruct_recording_for_sorting_from_resolved(
+        recording_row=row, source_kind="concatenated_recording"
+    )
+    for recording in (rebuilt, resolved):
+        np.testing.assert_array_equal(
+            recording.get_traces(), combined.get_traces()
+        )
+    assert set(canonical_sorting.unit_ids) == {0, 1}
     assert _observed_duration_s(sorting_key["sorting_id"]) == pytest.approx(
         np.diff(row["obs_intervals"], axis=1).sum()
     )
@@ -319,6 +337,21 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             np.testing.assert_allclose(
                 times[uid], recordings[i].get_times()[frames[uid]]
             )
+
+    # The nullable detection FK must cascade through the concat master, not
+    # just remove one snapshot member and leave a truncated selection behind.
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    member_keys = (ConcatMemberCuration & merged).fetch("KEY")
+    (
+        RecordingArtifactDetection & {"artifact_detection_id": detection_ids[0]}
+    ).cascade_delete(safemode=False)
+    assert not (ConcatenatedRecordingSelection & key)
+    assert not (ConcatenatedRecordingSelection & different)
+    assert not (Sorting & sorting_key)
+    assert not (CurationV2 & sorting_key)
+    assert not (ConcatMemberCuration & merged)
+    assert not (SpikeSortingOutput.ConcatMemberCuration & member_keys)
 
 
 @pytest.mark.slow
@@ -432,3 +465,28 @@ def test_member_artifact_failure_retry_and_reuse(
     assert again["concat_recording_id"] == retry["concat_recording_id"]
     assert again["member_artifact_detection_status"] == "reused"
     assert again["sorting_status"] == "reused"
+
+    # A detection that leaves no usable time must identify the failing member,
+    # even when its recording and detection were already populated.
+    artifact_id = again["member_artifacts"][1]["artifact_detection_id"]
+    recording_id = again["member_recording_ids"][1]
+    original_intervals = (
+        RecordingArtifactDetection.get_artifact_removed_intervals
+    )
+
+    def empty_second_member(self, key, as_dict=False):
+        if key["artifact_detection_id"] == artifact_id:
+            return np.empty((0, 2))
+        return original_intervals(self, key, as_dict=as_dict)
+
+    monkeypatch.setattr(
+        RecordingArtifactDetection,
+        "get_artifact_removed_intervals",
+        empty_second_member,
+    )
+    with pytest.raises(PipelineStageError) as error:
+        run_v2_pipeline(**request)
+    assert error.value.stage == "member_artifact_detection"
+    assert str(artifact_id) in str(error.value)
+    assert str(recording_id) in str(error.value)
+    assert len(error.value.partial_run_summary["member_artifacts"]) == 1
