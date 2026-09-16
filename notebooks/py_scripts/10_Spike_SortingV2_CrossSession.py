@@ -124,11 +124,12 @@ LabTeam.insert1(
 # (Recording dates are derived from each session, never supplied.)
 #
 # In concat mode, `run_v2_pipeline` takes the *group* instead of a single session:
-# it populates each member's recording, concatenates them into one
-# motion-corrected recording, and sorts the result as a single piece. The summary
+# it preprocesses each member, detects artifacts and masks that member, then
+# concatenates and motion-corrects the masked traces before sorting. The summary
 # is concat-shaped — `member_recording_ids` and `concat_recording_id` in place of
-# the single-session `recording_id`, and no artifact stage (a concat preset runs
-# none). The synthetic concat curation itself stays out of `SpikeSortingOutput`;
+# the single-session `recording_id`, plus `member_artifacts` with exact detection
+# IDs, statuses and masked durations. Inspect the scientific setup in the receipt.
+# Detection choices are frozen; no mask is inherited from an earlier sort. The synthetic concat curation itself stays out of `SpikeSortingOutput`;
 # the summary instead returns one wall-clock-aligned `member_merge_ids` entry per
 # frozen member, keyed by `member_index`. `auto_curate=True` makes those member
 # IDs point to the auto-curated child. Idempotent, like every `run_v2_pipeline`
@@ -152,6 +153,18 @@ if run_concat:
         auto_curate=True,
     )
     display(describe_run(concat_summary))
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+
+    for result in concat_summary["member_artifacts"]:
+        print(result)
+        display(
+            RecordingArtifactDetection().get_artifact_removed_intervals(
+                {"artifact_detection_id": result["artifact_detection_id"]}
+            )
+        )
+    # Compare these original-session kept intervals with short preprocessed
+    # trace windows via visualization.plot_recording_traces. The concat cache
+    # itself already contains the mask, before and after motion correction.
     print(
         f"{len(concat_summary['member_recording_ids'])} member recordings -> "
         f"one concatenated sort with {concat_summary['n_units']} unit(s); "

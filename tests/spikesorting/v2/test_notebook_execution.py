@@ -213,17 +213,39 @@ def test_curation_notebook_runs(dj_conn):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("subset", [False, True], ids=["all-groups", "subset"])
-def test_presets_notebook_runs(dj_conn, subset):
+def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
     """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session.
 
     Self-contained: setup, then customize a preset (clone + register) and sort
     the whole session at once with ``run_v2_pipeline_session``.
     """
+    # Exercise the production label filter; shared v1 fixtures normally
+    # disable it under test_mode, which would invalidate population receipts.
+    from spyglass.spikesorting.analysis.v1 import group as group_module
+
+    monkeypatch.setattr(group_module, "test_mode", False)
     nwb_file_name, sort_group_id = _prepare_notebook_session(
-        dj_conn, f"notebook_presets_{'subset' if subset else 'all'}.nwb"
+        dj_conn, f"notebook_presets_{'subset' if subset else 'merged_all'}.nwb"
     )
+    if not subset:
+        import numpy as np
+        from spikeinterface.core import NumpySorting
+
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        def plant_units(sorter, sorter_params, recording, sorting_id, **kwargs):
+            frames = np.arange(1000, recording.get_num_samples() - 1000, 1000)
+            return NumpySorting.from_unit_dict(
+                {unit: frames + unit * 100 for unit in range(3)},
+                recording.get_sampling_frequency(),
+            )
+
+        monkeypatch.setattr(Sorting, "_run_sorter", staticmethod(plant_units))
     parameters = _notebook_params(nwb_file_name, sort_group_id)
     parameters.pop("sort_group_id")  # a whole-session run needs no single ID
+    parameters.update(
+        use_auto_labels_only=True, analysis_policy="v2_unflagged_units"
+    )
     if subset:
         parameters["sort_group_ids"] = [sort_group_id]
     namespace = _execute_notebook(
@@ -244,6 +266,58 @@ def test_presets_notebook_runs(dj_conn, subset):
         row["sort_group_id"] for row in namespace["session_results"]
     ] == expected_ids
     assert all(row["outcome"] == "ok" for row in namespace["session_results"])
+    assert namespace["population_key"] is not None
+    if not subset:
+        from spyglass.spikesorting.v2.curation import CurationV2
+        from spyglass.spikesorting.v2.curation_api import CurationRef
+
+        assert len(expected_ids) >= 2
+        run = namespace["successful_runs"][expected_ids[0]]
+        child = CurationV2.create_merged_curation(
+            sorting_key={"sorting_id": run["sorting_id"]},
+            parent_curation_id=run.root_curation.curation_id,
+            merge_groups=[[0, 1]],
+        )
+        ref = CurationRef.from_key(child)
+        namespace["final_curations"][expected_ids[0]] = ref
+        with pytest.raises(ValueError, match="different members or policy"):
+            namespace["assemble_population"]()
+        namespace["population_name"] = "v2_session_after_merge"
+        key, _, _, identities = namespace["assemble_population"]()
+        merged_unit = (
+            set((CurationV2.Unit & child).fetch("unit_id")) - {0, 1, 2}
+        ).pop()
+        assert {
+            "spikesorting_merge_id": ref.merge_id,
+            "unit_id": merged_unit,
+        } in identities
+        namespace["population_key"] = key
+        namespace["population_unit_ids"] = identities
+    first_key, _, _, first_ids = namespace["assemble_population"]()
+    assert first_key == namespace["population_key"]
+    assert {
+        (row["spikesorting_merge_id"], row["unit_id"]) for row in first_ids
+    } == {
+        (row["spikesorting_merge_id"], row["unit_id"])
+        for row in namespace["population_unit_ids"]
+    }
+    # A failed group makes the handoff pending until explicitly omitted.
+    missing = max(expected_ids) + 1
+    namespace["target_sort_group_ids"].append(missing)
+    namespace["session_results"].append(
+        {"sort_group_id": missing, "outcome": "failed", "error": "test failure"}
+    )
+    assert namespace["assemble_population"]()[0] is None
+    namespace["omitted_sort_group_ids"].append(missing)
+    assert namespace["assemble_population"]()[0] == first_key
+    table = namespace["population_review_table"]().set_index("sort_group_id")
+    assert (
+        table.loc[missing, "omitted"]
+        and table.loc[missing, "outcome"] == "failed"
+    )
+    namespace["analysis_policy"] = "all_units"
+    with pytest.raises(ValueError, match="different members or policy"):
+        namespace["assemble_population"]()
 
 
 class _NotebookMatcherParams(BaseModel):
@@ -404,3 +478,76 @@ def test_cross_session_notebook_runs(dj_conn):
     # Part B matched units into tracked units (only where UnitMatchPy is present).
     if unitmatch_available:
         assert namespace["match_summary"]["n_tracked_units"] >= 1
+
+
+@pytest.mark.slow
+def test_targeted_inspection_and_metric_filter_use_final_units(
+    planted_three_unit_sort,
+):
+    """Execute the published inspection/filter cells over an actual merged child."""
+    import matplotlib
+    import numpy as np
+    import pandas as pd
+    from IPython.display import display
+
+    from spyglass.spikesorting.v2 import visualization as ssviz
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.pipeline import select_units_for_analysis
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    matplotlib.use("Agg")
+    clear_curations_for(planted_three_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=planted_three_unit_sort)
+        child = CurationV2.create_merged_curation(
+            sorting_key=planted_three_unit_sort,
+            parent_curation_id=root["curation_id"],
+            merge_groups=[[0, 1]],
+        )
+        ref = CurationRef.from_key(child)
+        units = sorted((CurationV2.Unit & child).fetch("unit_id"))
+        spikes, identities = select_units_for_analysis(
+            ref, policy="all_units"
+        ).fetch_spike_data(return_unit_ids=True)
+        namespace = {
+            "np": np,
+            "pd": pd,
+            "display": display,
+            "ssviz": ssviz,
+            "final_curation": ref,
+            "inspection_unit_ids": units,
+            "inspection_pair": units,
+            "spike_times": spikes,
+            "selected_unit_ids": identities,
+            "snr_threshold": 0.0,
+        }
+        book = json.loads(
+            (_NOTEBOOKS / "10_Spike_SortingV2_Curation.ipynb").read_text()
+        )
+        active = False
+        for cell in book["cells"]:
+            source = "".join(cell["source"])
+            if "### Is this unit neural" in source:
+                active = True
+            if "## Appendix A." in source:
+                break
+            if active and cell["cell_type"] == "code":
+                exec(  # noqa: S102 - execute repository-owned notebook cells
+                    compile(source, "<targeted-inspection>", "exec"), namespace
+                )
+        assert namespace["final_evaluation"].curation == ref
+        assert set(namespace["final_evaluation"].metrics.index) == set(units)
+        # The reusable example joins IDs (not row positions) and excludes NaN.
+        synthetic = pd.DataFrame({"snr": [np.nan, 8.0]}, index=units[::-1])
+        filtered, chosen = namespace["filter_selected_spikes"](
+            spikes, identities, synthetic, threshold=5.0
+        )
+        assert len(filtered) == 1 and [row["unit_id"] for row in chosen] == [
+            units[0]
+        ]
+        assert namespace["analysis_provenance"]["curation_uuid"] == str(
+            ref.curation_uuid
+        )
+    finally:
+        clear_curations_for(planted_three_unit_sort)

@@ -299,3 +299,23 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     ([Curation](../notebooks/10_Spike_SortingV2_Curation.ipynb),
     [Presets](../notebooks/10_Spike_SortingV2_Presets.ipynb),
     [Cross-Session](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)).
+
+For multiple shanks/tetrodes, continue with the
+[whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb):
+review each group, choose an exact final curation, and assemble one population
+with a consistent label policy. It reports failed/omitted groups and checks
+membership when rerun. For pair diagnostics, rasters, early/late traces, and an
+additional SNR filter on returned data, use the
+[curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb).
+
+Inspect the scientific setup in preflight/`describe_run`: artifact masking,
+drift QC and motion correction are different operations. Concat detects and
+masks each member before motion correction; Kilosort's shipped no-mask preset
+does not reject artifacts merely by correcting drift.
+
+Use `review.summary()` before opening the browser. Save Annotations saves bundle
+edits; Finalize sets a browser flag; Python preview/commit creates the curation.
+Pending merges still show parent metrics. Inspect the reevaluated child before
+choosing it for analysis. `unavailable_qc` names missing inputs for enabled
+rules; missing-policy pass means unflagged, not good. `accept` plus a deny label
+such as `noise` is excluded by the accepted-unit policies.

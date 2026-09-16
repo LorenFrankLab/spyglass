@@ -26,6 +26,9 @@
 # +
 import datajoint as dj
 import pandas as pd
+from IPython.display import display
+
+from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
 from spyglass.common import Electrode, LabTeam
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -41,6 +44,7 @@ from spyglass.spikesorting.v2.pipeline import (
     preflight_v2_pipeline_session,
     register_pipeline_preset,
     run_v2_pipeline_session,
+    select_units_for_analysis,
 )
 from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -54,6 +58,17 @@ pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 references = None  # inherit stored references; review before creating groups
 # None sorts every group; set an explicit subset such as [0, 2] if needed.
 sort_group_ids = None
+analysis_policy = "v2_accepted_single_units"
+population_name = "v2_reviewed_session"
+# Explicit alternative to human review. Missing QC may pass the rules;
+# unflagged is not evidence that a unit is good. Choose the policy deliberately.
+use_auto_labels_only = False
+review_group_id = None  # set one group after reading the batch report
+open_review_in_browser = False
+commit_group_review = False
+commit_group_verification = False
+# Deliberate omissions are reported as a PARTIAL population.
+omitted_sort_group_ids = []
 # -
 
 # ## 1. One-time setup
@@ -213,6 +228,7 @@ session_report = preflight_v2_pipeline_session(
     team_name=team_name,
     pipeline_preset=pipeline_preset,
     sort_group_ids=sort_group_ids,
+    auto_curate=True,
 )
 # Freeze the validated target list so execution uses exactly these groups.
 target_sort_group_ids = [
@@ -230,5 +246,223 @@ session_results = run_v2_pipeline_session(
     pipeline_preset=pipeline_preset,
     sort_group_ids=target_sort_group_ids,
     continue_on_error=True,
+    auto_curate=True,
 )
 describe_run(session_results)
+
+
+# ## 4. Choose the exact final curation for each group
+#
+# Keep this mapping while reviewing groups. Add only the generation you intend
+# to analyze: never choose the greatest curation ID. Run the following cells
+# for one group at a time; opening a browser does not wait for your edits.
+# Failed, zero-unit, omitted, and still-unreviewed groups remain visible.
+#
+# For an explicitly automatic workflow, set `use_auto_labels_only=True` and
+# choose `analysis_policy="v2_unflagged_units"`. Rules propose bad-unit labels;
+# they do not write `accept`. Missing-policy pass means "not flagged", not
+# "quality established". Deny labels win: `accept` plus `noise` is excluded.
+
+# +
+final_curations = {}  # retain this mapping when rerunning the review cells
+successful_runs = {
+    row["sort_group_id"]: row
+    for row in session_results
+    if row["outcome"] == "ok"
+}
+if use_auto_labels_only:
+    final_curations.update(
+        {
+            group: run.auto_labeled_curation
+            for group, run in successful_runs.items()
+        }
+    )
+# -
+
+# Select `review_group_id` above, then run this cell. Optional FigPack extra:
+# `pip install -e ".[spikesorting-v2-curation]"`.
+
+group_review = None
+if review_group_id is not None:
+    review_parent = final_curations.get(
+        review_group_id, successful_runs[review_group_id].auto_labeled_curation
+    )
+    group_review = review_parent.start_review("franklab_hippocampus_2026_06")
+    print(group_review.summary())
+    print(group_review.open(open_browser=open_review_in_browser))
+
+# **Stop to inspect and edit.** Save Annotations stores bundle edits; Finalize
+# changes a browser flag. Neither creates a scientific curation. After saving,
+# preview below, then set `commit_group_review=True` to commit.
+
+group_changes = None
+if group_review is not None:
+    group_changes = group_review.preview_import()
+    print(group_changes.summary())
+    display(group_changes.changed_units())
+
+# A label-only commit can be selected immediately. A merge opens another review
+# of the merged child's new waveforms and metrics. Pending browser merges never
+# change the parent metrics. The separate verification cell prevents an open
+# browser from being mistaken for a completed inspection.
+
+group_verification = None
+if group_changes is not None and commit_group_review:
+    group_receipt = group_changes.commit(
+        confirm_no_changes=not group_changes.has_changes,
+        conflict_resolutions={},  # resolve any conflicts shown in the preview
+    )
+    print(group_receipt.next_step())
+    if group_receipt.needs_merge_verification:
+        final_curations.pop(review_group_id, None)
+        group_verification = group_receipt.continue_review()
+        print(group_verification.open(open_browser=open_review_in_browser))
+    else:
+        final_curations[review_group_id] = group_receipt.curation
+
+# Inspect the merged child, save any edits, then set
+# `commit_group_verification=True`. Another merge needs another inspection;
+# rerun this cell after that inspection. For a mistaken committed merge, follow
+# section 3-recover of the [curation notebook](./10_Spike_SortingV2_Curation.ipynb).
+
+if group_verification is not None and commit_group_verification:
+    verified_changes = group_verification.preview_import()
+    print(verified_changes.summary())
+    verified_receipt = verified_changes.commit(
+        confirm_no_changes=not verified_changes.has_changes,
+        conflict_resolutions={},
+    )
+    print(verified_receipt.next_step())
+    if verified_receipt.needs_merge_verification:
+        group_verification = verified_receipt.continue_review()
+        print(group_verification.open(open_browser=open_review_in_browser))
+    else:
+        final_curations[review_group_id] = verified_receipt.curation
+        group_verification = None
+
+# Rerun this report as you finish groups. A zero-unit sort is a completed
+# computation, but contributes no units. Explicitly omit a failed/unwanted
+# group only after deciding that a partial population suits the analysis.
+
+
+# +
+def population_review_table():
+    rows = []
+    for run in session_results:
+        group = run["sort_group_id"]
+        chosen = final_curations.get(group)
+        rows.append(
+            {
+                "sort_group_id": group,
+                "outcome": run["outcome"],
+                "n_units": run.get("n_units"),
+                "error": run.get("error", ""),
+                "omitted": group in omitted_sort_group_ids,
+                "final_curation_uuid": (
+                    None if chosen is None else str(chosen.curation_uuid)
+                ),
+                "ready": chosen is not None or group in omitted_sort_group_ids,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+population_review_table()
+# -
+
+# ## 5. Assemble one session population under one label policy
+#
+# Run this after finishing the mapping (or explicitly omitting groups). Each
+# receipt shows selected/excluded, MUA and unlabeled counts. Unit IDs are local:
+# use `(spikesorting_merge_id, unit_id)` together across groups. These are
+# label policies; additional metric filters are illustrated in the curation
+# notebook and do not automatically carry into decoding.
+#
+# The assembly reuses a named group only if its membership AND policy match.
+# Choose a new `population_name` when deliberately changing the population.
+
+
+# +
+def assemble_population():
+    targets = set(target_sort_group_ids)
+    omitted = set(omitted_sort_group_ids)
+    chosen = set(final_curations)
+    if (chosen | omitted) - targets or chosen & omitted:
+        raise ValueError(
+            "Chosen and omitted groups must be disjoint subsets of the run targets."
+        )
+    pending = targets - chosen - omitted
+    if pending:
+        print(
+            "Population pending; review or explicitly omit groups:",
+            sorted(pending),
+        )
+        return None, {}, [], []
+    if not chosen:
+        print("No groups chosen; no analysis population created.")
+        return None, {}, [], []
+    receipts = {}
+    for group, ref in final_curations.items():
+        if (
+            group not in successful_runs
+            or ref.sorting_id != successful_runs[group]["sorting_id"]
+        ):
+            raise ValueError(
+                f"Group {group} needs a curation of its successful run."
+            )
+        receipts[group] = select_units_for_analysis(ref, policy=analysis_policy)
+        print(f"Group {group}:\n{receipts[group].summary()}")
+    key = {
+        "nwb_file_name": nwb_file_name,
+        "sorted_spikes_group_name": population_name,
+        "unit_filter_params_name": analysis_policy,
+    }
+    members = {receipt.curation.merge_id for receipt in receipts.values()}
+    existing = SortedSpikesGroup & {
+        "nwb_file_name": nwb_file_name,
+        "sorted_spikes_group_name": population_name,
+    }
+    if existing:
+        stored_policies = set(existing.fetch("unit_filter_params_name"))
+        stored_members = set(
+            (SortedSpikesGroup.Units & key).fetch("spikesorting_merge_id")
+        )
+        if stored_policies != {analysis_policy} or stored_members != members:
+            raise ValueError(
+                "Population name already has different members or policy; choose a new name."
+            )
+    else:
+        SortedSpikesGroup().create_group(
+            population_name,
+            nwb_file_name,
+            analysis_policy,
+            keys=[{"spikesorting_merge_id": merge_id} for merge_id in members],
+        )
+    spikes, identities = SortedSpikesGroup.fetch_spike_data(
+        key, return_unit_ids=True
+    )
+    expected = {
+        (receipt.curation.merge_id, unit_id)
+        for receipt in receipts.values()
+        for unit_id in receipt.included_unit_ids
+    }
+    actual = {
+        (row["spikesorting_merge_id"], row["unit_id"]) for row in identities
+    }
+    assert actual == expected, "Population differs from the per-group receipts."
+    print(
+        (
+            "PARTIAL population; omitted groups:"
+            if omitted
+            else "All requested groups included:"
+        ),
+        sorted(omitted or chosen),
+    )
+    return key, receipts, spikes, identities
+
+
+population_key, group_selections, population_spikes, population_unit_ids = (
+    assemble_population()
+)
+population_review_table()
+# -

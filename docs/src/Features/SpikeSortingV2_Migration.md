@@ -392,3 +392,19 @@ breaking-changes subsection):
     metrics (unit-count order, firing-rate distribution shape), not
     spike-by-spike equality. The deterministic `clusterless_thresholder` path is
     the tight parity reference.
+
+The whole-session and curation notebooks now show the complete population
+handoff and detailed inspection routes. Additional metric predicates can filter
+fetched data with an exact evaluation/curation record; they do not change stored
+decoding-group membership. Native split/per-spike edits and Phy edit re-import
+remain unsupported.
+
+Concat selections now require explicit per-member artifact detection IDs (or
+explicit `None` values). The standard runner resolves these automatically from
+the preset. Masks precede motion correction, participate in concat identity, and
+survive rebuilds and per-session exports as `obs_intervals`. This changes the
+pre-production concat schema: recreate the affected disposable v2 schema before
+repopulating; old materializations cannot satisfy the new selection. There is no
+production data migration in this change. SI's duration-based metrics and
+downstream decoding times do not automatically honor observation intervals;
+restrict analysis windows explicitly.

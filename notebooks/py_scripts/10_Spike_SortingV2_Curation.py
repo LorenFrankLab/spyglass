@@ -27,6 +27,8 @@
 
 # +
 import datajoint as dj
+import numpy as np
+import pandas as pd
 from IPython.display import display
 
 from spyglass.common import LabTeam
@@ -60,6 +62,9 @@ commit_browser_review = False  # commit the previewed browser edits
 commit_merge_verification = False  # commit the post-merge verification review
 # Analysis population policy for the final handoff (section 4).
 analysis_policy = "v2_accepted_single_units"
+inspection_unit_ids = []  # set after looking at the review, e.g. [3, 7]
+inspection_pair = []  # exactly two final-curation IDs to investigate
+snr_threshold = 5.0  # example analysis predicate: choose for your experiment
 # Optional executable example for typed, curation-scoped custom properties.
 run_custom_annotation_example = False
 # Opt-in scripted curation appendix (separate result names; never overwrites
@@ -174,7 +179,6 @@ CurationV2.summarize_curation(root_curation.as_key())
 
 root_annotation_sets = []
 if run_custom_annotation_example:
-    import pandas as pd
 
     from spyglass.spikesorting.v2.unit_annotation import (
         CurationUnitAnnotationSet,
@@ -264,6 +268,7 @@ if figpack_available:
         annotation_sets=root_annotation_sets,
     )
     review_url = review.open(open_browser=open_review_in_browser)
+    print(review.summary())
     print("Review id:", review.review_id)
     print("Bundle:", review.uri)
     print("Open in a browser:", review_url)
@@ -546,6 +551,127 @@ if final_unit_ids:
     ssviz.plot_unit_summary(
         final_curation, final_unit_ids[0], compute_missing=True
     )
+# -
+
+# ### Is this unit neural, noise, or MUA? Does it remain plausible late?
+#
+# Set `inspection_unit_ids` to suspicious units in the FINAL curation. These
+# calls use the unwhitened analyzer in microvolts; compare waveform shape,
+# refractory behavior and temporal stability rather than equating a narrow
+# waveform or high rate with noise. Inspect short windows at beginning, middle,
+# and end, and a raster for those units. SI time ranges below are recording-
+# relative seconds; fetched analysis spikes use the original session timeline.
+
+# +
+final_evaluation = final_curation.evaluate(
+    metric_params_name="franklab_default",
+    auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+)
+display(final_evaluation.missing_qc_inputs().to_frame())
+if inspection_unit_ids:
+    import spikeinterface.widgets as sw
+
+    ssviz.plot_waveforms(final_curation, unit_ids=inspection_unit_ids)
+    with final_curation.open_analyzer() as analyzer:
+        duration = (
+            analyzer.recording.get_num_samples() / analyzer.sampling_frequency
+        )
+        width = min(1.0, duration)
+        starts = sorted(
+            {0.0, max(0.0, (duration - width) / 2), max(0.0, duration - width)}
+        )
+        for start in starts:
+            ssviz.plot_spikes_on_traces(
+                final_curation,
+                unit_ids=inspection_unit_ids,
+                time_range=[start, start + width],
+                compute_missing=True,
+            )
+        sw.plot_rasters(
+            analyzer.sorting,
+            unit_ids=inspection_unit_ids,
+            time_range=[0.0, duration],
+            backend="matplotlib",
+        )
+# -
+
+# ### Should this pair merge?
+#
+# Pick exactly two IDs after inspection; no automatic merge is performed here.
+# Compare targeted cross-correlograms, peak distributions and amplitude over
+# time. Use the browser commit/continuation above, then rerun these cells with
+# the committed merged unit selected. The same evaluation follows that child.
+
+if inspection_pair:
+    if len(inspection_pair) != 2:
+        raise ValueError("Choose exactly two final-curation unit IDs.")
+    pairs = [tuple(inspection_pair)]
+    final_evaluation.plots.pair_correlograms(pairs)
+    final_evaluation.plots.pair_peaks(pairs)
+    final_evaluation.plots.peak_over_time(pairs)
+    display(final_evaluation.burst_pair_metrics(pairs))
+
+# The browser's amplitude sampling cap and pair-similarity threshold limit its
+# display. An absent point or pair does not establish absent spikes or absent
+# correlation; use the targeted views above. Display limits do not bound every
+# analyzer computation or the browser's unit-pair similarity payload.
+#
+# `isi_violation` is the count of violating intervals / (`num_spikes` - 1), using
+# this evaluation recipe's refractory window. It is different from SI's
+# `isi_violations_ratio` and is not a contamination estimate. `unavailable_qc`
+# names missing inputs needed by the enabled rules. With missing-policy pass,
+# a blank metric can leave a unit unflagged; it does not establish quality.
+#
+# Artifact intervals are stored in NWB `obs_intervals`. SI's duration-based
+# quality metrics use the analyzer's full sample timeline (including zeroed
+# artifacts); they are not rates over valid observation time. Shared decoding
+# accessors also require the caller to restrict analysis times to valid
+# intervals; zeroed periods must not be interpreted as neural silence.
+
+# ### Additional SNR selection for this analysis only
+#
+# Labels determine the stored selection group. An additional metric predicate
+# must use an evaluation of the EXACT final curation and join by unit ID, not
+# row position. Missing required SNR values are excluded. Record the selected
+# identities and predicate with your output. A region condition can similarly
+# join curated unit metadata by ID; this example does not invent a region label.
+#
+# This filters returned arrays only. It does not change `SortedSpikesGroup`
+# membership or subsequent decoding consumers. Do not mark a good unit `reject`
+# just because it fails one analysis's population preference.
+
+
+# +
+def filter_selected_spikes(spikes, identities, metrics, *, threshold):
+    snr = pd.to_numeric(metrics["snr"])
+    eligible = set(snr.index[np.isfinite(snr) & (snr >= threshold)])
+    keep = [
+        i
+        for i, identity in enumerate(identities)
+        if identity["unit_id"] in eligible
+    ]
+    return [spikes[i] for i in keep], [identities[i] for i in keep]
+
+
+filtered_spikes, filtered_unit_ids = filter_selected_spikes(
+    spike_times,
+    selected_unit_ids,
+    final_evaluation.metrics,
+    threshold=snr_threshold,
+)
+analysis_provenance = {
+    "curation_uuid": str(final_curation.curation_uuid),
+    "evaluation_id": str(final_evaluation.evaluation_id),
+    "predicate": {"snr_gte": snr_threshold, "missing": "exclude"},
+    "unit_ids": [
+        {
+            "spikesorting_merge_id": str(row["spikesorting_merge_id"]),
+            "unit_id": int(row["unit_id"]),
+        }
+        for row in filtered_unit_ids
+    ],
+}
+analysis_provenance
 # -
 
 # ## Appendix A. Scripted evaluate → merge → re-evaluate (opt-in)

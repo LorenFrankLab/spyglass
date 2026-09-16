@@ -1416,11 +1416,29 @@ members = [
         "interval_list_name": "raw data valid times",
     },
 ]
-for m in members:
+artifact_ids = {}
+from spyglass.spikesorting.v2.artifact import (
+    RecordingArtifactSelection,
+    RecordingArtifactDetection,
+)
+
+for member_index, m in enumerate(members):
     rec_key = RecordingSelection.insert_selection(
         {**m, "preprocessing_params_name": "default", "team_name": "my_team"}
     )
     Recording.populate(rec_key)
+    detection = RecordingArtifactSelection.insert_selection(
+        {
+            **rec_key,
+            "artifact_detection_params_name": "default",
+        }
+    )
+    RecordingArtifactDetection.populate(detection)
+    artifact_ids[member_index] = detection["artifact_detection_id"]
+    print(
+        member_index,
+        RecordingArtifactDetection().get_artifact_removed_intervals(detection),
+    )
 
 # 2. Name the group. session_group_owner namespaces the group name, so two
 #    teams can both use "day1". Same-day is the default; multi-day members
@@ -1437,7 +1455,8 @@ concat_key = ConcatenatedRecordingSelection.insert_selection(
         "session_group_name": "day1",
         "preprocessing_params_name": "default",
         "motion_correction_params_name": "auto_default",
-    }
+    },
+    artifact_detection_ids=artifact_ids,
 )
 ConcatenatedRecording.populate(concat_key)
 
@@ -1484,9 +1503,29 @@ Key behaviors and caveats:
     `SpikeSortingOutput.get_sort_group_info`, and the `(sorter, nwb_file_name)`
     decoding metadata from `CurationV2.get_sort_metadata` — resolves through the
     same anchor member rather than raising.
-- **No concat artifact detection.** A concat `SortingSelection` may not carry an
-    artifact-detection pass; artifact detection remains a single-recording (or
-    shared-recording-group) input.
+- **Artifacts are detected and masked per member before motion correction.** The
+    shipped concat preset enables amplitude detection. The selection freezes
+    each detection with a foreign key and includes it in its identity; changing
+    a mask creates a new concat and sort. No mask is inherited implicitly from
+    an earlier standalone sort. Direct callers must supply every member index in
+    `artifact_detection_ids`; an explicit `None` means no mask for that member.
+    A concat `SortingSelection` has no separate artifact input because masking
+    already happened in its source. Corrected traces are masked again to
+    preserve exclusions after interpolation. Sample counts and boundaries never
+    change.
+- **Observation intervals survive curation and member export.** The concat NWB
+    stores kept intervals in synthetic seconds; each exported member carries its
+    kept intervals in original session time, including disjoint recordings.
+    Rebuilds resolve the same frozen detections. Detection deletion is blocked
+    while a concat selection references it (unless explicitly cascade deleting).
+    `describe_run` reports member detection IDs/status and masked durations.
+- **Valid time needs an explicit analysis choice.** `describe_units` uses kept
+    duration for its rate denominator. SI quality metrics such as `firing_rate`
+    and `presence_ratio` still use the analyzer sample timeline, including
+    masked time; their stored numeric semantics are unchanged. NWB
+    `obs_intervals` does not automatically restrict `SortedSpikesGroup` spike
+    indicators or decoding times. Intersect analysis windows with those
+    intervals; do not interpret masked periods as neural silence.
 - **Downstream merge gate.** The concat `CurationV2` row itself is never
     registered in `SpikeSortingOutput`: its synthetic gap-free timeline is
     unsafe for session-scoped consumers. `ConcatMemberCuration` instead
@@ -1815,9 +1854,12 @@ use:
 - **Streaming Recording writes.** `Recording.make` now streams the preprocessed
     `ElectricalSeries` to NWB via HDMF's `GenericDataChunkIterator` with a
     channel-count-scaled write buffer (≈30 s of data, capped at 5 GB). The full
-    trace array is never materialized in RAM; chronic recordings (30 kHz × 128
-    ch × 1 h ≈ 110 GB float64) populate on any lab workstation. The
-    chunked-write helpers live in `spikesorting.v2._nwb_iterators` (port of v1's
+    trace array is never materialized in RAM. This is a bounded write strategy,
+    not an hour-long capacity guarantee: sorting, analyzers and browser pair
+    payloads have their own costs. See the
+    [measured validation record](../../plans/spikesorting-v2-sorting-ux-validation.md)
+    for tested workloads and remaining lab/hardware checks. The chunked-write
+    helpers live in `spikesorting.v2._nwb_iterators` (port of v1's
     `SpikeInterfaceRecordingDataChunkIterator` and
     `TimestampsDataChunkIterator`).
 - **Tri-part `make` + `_parallel_make = True`** on `Recording`, the
@@ -1881,3 +1923,47 @@ you only want to add rows for previously-unseen sort groups, supply explicit
 
 Test fixtures that previously relied on the v1 short-circuit must opt into the
 explicit flow above -- there is no v2 equivalent of `test_mode`.
+
+### Inspecting scientific evidence and choosing a population
+
+Preflight and `describe_run` show reference settings, preprocessing parameters,
+artifact settings, and motion treatment alongside the effective sorter config.
+Kilosort internal preprocessing/drift correction is not artifact rejection: the
+shipped Kilosort4 preset selects no Spyglass artifact masking. `DriftEstimate`
+is QC only and does not apply correction. Concat and Kilosort presets remain
+experimental pending scientific validation.
+
+A review's help pane identifies its committed curation and evaluation. **Save
+Annotations** writes edits to the bundle; **Finalize Curation** sets a browser
+flag; Python `preview_import()` and `commit()` create or reuse the scientific
+curation. Pending merges do not change displayed metrics. Follow
+`receipt.next_step()` and `continue_review()` to inspect the reevaluated child.
+`review.summary()` reports unavailable rule inputs and display budgets.
+
+The selectable `unavailable_qc` column names missing inputs required by the
+selected evaluation's rules. Disabled metrics are not failed computations. With
+`missing_policy="pass"`, missing evidence may leave a unit unflagged; this does
+not establish quality. Numeric absence stays absent. `isi_violation` is
+violating-interval count / (`num_spikes` - 1), with the evaluation recipe's
+refractory window; it is different from SI's `isi_violations_ratio` and is not a
+contamination estimate. Deny labels take precedence over `accept` in the shipped
+analysis policies.
+
+The [curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb)
+contains runnable waveform, spike-on-trace, pair correlogram/peak, early/middle/
+late, and raster examples using an exact final curation. Display sampling and
+pair thresholds can omit evidence from the summary; use targeted views rather
+than treating absence as proof. Its additional SNR filter records evaluation,
+curation and composite unit identities with the returned data. This filter does
+**not** change a stored `SortedSpikesGroup` or decoding consumers. Persisted
+metric-filtered populations remain outside this release.
+
+The
+[whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb)
+continues from batch results through explicit per-group final curations, one
+label policy and one analysis population. Failed/unreviewed groups remain
+pending until reviewed or explicitly omitted; omissions make a partial
+population. Across groups, use `(spikesorting_merge_id, unit_id)` identities.
+Native splitting, per-spike deletion, unit-specific valid-time editing,
+selective unmerge preserving later edits, and Phy edit re-import remain
+unsupported; Phy export supports inspection, not an edit round trip.

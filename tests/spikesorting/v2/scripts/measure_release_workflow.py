@@ -52,6 +52,7 @@ import importlib.util
 import json
 import os
 import platform
+import subprocess
 import sys
 import threading
 import time
@@ -149,6 +150,7 @@ def main():
     ap.add_argument("--label", required=True)
     ap.add_argument("--n-jobs", type=int, default=4)
     ap.add_argument("--port", type=int, default=3313)
+    ap.add_argument("--container-name", default="spyglass-measure")
     ap.add_argument(
         "--base-dir",
         default=str(REPO / "tests" / "_data_release_measure"),
@@ -170,7 +172,7 @@ def main():
     from tests.container import DockerMySQLManager
 
     server = DockerMySQLManager(
-        container_name="spyglass-measure", port=args.port
+        container_name=args.container_name, port=args.port
     )
     server.wait()
     dj.config.update(server.credentials)
@@ -199,6 +201,14 @@ def main():
     timings: dict[str, float] = {}
     result: dict = {
         "label": args.label,
+        "git_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True
+        ).strip(),
+        "git_dirty": bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=REPO, text=True
+            ).strip()
+        ),
         "nwb": args.nwb,
         "preset": args.preset,
         "n_jobs": args.n_jobs,
@@ -208,6 +218,11 @@ def main():
             "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
             "platform": platform.platform(),
             "cuda": "disabled (CPU-only run)",
+            "filesystems": [
+                {"mountpoint": p.mountpoint, "type": p.fstype}
+                for p in psutil.disk_partitions(all=True)
+                if base.resolve().is_relative_to(Path(p.mountpoint))
+            ],
         },
         "timings_s": timings,
         "stage_results": {},
@@ -262,6 +277,7 @@ def _run_workflow(args, result: dict, timings: dict) -> None:
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
     from spyglass.common import IntervalList, LabTeam, Raw
+    from spyglass.spikesorting.analysis.v1 import group as analysis_group
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2 import visualization as ssviz
     from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
@@ -344,6 +360,7 @@ def _run_workflow(args, result: dict, timings: dict) -> None:
     result["preflight"] = {
         "effective_config": report.effective_config,
         "resource_notes": report.resource_notes,
+        "scientific_config": report.scientific_config,
     }
 
     with stage("prepare_sort_root"):
@@ -428,9 +445,15 @@ def _run_workflow(args, result: dict, timings: dict) -> None:
             ssviz.export_to_phy(
                 merged_ref, Path(args.out_dir) / f"phy_{args.label}"
             )
+    # The private database uses test mode for setup. Measure production label
+    # filtering: the shared analysis test fixture otherwise bypasses it.
+    analysis_group.test_mode = False
     with stage("select_units"):
         sel = select_units_for_analysis(merged_ref, policy="v2_unflagged_units")
-        times = sel.fetch_spike_data()
+        times, selected_ids = sel.fetch_spike_data(return_unit_ids=True)
+        assert {unit["unit_id"] for unit in selected_ids} == set(
+            sel.included_unit_ids
+        )
     result["selection"] = {
         "policy": sel.policy_name,
         "n_included": len(sel.included_unit_ids),
