@@ -65,9 +65,7 @@ run_custom_annotation_example = False
 # Opt-in scripted curation appendix (separate result names; never overwrites
 # the browser result).
 run_scripted_curation_example = False
-# Undo a committed merge that was wrong: name the receipt it came from
-# ("browser_receipt" or "verification_receipt") in section 3-recover.
-undo_merge_from_receipt = None
+commit_recovery = False  # commit the previewed correction in section 3-recover
 # Sort group (shank) to sort. None auto-picks only when the session has exactly
 # one sort group; otherwise set it deliberately after reviewing step 2.
 sort_group_id = None
@@ -386,54 +384,65 @@ def require_verified_result():
 
 # ### 3-recover. Undo a committed merge that was wrong (opt-in)
 #
-# Set `undo_merge_from_receipt` to the name of the receipt the bad merge came
-# from -- `"browser_receipt"` (the first commit) or `"verification_receipt"`
-# (a merge made during verification) -- and run this cell twice: the first
-# run opens that merge's own review (its parent is the merge's parent, not
-# the root; its bundle still holds your other saved edits) and tells you to
-# select the merged units, **Unmerge Selected** and **Save Annotations**; the
-# second run sees the merge gone, commits the replacement sibling
-# (`confirm_no_changes` when unmerging restored the parent exactly), and
-# switches `pending_verification` / `final_curation` to the replacement
-# branch, so the verification and analysis cells below no longer touch the
-# abandoned merge. The abandoned branch stays as history
-# (`newer_sibling_curations`); remove it later with
-# `bad_merge.delete_subtree()` once nothing downstream refers to it.
+# Replace `None` below with the receipt that committed the mistaken merge:
+# `browser_receipt` for the first commit, or the appropriate
+# `verification_receipt` for a later merge. This opens that merge's own
+# review, whose bundle still holds your other saved edits.
 
-bad_merge_receipt = (
-    globals().get(undo_merge_from_receipt) if undo_merge_from_receipt else None
-)
+bad_merge_receipt = None  # replace with browser_receipt or verification_receipt
+recovery_review = None
 if bad_merge_receipt is not None:
     recovery_review = bad_merge_receipt.changes.review
     bad_merge = bad_merge_receipt.curation
-    mistaken_groups = set(bad_merge_receipt.changes.merge_groups)
+    print(
+        "Open the review to correct:",
+        recovery_review.open(open_browser=open_review_in_browser),
+    )
+
+# **Stop here to edit.** Select only the mistaken merge's units,
+# **Unmerge Selected**, and **Save Annotations**. Other valid merges and
+# label edits can stay. After saving, run the next cell to preview the
+# correction; it does not commit anything.
+
+recovery_changes = None
+if recovery_review is not None:
     recovery_changes = recovery_review.preview_import()
-    if mistaken_groups & set(recovery_changes.merge_groups):
+    print(recovery_changes.summary())
+    display(recovery_changes.changed_units())
+
+# Inspect the preview, resolve any listed label conflicts using its merged
+# unit IDs, then set `commit_recovery=True` and run the next cell. A complete
+# undo with no label changes confirms a no-change child; remaining merges
+# open a verification review. Inspect that review before rerunning the
+# verification cell above. The replacement becomes the notebook's result
+# only when no verification is pending.
+#
+# The abandoned branch stays as history (`newer_sibling_curations`); remove
+# it later with `bad_merge.delete_subtree()` once nothing downstream refers
+# to it.
+
+recovery_conflict_resolutions = {}  # use the IDs from recovery_changes
+if recovery_changes is not None and commit_recovery:
+    replacement_receipt = recovery_changes.commit(
+        conflict_resolutions=recovery_conflict_resolutions,
+        confirm_no_changes=not recovery_changes.has_changes,
+    )
+    print(replacement_receipt.next_step())
+    print(
+        f"Replacement curation {replacement_receipt.curation.curation_id} "
+        f"(parent {bad_merge.parent.curation_id}); abandoned merge "
+        f"{bad_merge.curation_id} kept as history."
+    )
+    if replacement_receipt.needs_merge_verification:
+        pending_verification = replacement_receipt.continue_review()
+        final_curation = None
         print(
-            "Undo the merge in the browser, Save Annotations, then run this "
-            "cell again:",
-            recovery_review.open(open_browser=open_review_in_browser),
+            "Its remaining merges await verification -- inspect:",
+            pending_verification.open(open_browser=open_review_in_browser),
         )
     else:
-        replacement_receipt = recovery_changes.commit(
-            confirm_no_changes=not recovery_changes.has_changes
-        )
-        print(replacement_receipt.next_step())
-        print(
-            f"Replacement curation {replacement_receipt.curation.curation_id} "
-            f"(parent {bad_merge.parent.curation_id}); abandoned merge "
-            f"{bad_merge.curation_id} kept as history."
-        )
-        if replacement_receipt.needs_merge_verification:
-            pending_verification = replacement_receipt.continue_review()
-            final_curation = None
-            print(
-                "Its remaining merges await verification -- inspect:",
-                pending_verification.open(open_browser=open_review_in_browser),
-            )
-        else:
-            pending_verification = None
-            final_curation = replacement_receipt.curation
+        pending_verification = None
+        final_curation = replacement_receipt.curation
 
 # ### 3-hand-label. Override specific units (optional)
 #

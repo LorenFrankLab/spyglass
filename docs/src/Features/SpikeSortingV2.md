@@ -679,16 +679,32 @@ edit committed in between. The review the mistaken merge came from is on its
 receipt (`receipt.changes.review`); undo the proposal there and commit again:
 
 ```python
-review = bad_receipt.changes.review      # the review the bad merge came from
-review.open()                            # its bundle still holds your edits
-# browser: select the merged units -> Unmerge Selected -> Save Annotations
-changes = review.preview_import()        # merge gone; other saved edits kept
-print(changes.summary())                 # newer_sibling_curations lists the
-                                         # abandoned merged child
-replacement_receipt = changes.commit(
+bad_merge_receipt = receipt  # or the verification_receipt that made the bad merge
+bad_merge = bad_merge_receipt.curation
+recovery_review = bad_merge_receipt.changes.review
+recovery_review.open()  # its bundle still holds your edits
+```
+
+Stop here: select only the mistaken merge's units, **Unmerge Selected**, then
+**Save Annotations**. Keep any other valid merges and label edits. After
+saving, preview the correction in a separate cell:
+
+```python
+recovery_changes = recovery_review.preview_import()
+print(recovery_changes.summary())  # includes the abandoned sibling
+recovery_changes.changed_units()
+```
+
+Inspect the preview, resolve any listed label conflicts using its merged
+unit IDs, then commit in another cell:
+
+```python
+recovery_conflict_resolutions = {}  # use the IDs from recovery_changes
+replacement_receipt = recovery_changes.commit(
+    conflict_resolutions=recovery_conflict_resolutions,
     # unmerging alone restores the parent exactly: that is a no-change
     # commit and must be confirmed (labels changed too -> a plain commit)
-    confirm_no_changes=not changes.has_changes,
+    confirm_no_changes=not recovery_changes.has_changes,
 )
 # Switch to the replacement branch so nothing downstream resumes or
 # approves the abandoned merge: the same pending / final rule as after any
@@ -696,14 +712,19 @@ replacement_receipt = changes.commit(
 if replacement_receipt.needs_merge_verification:
     pending_verification = replacement_receipt.continue_review()
     final_curation = None
+    pending_verification.open()
 else:
     pending_verification = None
     final_curation = replacement_receipt.curation
 ```
 
-`replacement_receipt.curation.parent` is the mistaken merge's parent. Without the receipt in
-hand, `FigPackReview.resume(review_id)` (the id printed when the review
-started) or `FigPackReview.find(bad_merge.parent, profile=profile)` gets
+If a verification view opens, inspect the replacement's merged units before
+running the verification block above. Only once nothing is pending is
+`final_curation` ready for analysis.
+
+`replacement_receipt.curation.parent` is the mistaken merge's parent. Without
+the receipt in hand, `FigPackReview.resume(review_id)` (the id printed when
+the review started) or `FigPackReview.find(bad_merge.parent, profile=profile)` gets
 you there; `find` may return several reviews of that parent (each
 `start_review` after a commit starts a new one -- a review's identity
 includes the parent's children at its start), so pick the one whose bundle
@@ -713,7 +734,7 @@ holds your edits:
 for candidate in FigPackReview.find(bad_merge.parent, profile=profile):
     print(candidate.review_id, candidate.uri)
     print("  ", candidate.preview_import().next_step())
-review = FigPackReview.resume(chosen_review_id)
+recovery_review = FigPackReview.resume(chosen_review_id)
 ```
 
 Edits made in the merged child's own verification review live on that
