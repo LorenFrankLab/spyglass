@@ -643,17 +643,9 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
     table.insert(0, "unavailable_qc", coverage)
     from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
 
-    metric_kwargs = (
-        QualityMetricParameters
-        & {"metric_params_name": evaluation.spec.metric_params_name}
-    ).fetch1("metric_kwargs")
-    from spikeinterface.metrics.quality import (
-        get_default_quality_metrics_params,
+    refractory_ms = QualityMetricParameters.get_isi_threshold_ms(
+        evaluation.spec.metric_params_name
     )
-
-    isi_params = get_default_quality_metrics_params()["isi_violation"]
-    isi_params.update((metric_kwargs or {}).get("isi_violation") or {})
-    refractory_ms = isi_params["isi_threshold_ms"]
     table.attrs["qc_context"] = (
         f"Evaluation `{evaluation.evaluation_id}`: "
         f"{int(coverage.ne('').sum())}/{len(coverage)} units have unavailable rule inputs. "

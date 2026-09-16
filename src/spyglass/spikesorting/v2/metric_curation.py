@@ -285,6 +285,20 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """
 
     @classmethod
+    def get_isi_threshold_ms(cls, metric_params_name: str) -> float:
+        """Resolve the recipe's refractory window, including SI's default."""
+        from spikeinterface.metrics.quality import (
+            get_default_quality_metrics_params,
+        )
+
+        kwargs = (cls & {"metric_params_name": metric_params_name}).fetch1(
+            "metric_kwargs"
+        )
+        defaults = get_default_quality_metrics_params()["isi_violation"]
+        params = {**defaults, **((kwargs or {}).get("isi_violation") or {})}
+        return float(params["isi_threshold_ms"])
+
+    @classmethod
     def _default_rows(cls) -> list[dict]:
         # nn_advanced is a PCA metric -> these rows set skip_pc_metrics=False so
         # the nn_noise_overlap column exists for the default auto-curation rule.
@@ -2625,7 +2639,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         key,
         pairs=None,
         *,
-        isi_threshold_ms: float = 2.0,
+        isi_threshold_ms: float | None = None,
         window_ms: float = 100.0,
         bin_ms: float = 5.0,
     ):
@@ -2637,7 +2651,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         ``isi_violation`` of the merged train, directional ``xcorrel_asymm``,
         and ``unit_distance`` between unit locations. Ordered pairs are
         distinct rows because the correlogram asymmetry is directional.
-        ``pairs`` defaults to every ordered pair.
+        ``pairs`` defaults to every ordered pair. The ISI fraction uses
+        violating intervals / (spikes - 1), matching stored unit QC. Its
+        refractory window comes from this evaluation's metric recipe unless
+        ``isi_threshold_ms`` explicitly overrides it.
 
         Unlike ``get_metrics`` / ``get_labels`` this is an instance method: it
         reads the analyzer through ``_display_analyzer`` rather than the
@@ -2652,6 +2669,14 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._metric_curation_plots import (
             burst_pair_metrics_frame,
         )
+
+        if isi_threshold_ms is None:
+            metric_params_name = (CurationEvaluationSelection & key).fetch1(
+                "metric_params_name"
+            )
+            isi_threshold_ms = QualityMetricParameters.get_isi_threshold_ms(
+                metric_params_name
+            )
 
         with self._display_analyzer(
             key,

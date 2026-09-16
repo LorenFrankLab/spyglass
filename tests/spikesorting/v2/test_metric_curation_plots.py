@@ -142,11 +142,11 @@ def synthetic_analyzer():
 
 
 def test_calculate_isi_violation_threshold_is_milliseconds():
-    """The threshold arg is named in ms and 2 ms is the v2 default.
+    """The shared legacy utility's threshold is explicitly named in ms.
 
     v1 named it ``isi_threshold_s`` while internally treating it as ms (it
-    multiplied by 1e-3); the rename removes that trap. The default aligns with
-    the single-unit ``isi_violation`` (2 ms).
+    multiplied by 1e-3); the rename removes that trap. Its legacy denominator
+    remains spike count; v2 pair diagnostics use the unit-QC interval fraction.
     """
     import inspect
 
@@ -365,6 +365,24 @@ def test_burst_pair_metrics_flags_oversplit(synthetic_analyzer):
     assert by_pair[(0, 1)]["unit_distance"] < by_pair[(0, 2)]["unit_distance"]
 
 
+def test_burst_pair_isi_uses_interval_count(synthetic_analyzer, monkeypatch):
+    from spyglass.spikesorting.v2._metric_curation_plots import (
+        burst_pair_metrics_frame,
+    )
+
+    # Three merged spikes, two intervals, one violation at 2 ms. A one-spike
+    # pair has no interval evidence and must stay unavailable rather than zero.
+    trains = {0: np.array([300, 1500]), 1: np.array([345]), 2: np.array([])}
+    monkeypatch.setattr(
+        synthetic_analyzer.sorting, "get_unit_spike_train", trains.__getitem__
+    )
+    frame = burst_pair_metrics_frame(
+        synthetic_analyzer, pairs=[(0, 1), (1, 2)], isi_threshold_ms=2.0
+    )
+    assert frame.loc[(0, 1), "isi_violation"] == pytest.approx(0.5)
+    assert np.isnan(frame.loc[(1, 2), "isi_violation"])
+
+
 def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
     """The data form of the burst diagnostics is a ``(unit1, unit2)`` frame.
 
@@ -430,7 +448,9 @@ def test_curation_evaluation_get_burst_pair_metrics(
     )
 
     frame = CurationEvaluation().get_burst_pair_metrics(
-        {"curation_evaluation_id": "unused"}, pairs=[(0, 1), (0, 2)]
+        {"curation_evaluation_id": "unused"},
+        pairs=[(0, 1), (0, 2)],
+        isi_threshold_ms=2.0,
     )
 
     assert frame.index.names == ["unit1", "unit2"]
@@ -462,7 +482,9 @@ def test_plot_burst_pair_metrics_renders_from_the_data_path(
     )
 
     fig = CurationEvaluation().plot_burst_pair_metrics(
-        {"curation_evaluation_id": "unused"}, pairs=[(0, 1)]
+        {"curation_evaluation_id": "unused"},
+        pairs=[(0, 1)],
+        isi_threshold_ms=2.0,
     )
 
     assert isinstance(fig, plt.Figure)
@@ -490,10 +512,73 @@ def test_evaluation_result_burst_pair_metrics_returns_frame(
         lambda self: {"curation_evaluation_id": "unused"},
     )
 
-    frame = result.burst_pair_metrics(pairs=[(1, 0)])
+    frame = result.burst_pair_metrics(pairs=[(1, 0)], isi_threshold_ms=2.0)
 
     assert isinstance(frame, pd.DataFrame)
     assert list(frame.index) == [(1, 0)]
+
+
+@pytest.mark.database
+def test_burst_pair_isi_uses_evaluation_recipe(
+    planted_three_unit_sort,
+    curation_evaluation_defaults,
+    synthetic_analyzer,
+    monkeypatch,
+):
+    from spikeinterface.metrics.quality import (
+        get_default_quality_metrics_params,
+    )
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+        QualityMetricParameters,
+    )
+
+    name = "workflow_pair_isi_half_ms"
+    QualityMetricParameters.insert1(
+        {
+            "metric_params_name": name,
+            "metric_names": ["isi_violation"],
+            "metric_kwargs": {"isi_violation": {"isi_threshold_ms": 0.5}},
+        },
+        skip_duplicates=True,
+    )
+    default_name = "workflow_pair_isi_si_default"
+    QualityMetricParameters.insert1(
+        {
+            "metric_params_name": default_name,
+            "metric_names": ["isi_violation"],
+            "metric_kwargs": {},
+        },
+        skip_duplicates=True,
+    )
+    assert QualityMetricParameters.get_isi_threshold_ms(default_name) == (
+        get_default_quality_metrics_params()["isi_violation"][
+            "isi_threshold_ms"
+        ]
+    )
+    root = CurationV2.insert_curation(sorting_key=planted_three_unit_sort)
+    key = CurationEvaluationSelection.insert_selection(
+        {
+            **root,
+            "metric_params_name": name,
+            "auto_curation_rules_name": "none",
+        }
+    )
+    table = _patch_evaluation_display_analyzer(monkeypatch, synthetic_analyzer)
+    trains = {0: np.array([300, 1500]), 1: np.array([345]), 2: np.array([])}
+    monkeypatch.setattr(
+        synthetic_analyzer.sorting, "get_unit_spike_train", trains.__getitem__
+    )
+    default = table().get_burst_pair_metrics(key, pairs=[(0, 1)])
+    override = table().get_burst_pair_metrics(
+        key,
+        pairs=[(0, 1)],
+        isi_threshold_ms=2.0,
+    )
+    assert default.loc[(0, 1), "isi_violation"] == 0.0
+    assert override.loc[(0, 1), "isi_violation"] == pytest.approx(0.5)
 
 
 def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(

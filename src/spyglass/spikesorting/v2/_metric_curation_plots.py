@@ -383,7 +383,8 @@ def burst_pair_metrics_from_analyzer(
       ``similarity_correlograms`` auto-merge preset compares templates with
       ``l1`` (its ``similarity_method`` default), while this reports cosine.
     - ``isi_violation`` -- refractory-violation fraction of the merged train
-      (``isi_threshold_ms`` default 2 ms, aligned with the single-unit metric).
+      (violating intervals / (spikes - 1), matching stored unit QC). This pure
+      helper defaults to 2 ms; the evaluation API supplies its recipe's window.
     - ``xcorrel_asymm`` -- cross-correlogram left/right asymmetry (burst
       parent/child signature; directional, so computed per ordered pair).
     - ``unit_distance`` -- euclidean distance between ``unit_locations`` (the
@@ -401,9 +402,9 @@ def burst_pair_metrics_from_analyzer(
     """
     from itertools import permutations
 
-    from spyglass.spikesorting.utils_burst import (
-        calculate_ca,
-        calculate_isi_violation,
+    from spyglass.spikesorting.utils_burst import calculate_ca
+    from spyglass.spikesorting.v2._metric_curation import (
+        isi_violation_fraction,
     )
 
     for name in ("templates", "template_similarity", "unit_locations"):
@@ -437,15 +438,19 @@ def burst_pair_metrics_from_analyzer(
     rows = []
     for u1, u2 in pairs:
         i1, i2 = index_of[u1], index_of[u2]
+        merged_times = np.sort(
+            np.concatenate([spike_times[u1], spike_times[u2]])
+        )
+        violations = np.count_nonzero(
+            np.diff(merged_times) < isi_threshold_ms * 1e-3
+        )
         rows.append(
             {
                 "unit1": u1,
                 "unit2": u2,
                 "wf_similarity": float(similarity[i1, i2]),
-                "isi_violation": calculate_isi_violation(
-                    spike_times[u1],
-                    spike_times[u2],
-                    isi_threshold_ms=isi_threshold_ms,
+                "isi_violation": float(
+                    isi_violation_fraction(violations, len(merged_times))
                 ),
                 "xcorrel_asymm": calculate_ca(bin_centers, ccgs[i1, i2, :]),
                 "unit_distance": float(
