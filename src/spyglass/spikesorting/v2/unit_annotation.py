@@ -15,6 +15,7 @@ from typing import Any
 import datajoint as dj
 import pandas as pd
 
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 from spyglass.spikesorting.v2._unit_annotation import (
     ANNOTATION_VALUE_TYPES,
     annotation_set_hash,
@@ -141,8 +142,9 @@ class UnitAnnotationDefinition(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                     field="annotation_name",
                     max_length=64,
                 ),
-                "annotation_version": int(
-                    supplied.get("annotation_version", 0)
+                "annotation_version": lossless_int(
+                    supplied.get("annotation_version", 0),
+                    "annotation_version",
                 ),
                 "value_type": str(supplied.get("value_type", "")),
                 "physical_unit": str(supplied.get("physical_unit", "")),
@@ -234,17 +236,24 @@ class CurationUnitAnnotationSet(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             if isinstance(rows, Mapping):
                 rows = [rows]
             normalized = []
+            value_types = {}
             for supplied in rows:
                 row = dict(supplied)
                 definition_key = {
                     "annotation_name": row["annotation_name"],
                     "annotation_version": row["annotation_version"],
                 }
-                value_type = str(
-                    (UnitAnnotationDefinition & definition_key).fetch1(
-                        "value_type"
-                    )
+                definition_id = (
+                    row["annotation_name"],
+                    row["annotation_version"],
                 )
+                if definition_id not in value_types:
+                    value_types[definition_id] = str(
+                        (UnitAnnotationDefinition & definition_key).fetch1(
+                            "value_type"
+                        )
+                    )
+                value_type = value_types[definition_id]
                 expected = _VALUE_COLUMN[value_type]
                 unexpected = [
                     name
@@ -482,7 +491,12 @@ class CurationUnitAnnotationSet(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> pd.DataFrame:
         """Return one immutable set indexed by true curated ``unit_id``."""
         ref = AnnotationSetRef.from_key(set_key)
-        values = cls._stored_values(ref.as_key(), ref.value_type)
+        return cls._dataframe_from_ref(ref)
+
+    @classmethod
+    def _dataframe_from_ref(cls, ref: AnnotationSetRef) -> pd.DataFrame:
+        """Read values for a reference already validated by the caller."""
+        values = cls._stored_values(ref._unchecked_key(), ref.value_type)
         unit_ids = [unit_id for unit_id, _ in values]
         raw_values = [value for _, value in values]
         if ref.value_type == "float":

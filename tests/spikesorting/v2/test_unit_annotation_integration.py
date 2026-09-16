@@ -2,11 +2,181 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import datajoint as dj
+import numpy as np
 import pandas as pd
 import pytest
 
 pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+
+@pytest.fixture
+def versioned_annotation_sets(planted_two_unit_sort):
+    """Two versions with different value types in the same curation."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        unit_ids = (CurationV2.Unit & root.as_key()).fetch(
+            "unit_id", order_by="unit_id"
+        )
+        refs = []
+        for version, value_type, values in (
+            (np.int64(1), "float", [0.5, 1.5]),
+            (2, "int", [1, 2]),
+        ):
+            definition = UnitAnnotationDefinition.insert_definition(
+                "versioned_annotation_score", version, value_type
+            )
+            refs.append(
+                CurationUnitAnnotationSet.from_dataframe(
+                    root,
+                    definition,
+                    pd.DataFrame({"score": values}, index=unit_ids),
+                    producer="annotation-regression-test",
+                )
+            )
+        yield root, refs
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def _select_count(query, table):
+    return sum(
+        call.args[0].lstrip().upper().startswith("SELECT")
+        and table.full_table_name in call.args[0]
+        for call in query.call_args_list
+    )
+
+
+def test_annotation_versions_preserve_integer_identity(
+    versioned_annotation_sets,
+):
+    """Factories and reference resolution reject versions that change identity."""
+    from spyglass.spikesorting.v2.unit_annotation import (
+        AnnotationDefinitionRef,
+        AnnotationSetRef,
+        UnitAnnotationDefinition,
+    )
+
+    _, (score, _) = versioned_annotation_sets
+    key = score.as_key()
+    definition = AnnotationDefinitionRef.from_key(key)
+    numpy_key = {**key, "annotation_version": np.int64(1)}
+    assert AnnotationDefinitionRef.from_key(numpy_key) == definition
+    assert AnnotationSetRef.from_key(numpy_key) == score
+
+    for version in (1.9, 1.0, True, "1"):
+        invalid_key = {**key, "annotation_version": version}
+        with pytest.raises(
+            ValueError, match="annotation_version must be an integer"
+        ):
+            UnitAnnotationDefinition.insert_definition(
+                score.annotation_name, version, "float"
+            )
+        with pytest.raises(
+            ValueError, match="annotation_version must be an integer"
+        ):
+            AnnotationDefinitionRef.from_key(invalid_key)
+        with pytest.raises(
+            ValueError, match="annotation_version must be an integer"
+        ):
+            AnnotationSetRef.from_key(invalid_key)
+
+
+def test_annotation_batch_reads_each_definition_once(versioned_annotation_sets):
+    """Mixed-version batches validate types with one lookup per definition."""
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+    )
+
+    _, refs = versioned_annotation_sets
+    rows = [
+        row
+        for ref in refs
+        for row in (CurationUnitAnnotationSet.Value & ref.as_key()).fetch(
+            as_dict=True
+        )
+    ]
+    connection = CurationUnitAnnotationSet.connection
+    # Each call must resolve its definitions anew; the cache is batch-local.
+    for _ in range(2):
+        with patch.object(connection, "query", wraps=connection.query) as query:
+            CurationUnitAnnotationSet.Value.insert(
+                iter(rows), skip_duplicates=True, allow_direct_insert=True
+            )
+        assert _select_count(query, UnitAnnotationDefinition) == 2
+
+    invalid = {**rows[-1], "value_float": 0.5}
+    with pytest.raises(TypeError, match="only value_int may be populated"):
+        CurationUnitAnnotationSet.Value.insert(
+            [*rows, invalid], skip_duplicates=True, allow_direct_insert=True
+        )
+
+
+def test_annotation_reads_validate_once_and_reject_stale_refs(
+    versioned_annotation_sets,
+):
+    """Composed reads avoid repeated checks but revalidate on every operation."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+        read_unit_properties,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    root, (score, _) = versioned_annotation_sets
+    connection = CurationUnitAnnotationSet.connection
+    for supplied in (score, score.snapshot()):
+        with patch.object(connection, "query", wraps=connection.query) as query:
+            frame = CurationUnitAnnotationSet.to_dataframe(supplied)
+        assert frame.iloc[:, 0].tolist() == [0.5, 1.5]
+        assert _select_count(query, CurationV2) == 1
+        assert _select_count(query, CurationUnitAnnotationSet) == 1
+        assert _select_count(query, UnitAnnotationDefinition) == 1
+
+        with patch.object(connection, "query", wraps=connection.query) as query:
+            properties = read_unit_properties(
+                root, evaluation=None, annotation_sets=[supplied]
+            )
+        assert properties[score.column_name].tolist() == [0.5, 1.5]
+        assert _select_count(query, CurationUnitAnnotationSet) == 1
+        assert _select_count(query, UnitAnnotationDefinition) == 1
+
+    with pytest.raises(ValueError, match="repeats set_hash"):
+        read_unit_properties(
+            root, evaluation=None, annotation_sets=[score, score.snapshot()]
+        )
+
+    sorting_key = {"sorting_id": root.sorting_id}
+    clear_curations_for(sorting_key)
+    replacement = CurationRef.from_key(
+        CurationV2.create_initial_curation(sorting_key)
+    )
+    assert replacement.curation_id == root.curation_id
+    assert replacement.curation_uuid != root.curation_uuid
+    with pytest.raises(CurationNotFoundError):
+        score.to_dataframe()
+    with pytest.raises(CurationNotFoundError):
+        read_unit_properties(
+            replacement, evaluation=None, annotation_sets=[score]
+        )
 
 
 def test_typed_annotation_sets_and_explicit_common_reader(

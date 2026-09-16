@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from spyglass.spikesorting.v2._lookup_validation import lossless_int
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 AnnotationValueType = Literal["float", "int", "bool", "text"]
@@ -67,7 +68,9 @@ class AnnotationDefinitionRef:
             UnitAnnotationDefinition
             & {
                 "annotation_name": str(key["annotation_name"]),
-                "annotation_version": int(key["annotation_version"]),
+                "annotation_version": lossless_int(
+                    key["annotation_version"], "annotation_version"
+                ),
             }
         ).fetch1()
         return cls._from_row(row)
@@ -129,9 +132,11 @@ class AnnotationSetRef:
         # raises CurationNotFoundError on a stale one).
         curation = CurationRef.from_key(key)
         dj_key = {
-            **curation.as_key(),
+            **curation._unchecked_key(),
             "annotation_name": str(key["annotation_name"]),
-            "annotation_version": int(key["annotation_version"]),
+            "annotation_version": lossless_int(
+                key["annotation_version"], "annotation_version"
+            ),
             "set_hash": str(key["set_hash"]),
         }
         rows = (CurationUnitAnnotationSet & dj_key).fetch(as_dict=True)
@@ -246,7 +251,9 @@ def read_unit_properties(
     can never silently overwrite each other or a built-in metric.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.unit_annotation import to_dataframe
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+    )
 
     if not isinstance(curation, CurationRef):
         raise TypeError("read_unit_properties requires curation=CurationRef.")
@@ -289,7 +296,7 @@ def read_unit_properties(
         result = metrics.reindex(unit_ids).copy(deep=True)
         result.index.name = "unit_id"
 
-    seen_keys = set()
+    seen_refs = set()
     for supplied in annotation_sets:
         ref = AnnotationSetRef.from_key(supplied)
         if ref.curation != curation:
@@ -297,18 +304,17 @@ def read_unit_properties(
                 f"Annotation set {ref.set_hash} belongs to a different "
                 "curation."
             )
-        identity = tuple(ref.as_key().values())
-        if identity in seen_keys:
+        if ref in seen_refs:
             raise ValueError(
                 f"annotation_sets repeats set_hash {ref.set_hash}."
             )
-        seen_keys.add(identity)
+        seen_refs.add(ref)
         column = ref.column_name
         if column in result.columns:
             raise ValueError(
                 f"Deterministic unit-property column collision at {column!r}."
             )
-        values = to_dataframe(ref).iloc[:, 0]
+        values = CurationUnitAnnotationSet._dataframe_from_ref(ref).iloc[:, 0]
         result[column] = values.reindex(result.index)
     return result
 
