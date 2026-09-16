@@ -77,9 +77,18 @@ def _ok_report(sort_group_id: int, pipeline_preset: str) -> PreflightReport:
         warnings=[],
         resolved_pipeline_preset=pipeline_preset,
         expected_ids={
-            "recording_id": {"id": f"rec-{sort_group_id}", "exists": False}
+            "recording_id": {
+                "id": f"rec-{sort_group_id}",
+                "exists": False,
+                "computed_exists": False,
+            }
         },
         checks=[PreflightCheck("pipeline_preset_known", True, "")],
+        effective_config={
+            "sorter": "mountainsort5",
+            "job_kwargs": {"n_jobs": 2},
+        },
+        resource_notes=[f"Group {sort_group_id} waveform buffer: 1 MiB/unit"],
     )
 
 
@@ -159,9 +168,20 @@ def test_preflight_session_all_groups(monkeypatch):
             "warnings",
             "expected_ids",
             "checks",
+            "effective_config",
+            "resource_notes",
         }
         assert row["ok"] is True
         assert row["expected_ids"]  # carried through from the per-group report
+        source = _ok_report(row["sort_group_id"], _PRESET)
+        assert row["effective_config"] == source.effective_config
+        assert row["resource_notes"] == source.resource_notes
+    summary = report.summary()
+    assert "Target sort groups: 0, 1, 2" in summary
+    assert "mountainsort5" in summary
+    for group_id in range(3):
+        assert f"Sort group {group_id}:" in summary
+        assert f"Group {group_id} waveform buffer: 1 MiB/unit" in summary
 
 
 @pytest.mark.unit
@@ -208,6 +228,10 @@ def test_preflight_session_collects_group_errors(monkeypatch):
     assert by_id[1]["ok"] is False
     assert by_id[1]["errors"] == ["LabTeam 't' does not exist."]
     assert by_id[0]["ok"] is True and by_id[2]["ok"] is True
+    summary = report.summary()
+    assert "Session preflight blocked" in summary
+    assert "Sort group 1:\n  ERROR: LabTeam 't' does not exist." in summary
+    assert "Warning: heads up" in summary
 
 
 # ---------------------------------------------------------------------------
@@ -710,8 +734,12 @@ def test_preflight_session_real_all_ok(session_inputs):
             "warnings",
             "expected_ids",
             "checks",
+            "effective_config",
+            "resource_notes",
         }
         assert row["ok"] is True
+        assert row["resource_notes"]
+    assert "Session preflight ready" in report.summary()
 
 
 @pytest.fixture(scope="module")

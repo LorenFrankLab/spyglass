@@ -11,6 +11,7 @@ import paths are unchanged. Depends only on ``_pipeline_presets``
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pprint import pformat
 from typing import TYPE_CHECKING, Any
 
 from spyglass.spikesorting.v2._pipeline_presets import _PIPELINE_PRESETS
@@ -243,6 +244,20 @@ class PreflightReport:
         """Return ``True`` when the configuration is runnable (``ok``)."""
         return self.ok
 
+    def summary(self) -> str:
+        """Render the execution plan and actionable findings without DB reads."""
+        state = "ready" if self.ok else "blocked"
+        return "\n".join(
+            [f"Preflight {state}: {self.resolved_pipeline_preset}"]
+            + _preflight_details(
+                self.errors,
+                self.warnings,
+                self.expected_ids,
+                self.effective_config,
+                self.resource_notes,
+            )
+        )
+
 
 @dataclass(frozen=True)
 class PreflightSessionReport:
@@ -267,7 +282,8 @@ class PreflightSessionReport:
     group_reports
         One plain-dict entry per target sort group, with keys
         ``sort_group_id``, ``ok``, ``errors``, ``warnings``, ``expected_ids``,
-        and ``checks`` (from the underlying :class:`PreflightReport`).
+        ``checks``, ``effective_config``, and ``resource_notes`` (from the
+        underlying :class:`PreflightReport`).
         ``pandas`` is intentionally not imported here; wrap with
         ``pd.DataFrame(report.group_reports)`` in a notebook when useful.
     """
@@ -281,6 +297,55 @@ class PreflightSessionReport:
     def __bool__(self) -> bool:
         """Return ``True`` when every target group is runnable (``ok``)."""
         return self.ok
+
+    def summary(self) -> str:
+        """Render the checked targets and their execution plans."""
+        state = "ready" if self.ok else "blocked"
+        lines = [
+            f"Session preflight {state}: {self.resolved_pipeline_preset}",
+            "Target sort groups: "
+            + ", ".join(
+                str(row["sort_group_id"]) for row in self.group_reports
+            ),
+        ]
+        for row in self.group_reports:
+            lines.append(f"Sort group {row['sort_group_id']}:")
+            lines.extend(
+                _preflight_details(
+                    row["errors"],
+                    row["warnings"],
+                    row["expected_ids"],
+                    row["effective_config"],
+                    row["resource_notes"],
+                )
+            )
+        return "\n".join(lines)
+
+
+def _preflight_details(
+    errors, warnings, expected_ids, effective_config, resources
+):
+    """Format fields shared by single-group and session preflight reports."""
+    lines = [f"  ERROR: {message}" for message in errors]
+    lines.extend(f"  Warning: {message}" for message in warnings)
+    for key, selection in expected_ids.items():
+        if selection["id"] is None:
+            action = "skip"
+        elif selection["computed_exists"]:
+            action = "reuse completed output"
+        else:
+            action = "compute"
+        lines.append(f"  {key.removesuffix('_id')}: {action}")
+    if effective_config is not None:
+        lines.append("  Effective sorter configuration:")
+        lines.extend(
+            f"    {line}"
+            for line in pformat(effective_config, width=76).splitlines()
+        )
+    if resources:
+        lines.append("  Resources:")
+        lines.extend(f"    {note}" for note in resources)
+    return lines
 
 
 def resolve_preset_sort_config(bundle) -> "dict | None":
@@ -1423,6 +1488,8 @@ def preflight_v2_pipeline_session(
                 "warnings": report.warnings,
                 "expected_ids": report.expected_ids,
                 "checks": report.checks,
+                "effective_config": report.effective_config,
+                "resource_notes": report.resource_notes,
             }
         )
         errors.extend(

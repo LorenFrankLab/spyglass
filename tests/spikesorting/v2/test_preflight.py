@@ -57,6 +57,61 @@ _INTERVAL = "raw data valid times"
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("blocked", [False, True])
+def test_preflight_summary_distinguishes_selection_from_completed_output(
+    monkeypatch, blocked
+):
+    """The displayed plan must not promise reuse for an unfinished stage."""
+
+    def no_query(*args, **kwargs):
+        pytest.fail("Rendering a preflight report must not query the DB")
+
+    monkeypatch.setattr(dj.Connection, "query", no_query)
+    report = PreflightReport(
+        ok=not blocked,
+        errors=["Install the sorter runtime."] if blocked else [],
+        warnings=["Review the reference choice."],
+        resolved_pipeline_preset="test_recipe",
+        expected_ids={
+            "recording_id": {
+                "id": "recording",
+                "exists": True,
+                "computed_exists": True,
+            },
+            "artifact_detection_id": {
+                "id": None,
+                "exists": False,
+                "computed_exists": False,
+            },
+            "sorting_id": {
+                "id": "sorting",
+                "exists": True,
+                "computed_exists": False,
+            },
+        },
+        checks=[],
+        effective_config={
+            "sorter": "mountainsort5",
+            "execution_backend": "local",
+            "job_kwargs": {"n_jobs": 2, "chunk_duration": "1s"},
+        },
+        resource_notes=["Sorter scratch: /scratch/sorting"],
+    )
+    summary = report.summary()
+    assert (
+        f"Preflight {'blocked' if blocked else 'ready'}: test_recipe" in summary
+    )
+    assert "recording: reuse completed output" in summary
+    assert "artifact_detection: skip" in summary
+    assert "sorting: compute" in summary
+    assert "Warning: Review the reference choice." in summary
+    assert "mountainsort5" in summary and "local" in summary
+    assert "'n_jobs': 2" in summary and "'chunk_duration': '1s'" in summary
+    assert "Sorter scratch: /scratch/sorting" in summary
+    assert ("ERROR: Install the sorter runtime." in summary) == blocked
+
+
+@pytest.mark.unit
 def test_identity_payload_extraction_stable():
     """The extracted payload builders reproduce the frozen selection ids.
 
