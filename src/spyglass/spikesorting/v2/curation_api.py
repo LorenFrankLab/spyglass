@@ -34,7 +34,7 @@ def _uuid(value) -> uuid.UUID:
 
 
 def _normalize_merge_groups(groups) -> list[list[int]]:
-    """Validate merge-group SHAPE (DB-free): containers, ids, disjointness."""
+    """Validate merge-group SHAPE (DB-free): containers, ids, no overlaps."""
     if isinstance(groups, (str, bytes, Mapping)) or not isinstance(
         groups, Iterable
     ):
@@ -660,6 +660,20 @@ class EvaluationResult:
     @property
     def metrics(self) -> pd.DataFrame:
         return self._metrics.copy(deep=True)
+
+    def missing_qc_inputs(self) -> pd.Series:
+        """Unavailable rule inputs per unit for this exact evaluation."""
+        from spyglass.spikesorting.v2._review_unit_properties import (
+            missing_rule_metrics,
+        )
+        from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
+
+        self._current_evaluation_key()
+        names = (
+            AutoCurationRules.Rule
+            & {"auto_curation_rules_name": self.spec.auto_curation_rules_name}
+        ).fetch("metric_name", order_by="rule_index")
+        return missing_rule_metrics(self._metrics, names)
 
     @property
     def suggested_merges(self) -> list[list[int]]:

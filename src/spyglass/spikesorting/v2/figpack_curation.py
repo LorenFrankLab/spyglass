@@ -434,14 +434,17 @@ def _build_curation_view(
             ).view
 
     control = curation_control(label_options, seed_labels)
-    summary_title = f"Sorting summary ({display.describe()})"
+    summary_title = "Sorting summary"
+    context = (
+        f"Sorting `{curation_key['sorting_id']}`, curation "
+        f"`{curation_key['curation_id']}`. {display.describe()}. "
+        "Omitted pairs are filtered from the display, not evidence of no correlation."
+    )
     if review_table is not None:
-        summary_title = (
-            "Sorting summary -- unit table: official metrics / proposals of "
-            f"committed curation {int(curation_key['curation_id'])} "
-            f"({display.describe()})"
-        )
-    view = compose_review_layout(summary, control, summary_title=summary_title)
+        context += " " + review_table.attrs.get("qc_context", "")
+    view = compose_review_layout(
+        summary, control, summary_title=summary_title, context=context
+    )
     _coerce_units_table_ids(view)
     return view
 
@@ -636,6 +639,29 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
         index=metrics.index,
     )
     table = pd.concat([actions, metrics], axis=1)
+    coverage = evaluation.missing_qc_inputs().reindex(unit_ids)
+    table.insert(0, "unavailable_qc", coverage)
+    from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
+
+    metric_kwargs = (
+        QualityMetricParameters
+        & {"metric_params_name": evaluation.spec.metric_params_name}
+    ).fetch1("metric_kwargs")
+    from spikeinterface.metrics.quality import (
+        get_default_quality_metrics_params,
+    )
+
+    isi_params = get_default_quality_metrics_params()["isi_violation"]
+    isi_params.update((metric_kwargs or {}).get("isi_violation") or {})
+    refractory_ms = isi_params["isi_threshold_ms"]
+    table.attrs["qc_context"] = (
+        f"Evaluation `{evaluation.evaluation_id}`: "
+        f"{int(coverage.ne('').sum())}/{len(coverage)} units have unavailable rule inputs. "
+        "A missing-policy pass means not flagged, not verified quality. "
+        f"`isi_violation` = violating intervals / (spikes − 1), "
+        f"with a {refractory_ms:g} ms refractory window; "
+        "it is not SI's `isi_violations_ratio` or a contamination percentage."
+    )
     table.index.name = "unit_id"
     return table
 

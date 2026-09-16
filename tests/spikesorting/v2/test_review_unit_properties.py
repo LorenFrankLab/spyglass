@@ -65,3 +65,23 @@ def test_review_unit_properties_aligns_to_analyzer_order_and_keeps_order():
     # A unit the analyzer does NOT show cannot be described.
     with pytest.raises(ValueError, match="absent from the analyzer"):
         review_unit_properties(table, unit_ids=[1, 2])
+
+
+def test_missing_rule_inputs_follow_enabled_rules_and_unit_ids():
+    from spyglass.spikesorting.v2._review_unit_properties import (
+        missing_rule_metrics,
+    )
+
+    metrics = pd.DataFrame(
+        {"snr": [8.0, np.nan], "unused": [np.nan, np.nan]}, index=[9, 3]
+    )
+    coverage = missing_rule_metrics(metrics, ["snr", "isi_violation", "snr"])
+    assert coverage.to_dict() == {9: "isi_violation", 3: "snr, isi_violation"}
+    assert missing_rule_metrics(metrics, []).to_dict() == {9: "", 3: ""}
+    table = metrics.join(coverage)
+    properties = review_unit_properties(table, [3, 9])
+    assert properties["unavailable_qc"].tolist() == [
+        "snr, isi_violation",
+        "isi_violation",
+    ]
+    assert np.isnan(properties["snr"][0])

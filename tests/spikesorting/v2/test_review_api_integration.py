@@ -126,6 +126,10 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert review.parent == run.root_curation
         assert review.profile.review_profile_name == profile_name
         assert review.evaluation.spec == review.profile.evaluation_spec
+        assert (
+            review.evaluation.missing_qc_inputs().eq("").all()
+        )  # no enabled rules
+        assert "0/2 units" in review.summary()
         resumed = FigPackReview.resume(review.review_id)
         assert resumed.review_id == review.review_id
         assert resumed.parent == review.parent
@@ -295,6 +299,9 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert continuation.parent == receipt.curation
         assert continuation.profile == review.profile
         assert continuation.evaluation == receipt.evaluation
+        assert set(continuation.evaluation.missing_qc_inputs().index) == set(
+            continuation.evaluation.metrics.index
+        )
         resumed_continuation = FigPackReview.resume(continuation.review_id)
         assert resumed_continuation.parent == continuation.parent
         assert resumed_continuation.profile == continuation.profile

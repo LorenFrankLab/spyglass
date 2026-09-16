@@ -65,12 +65,17 @@ def review_bundle(tmp_path_factory):
     # incomplete boolean annotation (its gap must not render as False).
     table = pd.DataFrame(
         {
-            "snr": [8.0, 2.0, 7.0],
+            "snr": [8.0, np.nan, 7.0],
             "proposed_labels": ["", "noise", ""],
             "burst_flag": pd.array([True, None, False], dtype="boolean"),
         },
         index=pd.Index([1, 2, 3], name="unit_id"),
     )
+    from spyglass.spikesorting.v2._review_unit_properties import (
+        missing_rule_metrics,
+    )
+
+    table["unavailable_qc"] = missing_rule_metrics(table, ["snr"])
     summary = sw.plot_sorting_summary(
         analyzer,
         backend="figpack",
@@ -136,17 +141,19 @@ def test_review_columns_and_controls_are_usable(
             "snr",
             "proposed_labels",
             "burst_flag",
+            "unavailable_qc",
         ]
         assert browser.row_texts(browser.unit_row(page, 2)) == [
             "",
             "2",
             "noise",
             "",
-            "2.",
+            "",  # unavailable numeric evidence stays absent
             "noise",
             "",  # the boolean gap stays empty, not False
+            "snr",
         ]
-        assert browser.row_texts(browser.unit_row(page, 1))[-1] == "True"
+        assert browser.row_texts(browser.unit_row(page, 1))[-2] == "True"
 
         browser.start_curating(page)
         browser.select_units(page, 3)  # select via the metric-bearing row
@@ -195,3 +202,95 @@ def test_browser_edits_reach_annotations_and_survive_reload(
         assert browser.row_texts(browser.unit_row(page, 3))[2] == "accept"
         assert browser.row_texts(browser.unit_row(page, 2))[2] == ""
         assert "(1, 3)" in browser.row_texts(browser.unit_row(page, 1))[1]
+
+
+@pytest.mark.parametrize("n_units", [64, 256])
+def test_large_review_save_reload(n_units, tmp_path):
+    """Measure actual browser interactions independently of sorter runtime."""
+    from time import perf_counter
+
+    import spikeinterface.core as sc
+    import spikeinterface.widgets as sw
+
+    from spyglass.spikesorting.v2._review_delivery import (
+        serve_review_bundle,
+        stop_review_servers,
+    )
+    from spyglass.spikesorting.v2._review_view import (
+        coerce_units_table_ids,
+        compose_review_layout,
+        curation_control,
+    )
+
+    browser.require_browser()
+    start = perf_counter()
+    recording, sorting = sc.generate_ground_truth_recording(
+        durations=[6.0], num_channels=16, num_units=n_units, seed=42
+    )
+    analyzer = sc.create_sorting_analyzer(sorting, recording, sparse=False)
+    analyzer.compute(
+        [
+            "random_spikes",
+            "waveforms",
+            "templates",
+            "noise_levels",
+            "spike_amplitudes",
+            "correlograms",
+            "unit_locations",
+            "template_similarity",
+        ]
+    )
+    summary = sw.plot_sorting_summary(
+        analyzer,
+        backend="figpack",
+        curation=False,
+        generate_url=False,
+        display=False,
+        max_amplitudes_per_unit=1000,
+        min_similarity_for_correlograms=0.2,
+    ).view
+    view = compose_review_layout(
+        summary,
+        curation_control(LABEL_OPTIONS),
+        summary_title="Sorting summary",
+    )
+    coerce_units_table_ids(view)
+    bundle = tmp_path / "stress.figpack"
+    view.save(str(bundle), title=f"{n_units} unit review")
+    result = {
+        "units": n_units,
+        "channels": 16,
+        "duration_s": 6,
+        "generation_s": perf_counter() - start,
+        "bundle_bytes": sum(
+            path.stat().st_size for path in bundle.rglob("*") if path.is_file()
+        ),
+    }
+    url = serve_review_bundle(bundle)
+    unit_id = int(analyzer.unit_ids[-1])
+    try:
+        start = perf_counter()
+        with browser.review_page(url, artifacts=tmp_path) as page:
+            result["browser_start_and_load_s"] = perf_counter() - start
+            assert page.get_by_text(
+                "Commit in Python:", exact=False
+            ).is_visible()
+            browser.start_curating(page)
+            start = perf_counter()
+            browser.unit_row(page, unit_id).get_by_role("checkbox").check()
+            browser.set_label(page, "accept", True)
+            assert browser.save_annotations(page) in (200, 201)
+            result["select_label_save_s"] = perf_counter() - start
+        start = perf_counter()
+        with browser.review_page(url, artifacts=tmp_path) as page:
+            assert (
+                browser.row_texts(browser.unit_row(page, unit_id))[2]
+                == "accept"
+            )
+            result["browser_restart_reload_s"] = perf_counter() - start
+        labels, merges = _saved_state(bundle)
+        assert labels[unit_id] == ["accept"] and merges == []
+    finally:
+        stop_review_servers(bundle)
+    (tmp_path / "measurements.json").write_text(json.dumps(result, indent=2))
+    print("REVIEW_MEASUREMENT", json.dumps(result))

@@ -206,6 +206,20 @@ class FigPackReview:
         """Whether the review lives at a hosted (figpack.org) URL."""
         return self.uri.startswith(("http://", "https://"))
 
+    def summary(self) -> str:
+        """Identify displayed science, missing rule inputs, and the next action."""
+        missing = self.evaluation.missing_qc_inputs()
+        return (
+            f"Review {self.review_id}: sorting {self.parent.sorting_id}, "
+            f"curation {self.parent.curation_id} ({self.parent.curation_uuid}); "
+            f"evaluation {self.evaluation.evaluation_id}.\n"
+            f"QC: {int(missing.ne('').sum())}/{len(missing)} units have "
+            "unavailable rule inputs (not a quality pass).\n"
+            f"Display: {self.display_options.describe()}.\n"
+            "Edit and Save Annotations in the browser, then preview_import() "
+            "and commit() in Python. Pending merges do not update these metrics."
+        )
+
     def open(
         self, *, open_browser: bool = True, port: int | None = None
     ) -> str:
@@ -638,6 +652,7 @@ def _review_config(
     config = _profile_snapshot(profile)
     config.update(
         {
+            "view_version": 2,
             "curation_evaluation_id": str(evaluation.evaluation_id),
             "delivery": {
                 "upload": bool(upload),

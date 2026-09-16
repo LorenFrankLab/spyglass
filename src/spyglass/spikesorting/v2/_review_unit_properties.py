@@ -24,6 +24,31 @@ import numpy as np
 import pandas as pd
 
 
+def missing_rule_metrics(
+    metrics: pd.DataFrame, metric_names: Sequence[str]
+) -> pd.Series:
+    """Name unavailable inputs for enabled rules, keeping the evaluation's IDs.
+
+    A metric absent from the recipe is relevant only if a configured rule
+    requires it. This is evidence coverage, not a quality verdict.
+    """
+    names = list(dict.fromkeys(metric_names))
+    values = metrics.reindex(columns=names).to_numpy(
+        dtype=float, na_value=np.nan
+    )
+    return pd.Series(
+        [
+            ", ".join(
+                name for name, available in zip(names, row) if not available
+            )
+            for row in np.isfinite(values)
+        ],
+        index=metrics.index,
+        name="unavailable_qc",
+        dtype=str,
+    )
+
+
 def _text(value) -> str:
     return "" if pd.isna(value) else str(value)
 

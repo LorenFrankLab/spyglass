@@ -91,8 +91,12 @@ def test_browser_review_commit_verify_and_select(
                 h.lower()
                 for h in browser.row_texts(page.get_by_role("row").first)
             ]
-            # Actionable columns first, then the profile's metrics in order.
-            assert headers[4:9] == [
+            assert page.get_by_text(
+                "Commit in Python:", exact=False
+            ).is_visible()
+            # Evidence coverage, actions, then the profile's metrics in order.
+            assert headers[4:10] == [
+                "unavailable_qc",
                 "proposed_labels",
                 "proposed_merge_groups",
                 "merged_from",

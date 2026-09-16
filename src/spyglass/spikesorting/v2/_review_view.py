@@ -23,13 +23,15 @@ from spyglass.spikesorting.v2._figpack_curation import FIGPACK_INSTALL_HINT
 #: whole height while inspecting.
 CURATION_CONTROL_HEIGHT = 280
 
-#: The control pane's title doubles as the in-browser instruction sequence
-#: and says what the browser buttons do NOT do.
-CURATION_PANE_TITLE = (
-    "Curation -- Curate Figure, select units in the table, tick labels or "
-    "Merge Selected, then Save Annotations (saves to the bundle; the commit "
-    "happens in Python; Finalize Curation is a browser flag only). Click "
-    "this title to collapse the pane while inspecting."
+CURATION_PANE_TITLE = "Curation"
+REVIEW_HELP = (
+    "**Edit:** Curate Figure → select units → labels or Merge Selected. "
+    "**Save Annotations** saves edits to this bundle. **Finalize Curation** "
+    "sets a browser flag. **Commit in Python:** `preview_import()` → `commit()`.\n\n"
+    "Metrics describe the committed curation; pending merges do not update them. "
+    "After committing a merge, inspect its reevaluated child with `continue_review()`. "
+    "Blank metrics are unavailable, not zero. An unflagged unit is not necessarily "
+    "accepted; exclusion labels override acceptance in the shipped selection policies."
 )
 
 
@@ -69,7 +71,9 @@ def curation_control(label_options, seed_labels=None):
     )
 
 
-def compose_review_layout(summary, control, *, summary_title: str):
+def compose_review_layout(
+    summary, control, *, summary_title: str, context: str = ""
+):
     """Stack the SI sorting summary over the curation control.
 
     The summary (selectable unit table + scientific views) takes all
@@ -81,6 +85,16 @@ def compose_review_layout(summary, control, *, summary_title: str):
     return figpack_views.Box(
         direction="vertical",
         items=[
+            figpack_views.LayoutItem(
+                view=figpack_views.Markdown(
+                    REVIEW_HELP + ("\n\n" + context if context else ""),
+                    font_size=12,
+                ),
+                title="Review instructions and QC (scroll for details)",
+                min_size=130,
+                max_size=130,
+                collapsible=True,
+            ),
             figpack_views.LayoutItem(
                 view=summary, title=summary_title, stretch=1
             ),
