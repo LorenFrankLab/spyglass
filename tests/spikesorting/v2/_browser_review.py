@@ -99,6 +99,11 @@ def row_texts(row) -> list[str]:
     return [cells.nth(i).inner_text().strip() for i in range(cells.count())]
 
 
+def toggle_curation_pane(page) -> None:
+    """Collapse / expand the Curation pane through its title toggle."""
+    page.get_by_text(re.compile(r"^[▼▶]\s*Curation")).first.click()
+
+
 def start_curating(page) -> None:
     """**Curate Figure** enables editing (the frontend's local-figure mode)."""
     page.get_by_role("button", name="Curate Figure", exact=True).click()

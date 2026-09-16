@@ -16,15 +16,20 @@ from __future__ import annotations
 
 from spyglass.spikesorting.v2._figpack_curation import FIGPACK_INSTALL_HINT
 
-#: Fixed height (px) reserved for the curation control. A LayoutItem with
-#: only ``max_size`` reserves NO space when a sibling has ``stretch``, which
-#: collapsed the control to its title and made its buttons unclickable.
-CURATION_CONTROL_HEIGHT = 300
+#: Fixed height (px) reserved for the curation control when expanded. A
+#: LayoutItem with only ``max_size`` reserves NO space when a sibling has
+#: ``stretch``, which collapsed the control to its title and made its buttons
+#: unclickable; the pane is collapsible so the scientific views can take the
+#: whole height while inspecting.
+CURATION_CONTROL_HEIGHT = 280
 
-#: The control pane's title doubles as the in-browser instruction sequence.
+#: The control pane's title doubles as the in-browser instruction sequence
+#: and says what the browser buttons do NOT do.
 CURATION_PANE_TITLE = (
-    "Curation -- Curate Figure, select units in the table, edit labels / "
-    "merges, then Save Annotations"
+    "Curation -- Curate Figure, select units in the table, tick labels or "
+    "Merge Selected, then Save Annotations (saves to the bundle; the commit "
+    "happens in Python; Finalize Curation is a browser flag only). Click "
+    "this title to collapse the pane while inspecting."
 )
 
 
@@ -69,7 +74,8 @@ def compose_review_layout(summary, control, *, summary_title: str):
 
     The summary (selectable unit table + scientific views) takes all
     remaining height; the control keeps a fixed strip below it so its label
-    and merge buttons are clickable at laptop and large viewports alike.
+    and merge buttons are clickable at laptop and large viewports alike, and
+    collapses (title click) to hand the whole height to the views.
     """
     figpack_views, _ = require_figpack()
     return figpack_views.Box(
@@ -83,6 +89,7 @@ def compose_review_layout(summary, control, *, summary_title: str):
                 title=CURATION_PANE_TITLE,
                 min_size=CURATION_CONTROL_HEIGHT,
                 max_size=CURATION_CONTROL_HEIGHT,
+                collapsible=True,
             ),
         ],
     )

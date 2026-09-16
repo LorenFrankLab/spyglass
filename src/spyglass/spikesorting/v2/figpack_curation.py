@@ -591,8 +591,7 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
             f"and annotation sets: {missing}. Available properties: "
             f"{list(map(str, properties.columns))}."
         )
-    table = properties.reindex(unit_ids)[requested].copy()
-    table.index.name = "unit_id"
+    metrics = properties.reindex(unit_ids)[requested]
 
     proposed_labels = evaluation.proposed_labels
     suggested_groups = evaluation.suggested_merges
@@ -611,20 +610,34 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
         groups = [group for group in suggested_groups if unit_id in group]
         return "; ".join(",".join(map(str, group)) for group in groups)
 
-    table["proposed_labels"] = [
-        ",".join(proposed_labels.get(unit_id, [])) for unit_id in unit_ids
-    ]
-    table["proposed_merge_groups"] = [
-        groups_for(unit_id) for unit_id in unit_ids
-    ]
-    table["merged_from"] = [
-        (
-            ",".join(map(str, raw_provenance.get(unit_id, [])))
-            if len(raw_provenance.get(unit_id, [])) > 1
-            else ""
-        )
-        for unit_id in unit_ids
-    ]
+    # Actionable columns first (what the rule set proposes and what an
+    # earlier merge did), then the profile's metric / annotation columns in
+    # their requested order: on a laptop-width table the first columns are
+    # the ones a curator acts on.
+    import pandas as pd
+
+    actions = pd.DataFrame(
+        {
+            "proposed_labels": [
+                ",".join(proposed_labels.get(unit_id, []))
+                for unit_id in unit_ids
+            ],
+            "proposed_merge_groups": [
+                groups_for(unit_id) for unit_id in unit_ids
+            ],
+            "merged_from": [
+                (
+                    ",".join(map(str, raw_provenance.get(unit_id, [])))
+                    if len(raw_provenance.get(unit_id, [])) > 1
+                    else ""
+                )
+                for unit_id in unit_ids
+            ],
+        },
+        index=metrics.index,
+    )
+    table = pd.concat([actions, metrics], axis=1)
+    table.index.name = "unit_id"
     return table
 
 

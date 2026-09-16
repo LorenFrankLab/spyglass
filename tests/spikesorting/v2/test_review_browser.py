@@ -152,6 +152,14 @@ def test_review_columns_and_controls_are_usable(
         browser.select_units(page, 3)  # select via the metric-bearing row
         assert browser.label_checkbox(page, "accept").is_enabled()
         assert page.get_by_role("button", name="Finalize Curation").is_enabled()
+        # The pane collapses to hand the views the full height, and expands
+        # again with its controls reachable.
+        merge = page.get_by_role("button", name="Merge Selected", exact=True)
+        browser.toggle_curation_pane(page)
+        merge.wait_for(state="hidden")
+        browser.toggle_curation_pane(page)
+        merge.wait_for(state="visible")
+        assert browser.label_checkbox(page, "accept").is_enabled()
 
 
 def test_browser_edits_reach_annotations_and_survive_reload(
