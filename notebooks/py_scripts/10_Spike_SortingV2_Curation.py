@@ -339,13 +339,17 @@ if browser_changes is not None and commit_browser_review:
 # silently.
 #
 # If a committed merge was WRONG, do not label around it: a committed merge
-# is a branch. Go back to the parent's review -- `FigPackReview.find(
-# root_curation, profile=review_profile)` returns it with every edit you
-# saved (a fresh `start_review` would begin a new review now that a child
-# exists) -- select the merged units, **Unmerge Selected**, **Save
-# Annotations**, and preview/commit again: the replacement sibling keeps your
-# labels and the abandoned merged branch stays as history (the preview lists
-# it under `newer_sibling_curations`). Recovery is spelled out in the
+# is a branch, and the fix is a replacement sibling from THAT merge's parent
+# (a merge committed during verification has the earlier merged child as its
+# parent -- going back to the root would discard the earlier, valid merge).
+# The review it came from is on its receipt: `bad_receipt.changes.review`
+# (`browser_receipt` or `verification_receipt` above; or
+# `FigPackReview.resume(<printed id>)`). `open()` it, select the merged
+# units, **Unmerge Selected**, **Save Annotations**, then
+# `preview_import().commit(confirm_no_changes=not changes.has_changes)` --
+# unmerging alone restores the parent exactly, which is a confirmed
+# no-change commit. Other saved edits are kept; the abandoned branch stays as
+# history (`newer_sibling_curations`). Recovery is spelled out in the
 # reference ("Where am I, and how do I undo a merge?").
 
 # +

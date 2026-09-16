@@ -267,8 +267,9 @@ class FigPackReview:
         started, so once a child has been committed ``start_review`` over
         the same parent begins a NEW review (fresh seeded bundle) rather
         than reusing the one holding your saved edits. Resume the earlier
-        one from here (``preview_import().has_changes`` tells which holds
-        uncommitted edits). Expert (non-profile) views are not listed.
+        one from here; each review's ``preview_import()`` shows whether its
+        saved edits differ from the parent and ``uri`` names its bundle.
+        Expert (non-profile) views are not listed.
 
         Parameters
         ----------
@@ -483,15 +484,18 @@ class CurationChangeSet:
 
         The browser's **Save Annotations** only writes the bundle and
         **Finalize Curation** only flips a browser flag; nothing reaches
-        Spyglass until ``commit()``. This states that consistently.
+        Spyglass until ``commit()``. The preview compares the saved
+        annotations with the reviewed PARENT only: it cannot tell whether
+        an identical diff was already committed (``commit()`` reuses that
+        child), so the wording says what is actually known.
         """
         if self.has_changes:
             merges = len(self.merge_groups)
             return (
-                "Browser edits saved, not committed: "
+                "Saved browser edits differ from the reviewed parent: "
                 f"{len(self.changed_units())} changed unit(s), {merges} "
                 "proposed merge(s). Next: inspect summary() and run "
-                "commit() in Python"
+                "commit() in Python (a diff committed earlier is reused)"
                 + (
                     " with conflict_resolutions for every listed conflict."
                     if self.label_conflicts

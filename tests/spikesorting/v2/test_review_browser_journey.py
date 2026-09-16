@@ -175,15 +175,19 @@ def test_browser_review_commit_verify_and_select(
         )
         assert len(spikes) == 1 and len(spikes[0]) > 0
 
-        # 6. Recovery: the merge was a mistake. Find the PARENT's review
-        #    without its id (a fresh start_review would begin a new review
-        #    now that a child exists), undo the proposal in the browser, save,
-        #    and commit a replacement sibling; the labels saved along with
-        #    the merge are kept, the merged branch stays as history.
-        found = FigPackReview.find(root, profile=profile)
-        assert [r.review_id for r in found] == [review.review_id]
+        # 6. Recovery: the merge was a mistake. The review it came from is
+        #    on its receipt (the merge's own parent -- here the root); undo
+        #    the proposal in the browser, save, and commit a replacement
+        #    sibling; the labels saved along with the merge are kept, the
+        #    merged branch stays as history. find() lists that review too
+        #    (a fresh start_review would begin a new review now that a
+        #    child exists).
+        again = receipt.changes.review
+        assert again.review_id == review.review_id
+        assert [
+            r.review_id for r in FigPackReview.find(root, profile=profile)
+        ] == [review.review_id]
         assert FigPackReview.find(merged) == (resumed,)
-        again = found[0]
         assert again.preview_import().has_changes  # the saved edits
         with browser.review_page(
             again.open(open_browser=False), artifacts=tmp_path / "recover"
@@ -200,7 +204,7 @@ def test_browser_review_commit_verify_and_select(
         assert recovery.labels_after[unit_a] == ("accept",)
         assert recovery.labels_after[unit_b] == ("accept",)
         assert merged in recovery.newer_sibling_curations
-        assert "Browser edits saved, not committed" in recovery.next_step()
+        assert "differ from the reviewed parent" in recovery.next_step()
         replacement = recovery.commit().curation
         assert replacement.parent == root and replacement != merged
         assert sorted(
@@ -224,6 +228,51 @@ def test_browser_review_commit_verify_and_select(
         assert {c.curation_id for c in root.children} == {
             replacement.curation_id
         }
+
+        # 7. A merge-only mistake on a LATER curation: recover through that
+        #    merge's own parent (the replacement, not the root) and, since
+        #    unmerging restores the parent exactly, confirm the no-change
+        #    commit.
+        later = replacement.start_review(profile, upload=False)
+        with browser.review_page(
+            later.open(open_browser=False), artifacts=tmp_path / "later"
+        ) as page:
+            browser.start_curating(page)
+            browser.select_units(page, unit_a, unit_b)
+            browser.merge_selected(page)
+            assert browser.save_annotations(page) in (200, 201)
+        bad_receipt = later.preview_import().commit()
+        bad_merge = bad_receipt.curation
+        assert bad_merge.parent == replacement
+        assert bad_receipt.needs_merge_verification
+        review_of_bad = bad_receipt.changes.review
+        assert review_of_bad.parent == replacement  # not the root
+        with browser.review_page(
+            review_of_bad.open(open_browser=False),
+            artifacts=tmp_path / "later-undo",
+        ) as page:
+            browser.start_curating(page)
+            browser.select_units(page, unit_a, unit_b)
+            page.get_by_role(
+                "button", name="Unmerge Selected", exact=True
+            ).click()
+            assert browser.save_annotations(page) in (200, 201)
+        undone = review_of_bad.preview_import()
+        assert not undone.has_changes
+        assert bad_merge in undone.newer_sibling_curations
+        with pytest.raises(ValueError, match="confirm_no_changes"):
+            undone.commit()
+        verified_replacement = undone.commit(confirm_no_changes=True).curation
+        assert verified_replacement.parent == replacement
+        assert sorted(
+            map(
+                int,
+                (CurationV2.Unit & verified_replacement.as_key()).fetch(
+                    "unit_id"
+                ),
+            )
+        ) == [unit_a, unit_b]
+        bad_merge.delete_subtree(safemode=False)
     finally:
         for group_key in created_groups:
             (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)

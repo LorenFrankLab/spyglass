@@ -170,7 +170,9 @@ def test_next_step_lines_name_the_state_consistently():
 
     edited = _change_set()
     line = edited.next_step()
-    assert line.startswith("Browser edits saved, not committed")
+    assert line.startswith(
+        "Saved browser edits differ from the reviewed parent"
+    )
     assert "commit()" in line and "conflict_resolutions" in line
     clean = _change_set(
         labels_after={1: ("accept",), 2: ("noise",), 3: ()},

@@ -657,9 +657,11 @@ bundle's `annotations.json`. A missing bundle raises with the recovery step
 #### Where am I, and how do I undo a merge?
 
 `changes.next_step()` and `receipt.next_step()` say, in one line each, which
-of the four states applies -- *browser edits saved, not committed* / *no saved
-edits differ* / *merged result awaiting verification* / *result available for
-analysis* -- and what to do next. The browser's **Save Annotations** only
+of the four states applies -- *saved browser edits differ from the reviewed
+parent* / *no saved edits differ* / *merged result awaiting verification* /
+*result available for analysis* -- and what to do next. (The preview compares
+the bundle with the reviewed parent only; a diff you already committed still
+"differs", and committing it again reuses that child.) The browser's **Save Annotations** only
 writes the bundle; **Finalize Curation** only flips a browser flag; nothing
 reaches Spyglass before `commit()`.
 
@@ -669,34 +671,53 @@ shows no merge.
 
 **A committed merge that was wrong** is a branch, not an edit: the merged
 child (and any verification child under it) stays as history, and the fix is
-a replacement sibling from the same parent. Go back to the parent's review,
-undo the proposal there, and commit again:
+a replacement sibling from the **same parent as the mistaken merge** -- which
+is the parent of *that* merge, not necessarily the root. A merge committed
+during a verification review has the earlier merged child as its parent;
+going back to the root would discard that earlier, valid merge and every
+edit committed in between. The review the mistaken merge came from is on its
+receipt (`receipt.changes.review`); undo the proposal there and commit again:
 
 ```python
-from spyglass.spikesorting.v2.pipeline import FigPackReview
-
-(review,) = FigPackReview.find(parent, profile=profile)  # the review whose
-review.open()                                            # edits you saved
+review = bad_receipt.changes.review      # the review the bad merge came from
+review.open()                            # its bundle still holds your edits
 # browser: select the merged units -> Unmerge Selected -> Save Annotations
-changes = review.preview_import()          # merge gone; your labels kept;
-print(changes.summary())                   # newer_sibling_curations lists the
-replacement = changes.commit().curation    # abandoned merged child
+changes = review.preview_import()        # merge gone; other saved edits kept
+print(changes.summary())                 # newer_sibling_curations lists the
+                                         # abandoned merged child
+replacement = changes.commit(
+    # unmerging alone restores the parent exactly: that is a no-change
+    # commit and must be confirmed (labels changed too -> a plain commit)
+    confirm_no_changes=not changes.has_changes,
+).curation
 ```
 
-(`parent.start_review(profile)` would start a *new* review here: a review's
-identity includes the parent's children at its start, so after a commit the
-same call seeds a fresh bundle rather than reusing the edited one.)
+`replacement.parent` is the mistaken merge's parent. Without the receipt in
+hand, `FigPackReview.resume(review_id)` (the id printed when the review
+started) or `FigPackReview.find(bad_merge.parent, profile=profile)` gets
+you there; `find` may return several reviews of that parent (each
+`start_review` after a commit starts a new one -- a review's identity
+includes the parent's children at its start), so pick the one whose bundle
+holds your edits:
+
+```python
+for candidate in FigPackReview.find(bad_merge.parent, profile=profile):
+    print(candidate.review_id, candidate.uri)
+    print("  ", candidate.preview_import().next_step())
+review = FigPackReview.resume(chosen_review_id)
+```
 
 Edits made in the merged child's own verification review live on that
 branch; redo them on the replacement. Once nothing downstream refers to the
-abandoned branch, `merged.preview_curation_delete()` lists it leaf-first and
-`merged.delete_subtree()` removes it (a `SortedSpikesGroup` built from it
-must be deleted first).
+abandoned branch, `bad_merge.preview_curation_delete()` lists it leaf-first
+and `bad_merge.delete_subtree()` removes it (a `SortedSpikesGroup` built
+from it must be deleted first).
 
 **Finding yesterday's review** needs no id: `FigPackReview.find(parent)`
 returns every built profile-backed review of that curation, oldest first
-(`profile=` narrows it), each with its `uri` and saved edits
-(`preview_import().has_changes` says which one holds uncommitted work);
+(`profile=` narrows it), each with its `uri`; `preview_import().next_step()`
+says whether a review's saved edits differ from its parent (it cannot say
+whether you already committed them -- `commit()` reuses an identical child).
 `FigPackReview.resume(review_id)` rebuilds a handle from an id printed
 earlier. Before any child is committed, `parent.start_review(profile)` also
 returns the existing review (its stages say `reused`).
