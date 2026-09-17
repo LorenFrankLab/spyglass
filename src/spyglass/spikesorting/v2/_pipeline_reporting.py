@@ -707,15 +707,19 @@ def _observed_duration_s(sorting_id) -> float:
     """Seconds the sort actually observed, for a firing-rate denominator.
 
     Mirrors ``Sorting.make_fetch``: when the sort ran artifact detection the
-    denominator is the artifact-removed ``valid_times`` total (the segments the
-    sorter actually saw), otherwise the materialized ``Recording.duration_s``.
+    denominator is the retained sample duration, otherwise the materialized
+    recording's sample count / sampling frequency (not its wall-clock span).
     Using the raw recording length would overstate the denominator -- and so
     understate firing rate -- for artifact-masked sorts.
     """
     import numpy as np
 
     from spyglass.common.common_interval import IntervalList
-    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2._observed_time import observed_intervals
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.utils import (
         artifact_detection_interval_list_name,
@@ -724,10 +728,15 @@ def _observed_duration_s(sorting_id) -> float:
     sorting_key = {"sorting_id": sorting_id}
     source = SortingSelection.resolve_source(sorting_key)
     if source.kind == "concatenated_recording":
-        from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+        from spyglass.spikesorting.v2.session_group import (
+            ConcatenatedRecording,
+        )
 
         intervals = (ConcatenatedRecording & source.key).fetch1("obs_intervals")
-        return float(np.diff(intervals, axis=1).sum())
+        recording = ConcatenatedRecording().get_recording(source.key)
+        return float(
+            np.diff(observed_intervals(recording, intervals), axis=1).sum()
+        )
     recording_id = source.key["recording_id"]
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         sorting_key
@@ -745,10 +754,12 @@ def _observed_duration_s(sorting_id) -> float:
                 ),
             }
         ).fetch1("valid_times")
-        return float(np.sum(np.diff(np.asarray(valid_times), axis=1)))
-    return float(
-        (Recording & {"recording_id": recording_id}).fetch1("duration_s")
-    )
+        recording = Recording().get_recording({"recording_id": recording_id})
+        return float(
+            np.diff(observed_intervals(recording, valid_times), axis=1).sum()
+        )
+    recording = Recording().get_recording({"recording_id": recording_id})
+    return recording.get_num_samples() / recording.sampling_frequency
 
 
 def describe_units(sorting_id) -> "pd.DataFrame":

@@ -225,6 +225,63 @@ def test_select_units_for_analysis_round_trip(
         assert everything.unlabeled_unit_ids == (unit_ids[2],)
         assert everything.included_unlabeled_unit_ids == (unit_ids[2],)
 
+        # Metrics are selected from this exact evaluation and frozen in the
+        # group, rather than re-read from the NWB's legacy metric columns.
+        evaluation = ref.evaluate(
+            metric_params_name="minimal", auto_curation_rules_name="none"
+        )
+        observed = receipt.observation
+        assert observed.duration_s > 0 and not observed.unknown_sources
+        assert observed.contains(spikes[0]).all()
+        metrics = evaluation.metrics
+        assert metrics.loc[unit_ids[0], "observed_duration_s"] == pytest.approx(
+            observed.duration_s
+        )
+        assert metrics.loc[
+            unit_ids[0], "observed_firing_rate_hz"
+        ] == pytest.approx(len(spikes[0]) / observed.duration_s)
+        assert "firing_rate" in metrics  # raw SI definition remains available
+        criterion = {"observed_firing_rate_hz": {">=": 0}}
+        metric_selection = select_units_for_analysis(
+            ref,
+            policy="all_units",
+            evaluation=evaluation,
+            unit_criteria=criterion,
+        )
+        created.extend(g.group_key for g in metric_selection.groups)
+        assert metric_selection.included_unit_ids == tuple(unit_ids)
+        assert metric_selection.selection_provenance["evaluation_id"] == str(
+            evaluation.evaluation_id
+        )
+        # A direct consumer reads the frozen membership even if the named
+        # policy now excludes everything. Restore the shared default promptly.
+        policy_key = {"unit_filter_params_name": "all_units"}
+        try:
+            UnitSelectionParams.update1(
+                {**policy_key, "unit_criteria": {"missing_column": {">": 0}}}
+            )
+            _, selected_ids = SortedSpikesGroup.fetch_spike_data(
+                dict(metric_selection.group_key), return_unit_ids=True
+            )
+            assert [row["unit_id"] for row in selected_ids] == unit_ids
+        finally:
+            UnitSelectionParams.update1({**policy_key, "unit_criteria": None})
+        empty = select_units_for_analysis(
+            ref,
+            policy="all_units",
+            evaluation=evaluation,
+            unit_criteria={"firing_rate": {"<": 0}},
+        )
+        created.extend(g.group_key for g in empty.groups)
+        assert empty.group_key != metric_selection.group_key
+        assert empty.included_unit_ids == ()
+        assert empty.fetch_spike_data() == []
+        assert len(empty.excluded_units) == len(unit_ids)
+        with pytest.raises(ValueError, match="curation"):
+            select_units_for_analysis(
+                CurationRef.from_key(root), evaluation=evaluation
+            )
+
         # A merge preview is not a result: refused.
         preview = CurationV2.insert_curation(
             sorting_key,

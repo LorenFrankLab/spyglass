@@ -505,6 +505,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         metric_kwargs,
         template_metric_columns,
         skip_pc_metrics,
+        observed_presence_bin_duration_s,
         metric_schema_version,
         metric_job_kwargs,
     ) = metric_rel.fetch1(
@@ -512,6 +513,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         "metric_kwargs",
         "template_metric_columns",
         "skip_pc_metrics",
+        "observed_presence_bin_duration_s",
         "params_schema_version",
         "job_kwargs",
     )
@@ -520,6 +522,9 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         "metric_kwargs": _jsonable_blob(metric_kwargs),
         "template_metric_columns": _jsonable_blob(template_metric_columns),
         "skip_pc_metrics": bool(skip_pc_metrics),
+        "observed_presence_bin_duration_s": float(
+            observed_presence_bin_duration_s
+        ),
     }
     for key, value in _flatten("", metric_params):
         rows.append(

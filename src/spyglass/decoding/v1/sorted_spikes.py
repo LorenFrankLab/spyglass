@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 from __future__ import annotations
 
 import copy
+import json
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
@@ -98,7 +99,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             model_params["decoding_params"],
             model_params["decoding_kwargs"],
         )
-        decoding_kwargs = decoding_kwargs or {}
+        decoding_kwargs = dict(decoding_kwargs or {})
 
         # Get position data
         (
@@ -109,7 +110,17 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         # Get the spike times for the selected units. Don't need to filter by
         # interval since the non_local_detector code will do that
 
-        spike_times = self.fetch_spike_data(key, filter_by_interval=False)
+        spike_times, unit_ids = self.fetch_spike_data(
+            key, filter_by_interval=False, return_unit_ids=True
+        )
+        observation = SortedSpikesGroup.get_observation_intervals(
+            key, unit_ids=unit_ids
+        )
+        observed = observation.contains(position_info.index.to_numpy())
+        if observation.intervals is not None:
+            spike_times = [
+                times[observation.contains(times)] for times in spike_times
+            ]
 
         # Get the encoding and decoding intervals
         encoding_interval = (
@@ -119,6 +130,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["encoding_interval"],
             }
         ).fetch1("valid_times")
+        encoding_interval = observation.restrict(encoding_interval)
         is_training = np.zeros(len(position_info), dtype=bool)
         for interval_start, interval_end in encoding_interval:
             is_training[
@@ -131,8 +143,25 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             position_info[position_variable_names].isna().values.max(axis=1)
         ] = False
 
-        if "is_training" not in decoding_kwargs:
-            decoding_kwargs["is_training"] = is_training
+        if observation.intervals is None:
+            decoding_kwargs.setdefault("is_training", is_training)
+        else:
+            decoding_kwargs["is_training"] = (
+                np.asarray(decoding_kwargs.get("is_training", True), dtype=bool)
+                & is_training
+                & observed
+            )
+        if observation.intervals is not None and not np.any(
+            decoding_kwargs["is_training"]
+        ):
+            raise ValueError(
+                "No observed training time remains for this population and encoding interval."
+            )
+        if "is_missing" in decoding_kwargs:
+            decoding_kwargs["is_missing"] = (
+                np.asarray(decoding_kwargs["is_missing"], dtype=bool)
+                | ~observed
+            )
 
         decoding_interval = (
             IntervalList
@@ -141,6 +170,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["decoding_interval"],
             }
         ).fetch1("valid_times")
+        effective_decoding = observation.restrict(decoding_interval)
+        decoding_interval = effective_decoding.copy()
+        if observation.intervals is not None:
+            # The decoder's existing interval interface is closed. Convert
+            # half-open exposure stops without changing the original timeline.
+            decoding_interval[:, 1] = np.nextafter(
+                decoding_interval[:, 1], -np.inf
+            )
 
         # Run decoder (external dependency - can be mocked in tests)
         classifier, results = self._run_decoder(
@@ -151,6 +188,20 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             position_variable_names=position_variable_names,
             spike_times=spike_times,
             decoding_interval=decoding_interval,
+        )
+        results.attrs["spyglass_observation_intervals"] = json.dumps(
+            None
+            if observation.intervals is None
+            else observation.intervals.tolist()
+        )
+        results.attrs["spyglass_encoding_intervals"] = json.dumps(
+            encoding_interval.tolist()
+        )
+        results.attrs["spyglass_decoding_intervals"] = json.dumps(
+            effective_decoding.tolist()
+        )
+        results.attrs["spyglass_observation_unknown_sources"] = json.dumps(
+            observation.unknown_sources
         )
 
         # Save results to disk (external I/O - can be mocked in tests)
@@ -259,6 +310,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     )
                 ] = False
 
+            is_missing |= np.asarray(
+                decoding_kwargs.get("is_missing", False), dtype=bool
+            )
             # Validate that at least some time points are in decoding intervals
             if np.all(is_missing):
                 raise ValueError(
@@ -268,8 +322,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     f"[{position_info.index.min()}, {position_info.index.max()}]"
                 )
 
-            if "is_missing" not in decoding_kwargs:
-                decoding_kwargs["is_missing"] = is_missing
+            decoding_kwargs["is_missing"] = is_missing
             results = classifier.estimate_parameters(
                 position_time=position_info.index.to_numpy(),
                 position=position_info[position_variable_names].to_numpy(),
@@ -297,6 +350,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             # We treat each decoding interval as a separate sequence
             interval_results = []
             for interval_start, interval_end in decoding_interval:
+                in_interval = (position_info.index >= interval_start) & (
+                    position_info.index <= interval_end
+                )
                 interval_time = position_info.loc[
                     interval_start:interval_end
                 ].index.to_numpy()
@@ -306,6 +362,11 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                         f"Interval {interval_start}:{interval_end} is empty"
                     )
                     continue
+                interval_kwargs = dict(predict_kwargs)
+                if "is_missing" in interval_kwargs:
+                    interval_kwargs["is_missing"] = np.broadcast_to(
+                        interval_kwargs["is_missing"], (len(position_info),)
+                    )[in_interval]
                 interval_result = classifier.predict(
                     position_time=interval_time,
                     position=position_info.loc[interval_start:interval_end][
@@ -313,8 +374,12 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     ].to_numpy(),
                     spike_times=spike_times,
                     time=interval_time,
-                    **predict_kwargs,
+                    **interval_kwargs,
                 )
+                if "is_missing" in interval_kwargs:
+                    interval_result = interval_result.assign_coords(
+                        is_missing=("time", interval_kwargs["is_missing"])
+                    )
                 interval_results.append(interval_result)
 
             # Validate that at least one interval had valid time points
@@ -596,7 +661,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             key, return_unit_ids=True
         )
         if not filter_by_interval:
-            return spike_times
+            return (spike_times, unit_ids) if return_unit_ids else spike_times
 
         if time_slice is None:
             min_time, max_time = _get_interval_range(key)

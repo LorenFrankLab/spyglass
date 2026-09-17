@@ -345,6 +345,9 @@ def reject_duplicate_quality_metric_content(
                     "metric_names": row["metric_names"],
                     "metric_kwargs": row["metric_kwargs"],
                     "template_metric_columns": row["template_metric_columns"],
+                    "observed_presence_bin_duration_s": row[
+                        "observed_presence_bin_duration_s"
+                    ],
                     "skip_pc_metrics": bool(row["skip_pc_metrics"]),
                 }
             ),

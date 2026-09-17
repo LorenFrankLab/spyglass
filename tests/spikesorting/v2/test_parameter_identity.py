@@ -326,6 +326,7 @@ def _qmp_row(name, *, metric_names, **overrides):
         "metric_params_name": name,
         "metric_names": metric_names,
         "metric_kwargs": {},
+        "observed_presence_bin_duration_s": 60.0,
         "template_metric_columns": [],
         "skip_pc_metrics": True,
         "params_schema_version": 1,

@@ -4,7 +4,8 @@ A curation -- root, auto-labeled, or manually curated -- holds EVERY unit with
 its labels; its ``SpikeSortingOutput`` merge id is a registered output, not a
 filtered population. ``SpikeSortingOutput.get_spike_times`` returns all units.
 The supported handoff is :func:`select_units_for_analysis`: it applies a named
-``UnitSelectionParams`` policy to the curation's labels, builds the
+``UnitSelectionParams`` label policy and optional evaluation-based criteria,
+freezes membership, builds the
 ``SortedSpikesGroup`` downstream analyses read (``fetch_spike_data`` and the
 decoding / firing-rate consumers), and returns a receipt naming the exact
 curation generation, the policy content, and every included / excluded unit
@@ -36,13 +37,15 @@ so the handoff builds one group per member and the receipt lists them.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 
 #: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples
 #: behind a mapping proxy, so neither the shipped catalog nor a receipt's
@@ -88,6 +91,13 @@ class SelectedGroup:
     member_index: int | None
     status: str  # "created" | "reused"
 
+    @property
+    def observation(self):
+        """Common observed intervals in this member's original session time."""
+        from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
+        return SortedSpikesGroup.get_observation_intervals(dict(self.group_key))
+
     def fetch_spike_data(self, **kwargs):
         """Spike times for the selected units via the downstream group API."""
         from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
@@ -108,6 +118,7 @@ class UnitSelectionReceipt:
     excluded_units: Mapping[int, str]
     unlabeled_unit_ids: tuple[int, ...]
     groups: tuple[SelectedGroup, ...]
+    selection_provenance: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def included_unlabeled_unit_ids(self) -> tuple[int, ...]:
@@ -116,6 +127,12 @@ class UnitSelectionReceipt:
         return tuple(
             u for u in self.included_unit_ids if u in self.unlabeled_unit_ids
         )
+
+    @property
+    def observation(self):
+        """Availability of a single-session population (members expose their own)."""
+        self.group_key  # enforce the same single-session contract as spike data
+        return self.groups[0].observation
 
     @property
     def group_key(self) -> Mapping[str, Any]:
@@ -174,6 +191,12 @@ class UnitSelectionReceipt:
                 for g in self.groups
             ),
         ]
+        if self.selection_provenance.get("unit_criteria"):
+            lines.append(
+                "metric criteria: "
+                f"{self.selection_provenance['unit_criteria']}; "
+                f"evaluation: {self.selection_provenance.get('evaluation_id')}"
+            )
         if not self.included_unit_ids:
             if n_total == 0:
                 lines.append(
@@ -190,6 +213,12 @@ class UnitSelectionReceipt:
                     "review and hand over that child, or choose an "
                     "exclude-only policy such as 'v2_unflagged_units' to "
                     "keep everything the rules did not flag."
+                )
+            elif self.selection_provenance.get("unit_criteria"):
+                lines.append(
+                    "empty selection: no units satisfy both the label policy "
+                    "and metric criteria. See describe() for failed predicates "
+                    "and unavailable values; review the criteria and evaluation."
                 )
             else:
                 lines.append(
@@ -248,7 +277,7 @@ def _labels_by_unit(curation: CurationRef) -> dict[int, list[str]]:
     return CurationV2._labels_by_unit(curation.as_key())
 
 
-def _resolve_policy(policy_name: str) -> LabelPolicy:
+def _resolve_policy(policy_name: str) -> tuple[LabelPolicy, dict]:
     """Return the stored include/exclude labels of a ``UnitSelectionParams`` row."""
     from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
@@ -263,13 +292,9 @@ def _resolve_policy(policy_name: str) -> LabelPolicy:
             "rows: all_units / exclude_noise / default_exclusion."
         )
     row = rows[0]
-    if row.get("unit_criteria"):
-        raise ValueError(
-            f"UnitSelectionParams row {policy_name!r} carries unit_criteria; "
-            "select_units_for_analysis applies label policies only."
-        )
-    return _label_policy(
-        row["include_labels"] or [], row["exclude_labels"] or []
+    return (
+        _label_policy(row["include_labels"] or [], row["exclude_labels"] or []),
+        row.get("unit_criteria") or {},
     )
 
 
@@ -319,8 +344,11 @@ def select_units_for_analysis(
     *,
     policy: str = DEFAULT_UNIT_SELECTION_POLICY,
     group_name: str | None = None,
+    evaluation: EvaluationResult | None = None,
+    unit_criteria: Mapping | None = None,
+    annotation_sets: Sequence = (),
 ) -> UnitSelectionReceipt:
-    """Hand a curation to downstream analysis under an explicit label policy.
+    """Freeze a label/metric-selected population for downstream analysis.
 
     Parameters
     ----------
@@ -340,6 +368,15 @@ def select_units_for_analysis(
         ``"v2_{policy}_{curation_uuid_hex[:12]}"`` -- unique per curation
         generation, so re-running is idempotent and a recreated curation
         never reuses a stale group.
+    evaluation : EvaluationResult, optional
+        Exact evaluation of this curation supplying metric columns.
+    unit_criteria : mapping, optional
+        Criteria in UnitSelectionParams syntax. Defaults to that policy's
+        stored criteria; an explicit mapping overrides them. Missing values
+        fail a predicate. Selected membership is persisted, including empty
+        selections, so every downstream consumer uses the same population.
+    annotation_sets : sequence, optional
+        Exact custom property sets available to the criteria.
 
     Returns
     -------
@@ -347,6 +384,8 @@ def select_units_for_analysis(
         The pinned curation, the policy content, included / excluded unit ids
         with reasons, and the group(s) downstream reads.
     """
+    import pandas as pd
+
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -360,16 +399,73 @@ def select_units_for_analysis(
         context="select_units_for_analysis",
         merges_applied=row["merges_applied"],
     )
-    resolved_policy = _resolve_policy(policy)
+    resolved_policy, stored_criteria = _resolve_policy(policy)
+    criteria = dict(stored_criteria if unit_criteria is None else unit_criteria)
     labels_by_unit = _labels_by_unit(ref)
     unit_ids = sorted(int(u) for u in (CurationV2.Unit & key).fetch("unit_id"))
     included, excluded = apply_unit_selection_policy(
         labels_by_unit, unit_ids, resolved_policy
     )
+    from spyglass.spikesorting.v2.annotation_api import (
+        AnnotationSetRef,
+        read_unit_properties,
+    )
+
+    annotations = tuple(AnnotationSetRef.from_key(v) for v in annotation_sets)
+    properties = read_unit_properties(
+        ref, evaluation=evaluation, annotation_sets=annotations
+    )
+    # Apply the same operators as legacy analysis groups; only the source of
+    # the columns differs (an explicit evaluation instead of the Units NWB).
+    for column, criterion in criteria.items():
+        mask = SortedSpikesGroup.filter_units_by_criteria(
+            properties, {column: criterion}
+        )
+        for unit_id, passed in zip(properties.index, mask):
+            if not passed and unit_id not in excluded:
+                value = properties.at[unit_id, column]
+                missing = pd.api.types.is_scalar(value) and pd.isna(value)
+                excluded[int(unit_id)] = (
+                    f"unavailable metric: {column}"
+                    if missing
+                    else f"criterion failed: {column} {criterion} (value={value})"
+                )
+    included = tuple(u for u in included if u not in excluded)
+    from spyglass.spikesorting.v2._observation_io import selection_observations
+    from spyglass.spikesorting.v2._observed_time import (
+        OBSERVATION_VERSION,
+        normalize_observation_provenance,
+    )
+
+    provenance = {
+        "observation_version": OBSERVATION_VERSION,
+        "curation_uuid": str(ref.curation_uuid),
+        "label_policy": {k: list(v) for k, v in resolved_policy.items()},
+        "unit_criteria": criteria,
+        "evaluation_id": str(evaluation.evaluation_id) if evaluation else None,
+        "evaluation_recipes": (
+            {
+                "metric_params_name": evaluation.spec.metric_params_name,
+                "auto_curation_rules_name": evaluation.spec.auto_curation_rules_name,
+            }
+            if evaluation
+            else None
+        ),
+        "annotation_sets": [a.snapshot() for a in annotations],
+    }
+    # Canonical JSON also makes non-serializable criteria fail before writes.
+    from spyglass.spikesorting.v2._lookup_validation import _jsonable_blob
+
+    provenance = _jsonable_blob(provenance)
+    selection_hash = hashlib.sha256(
+        json.dumps(provenance, sort_keys=True).encode()
+    ).hexdigest()[:12]
     unlabeled = tuple(u for u in unit_ids if not labels_by_unit.get(u))
 
     if group_name is None:
         group_name = f"v2_{policy}_{ref.curation_uuid.hex[:12]}"
+        if criteria or evaluation is not None or annotations:
+            group_name += f"_{selection_hash}"
     if len(group_name) > 80:
         raise ValueError("group_name must be at most 80 characters.")
 
@@ -427,6 +523,14 @@ def select_units_for_analysis(
             "sorted_spikes_group_name": name,
             "unit_filter_params_name": policy,
         }
+        member_provenance = {
+            **provenance,
+            "observation_intervals": selection_observations(merge_id, included),
+        }
+        snapshot = {
+            "selected_unit_ids": list(included),
+            "selection_provenance": member_provenance,
+        }
         existing = SortedSpikesGroup & group_key
         if existing:
             members = {
@@ -441,6 +545,21 @@ def select_units_for_analysis(
                     f"{sorted(map(str, members))}, not this curation's output "
                     f"{merge_id}. Pass a different group_name."
                 )
+            stored = (SortedSpikesGroup.UnitSelection & group_key).fetch(
+                as_dict=True
+            )
+            if (
+                len(stored) != 1
+                or list(stored[0]["selected_unit_ids"]) != list(included)
+                or normalize_observation_provenance(
+                    stored[0]["selection_provenance"]
+                )
+                != member_provenance
+            ):
+                raise ValueError(
+                    "Existing group has a different selection; choose a new "
+                    "group_name to preserve the earlier population."
+                )
             status = "reused"
         else:
             SortedSpikesGroup().create_group(
@@ -448,6 +567,7 @@ def select_units_for_analysis(
                 nwb_file_name,
                 unit_filter_params_name=policy,
                 keys=[{"spikesorting_merge_id": merge_id}],
+                unit_selections={merge_id: snapshot},
             )
             status = "created"
         groups.append(
@@ -468,4 +588,5 @@ def select_units_for_analysis(
         excluded_units=MappingProxyType(excluded),
         unlabeled_unit_ids=unlabeled,
         groups=tuple(groups),
+        selection_provenance=MappingProxyType(provenance),
     )

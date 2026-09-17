@@ -57,7 +57,10 @@ def test_unmasked_members_keep_their_samples():
 @pytest.mark.slow
 @pytest.mark.parametrize("motion", ["none", "rigid_fast"])
 def test_detected_artifacts_survive_concat_rebuild_and_member_export(
-    chronic_2_session_minirec, monkeypatch, motion
+    chronic_2_session_minirec,
+    monkeypatch,
+    motion,
+    curation_evaluation_defaults,
 ):
     from pathlib import Path
 
@@ -137,6 +140,12 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             {
                 **rec_key,
                 "artifact_detection_params_name": recipe,
+                "manual_excluded_times": [
+                    [
+                        float(recording.sample_index_to_time(200)),
+                        float(recording.sample_index_to_time(210)),
+                    ]
+                ],
             }
         )
         RecordingArtifactDetection.populate(art_key, reserve_jobs=False)
@@ -147,6 +156,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         valid_times.append(valid)
         ranges.append(artifact_frame_ranges(recording, valid))
         assert ranges[-1], "Fixture must actually exercise nonempty masks."
+        assert any(start <= 200 and end >= 210 for start, end in ranges[-1])
 
     observed = []
     original = concat_services.build_concatenated_recording
@@ -295,7 +305,14 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         )
     assert set(canonical_sorting.unit_ids) == {0, 1}
     assert _observed_duration_s(sorting_key["sorting_id"]) == pytest.approx(
-        np.diff(row["obs_intervals"], axis=1).sum()
+        sum(
+            (
+                member.get_num_samples()
+                - sum(end - start for start, end in excluded)
+            )
+            / member.sampling_frequency
+            for member, excluded in zip(recordings, ranges)
+        )
     )
     root = CurationV2.insert_curation(
         sorting_key=sorting_key, labels={0: ["accept"], 1: ["accept"]}
@@ -336,6 +353,62 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             np.testing.assert_array_equal(valid, valid_times[i])
             np.testing.assert_allclose(
                 times[uid], recordings[i].get_times()[frames[uid]]
+            )
+
+    # The analysis snapshot uses the same global unit decision on each
+    # member's real session timeline, through the downstream group accessor.
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+    from spyglass.spikesorting.v2.analysis_selection import (
+        select_units_for_analysis,
+    )
+
+    selection = select_units_for_analysis(merged)
+    try:
+        from spyglass.spikesorting.v2.curation_api import CurationRef
+
+        evaluation = CurationRef.from_key(merged).evaluate(
+            metric_params_name="minimal", auto_curation_rules_name="none"
+        )
+        metrics = evaluation.metrics
+        # The planted sorter deliberately returned events in the masked interval.
+        # Observed metrics count only available events and use sample exposure;
+        # the original SI firing-rate column keeps its own full-timeline meaning.
+        observed_count = sum(
+            not any(start <= frame < stop for start, stop in excluded)
+            for excluded in ranges
+            for frame in (100, 200)
+        )
+        duration = _observed_duration_s(sorting_key["sorting_id"])
+        assert metrics.loc[2, "observed_duration_s"] == pytest.approx(duration)
+        assert metrics.loc[2, "observed_firing_rate_hz"] == pytest.approx(
+            observed_count / duration
+        )
+        assert metrics.loc[2, "firing_rate"] == pytest.approx(
+            4 * combined.sampling_frequency / combined.get_num_samples()
+        )
+        assert selection.included_unit_ids == (2,)
+        assert len(selection.groups) == len(recordings)
+        for selected in selection.groups:
+            _, identities = SortedSpikesGroup.fetch_spike_data(
+                dict(selected.group_key), return_unit_ids=True
+            )
+            assert identities == [
+                {"spikesorting_merge_id": selected.merge_id, "unit_id": 2}
+            ]
+            observed = selected.observation
+            assert observed.duration_s > 0 and not observed.unknown_sources
+            i = selected.member_index
+            member = recordings[i]
+            expected = (
+                member.get_num_samples()
+                - sum(end - start for start, end in ranges[i])
+            ) / member.sampling_frequency
+            assert observed.duration_s == pytest.approx(expected)
+            assert not observed.contains([member.get_times()[200]])[0]
+    finally:
+        for selected in selection.groups:
+            (SortedSpikesGroup & dict(selected.group_key)).super_delete(
+                warn=False
             )
 
     # The nullable detection FK must cascade through the concat master, not

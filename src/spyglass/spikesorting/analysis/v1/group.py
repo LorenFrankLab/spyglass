@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from itertools import compress
 from typing import Optional, Union
 
@@ -106,14 +107,32 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
         """
 
+    class UnitSelection(SpyglassMixinPart):
+        """Frozen membership, including an explicitly empty selection.
+
+        Groups without these rows continue to evaluate UnitSelectionParams
+        against their NWB columns. A snapshot records the decision made at
+        group creation, so later recipe edits cannot change a population.
+        """
+
+        definition = """
+        -> master.Units
+        ---
+        selected_unit_ids: longblob
+        selection_provenance: longblob
+        """
+
     def create_group(
         self,
         group_name: str,
         nwb_file_name: str,
         unit_filter_params_name: str = "all_units",
-        keys: list[dict] = [],
+        keys: list[dict] | None = None,
+        *,
+        unit_selections: dict | None = None,
     ):
         """Create a new group of sorted spikes"""
+        keys = keys or []
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,
@@ -139,13 +158,37 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             merge_ids, nwb_file_name
         )
 
+        selections = {
+            str(merge_id): snapshot
+            for merge_id, snapshot in (unit_selections or {}).items()
+        }
+        if unit_selections is not None and set(selections) != set(
+            map(str, merge_ids)
+        ):
+            raise ValueError(
+                "Provide one unit selection for every group member."
+            )
+
         parts_insert = [{**key, **group_key} for key in keys]
 
-        self.insert1(
-            group_key,
-            skip_duplicates=True,
-        )
-        self.Units.insert(parts_insert, skip_duplicates=True)
+        with (
+            nullcontext()
+            if self.connection.in_transaction
+            else self.connection.transaction
+        ):
+            self.insert1(group_key)
+            self.Units.insert(parts_insert)
+            self.UnitSelection.insert(
+                [
+                    {
+                        **group_key,
+                        "spikesorting_merge_id": merge_id,
+                        **selections[str(merge_id)],
+                    }
+                    for merge_id in merge_ids
+                    if str(merge_id) in selections
+                ]
+            )
 
     @staticmethod
     def filter_units(
@@ -331,6 +374,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         # column missing everywhere (potentially a typo) from one missing
         # here and there (a result mixing gated and un-gated units), so they
         # are checked once every sorting has been seen
+        snapshots = {
+            str(row["spikesorting_merge_id"]): row
+            for row in (cls.UnitSelection & key).fetch(as_dict=True)
+        }
+
         criteria_columns = set(unit_criteria or {})
         applied_to = {column: [] for column in criteria_columns}
         skipped_by = {column: [] for column in criteria_columns}
@@ -365,58 +413,79 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 for unit_id in _get_nwb_unit_ids(nwb_file, nwb_field_name)
             ]
 
-            include_unit = np.ones(len(sorting_spike_times), dtype=bool)
-
-            # filter the spike times based on the curation labels if present
-            group_col = next(
-                (c for c in units_df.columns if c in CURATION_LABEL_COLUMNS),
-                None,
-            )
-            # NOTE: the ``not test_mode`` guard is load-bearing. The shared
-            # base-env test fixtures build ``default_exclusion`` groups
-            # (exclude ``noise``/``mua``) over curations whose units carry
-            # those labels, so running the filter under pytest would empty
-            # the group and break ``test_fetch_data`` / sorted-spikes
-            # decoding (np.concatenate on []). Filtering is exercised
-            # directly via ``test_filter_units`` instead. Removing this
-            # guard reproduces the PR #1209 regression it was added to fix.
-            if group_col is not None:
-                if not test_mode:
-                    include_unit &= SortedSpikesGroup.filter_units(
-                        units_df[group_col].to_list(),
-                        include_labels,
-                        exclude_labels,
+            snapshot = snapshots.get(str(merge_id))
+            if snapshot is not None:
+                wanted = set(snapshot["selected_unit_ids"])
+                available = {row["unit_id"] for row in file_unit_ids}
+                if missing := wanted - available:
+                    raise ValueError(
+                        f"Selected units {sorted(missing)} are absent from {merge_id}."
                     )
+                include_unit = np.array(
+                    [row["unit_id"] in wanted for row in file_unit_ids],
+                    dtype=bool,
+                )
             else:
-                # An all-unlabeled curated NWB omits the label column, so the
-                # filter above is skipped and an include-only selection would
-                # wrongly return ALL units. Synthesize empty per-unit label
-                # lists so the filter still applies: include-only -> no units,
-                # exclude-only -> all units. This runs regardless of test_mode
-                # -- unlike the column-present path, an exclude filter over
-                # empty labels keeps EVERY unit, so it cannot empty the shared
-                # default_exclusion fixtures (whose units carry labels in a
-                # present column, handled above).
-                include_filter = (
-                    list(include_labels) if include_labels is not None else []
-                )
-                exclude_filter = (
-                    list(exclude_labels) if exclude_labels is not None else []
-                )
-                if include_filter or exclude_filter:
-                    include_unit &= SortedSpikesGroup.filter_units(
-                        [[] for _ in sorting_spike_times],
-                        include_filter,
-                        exclude_filter,
-                    )
+                include_unit = np.ones(len(sorting_spike_times), dtype=bool)
 
-            # filter on arbitrary criteria over the units table columns
-            for column in criteria_columns:
-                seen = applied_to if column in units_df else skipped_by
-                seen[column].append(merge_id)
-            include_unit &= SortedSpikesGroup.filter_units_by_criteria(
-                units_df, unit_criteria, strict=False
-            )
+                # filter the spike times based on the curation labels if present
+                group_col = next(
+                    (
+                        c
+                        for c in units_df.columns
+                        if c in CURATION_LABEL_COLUMNS
+                    ),
+                    None,
+                )
+                # NOTE: the ``not test_mode`` guard is load-bearing. The shared
+                # base-env test fixtures build ``default_exclusion`` groups
+                # (exclude ``noise``/``mua``) over curations whose units carry
+                # those labels, so running the filter under pytest would empty
+                # the group and break ``test_fetch_data`` / sorted-spikes
+                # decoding (np.concatenate on []). Filtering is exercised
+                # directly via ``test_filter_units`` instead. Removing this
+                # guard reproduces the PR #1209 regression it was added to fix.
+                if group_col is not None:
+                    if not test_mode:
+                        include_unit &= SortedSpikesGroup.filter_units(
+                            units_df[group_col].to_list(),
+                            include_labels,
+                            exclude_labels,
+                        )
+                else:
+                    # An all-unlabeled curated NWB omits the label column, so the
+                    # filter above is skipped and an include-only selection would
+                    # wrongly return ALL units. Synthesize empty per-unit label
+                    # lists so the filter still applies: include-only -> no units,
+                    # exclude-only -> all units. This runs regardless of test_mode
+                    # -- unlike the column-present path, an exclude filter over
+                    # empty labels keeps EVERY unit, so it cannot empty the shared
+                    # default_exclusion fixtures (whose units carry labels in a
+                    # present column, handled above).
+                    include_filter = (
+                        list(include_labels)
+                        if include_labels is not None
+                        else []
+                    )
+                    exclude_filter = (
+                        list(exclude_labels)
+                        if exclude_labels is not None
+                        else []
+                    )
+                    if include_filter or exclude_filter:
+                        include_unit &= SortedSpikesGroup.filter_units(
+                            [[] for _ in sorting_spike_times],
+                            include_filter,
+                            exclude_filter,
+                        )
+
+                # filter on arbitrary criteria over the units table columns
+                for column in criteria_columns:
+                    seen = applied_to if column in units_df else skipped_by
+                    seen[column].append(merge_id)
+                include_unit &= SortedSpikesGroup.filter_units_by_criteria(
+                    units_df, unit_criteria, strict=False
+                )
             if not include_unit.all():
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
@@ -449,11 +518,56 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return spike_times
 
     @classmethod
+    def get_observation_intervals(cls, key, *, unit_ids=None):
+        """Common usable time for the frozen population, in session seconds.
+
+        Only selected units contribute restrictions. Legacy members without an
+        observation snapshot retain their behavior and are listed as unknown.
+        Pass identities from ``fetch_spike_data(return_unit_ids=True)`` when
+        already loaded, to avoid reading legacy spike data a second time.
+        """
+        from spyglass.spikesorting.v2._observed_time import (
+            population_availability,
+        )
+
+        key = cls.get_fully_defined_key(key)
+        rows = {
+            str(row["spikesorting_merge_id"]): row
+            for row in (cls.UnitSelection & key).fetch(as_dict=True)
+        }
+        members = (cls.Units & key).fetch("spikesorting_merge_id")
+        legacy_ids = {}
+        if any(str(member) not in rows for member in members):
+            if unit_ids is None:
+                _, unit_ids = cls.fetch_spike_data(key, return_unit_ids=True)
+            for identity in unit_ids:
+                legacy_ids.setdefault(
+                    str(identity["spikesorting_merge_id"]), []
+                ).append(identity["unit_id"])
+        snapshots = []
+        for member in members:
+            row = rows.get(str(member))
+            snapshots.append(
+                (
+                    member,
+                    (
+                        row["selected_unit_ids"]
+                        if row
+                        else legacy_ids.get(str(member), [])
+                    ),
+                    row["selection_provenance"] if row else {},
+                )
+            )
+        return population_availability(snapshots)
+
+    @classmethod
     def get_spike_indicator(
         cls,
         key: dict,
         time: np.ndarray,
         return_unit_ids: bool = False,
+        *,
+        return_validity: bool = False,
     ) -> np.ndarray:
         """Get spike indicator matrix for the group
 
@@ -467,6 +581,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if True, return the unit ids along with the spike indicator matrix,
             by default False. Unit ids defined as a list of dictionaries with
             keys 'spikesorting_merge_id' and 'unit_number'
+        return_validity : bool, optional
+            Append the common observed-bin mask to the return tuple. Bins
+            crossing excluded time contain NaN, not zero-spike evidence.
 
         Returns
         -------
@@ -481,9 +598,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times, unit_ids = cls.fetch_spike_data(key, return_unit_ids=True)
 
         spike_indicator = np.zeros((len(time), len(spike_times)))
+        observation = cls.get_observation_intervals(key, unit_ids=unit_ids)
 
         for ind, times in enumerate(spike_times):
-            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            times = times[
+                (times >= min_time)
+                & (times <= max_time)
+                & observation.contains(times)
+            ]
             spike_indicator[:, ind] = np.bincount(
                 np.digitize(times, time[1:-1]),
                 minlength=time.shape[0],
@@ -491,6 +613,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
+        valid = observation.valid_bins(time)
+        spike_indicator[~valid, :] = np.nan
+        if return_validity:
+            return (
+                (spike_indicator, unit_ids, valid)
+                if return_unit_ids
+                else (spike_indicator, valid)
+            )
         if return_unit_ids:
             return spike_indicator, unit_ids
         return spike_indicator
@@ -531,15 +661,39 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if return_unit_ids is True, returns a list of dictionaries with
             keys 'spikesorting_merge_id' and 'unit_number' for each unit
         """
-        spike_indicator, unit_ids = cls.get_spike_indicator(
-            key, time, return_unit_ids=True
+        spike_indicator, unit_ids, valid = cls.get_spike_indicator(
+            key, time, return_unit_ids=True, return_validity=True
         )
-        firing_rate = firing_rate_from_spike_indicator(
-            spike_indicator=spike_indicator,
-            time=time,
-            multiunit=multiunit,
-            smoothing_sigma=smoothing_sigma,
-        )
+        if valid.all():
+            firing_rate = firing_rate_from_spike_indicator(
+                spike_indicator=spike_indicator,
+                time=time,
+                multiunit=multiunit,
+                smoothing_sigma=smoothing_sigma,
+            )
+        else:
+            from ripple_detection import get_multiunit_population_firing_rate
+
+            # Smooth each observed run separately, never through an artifact.
+            counts = (
+                spike_indicator.sum(axis=1, keepdims=True)
+                if multiunit
+                else spike_indicator
+            )
+            firing_rate = np.full(counts.shape, np.nan)
+            changes = np.diff(np.r_[False, valid, False].astype(int))
+            sampling_frequency = 1 / np.median(np.diff(time))
+            for start, stop in zip(
+                np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)
+            ):
+                for unit in range(counts.shape[1]):
+                    firing_rate[start:stop, unit] = (
+                        get_multiunit_population_firing_rate(
+                            counts[start:stop, unit, np.newaxis],
+                            sampling_frequency,
+                            smoothing_sigma,
+                        )
+                    )
         if return_unit_ids:
             return firing_rate, unit_ids
         return firing_rate

@@ -33,7 +33,7 @@ from pydantic import (
     model_validator,
 )
 
-QUALITY_METRIC_SCHEMA_VERSION = 1
+QUALITY_METRIC_SCHEMA_VERSION = 2
 AUTO_CURATION_RULES_SCHEMA_VERSION = 1
 
 # Comparison operators a threshold rule may use. Mirrors the ``operator`` enum
@@ -207,6 +207,9 @@ class QualityMetricParamsSchema(BaseModel):
     metric_names: list[str] = Field(min_length=1)
     metric_kwargs: dict[str, dict] = Field(default_factory=dict)
     skip_pc_metrics: bool = True
+    observed_presence_bin_duration_s: float = Field(
+        default=60.0, gt=0, allow_inf_nan=False
+    )
     # SI template (waveform-shape) output COLUMNS surfaced in the metric table
     # for downstream cell typing. Exposed, not thresholded (the pipeline ships
     # no cell-type cutoffs). An empty list surfaces no shape columns.
@@ -390,6 +393,9 @@ def prepare_quality_metric_row(row: dict) -> dict:
         "metric_names": row["metric_names"],
         "metric_kwargs": row.get("metric_kwargs", {}),
         "skip_pc_metrics": row.get("skip_pc_metrics", True),
+        "observed_presence_bin_duration_s": row.get(
+            "observed_presence_bin_duration_s", 60.0
+        ),
     }
     if "template_metric_columns" in row:
         payload["template_metric_columns"] = row["template_metric_columns"]
@@ -400,6 +406,9 @@ def prepare_quality_metric_row(row: dict) -> dict:
         "metric_kwargs": clean["metric_kwargs"],
         "template_metric_columns": clean["template_metric_columns"],
         "skip_pc_metrics": clean["skip_pc_metrics"],
+        "observed_presence_bin_duration_s": clean[
+            "observed_presence_bin_duration_s"
+        ],
         "params_schema_version": clean["schema_version"],
         "job_kwargs": row.get("job_kwargs"),
     }

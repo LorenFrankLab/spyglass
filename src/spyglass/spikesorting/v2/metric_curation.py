@@ -52,16 +52,16 @@ from spyglass.spikesorting.v2._params.metric_curation import (
     prepare_quality_metric_row,
     required_extensions_for_metrics,
 )
-from spyglass.spikesorting.v2.curation import CurationV2
-from spyglass.spikesorting.v2.exceptions import (
-    UnsupportedDirectInsertError,
-    ZeroUnitAnalyzerError,
-)
 from spyglass.spikesorting.v2._recipe_catalog import (
     waveform_params_for_preprocessing,
 )
 from spyglass.spikesorting.v2._sorting_analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+)
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.exceptions import (
+    UnsupportedDirectInsertError,
+    ZeroUnitAnalyzerError,
 )
 from spyglass.spikesorting.v2.recording import RecordingSelection
 from spyglass.spikesorting.v2.sorting import (
@@ -232,6 +232,7 @@ class EvaluationMetricInputs(NamedTuple):
     auto_merge_kwargs: dict
     rule_rows: list[dict]
     metric_job_kwargs: dict
+    observed_presence_bin_duration_s: float = 60.0
 
 
 class CurationEvaluationFetched(NamedTuple):
@@ -280,7 +281,8 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     metric_kwargs: blob             # dict[str, dict] per-metric kwargs
     template_metric_columns: blob   # list[str] of SI template output columns
     skip_pc_metrics=1: bool
-    params_schema_version=1: int
+    observed_presence_bin_duration_s=60: float
+    params_schema_version=2: int
     job_kwargs=null: blob
     """
 
@@ -757,6 +759,7 @@ class CurationEvaluationSelection(
     -> QualityMetricParameters
     -> AutoCurationRules
     -> AnalyzerWaveformParameters.proj(metric_waveform_params_name="waveform_params_name")
+    observation_version=0: int  # zero identifies selections predating observed-time metrics
     """
 
     @classmethod
@@ -815,12 +818,15 @@ class CurationEvaluationSelection(
             parent_key, context="CurationEvaluation"
         )
 
+        from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
+
         identity = {
             "sorting_id": key["sorting_id"],
             "curation_id": key["curation_id"],
             "metric_params_name": key["metric_params_name"],
             "auto_curation_rules_name": key["auto_curation_rules_name"],
             "metric_waveform_params_name": metric_waveform_params_name,
+            "observation_version": OBSERVATION_VERSION,
         }
         curation_evaluation_id = deterministic_id(
             "curation_evaluation", identity
@@ -979,6 +985,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._artifact_intervals import (
             read_artifact_removed_intervals,
         )
+        from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
         from spyglass.spikesorting.v2._sorting_analyzer import (
             fetch_waveform_params,
             resolve_display_waveform_params_name,
@@ -1004,6 +1011,10 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             merges_applied=merges_applied,
         )
         _assert_is_metric_recipe(sel["metric_waveform_params_name"])
+        if sel["observation_version"] != OBSERVATION_VERSION:
+            raise ValueError(
+                "Recreate this evaluation selection with insert_selection to include observed-time metrics."
+            )
 
         qm = (
             QualityMetricParameters
@@ -1159,6 +1170,9 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 metric_job_kwargs=_resolved_job_kwargs(
                     qm["job_kwargs"], acr["job_kwargs"]
                 ),
+                observed_presence_bin_duration_s=qm[
+                    "observed_presence_bin_duration_s"
+                ],
             ),
         )
 
@@ -1244,6 +1258,13 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             "spikeinterface_version": spikeinterface_version,
         }
 
+        from spyglass.spikesorting.v2._observed_time import OBSERVATION_VERSION
+
+        base_provenance["observation_version"] = OBSERVATION_VERSION
+        base_provenance["observed_presence_bin_duration_s"] = (
+            metric_inputs.observed_presence_bin_duration_s
+        )
+
         def _provenance_tables(source_analyzer_hashes):
             return [
                 build_provenance_table(
@@ -1283,6 +1304,17 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 artifact_detection_id=recording_inputs.artifact_detection_id,
                 recording_id=recording_inputs.recording_id,
             )
+
+            from spyglass.spikesorting.v2._observation_io import (
+                observation_metrics_from_nwb,
+            )
+
+            observation_metrics, interval_hash = observation_metrics_from_nwb(
+                sorting_inputs.curated_units_abs_path,
+                recording,
+                bin_duration_s=metric_inputs.observed_presence_bin_duration_s,
+            )
+            base_provenance["observation_intervals_hash"] = interval_hash
 
             if sorting_inputs.use_fast_path:
                 # Root / label-only: the cached raw-sort analyzers already carry
@@ -1335,6 +1367,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
                             rule_rows=metric_inputs.rule_rows,
                             expected_unit_ids=sorting_inputs.expected_unit_ids,
+                            observation_metrics=observation_metrics,
                         )
                     )
             else:
@@ -1349,7 +1382,6 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                 )
                 compute_key = {"sorting_id": sorting_inputs.sorting_id}
                 from spyglass.settings import temp_dir as spyglass_temp_dir
-
                 from spyglass.spikesorting.v2._analyzer_cache import (
                     ANALYZER_FOLDER_SUFFIX,
                     load_analyzer_folder,
@@ -1399,6 +1431,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
                             auto_merge_kwargs=metric_inputs.auto_merge_kwargs,
                             rule_rows=metric_inputs.rule_rows,
                             expected_unit_ids=sorting_inputs.expected_unit_ids,
+                            observation_metrics=observation_metrics,
                         )
                     )
 
@@ -1620,6 +1653,7 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         auto_merge_kwargs,
         rule_rows,
         expected_unit_ids,
+        observation_metrics=None,
     ):
         """Compute metrics / labels / merge suggestions and enforce namespace.
 
@@ -1641,6 +1675,8 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
             template_metric_columns=template_metric_columns,
         )
         self._assert_unit_namespace(metrics_df, expected_unit_ids)
+        if observation_metrics is not None:
+            metrics_df = metrics_df.join(observation_metrics)
         labels_by_unit = apply_label_rules(metrics_df, rule_rows)
         merge_groups = self._compute_merge_groups(
             display_analyzer,
@@ -2378,10 +2414,11 @@ class CurationEvaluation(SpyglassMixin, dj.Computed):
         """Return proposed merge groups for a preset (``[]`` for 'none')."""
         if auto_merge_preset == "none":
             return []
+        from spikeinterface.curation import compute_merge_unit_groups
+
         from spyglass.spikesorting.v2._sorting_analyzer import (
             ensure_extensions,
         )
-        from spikeinterface.curation import compute_merge_unit_groups
 
         extensions = list(_CURATION_EXTENSIONS)
         extensions.extend(
