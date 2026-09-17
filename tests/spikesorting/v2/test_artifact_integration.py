@@ -878,3 +878,65 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
         except KeyError:
             pass
         (RecordingArtifactDetection & art_pk).super_delete(warn=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_manual_exclusions_are_persisted_and_compose_with_detection(
+    artifact_e2e_session, monkeypatch
+):
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._sorting_artifact_mask import (
+        apply_artifact_mask,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    recording = _synth_recording_with_transient()
+    monkeypatch.setattr(Recording, "get_recording", lambda *a, **kw: recording)
+    name = "manual_and_automatic_test"
+    ArtifactDetectionParameters.insert1(
+        {
+            "artifact_detection_params_name": name,
+            "params": {
+                "detect": True,
+                "amplitude_threshold_uv": _AMP_THRESH_UV,
+                "zscore_threshold": None,
+                "proportion_above_threshold": 1.0,
+                "min_length_s": 0.001,
+                "removal_window_ms": 1.0,
+            },
+        },
+        allow_duplicate_params=True,
+    )
+    request = {
+        "recording_id": artifact_e2e_session["recording_id"],
+        "artifact_detection_params_name": name,
+    }
+    automatic = RecordingArtifactSelection.insert_selection(request)
+    manual = RecordingArtifactSelection.insert_selection(
+        {**request, "manual_excluded_times": [[0.5, 0.51]]}
+    )
+    assert automatic != manual
+    assert (
+        RecordingArtifactSelection.insert_selection(
+            {**request, "manual_excluded_times": [[0.505, 0.51], [0.5, 0.505]]}
+        )
+        == manual
+    )
+    RecordingArtifactDetection.populate(manual, reserve_jobs=False)
+    valid = (
+        IntervalList
+        & {
+            "nwb_file_name": artifact_e2e_session["nwb_file_name"],
+            "interval_list_name": f"artifact_detection_{manual['artifact_detection_id']}",
+        }
+    ).fetch1("valid_times")
+    masked = apply_artifact_mask(recording, valid).get_traces()
+    np.testing.assert_array_equal(masked[15000:15300], 0)
+    np.testing.assert_array_equal(masked[_ART_LO:_ART_HI], 0)
+    np.testing.assert_array_equal(masked[15300:15400], _BACKGROUND_UV)

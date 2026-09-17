@@ -213,6 +213,7 @@ def artifact_detection_identity_payload(
     artifact_detection_params_name,
     recording_id=None,
     shared_artifact_group_name=None,
+    manual_excluded_times=None,
 ) -> dict:
     """Build an artifact-detection selection logical-identity payload.
 
@@ -253,13 +254,29 @@ def artifact_detection_identity_payload(
             "artifact_detection_identity_payload requires exactly one source: "
             "recording_id xor shared_artifact_group_name."
         )
+    from spyglass.spikesorting.v2._manual_artifacts import (
+        normalize_manual_exclusions,
+    )
+
+    exclusions = normalize_manual_exclusions(manual_excluded_times)
+    manual = (
+        {
+            "manual_exclusions_hash": hashlib.sha256(
+                json.dumps(exclusions).encode()
+            ).hexdigest()
+        }
+        if exclusions
+        else {}
+    )
     if recording_id is not None:
         return {
+            **manual,
             "source_kind": "recording",
             "artifact_detection_params_name": artifact_detection_params_name,
             "recording_id": recording_id,
         }
     return {
+        **manual,
         "source_kind": "shared_artifact_group",
         "artifact_detection_params_name": artifact_detection_params_name,
         "shared_artifact_group_name": shared_artifact_group_name,

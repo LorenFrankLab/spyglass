@@ -433,6 +433,7 @@ def _insert_artifact_selection(
     recording_id=None,
     shared_artifact_group_name=None,
     supplied_id=None,
+    manual_excluded_times=None,
     extra_row,
 ) -> dict:
     """Idempotently insert one split artifact-detection selection row.
@@ -484,10 +485,16 @@ def _insert_artifact_selection(
         _ensure_lookup_row_exists,
     )
 
+    from spyglass.spikesorting.v2._manual_artifacts import (
+        normalize_manual_exclusions,
+    )
+
+    exclusions = normalize_manual_exclusions(manual_excluded_times)
     payload = artifact_detection_identity_payload(
         artifact_detection_params_name=artifact_detection_params_name,
         recording_id=recording_id,
         shared_artifact_group_name=shared_artifact_group_name,
+        manual_excluded_times=exclusions,
     )
     artifact_detection_id = deterministic_id("artifact_detection", payload)
     assert_supplied_id_matches(
@@ -506,6 +513,7 @@ def _insert_artifact_selection(
     row = {
         **pk,
         "artifact_detection_params_name": artifact_detection_params_name,
+        "manual_excluded_times": exclusions,
         **extra_row,
     }
     try:
@@ -542,6 +550,7 @@ class RecordingArtifactSelection(
     ---
     -> ArtifactDetectionParameters
     -> Recording
+    manual_excluded_times=null: longblob # immutable [start, stop) session seconds
     """
 
     @classmethod
@@ -568,6 +577,7 @@ class RecordingArtifactSelection(
             ],
             recording_id=recording_id,
             supplied_id=key.get("artifact_detection_id"),
+            manual_excluded_times=key.get("manual_excluded_times"),
             extra_row={"recording_id": recording_id},
         )
 
@@ -593,6 +603,7 @@ class SharedGroupArtifactSelection(
     -> ArtifactDetectionParameters
     -> SharedArtifactGroup
     member_set_hash: char(64)   # frozen sha256 of the ordered member recording_id set
+    manual_excluded_times=null: longblob # immutable [start, stop) session seconds
     """
 
     @classmethod
@@ -632,6 +643,7 @@ class SharedGroupArtifactSelection(
             ],
             shared_artifact_group_name=group_name,
             supplied_id=key.get("artifact_detection_id"),
+            manual_excluded_times=key.get("manual_excluded_times"),
             extra_row={
                 "shared_artifact_group_name": group_name,
                 "member_set_hash": member_set_hash,
@@ -689,6 +701,7 @@ class RecordingArtifactFetched(NamedTuple):
     recording_id: object
     nwb_file_name: str
     artifact_job_kwargs: dict | None
+    manual_excluded_times: object = None
 
 
 class SharedGroupArtifactFetched(NamedTuple):
@@ -706,6 +719,7 @@ class SharedGroupArtifactFetched(NamedTuple):
     member_nwb_file_names: tuple
     nwb_file_name: str
     artifact_job_kwargs: dict | None
+    manual_excluded_times: object = None
 
 
 class _ArtifactDetectionMixin:
@@ -756,7 +770,12 @@ class _ArtifactDetectionMixin:
         )
 
     def _run_artifact_scan(
-        self, recording, validated, artifact_job_kwargs, context
+        self,
+        recording,
+        validated,
+        artifact_job_kwargs,
+        context,
+        manual_excluded_times=None,
     ):
         """Resolve job kwargs and scan a loaded recording for artifacts.
 
@@ -784,11 +803,20 @@ class _ArtifactDetectionMixin:
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
         resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
-        return self._detect_artifacts(
+        valid_times = self._detect_artifacts(
             recording,
             validated,
             context=context,
             job_kwargs=resolved_job_kwargs,
+        )
+        from spyglass.spikesorting.v2._manual_artifacts import (
+            apply_manual_exclusions,
+        )
+
+        return apply_manual_exclusions(
+            valid_times,
+            manual_excluded_times,
+            validated.min_length_s,
         )
 
     def make_insert(
@@ -1089,10 +1117,19 @@ class RecordingArtifactDetection(
             recording_id=recording_id,
             nwb_file_name=nwb_file_name,
             artifact_job_kwargs=artifact_job_kwargs,
+            manual_excluded_times=(RecordingArtifactSelection & key).fetch1(
+                "manual_excluded_times"
+            ),
         )
 
     def make_compute(
-        self, key, validated, recording_id, nwb_file_name, artifact_job_kwargs
+        self,
+        key,
+        validated,
+        recording_id,
+        nwb_file_name,
+        artifact_job_kwargs,
+        manual_excluded_times=None,
     ):
         """Load the single recording and scan it for artifacts.
 
@@ -1106,6 +1143,7 @@ class RecordingArtifactDetection(
             recording,
             validated,
             artifact_job_kwargs,
+            manual_excluded_times=manual_excluded_times,
             context=(
                 f" for artifact_detection_id={key['artifact_detection_id']}, "
                 f"recording_id={recording_id}"
@@ -1230,6 +1268,9 @@ class SharedGroupArtifactDetection(
             member_nwb_file_names=member_nwb_file_names,
             nwb_file_name=member_nwb_file_names[0],
             artifact_job_kwargs=artifact_job_kwargs,
+            manual_excluded_times=(SharedGroupArtifactSelection & key).fetch1(
+                "manual_excluded_times"
+            ),
         )
 
     def make_compute(
@@ -1241,6 +1282,7 @@ class SharedGroupArtifactDetection(
         member_nwb_file_names,
         nwb_file_name,
         artifact_job_kwargs,
+        manual_excluded_times=None,
     ):
         """Union the members' channels and scan the union ONCE.
 
@@ -1280,6 +1322,7 @@ class SharedGroupArtifactDetection(
             unioned,
             validated,
             artifact_job_kwargs,
+            manual_excluded_times=manual_excluded_times,
             context=(
                 f" for artifact_detection_id={key['artifact_detection_id']}, "
                 f"shared_artifact_group={shared_artifact_group_name}"

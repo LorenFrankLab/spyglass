@@ -1188,12 +1188,7 @@ def test_preset_model_artifact_optional_and_motion_field():
         auto_curation_rules_name="v1_default_nn_noise",
         motion_correction_params_name="auto",
     )
-    assert (
-        preset.artifact_detection_params_name
-        == _PIPELINE_PRESETS[
-            "franklab_probe_hippocampus_30khz_ms5_2026_06"
-        ].artifact_detection_params_name
-    )
+    assert preset.artifact_detection_params_name is None
     assert preset.motion_correction_params_name == "auto"
 
     with pytest.raises(ValueError):

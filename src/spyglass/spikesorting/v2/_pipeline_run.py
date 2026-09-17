@@ -176,6 +176,7 @@ def run_v2_pipeline(
     concat_session_group_name: "str | None" = None,
     build_figpack_view: bool = False,
     figpack_label_options: "list[str] | None" = None,
+    manual_excluded_times=None,
 ) -> "RunResult":
     """End-to-end sort in one call: select + populate every stage, then curate.
 
@@ -308,6 +309,11 @@ def run_v2_pipeline(
         analyzer to summarize, so the view is skipped (``figpack_status`` is
         ``"skipped"`` and ``figpack_uri`` is absent) rather than failing the run.
         Hosted upload is not offered here -- the bundle is always local.
+    manual_excluded_times
+        Immutable half-open [start, stop) exclusions in original session
+        seconds, composed with automatic artifact detection. For concat,
+        map each member_index to its intervals. Manual exclusions also apply
+        when the preset disables automatic detection.
     figpack_label_options
         Curation label palette (in display order) for the FigPack view; passed
         through to ``FigPackCurationSelection``. ``None`` (default) uses
@@ -486,6 +492,17 @@ def run_v2_pipeline(
             "what each preset does, or list_pipeline_presets() for just the names."
         )
     bundle = _PIPELINE_PRESETS[pipeline_preset]
+    from spyglass.spikesorting.v2._manual_artifacts import (
+        artifact_recipe_with_manual_exclusions,
+        resolve_manual_exclusions,
+    )
+
+    manual_excluded_times = resolve_manual_exclusions(
+        manual_excluded_times, concat=is_concat
+    )
+    bundle = artifact_recipe_with_manual_exclusions(
+        bundle, manual_excluded_times
+    )
 
     # The preset's motion field selects the mode it is built for: a motion-pinned
     # preset is a concat preset (motion correction runs on the
@@ -565,6 +582,7 @@ def run_v2_pipeline(
             team_name=team_name,
             pipeline_preset=pipeline_preset,
             auto_curate=auto_curate,
+            manual_excluded_times=manual_excluded_times,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
@@ -586,6 +604,7 @@ def run_v2_pipeline(
             concat_session_group_name,
             bundle,
             auto_curate=auto_curate,
+            manual_excluded_times=manual_excluded_times,
         )
 
     # Per-stage observability. For each stage: derive computed-vs-reused from
@@ -609,6 +628,7 @@ def run_v2_pipeline(
             bundle,
             [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
             run_summary["sorter_config"],
+            manual_excluded_times=manual_excluded_times,
         )
     stage_seconds: dict[str, float] = {}
     # Point the run summary at the live stage_seconds dict NOW (not only at the
@@ -686,6 +706,7 @@ def run_v2_pipeline(
                 {
                     "recording_id": recording_key["recording_id"],
                     "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                    "manual_excluded_times": manual_excluded_times,
                 }
             )
             (
@@ -737,6 +758,13 @@ def run_v2_pipeline(
         members = (SessionGroup.Member & group_key).fetch(
             as_dict=True, order_by="member_index"
         )
+        unknown_members = set(manual_excluded_times) - {
+            int(m["member_index"]) for m in members
+        }
+        if unknown_members:
+            raise PipelineInputError(
+                f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
+            )
         run_summary["scientific_config"] = describe_scientific_setup(
             bundle,
             [
@@ -747,6 +775,7 @@ def run_v2_pipeline(
                 for member in members
             ],
             run_summary["sorter_config"],
+            manual_excluded_times=manual_excluded_times,
         )
         member_recording_keys = [
             RecordingSelection.insert_selection(
@@ -791,9 +820,14 @@ def run_v2_pipeline(
                     {
                         **recording_key,
                         "artifact_detection_params_name": bundle.artifact_detection_params_name,
+                        "manual_excluded_times": manual_excluded_times.get(
+                            int(member["member_index"]), []
+                        ),
                     }
                 )
-                for recording_key in member_recording_keys
+                for member, recording_key in zip(
+                    members, member_recording_keys, strict=True
+                )
             ]
 
             def _populate_member_artifacts():
@@ -1176,6 +1210,7 @@ def run_v2_pipeline_session(
     auto_curate: bool = False,
     preflight: bool = True,
     continue_on_error: bool = False,
+    manual_excluded_times=None,
 ) -> list[RunV2PipelineSessionResult]:
     """Sort every (or selected) sort group in a session in one call.
 
@@ -1292,6 +1327,7 @@ def run_v2_pipeline_session(
             pipeline_preset=pipeline_preset,
             sort_group_ids=targets,
             auto_curate=auto_curate,
+            manual_excluded_times=manual_excluded_times,
         )
         # Capture each group's non-blocking advisories. OK groups run below with
         # preflight=False (the DB checks are not repeated), so without this their
@@ -1352,6 +1388,7 @@ def run_v2_pipeline_session(
                 require_units=require_units,
                 auto_curate=auto_curate,
                 preflight=False,
+                manual_excluded_times=manual_excluded_times,
             )
         except (
             PipelineStageError,

@@ -189,13 +189,15 @@ def artifact_frame_ranges(
     # The complement walk silently clips to [t_first, t_last], so an interval
     # starting before the first sample or ending past the last (a units/
     # alignment error -- e.g. ms vs s) would be quietly ignored rather than
-    # flagged. Tolerate one sample-period of float slop at each endpoint.
+    # flagged. Allow the exclusive end used by concatenated recordings and
+    # one sample-period of endpoint slop. The equivalent expressions n / fs
+    # and (n - 1) / fs + 1 / fs can differ by one floating-point step.
     envelope_tol = 1.0 / assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="apply_artifact_mask: "
     )
-    if starts.min() < t_first - envelope_tol or ends.max() > (
-        t_last + envelope_tol
-    ):
+    envelope_start = np.nextafter(t_first - envelope_tol, -np.inf)
+    envelope_stop = np.nextafter(t_last + envelope_tol, np.inf)
+    if starts.min() < envelope_start or ends.max() > envelope_stop:
         raise ValueError(
             "apply_artifact_mask: valid_times "
             f"{valid_times.tolist()!r} fall outside the recording envelope "
@@ -244,9 +246,9 @@ def artifact_frame_ranges(
     # successor is a wall-clock discontinuity. That frame is the last
     # real sample of the preceding chunk (valid) -- masking it would
     # zero a good sample per gap. A genuine 1-frame artifact instead
-    # has ~1-sample spacing to its neighbor, so it is kept. (A 1-sample
-    # artifact landing exactly on a chunk's final sample is the lone
-    # uncovered edge; negligible at the chunk boundary.) Read only the two
+    # has ~1-sample spacing to its neighbor, so it is kept. A manual cut uses
+    # a predecessor float to distinguish an excluded final sample from the
+    # chunk's inclusive endpoint. Read only the two
     # boundary frames per width-1 candidate instead of indexing a full vector.
     sample_period = 1.0 / assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="apply_artifact_mask: "
@@ -258,7 +260,9 @@ def artifact_frame_ranges(
         ts_start, ts_end = _segment_times_at(
             recording, np.array([start, end], dtype=np.int64)
         )
-        return (ts_end - ts_start) > 1.5 * sample_period
+        return (ts_end - ts_start) > 1.5 * sample_period and np.any(
+            ends == ts_start
+        )
 
     frame_ranges = [
         (s, e)

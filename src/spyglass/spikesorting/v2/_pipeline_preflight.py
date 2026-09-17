@@ -362,7 +362,9 @@ def _preflight_details(
     return lines
 
 
-def describe_scientific_setup(bundle, group_keys, effective_config=None):
+def describe_scientific_setup(
+    bundle, group_keys, effective_config=None, *, manual_excluded_times=None
+):
     """Resolve the preprocessing and artifact rows execution uses for display."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import (
@@ -386,7 +388,9 @@ def describe_scientific_setup(bundle, group_keys, effective_config=None):
     )
     result = {
         "preprocessing_recipe": bundle.preprocessing_params_name,
-        "preprocessing": dict(preprocessing[0]) if len(preprocessing) else None,
+        "preprocessing": (
+            dict(preprocessing[0]) if len(preprocessing) else None
+        ),
         "references": (SortGroupV2 & group_keys).fetch(
             "nwb_file_name",
             "sort_group_id",
@@ -398,6 +402,8 @@ def describe_scientific_setup(bundle, group_keys, effective_config=None):
         "artifact_detection": dict(artifacts[0]) if len(artifacts) else None,
         "motion": "No external correction; DriftEstimate is diagnostic only.",
     }
+    if manual_excluded_times:
+        result["manual_excluded_times"] = manual_excluded_times
     if bundle.motion_correction_params_name is not None:
         from spyglass.spikesorting.v2.session_group import (
             MotionCorrectionParameters,
@@ -412,8 +418,11 @@ def describe_scientific_setup(bundle, group_keys, effective_config=None):
         result["motion"] = dict(rows[0]) if len(rows) else None
         result["artifact_application"] = (
             "No artifact masking selected."
-            if bundle.artifact_detection_params_name is None
-            or (len(artifacts) and not artifacts[0].get("detect", True))
+            if not manual_excluded_times
+            and (
+                bundle.artifact_detection_params_name is None
+                or (len(artifacts) and not artifacts[0].get("detect", True))
+            )
             else "Per member before concatenation and motion correction."
         )
     elif bundle.sorter == "kilosort4":
@@ -599,6 +608,7 @@ def assert_concat_preflight(
     bundle,
     *,
     auto_curate: bool = False,
+    manual_excluded_times=None,
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
@@ -759,7 +769,10 @@ def assert_concat_preflight(
             )
 
     assert_preset_compute_rows(bundle)
-    if bundle.artifact_detection_params_name in (None, "none"):
+    if (
+        bundle.artifact_detection_params_name in (None, "none")
+        and not manual_excluded_times
+    ):
         return ["No artifact masking selected for the concatenated members."]
     return []
 
@@ -771,6 +784,7 @@ def preflight_v2_pipeline(
     team_name: str,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     auto_curate: bool = False,
+    manual_excluded_times=None,
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
@@ -838,6 +852,15 @@ def preflight_v2_pipeline(
         )
     _check("pipeline_preset_known", True, "")
     bundle = _PIPELINE_PRESETS[pipeline_preset]
+    from spyglass.spikesorting.v2._manual_artifacts import (
+        artifact_recipe_with_manual_exclusions,
+        resolve_manual_exclusions,
+    )
+
+    manual_excluded_times = resolve_manual_exclusions(manual_excluded_times)
+    bundle = artifact_recipe_with_manual_exclusions(
+        bundle, manual_excluded_times
+    )
 
     # A motion-pinned preset targets a concatenated session group (motion
     # correction runs on the ConcatenatedRecording path, not single-session
@@ -1240,6 +1263,7 @@ def preflight_v2_pipeline(
                 artifact_detection_identity_payload(
                     artifact_detection_params_name=bundle.artifact_detection_params_name,
                     recording_id=recording_id,
+                    manual_excluded_times=manual_excluded_times,
                 ),
             )
         sorting_id = build_sorting_selection_plan(
@@ -1316,6 +1340,7 @@ def preflight_v2_pipeline(
             bundle,
             [{"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}],
             effective_config,
+            manual_excluded_times=manual_excluded_times,
         ),
     )
 
@@ -1504,6 +1529,7 @@ def preflight_v2_pipeline_session(
     pipeline_preset: str,
     sort_group_ids: "list[int] | None" = None,
     auto_curate: bool = False,
+    manual_excluded_times=None,
 ) -> PreflightSessionReport:
     """Read-only preflight for every target sort group in a session.
 
@@ -1561,6 +1587,7 @@ def preflight_v2_pipeline_session(
             team_name=team_name,
             pipeline_preset=pipeline_preset,
             auto_curate=auto_curate,
+            manual_excluded_times=manual_excluded_times,
         )
         group_reports.append(
             {
