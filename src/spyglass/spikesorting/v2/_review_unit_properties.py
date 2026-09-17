@@ -4,7 +4,7 @@ A profile-backed browser review shows its **selected evaluation's** metrics,
 annotation-set columns and label / merge proposals in the same selectable
 ``UnitsTable`` that drives unit selection for the curation control (so a
 metric-bearing row IS the unit being curated). SpikeInterface's
-``plot_sorting_summary(extra_unit_properties=...)`` takes those columns as
+unit-table builder takes those columns as
 one-dimensional NumPy arrays aligned to the analyzer's unit order and accepts
 only integer / unsigned / float / bool / string dtypes -- object arrays
 (including ordinary pandas string columns) are silently dropped with a

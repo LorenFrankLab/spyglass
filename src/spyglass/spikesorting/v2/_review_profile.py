@@ -64,9 +64,15 @@ _PROFILE_FIELDS = frozenset(
 )
 
 
-def profile_display_property_vocabulary(metric_row: Mapping) -> tuple[str, ...]:
+def profile_display_property_vocabulary(
+    metric_row: Mapping,
+) -> tuple[str, ...]:
     """Return the ordered built-in columns one metric recipe can display."""
-    columns: list[str] = []
+    columns: list[str] = [
+        "observed_duration_s",
+        "observed_firing_rate_hz",
+        "observed_presence_ratio",
+    ]
     for metric_name in metric_row["metric_names"]:
         columns.extend(
             _QUALITY_METRIC_OUTPUT_COLUMNS.get(metric_name, (metric_name,))
@@ -78,21 +84,23 @@ def profile_display_property_vocabulary(metric_row: Mapping) -> tuple[str, ...]:
 
 
 def _normalize_label_options(label_options) -> list[str]:
-    """Normalize and validate the ordered built-in curation-label palette."""
+    """Normalize built-in aliases and configured lab labels."""
     if label_options is None:
         label_options = default_label_options()
     if isinstance(label_options, (str, bytes)) or not isinstance(
         label_options, (list, tuple)
     ):
         raise TypeError("label_options must be a list or tuple of strings.")
-    valid = {label.value for label in CurationLabel}
     normalized: list[str] = []
     for label in label_options:
         value = CurationLabel.normalize(label)
-        if value not in valid:
+        if not isinstance(label, str) or not value.strip() or len(value) > 32:
             raise ValueError(
-                f"label_options contains unknown built-in label {label!r}; "
-                f"valid labels are {sorted(valid)}."
+                "Each label must be a non-empty string of at most 32 characters."
+            )
+        if value != value.strip():
+            raise ValueError(
+                "Labels must not contain leading or trailing whitespace."
             )
         normalized.append(value)
     duplicates = sorted(
@@ -228,7 +236,7 @@ def review_profile_label_policy(label_import_mode: str) -> str:
     )
 
 
-REVIEW_DISPLAY_OPTIONS_VERSION = 1
+REVIEW_DISPLAY_OPTIONS_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -241,12 +249,18 @@ class ReviewDisplayOptions:
 
     Attributes
     ----------
+    max_raster_spikes_per_unit
+        Per-unit raster cap, sampled evenly across the full spike train.
     max_amplitudes_per_unit
         Per-unit cap on spike-amplitude points in the amplitude view. Points
         are drawn uniformly at random from the unit's whole spike train (so a
         long recording is sampled across its full duration, not truncated to
         its start), seeded by ``amplitude_sampling_seed`` so a rebuilt bundle
-        shows the same points. ``None`` sends every spike.
+        shows the same points. ``None`` removes the fixed cap; the duration
+        budget still applies unless its rate is also ``None``.
+    max_initial_points
+        Total points per time-based view before deferring that view to explicit
+        selected-unit inspection. This controls initial payload, not sampling.
     amplitude_sampling_seed
         Seed for the amplitude subsample.
     min_similarity_for_correlograms
@@ -257,12 +271,30 @@ class ReviewDisplayOptions:
         Payload version, persisted with the review configuration.
     """
 
-    max_amplitudes_per_unit: int | None = 2000
+    max_raster_spikes_per_unit: int | None = None
+    max_amplitudes_per_unit: int | None = None
+    raster_max_firing_rate: float | None = 50.0
+    amplitude_max_firing_rate: float | None = 50.0
+    max_initial_points: int = 1_000_000
     amplitude_sampling_seed: int = 0
     min_similarity_for_correlograms: float = 0.2
     version: int = REVIEW_DISPLAY_OPTIONS_VERSION
 
     def __post_init__(self):
+        if (
+            isinstance(self.max_initial_points, bool)
+            or not isinstance(self.max_initial_points, int)
+            or self.max_initial_points < 1
+        ):
+            raise ValueError("max_initial_points must be a positive integer.")
+        if self.max_raster_spikes_per_unit is not None and (
+            isinstance(self.max_raster_spikes_per_unit, bool)
+            or not isinstance(self.max_raster_spikes_per_unit, int)
+            or self.max_raster_spikes_per_unit < 1
+        ):
+            raise ValueError(
+                "max_raster_spikes_per_unit must be a positive integer."
+            )
         if self.max_amplitudes_per_unit is not None and (
             isinstance(self.max_amplitudes_per_unit, bool)
             or int(self.max_amplitudes_per_unit) < 1
@@ -283,7 +315,17 @@ class ReviewDisplayOptions:
                 "min_similarity_for_correlograms must be within [0, 1]; got "
                 f"{self.min_similarity_for_correlograms!r}."
             )
-        if int(self.version) != REVIEW_DISPLAY_OPTIONS_VERSION:
+        import math
+
+        for value in (
+            self.raster_max_firing_rate,
+            self.amplitude_max_firing_rate,
+        ):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                raise ValueError(
+                    "Display firing-rate limits must be finite and positive, or None."
+                )
+        if int(self.version) not in (1, REVIEW_DISPLAY_OPTIONS_VERSION):
             raise ValueError(
                 "ReviewDisplayOptions version "
                 f"{self.version!r} is not the supported "
@@ -308,12 +350,37 @@ class ReviewDisplayOptions:
                 f"display_options has unknown field(s) {unknown}; accepted: "
                 f"{sorted(cls.__dataclass_fields__)}."
             )
-        return cls(**dict(value))
+        fields = dict(value)
+        if fields.get("version") == 1:
+            # Old saved bundles keep their explicit fixed budgets.
+            fields.setdefault("max_raster_spikes_per_unit", 2000)
+            fields.setdefault("max_amplitudes_per_unit", 2000)
+            fields.setdefault("raster_max_firing_rate", None)
+            fields.setdefault("amplitude_max_firing_rate", None)
+        return cls(**fields)
+
+    def point_limit(self, kind, duration_s):
+        """Resolve v1's duration-scaled budget and an optional smaller cap."""
+        import math
+
+        rate, cap = (
+            (self.raster_max_firing_rate, self.max_raster_spikes_per_unit)
+            if kind == "raster"
+            else (self.amplitude_max_firing_rate, self.max_amplitudes_per_unit)
+        )
+        limits = [int(cap)] if cap is not None else []
+        if rate is not None:
+            limits.append(math.floor(duration_s * rate))
+        return min(limits) if limits else None
 
     def as_dict(self) -> dict:
         """JSON-native form persisted in the review configuration."""
         return {
             "version": int(self.version),
+            "raster_max_firing_rate": self.raster_max_firing_rate,
+            "amplitude_max_firing_rate": self.amplitude_max_firing_rate,
+            "max_initial_points": self.max_initial_points,
+            "max_raster_spikes_per_unit": self.max_raster_spikes_per_unit,
             "max_amplitudes_per_unit": (
                 None
                 if self.max_amplitudes_per_unit is None
@@ -327,13 +394,34 @@ class ReviewDisplayOptions:
 
     def describe(self) -> str:
         """Short human-readable summary for view titles."""
-        cap = (
-            "all spikes"
-            if self.max_amplitudes_per_unit is None
-            else f"<= {int(self.max_amplitudes_per_unit)} sampled spikes/unit "
-            f"(seed {int(self.amplitude_sampling_seed)})"
-        )
+
+        def budget(kind, rate, cap):
+            limits = []
+            if rate is not None:
+                limits.append(f"floor(duration × {rate:g})")
+            if cap is not None:
+                limits.append(str(cap))
+            formula = ("minimum of " if len(limits) > 1 else "") + " and ".join(
+                limits
+            )
+            return f"{kind}: " + (
+                formula + " points/unit" if limits else "all spikes"
+            )
+
         return (
-            f"amplitudes: {cap}; cross-correlograms for pairs with template "
+            budget(
+                "raster",
+                self.raster_max_firing_rate,
+                self.max_raster_spikes_per_unit,
+            )
+            + "; "
+            + budget(
+                "amplitudes",
+                self.amplitude_max_firing_rate,
+                self.max_amplitudes_per_unit,
+            )
+            + "; "
+            f"amplitude seed {self.amplitude_sampling_seed}; "
+            "budgets span the full recording. Cross-correlograms for pairs with template "
             f"similarity >= {float(self.min_similarity_for_correlograms):g}"
         )

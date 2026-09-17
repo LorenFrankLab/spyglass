@@ -10,6 +10,7 @@ importer reads, written by the frontend.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 from contextlib import contextmanager
@@ -46,14 +47,21 @@ def require_browser() -> None:
 
 
 @contextmanager
-def review_page(url: str, *, viewport=VIEWPORTS["laptop"], artifacts: Path):
+def review_page(
+    url: str,
+    *,
+    viewport=VIEWPORTS["laptop"],
+    artifacts: Path,
+    native_toolbar=False,
+):
     """Open ``url`` in headless Chromium; on any error keep a screenshot.
 
     Yields the Playwright ``Page`` once the figure has rendered (the
-    **Curate Figure** button is visible). Confirmation dialogs (the merge
+    draft controls and unit table are visible). Confirmation dialogs (the merge
     button asks) are accepted. On an exception, ``<artifacts>/failure.png``
     and the page's text are written before re-raising.
     """
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -63,12 +71,24 @@ def review_page(url: str, *, viewport=VIEWPORTS["laptop"], artifacts: Path):
             viewport={"width": viewport[0], "height": viewport[1]}
         )
         page = context.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
         page.set_default_timeout(DEFAULT_TIMEOUT_MS)
         page.on("dialog", lambda dialog: dialog.accept())
         try:
             page.goto(url, wait_until="load")
-            page.get_by_role("button", name="Curate Figure").wait_for()
+            if native_toolbar:
+                page.get_by_role(
+                    "button", name="Curate Figure", exact=True
+                ).wait_for()
+            else:
+                page.get_by_role(
+                    "button", name="Save draft", exact=True
+                ).wait_for()
+                page.get_by_text("Draft saved.", exact=False).wait_for()
+            page.get_by_role("row").first.wait_for()
             yield page
+            assert not errors, f"Browser errors: {errors}"
         except Exception:
             try:
                 page.screenshot(
@@ -77,10 +97,13 @@ def review_page(url: str, *, viewport=VIEWPORTS["laptop"], artifacts: Path):
                 (artifacts / "failure.txt").write_text(
                     page.locator("body").inner_text()
                 )
-            except Exception:  # pragma: no cover - diagnostics only
-                pass
+            except (OSError, PlaywrightError) as error:  # pragma: no cover
+                print(f"Could not capture browser diagnostics: {error}")
             raise
         finally:
+            (artifacts / "browser-errors.json").write_text(
+                json.dumps(errors, indent=2)
+            )
             context.close()
             browser.close()
 
@@ -104,10 +127,19 @@ def toggle_curation_pane(page) -> None:
     page.get_by_text(re.compile(r"^[▼▶]\s*Curation")).first.click()
 
 
+def wait_for_visible_plot(page) -> None:
+    """Require usable plot height, not just a reachable tab or toolbar."""
+    page.wait_for_function(
+        """() => [...document.querySelectorAll('canvas')].some(canvas => {
+            const rect = canvas.getBoundingClientRect();
+            return rect.width >= 100 && rect.height >= 100;
+        })"""
+    )
+
+
 def start_curating(page) -> None:
-    """**Curate Figure** enables editing (the frontend's local-figure mode)."""
-    page.get_by_role("button", name="Curate Figure", exact=True).click()
-    page.get_by_text("Curating Local Figure").wait_for()
+    """Wait for the local review's draft-editing controls."""
+    page.get_by_role("button", name="Save draft", exact=True).wait_for()
 
 
 def select_units(page, *unit_ids: int) -> None:
@@ -144,11 +176,12 @@ def merge_selected(page) -> None:
     page.get_by_role("button", name="Merge Selected", exact=True).click()
 
 
-def save_annotations(page) -> int:
+def save_annotations(page, *, native_toolbar=False) -> int:
     """Click **Save Annotations**; return the status of the browser's PUT."""
     with page.expect_response(
         lambda response: response.request.method == "PUT"
         and response.url.endswith("/annotations.json")
     ) as saved:
-        page.get_by_role("button", name="Save Annotations", exact=True).click()
+        name = "Save Annotations" if native_toolbar else "Save draft"
+        page.get_by_role("button", name=name, exact=True).click()
     return saved.value.status

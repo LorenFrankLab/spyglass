@@ -468,6 +468,7 @@ jobs:
           tests/spikesorting/v2/test_review_api_integration.py \
           tests/spikesorting/v2/test_review_delivery.py \
           tests/spikesorting/v2/test_review_unit_properties.py \
+          tests/spikesorting/v2/test_review_inspection.py \
           tests/spikesorting/v2/test_review_browser.py \
           tests/spikesorting/v2/test_review_browser_journey.py \
           "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_publishes_offline_view" \

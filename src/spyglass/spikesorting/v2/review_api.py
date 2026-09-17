@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import uuid
 import webbrowser
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -43,6 +44,8 @@ from spyglass.spikesorting.v2.exceptions import (
 # ``child_committed`` keeps computed / reused).
 if TYPE_CHECKING:
     import pandas as pd
+
+    from spyglass.spikesorting.v2._review_notebook import ReviewCommitPanel
 
 ReviewStageState = Literal["computed", "reused", "complete"]
 
@@ -216,29 +219,32 @@ class FigPackReview:
             f"QC: {int(missing.ne('').sum())}/{len(missing)} units have "
             "unavailable rule inputs (not a quality pass).\n"
             f"Display: {self.display_options.describe()}.\n"
-            "Edit and Save Annotations in the browser, then preview_import() "
-            "and commit() in Python. Pending merges do not update these metrics."
+            "Save the browser draft, then run review.commit_panel() in the notebook. "
+            "Pending merges do not update these metrics."
         )
 
     def open(
-        self, *, open_browser: bool = True, port: int | None = None
+        self,
+        *,
+        open_browser: bool = True,
+        port: int | None = None,
+        focus_unit_ids: Sequence[int] = (),
     ) -> str:
         """Deliver the review to a browser and return its URL.
 
         A hosted review opens its persisted URL. A local review is served
         from this Python process over loopback -- the exact saved bundle
-        (``self.uri``), so **Save Annotations** in the browser writes the
+        (``self.uri``), so **Save draft** in the browser writes the
         same ``annotations.json`` that :meth:`preview_import` reads; nothing
         is copied, rebuilt or uploaded to open it. Repeated calls reuse the
         running server; after a kernel restart, ``resume()`` + ``open()``
         starts delivery again over the same files (the port is process
         state, never persisted).
 
-        In the browser: **Curate Figure** enables editing, select units in
-        the unit table, add/remove labels or propose merges in the Curation
-        pane, then **Save Annotations**. (**Finalize Curation** is a browser
-        state flag only -- it neither saves nor commits.) Then run
-        ``preview_import()`` / ``commit()`` in Python.
+        In a local browser: select units, edit labels or propose merges, then
+        **Save draft**. Hosted figures use **Curate Figure** and the authenticated
+        **Save Annotations** toolbar action. Both save a draft; run
+        ``review.commit_panel()`` in the notebook to preview and commit it.
 
         Parameters
         ----------
@@ -252,6 +258,8 @@ class FigPackReview:
         port : int, optional
             Loopback port for a local review's server (default: a free
             port). Ignored when the bundle is already being served.
+        focus_unit_ids : sequence of int, optional
+            Units to select when the review opens, such as newly merged units.
 
         Returns
         -------
@@ -264,11 +272,141 @@ class FigPackReview:
             from spyglass.spikesorting.v2._review_delivery import (
                 serve_review_bundle,
             )
+            from spyglass.spikesorting.v2._review_operations import (
+                ReviewOperationService,
+            )
 
-            url = serve_review_bundle(self.uri, port=port)
+            url = serve_review_bundle(
+                self.uri,
+                port=port,
+                operation_factory=lambda: ReviewOperationService.for_review(
+                    self
+                ),
+            )
+        if len(focus_unit_ids):
+            from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query))
+            query["spyglass_units"] = ",".join(
+                str(int(unit)) for unit in focus_unit_ids
+            )
+            url = urlunsplit(parts._replace(query=urlencode(query)))
         if open_browser:
             webbrowser.open(url)
         return url
+
+    def result(self) -> CurationRef:
+        """Read the completed browser review's final, explicitly verified curation."""
+        from spyglass.spikesorting.v2._review_operations import (
+            committed_review_result,
+        )
+
+        if self.is_hosted:
+            raise ValueError(
+                "Hosted drafts use the notebook commit receipt; browser results require a connected local review."
+            )
+        return committed_review_result(self)
+
+    def inspect_units(
+        self, unit_ids: Sequence[int], *, time_range=None, include_traces=False
+    ):
+        """Return a FigPack view of any units, including every selected CCG pair.
+
+        Display with ``view.show(title="Selected units", upload=False,
+        ephemeral=False)``. ``time_range=(start, stop)`` uses recording-relative
+        seconds and shows every raster spike in that window.
+        Without a window, the raster uses the review's overview budget. This
+        inspection does not edit the draft or change evaluation settings.
+        """
+        from spyglass.spikesorting.v2._curation_analyzer import (
+            curation_analyzer_with_extensions,
+        )
+        from spyglass.spikesorting.v2._observation_io import (
+            cached_review_timeline,
+            review_timeline,
+        )
+        from spyglass.spikesorting.v2._review_inspection import inspection_view
+        from spyglass.spikesorting.v2._review_unit_properties import (
+            review_unit_properties,
+        )
+        from spyglass.spikesorting.v2._review_view import (
+            coerce_units_table_ids,
+        )
+        from spyglass.spikesorting.v2._visualization import (
+            DISPLAY_WIDGET_EXTENSIONS,
+        )
+        from spyglass.spikesorting.v2.figpack_curation import (
+            FigPackCurationSelection,
+            _review_context_table,
+        )
+        from spyglass.spikesorting.v2.sorting import Sorting
+
+        stored = (
+            FigPackCurationSelection & {"figpack_curation_id": self.review_id}
+        ).fetch1("displayed_unit_properties")
+        _, config = unpack_display_config(stored)
+        table = _review_context_table(self.parent.as_key(), config)
+        _, labels = _read_parent_units_and_labels(self.parent.as_key())
+        table["committed_labels"] = [
+            ", ".join(labels.get(int(unit), ())) for unit in table.index
+        ]
+        ids = [lossless_int(unit, "unit_id") for unit in unit_ids]
+        if not ids:
+            raise ValueError("Select at least one unit to inspect.")
+        timeline = (
+            review_timeline(self.parent.as_key())
+            if self.is_hosted
+            else cached_review_timeline(
+                self.parent.as_key(),
+                cache_path=Path(self.uri) / "spyglass_review_timeline.json",
+                curation_uuid=self.parent.curation_uuid,
+            )
+        )
+        recipe = (Sorting & {"sorting_id": self.parent.sorting_id}).fetch1(
+            "display_waveform_params_name"
+        )
+        with curation_analyzer_with_extensions(
+            self.parent,
+            recipe,
+            "display",
+            extra_extensions={
+                name: {}
+                for name in DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
+            },
+        ) as analyzer:
+            view = inspection_view(
+                analyzer,
+                self.display_options,
+                unit_ids=ids,
+                time_range=time_range,
+                timeline=timeline,
+                displayed_unit_properties=[],
+                extra_unit_properties=review_unit_properties(
+                    table, analyzer.unit_ids
+                ),
+            )
+            if include_traces:
+                from spyglass.spikesorting.v2._review_inspection import (
+                    add_trace_inspection,
+                )
+
+                add_trace_inspection(
+                    analyzer, view, ids, time_range, timeline=timeline
+                )
+            coerce_units_table_ids(view)
+        return view
+
+    def commit_panel(self, *, open_browser: bool = True) -> ReviewCommitPanel:
+        """Display a guided preview/commit action; return a panel with its receipt.
+
+        Use ``panel = review.commit_panel()`` after saving the browser draft.
+        Merge commits open the reevaluated child for verification. A no-change
+        review has an explicit "Record reviewed" button.
+        """
+        from spyglass.spikesorting.v2._review_notebook import ReviewCommitPanel
+
+        return ReviewCommitPanel(self, open_browser=open_browser)
 
     def preview_import(self) -> "CurationChangeSet":
         """Read, verify, and diff browser edits without mutating state."""
@@ -500,10 +638,9 @@ class CurationChangeSet:
     def next_step(self) -> str:
         """One line saying where this review stands and what to do next.
 
-        The browser's **Save Annotations** only writes the bundle and
-        **Finalize Curation** only flips a browser flag; nothing reaches
-        Spyglass until ``commit()``. The preview compares the saved
-        annotations with the reviewed PARENT only: it cannot tell whether
+        The browser saves a draft; nothing reaches Spyglass until ``commit()``.
+        The preview compares the saved annotations with the reviewed PARENT
+        only: it cannot tell whether
         an identical diff was already committed (``commit()`` reuses that
         child), so the wording says what is actually known.
         """
@@ -576,12 +713,18 @@ class CurationChangeSet:
         *,
         conflict_resolutions: Mapping[int, tuple[str, ...]] | None = None,
         confirm_no_changes: bool = False,
+        on_commit: Callable[[CurationRef], None] | None = None,
     ) -> "ReviewImportReceipt":
-        """Commit exactly this preview after a UUID + annotation-hash recheck."""
+        """Commit exactly this preview after a UUID + annotation-hash recheck.
+
+        ``on_commit`` receives the durable child before reevaluation. Connected
+        delivery uses it to retain the child's identity if later work fails.
+        """
         return _commit_change_set(
             self,
             conflict_resolutions=conflict_resolutions,
             confirm_no_changes=confirm_no_changes,
+            on_commit=on_commit,
         )
 
 
@@ -652,7 +795,7 @@ def _review_config(
     config = _profile_snapshot(profile)
     config.update(
         {
-            "view_version": 2,
+            "view_version": 4,
             "curation_evaluation_id": str(evaluation.evaluation_id),
             "delivery": {
                 "upload": bool(upload),
@@ -999,6 +1142,7 @@ def _commit_change_set(
     *,
     conflict_resolutions: Mapping[int, tuple[str, ...]] | None,
     confirm_no_changes: bool,
+    on_commit=None,
 ) -> ReviewImportReceipt:
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.figpack_curation import (
@@ -1122,6 +1266,8 @@ def _commit_change_set(
         allow_custom_labels=True,
     )
     child = CurationRef.from_key(child_key)
+    if on_commit is not None:
+        on_commit(child)
     child_status: ReviewStageState = (
         "reused" if child.curation_id in existing_children else "computed"
     )

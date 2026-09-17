@@ -35,7 +35,7 @@ from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v2_metric_curation")
 
-FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_06"
+FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_09"
 
 _PROFILE_CONTENT_FIELDS = (
     "metric_params_name",
@@ -171,9 +171,10 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             "displayed_unit_properties": [
                 "snr",
                 "isi_violation",
-                "firing_rate",
+                "observed_firing_rate_hz",
+                "observed_duration_s",
                 "num_spikes",
-                "presence_ratio",
+                "observed_presence_ratio",
                 "amplitude_cutoff",
                 "nn_isolation",
                 "nn_noise_overlap",

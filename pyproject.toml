@@ -151,16 +151,11 @@ optional-dependencies.spikesorting-v2-matching = [
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports
 ]
 optional-dependencies.spikesorting-v2-curation = [
-  # FigPack web-based curation UI for v2 sorts. EXACT pins: figpack-spike-sorting
-  # is pre-1.0 (0.1.x) and its ``SortingCuration`` kwargs already drifted from
-  # SpikeInterface's figpack backend (SI passes ``label_choices=``, the extension
-  # expects ``default_label_options=``; figpack_curation builds the curation
-  # control directly to work around it). Verified combo: figpack 0.3.20 +
-  # figpack-spike-sorting 0.1.14 + spikeinterface 0.104.x (see
-  # tests/spikesorting/v2/resolver/figpack-runtime.md). Loosen only after
-  # re-verifying the API and curation round trip on a newer release.
+  # Pinned FigPack view/context APIs used by the Spyglass review extension.
+  # Re-verify the browser edit/save/import journey before changing these pins.
   "figpack==0.3.20",
   "figpack-spike-sorting==0.1.14",
+  "ipywidgets>=8,<9", # guided notebook preview, conflict resolution, and commit
 ]
 optional-dependencies.spikesorting-v2-curation-test = [
   # Browser regression tests for the FigPack review journey (Python

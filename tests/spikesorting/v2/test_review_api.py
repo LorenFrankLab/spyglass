@@ -238,3 +238,19 @@ def test_next_step_lines_name_the_state_consistently():
         .next_step()
         .startswith("Result available for analysis: curation 5")
     )
+
+
+def test_configured_lab_label_can_be_added_during_review():
+    from spyglass.spikesorting.v2.review_api import _normalize_review_edits
+
+    profile = _profile()
+    profile.label_options = (*profile.label_options, "lab_cell")
+    labels, _, conflicts, _ = _normalize_review_edits(
+        profile,
+        {1: ["lab_cell"]},
+        [],
+        unit_ids={1},
+        labels_before={},
+    )
+    assert labels[1] == ("lab_cell",)
+    assert conflicts == ()

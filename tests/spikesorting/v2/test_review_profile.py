@@ -65,8 +65,9 @@ def test_review_profile_normalizes_and_validates_ordered_lists():
     assert row["label_options"] == ["accept", "mua", "noise", "reject"]
     with pytest.raises(ValueError, match="not produced"):
         _normalized(displayed_unit_properties=["not_a_metric"])
-    with pytest.raises(ValueError, match="unknown built-in label"):
-        _normalized(label_options=["good"])
+    assert _normalized(label_options=["good"])["label_options"] == ["good"]
+    with pytest.raises(ValueError, match="non-empty"):
+        _normalized(label_options=[""])
     with pytest.raises(ValueError, match="duplicate"):
         _normalized(label_options=["accept", "accept"])
 
@@ -78,6 +79,9 @@ def test_review_profile_property_vocabulary_expands_builtin_outputs():
         "template_metric_columns": ["trough_half_width"],
     }
     assert profile_display_property_vocabulary(metric_row) == (
+        "observed_duration_s",
+        "observed_firing_rate_hz",
+        "observed_presence_ratio",
         "snr",
         "nn_isolation",
         "nn_noise_overlap",
@@ -99,7 +103,12 @@ def test_review_profile_property_vocabulary_matches_pinned_si():
         expected = tuple(metric.metric_columns)
         if metric.metric_name == "isi_violation":
             expected = ("isi_violation", *expected)
-        assert actual == expected, metric.metric_name
+        assert actual[:3] == (
+            "observed_duration_s",
+            "observed_firing_rate_hz",
+            "observed_presence_ratio",
+        )
+        assert actual[3:] == expected, metric.metric_name
 
 
 def test_review_profile_import_mode_reuses_curation_label_policy():
@@ -206,7 +215,14 @@ def test_review_display_options_are_bounded_and_serializable():
     )
 
     default = ReviewDisplayOptions()
-    assert default.max_amplitudes_per_unit == 2000
+    assert default.max_amplitudes_per_unit is None
+    assert default.point_limit("amplitudes", 3600) == 180000
+    assert default.point_limit("raster", 60) == 3000
+    old = ReviewDisplayOptions.from_mapping(
+        {"version": 1, "max_amplitudes_per_unit": 2000}
+    )
+    assert old.point_limit("amplitudes", 3600) == 2000
+    assert old.point_limit("raster", 3600) == 2000
     assert default.as_dict()["version"] == REVIEW_DISPLAY_OPTIONS_VERSION
     assert ReviewDisplayOptions.from_mapping(default.as_dict()) == default
     assert ReviewDisplayOptions.from_mapping(None) == default
@@ -217,7 +233,8 @@ def test_review_display_options_are_bounded_and_serializable():
         }
     )
     assert custom.max_amplitudes_per_unit is None
-    assert "all spikes" in custom.describe()
+    assert "floor(duration × 50)" in custom.describe()
+    assert "all spikes" not in custom.describe()
     for bad in (
         {"max_amplitudes_per_unit": 0},
         {"amplitude_sampling_seed": -1},

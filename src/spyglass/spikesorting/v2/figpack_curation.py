@@ -10,16 +10,10 @@ or saves it, and stores the resulting URI; ``fetch_curation_from_uri`` reads the
 edited labels and merge groups back in the exact shape
 ``CurationV2.insert_curation`` consumes.
 
-The view is built by letting SpikeInterface compose the whole sorting summary
-(``plot_sorting_summary(curation=False, backend="figpack")``) and attaching only
-the ``SortingCuration`` control as a sibling -- SpikeInterface owns the layout,
-while a profile-backed review adds one read-only metrics/suggestions table.
-The analyzer is resolved for the exact committed curation generation, so merged
-units render their real waveforms and correlograms. (SI's
-``plot_sorting_summary(curation=True)`` is not used: released SpikeInterface
-passes ``label_choices=`` while ``figpack-spike-sorting`` expects
-``default_label_options=``; ``_curation_control_accepts_label_choices`` probes
-for the day that upstream mismatch is fixed.)
+SpikeInterface supplies the scientific summary. Spyglass adds raster and
+explicit autocorrelogram tabs, the authoritative evaluation table, and a draft
+control with the profile's label palette. Scientific commits and post-merge
+verification remain in the notebook; the browser saves only annotations.
 
 The ``figpack`` and ``figpack_spike_sorting`` packages are an optional
 dependency (the ``spikesorting-v2-curation`` extra); they are imported lazily so
@@ -34,7 +28,6 @@ import os
 import shutil
 import tempfile
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,6 +46,8 @@ from spyglass.spikesorting.v2._figpack_curation import (
 )
 from spyglass.spikesorting.v2._review_view import (
     coerce_units_table_ids as _coerce_units_table_ids,
+)
+from spyglass.spikesorting.v2._review_view import (
     require_figpack,
 )
 from spyglass.spikesorting.v2._selection_identity import (
@@ -72,7 +67,7 @@ from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.spikesorting.v2.utils import (
     SelectionMasterInsertGuard,
 )
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("spikesorting_v2_figpack_curation")
 
@@ -91,22 +86,6 @@ class FigPackBuildResult:
 def _require_figpack():
     """Return ``(figpack.views, figpack_spike_sorting.views)`` or raise."""
     return require_figpack()
-
-
-def _curation_control_accepts_label_choices() -> bool:
-    """Whether ``SortingCuration`` accepts SI's ``label_choices`` kwarg.
-
-    The attach approach exists because released SpikeInterface calls
-    ``SortingCuration(label_choices=...)`` while ``figpack-spike-sorting`` 0.1.x
-    defines ``default_label_options=``. When upstream aligns, this returns
-    ``True`` and the one-call ``plot_sorting_summary(curation=True)`` path can
-    replace the attach shim. Pure introspection; no view is built.
-    """
-    import inspect
-
-    _, figpack_ss_views = _require_figpack()
-    params = inspect.signature(figpack_ss_views.SortingCuration).parameters
-    return "label_choices" in params
 
 
 def figpack_cache_root() -> Path:
@@ -329,25 +308,6 @@ def _assert_displayed_unit_properties_available(
         )
 
 
-@contextmanager
-def _seeded_numpy_random(seed: int):
-    """Pin numpy's global RNG for SI's display subsampling, then restore it.
-
-    ``AmplitudesWidget(max_spikes_per_unit=...)`` subsamples with the
-    unseeded global ``np.random.choice``; seeding it here (and restoring the
-    prior state) makes the displayed sample deterministic without touching
-    any scientific computation.
-    """
-    import numpy as np
-
-    state = np.random.get_state()
-    np.random.seed(int(seed))
-    try:
-        yield
-    finally:
-        np.random.set_state(state)
-
-
 def _build_curation_view(
     curation_key: dict,
     *,
@@ -359,10 +319,10 @@ def _build_curation_view(
 ):
     """Build the FigPack curation view for a curation (minimal-attach).
 
-    Lets SpikeInterface compose the whole sorting summary over the sort's
+    Composes individual SpikeInterface inspection widgets over the sort's
     display analyzer (ensuring the curation-view extensions and any explicitly
     requested unit-table columns are available), then attaches only the
-    ``SortingCuration`` control as a sibling. ``display_options``
+    Spyglass draft control as a sibling. ``display_options``
     (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
     amplitude sample and the correlogram pair filter -- and is display-only.
 
@@ -375,11 +335,14 @@ def _build_curation_view(
     when the display analyzer carries a same-named property. Returns the
     composed ``figpack.views`` object.
     """
-    import spikeinterface.widgets as sw
-
     from spyglass.spikesorting.v2 import _visualization as _viz
     from spyglass.spikesorting.v2._curation_analyzer import (
         curation_analyzer_with_extensions,
+    )
+    from spyglass.spikesorting.v2._observation_io import review_timeline
+    from spyglass.spikesorting.v2._review_inspection import (
+        defer_time_views,
+        inspection_view,
     )
     from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
     from spyglass.spikesorting.v2._review_unit_properties import (
@@ -418,27 +381,29 @@ def _build_curation_view(
         _assert_displayed_unit_properties_available(
             analyzer, analyzer_properties
         )
-        with _seeded_numpy_random(display.amplitude_sampling_seed):
-            summary = sw.plot_sorting_summary(
-                analyzer,
-                backend="figpack",
-                curation=False,
-                displayed_unit_properties=analyzer_properties,
-                extra_unit_properties=extra_properties,
-                max_amplitudes_per_unit=display.max_amplitudes_per_unit,
-                min_similarity_for_correlograms=(
-                    display.min_similarity_for_correlograms
-                ),
-                generate_url=False,
-                display=False,
-            ).view
+        deferred = defer_time_views(analyzer, display)
+        timeline = review_timeline(curation_key)
+        summary = inspection_view(
+            analyzer,
+            display,
+            timeline=timeline,
+            deferred=deferred,
+            displayed_unit_properties=analyzer_properties,
+            extra_unit_properties=extra_properties,
+            min_similarity_for_correlograms=display.min_similarity_for_correlograms,
+        )
 
     control = curation_control(label_options, seed_labels)
     summary_title = "Sorting summary"
     context = (
         f"Sorting `{curation_key['sorting_id']}`, curation "
         f"`{curation_key['curation_id']}`. {display.describe()}. "
-        "Omitted pairs are filtered from the display, not evidence of no correlation."
+        "Omitted pairs are filtered from the display, not evidence of no correlation. "
+        "Select units and use Inspect selected units / pairs for every pair and "
+        "an exact raster window. Python alternative: "
+        "`review.inspect_units([id1, id2], time_range=(start, stop))`. "
+        "Times are seconds from the start of this sorting recording; concatenated "
+        "recordings use the concatenated timeline."
     )
     if review_table is not None:
         context += " " + review_table.attrs.get("qc_context", "")
@@ -641,7 +606,9 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
     table = pd.concat([actions, metrics], axis=1)
     coverage = evaluation.missing_qc_inputs().reindex(unit_ids)
     table.insert(0, "unavailable_qc", coverage)
-    from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
 
     refractory_ms = QualityMetricParameters.get_isi_threshold_ms(
         evaluation.spec.metric_params_name

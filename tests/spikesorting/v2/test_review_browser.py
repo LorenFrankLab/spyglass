@@ -4,9 +4,9 @@ Composes the production review layout (``_review_view``) over an in-memory
 SpikeInterface analyzer with the official-property unit table
 (``_review_unit_properties``), saves a real FigPack bundle, serves it with
 the production local delivery (``_review_delivery``), and drives headless
-Chromium through the documented sequence: **Curate Figure**, select units
-in the unit table, add / remove labels, propose a merge, **Save
-Annotations**, reload. Assertions are on the ``annotations.json`` the
+Chromium through the local sequence: select units in the unit table, add /
+remove labels, propose a merge, **Save draft**, reload. Assertions are on the
+``annotations.json`` the
 frontend wrote and Spyglass's own parser reads.
 """
 
@@ -22,7 +22,7 @@ from tests.spikesorting.v2 import _browser_review as browser
 
 pytestmark = [pytest.mark.slow]
 
-LABEL_OPTIONS = ["accept", "mua", "noise"]
+LABEL_OPTIONS = ["accept", "mua", "noise", "lab_cell"]
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +30,6 @@ def review_bundle(tmp_path_factory):
     """A saved review bundle over a small synthetic 3-unit analyzer."""
     browser.require_browser()
     import spikeinterface.core as sc
-    import spikeinterface.widgets as sw
 
     from spyglass.spikesorting.v2._figpack_curation import (
         labels_and_merges_to_annotations,
@@ -76,15 +75,15 @@ def review_bundle(tmp_path_factory):
     )
 
     table["unavailable_qc"] = missing_rule_metrics(table, ["snr"])
-    summary = sw.plot_sorting_summary(
+    from spyglass.spikesorting.v2._review_inspection import inspection_view
+    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
+
+    summary = inspection_view(
         analyzer,
-        backend="figpack",
-        curation=False,
+        ReviewDisplayOptions(),
         displayed_unit_properties=[],
         extra_unit_properties=review_unit_properties(table, analyzer.unit_ids),
-        generate_url=False,
-        display=False,
-    ).view
+    )
     view = compose_review_layout(
         summary,
         curation_control(LABEL_OPTIONS, {1: ["accept"], 2: ["noise"]}),
@@ -158,7 +157,8 @@ def test_review_columns_and_controls_are_usable(
         browser.start_curating(page)
         browser.select_units(page, 3)  # select via the metric-bearing row
         assert browser.label_checkbox(page, "accept").is_enabled()
-        assert page.get_by_role("button", name="Finalize Curation").is_enabled()
+        assert page.get_by_role("button", name="Finalize Curation").count() == 0
+        assert page.get_by_role("button", name="Save Annotations").count() == 0
         # The pane collapses to hand the views the full height, and expands
         # again with its controls reachable.
         merge = page.get_by_role("button", name="Merge Selected", exact=True)
@@ -166,6 +166,11 @@ def test_review_columns_and_controls_are_usable(
         merge.wait_for(state="hidden")
         browser.toggle_curation_pane(page)
         merge.wait_for(state="visible")
+        assert browser.label_checkbox(page, "accept").is_enabled()
+        assert page.get_by_role("button", name="Add", exact=True).count() == 0
+        page.get_by_text("Autocorrelograms", exact=True).click()
+        page.get_by_text("Raster (overview)", exact=True).click()
+        browser.wait_for_visible_plot(page)
         assert browser.label_checkbox(page, "accept").is_enabled()
 
 
@@ -181,12 +186,25 @@ def test_browser_edits_reach_annotations_and_survive_reload(
         browser.start_curating(page)
         browser.select_units(page, 3)
         browser.set_label(page, "accept", True)
+        browser.set_label(page, "lab_cell", True)
+        browser.toggle_curation_pane(page)
+        browser.toggle_curation_pane(page)
+        assert browser.label_checkbox(page, "lab_cell").is_checked()
+        browser.set_label(page, "lab_cell", False)
         browser.select_units(page, 2)
         browser.set_label(page, "noise", False)
         browser.select_units(page, 1, 3)
         browser.merge_selected(page)
-        page.get_by_text("Selected units in 1 merge group(s)").wait_for()
+        page.get_by_text("Pending merges:", exact=False).wait_for()
         assert browser.save_annotations(page) in (200, 201)
+        page.get_by_text("Draft saved.", exact=False).wait_for()
+        dialogs = []
+        page.on("dialog", lambda dialog: dialogs.append(dialog.type))
+        page.reload()
+        page.get_by_text("Draft saved.", exact=False).wait_for()
+        assert dialogs == [], (
+            "Saved drafts must not produce an unsaved-edits warning."
+        )
 
     labels, merges = _saved_state(review_bundle)
     # Unit 2's cleared label is an empty list in the saved state (the
@@ -210,12 +228,13 @@ def test_large_review_save_reload(n_units, tmp_path):
     from time import perf_counter
 
     import spikeinterface.core as sc
-    import spikeinterface.widgets as sw
 
     from spyglass.spikesorting.v2._review_delivery import (
         serve_review_bundle,
         stop_review_servers,
     )
+    from spyglass.spikesorting.v2._review_inspection import inspection_view
+    from spyglass.spikesorting.v2._review_profile import ReviewDisplayOptions
     from spyglass.spikesorting.v2._review_view import (
         coerce_units_table_ids,
         compose_review_layout,
@@ -240,15 +259,16 @@ def test_large_review_save_reload(n_units, tmp_path):
             "template_similarity",
         ]
     )
-    summary = sw.plot_sorting_summary(
+    summary = inspection_view(
         analyzer,
-        backend="figpack",
-        curation=False,
-        generate_url=False,
-        display=False,
-        max_amplitudes_per_unit=1000,
+        ReviewDisplayOptions(max_amplitudes_per_unit=1000),
         min_similarity_for_correlograms=0.2,
-    ).view
+        timeline={
+            "excluded": np.array([[2.0, 3.0]]),
+            "mappings": [("synthetic", 0, 6, 100, 106)],
+            "concatenated": False,
+        },
+    )
     view = compose_review_layout(
         summary,
         curation_control(LABEL_OPTIONS),
@@ -272,8 +292,11 @@ def test_large_review_save_reload(n_units, tmp_path):
         start = perf_counter()
         with browser.review_page(url, artifacts=tmp_path) as page:
             result["browser_start_and_load_s"] = perf_counter() - start
+            result["browser_js_heap_bytes_after_load"] = page.evaluate(
+                "performance.memory?.usedJSHeapSize ?? null"
+            )
             assert page.get_by_text(
-                "Commit in Python:", exact=False
+                "Commit and review:", exact=False
             ).is_visible()
             browser.start_curating(page)
             start = perf_counter()
@@ -281,6 +304,9 @@ def test_large_review_save_reload(n_units, tmp_path):
             browser.set_label(page, "accept", True)
             assert browser.save_annotations(page) in (200, 201)
             result["select_label_save_s"] = perf_counter() - start
+            page.get_by_text("Raster (overview)", exact=True).click()
+            browser.wait_for_visible_plot(page)
+            page.screenshot(path=str(tmp_path / "review.png"))
         start = perf_counter()
         with browser.review_page(url, artifacts=tmp_path) as page:
             assert (
@@ -294,3 +320,31 @@ def test_large_review_save_reload(n_units, tmp_path):
         stop_review_servers(bundle)
     (tmp_path / "measurements.json").write_text(json.dumps(result, indent=2))
     print("REVIEW_MEASUREMENT", json.dumps(result))
+
+
+def test_native_toolbar_saves_through_figpack_with_configured_labels(
+    review_bundle, tmp_path
+):
+    """Exercise the hosted control path with a local native FigPack transport."""
+    from urllib.parse import urlencode
+
+    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+
+    url = serve_review_bundle(review_bundle)
+    # A figure URL delegates draft saving to FigPack, as hosted figures do.
+    # Authentication stays upstream; this test writes only to our local bundle.
+    with browser.review_page(
+        url + "?" + urlencode({"figure": url}),
+        artifacts=tmp_path,
+        native_toolbar=True,
+    ) as page:
+        page.get_by_role("button", name="Curate Figure", exact=True).click()
+        browser.select_units(page, 2)
+        browser.set_label(page, "lab_cell", True)
+        assert page.get_by_role("button", name="Finalize Curation").count() == 0
+        assert browser.save_annotations(page, native_toolbar=True) in (
+            200,
+            201,
+        )
+    labels, _ = _saved_state(review_bundle)
+    assert labels[2] == ["lab_cell"]

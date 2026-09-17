@@ -105,6 +105,41 @@ def test_missing_bundle_names_recovery(tmp_path):
         serve_review_bundle(tmp_path / "gone")
 
 
+def test_connected_actions_require_matching_origin_and_review(bundle):
+    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+
+    class Operations:
+        review_id = "pinned-review"
+
+        def start(self, request):
+            return {"status": "running"}
+
+        def close(self):
+            pass
+
+    url = serve_review_bundle(bundle, operation_factory=Operations)
+    for origin, identity, expected in (
+        ("https://unrelated.example", "pinned-review", 403),
+        (url.rstrip("/"), "another-review", 403),
+        (url.rstrip("/"), "pinned-review", 202),
+    ):
+        request = urllib.request.Request(
+            url + "api/operation",
+            data=b'{"action":"preview"}',
+            headers={
+                "Content-Type": "application/json",
+                "Origin": origin,
+                "X-Spyglass-Review": identity,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        assert status == expected
+
+
 def test_review_open_returns_url_without_launching_browser(bundle, monkeypatch):
     """``FigPackReview.open`` serves a local bundle (and only launches a
     browser when asked); a hosted review returns its URL untouched."""

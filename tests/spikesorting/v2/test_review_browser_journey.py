@@ -48,8 +48,6 @@ def _ensure_journey_profile() -> str:
 def test_browser_review_commit_verify_and_select(
     planted_two_unit_sort, curation_evaluation_defaults, tmp_path, monkeypatch
 ):
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
     from spyglass.spikesorting.analysis.v1 import group as group_module
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
     from spyglass.spikesorting.v2._review_delivery import (
@@ -63,6 +61,7 @@ def test_browser_review_commit_verify_and_select(
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.review_api import FigPackReview
     from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_two_unit_sort)
     unit_a, unit_b = sorted(
@@ -79,6 +78,14 @@ def test_browser_review_commit_verify_and_select(
             )
         )
         review = root.start_review(profile, upload=False)
+        detail = review.inspect_units([unit_a], time_range=(0, 0.2))
+        assert [row.unit_id for row in detail.item1.view.rows] == [unit_a]
+        assert "committed_labels" in [
+            column.key for column in detail.item1.view.columns
+        ]
+        detail.save(
+            str(tmp_path / "inspection.figpack"), title="Selected units"
+        )
         url = review.open(open_browser=False)
         assert url.startswith("http://localhost:")
         assert review.open(open_browser=False) == url  # reused delivery
@@ -92,7 +99,7 @@ def test_browser_review_commit_verify_and_select(
                 for h in browser.row_texts(page.get_by_role("row").first)
             ]
             assert page.get_by_text(
-                "Commit in Python:", exact=False
+                "Commit and review:", exact=False
             ).is_visible()
             # Evidence coverage, actions, then the profile's metrics in order.
             assert headers[4:10] == [
@@ -124,7 +131,11 @@ def test_browser_review_commit_verify_and_select(
         assert changes.labels_after[unit_b] == ("accept",)
         assert not changes.label_conflicts  # both contributors: accept
         assert "proposed merges" in changes.summary()
-        receipt = changes.commit()
+        panel = review.commit_panel(open_browser=False)
+        panel.button.click()
+        receipt = panel.receipt
+        assert receipt is not None
+        assert panel.verification_review is not None
         merged = receipt.curation
         assert merged.parent == root
         assert receipt.needs_merge_verification
@@ -159,7 +170,10 @@ def test_browser_review_commit_verify_and_select(
         verification = resumed.preview_import()
         assert not verification.has_changes
         assert "confirm_no_changes" in verification.summary()
-        final_receipt = verification.commit(confirm_no_changes=True)
+        verification_panel = resumed.commit_panel(open_browser=False)
+        assert "Record reviewed" in verification_panel.button.description
+        verification_panel.button.click()
+        final_receipt = verification_panel.receipt
         final_curation = final_receipt.curation
         assert final_curation.parent == merged
         assert not final_receipt.needs_merge_verification
@@ -199,9 +213,11 @@ def test_browser_review_commit_verify_and_select(
             browser.start_curating(page)
             browser.select_units(page, unit_a, unit_b)
             page.get_by_role(
-                "button", name="Unmerge Selected", exact=True
+                "button", name="Undo selected merge", exact=True
             ).click()
-            page.get_by_text("2 unmerged unit(s) selected").wait_for()
+            page.get_by_text("Pending merges:", exact=False).wait_for(
+                state="hidden"
+            )
             assert browser.save_annotations(page) in (200, 201)
         recovery = again.preview_import()
         assert recovery.merge_groups == ()
@@ -258,7 +274,7 @@ def test_browser_review_commit_verify_and_select(
             browser.start_curating(page)
             browser.select_units(page, unit_a, unit_b)
             page.get_by_role(
-                "button", name="Unmerge Selected", exact=True
+                "button", name="Undo selected merge", exact=True
             ).click()
             assert browser.save_annotations(page) in (200, 201)
         undone = review_of_bad.preview_import()
@@ -298,3 +314,157 @@ def test_browser_review_commit_verify_and_select(
         for group_key in created_groups:
             (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
         clear_curations_for(sorting_key)
+
+
+def test_connected_browser_commits_conflict_and_verifies_without_notebook(
+    planted_two_unit_sort, curation_evaluation_defaults, tmp_path
+):
+    import json
+    from time import perf_counter
+
+    from playwright.sync_api import expect
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    first, second = sorted(
+        map(int, (Sorting.Unit & sorting_key).fetch("unit_id"))
+    )
+    root = CurationRef.from_key(CurationV2.insert_curation(sorting_key))
+    review = root.start_review(
+        _ensure_journey_profile(), display_options={"max_initial_points": 1}
+    )
+    initial_url = review.open(open_browser=False)
+    measurements = {}
+    with browser.review_page(
+        initial_url, artifacts=tmp_path / "connected"
+    ) as page:
+        page.get_by_role(
+            "button", name="Preview and commit", exact=True
+        ).wait_for()
+        for name in (
+            "Waveforms",
+            "Spike amplitudes",
+            "Autocorrelograms",
+            "Cross-correlograms",
+            "Electrode geometry",
+        ):
+            expect(page.get_by_text(name, exact=True)).to_be_visible()
+        page.get_by_text("Spike amplitudes", exact=True).click()
+        expect(
+            page.get_by_text("Time-based overview not loaded.", exact=True)
+        ).to_be_visible()
+        page.get_by_text("Waveforms", exact=True).click()
+        browser.select_units(page, first)
+        browser.set_label(page, "accept", True)
+        # Focused evidence is loaded through the service without saving or
+        # replacing the active draft. The trace request stays bounded.
+        page.get_by_label("Start seconds", exact=True).fill("0.1")
+        page.get_by_label("Stop seconds", exact=True).fill("0.3")
+        started = perf_counter()
+        page.get_by_role(
+            "button", name="Inspect selected units / pairs", exact=True
+        ).click()
+        detail = page.get_by_role(
+            "link", name="Open selected-unit inspection", exact=True
+        )
+        expect(detail).to_be_visible(timeout=120000)
+        measurements["focused_bundle_preparation_s"] = perf_counter() - started
+        with page.expect_popup() as popup:
+            detail.click()
+        focused = popup.value
+        started = perf_counter()
+        expect(
+            focused.get_by_text("Spikes on traces", exact=True)
+        ).to_be_visible(timeout=60000)
+        measurements["focused_browser_load_s"] = perf_counter() - started
+        focused.close()
+        assert browser.label_checkbox(page, "accept").is_checked()
+        browser.select_units(page, second)
+        browser.set_label(page, "noise", True)
+        browser.select_units(page, first, second)
+        browser.merge_selected(page)
+        page.get_by_role(
+            "button", name="Preview and commit", exact=True
+        ).click()
+        confirmation = page.get_by_label(
+            "Use these final labels (empty is allowed)", exact=True
+        )
+        expect(confirmation).to_be_visible(timeout=120000)
+        page.get_by_text("accept", exact=True).last.locator("..").get_by_role(
+            "checkbox"
+        ).check()
+        confirmation.check()
+        started = perf_counter()
+        page.get_by_role(
+            "button", name="Commit and inspect merged units", exact=True
+        ).click()
+        page.wait_for_url(lambda url: str(url) != initial_url, timeout=180000)
+        expect(browser.unit_row(page, second + 1)).to_be_visible(timeout=60000)
+        measurements["merge_evaluate_and_open_s"] = perf_counter() - started
+        with pytest.raises(ValueError, match="not completed"):
+            review.result()
+        page.get_by_role(
+            "button", name="Preview and commit", exact=True
+        ).click()
+        verify = page.get_by_role(
+            "button", name="Record reviewed — no changes", exact=True
+        )
+        expect(verify).to_be_visible(timeout=120000)
+        verify.click()
+        expect(
+            page.get_by_text(
+                "Review complete. This curation is ready for analysis.",
+                exact=True,
+            )
+        ).to_be_visible(timeout=120000)
+        final = review.result()
+        assert final.parent.parent == root
+        assert [
+            int(u) for u in (CurationV2.Unit & final.as_key()).fetch("unit_id")
+        ] == [second + 1]
+        page.reload()
+        expect(
+            page.get_by_text(
+                "Review complete. This curation is ready for analysis.",
+                exact=True,
+            )
+        ).to_be_visible()
+        assert review.result() == final
+        # Recover a mistaken merge through its original draft, then explicitly
+        # replace the result branch. No notebook mutation is involved.
+        page.get_by_role(
+            "button", name="Review parent branch", exact=True
+        ).click()
+        page.wait_for_url(initial_url, timeout=120000)
+        expect(page.get_by_text("Draft saved.", exact=False)).to_be_visible()
+        expect(browser.unit_row(page, first)).to_be_visible()
+        browser.select_units(page, first, second)
+        page.get_by_role(
+            "button", name="Undo selected merge", exact=True
+        ).click()
+        page.get_by_role(
+            "button", name="Preview and commit", exact=True
+        ).click()
+        commit = page.get_by_role("button", name="Commit curation", exact=True)
+        expect(commit).to_be_visible(timeout=120000)
+        commit.click()
+        expect(
+            page.get_by_text(
+                "Review complete. This curation is ready for analysis.",
+                exact=True,
+            )
+        ).to_be_visible(timeout=120000)
+        replacement = review.result()
+        assert replacement.parent == root
+        assert replacement != final
+        assert sorted(
+            map(int, (CurationV2.Unit & replacement.as_key()).fetch("unit_id"))
+        ) == [first, second]
+    (tmp_path / "connected-measurements.json").write_text(
+        json.dumps(measurements, indent=2)
+    )

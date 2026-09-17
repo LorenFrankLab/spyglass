@@ -1,7 +1,7 @@
 """Compose the FigPack review view: SI sorting summary + curation control.
 
 The pieces of the review figure that do not need a database: the
-``SortingCuration`` control seeded with the committed labels, and the
+Spyglass draft control seeded with the committed labels, and the
 vertical layout that gives that control a fixed, reachable strip under the
 SpikeInterface sorting summary. ``figpack_curation._build_curation_view``
 (schema-bound) resolves the analyzer and the review table, then composes
@@ -21,17 +21,18 @@ from spyglass.spikesorting.v2._figpack_curation import FIGPACK_INSTALL_HINT
 #: ``stretch``, which collapsed the control to its title and made its buttons
 #: unclickable; the pane is collapsible so the scientific views can take the
 #: whole height while inspecting.
-CURATION_CONTROL_HEIGHT = 280
+CURATION_CONTROL_HEIGHT = 150
 
 CURATION_PANE_TITLE = "Curation"
 REVIEW_HELP = (
-    "**Edit:** Curate Figure → select units → labels or Merge Selected. "
-    "**Save Annotations** saves edits to this bundle. **Finalize Curation** "
-    "sets a browser flag. **Commit in Python:** `preview_import()` → `commit()`.\n\n"
-    "Metrics describe the committed curation; pending merges do not update them. "
-    "After committing a merge, inspect its reevaluated child with `continue_review()`. "
-    "Blank metrics are unavailable, not zero. An unflagged unit is not necessarily "
-    "accepted; exclusion labels override acceptance in the shipped selection policies."
+    "**Edit:** select units → labels or Merge Selected. **Save draft** saves "
+    "browser edits; it does not commit a curation. For hosted figures, the "
+    "authenticated **Save Annotations** toolbar action also saves a draft. "
+    "**Commit and review:** use **Preview and commit** in a connected local review, "
+    "or `review.commit_panel()` in the notebook.\n\n"
+    "Pending merges do not update metrics. Committing reevaluates merged "
+    "units and opens their verification review. Blank metrics are unavailable, not "
+    "zero. Exclusion labels override acceptance in the shipped selection policies."
 )
 
 
@@ -50,24 +51,40 @@ def require_figpack():
 
 
 def curation_control(label_options, seed_labels=None):
-    """The ``SortingCuration`` control seeded with committed labels.
+    """The Spyglass draft control seeded with committed labels.
 
     ``mergeGroups`` starts empty on purpose: applied merge provenance is
     shown in the unit table (``merged_from``), and only NEW browser edits may
     populate the control's merge groups.
     """
-    _, figpack_ss_views = require_figpack()
-    return figpack_ss_views.SortingCuration(
-        default_label_options=list(label_options),
-        curation={
-            "labelsByUnit": {
-                str(unit_id): list(labels)
-                for unit_id, labels in (seed_labels or {}).items()
-            },
-            "mergeGroups": [],
-            "isClosed": False,
-            "labelChoices": list(label_options),
-        },
+    from pathlib import Path
+
+    import figpack
+
+    extension = figpack.FigpackExtension(
+        name="spyglass-review",
+        javascript_code=Path(__file__)
+        .with_name("_review_controls.js")
+        .read_text(),
+        version="1.0.0",
+    )
+
+    class ReviewControls(figpack.ExtensionView):
+        def write_to_zarr_group(self, group):
+            super().write_to_zarr_group(group)
+            group.attrs["label_options"] = list(label_options)
+            group.attrs["curation"] = {
+                "labelsByUnit": {
+                    str(unit_id): list(labels)
+                    for unit_id, labels in (seed_labels or {}).items()
+                },
+                "mergeGroups": [],
+                "isClosed": False,
+                "labelChoices": list(label_options),
+            }
+
+    return ReviewControls(
+        extension=extension, view_type="spyglass.ReviewControls"
     )
 
 
@@ -91,8 +108,8 @@ def compose_review_layout(
                     font_size=12,
                 ),
                 title="Review instructions and QC (scroll for details)",
-                min_size=130,
-                max_size=130,
+                min_size=60,
+                max_size=60,
                 collapsible=True,
             ),
             figpack_views.LayoutItem(
