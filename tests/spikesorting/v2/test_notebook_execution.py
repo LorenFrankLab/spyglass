@@ -97,7 +97,8 @@ def _execute_notebook(ipynb_path: Path, parameters: dict) -> dict:
             continue
         source = "".join(cell["source"])
         exec(
-            compile(source, f"{ipynb_path.name}#cell{index}", "exec"), namespace
+            compile(source, f"{ipynb_path.name}#cell{index}", "exec"),
+            namespace,
         )
         if "parameters" in cell.get("metadata", {}).get("tags", []):
             exec(
@@ -305,7 +306,11 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch):
     missing = max(expected_ids) + 1
     namespace["target_sort_group_ids"].append(missing)
     namespace["session_results"].append(
-        {"sort_group_id": missing, "outcome": "failed", "error": "test failure"}
+        {
+            "sort_group_id": missing,
+            "outcome": "failed",
+            "error": "test failure",
+        }
     )
     assert namespace["assemble_population"]()[0] is None
     namespace["omitted_sort_group_ids"].append(missing)
@@ -521,6 +526,8 @@ def test_targeted_inspection_and_metric_filter_use_final_units(
             "spike_times": spikes,
             "selected_unit_ids": identities,
             "snr_threshold": 0.0,
+            "analysis_policy": "all_units",
+            "select_units_for_analysis": select_units_for_analysis,
         }
         book = json.loads(
             (_NOTEBOOKS / "10_Spike_SortingV2_Curation.ipynb").read_text()
@@ -538,14 +545,12 @@ def test_targeted_inspection_and_metric_filter_use_final_units(
                 )
         assert namespace["final_evaluation"].curation == ref
         assert set(namespace["final_evaluation"].metrics.index) == set(units)
-        # The reusable example joins IDs (not row positions) and excludes NaN.
-        synthetic = pd.DataFrame({"snr": [np.nan, 8.0]}, index=units[::-1])
-        filtered, chosen = namespace["filter_selected_spikes"](
-            spikes, identities, synthetic, threshold=5.0
+        selection = namespace["metric_selection"]
+        _, selected = selection.fetch_spike_data(return_unit_ids=True)
+        assert selected == namespace["filtered_unit_ids"]
+        assert selection.selection_provenance["evaluation_id"] == str(
+            namespace["final_evaluation"].evaluation_id
         )
-        assert len(filtered) == 1 and [row["unit_id"] for row in chosen] == [
-            units[0]
-        ]
         assert namespace["analysis_provenance"]["curation_uuid"] == str(
             ref.curation_uuid
         )

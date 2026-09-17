@@ -67,7 +67,7 @@ the existing DataJoint primary keys:
     existing rows take the `error` default, while the shipped rule sets record
     `pass` so a low-spike NaN cannot abort a run.
 - `CurationReviewProfile` persists one immutable metric/rule/display/label
-    bundle. `initialize_v2_defaults()` installs `franklab_hippocampus_2026_06`.
+    bundle. `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09`.
 - `CurationV2.created_at` / `created_by` record real lifecycle metadata. The
     additive defaults cover pre-existing preproduction rows; historical
     authorship is not reconstructed.
@@ -192,6 +192,40 @@ declares their net-new tables without changing either recipe table.
     not need v1 sorter names pay nothing.
 
 ## 2. What you query differently
+
+### Updating a preproduction v2 database for observed time and browser curation
+
+New databases declare the current schema automatically. For an existing
+**development** database, first preserve local review bundles (including
+`annotations.json` and `spyglass_curation.json`) and their review IDs. Do not
+apply these development steps to a production database.
+
+- Add `QualityMetricParameters.observed_presence_bin_duration_s` (float, default
+  60) and `CurationEvaluationSelection.observation_version` (int, default 0),
+  using the corresponding table's `.alter()` after reviewing its SQL. Version 0
+  identifies historical evaluations; new `insert_selection` calls explicitly
+  use version 1 and create new evaluation identities. The metric-parameter
+  normalization schema is now version 2.
+- Call `initialize_v2_defaults()` to install the new immutable
+  `franklab_hippocampus_2026_09` review profile. Existing named profiles remain
+  unchanged. Reevaluate a chosen curation and start a new review to get the
+  observed-time columns and new view composition (view version 3).
+- Saved display version 1 retains its explicit fixed point caps when resumed.
+  New display version 2 uses duration-scaled 50 Hz budgets, optionally limited
+  by explicit caps. Do not overwrite an old review's identity sidecar or copy
+  annotations onto a different curation: resume/import the old draft through
+  its original review, commit it, then review that committed child with the
+  new profile.
+- Newly created `SortedSpikesGroup.UnitSelection` snapshots include observed
+  intervals in `selection_provenance`; no extra part-table column is required.
+  Use a new group name to create a snapshot for a previously selected curation.
+  Existing groups retain their frozen membership and report unknown coverage
+  where observation snapshots are absent.
+
+The connected local browser writes operation/result journals beside the saved
+bundle, without a workflow-status table. Hosted bundles still require the
+notebook import path. See [observed-time behavior](./SpikeSortingV2.md#observed-time-metrics-and-downstream-analysis)
+for metric definitions, bin validity, and decoder restrictions.
 
 - **No `recording_id`-keyed `IntervalList` row.** v2 does not persist the
     valid-times range on the `Recording` row (it stores only `duration_s`). The
@@ -398,9 +432,8 @@ breaking-changes subsection):
     the tight parity reference.
 
 The whole-session and curation notebooks now show the complete population
-handoff and detailed inspection routes. Additional metric predicates can filter
-fetched data with an exact evaluation/curation record; they do not change stored
-decoding-group membership. Native split/per-spike edits and Phy edit re-import
+handoff and detailed inspection routes. Metric predicates passed to `select_units_for_analysis` with an explicit
+evaluation persist the selected population; decoding reads the same membership. Native split/per-spike edits and Phy edit re-import
 remain unsupported.
 
 Concat selections now require explicit per-member artifact detection IDs (or

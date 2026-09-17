@@ -67,6 +67,7 @@ review_group_id = None  # set one group after reading the batch report
 open_review_in_browser = False
 commit_group_review = False
 commit_group_verification = False
+use_group_browser_result = False  # True after the connected browser review finishes
 # Deliberate omissions are reported as a PARTIAL population.
 omitted_sort_group_ids = []
 # -
@@ -287,13 +288,15 @@ if review_group_id is not None:
     review_parent = final_curations.get(
         review_group_id, successful_runs[review_group_id].auto_labeled_curation
     )
-    group_review = review_parent.start_review("franklab_hippocampus_2026_06")
+    group_review = review_parent.start_review("franklab_hippocampus_2026_09")
     print(group_review.summary())
     print(group_review.open(open_browser=open_review_in_browser))
 
-# **Stop to inspect and edit.** Save Annotations stores bundle edits; Finalize
-# changes a browser flag. Neither creates a scientific curation. After saving,
-# preview below, then set `commit_group_review=True` to commit.
+# **Stop to inspect and edit.** In a connected local browser use **Preview and
+# commit**, then inspect and record any merged-child verification. After it
+# finishes, set `use_group_browser_result=True` and run the handoff below.
+# **Save draft** retains unfinished edits. The following cells are the optional
+# notebook/script alternative (also used for hosted figures).
 
 group_changes = None
 if group_review is not None:
@@ -339,6 +342,9 @@ if group_verification is not None and commit_group_verification:
     else:
         final_curations[review_group_id] = verified_receipt.curation
         group_verification = None
+
+if use_group_browser_result:
+    final_curations[review_group_id] = group_review.result()
 
 # Rerun this report as you finish groups. A zero-unit sort is a completed
 # computation, but contributes no units. Explicitly omit a failed/unwanted
@@ -410,7 +416,9 @@ def assemble_population():
             raise ValueError(
                 f"Group {group} needs a curation of its successful run."
             )
-        receipts[group] = select_units_for_analysis(ref, policy=analysis_policy)
+        receipts[group] = select_units_for_analysis(
+            ref, policy=analysis_policy
+        )
         print(f"Group {group}:\n{receipts[group].summary()}")
     key = {
         "nwb_file_name": nwb_file_name,
@@ -418,6 +426,18 @@ def assemble_population():
         "unit_filter_params_name": analysis_policy,
     }
     members = {receipt.curation.merge_id for receipt in receipts.values()}
+    # Preserve each receipt's frozen population when combining sort groups.
+    snapshots = {}
+    for receipt in receipts.values():
+        for selected_group in receipt.groups:
+            stored = (
+                SortedSpikesGroup.UnitSelection
+                & dict(selected_group.group_key)
+            ).fetch1()
+            snapshots[selected_group.merge_id] = {
+                "selected_unit_ids": list(stored["selected_unit_ids"]),
+                "selection_provenance": stored["selection_provenance"],
+            }
     existing = SortedSpikesGroup & {
         "nwb_file_name": nwb_file_name,
         "sorted_spikes_group_name": population_name,
@@ -427,7 +447,20 @@ def assemble_population():
         stored_members = set(
             (SortedSpikesGroup.Units & key).fetch("spikesorting_merge_id")
         )
-        if stored_policies != {analysis_policy} or stored_members != members:
+        stored_snapshots = {
+            row["spikesorting_merge_id"]: {
+                "selected_unit_ids": list(row["selected_unit_ids"]),
+                "selection_provenance": row["selection_provenance"],
+            }
+            for row in (SortedSpikesGroup.UnitSelection & key).fetch(
+                as_dict=True
+            )
+        }
+        if (
+            stored_policies != {analysis_policy}
+            or stored_members != members
+            or stored_snapshots != snapshots
+        ):
             raise ValueError(
                 "Population name already has different members or policy; choose a new name."
             )
@@ -437,6 +470,7 @@ def assemble_population():
             nwb_file_name,
             analysis_policy,
             keys=[{"spikesorting_merge_id": merge_id} for merge_id in members],
+            unit_selections=snapshots,
         )
     spikes, identities = SortedSpikesGroup.fetch_spike_data(
         key, return_unit_ids=True
@@ -449,7 +483,9 @@ def assemble_population():
     actual = {
         (row["spikesorting_merge_id"], row["unit_id"]) for row in identities
     }
-    assert actual == expected, "Population differs from the per-group receipts."
+    assert (
+        actual == expected
+    ), "Population differs from the per-group receipts."
     print(
         (
             "PARTIAL population; omitted groups:"

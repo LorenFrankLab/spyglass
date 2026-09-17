@@ -167,20 +167,19 @@ without `auto_curate=True` leaves it `None` and gives you only
 `start_review` evaluates the pinned curation with a named review profile and
 saves a seeded FigPack bundle (local by default). `review.open()` serves that
 exact bundle from your kernel at `http://localhost:<port>/` and returns the URL.
-In the browser: **Curate Figure**, select units in the unit table (its columns
+In the browser: select units in the unit table (its columns
 are the profile's official metrics and the rule set's proposals for the curation
 under review), tick labels or **Merge Selected** in the Curation pane, then
-**Save Annotations** (**Finalize Curation** is only a browser flag; it commits
-nothing). Requires the `spikesorting-v2-curation` extra.
+**Preview and commit**. **Save draft** keeps unfinished edits. Hosted figures use **Curate Figure** and **Save Annotations**
+for authenticated draft saving. Requires the `spikesorting-v2-curation` extra.
 
 ```python
 from spyglass.spikesorting.v2.pipeline import FigPackReview
 
 review = run.start_review(
-    "franklab_hippocampus_2026_06",  # review profile: metrics + rules + columns
+    "franklab_hippocampus_2026_09",  # review profile: metrics + rules + columns
     source="auto_labeled",
     upload=False,
-    display_options={"max_amplitudes_per_unit": 2000},  # display budget only
 )
 url = review.open()  # serves the bundle; opens the browser
 print(review.review_id, url)  # open_browser=False just returns the URL
@@ -189,38 +188,35 @@ print(review.review_id, url)  # open_browser=False just returns the URL
 # and display budget come back from the persisted identity, and open() serves
 # the same bundle again -- saved edits included.
 review = FigPackReview.resume(review.review_id)
-changes = review.preview_import()  # reads the saved annotations.json
-print(changes.summary())  # labels +/-, merges, counts, conflicts
-receipt = changes.commit()  # or commit(confirm_no_changes=True)
-
-# A merge is re-evaluated with the same profile; the merged child is NOT the
-# result until you have looked at it. Open the merged units and STOP here --
-# open() does not wait. A label-only review has nothing to verify.
-pending_verification = None
-if receipt.needs_merge_verification:
-    pending_verification = receipt.continue_review()
-    pending_verification.open()
-    final_curation = None  # pending until the look is committed
-else:
-    final_curation = receipt.curation  # the committed child (labels + merges)
+review.open()
 ```
 
-If a verification is pending: inspect the merged units (edit and **Save
-Annotations** if one is wrong), then, in a later cell or session, commit that
-look explicitly. Run this block again if the commit imports another merge.
+In the local browser, click **Preview and commit**, then **Commit curation**,
+**Commit and inspect merged units**, or **Record reviewed — no changes**.
+For conflicting merge labels, the preview shows the
+contributor IDs and lets you choose the final labels. A merge is reevaluated
+with the same profile and opens a new review focused on the merged units.
+
+Inspect that child and record its review in the browser. Further merges repeat
+the same sequence. Use **Review parent branch** to recover a mistaken merge,
+undo its draft merge, and commit an explicit replacement. When finished:
 
 ```python
-if pending_verification is not None:
-    verification = FigPackReview.resume(pending_verification.review_id)
-    changes = verification.preview_import()
-    verification_receipt = changes.commit(confirm_no_changes=not changes.has_changes)
-    if verification_receipt.needs_merge_verification:
-        pending_verification = verification_receipt.continue_review()
-        pending_verification.open()  # another merge: inspect, run again
-    else:
-        pending_verification = None
-        final_curation = verification_receipt.curation
+final_curation = review.result()
 ```
+
+This accessor follows the recorded verification chain and refuses an unfinished
+review. It survives reloads and resuming the review in a new Python process.
+Hosted bundles have no compute service: use `panel = review.commit_panel()`
+after saving their draft, then follow `panel.receipt` and any verification review.
+The same panel and explicit `preview_import()` / `commit()` API remain available
+as local alternatives.
+
+Select units and use **Inspect selected units / pairs** for every selected CCG
+pair; enter a time window for an exact raster and, up to 10 seconds, spikes on
+traces. **Time and sampling** explains the display coordinates and original
+session mapping. Raster and amplitude budgets default to `floor(duration_s * 50)`
+points per unit, matching v1. Large time plots load only when explicitly requested.
 
 Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port> host`)
 and open the same `localhost` URL locally -- the frontend enables editing only
@@ -313,8 +309,9 @@ drift QC and motion correction are different operations. Concat detects and
 masks each member before motion correction; Kilosort's shipped no-mask preset
 does not reject artifacts merely by correcting drift.
 
-Use `review.summary()` before opening the browser. Save Annotations saves bundle
-edits; Finalize sets a browser flag; Python preview/commit creates the curation.
+Use `review.summary()` before opening the browser. Save draft saves bundle
+edits; Preview and commit creates the curation in a connected local browser.
+The notebook commit panel remains an alternative.
 Pending merges still show parent metrics. Inspect the reevaluated child before
 choosing it for analysis. `unavailable_qc` names missing inputs for enabled
 rules; missing-policy pass means unflagged, not good. `accept` plus a deny label

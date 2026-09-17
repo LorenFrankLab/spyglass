@@ -363,9 +363,12 @@ auto_labeled
 # fresh process -- the same parent generation, profile snapshot, evaluation and
 # display budget. `review.open()` serves the bundle from this kernel at a
 # `http://localhost:<port>/` URL and returns it (`open_browser=False` only
-# prints it); in the browser, **Curate Figure**, select units, edit labels /
-# merges, **Save Annotations**. `preview_import()` then shows exactly those
-# saved edits, and `.commit()` writes a new child curation. The full
+# prints it). Select units, edit labels / merges, then **Preview and commit**.
+# Merge commits open a reevaluated child to inspect and record as reviewed.
+# **Save draft** keeps unfinished edits. After completing the browser sequence,
+# `review.result()` returns the exact reviewed curation for analysis. Hosted
+# figures use **Curate Figure**, **Save Annotations**, and the notebook commit
+# panel instead. The full
 # walkthrough -- commit, merged-unit verification, and handing the reviewed
 # result to analysis -- is the [Curation](./10_Spike_SortingV2_Curation.ipynb)
 # notebook. The review packages are optional
@@ -379,10 +382,9 @@ from spyglass.spikesorting.v2.pipeline import FigPackReview
 
 if importlib.util.find_spec("figpack") is not None:
     review = auto_summary.start_review(
-        "franklab_hippocampus_2026_06",
+        "franklab_hippocampus_2026_09",
         source="auto_labeled",
         upload=False,
-        display_options={"max_amplitudes_per_unit": 2000},
     )
     print("Open in a browser:", review.open(open_browser=False))
     reopened = FigPackReview.resume(review.review_id)
@@ -415,7 +417,10 @@ else:
 # default policy, or choose `v2_unflagged_units` to state explicitly that
 # rule-passing, never-reviewed units count. Unlabeled units are excluded by the
 # `accepted` policies and listed on the receipt either way. Pass the curation
-# you actually reviewed.
+# you actually reviewed: after the browser sequence, use
+# `select_units_for_analysis(review.result())`. The executable example below
+# explicitly selects the automatic, unreviewed population so the notebook can
+# also run without an interactive browser session.
 
 # +
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis

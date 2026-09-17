@@ -157,7 +157,7 @@ def main():
         help="Private Spyglass base dir (must sit under a 'tests' directory).",
     )
     ap.add_argument("--out-dir", default=str(HERE))
-    ap.add_argument("--profile", default="franklab_hippocampus_2026_06")
+    ap.add_argument("--profile", default="franklab_hippocampus_2026_09")
     ap.add_argument("--sort-group-id", type=int, default=None)
     args = ap.parse_args()
 

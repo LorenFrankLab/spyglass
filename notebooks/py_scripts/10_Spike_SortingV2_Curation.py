@@ -55,9 +55,11 @@ nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
-review_profile = "franklab_hippocampus_2026_06"
+review_profile = "franklab_hippocampus_2026_09"
 # Keep run-all/headless execution safe. Set True interactively when ready.
 open_review_in_browser = False
+use_connected_browser_result = False  # True after completing the local browser review
+use_notebook_commit_panel = False  # optional alternative, required for hosted drafts
 commit_browser_review = False  # commit the previewed browser edits
 commit_merge_verification = False  # commit the post-merge verification review
 # Analysis population policy for the final handoff (section 4).
@@ -198,7 +200,11 @@ if run_custom_annotation_example:
     )
     scale = max(1, max((int(row["n_spikes"]) for row in unit_rows), default=1))
     custom_values = pd.DataFrame(
-        {"custom_score": [float(row["n_spikes"]) / scale for row in unit_rows]},
+        {
+            "custom_score": [
+                float(row["n_spikes"]) / scale for row in unit_rows
+            ]
+        },
         index=pd.Index(
             [int(row["unit_id"]) for row in unit_rows], name="unit_id"
         ),
@@ -233,7 +239,7 @@ if run_custom_annotation_example:
 #
 # In the browser:
 #
-# 1. **Curate Figure** (bottom bar) enables editing.
+# 1. Local reviews are ready to edit; hosted figures use **Curate Figure**.
 # 2. Select units in the unit table. Its columns are the profile's official
 #    evaluation metrics, any annotation columns, the rule set's
 #    `proposed_labels` / `proposed_merge_groups`, and `merged_from` (applied
@@ -242,9 +248,19 @@ if run_custom_annotation_example:
 #    after commit shows those).
 # 3. In the **Curation** pane, tick/untick labels for the selected units, or
 #    select two or more and **Merge Selected**.
-# 4. **Save Annotations**. (**Finalize Curation** is only a browser state
-#    flag: it neither saves nor commits anything to Spyglass.)
-# 5. Back here: preview, then commit.
+# 4. **Preview and commit**, choose final labels for any conflicting merge,
+#    and commit. **Save draft** keeps unfinished edits.
+# 5. If merges were committed, inspect the child that opens and record its
+#    review in the browser. **Review parent branch** recovers a mistaken merge.
+# 6. Set `use_connected_browser_result=True` after completing the review. The
+#    handoff cell below reads `review.result()` and refuses an unfinished review.
+#
+# Select units and use **Inspect selected units / pairs** for all their CCGs.
+# Enter a window for an exact raster and, up to 10 seconds, spikes on traces.
+# **Time and sampling** maps display seconds to original session seconds;
+# red bands show excluded time. Default raster/amplitude budgets match v1's
+# `floor(duration_s * 50)` points per unit. Large time plots load on request.
+# Hosted figures save with **Save Annotations** and use the notebook alternative.
 #
 # Remote kernel: forward the port (`ssh -L <port>:localhost:<port> host`) and
 # open the same `localhost` URL on your machine -- the frontend enables local
@@ -278,12 +294,26 @@ else:
         "the 'spikesorting-v2-curation' extra to review in a browser."
     )
 
-# After **Save Annotations**, re-run from here. The preview is mutation-free:
+# Optional notebook/script alternative after **Save draft**. The preview is mutation-free:
 # it reads the saved `annotations.json`, re-verifies the review identity, and
 # reports the diff -- label additions/removals, proposed merges, the resulting
 # unit count, contributor-label conflicts a merge would create, and sibling
 # children other reviewers committed meanwhile. Losing the Python variable is
 # harmless: resume from the printed review id.
+
+# The guided route previews the saved draft, provides label choices for each
+# conflicting merge, and opens the reevaluated child after committing. A
+# no-change review has an explicit **Record reviewed** button. Run this cell
+# after saving a draft, then click its action. Nothing commits during run-all.
+
+panel = (
+    review.commit_panel(open_browser=open_review_in_browser)
+    if review is not None and use_notebook_commit_panel
+    else None
+)
+
+# After clicking, run the following cells to collect the receipt. The explicit
+# preview/commit API remains available below for scripted workflows.
 
 browser_changes = None
 if review is not None:
@@ -313,8 +343,14 @@ if review is not None:
 # lands, `final_curation` is the reviewed parent itself.
 
 final_curation = root_curation if review is None else review.parent
-browser_receipt = None
-pending_verification = None  # a review over merged units awaiting your look
+browser_receipt = panel.receipt if panel is not None else None
+pending_verification = panel.verification_review if panel is not None else None
+if browser_receipt is not None:
+    final_curation = (
+        None
+        if browser_receipt.needs_merge_verification
+        else browser_receipt.curation
+    )
 if browser_changes is not None and commit_browser_review:
     conflict_resolutions = {}
     browser_receipt = browser_changes.commit(
@@ -335,6 +371,26 @@ if browser_changes is not None and commit_browser_review:
         )
     else:
         final_curation = browser_receipt.curation
+
+# For the guided route, inspect the opened child, save any edits, and run this
+# cell to create its verification action. The same panel supports further merges.
+
+verification_panel = (
+    pending_verification.commit_panel(open_browser=open_review_in_browser)
+    if pending_verification is not None
+    else None
+)
+
+# After clicking the verification action, run this cell to select its result.
+
+if verification_panel is not None and verification_panel.receipt is not None:
+    verification_receipt = verification_panel.receipt
+    pending_verification = verification_panel.verification_review
+    final_curation = (
+        None
+        if verification_receipt.needs_merge_verification
+        else verification_receipt.curation
+    )
 
 # Inspect the merged units in that second review (their `merged_from` column
 # names the contributors). If they look right, save nothing, THEN set
@@ -387,6 +443,14 @@ def require_verified_result():
 # -
 
 
+# For the connected local workflow, retrieve its explicitly verified result.
+# Set the flag only after completing the browser actions; this accessor never
+# silently substitutes the latest child or a still-pending merge.
+
+if use_connected_browser_result:
+    final_curation = review.result()
+    pending_verification = None
+
 # ### 3-recover. Undo a committed merge that was wrong (opt-in)
 #
 # Replace `None` below with the receipt that committed the mistaken merge:
@@ -394,7 +458,8 @@ def require_verified_result():
 # `verification_receipt` for a later merge. This opens that merge's own
 # review, whose bundle still holds your other saved edits.
 
-bad_merge_receipt = None  # replace with browser_receipt or verification_receipt
+# Replace with browser_receipt or verification_receipt.
+bad_merge_receipt = None
 recovery_review = None
 if bad_merge_receipt is not None:
     recovery_review = bad_merge_receipt.changes.review
@@ -405,7 +470,7 @@ if bad_merge_receipt is not None:
     )
 
 # **Stop here to edit.** Select only the mistaken merge's units,
-# **Unmerge Selected**, and **Save Annotations**. Other valid merges and
+# **Undo selected merge**, and **Save draft**. Other valid merges and
 # label edits can stay. After saving, run the next cell to preview the
 # correction; it does not commit anything.
 
@@ -625,57 +690,33 @@ if inspection_pair:
 # names missing inputs needed by the enabled rules. With missing-policy pass,
 # a blank metric can leave a unit unflagged; it does not establish quality.
 #
-# Artifact intervals are stored in NWB `obs_intervals`. SI's duration-based
-# quality metrics use the analyzer's full sample timeline (including zeroed
-# artifacts); they are not rates over valid observation time. Shared decoding
-# accessors also require the caller to restrict analysis times to valid
-# intervals; zeroed periods must not be interpreted as neural silence.
+# Artifact intervals are stored in NWB `obs_intervals`. The standard review
+# displays `observed_firing_rate_hz`, `observed_presence_ratio`, and
+# `observed_duration_s`; raw SI duration metrics retain SI's full-timeline
+# definitions. `selection.observation` exposes the frozen population's usable
+# time. Sorted-spikes decoding intersects encoding/decoding intervals with that
+# time; binned counts distinguish excluded bins (NaN) from observed silence.
 
 # ### Additional SNR selection for this analysis only
 #
-# Labels determine the stored selection group. An additional metric predicate
-# must use an evaluation of the EXACT final curation and join by unit ID, not
-# row position. Missing required SNR values are excluded. Record the selected
-# identities and predicate with your output. A region condition can similarly
-# join curated unit metadata by ID; this example does not invent a region label.
-#
-# This filters returned arrays only. It does not change `SortedSpikesGroup`
-# membership or subsequent decoding consumers. Do not mark a good unit `reject`
-# just because it fails one analysis's population preference.
+# Add analysis-specific metric criteria to the chosen label policy. The exact
+# evaluation must belong to `final_curation`; missing metric values fail the
+# predicate. The resulting membership is persisted, so decoding and fetching
+# use the same units. A good unit need not be labeled `reject` merely because
+# it fails one analysis's population preference.
 
-
-# +
-def filter_selected_spikes(spikes, identities, metrics, *, threshold):
-    snr = pd.to_numeric(metrics["snr"])
-    eligible = set(snr.index[np.isfinite(snr) & (snr >= threshold)])
-    keep = [
-        i
-        for i, identity in enumerate(identities)
-        if identity["unit_id"] in eligible
-    ]
-    return [spikes[i] for i in keep], [identities[i] for i in keep]
-
-
-filtered_spikes, filtered_unit_ids = filter_selected_spikes(
-    spike_times,
-    selected_unit_ids,
-    final_evaluation.metrics,
-    threshold=snr_threshold,
+metric_selection = select_units_for_analysis(
+    final_curation,
+    policy=analysis_policy,
+    evaluation=final_evaluation,
+    unit_criteria={"snr": {">=": snr_threshold}},
 )
-analysis_provenance = {
-    "curation_uuid": str(final_curation.curation_uuid),
-    "evaluation_id": str(final_evaluation.evaluation_id),
-    "predicate": {"snr_gte": snr_threshold, "missing": "exclude"},
-    "unit_ids": [
-        {
-            "spikesorting_merge_id": str(row["spikesorting_merge_id"]),
-            "unit_id": int(row["unit_id"]),
-        }
-        for row in filtered_unit_ids
-    ],
-}
+filtered_spikes, filtered_unit_ids = metric_selection.fetch_spike_data(
+    return_unit_ids=True
+)
+analysis_provenance = dict(metric_selection.selection_provenance)
+print(metric_selection.summary())
 analysis_provenance
-# -
 
 # ## Appendix A. Scripted evaluate → merge → re-evaluate (opt-in)
 #
@@ -742,7 +783,7 @@ if run_scripted_curation_example:
 # Over a scripted evaluation, `.metrics` carries `trough_half_width` (seconds,
 # from the unwhitened display analyzer) next to the quality metrics: narrow
 # spikes are fast-spiking interneurons, wide spikes pyramidal cells; with
-# `firing_rate` it gives the classic rate x width view. **The pipeline ships NO
+# `observed_firing_rate_hz` it gives the classic rate x width view. **The pipeline ships NO
 # cell-type thresholds** -- the boundary below is yours, tuned for hippocampus;
 # other regions need their own. (Trough-to-peak duration and slope columns are
 # available via the metric row's `template_metric_columns` but clip on the
@@ -752,23 +793,23 @@ if run_scripted_curation_example:
     import matplotlib.pyplot as plt
 
     shape = scripted_evaluation.metrics[
-        ["firing_rate", "trough_half_width"]
+        ["observed_firing_rate_hz", "trough_half_width"]
     ].dropna()
     rate_cut_hz, width_cut_s = 7.0, 0.0003  # YOUR thresholds, 0.3 ms
-    is_interneuron = (shape["firing_rate"] > rate_cut_hz) & (
+    is_interneuron = (shape["observed_firing_rate_hz"] > rate_cut_hz) & (
         shape["trough_half_width"] < width_cut_s
     )
     fig, ax = plt.subplots(figsize=(5, 4))
     ax.scatter(
         shape.loc[~is_interneuron, "trough_half_width"] * 1e3,
-        shape.loc[~is_interneuron, "firing_rate"],
+        shape.loc[~is_interneuron, "observed_firing_rate_hz"],
         c="tab:blue",
         label="putative pyramidal",
         alpha=0.8,
     )
     ax.scatter(
         shape.loc[is_interneuron, "trough_half_width"] * 1e3,
-        shape.loc[is_interneuron, "firing_rate"],
+        shape.loc[is_interneuron, "observed_firing_rate_hz"],
         c="tab:red",
         label="putative interneuron",
         alpha=0.8,
@@ -776,7 +817,7 @@ if run_scripted_curation_example:
     ax.axvline(width_cut_s * 1e3, ls="--", c="gray")
     ax.axhline(rate_cut_hz, ls="--", c="gray")
     ax.set_xlabel("trough_half_width (ms)")
-    ax.set_ylabel("firing_rate (Hz)")
+    ax.set_ylabel("observed_firing_rate_hz (Hz)")
     ax.set_title("Putative cell types -- YOUR thresholds, not the pipeline's")
     ax.legend()
     print(

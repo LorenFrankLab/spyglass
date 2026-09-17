@@ -145,7 +145,7 @@ coexist under one merge surface.
 - **`CurationReviewProfile`** -- one immutable, DB-persisted name binding the
     exact quality-metric and auto-curation recipes to an ordered property
     display, label palette, and explicit `replace`/`overlay` import mode.
-    `initialize_v2_defaults()` installs `franklab_hippocampus_2026_06`.
+    `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09`.
     Upload/ephemeral/credential/destination choices remain per-review runtime
     inputs and are not profile identity.
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
@@ -612,14 +612,16 @@ shows them.
 ```python
 review = run_summary.start_review(
     source="root",  # use "auto_labeled" only when the run produced one
-    profile="franklab_hippocampus_2026_06",
+    profile="franklab_hippocampus_2026_09",
     upload=False,  # local seeded bundle; True publishes the same bundle
 )
 url = review.open()  # serves review.uri at http://localhost:<port>/ and opens it
 
-# In the browser: Curate Figure -> select units in the table -> tick labels /
-# Merge Selected in the Curation pane -> Save Annotations. ("Finalize
-# Curation" is a browser state flag, not a Spyglass commit.)
+# In the browser: select units -> labels / Merge Selected -> Save draft.
+# Local browser: Preview and commit -> inspect child -> record review.
+# After completing the browser sequence: final_curation = review.result()
+# Notebook alternative: panel = review.commit_panel().
+# The equivalent scripted API follows.
 
 # Preview is a pure read of the saved annotations.json: no rows or files change.
 changes = review.preview_import()
@@ -633,7 +635,7 @@ receipt = changes.commit(
 
 # A merge is automatically re-evaluated with the same profile, and the merged
 # child is NOT the result until you have looked at it. open() does not wait:
-# stop here and inspect (edit + Save Annotations if a merge was wrong). A
+# stop here and inspect (edit + Save draft if a merge was wrong). A
 # label-only review has nothing to verify.
 pending_verification = None
 if receipt.needs_merge_verification:
@@ -691,12 +693,12 @@ the four states applies -- *saved browser edits differ from the reviewed parent*
 / *no saved edits differ* / *merged result awaiting verification* / *result
 available for analysis* -- and what to do next. (The preview compares the bundle
 with the reviewed parent only; a diff you already committed still "differs", and
-committing it again reuses that child.) The browser's **Save Annotations** only
-writes the bundle; **Finalize Curation** only flips a browser flag; nothing
-reaches Spyglass before `commit()`.
+committing it again reuses that child.) The browser's **Save draft** only
+writes a draft. Use `review.commit_panel()` to preview and commit it, or
+`preview_import()` / `commit()` for scripts.
 
 **A pending merge proposal** (saved, not committed): select its units in the
-browser, **Unmerge Selected**, **Save Annotations**; `preview_import()` then
+browser, **Undo selected merge**, **Save draft**; `preview_import()` then
 shows no merge.
 
 **A committed merge that was wrong** is a branch, not an edit: the merged child
@@ -715,8 +717,8 @@ recovery_review = bad_merge_receipt.changes.review
 recovery_review.open()  # its bundle still holds your edits
 ```
 
-Stop here: select only the mistaken merge's units, **Unmerge Selected**, then
-**Save Annotations**. Keep any other valid merges and label edits. After saving,
+Stop here: select only the mistaken merge's units, **Undo selected merge**, then
+**Save draft**. Keep any other valid merges and label edits. After saving,
 preview the correction in a separate cell:
 
 ```python
@@ -857,7 +859,7 @@ display(root.summarize(evaluation=None, annotation_sets=[annotation_set]))
 # The selected custom column appears in the review's unit table and its
 # set_hash becomes part of this figure's identity.
 review = root.start_review(
-    "franklab_hippocampus_2026_06",
+    "franklab_hippocampus_2026_09",
     annotation_sets=[annotation_set],
 )
 ```
@@ -1046,7 +1048,7 @@ from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
 
 initialize_v2_defaults()
 profile = (
-    CurationReviewProfile & {"review_profile_name": "franklab_hippocampus_2026_06"}
+    CurationReviewProfile & {"review_profile_name": "franklab_hippocampus_2026_09"}
 ).fetch1()
 ```
 
@@ -1850,7 +1852,7 @@ through `run_v2_pipeline` / `run_v2_unit_match` and the underlying tables.
 
 FigPack curation is profile-backed and local by default. Call
 `run_summary.start_review(...)`, `review.open()` to serve the seeded bundle to
-the browser, edit and **Save Annotations**, inspect `review.preview_import()`,
+the browser, edit and **Save draft**, inspect `review.preview_import()`,
 and commit the exact verified change set. Merged and label-only curations render
 in their own unit namespace; evaluation metrics, suggestions and already-applied
 merge provenance are columns of the selectable unit table (context about the
@@ -1950,10 +1952,13 @@ is QC only and does not apply correction. Concat and Kilosort presets remain
 experimental pending scientific validation.
 
 A review's help pane identifies its committed curation and evaluation. **Save
-Annotations** writes edits to the bundle; **Finalize Curation** sets a browser
-flag; Python `preview_import()` and `commit()` create or reuse the scientific
-curation. Pending merges do not change displayed metrics. Follow
-`receipt.next_step()` and `continue_review()` to inspect the reevaluated child.
+draft** writes unfinished edits to the bundle. **Preview and commit** previews
+and commits an exact saved snapshot in the connected local browser, then opens
+the reevaluated child when merges need verification. After recording that review,
+`review.result()` retrieves the explicit final curation. The notebook alternative
+is `review.commit_panel()`. Hosted figures retain FigPack **Save Annotations**
+for authenticated draft saving and require notebook import. Pending merges do
+not change displayed metrics.
 `review.summary()` reports unavailable rule inputs and display budgets.
 
 The selectable `unavailable_qc` column names missing inputs required by the
@@ -1969,10 +1974,9 @@ The [curation notebook](../../../notebooks/10_Spike_SortingV2_Curation.ipynb)
 contains runnable waveform, spike-on-trace, pair correlogram/peak, early/middle/
 late, and raster examples using an exact final curation. Display sampling and
 pair thresholds can omit evidence from the summary; use targeted views rather
-than treating absence as proof. Its additional SNR filter records evaluation,
-curation and composite unit identities with the returned data. This filter does
-**not** change a stored `SortedSpikesGroup` or decoding consumers. Persisted
-metric-filtered populations remain outside this release.
+than treating absence as proof. Metric predicates now persist the selected unit IDs and their evaluation/criteria
+provenance in `SortedSpikesGroup.UnitSelection`; fetching and decoding read that
+same population.
 
 The
 [whole-session notebook](../../../notebooks/10_Spike_SortingV2_Presets.ipynb)
@@ -1983,3 +1987,162 @@ population. Across groups, use `(spikesorting_merge_id, unit_id)` identities.
 Native splitting, per-spike deletion, unit-specific valid-time editing,
 selective unmerge preserving later edits, and Phy edit re-import remain
 unsupported; Phy export supports inspection, not an edit round trip.
+
+### Guided review, inspection, and frozen analysis populations
+
+The normal local workflow stays in the browser: inspect, edit, **Preview and
+commit**, resolve any merge-label conflicts, then commit. Merge commits preserve
+the profile and display budget and open the reevaluated child focused on its new
+units. Inspect it and record its review there. `final_curation = review.result()`
+then returns the verified result; it never guesses from the latest child. Labels
+and no-change reviews finish directly. **Review parent branch** reopens the exact
+pre-merge review; undo the draft merge and commit a replacement branch. The
+mistaken child remains an independent lineage branch.
+
+Operations run one at a time in a worker with its own DataJoint connection.
+Progress and committed identities persist in the local bundle. Reloading during
+computation reconnects to it. Ownership is shared across notebook kernels and
+survives the launcher exiting while its worker remains alive. After a restart,
+resume the review: a live worker remains running; retry only an interrupted action. A failed reevaluation retains the child and retries reuse
+it. Do not edit or discard the review bundle while an operation is running.
+The notebook panel remains supported (`panel = review.commit_panel()`), including
+`panel.receipt` and `panel.verification_review` for hosted or scripted workflows.
+
+Configure lab-specific labels in `CurationReviewProfile.label_options` (nonempty
+strings of at most 32 characters). The browser offers only this palette; labels
+already on a parent remain preserved during import. There is no browser
+finalization flag or ad hoc label-creation control.
+
+The unit selector stays visible across **Waveforms**, **Spike amplitudes**,
+**Autocorrelograms**, **Cross-correlograms**, **Electrode geometry**, and **Raster**.
+Raster and amplitude budgets default to `floor(recording_duration_s * 50)` points
+per unit, matching v1: 3,000 for a minute, 180,000 for an hour. Low-rate trains
+retain every point; higher-rate samples span the full recording reproducibly.
+`max_raster_spikes_per_unit` and `max_amplitudes_per_unit` optionally impose smaller
+caps. These affect display only, not waveform sampling or metric computation.
+
+Time plots exceeding `max_initial_points` (default 1,000,000 per view) are marked
+**not loaded** in the initial bundle. Use **Inspect selected units / pairs** to
+load the requested units with their full display budget; a requested raster
+window includes every spike in `[start, stop)`. All selected CCG pairs are
+included regardless of overview similarity filtering. A window of at most 10
+seconds also includes a static spikes-on-traces figure. A hosted/static bundle
+requires the Python alternative or an explicit smaller overview cap:
+
+```python
+view = review.inspect_units([1, 4], time_range=(100, 110), include_traces=True)
+view.show(title="Selected units", upload=False, ephemeral=False)
+```
+
+Focused inspection reads the published display cache without copying its waveform
+buffer. Deferred time plots skip their data preparation, and repeated local
+inspection reuses the review's timeline metadata. Explicit NWB timestamps remain
+lazy during recording restriction; contiguous reads preserve irregular timing
+without allocating the full source clock.
+
+Times are recording-relative seconds, including the synthetic timeline for
+concatenated recordings. **Time and sampling** maps spans back to original
+session seconds, including gaps and concatenated member boundaries. Red bands
+beside raster/amplitude views and on traces mark excluded time. Manual exclusions
+still use original session seconds. Inspection opens separately and preserves
+the active draft and official scientific evaluation.
+
+For an analysis-specific population, keep quality labels and population
+preferences separate:
+
+```python
+evaluation = final_curation.evaluate(
+    metric_params_name="minimal", auto_curation_rules_name="none"
+)
+selection = select_units_for_analysis(
+    final_curation,
+    policy="v2_accepted_single_units",
+    evaluation=evaluation,
+    unit_criteria={"snr": {">=": 5}},
+)
+spikes, identities = selection.fetch_spike_data(return_unit_ids=True)
+```
+
+Criteria use the existing `UnitSelectionParams` operators. Missing values fail
+the predicate; a missing column or an evaluation from another curation is an
+error. Membership, including an empty selection, is frozen along with criteria,
+label policy, evaluation ID/recipes, and any selected annotation sets. Later
+policy edits cannot change an existing population. Each concatenated member gets
+a session-scoped group with the same unit decision. When combining groups, copy
+their `UnitSelection` snapshots, as the whole-session notebook demonstrates.
+
+### Observed-time metrics and downstream analysis
+
+The standard `franklab_hippocampus_2026_09` review profile uses
+`observed_duration_s`, `observed_firing_rate_hz`, and `observed_presence_ratio`.
+These use stored observation intervals, normalized through recording sample
+boundaries so the last sample contributes its full duration. Time is never
+compressed across exclusions or recording gaps.
+
+Observed firing rate counts spikes in usable spans and divides by their total
+duration. Observed presence divides the observed duration of occupied bins by
+total observed duration. Bins are fixed on the original timeline, anchored at
+the recording's first timestamp; at least one observed spike makes a bin
+occupied. Partial bins contribute only their usable duration; entirely excluded
+bins contribute nothing. `QualityMetricParameters.observed_presence_bin_duration_s`
+defaults to 60 seconds. Zero exposure produces unavailable rate/presence values;
+observed silence produces zero. This presence definition is distinct from SI's.
+
+| Metric family | Time/exclusion semantics |
+| --- | --- |
+| `observed_*` columns | Sample-exact usable-time duration and exposure-weighted presence. |
+| Raw SI `firing_rate`, `presence_ratio`, `firing_range` | Retain SI's full-timeline definitions; use observed columns for artifact-adjusted decisions. |
+| `isi_violation` | Violating-interval fraction over retained spikes, without a duration denominator; shipped rules use this, not SI's contamination ratio. Original spike timing is preserved. |
+| SI `isi_violations_ratio`, refractory-period contamination metrics | Duration-dependent SI estimates; optional expert diagnostics, not default artifact-adjusted decisions. |
+| SNR, amplitude/noise overlap, waveform/template metrics | Retain SI definitions and sampling recipes; masking is not a claim of universal metric correction. Sparse/insufficient evidence remains unavailable. |
+
+Evaluations record the observation-definition version, interval fingerprint,
+and presence-bin width. The review's unavailable-QC column still identifies
+missing inputs for enabled rules. The shipped rules use noise overlap and
+`isi_violation`; neither silently substitutes a duration-based contamination
+estimate.
+
+`select_units_for_analysis` freezes each included unit's observed intervals in
+the same snapshot as membership. `selection.observation` (one session) or
+`selection.groups[i].observation` exposes `intervals`, `duration_s`, and
+`unknown_sources`. The common intervals are the **intersection** of selected
+units' availability; empty/unselected groups impose no restriction. Concatenated
+member snapshots are mapped to original session seconds before analysis.
+
+`SortedSpikesGroup.get_spike_indicator(key, time, return_validity=True)` returns
+counts and a validity mask on the caller's time axis. Bins crossing exclusions
+contain NaN; valid bins without spikes contain zero. Firing-rate smoothing runs
+separately within observed spans. Sorted-spikes decoding restricts encoding and
+decoding intervals, ANDs training masks with availability, and ORs missing masks
+with unavailable time. Ordinary prediction preserves gaps; parameter estimation
+labels missing time `-1`. Saved results include effective intervals. An empty
+training or decoding interval raises a clear error.
+
+Legacy/imported populations without snapshots retain their previous coverage
+behavior and report unknown sources. Mixed populations apply known restrictions
+without inventing missing metadata. Other custom downstream analyses must use
+the exposed intervals explicitly; these changes do not redefine every external
+SI metric or implement clusterless masking.
+
+### Manual recording exclusions
+
+`run_v2_pipeline(..., manual_excluded_times=[[start, stop], ...])` adds manual
+artifact exclusions to automatic detection. Intervals are half-open `[start,
+stop)` in the **original session's seconds**, not sample indices. They are
+normalized, stored on the artifact selection, and included in its identity.
+Changing them therefore creates a different artifact result and downstream sort.
+A preset with automatic detection disabled still applies the manual exclusions.
+The artifact recipe's `min_length_s` applies to the remaining valid spans.
+The session runner applies the supplied intervals to each requested sort group.
+
+For concatenated sorting, pass `manual_excluded_times={member_index:
+[[start, stop], ...]}`. Each member's exclusions use that member's original
+session timestamps. Automatic and manual masks are composed before motion
+correction and survive reconstruction and member export. No per-spike editing is
+introduced.
+
+These preproduction changes add `manual_excluded_times` to
+`RecordingArtifactSelection` and `SharedGroupArtifactSelection`, plus the
+`SortedSpikesGroup.UnitSelection` part. Recreate affected disposable schemas or
+apply reviewed DDL before using this branch with an existing database. No
+production migration is performed automatically.
