@@ -314,6 +314,101 @@ def test_browser_review_preview_commit_resume_and_continue(
         clear_curations_for(sorting_key)
 
 
+def test_worker_retry_reuses_committed_child_after_evaluation_failure(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """A failed merge evaluation can resume without committing another child."""
+    from spyglass.spikesorting.v2._review_operations import (
+        OPERATION_FILE,
+        RESULT_FILE,
+        run_operation,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(CurationV2.insert_curation(sorting_key))
+        units = sorted(
+            map(int, (CurationV2.Unit & root.as_key()).fetch("unit_id"))
+        )
+        review = root.start_review(_ensure_test_profile())
+        _write_edits(review.uri, {unit: ["accept"] for unit in units}, [units])
+        request = {
+            "action": "commit",
+            "annotations_hash": review.preview_import().annotations_hash,
+        }
+        original_evaluate = CurationRef.evaluate
+        evaluated = []
+
+        def evaluate(self, **kwargs):
+            evaluated.append(self.curation_uuid)
+            if len(evaluated) == 1:
+                raise RuntimeError("Injected evaluation failure after commit")
+            return original_evaluate(self, **kwargs)
+
+        monkeypatch.setattr(CurationRef, "evaluate", evaluate)
+        run_operation(
+            review_id=review.review_id,
+            bundle=review.uri,
+            request=request,
+            operation_id="first",
+        )
+        bundle = Path(review.uri)
+        pending = json.loads((bundle / RESULT_FILE).read_text())
+        state = json.loads((bundle / OPERATION_FILE).read_text())
+        assert state["status"] == "failed"
+        assert "Injected evaluation failure" in state["message"]
+        assert pending["pending"]
+        (child,) = root.children
+        assert pending["curation"]["curation_uuid"] == str(child.curation_uuid)
+        assert len(CurationV2 & sorting_key) == 2  # root + durable child
+        with pytest.raises(ValueError, match="not completed"):
+            review.result()
+
+        # Resume from persisted review metadata; do not reuse a mocked receipt.
+        resumed = FigPackReview.resume(review.review_id)
+        run_operation(
+            review_id=resumed.review_id,
+            bundle=resumed.uri,
+            request=request,
+            operation_id="retry",
+        )
+        completed = json.loads((bundle / RESULT_FILE).read_text())
+        assert (
+            json.loads((bundle / OPERATION_FILE).read_text())["status"]
+            == "complete"
+        )
+        assert not completed["pending"]
+        assert completed["curation"] == pending["curation"]
+        assert len(CurationV2 & sorting_key) == 2
+        assert root.children == (child,)
+        assert len(evaluated) >= 2 and set(evaluated) == {child.curation_uuid}
+        verification = FigPackReview.resume(completed["verification_review_id"])
+        assert verification.parent == child
+        assert verification.evaluation.curation == child
+        with pytest.raises(ValueError, match="not completed"):
+            resumed.result()
+
+        run_operation(
+            review_id=verification.review_id,
+            bundle=verification.uri,
+            request={
+                "action": "commit",
+                "annotations_hash": verification.preview_import().annotations_hash,
+                "confirm_no_changes": True,
+            },
+            operation_id="verify",
+        )
+        assert resumed.result().parent == child
+        assert root.children == (child,)
+    finally:
+        clear_curations_for(sorting_key)
+
+
 def test_review_explicit_annotation_set_identity_and_display(
     planted_two_unit_sort, curation_evaluation_defaults
 ):

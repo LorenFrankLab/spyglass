@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_worker_failure_retains_committed_child_and_retry_reuses_it(
+def test_worker_failure_retains_receipt_and_retry_completes_journal(
     tmp_path, monkeypatch
 ):
     from spyglass.spikesorting.v2 import review_api
