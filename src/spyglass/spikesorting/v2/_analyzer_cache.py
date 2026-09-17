@@ -254,9 +254,9 @@ def load_analyzer_folder(folder, *, recording=None):
     ``load_sorting_analyzer`` eagerly ``np.load``s every saved extension, which
     for ``waveforms`` reads the whole ``n_spikes x n_samples x n_channels``
     buffer into RAM on every open -- tens of GB for a long, unit-rich sort.
-    This loader opens the analyzer with ``load_extensions=False``, loads every
-    other saved extension exactly as SI would, and attaches ``waveforms`` as a
-    read-only ``np.memmap`` of ``extensions/waveforms/waveforms.npy``. SI's
+    This loader opens the analyzer with ``load_extensions=False``, leaves other
+    extensions for SI's on-demand ``get_extension`` loader, and attaches
+    ``waveforms`` as a read-only ``np.memmap`` of ``extensions/waveforms/waveforms.npy``. SI's
     consumers index the waveform buffer per unit (``get_waveforms_one_unit``,
     template and PCA fitting), so each of them touches one unit's slice at a
     time, and SI's binary ``_save_data`` already special-cases a memmapped
@@ -285,23 +285,102 @@ def load_analyzer_folder(folder, *, recording=None):
         load_extensions=False,
         format="binary_folder",
     )
-    for name in analyzer.get_saved_extension_names():
-        if name != "waveforms":
-            analyzer.load_extension(name)
-            continue
-        extension = get_extension_class("waveforms")(analyzer)
-        extension.load_params()
-        extension.load_run_info()
-        run_info = extension.run_info
-        data_file = extension._get_binary_extension_folder() / "waveforms.npy"
-        if (
-            run_info is not None and not run_info.get("run_completed", False)
-        ) or not data_file.is_file():
-            # Mirror SI: an incomplete / dataless extension is "not computed".
-            continue
-        extension.data["waveforms"] = np.load(data_file, mmap_mode="r")
-        analyzer.extensions["waveforms"] = extension
+    if "waveforms" not in analyzer.get_saved_extension_names():
+        return analyzer
+    extension = get_extension_class("waveforms")(analyzer)
+    extension.load_params()
+    extension.load_run_info()
+    run_info = extension.run_info
+    data_file = extension._get_binary_extension_folder() / "waveforms.npy"
+    if (
+        run_info is not None and not run_info.get("run_completed", False)
+    ) or not data_file.is_file():
+        # Mirror SI: an incomplete / dataless extension is "not computed".
+        return analyzer
+    extension.data["waveforms"] = np.load(data_file, mmap_mode="r")
+    analyzer.extensions["waveforms"] = extension
     return analyzer
+
+
+def load_analyzer_extensions(analyzer):
+    """Load all extensions for expert SI editing/export, retaining waveform mmap.
+
+    SI's save/select/merge methods copy only loaded extensions. Internal
+    read-only views can stay lazy; public mutable analyzers must carry all data.
+    """
+    for name in analyzer.get_saved_extension_names():
+        analyzer.get_extension(name)
+    return analyzer
+
+
+def copy_analyzer_folder(analyzer, folder):
+    """Copy a published cache, including extensions SI has not loaded.
+
+    SI's save_as copies only loaded extensions. Let SI recreate the small
+    metadata files (rebasing relative extractor paths), then copy extension
+    files directly so waveform/amplitude buffers never need to enter RAM.
+    """
+    import spikeinterface as si
+
+    recording = (
+        analyzer.recording
+        if analyzer.has_recording() or analyzer.has_temporary_recording()
+        else None
+    )
+    si.SortingAnalyzer.create_binary_folder(
+        folder=folder,
+        sorting=analyzer.get_sorting_provenance() or analyzer.sorting,
+        recording=recording,
+        sparsity=analyzer.sparsity,
+        return_in_uV=analyzer.return_in_uV,
+        rec_attributes=analyzer.rec_attributes,
+        backend_options={},
+    )
+    shutil.copytree(
+        Path(analyzer.folder) / "extensions",
+        Path(folder) / "extensions",
+        dirs_exist_ok=True,
+    )
+    return load_analyzer_folder(folder, recording=recording)
+
+
+def analyzer_extension_array(analyzer, extension_name, data_name):
+    """Read a numeric array without loading other data or registering a copy.
+
+    Callers must treat the result as read-only. Keeping this mmap outside SI's
+    extension state also prevents its save methods from overwriting the source
+    of a mapped array while trying to copy that array.
+    """
+    import numpy as np
+
+    if (
+        analyzer.format != "binary_folder"
+        or extension_name in analyzer.extensions
+    ):
+        return analyzer.get_extension(extension_name).data[data_name]
+    return np.load(
+        Path(analyzer.folder)
+        / "extensions"
+        / extension_name
+        / f"{data_name}.npy",
+        mmap_mode="r",
+    )
+
+
+def analyzer_extension_params(analyzer, name):
+    """Read extension parameters without loading a disk-backed payload."""
+    from spikeinterface.core.sortinganalyzer import get_extension_class
+
+    if analyzer.format != "binary_folder" or name in analyzer.extensions:
+        return analyzer.get_extension(name).params or {}
+    extension = get_extension_class(name)(analyzer)
+    extension.load_params()
+    extension.load_run_info()
+    if extension.run_info is not None and not extension.run_info.get(
+        "run_completed", False
+    ):
+        raise ValueError(f"Analyzer extension {name!r} is incomplete.")
+    return extension.params or {}
 
 
 def waveform_recipe_hash(recipe_row) -> str:

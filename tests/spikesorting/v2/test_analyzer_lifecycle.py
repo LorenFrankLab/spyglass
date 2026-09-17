@@ -114,6 +114,7 @@ def test_load_path_acquires_lock(monkeypatch, tmp_path):
     result = _load_analyzer_folder_or_rebuild(
         folder,
         rebuild=True,
+        load_extensions=False,
         rebuild_fn=lambda: None,
         recipe_label="rec",
         sorting_id="sidX",

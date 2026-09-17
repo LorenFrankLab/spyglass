@@ -549,8 +549,8 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         import spikeinterface.sorters as sis
 
         from spyglass.spikesorting.v2._params.sorter import (
-            GenericSorterParamsSchema,
             _SORTER_SCHEMAS,
+            GenericSorterParamsSchema,
         )
         from spyglass.spikesorting.v2._sorting_dispatch import MATLAB_SORTERS
 
@@ -2212,6 +2212,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         waveform_params_name: str | None = None,
         *,
         rebuild: bool = True,
+        load_extensions: bool = True,
     ) -> "si.SortingAnalyzer":
         """Return the SortingAnalyzer; rebuild on missing or invalid folder.
 
@@ -2255,6 +2256,11 @@ class Sorting(SpyglassMixin, dj.Computed):
             uses this to OBSERVE a missing/reclaimed/corrupt analyzer rather
             than silently rebuild-then-hash it.
 
+        load_extensions : bool, optional
+            Load all saved extensions by default so SI save/select/merge methods
+            retain them. Internal read-only inspection may pass False to load
+            arrays on demand. Waveforms remain memory-mapped in either case.
+
         Returns
         -------
         si.SortingAnalyzer
@@ -2274,6 +2280,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             key,
             waveform_params_name=waveform_params_name,
             rebuild=rebuild,
+            load_extensions=load_extensions,
         )
 
     def add_extensions(

@@ -175,6 +175,7 @@ def test_extension_inventory_never_reads_payload(monkeypatch):
             raise AssertionError("extension payload must not be read")
 
     class _Analyzer:
+        format = "memory"
         extension = _Extension()
 
         def get_saved_extension_names(self):
@@ -275,26 +276,25 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
     seen: dict = {}
 
     class _Working:
-        def has_recording(self):
-            return True
+        def get_saved_extension_names(self):
+            return []
 
     class _Published:
-        def save_as(self, *, format, folder):
-            seen["format"] = format
-            seen["folder"] = Path(folder)
-            Path(folder).mkdir(parents=True)
-            return _Working()
+        pass
 
-        def has_recording(self):
-            return True
+    def copy_folder(published, folder):
+        assert isinstance(published, _Published)
+        seen["folder"] = Path(folder)
+        Path(folder).mkdir(parents=True)
+        return _Working()
 
+    monkeypatch.setattr(resolver, "copy_analyzer_folder", copy_folder)
     monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
     monkeypatch.setattr(
         resolver, "_resolve_curation_analyzer", lambda *a, **k: _Published()
     )
     with resolver.open_curation_analyzer({}, "recipe") as working:
         assert isinstance(working, _Working)
-        assert seen["format"] == "binary_folder"
         assert seen["folder"].is_relative_to(tmp_path)
         assert seen["folder"].exists()
     assert not seen["folder"].parent.exists()
@@ -726,6 +726,8 @@ def test_extension_params_match_semantics():
             self.params = params
 
     class _Analyzer:
+        format = "memory"
+
         def __init__(self, exts):
             self._exts = exts
 

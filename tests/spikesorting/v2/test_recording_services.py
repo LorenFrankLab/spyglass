@@ -392,11 +392,10 @@ def test_raw_eseries_path_resolves_by_object_id(tmp_path):
     matched series' OWN path and timestamp mode are returned: the rate-based
     first series vs. the explicit-timestamp second series.
     """
-    from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
-
     from spyglass.spikesorting.v2._recording_nwb import (
         raw_eseries_path_and_timestamp_mode,
     )
+    from tests.spikesorting.v2._ingest_helpers import write_two_eseries_nwb
 
     path = tmp_path / "two_eseries.nwb"
     object_ids = write_two_eseries_nwb(path)
@@ -539,3 +538,90 @@ def test_filtering_description_lists_only_steps_that_ran():
     assert "phase-shift" not in filtering_description(
         bp, "global_median", no_ps
     )
+
+
+@pytest.mark.parametrize("disjoint", [False, True])
+def test_explicit_restriction_keeps_hdf5_timestamps_lazy(
+    tmp_path, monkeypatch, disjoint
+):
+    import h5py
+
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording_times,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        write_processed_recording_nwb,
+    )
+
+    fs, count = 30000, 120000
+    times = 5 + np.arange(count) / fs
+    times[60000:] += 10
+    traces = np.arange(count * 2, dtype=np.float32).reshape(-1, 2)
+    path, series = write_processed_recording_nwb(
+        tmp_path / "restrict.nwb",
+        traces=traces,
+        timestamps=times,
+        rel_positions=[[0, 0], [0, 20]],
+    )
+    recording = read_recording_nwb(path, electrical_series_path=series)
+    spans = [(1000, 119999)] if not disjoint else [(1000, 5000), (65000, 90000)]
+    intervals = [[times[start], times[stop - 1]] for start, stop in spans]
+    getitem = h5py.Dataset.__getitem__
+    as_array = h5py.Dataset.__array__
+    reads = []
+
+    def bounded_getitem(dataset, item):
+        if dataset.name.endswith("/timestamps"):
+            reads.append(item)
+            if isinstance(item, slice):
+                assert len(range(*item.indices(len(dataset)))) <= fs
+        return getitem(dataset, item)
+
+    def no_full_array(dataset, *args, **kwargs):
+        assert not dataset.name.endswith("/timestamps"), (
+            "materialized full timestamp dataset"
+        )
+        return as_array(dataset, *args, **kwargs)
+
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", bounded_getitem)
+    monkeypatch.setattr(h5py.Dataset, "__array__", no_full_array)
+    selected, override, n_intervals = restrict_recording_times(
+        recording, intervals
+    )
+    expected_times = np.concatenate(
+        [times[start:stop] for start, stop in spans]
+    )
+    assert n_intervals == len(spans)
+    assert isinstance(recording.get_time_info()["time_vector"], h5py.Dataset)
+    assert any(isinstance(item, slice) for item in reads)
+    for first in range(0, len(override), 1000):
+        np.testing.assert_array_equal(
+            override[first : first + 1000], expected_times[first : first + 1000]
+        )
+    np.testing.assert_array_equal(override[::-100], expected_times[::-100])
+    np.testing.assert_array_equal(
+        selected.get_traces(),
+        np.concatenate([traces[start:stop] for start, stop in spans]),
+    )
+
+
+def test_restriction_preserves_segment_boundaries_and_rejects_backward_time():
+    import spikeinterface.core as si
+
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording_times,
+    )
+
+    recording = si.NumpyRecording([np.zeros((100, 1)), np.ones((100, 1))], 100)
+    recording.set_times(np.arange(100) / 100, segment_index=0)
+    recording.set_times(5 + np.arange(100) / 100, segment_index=1)
+    selected, times, count = restrict_recording_times(recording, [[0.5, 5.5]])
+    assert count == 2
+    np.testing.assert_array_equal(
+        times[:], np.r_[np.arange(50, 100) / 100, 5 + np.arange(51) / 100]
+    )
+    assert selected.get_num_samples() == 101
+    recording.set_times(np.arange(100) / 100, segment_index=1)
+    with pytest.raises(ValueError, match="backward across segments"):
+        restrict_recording_times(recording, [[0, 6]])

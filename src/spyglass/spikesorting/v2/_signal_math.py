@@ -198,6 +198,28 @@ def _get_recording_timestamps(
     return timestamps
 
 
+def intersect_intervals(left, right):
+    """Intersect sorted, disjoint intervals, omitting zero-length overlaps."""
+    import numpy as np
+
+    left = np.asarray(left, dtype=float).reshape(-1, 2)
+    right = np.asarray(right, dtype=float).reshape(-1, 2)
+    if np.array_equal(left, right):
+        return left[left[:, 1] > left[:, 0]]
+    result = []
+    i = j = 0
+    while i < len(left) and j < len(right):
+        start = max(left[i, 0], right[j, 0])
+        stop = min(left[i, 1], right[j, 1])
+        if start < stop:
+            result.append((start, stop))
+        if left[i, 1] < right[j, 1]:
+            i += 1
+        else:
+            j += 1
+    return np.asarray(result, dtype=float).reshape(-1, 2)
+
+
 def intersect_interval_sets(interval_sets):
     """Intersect a list of ``(n, 2)`` sorted, non-overlapping interval arrays.
 
@@ -221,20 +243,7 @@ def intersect_interval_sets(interval_sets):
         return np.empty((0, 2), dtype=float)
     acc = sets[0]
     for other in sets[1:]:
-        merged = []
-        i = j = 0
-        while i < len(acc) and j < len(other):
-            lo = max(acc[i, 0], other[j, 0])
-            hi = min(acc[i, 1], other[j, 1])
-            if lo < hi:
-                merged.append((lo, hi))
-            # Advance whichever interval ends first (standard two-pointer
-            # interval intersection over two sorted, disjoint sets).
-            if acc[i, 1] < other[j, 1]:
-                i += 1
-            else:
-                j += 1
-        acc = np.asarray(merged, dtype=float).reshape(-1, 2)
+        acc = intersect_intervals(acc, other)
         if acc.size == 0:
             break
     return acc
@@ -556,19 +565,9 @@ def _base_intervals_from_timestamps(timestamps, fs):
 # timestamps) exposes NO frame-bounded ``get_times``: calling
 # ``recording.get_times(start_frame=..., end_frame=...)`` raises TypeError, and
 # the bounds-less ``get_times()`` materializes (and caches) the whole vector.
-# So these helpers map frames<->time exclusively through
-# ``recording.sample_index_to_time(frames)``, which slices the lazy
-# h5py/mmap timestamp vector (or computes affine times) without materializing.
-# SpikeInterface > 0.104.3 refactored time handling into ``core/time_series.py``
-# and ADDED a bounded ``get_times(start_frame, end_frame)`` that lazily slices.
-# If/when the spikeinterface pin is raised past 0.104.3, ``base_intervals_and
-# _gaps`` / ``timestamp_fingerprint`` chunk loops MAY switch their per-chunk
-# ``_segment_times_at(recording, np.arange(start, end))`` to the (then-cheaper)
-# ``recording.get_times(segment_index=0, start_frame=start, end_frame=end)``.
-# This is an optional simplification, NOT a fix: ``sample_index_to_time`` is
-# unchanged in the newer source and stays correct + lazy either way, so there is
-# no urgency. The equivalence + bounded-memory tests guard both paths.
-# --------------------------------------------------------------------------- #
+# Random access uses sample_index_to_time; contiguous scans slice the public
+# get_time_info()["time_vector"] dataset directly. Both preserve exact explicit
+# timestamps while avoiding get_times() and HDF5 point-indexing overhead.
 
 
 def _recording_has_explicit_time_vector(recording, *, segment_index=0) -> bool:
@@ -632,14 +631,30 @@ def _segment_times_at(recording, frames, *, segment_index=0):
     return out.reshape(frames.shape)
 
 
-def frames_for_times(recording, times_s, *, segment_index=0):
-    """Frame index per query time, == ``searchsorted(get_times(), t, "left")``.
+def _segment_times_slice(recording, start, stop, *, segment_index=0):
+    """Read contiguous timestamps without HDF5 point indexing or full loads."""
+    import numpy as np
 
-    Returns, for each ``times_s[k]``, the smallest frame ``i`` in
+    info = recording.get_time_info(segment_index=segment_index)
+    if info["time_vector"] is not None:
+        return np.asarray(info["time_vector"][start:stop], dtype=np.float64)
+    return np.asarray(
+        recording.sample_index_to_time(
+            np.arange(start, stop, dtype=np.int64), segment_index=segment_index
+        ),
+        dtype=np.float64,
+    )
+
+
+def frames_for_times(recording, times_s, *, segment_index=0, side="left"):
+    """Bounded-memory equivalent of ``searchsorted(get_times(), t, side)``.
+
+    With ``side="left"``, returns the smallest frame ``i`` in
     ``[0, n_samples]`` with ``get_times()[i] >= times_s[k]`` -- exactly
     ``numpy.searchsorted(recording.get_times(), times_s, side="left")``, the
-    half-open frame mapping the artifact-mask complement walk needs. Computed by
-    a vectorized binary search over ``sample_index_to_time`` so peak memory is
+    half-open frame mapping the artifact-mask complement walk needs. With
+    ``side="right"``, returns the first frame strictly after the query time.
+    Computed by a vectorized binary search over ``sample_index_to_time`` so peak memory is
     bounded by the query count, not ``n_samples``. Because
     ``sample_index_to_time(i)`` is bit-identical to ``get_times()[i]`` for both
     rate-based and explicit recordings, the result is identical to the
@@ -655,6 +670,8 @@ def frames_for_times(recording, times_s, *, segment_index=0):
     times_s : array-like
         Query times in seconds.
     segment_index : int, optional
+    side : {"left", "right"}, optional
+        Use "right" for the exclusive frame bound of an inclusive end time.
 
     Returns
     -------
@@ -664,6 +681,8 @@ def frames_for_times(recording, times_s, *, segment_index=0):
     """
     import numpy as np
 
+    if side not in {"left", "right"}:
+        raise ValueError("side must be 'left' or 'right'.")
     times = np.atleast_1d(np.asarray(times_s, dtype=np.float64))
     # Reject non-finite query times. searchsorted sorts NaN as +inf, so
     # a NaN/Inf query silently maps to frame n (or 0) instead of failing. Note
@@ -693,7 +712,9 @@ def frames_for_times(recording, times_s, *, segment_index=0):
             np.minimum(mid, n - 1),
             segment_index=segment_index,
         )
-        go_right = active & (vals < times)
+        go_right = active & (
+            (vals < times) if side == "left" else (vals <= times)
+        )
         lo = np.where(go_right, mid + 1, lo)
         hi = np.where(active & ~go_right, mid, hi)
     return lo
@@ -715,7 +736,7 @@ class BaseIntervalsAndGaps(NamedTuple):
 def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     """Recorded chunks (seconds) and inter-chunk gap frame indices, chunked.
 
-    Streams the timeline in ~1 s chunks via ``sample_index_to_time`` (bounded
+    Streams the timeline in contiguous ~1 s slices (bounded
     peak memory, no ``get_times()`` materialization) to derive the same gap
     structure the full-vector path computes from ``get_times()``. Generalizes
     the chunked scan in ``_units_nwb._base_intervals_from_recording`` to also
@@ -774,16 +795,17 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
         )
 
     sample_period = 1.0 / float(fs)
-    chunk_size = max(1, int(round(float(fs))))
+    chunk_size = max(1, round(float(fs)))
     intervals: list[list[float]] = []
     gap_after: list[int] = []
     current_start = None
     prev_time = None
     for start_frame in range(0, n_samples, chunk_size):
         end_frame = min(n_samples, start_frame + chunk_size)
-        times = _segment_times_at(
+        times = _segment_times_slice(
             recording,
-            np.arange(start_frame, end_frame, dtype=np.int64),
+            start_frame,
+            end_frame,
             segment_index=segment_index,
         )
         if times.size == 0:
@@ -824,7 +846,7 @@ def timestamp_fingerprint(recording, *, segment_index=0):
     two recordings share iff their timestamps are byte-for-byte equal -- the
     bounded-memory replacement for ``np.array_equal`` over two full vectors when
     checking that shared-artifact-group members are time-aligned. Reads the
-    vector in ~1 s slices via ``sample_index_to_time`` (never the full
+    vector in contiguous ~1 s slices (never the full
     ``get_times()`` materialization) and folds each slice's float64 bytes into
     the digest, prefixed by ``n_samples`` so different-length vectors cannot
     collide.
@@ -854,12 +876,13 @@ def timestamp_fingerprint(recording, *, segment_index=0):
     hasher.update(np.int64(n_samples).tobytes())
     if n_samples == 0:
         return hasher.digest()
-    chunk_size = max(1, int(round(float(recording.get_sampling_frequency()))))
+    chunk_size = max(1, round(float(recording.get_sampling_frequency())))
     for start_frame in range(0, n_samples, chunk_size):
         end_frame = min(n_samples, start_frame + chunk_size)
-        times = _segment_times_at(
+        times = _segment_times_slice(
             recording,
-            np.arange(start_frame, end_frame, dtype=np.int64),
+            start_frame,
+            end_frame,
             segment_index=segment_index,
         )
         hasher.update(np.ascontiguousarray(times, dtype=np.float64).tobytes())

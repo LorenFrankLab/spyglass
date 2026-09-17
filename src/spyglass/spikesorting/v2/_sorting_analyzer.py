@@ -147,7 +147,13 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
 
 
 def _load_analyzer_folder_or_rebuild(
-    folder, *, rebuild, rebuild_fn, recipe_label, sorting_id
+    folder,
+    *,
+    rebuild,
+    rebuild_fn,
+    recipe_label,
+    sorting_id,
+    load_extensions=True,
 ):
     """Load an analyzer folder; rebuild via ``rebuild_fn`` on missing/invalid.
 
@@ -168,12 +174,19 @@ def _load_analyzer_folder_or_rebuild(
 
     from spyglass.spikesorting.v2._analyzer_cache import (
         analyzer_cache_lock,
+        load_analyzer_extensions,
         load_analyzer_folder,
     )
     from spyglass.spikesorting.v2.exceptions import (
         AnalyzerFolderInvalidError,
         AnalyzerFolderMissingError,
     )
+
+    def load():
+        analyzer = load_analyzer_folder(folder)
+        return (
+            load_analyzer_extensions(analyzer) if load_extensions else analyzer
+        )
 
     # Hold the per-sort lock around the whole load / invalid-cleanup / rebuild
     # region: a reader must not observe the brief move-aside window of a
@@ -184,7 +197,7 @@ def _load_analyzer_folder_or_rebuild(
     with analyzer_cache_lock(sorting_id):
         if folder.exists():
             try:
-                return load_analyzer_folder(folder)
+                return load()
             except Exception as exc:
                 message = (
                     "Sorting.get_analyzer: analyzer folder for "
@@ -225,11 +238,16 @@ def _load_analyzer_folder_or_rebuild(
                     "reconstruct it."
                 )
             rebuild_fn()
-        return load_analyzer_folder(folder)
+        return load()
 
 
 def load_or_rebuild_analyzer(
-    sorting_table, key, waveform_params_name=None, *, rebuild=True
+    sorting_table,
+    key,
+    waveform_params_name=None,
+    *,
+    rebuild=True,
+    load_extensions=True,
 ):
     """Return the SortingAnalyzer for ``key``, rebuilding the cache if needed.
 
@@ -254,6 +272,11 @@ def load_or_rebuild_analyzer(
         ``AnalyzerFolderInvalidError`` -- the recompute audit uses this so it can
         OBSERVE a missing/reclaimed/corrupt analyzer rather than silently
         rebuild-then-hash it.
+
+    load_extensions : bool, optional
+        Load all extensions by default, including their data validation inside
+        the rebuild boundary. Internal read-only views can pass False and load
+        individual arrays on demand.
 
     Returns
     -------
@@ -312,6 +335,7 @@ def load_or_rebuild_analyzer(
     return _load_analyzer_folder_or_rebuild(
         folder,
         rebuild=rebuild,
+        load_extensions=load_extensions,
         rebuild_fn=lambda: rebuild_analyzer_folder(
             sorting_table,
             {"sorting_id": sorting_id},

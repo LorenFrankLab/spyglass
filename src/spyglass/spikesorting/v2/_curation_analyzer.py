@@ -33,7 +33,9 @@ from pathlib import Path
 from spyglass.spikesorting.v2._analyzer_cache import (
     analyzer_cache_lock,
     analyzer_folder_storage_fingerprint,
+    copy_analyzer_folder,
     curation_analyzer_path,
+    load_analyzer_extensions,
     load_analyzer_folder,
     publish_analyzer_atomically,
     waveform_recipe_hash,
@@ -343,6 +345,10 @@ def _extension_inventory(
     demand, a merged cache carries the full display set -- so the request is
     the only addition it guarantees.
     """
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_extension_params,
+    )
+
     saved = set(analyzer.get_saved_extension_names())
     if exact:
         expected = _expected_extensions(role, extra)
@@ -360,8 +366,9 @@ def _extension_inventory(
             )
     inventory: dict[str, str] = {}
     for name in expected if exact else sorted(saved):
-        extension = analyzer.get_extension(name)
-        inventory[name] = _content_hash(extension.params or {})
+        inventory[name] = _content_hash(
+            analyzer_extension_params(analyzer, name)
+        )
     return inventory
 
 
@@ -381,7 +388,11 @@ def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
         return False
     if not requested:
         return True
-    stored = _jsonable_blob(dict(analyzer.get_extension(name).params or {}))
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_extension_params,
+    )
+
+    stored = _jsonable_blob(dict(analyzer_extension_params(analyzer, name)))
     wanted = _jsonable_blob(dict(requested))
     return all(
         key in stored and stored[key] == value for key, value in wanted.items()
@@ -633,6 +644,7 @@ def _resolve_curation_analyzer(
         base = Sorting().get_analyzer(
             {"sorting_id": row["sorting_id"]},
             waveform_params_name=waveform_recipe,
+            load_extensions=False,
         )
         absent = [name for name in request if not base.has_extension(name)]
         if absent:
@@ -645,6 +657,7 @@ def _resolve_curation_analyzer(
             base = Sorting().get_analyzer(
                 {"sorting_id": row["sorting_id"]},
                 waveform_params_name=waveform_recipe,
+                load_extensions=False,
             )
         # The manifest (spike-content hash + provenance) is only needed if a
         # derivative must be built; an ordinary read must not scan spike
@@ -725,9 +738,7 @@ def _resolve_curation_analyzer(
         )
         from spyglass.spikesorting.v2.utils import _resolved_job_kwargs
 
-        derivative = base.save_as(
-            format="binary_folder", folder=Path(staging_folder)
-        )
+        derivative = copy_analyzer_folder(base, Path(staging_folder))
         if not derivative.has_recording():
             recording, _sorting = reconstruct_recording_and_sorting(
                 Sorting(), {"sorting_id": row["sorting_id"]}
@@ -851,13 +862,10 @@ def open_curation_analyzer(
         prefix="v2_curation_analyzer_", dir=spyglass_temp_dir
     )
     try:
-        working = published.save_as(
-            format="binary_folder",
-            folder=Path(tmp) / f"working{ANALYZER_FOLDER_SUFFIX}",
+        working = copy_analyzer_folder(
+            published, Path(tmp) / f"working{ANALYZER_FOLDER_SUFFIX}"
         )
-        if not working.has_recording() and published.has_recording():
-            working.set_temporary_recording(published.recording)
-        yield working
+        yield load_analyzer_extensions(working)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
