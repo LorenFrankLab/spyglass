@@ -70,9 +70,10 @@ def review_page(
         context = browser.new_context(
             viewport={"width": viewport[0], "height": viewport[1]}
         )
-        page = context.new_page()
         errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
+        # Context-wide errors include inspection popups, from their first load.
+        context.on("weberror", lambda event: errors.append(str(event.error)))
+        page = context.new_page()
         page.set_default_timeout(DEFAULT_TIMEOUT_MS)
         page.on("dialog", lambda dialog: dialog.accept())
         try:
@@ -179,8 +180,10 @@ def merge_selected(page) -> None:
 def save_annotations(page, *, native_toolbar=False) -> int:
     """Click **Save Annotations**; return the status of the browser's PUT."""
     with page.expect_response(
-        lambda response: response.request.method == "PUT"
-        and response.url.endswith("/annotations.json")
+        lambda response: (
+            response.request.method == "PUT"
+            and response.url.endswith("/annotations.json")
+        )
     ) as saved:
         name = "Save Annotations" if native_toolbar else "Save draft"
         page.get_by_role("button", name=name, exact=True).click()

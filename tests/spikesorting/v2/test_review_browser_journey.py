@@ -378,11 +378,23 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
             detail.click()
         focused = popup.value
         started = perf_counter()
-        expect(
-            focused.get_by_text("Spikes on traces", exact=True)
-        ).to_be_visible(timeout=60000)
-        measurements["focused_browser_load_s"] = perf_counter() - started
-        focused.close()
+        try:
+            trace_tab = focused.get_by_text("Spikes on traces", exact=True)
+            expect(trace_tab).to_be_visible(timeout=60000)
+            trace_tab.click()
+            # A visible tab alone says nothing about whether its image loaded.
+            focused.wait_for_function(
+                """() => [...document.images].some(image => {
+                    const rect = image.getBoundingClientRect();
+                    return image.complete && image.naturalWidth >= 100 &&
+                        image.naturalHeight >= 100 && rect.width >= 100 &&
+                        rect.height >= 100;
+                })"""
+            )
+            measurements["focused_browser_load_s"] = perf_counter() - started
+        finally:
+            focused.screenshot(path=str(tmp_path / "focused-traces.png"))
+            focused.close()
         assert browser.label_checkbox(page, "accept").is_checked()
         browser.select_units(page, second)
         browser.set_label(page, "noise", True)

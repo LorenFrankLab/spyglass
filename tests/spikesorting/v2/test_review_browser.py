@@ -13,6 +13,7 @@ frontend wrote and Spyglass's own parser reads.
 from __future__ import annotations
 
 import json
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -26,8 +27,8 @@ LABEL_OPTIONS = ["accept", "mua", "noise", "lab_cell"]
 
 
 @pytest.fixture(scope="module")
-def review_bundle(tmp_path_factory):
-    """A saved review bundle over a small synthetic 3-unit analyzer."""
+def review_bundle_template(tmp_path_factory):
+    """Build the expensive analyzer once; tests copy its pristine bundle."""
     browser.require_browser()
     import spikeinterface.core as sc
 
@@ -99,10 +100,20 @@ def review_bundle(tmp_path_factory):
             )
         )
     )
-    yield bundle
+    return bundle
+
+
+@pytest.fixture
+def review_bundle(review_bundle_template, tmp_path):
+    """Give each browser test its own writable annotations and server."""
     from spyglass.spikesorting.v2._review_delivery import stop_review_servers
 
-    stop_review_servers(bundle)
+    bundle = tmp_path / "review.figpack"
+    shutil.copytree(review_bundle_template, bundle)
+    try:
+        yield bundle
+    finally:
+        stop_review_servers(bundle)
 
 
 def _saved_state(bundle):
@@ -347,4 +358,4 @@ def test_native_toolbar_saves_through_figpack_with_configured_labels(
             201,
         )
     labels, _ = _saved_state(review_bundle)
-    assert labels[2] == ["lab_cell"]
+    assert set(labels[2]) == {"lab_cell", "noise"}
