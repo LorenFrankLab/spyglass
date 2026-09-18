@@ -13,7 +13,10 @@ from spyglass.spikesorting.analysis.v1._unit_filter import (
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
-from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
+from spyglass.utils.spikesorting import (
+    contiguous_observed_runs,
+    firing_rate_from_spike_indicator,
+)
 
 schema = dj.schema("spikesorting_group_v1")
 
@@ -682,21 +685,23 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             from ripple_detection import get_multiunit_population_firing_rate
 
             # Smooth each observed run separately, never through an artifact.
+            # The shared splitter also ends a run at a timestamp jump, so a
+            # discontinuous time axis is not smoothed across either, and the
+            # MUA detector and this accessor agree on what a run is.
             counts = (
                 spike_indicator.sum(axis=1, keepdims=True)
                 if multiunit
                 else spike_indicator
             )
             firing_rate = np.full(counts.shape, np.nan)
-            changes = np.diff(np.r_[False, valid, False].astype(int))
             sampling_frequency = 1 / np.median(np.diff(time))
-            for start, stop in zip(
-                np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)
+            for run in contiguous_observed_runs(
+                time, valid, sampling_frequency
             ):
                 for unit in range(counts.shape[1]):
-                    firing_rate[start:stop, unit] = (
+                    firing_rate[run, unit] = (
                         get_multiunit_population_firing_rate(
-                            counts[start:stop, unit, np.newaxis],
+                            counts[run, unit, np.newaxis],
                             sampling_frequency,
                             smoothing_sigma,
                         )

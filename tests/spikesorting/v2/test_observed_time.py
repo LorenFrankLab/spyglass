@@ -154,6 +154,39 @@ def test_binned_counts_and_smoothing_do_not_bridge_exclusions(
     assert np.isnan(counts[3, 0])
 
 
+def test_group_smoothing_stops_at_a_timestamp_jump(common, monkeypatch):
+    """A gap in the time axis ends a run even where the units were observed.
+
+    The samples either side of the jump are both observed, so an availability
+    mask alone would treat them as one run and smooth a spike across seven
+    seconds of missing samples.
+    """
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
+    time = np.r_[np.arange(4.0), 10.0 + np.arange(6.0)]
+    monkeypatch.setattr(
+        SortedSpikesGroup,
+        "get_observation_intervals",
+        lambda key, **kwargs: ObservationAvailability(np.array([[0.0, 14.0]])),
+    )
+    monkeypatch.setattr(
+        SortedSpikesGroup,
+        "fetch_spike_data",
+        lambda key, return_unit_ids: ([np.array([1.0])], [{"unit_id": 1}]),
+    )
+
+    counts, valid = SortedSpikesGroup.get_spike_indicator(
+        {}, time, return_validity=True
+    )
+    assert counts[1, 0] == 1
+    assert valid.tolist() == [True] * 8 + [False, False]
+
+    rate = SortedSpikesGroup.get_firing_rate({}, time, smoothing_sigma=2)
+    assert rate[:4, 0].sum() > 0
+    assert rate[4:8, 0].tolist() == [0.0] * 4
+    assert np.isnan(rate[8:, 0]).all()
+
+
 def test_shared_masks_are_stored_once_and_keep_original_fingerprint(
     monkeypatch,
 ):

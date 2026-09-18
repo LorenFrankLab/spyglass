@@ -19,7 +19,10 @@ from spyglass.spikesorting.v1 import (
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
-from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
+from spyglass.utils.spikesorting import (
+    contiguous_observed_runs,
+    firing_rate_from_spike_indicator,
+)
 
 
 # v2 is an optional layer. Import the v2 module lazily and
@@ -134,6 +137,11 @@ if CurationV2 is not None:
     source_class_dict["CurationV2"] = CurationV2
 if ConcatMemberCuration is not None:
     source_class_dict["ConcatMemberCuration"] = ConcatMemberCuration
+
+# Sources whose curated NWB stores the per-unit spans its units were observed
+# over. Every other source predates that snapshot: its coverage is unknown, so
+# no NWB is opened for it and it is reported rather than silently restricting.
+OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCuration"})
 
 
 @schema
@@ -676,8 +684,88 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return self.get_spike_times_by_unit(key)[0]
 
     @classmethod
-    def get_spike_indicator(cls, key, time):
+    def _merge_source_map(cls, merge_ids) -> dict:
+        """Pipeline source of each merge id, resolved in a single fetch."""
+        if not len(merge_ids):
+            return {}
+        reserved_pk, reserved_sk = cls()._reserved_pk, cls()._reserved_sk
+        fetched, sources = (
+            cls & [{reserved_pk: merge_id} for merge_id in merge_ids]
+        ).fetch(reserved_pk, reserved_sk)
+        return dict(zip(map(str, fetched), sources))
+
+    @classmethod
+    def get_observation_intervals(cls, key, *, unit_ids=None):
+        """Common time every returned unit was observed over, in seconds.
+
+        Each contributing merge restricts the population: the result is the
+        intersection of the spans its selected units were observed over. Only
+        sources that store those spans (``OBSERVED_INTERVAL_SOURCES``)
+        contribute a restriction; every other source keeps its historic
+        behavior of restricting nothing and is named in ``unknown_sources``,
+        rather than being silently treated as observed throughout.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction identifying one or more merge entries.
+        unit_ids : list of dict, optional
+            Identities from ``get_spike_times_by_unit``. Pass them when
+            already loaded to avoid fetching the spike trains a second time.
+
+        Returns
+        -------
+        ObservationAvailability
+            ``intervals`` is ``None`` when no contributing merge stores spans;
+            ``unknown_sources`` holds the merge ids that could not report any.
+        """
+        from spyglass.spikesorting.v2._observed_time import (
+            population_availability,
+        )
+
+        if unit_ids is None:
+            _, unit_ids = (cls & key).get_spike_times_by_unit(key)
+        members = {}
+        for identity in unit_ids:
+            merge_id = identity["spikesorting_merge_id"]
+            members.setdefault(str(merge_id), (merge_id, []))[1].append(
+                identity["unit_id"]
+            )
+        sources = cls._merge_source_map(
+            [merge_id for merge_id, _ in members.values()]
+        )
+        snapshots = []
+        for name, (merge_id, ids) in members.items():
+            provenance = {}
+            if sources.get(name) in OBSERVED_INTERVAL_SOURCES:
+                # Imported inside the branch so a v0/v1-only environment, where
+                # the v2 layer may not import at all, never reaches for it.
+                from spyglass.spikesorting.v2 import _observation_io
+
+                provenance = {
+                    "observation_intervals": (
+                        _observation_io.selection_observations(merge_id, ids)
+                    )
+                }
+            snapshots.append((name, ids, provenance))
+        return population_availability(snapshots)
+
+    @classmethod
+    def get_spike_indicator(
+        cls,
+        key,
+        time,
+        *,
+        return_unit_ids: bool = False,
+        return_validity: bool = False,
+    ):
         """Get spike indicator matrix for the group
+
+        Bins that any contributing unit was not observed over hold ``np.nan``,
+        not a zero count: an unobserved bin is missing evidence, not evidence
+        of silence. Spikes are counted only inside the population's common
+        observed time (see ``get_observation_intervals``), so a spike a single
+        member happened to observe cannot enter a bin the population did not.
 
         Parameters
         ----------
@@ -685,19 +773,36 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             key to identify the group
         time : np.ndarray
             time vector for which to calculate the spike indicator matrix
+        return_unit_ids : bool, optional
+            if True, append the unit ids to the return tuple. Unit ids are a
+            list of dictionaries with keys 'spikesorting_merge_id' and
+            'unit_id'. Default False
+        return_validity : bool, optional
+            if True, append the common observed-bin mask to the return tuple.
+            Default False
 
         Returns
         -------
         np.ndarray
             spike indicator matrix with shape (len(time), n_units)
+        list of dict, optional
+            if return_unit_ids is True, one identity per column, in column
+            order
+        np.ndarray of bool, optional
+            if return_validity is True, True where every unit was observed
         """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = (cls & key).get_spike_times(key)
+        spike_times, unit_ids = (cls & key).get_spike_times_by_unit(key)
+        observation = cls.get_observation_intervals(key, unit_ids=unit_ids)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
-            times = times[np.logical_and(times >= min_time, times <= max_time)]
+            times = times[
+                (times >= min_time)
+                & (times <= max_time)
+                & observation.contains(times)
+            ]
             spike_indicator[:, ind] = np.bincount(
                 np.digitize(times, time[1:-1]),
                 minlength=time.shape[0],
@@ -706,6 +811,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
 
+        valid = observation.valid_bins(time)
+        spike_indicator[~valid, :] = np.nan
+        if return_validity:
+            return (
+                (spike_indicator, unit_ids, valid)
+                if return_unit_ids
+                else (spike_indicator, valid)
+            )
+        if return_unit_ids:
+            return spike_indicator, unit_ids
         return spike_indicator
 
     @classmethod
@@ -795,11 +910,34 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         Returns
         -------
         np.ndarray
-            time-dependent firing rate with shape (len(time), n_units)
+            time-dependent firing rate with shape (len(time), n_units).
+            Bins no contributing unit was observed over hold ``np.nan``, and
+            smoothing is applied within each contiguous observed run, so no
+            rate is carried across unobserved time.
         """
-        return firing_rate_from_spike_indicator(
-            spike_indicator=cls.get_spike_indicator(key, time),
-            time=time,
-            multiunit=multiunit,
-            smoothing_sigma=smoothing_sigma,
+        spike_indicator, valid = cls.get_spike_indicator(
+            key, time, return_validity=True
         )
+        if valid.all():
+            return firing_rate_from_spike_indicator(
+                spike_indicator=spike_indicator,
+                time=time,
+                multiunit=multiunit,
+                smoothing_sigma=smoothing_sigma,
+            )
+
+        counts = (
+            spike_indicator.sum(axis=1, keepdims=True)
+            if multiunit
+            else spike_indicator
+        )
+        firing_rate = np.full(counts.shape, np.nan)
+        sampling_frequency = 1 / np.median(np.diff(time))
+        for run in contiguous_observed_runs(time, valid, sampling_frequency):
+            for unit in range(counts.shape[1]):
+                firing_rate[run, unit] = get_multiunit_population_firing_rate(
+                    counts[run, unit, np.newaxis],
+                    sampling_frequency,
+                    smoothing_sigma,
+                )
+        return firing_rate
