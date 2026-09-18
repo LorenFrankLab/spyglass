@@ -1601,7 +1601,13 @@ cross-referenced here, not duplicated.
     resolve) and the conda `pytorch<1.12.0` pin is dropped from all three;
     DeepLabCut 3.x requires `torch>=2`, so the DLC environment now takes
     torch and torchvision from pip as `..[dlc]` dependencies instead of
-    from its conda `torchaudio` / `torchvision` lines. The v2 spike-sorting
+    from its conda `torchaudio` / `torchvision` lines. The `moseq-cpu` /
+    `moseq-gpu` extras and the two MoSeq environment files do not currently
+    resolve: every keypoint-moseq release pins `panel==0.14.4`, which
+    conflicts with the `panel>=1.4` Spyglass requires, so the install now
+    fails instead of silently pulling the 2023-era keypoint-moseq (0.2.5 or
+    older) the resolver used to fall back on; settling the `panel`
+    requirement is an open item. The v2 spike-sorting
     lane is `environments/environment.yml` /
     `environment_spikesorting_v2.yml`, both still on numpy 2.
     `environment.yml` also mirrors the `jax<0.10` and
