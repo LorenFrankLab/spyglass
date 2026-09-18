@@ -2,84 +2,28 @@
 
 from uuid import uuid4
 
-import datajoint as dj
 import pandas as pd
 import pytest
 
+from tests.spikesorting._annotation_fixtures import (
+    FakeSpikeSortingOutput,
+    drop_annotation_tables,
+    make_annotation_tables,
+)
+
 pytestmark = pytest.mark.integration
-
-
-class _FakeSpikeSortingOutput:
-    """Minimal merge relation that returns synthetic NWB fetch payloads."""
-
-    def __init__(self, payloads, merge_id=None):
-        self.payloads = payloads
-        self.merge_id = merge_id
-
-    def __and__(self, restriction):
-        return type(self)(self.payloads, restriction["merge_id"])
-
-    def fetch_nwb(self):
-        return [self.payloads[self.merge_id]]
 
 
 @pytest.fixture(scope="module")
 def annotation_table(dj_conn):
     """Create an isolated table using the production migration methods."""
-    from spyglass.spikesorting.analysis.v1.unit_annotation import (
-        UnitAnnotation,
+    table, schema = make_annotation_tables(
+        dj_conn, "test_unit_annotation_migration"
     )
-    from spyglass.utils import SpyglassMixin
 
-    class MigrationUnitAnnotation(SpyglassMixin, dj.Manual):
-        definition = """
-        spikesorting_merge_id: uuid
-        unit_id: int
-        """
+    yield table
 
-        class Annotation(SpyglassMixin, dj.Part):
-            definition = """
-            -> master
-            annotation: varchar(128)
-            ---
-            label = NULL: varchar(128)
-            quantification = NULL: float
-            """
-
-        audit_positional_unit_ids = classmethod(
-            UnitAnnotation.audit_positional_unit_ids.__func__
-        )
-        migrate_positional_unit_ids = classmethod(
-            UnitAnnotation.migrate_positional_unit_ids.__func__
-        )
-
-    class MigrationMarker(SpyglassMixin, dj.Manual):
-        definition = """
-        spikesorting_merge_id: uuid
-        ---
-        migration_version: int unsigned
-        migrated_at=CURRENT_TIMESTAMP: timestamp
-        """
-
-    context = {
-        "MigrationUnitAnnotation": MigrationUnitAnnotation,
-        "MigrationMarker": MigrationMarker,
-    }
-    schema = dj.Schema(
-        "test_unit_annotation_migration",
-        context=context,
-        connection=dj_conn,
-    )
-    schema(MigrationUnitAnnotation)
-    schema(MigrationMarker)
-    MigrationUnitAnnotation._positional_id_migration_table = MigrationMarker
-
-    yield MigrationUnitAnnotation
-
-    previous_level = dj.logger.level
-    dj.logger.setLevel("ERROR")
-    schema.drop(force=True)
-    dj.logger.setLevel(previous_level)
+    drop_annotation_tables(schema)
 
 
 @pytest.fixture
@@ -94,7 +38,7 @@ def annotation_case(annotation_table, monkeypatch):
         dense_id: {"object_id": pd.DataFrame(index=pd.Index([0, 1, 2, 3]))},
     }
     monkeypatch.setattr(
-        module, "SpikeSortingOutput", _FakeSpikeSortingOutput(payloads)
+        module, "SpikeSortingOutput", FakeSpikeSortingOutput(payloads)
     )
 
     annotation_table.insert(
