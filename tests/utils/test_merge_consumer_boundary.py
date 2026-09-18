@@ -23,6 +23,7 @@ advertised API true:
 from __future__ import annotations
 
 import inspect
+import logging
 
 import datajoint as dj
 import pytest
@@ -486,3 +487,40 @@ def test_fetch_nwb_string_return_merge_ids_aligns_by_parent_pk(
     )
     assert len(nwb_list) == 1
     assert merge_ids == [same_file_two_row_source["merge_id_0"]]
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_fetch_nwb_warns_when_restriction_skips_a_source(
+    two_source_merge, caplog
+):
+    """A clause naming an attribute one parent lacks skips that source LOUDLY.
+
+    ``leaf_a_id`` exists only on ``LeafA``'s parent, so ``LeafB`` is dropped
+    from the search entirely. That is the right behavior for a multi-source
+    merge (the caller may legitimately be naming one source's key), but a
+    silent skip makes the returned list read as "all the files matching",
+    hiding a source the caller may have meant to include. The partial result
+    must therefore be accompanied by a warning naming the skipped source.
+    """
+    Merge = two_source_merge["Merge"]
+    merge_id_a = two_source_merge["merge_id_a"]
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        nwb_list, merge_ids = Merge().fetch_nwb(
+            {"leaf_a_id": 0}, return_merge_ids=True
+        )
+
+    # The matching source's file is still returned -- this warns, not raises.
+    assert len(nwb_list) == 1
+    assert "leaf_a_id" in nwb_list[0]
+    assert merge_ids == [merge_id_a]
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ]
+    assert any(
+        "LeafB" in message and "not searched" in message for message in messages
+    ), f"no warning naming the skipped source; got {messages}"

@@ -620,6 +620,12 @@ class Merge(ExportMixin, dj.Manual):
         Notes
         -----
         Nwb files not strictly returned in same order as self
+
+        A restriction clause naming an attribute that one source's parent
+        does not have skips that source: it is dropped from the search and
+        its files are not returned, with a warning naming it. Nothing is
+        raised, because a multi-source caller may legitimately restrict on
+        one source's key (or mix per-source clauses in an OR-list).
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
@@ -734,6 +740,7 @@ class Merge(ExportMixin, dj.Manual):
             # routes each branch to its own source.
             master_attrs = set(self.heading.names)
             matches = []  # (source_name, parent, matched join)
+            skipped = []  # sources no clause could apply to
             for part in self.parts(as_objects=True):
                 source_name = self._part_name(part)
                 parent = self.merge_get_parent_class(source_name)
@@ -743,10 +750,24 @@ class Merge(ExportMixin, dj.Manual):
                     restriction, master_attrs | set(parent.heading.names)
                 )
                 if applicable is None:
-                    continue  # no restriction clause applies to this source
+                    # No restriction clause applies to this source.
+                    skipped.append(source_name)
+                    continue
                 matched = (self * part * parent) & applicable
                 if matched:
                     matches.append((source_name, parent, matched))
+            if matches and skipped:
+                # A partial result: some sources were never searched. This is
+                # legitimate (a caller naming one source's key means exactly
+                # that), so it warns rather than raises -- but the returned
+                # list would otherwise read as "every matching file", hiding
+                # a source the caller may have meant to include.
+                logger.warning(
+                    f"Merge.fetch_nwb: restriction {restriction!r} names "
+                    "attribute(s) absent from the parent of source(s) "
+                    f"{sorted(skipped)}; those sources were not searched and "
+                    "their files are not returned."
+                )
             if not matches:
                 # The restriction named parent attributes, but no source's
                 # IMMEDIATE parent carries them (e.g. an attribute upstream of
