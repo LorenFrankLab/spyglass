@@ -29,6 +29,43 @@ def load_extractor(source):
     return loader(source)
 
 
+def load_waveforms(folder):
+    """Load a saved waveform folder under either SpikeInterface generation.
+
+    Parameters
+    ----------
+    folder : str | pathlib.Path
+        A saved ``WaveformExtractor`` folder, or a binary-folder
+        ``SortingAnalyzer`` written by the back-compatibility API.
+
+    Returns
+    -------
+    WaveformExtractor | MockWaveformExtractor
+        SpikeInterface 0.99 returns a ``WaveformExtractor``; 0.101 and later
+        return a ``MockWaveformExtractor`` exposing the same ``get_waveforms``
+        / ``nbefore`` / ``nafter`` / ``sorting`` surface.
+
+    Raises
+    ------
+    RuntimeError
+        When the folder holds Zarr-format legacy waveforms, which 0.101 and
+        later cannot read.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting._legacy_runtime import _legacy_runtime_message
+
+    legacy = getattr(si, "WaveformExtractor", None)
+    if legacy is not None:
+        return legacy.load_from_folder(folder)
+    try:
+        return si.load_waveforms(folder, with_recording=False)
+    except NotImplementedError as exc:  # Zarr-format legacy waveforms
+        raise RuntimeError(
+            _legacy_runtime_message("Zarr-format WaveformExtractor folders")
+        ) from exc
+
+
 def numpy_sorting_from_samples_and_labels(
     samples, labels, sampling_frequency, unit_ids=None
 ):
