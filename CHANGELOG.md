@@ -1564,12 +1564,15 @@ cross-referenced here, not duplicated.
     `spikesorting-v2-matching` optional extra (`UnitMatchPy>=3.2.6,<3.2.8`,
     `mat73`). v0/v1 DataJoint schemas are unchanged and existing rows
     remain queryable through `SpikeSortingOutput`, but **active v0/v1
-    spike-sorting workflows (Waveforms, MetricCuration, BurstPair,
-    ArtifactDetection, decoding waveform extraction) now require the
-    legacy SpikeInterface 0.99 Spyglass environment**: calling them under
-    SI 0.104 raises a clear `RuntimeError` pointing the caller at either
-    the v2 pipeline (for new SI 0.104+ processing) or the legacy
-    environment. The full audit + per-surface classification lives at
+    spike-sorting workflows (Waveforms and MetricCuration waveform
+    extraction, BurstPair, ArtifactDetection, decoding waveform
+    extraction) now require the legacy SpikeInterface 0.99 Spyglass
+    environment**: calling them under SI 0.104 raises a clear
+    `RuntimeError` pointing the caller at either the v2 pipeline (for new
+    SI 0.104+ processing) or the legacy environment. Reading an
+    already-saved binary waveform folder is not gated (see the Pipelines
+    entry on reading saved legacy waveform folders). The full audit +
+    per-surface classification lives at
     `tests/spikesorting/v2/resolver/si0104-audit.md`; resolver / runtime
     evidence at `tests/spikesorting/v2/resolver/si0104-runtime.md`
 - **Restore the legacy (v0/v1) spike-sorting test environment.** The v0/v1
