@@ -1578,8 +1578,8 @@ cross-referenced here, not duplicated.
     namespace re-exports; SI 0.99's `qualitymetrics` carries both. The
     legacy conda env
     (`environments/environment_spikesorting_legacy.yml`) builds the SI-0.99
-    stack by relaxing the `pyproject` SpikeInterface / probeinterface / numpy
-    pins FIRST (a `sed` edit of the ephemeral checkout), so `mamba env create`
+    stack by relaxing the `pyproject` SpikeInterface / probeinterface pins
+    FIRST (a `sed` edit of the ephemeral checkout), so `mamba env create`
     resolves a coherent SI-0.99 stack in a single pass (relaxing first avoids
     the inconsistent set a 0.104-then-downgrade pass left behind). The
     `pytest-legacy` CI job runs that `sed` relax as its own step before
@@ -1617,9 +1617,9 @@ cross-referenced here, not duplicated.
     `tests/spikesorting/v2/scripts/verify_dependency_resolution.sh` checks
     that the declared pins actually resolve: `uv pip compile` resolves
     `pyproject.toml` once per install lane and `conda create --dry-run`
-    solves each environment file's conda section, both targeting Linux
-    x86_64. It reaches the network and takes minutes, so it is a script
-    rather than a collected test
+    solves the conda section of the default, DLC, and MoSeq environment
+    files, both targeting Linux x86_64. It reaches the network and takes
+    minutes, so it is a script rather than a collected test
 
 ### Pipelines
 

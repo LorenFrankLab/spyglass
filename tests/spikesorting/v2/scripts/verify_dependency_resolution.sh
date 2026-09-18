@@ -14,10 +14,11 @@
 #      pip-install it next to ``..[<extra>]`` and it belongs to no extra, so
 #      compiling pyproject.toml alone would leave it unresolved.
 #
-#   2. ``conda create --dry-run`` solves the *conda* section of each
-#      environment file. Between them the two layers cover a file completely:
-#      layer 2 takes its conda section, layer 1 takes both entries of its pip
-#      section.
+#   2. ``conda create --dry-run`` solves the *conda* section of four of the
+#      environment files: environment.yml, environment_dlc.yml,
+#      environment_moseq_cpu.yml and environment_moseq_gpu.yml. Between them
+#      the two layers cover one of those files completely: layer 2 takes its
+#      conda section, layer 1 takes both entries of its pip section.
 #
 # The conda solve uses each file's own channel list, read out of the file and
 # passed with --override-channels. That keeps the franklab and edeno channels
