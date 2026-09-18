@@ -42,6 +42,21 @@ def _failing_insert1(part_table):
         del part_table.insert1
 
 
+def _count_nwb_reads(monkeypatch):
+    """Record the merge id of every fake ``fetch_nwb`` call from now on."""
+    reads = []
+    original = FakeSpikeSortingOutput.fetch_nwb
+
+    def _counting_fetch_nwb(self):
+        reads.append(self.merge_id)
+        return original(self)
+
+    monkeypatch.setattr(
+        FakeSpikeSortingOutput, "fetch_nwb", _counting_fetch_nwb
+    )
+    return reads
+
+
 def _unit_ids(table, merge_id):
     """Return the stored unit ids of one merge, sorted."""
     return sorted(
@@ -131,6 +146,24 @@ def test_add_annotation_refuses_unmigrated_sparse_merge(annotation_case):
         table().add_annotation(key)
 
     assert not (table.Annotation & key)
+    assert _unit_ids(table, case["sparse_id"]) == POSITIONAL_IDS
+
+
+def test_restricted_instance_refuses_unmigrated_sparse_merge(annotation_case):
+    case = annotation_case
+    table = case["table"]
+    sparse = {"spikesorting_merge_id": case["sparse_id"]}
+    # A restriction matching none of the merge's rows: row presence must be
+    # judged on the whole table, as the audit is, or the merge looks fresh.
+    restricted = table() & {"unit_id": 99}
+    assert not restricted
+
+    with pytest.raises(ValueError, match="predate the true-id contract"):
+        restricted.add_annotation(
+            {**sparse, "unit_id": 2, "annotation": "restricted"}
+        )
+
+    assert not (case["marker"] & sparse)
     assert _unit_ids(table, case["sparse_id"]) == POSITIONAL_IDS
 
 
@@ -225,15 +258,29 @@ def test_annotation_state_transitions(scenario, annotation_case):
     SCENARIOS[scenario](annotation_case)
 
 
-def test_dense_namespace_accepts_write_without_migration(annotation_case):
+def test_dense_namespace_accepts_write_and_is_marked(
+    annotation_case, monkeypatch
+):
     case = annotation_case
     table = case["table"]
     dense = {"spikesorting_merge_id": case["dense_id"]}
     new_key = {**dense, "unit_id": 1, "annotation": "dense"}
 
     assert table.audit_positional_unit_ids(merge_ids=[case["dense_id"]]).empty
+    nwb_reads = _count_nwb_reads(monkeypatch)
 
     table().add_annotation(new_key)
 
     assert (table.Annotation & new_key).fetch1("unit_id") == 1
-    assert not (case["marker"] & dense)
+    # Nothing to migrate is exactly what the marker records, so the audit's
+    # NWB read happens once and not on every later write.
+    assert (case["marker"] & dense).fetch1("migration_version") == 1
+    assert nwb_reads == [case["dense_id"]]
+
+    table().add_annotation({**dense, "unit_id": 1, "annotation": "dense-2"})
+
+    assert sorted((table.Annotation & dense).fetch("annotation")) == [
+        "dense",
+        "dense-2",
+    ]
+    assert nwb_reads == [case["dense_id"]]

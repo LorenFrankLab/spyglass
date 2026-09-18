@@ -297,7 +297,11 @@ merge-applied unit namespaces must be migrated once using the release-note
 commands above: `add_annotation` refuses to write to such a merge until it is,
 rather than mixing the two id meanings in one merge. A merge whose first
 annotation is written under the new contract is recorded as needing no
-migration. Dense `0..n-1` unit namespaces are unaffected.
+migration. If `audit_positional_unit_ids()` shows a refused merge whose
+`stored_unit_ids` already are its `true_unit_ids`, insert
+`{"spikesorting_merge_id": ..., "migration_version": 1}` into
+`UnitAnnotationPositionalIdMigration` instead of migrating it. Dense `0..n-1`
+unit namespaces are unaffected.
 
 #### Spike Sorting v2: register schemas against any configured database host
 
