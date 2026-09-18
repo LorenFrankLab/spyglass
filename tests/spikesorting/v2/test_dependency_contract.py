@@ -16,10 +16,11 @@ Three coupled invariants live here:
 2. The legacy (v0/v1) lane resolves the SI-0.99 stack by **sed-rewriting**
    the committed SpikeInterface and probeinterface dependency strings in an
    ephemeral checkout (``.github/workflows/test-conda.yml`` ``pytest-legacy``
-   job and the local ``environment_spikesorting_legacy.yml`` doc). If that
-   committed pin text changes, those seds silently no-op and the legacy env
-   resolves the 0.104 line instead, so the sed source patterns must keep
-   matching the current committed strings.
+   job and the local ``environment_spikesorting_legacy.yml`` doc), while
+   ``numpy<2`` is pinned by that env file itself. If the committed pin text
+   changes, those seds silently no-op and the legacy env resolves the 0.104
+   line instead, so the sed source patterns must keep matching the current
+   committed strings.
 3. Every conda environment either declares the modern SciPy >=1.13 contract
    or documents the complete legacy pre-install pin-relaxation recipe.
 """
@@ -37,6 +38,16 @@ LEGACY_ENV = REPO_ROOT / "environments" / "environment_spikesorting_legacy.yml"
 CONDA_CI = REPO_ROOT / ".github" / "workflows" / "test-conda.yml"
 ENVIRONMENTS = REPO_ROOT / "environments"
 
+# The pins the legacy (SI-0.99) recipes rewrite, as literal sed source text
+# and its legacy replacement.
+LEGACY_SED_REWRITES = (
+    ('"spikeinterface==0.104.3"', '"spikeinterface>=0.99.1,<0.100"'),
+    ('"probeinterface>=0.3.2"', '"probeinterface>=0.2.19,<0.3"'),
+)
+
+# A sed expression whose source pattern mentions numpy.
+NUMPY_SED = re.compile(r"-e\s+'s/[^']*numpy")
+
 
 def _raw_dependencies() -> list[str]:
     """The literal ``[project].dependencies`` strings, as written."""
@@ -50,19 +61,6 @@ def _base_requirements() -> dict[str, Requirement]:
         req = Requirement(spec)
         reqs[req.name.lower()] = req
     return reqs
-
-
-def _raw_dependency(name: str) -> str:
-    """The literal dependency string for ``name`` (e.g. ``"numpy>=2,<3"``).
-
-    Uses the verbatim text rather than ``str(Requirement(...))`` because
-    ``packaging`` canonicalizes/reorders specifiers (``numpy>=2,<3`` ->
-    ``numpy<3,>=2``), which would not match the literal sed source text.
-    """
-    for spec in _raw_dependencies():
-        if Requirement(spec).name.lower() == name.lower():
-            return spec
-    raise AssertionError(f"{name} not found in base dependencies")
 
 
 def _extra_requirements(extra: str) -> dict[str, Requirement]:
@@ -152,6 +150,31 @@ def test_spikeinterface_hard_pin_matches_v2_env():
     )
 
 
+def test_legacy_sed_targets_present():
+    """The legacy recipes rewrite exactly the SpikeInterface and
+    probeinterface strings pyproject commits, and nothing about numpy --
+    the legacy env file pins numpy<2 itself."""
+    pyproject = PYPROJECT.read_text()
+    recipes = {path: path.read_text() for path in (CONDA_CI, LEGACY_ENV)}
+
+    for source, legacy in LEGACY_SED_REWRITES:
+        assert source in pyproject, (
+            f"pyproject no longer declares {source}, so the legacy sed "
+            "source pattern silently no-ops and the env resolves the v2 line."
+        )
+        fragment = f"'s/{source}/{legacy}/'"
+        for path, contents in recipes.items():
+            assert (
+                fragment in contents
+            ), f"{path} has no sed rewriting {source} -> {legacy}."
+
+    for path, contents in recipes.items():
+        assert not NUMPY_SED.search(contents), (
+            f"{path} still sed-rewrites the numpy pin. The legacy lane takes "
+            "numpy<2 from environment_spikesorting_legacy.yml instead."
+        )
+
+
 def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
     """Every environment makes its SciPy/runtime generation explicit.
 
@@ -166,7 +189,7 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
     legacy_markers = (
         "sed -i",
         "spikeinterface>=0.99.1,<0.100",
-        "numpy>=1.23,<2",
+        "numpy<2",
     )
 
     for path in sorted(ENVIRONMENTS.glob("*.yml")):
