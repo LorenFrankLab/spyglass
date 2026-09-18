@@ -181,15 +181,18 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
     Modern Spyglass installs need SciPy >=1.13 alongside the NumPy 2 / SI 0.104
     package contract. The one deliberate exception is the SI-0.99 legacy
     environment, whose header must carry the exact pre-install pin-relaxation
-    recipe; a stale ``scipy<1.13`` line without that recipe is not sufficient.
+    recipe *and* whose dependency lists must actually pin ``numpy<2``; a stale
+    ``scipy<1.13`` line without that recipe is not sufficient, and neither is a
+    header sentence that merely mentions the numpy pin.
     """
     modern_scipy = re.compile(
         r'^\s*-\s*["\']?scipy>=1\.13(?:["\']|\s|$)', re.MULTILINE
     )
+    # A real conda or pip dependency list item, not prose that names the pin.
+    legacy_numpy_pin = re.compile(r'^\s*-\s*["\']?numpy<2', re.MULTILINE)
     legacy_markers = (
         "sed -i",
         "spikeinterface>=0.99.1,<0.100",
-        "numpy<2",
     )
 
     for path in sorted(ENVIRONMENTS.glob("*.yml")):
@@ -198,9 +201,11 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
         documents_legacy_install = all(
             marker in contents for marker in legacy_markers
         )
-        assert is_modern or documents_legacy_install, (
-            f"{path} must pin scipy>=1.13 or document the complete legacy "
-            "SI-0.99 pre-install sed recipe in its header"
+        pins_legacy_numpy = bool(legacy_numpy_pin.search(contents))
+        assert is_modern or (documents_legacy_install and pins_legacy_numpy), (
+            f"{path} must pin scipy>=1.13, or both document the complete "
+            "legacy SI-0.99 pre-install sed recipe and carry a real "
+            "`- numpy<2` dependency entry (a header mention does not count)"
         )
 
 
