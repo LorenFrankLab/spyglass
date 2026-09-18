@@ -51,3 +51,6 @@ def test_load_waveforms_zarr_raises_legacy_message(tmp_path):
     message = str(excinfo.value)
     assert "Zarr" in message
     assert "legacy SpikeInterface 0.99" in message
+    # The guard must not tell the user that saved waveforms are unreadable:
+    # binary-folder waveforms are, and only extraction is gated.
+    assert "binary-folder waveforms, remain readable" in message
