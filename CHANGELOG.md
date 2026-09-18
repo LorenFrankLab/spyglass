@@ -1632,6 +1632,16 @@ cross-referenced here, not duplicated.
     solves the conda section of the default, DLC, and MoSeq environment
     files, both targeting Linux x86_64. It reaches the network and takes
     minutes, so it is a script rather than a collected test
+- **Warn when a `Merge.fetch_nwb` restriction skips a source.** In the
+    parent-attribute branch, a source whose immediate parent lacks an
+    attribute the restriction names was dropped from the search silently, so
+    the returned file list read as "everything that matched". A partial
+    result -- at least one source matched and at least one was skipped --
+    now logs a warning naming the skipped sources and stating that their
+    files are not returned. Nothing is raised, because a multi-source caller
+    may legitimately restrict on one source's key; the existing no-match
+    warning is unchanged, so the two never both fire. `fetch_nwb`'s
+    docstring states the behavior.
 
 ### Pipelines
 
@@ -1827,6 +1837,60 @@ cross-referenced here, not duplicated.
         pre-fill `parent_curation_id` / `apply_merge` by name; the expert
         `insert_curation` (and its ≥2-member merge-group validation) is
         unchanged.
+    - Read saved legacy waveform folders under the pinned SpikeInterface.
+        v0 `Waveforms.load_waveforms` and the cached-read branch of v1
+        `MetricCuration.get_waveforms` (`overwrite=False` over a non-empty
+        folder) no longer require the legacy SpikeInterface 0.99
+        environment: both go through a compatibility loader that returns a
+        `WaveformExtractor` under 0.99 and a `MockWaveformExtractor` -- same
+        `get_waveforms` / `nbefore` / `nafter` / `sorting` surface -- under
+        0.101 and later. Waveform *extraction* is still gated: in v1 the
+        legacy-environment guard, the recording and sorting reloads, and the
+        optional whitening now run only in the extraction branch. A
+        Zarr-format legacy waveform folder cannot be read under the pin and
+        raises the legacy-environment error instead of SpikeInterface's
+        `NotImplementedError`. That error message now names what is actually
+        gated -- waveform extraction, populate, curation, and recompute --
+        and says that existing v0/v1 rows, and their saved recordings,
+        sortings, and binary-folder waveforms, remain readable under the new
+        pin.
+    - Seed `SorterParameters.insert_default_legacy_si_sorters()` from each
+        SpikeInterface wrapper's own defaults. The helper built every row
+        from `sis.get_default_sorter_params(sorter)`, which is the wrapper's
+        `_dynamic_params()` plus SpikeInterface's global job kwargs
+        (`n_jobs`, `chunk_duration`, ...) for any sorter declaring
+        `requires_binary_data`. Those job keys are outside the wrapper
+        vocabulary the `SorterParameters` insert guard enforces, so the
+        final batch insert raised and no back-compat row landed at all. It
+        now reads the wrapper class's `_dynamic_params()` and re-runs the
+        vocabulary check per sorter before appending the row, so one sorter
+        whose defaults fall outside its own vocabulary is skipped with a
+        warning rather than aborting the batch. The curated-schema,
+        MATLAB-sorter, and not-installed skips are unchanged.
+    - Mark unobserved bins in the merge-level spike accessors.
+        `SpikeSortingOutput.get_spike_indicator` and `get_firing_rate`
+        binned spike times with no observation metadata, so a source with an
+        unobserved gap produced zero-count bins there and smoothing carried
+        a positive rate into the gap. They now follow the contract the
+        `SortedSpikesGroup` accessors use: spikes are counted only inside
+        the population's common observed time, bins outside it hold
+        `np.nan`, and the firing rate is smoothed within each contiguous
+        observed run. The new `SpikeSortingOutput.get_observation_intervals`
+        reports that common span -- the intersection of the spans stored by
+        the v2 curation sources (`CurationV2`, `ConcatMemberCuration`) for
+        the selected units -- and lists in `unknown_sources` the merge ids
+        that cannot report one: `CuratedSpikeSorting`, `CurationV1`, and
+        `ImportedSpikeSorting` predate that snapshot, so they restrict
+        nothing and are named rather than silently treated as observed
+        throughout (a population with no reporting source therefore keeps
+        the previous every-bin-observed behavior). `get_spike_indicator`
+        takes new `return_unit_ids` and `return_validity` flags, and the new
+        `SpikeSortingOutput.get_spike_times_by_unit` returns the trains
+        `get_spike_times` returns together with each train's
+        `spikesorting_merge_id` and units-table `unit_id` (the true id, not
+        a positional index). `SortedSpikesGroup.get_firing_rate` splits
+        observed runs with the same shared helper, so it no longer smooths
+        across a jump in the time axis of more than 1.5 sample periods.
     - Detect MUA events per contiguous observed run. `MuaEventsV1.make`
         masked by the detection interval only, so the bins no unit of the
         group was observed over reached `multiunit_HSE_detector` as NaN.
