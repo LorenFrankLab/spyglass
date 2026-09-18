@@ -9,7 +9,8 @@ Three coupled invariants live here:
 1. The base ``numpy`` requirement floors at 1.26 so the numpy<2 pipelines
    still install, while the ``spikesorting-v2`` and
    ``spikesorting-v2-matching`` extras carry the ``>=2,<3`` baseline the SI
-   0.104 stack needs, and the v2 conda env's SpikeInterface spec matches the
+   0.104 stack needs, ``scipy`` is declared directly rather than pulled in
+   transitively, and the v2 conda env's SpikeInterface spec matches the
    ``pyproject`` hard pin. A bare ``numpy`` or a drifting SI range silently
    shifts the resolved stack.
 2. The legacy (v0/v1) lane resolves the SI-0.99 stack by **sed-rewriting**
@@ -110,6 +111,19 @@ def test_v2_extras_pin_numpy_2():
             f"the {extra} extra must pin numpy>=2,<3; found "
             f"{str(reqs['numpy'].specifier)!r}"
         )
+
+
+def test_scipy_declared_in_base():
+    """scipy is a direct dependency with the modern >=1.13 floor: modules
+    outside the v2 stack import it at top level, so it may not arrive only
+    as a transitive pull from some other package."""
+    reqs = _base_requirements()
+    assert "scipy" in reqs, "scipy missing from base dependencies"
+    scipy = reqs["scipy"].specifier
+    assert scipy.contains("1.13.0") and not scipy.contains("1.12.0"), (
+        f"scipy is pinned {str(scipy)!r}; the base floor must be >=1.13 to "
+        "match the conda environments."
+    )
 
 
 def test_spikeinterface_hard_pin_matches_v2_env():

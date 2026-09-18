@@ -72,6 +72,9 @@ dependencies = [
   "pydotplus",
   "pynwb>=3.1.3",
   "ripple-detection",
+  "scipy>=1.13",                   # imported at top level across common/lfp/
+                                   # ripple/mua/decoding; floor matches the
+                                   # conda environments
   "seaborn",
   "sortingview>=0.11",
   "spikeinterface==0.104.3",        # pinned: KS4/MS5/SC2/TDC2/Generic schemas
