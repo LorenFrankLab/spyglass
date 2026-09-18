@@ -151,6 +151,7 @@ optional-dependencies.spikesorting-v2-matching = [
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports
 ]
 optional-dependencies.spikesorting-v2-curation = [
+  "filelock", # atomic draft revision checks across review-server processes
   # Pinned FigPack view/context APIs used by the Spyglass review extension.
   # Re-verify the browser edit/save/import journey before changing these pins.
   "figpack==0.3.20",

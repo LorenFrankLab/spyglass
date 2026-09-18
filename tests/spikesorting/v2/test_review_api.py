@@ -141,6 +141,7 @@ def _change_set(**overrides):
 
     review = SimpleNamespace(
         review_id=uuid.UUID(int=7),
+        is_hosted=False,
         parent=SimpleNamespace(curation_id=0, sorting_id=uuid.UUID(int=1)),
         profile=SimpleNamespace(review_profile_name="minimal_profile"),
     )
@@ -209,13 +210,20 @@ def test_next_step_lines_name_the_state_consistently():
     assert line.startswith(
         "Saved browser edits differ from the reviewed parent"
     )
-    assert "commit()" in line and "conflict_resolutions" in line
+    assert "Preview and commit" in line and "final labels" in line
+    edited.review.is_hosted = True
+    assert "commit()" in edited.next_step()
+    assert "conflict_resolutions" in edited.next_step()
     clean = _change_set(
         labels_after={1: ("accept",), 2: ("noise",), 3: ()},
         merge_groups=(),
         unit_count_after=3,
         label_conflicts=(),
     )
+    assert "Save draft" in clean.next_step()
+    assert "Record reviewed — no changes" in clean.next_step()
+    clean.review.is_hosted = True
+    assert "Save Annotations" in clean.next_step()
     assert "confirm_no_changes=True" in clean.next_step()
 
     def receipt(needs):

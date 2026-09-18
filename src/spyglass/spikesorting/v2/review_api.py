@@ -243,8 +243,9 @@ class FigPackReview:
 
         In a local browser: select units, edit labels or propose merges, then
         **Save draft**. Hosted figures use **Curate Figure** and the authenticated
-        **Save Annotations** toolbar action. Both save a draft; run
-        ``review.commit_panel()`` in the notebook to preview and commit it.
+        **Save Annotations** toolbar action. Both save a draft. Local reviews
+        offer **Preview and commit** in the browser; hosted reviews use
+        ``review.commit_panel()`` in the notebook.
 
         Parameters
         ----------
@@ -253,11 +254,12 @@ class FigPackReview:
             URL -- for a notebook printing it, a test driving its own
             browser, or an SSH-forwarded remote kernel (forward the printed
             port, e.g. ``ssh -L <port>:localhost:<port> host``, and open the
-            same ``http://localhost:<port>/`` locally; the FigPack frontend
+            same returned URL locally, including its bundle path; the frontend
             enables local editing only for a ``localhost`` origin).
         port : int, optional
             Loopback port for a local review's server (default: a free
-            port). Ignored when the bundle is already being served.
+            port). Ignored when this process already serves any review;
+            inspections and child reviews share that server and port.
         focus_unit_ids : sequence of int, optional
             Units to select when the review opens, such as newly merged units.
 
@@ -644,24 +646,37 @@ class CurationChangeSet:
         an identical diff was already committed (``commit()`` reuses that
         child), so the wording says what is actually known.
         """
+        hosted = self.review.is_hosted
         if self.has_changes:
             merges = len(self.merge_groups)
+            action = (
+                "inspect summary() and run commit() in Python "
+                "(a diff committed earlier is reused)"
+                if hosted
+                else "use Preview and commit in the local browser"
+            )
+            conflicts = (
+                " with conflict_resolutions for every listed conflict"
+                if hosted
+                else ", choosing the final labels for every listed conflict"
+            )
             return (
                 "Saved browser edits differ from the reviewed parent: "
                 f"{len(self.changed_units())} changed unit(s), {merges} "
-                "proposed merge(s). Next: inspect summary() and run "
-                "commit() in Python (a diff committed earlier is reused)"
-                + (
-                    " with conflict_resolutions for every listed conflict."
-                    if self.label_conflicts
-                    else "."
-                )
+                f"proposed merge(s). Next: {action}"
+                + (conflicts if self.label_conflicts else "")
+                + "."
             )
+        action = (
+            "edit and Save Annotations in the hosted browser, or run "
+            "commit(confirm_no_changes=True) in Python to record this curation as reviewed."
+            if hosted
+            else "edit and Save draft in the local browser, or use Preview and commit "
+            "then Record reviewed — no changes."
+        )
         return (
             "No saved browser edits differ from curation "
-            f"{self.review.parent.curation_id}. Next: edit and Save "
-            "Annotations in the browser, or commit(confirm_no_changes=True) "
-            "to record this curation as reviewed."
+            f"{self.review.parent.curation_id}. Next: {action}"
         )
 
     def summary(self) -> str:

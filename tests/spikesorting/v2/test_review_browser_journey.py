@@ -321,6 +321,7 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
 ):
     import json
     from time import perf_counter
+    from urllib.parse import urlsplit
 
     from playwright.sync_api import expect
 
@@ -343,6 +344,20 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
     with browser.review_page(
         initial_url, artifacts=tmp_path / "connected"
     ) as page:
+        forwarded_origin = urlsplit(initial_url).netloc
+
+        def only_forwarded_port(route):
+            target = urlsplit(route.request.url)
+            if (
+                target.hostname == "localhost"
+                and target.netloc != forwarded_origin
+            ):
+                route.abort()
+            else:
+                route.continue_()
+
+        # Model the documented SSH tunnel: only the initial local port is reachable.
+        page.context.route("**/*", only_forwarded_port)
         page.get_by_role(
             "button", name="Preview and commit", exact=True
         ).wait_for()
@@ -377,6 +392,7 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
         with page.expect_popup() as popup:
             detail.click()
         focused = popup.value
+        assert urlsplit(focused.url).netloc == forwarded_origin
         started = perf_counter()
         try:
             trace_tab = focused.get_by_text("Spikes on traces", exact=True)
@@ -416,6 +432,7 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
             "button", name="Commit and inspect merged units", exact=True
         ).click()
         page.wait_for_url(lambda url: str(url) != initial_url, timeout=180000)
+        assert urlsplit(page.url).netloc == forwarded_origin
         expect(browser.unit_row(page, second + 1)).to_be_visible(timeout=60000)
         measurements["merge_evaluate_and_open_s"] = perf_counter() - started
         with pytest.raises(ValueError, match="not completed"):

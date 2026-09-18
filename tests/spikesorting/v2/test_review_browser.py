@@ -126,6 +126,48 @@ def _saved_state(bundle):
     )
 
 
+def test_stale_tab_preserves_edits_and_can_reapply_on_latest_draft(
+    review_bundle, tmp_path
+):
+    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+
+    url = serve_review_bundle(review_bundle)
+    with browser.review_page(url, artifacts=tmp_path) as first:
+        second = first.context.new_page()
+        second.goto(url)
+        second.get_by_text("Draft saved.", exact=False).wait_for()
+        browser.select_units(first, 3)
+        browser.set_label(first, "accept", True)
+        assert browser.save_annotations(first) == 200
+        browser.select_units(second, 1)
+        browser.set_label(second, "lab_cell", True)
+        assert browser.save_annotations(second) == 409
+        second.get_by_text(
+            "Your unsaved edits are still here.", exact=False
+        ).wait_for()
+        assert browser.label_checkbox(second, "lab_cell").is_checked()
+        assert second.get_by_role(
+            "button", name="Save draft", exact=True
+        ).is_disabled()
+        assert _saved_state(review_bundle)[0][3] == ["accept"]
+        assert "lab_cell" not in _saved_state(review_bundle)[0][1]
+
+        with second.expect_popup() as opened:
+            second.get_by_role(
+                "link", name="Open latest draft in a new tab"
+            ).click()
+        latest = opened.value
+        latest.get_by_text("Draft saved.", exact=False).wait_for()
+        browser.select_units(latest, 1)
+        browser.set_label(latest, "lab_cell", True)
+        assert browser.save_annotations(latest) == 200
+        labels, _ = _saved_state(review_bundle)
+        assert set(labels[1]) == {"accept", "lab_cell"}
+        assert labels[3] == ["accept"]
+        latest.close()
+        second.close()
+
+
 @pytest.mark.parametrize("viewport", sorted(browser.VIEWPORTS))
 def test_review_columns_and_controls_are_usable(
     review_bundle, viewport, tmp_path
@@ -337,25 +379,48 @@ def test_native_toolbar_saves_through_figpack_with_configured_labels(
     review_bundle, tmp_path
 ):
     """Exercise the hosted control path with a local native FigPack transport."""
+    from functools import partial
+    from http.server import ThreadingHTTPServer
+    from threading import Thread
     from urllib.parse import urlencode
 
-    from spyglass.spikesorting.v2._review_delivery import serve_review_bundle
+    from figpack.core._file_handler import FileUploadCORSRequestHandler
 
-    url = serve_review_bundle(review_bundle)
+    # Simulate the hosted FigPack transport, which owns its save protocol.
+    # The Spyglass local endpoint deliberately refuses unconditional writes.
+    server = ThreadingHTTPServer(
+        ("localhost", 0),
+        partial(
+            FileUploadCORSRequestHandler,
+            directory=str(review_bundle),
+            enable_file_upload=True,
+        ),
+    )
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://localhost:{server.server_port}/"
     # A figure URL delegates draft saving to FigPack, as hosted figures do.
     # Authentication stays upstream; this test writes only to our local bundle.
-    with browser.review_page(
-        url + "?" + urlencode({"figure": url}),
-        artifacts=tmp_path,
-        native_toolbar=True,
-    ) as page:
-        page.get_by_role("button", name="Curate Figure", exact=True).click()
-        browser.select_units(page, 2)
-        browser.set_label(page, "lab_cell", True)
-        assert page.get_by_role("button", name="Finalize Curation").count() == 0
-        assert browser.save_annotations(page, native_toolbar=True) in (
-            200,
-            201,
-        )
+    try:
+        with browser.review_page(
+            url + "?" + urlencode({"figure": url}),
+            artifacts=tmp_path,
+            native_toolbar=True,
+        ) as page:
+            page.get_by_role("button", name="Curate Figure", exact=True).click()
+            browser.select_units(page, 2)
+            browser.set_label(page, "lab_cell", True)
+            assert (
+                page.get_by_role("button", name="Finalize Curation").count()
+                == 0
+            )
+            assert browser.save_annotations(page, native_toolbar=True) in (
+                200,
+                201,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
     labels, _ = _saved_state(review_bundle)
     assert set(labels[2]) == {"lab_cell", "noise"}

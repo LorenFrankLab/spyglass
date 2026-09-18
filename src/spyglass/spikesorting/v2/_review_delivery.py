@@ -7,8 +7,8 @@ the local draft control requires a loopback HTTP origin to write
 draft** writes the same file that :meth:`FigPackReview.preview_import` reads.
 Nothing is copied or rebuilt to open a review.
 
-Servers live only in this Python process (a background daemon thread per
-bundle, reused on repeated opens, stopped at interpreter exit); the port is
+One server lives in this Python process (a background daemon thread, reused
+across bundles, stopped at interpreter exit); the port is
 never persisted -- ``review.uri`` stays the durable filesystem location and a
 resume after a kernel restart simply starts delivery again over the same
 files.
@@ -21,16 +21,19 @@ sidecar stay read-only. An optional operation adapter accepts same-origin,
 review-scoped POST requests for scientific actions; the handler itself has no
 database connection or scientific policy.
 
-DB-free: imports only the standard library and, lazily, FigPack's request
-handler.
+Draft saves require the revision returned by the last read. A filesystem lock
+serializes revision checks and atomic replacement across review processes.
+DB-free; FigPack and filelock are imported only when starting delivery.
 """
 
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import threading
 import urllib.parse
+from dataclasses import dataclass
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -38,22 +41,67 @@ from pathlib import Path
 #: The only file the browser may write: the FigPack annotation sidecar.
 WRITABLE_BUNDLE_FILES = frozenset({"annotations.json"})
 
-_SERVERS: dict[Path, tuple[ThreadingHTTPServer, threading.Thread]] = {}
+
+@dataclass
+class _Bundle:
+    root: Path
+    operations: object = None
+
+
+_SERVER: tuple[ThreadingHTTPServer, threading.Thread] | None = None
 _LOCK = threading.Lock()
 
 
 def _handler_class():
     """Build the request-handler class (FigPack import kept lazy)."""
     from figpack.core._file_handler import FileUploadCORSRequestHandler
+    from filelock import FileLock
+
+    from spyglass.spikesorting.v2._json_io import write_json
+
+    def draft_revision(path):
+        data = path.read_bytes() if path.exists() else b""
+        return '"' + hashlib.sha256(data).hexdigest() + '"'
 
     class ReviewBundleRequestHandler(FileUploadCORSRequestHandler):
         """Bundle delivery and review-scoped operations through an adapter."""
+
+        def parse_request(self):
+            if not super().parse_request():
+                return False
+            parsed = urllib.parse.urlsplit(self.path)
+            parts = parsed.path.split("/", 3)
+            if len(parts) != 4 or parts[1] != "bundles":
+                self.send_error(404, "Unknown review bundle")
+                return False
+            with _LOCK:
+                self.bundle = self.server.bundles.get(parts[2])
+            if self.bundle is None:
+                self.send_error(404, "Unknown review bundle")
+                return False
+            self.directory = str(self.bundle.root)
+            self.bundle_prefix = f"/bundles/{parts[2]}"
+            self.bundle_path = parsed._replace(path="/" + parts[3]).geturl()
+            return True
+
+        def translate_path(self, path):
+            # Keep self.path intact for directory redirects and browser URLs;
+            # only filesystem resolution strips the registered bundle prefix.
+            return super().translate_path(path.removeprefix(self.bundle_prefix))
+
+        def _get_safe_file_path(self):
+            # do_PUT admits exactly this sidecar, never a client-supplied path.
+            path = (self.bundle.root / "annotations.json").resolve()
+            if not path.is_relative_to(self.bundle.root):
+                self.send_error(403, "Forbidden: path outside review bundle")
+                return None
+            return path
 
         def do_PUT(self):
             if not self._same_origin():
                 return
             relative = urllib.parse.unquote(
-                urllib.parse.urlparse(self.path).path.lstrip("/")
+                urllib.parse.urlparse(self.bundle_path).path.lstrip("/")
             )
             if relative not in WRITABLE_BUNDLE_FILES:
                 self.send_error(
@@ -62,7 +110,36 @@ def _handler_class():
                     "written through the local review server",
                 )
                 return
-            super().do_PUT()
+            path = self._get_safe_file_path()
+            if path is None:
+                return
+            revision = self.headers.get("If-Match")
+            if revision is None:
+                self._json(
+                    {"error": "Reload the review before saving a draft."}, 428
+                )
+                return
+            try:
+                size = int(self.headers.get("Content-Length", 0))
+                if not 0 < size <= 10_000_000:
+                    raise ValueError("Draft must be smaller than 10 MB.")
+                value = json.loads(self.rfile.read(size))
+                if not isinstance(value, dict):
+                    raise TypeError("Draft must be a JSON object.")
+            except (ValueError, TypeError, UnicodeError) as exc:
+                self._json({"error": str(exc)}, 400)
+                return
+            # Atomic replacement keeps readers from seeing partial JSON. The
+            # lock covers comparison AND write, including other processes on
+            # shared storage; a thread lock alone cannot protect this draft.
+            with FileLock(str(path) + ".lock"):
+                if revision != draft_revision(path):
+                    self._json(
+                        {"error": "Another tab changed this draft."}, 409
+                    )
+                    return
+                write_json(path, value)
+                self._json({"saved": True}, etag=draft_revision(path))
 
         def _same_origin(self):
             hosts = {
@@ -80,22 +157,58 @@ def _handler_class():
                 return False
             return True
 
-        def _json(self, value, status=200):
-            data = json.dumps(value).encode()
+        def _json(self, value, status=200, *, etag=None):
+            self._respond(
+                json.dumps(value).encode(),
+                "application/json",
+                status,
+                etag=etag,
+            )
+
+        def _respond(self, data, content_type, status=200, *, etag=None):
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
+            if etag is not None:
+                self.send_header("ETag", etag)
             self.end_headers()
             self.wfile.write(data)
 
         def do_GET(self):
-            path = urllib.parse.urlsplit(self.path).path
+            path = urllib.parse.urlsplit(self.bundle_path).path
+            if path == "/extension-spyglass-review.js":
+                # Controls and the local save protocol upgrade together, even
+                # when reopening a saved bundle from an earlier installation.
+                self._respond(
+                    Path(__file__)
+                    .with_name("_review_controls.js")
+                    .read_bytes(),
+                    "text/javascript",
+                )
+                return
+            if path == "/annotations.json":
+                target = self._get_safe_file_path()
+                if target is None:
+                    return
+                # Read payload and revision from the SAME bytes. A writer may
+                # replace the file immediately afterwards; If-Match catches it.
+                try:
+                    data = target.read_bytes()
+                except FileNotFoundError:
+                    data = b""
+                etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+                self._json(
+                    json.loads(data) if data else {},
+                    200 if data else 404,
+                    etag=etag,
+                )
+                return
             if not path.startswith("/api/"):
                 return super().do_GET()
             if not self._same_origin():
                 return
-            service = self.server.review_operations
+            service = self.bundle.operations
             if path == "/api/capabilities":
                 self._json(
                     {
@@ -114,9 +227,9 @@ def _handler_class():
         def do_POST(self):
             if not self._same_origin():
                 return
-            service = self.server.review_operations
+            service = self.bundle.operations
             if (
-                urllib.parse.urlsplit(self.path).path != "/api/operation"
+                urllib.parse.urlsplit(self.bundle_path).path != "/api/operation"
                 or service is None
             ):
                 self._json(
@@ -146,19 +259,19 @@ def _handler_class():
     return ReviewBundleRequestHandler
 
 
-def review_bundle_url(port: int) -> str:
+def review_bundle_url(port: int, bundle_id: str) -> str:
     """The browser URL for a bundle served on ``port``.
 
     Spelled with ``localhost`` (not ``127.0.0.1``): the FigPack frontend
     enables local in-place editing only for ``http://localhost:<port>/``.
     """
-    return f"http://localhost:{port}/"
+    return f"http://localhost:{port}/bundles/{bundle_id}/"
 
 
 def serve_review_bundle(
     bundle, *, port: int | None = None, operation_factory=None
 ) -> str:
-    """Serve ``bundle`` over loopback (starting or reusing a server); return its URL.
+    """Serve ``bundle`` on this process's shared loopback server; return its URL.
 
     Parameters
     ----------
@@ -167,8 +280,8 @@ def serve_review_bundle(
         review). Must contain ``index.html``.
     port : int, optional
         Loopback port to bind on a fresh start (``None`` picks a free one).
-        Ignored when this process already serves the bundle; the running
-        server's URL is returned instead.
+        Ignored when this process already serves any bundle. All reviews and
+        inspections share that port, so one SSH tunnel supports navigation.
     operation_factory : callable, optional
         Create the scientific operation adapter when attaching a connected
         review. Omit for DB-free static/read-only inspection delivery.
@@ -176,7 +289,7 @@ def serve_review_bundle(
     Returns
     -------
     str
-        ``http://localhost:<port>/``.
+        ``http://localhost:<port>/bundles/<id>/``.
 
     Raises
     ------
@@ -184,6 +297,7 @@ def serve_review_bundle(
         If the bundle directory or its ``index.html`` is missing (the
         message names the recovery: rebuild the review).
     """
+    global _SERVER
     root = Path(bundle).resolve()
     if not (root / "index.html").is_file():
         raise FileNotFoundError(
@@ -192,59 +306,59 @@ def serve_review_bundle(
             "again from its curation (start_review(...) recreates the bundle "
             "-- edits saved into the missing bundle are gone)."
         )
+    bundle_id = hashlib.sha256(str(root).encode()).hexdigest()
     with _LOCK:
-        running = _SERVERS.get(root)
-        if running is not None and running[1].is_alive():
-            if (
-                running[0].review_operations is None
-                and operation_factory is not None
-            ):
-                running[0].review_operations = operation_factory()
-            return review_bundle_url(running[0].server_port)
-        handler = partial(
-            _handler_class(),
-            directory=str(root),
-            enable_file_upload=True,
-        )
-        server = ThreadingHTTPServer(("127.0.0.1", port or 0), handler)
-        server.daemon_threads = True
-        server.review_operations = (
-            operation_factory() if operation_factory else None
-        )
-        thread = threading.Thread(
-            target=server.serve_forever,
-            name=f"spyglass-review-server:{root.name}",
-            daemon=True,
-        )
-        thread.start()
-        _SERVERS[root] = (server, thread)
-        return review_bundle_url(server.server_port)
+        if _SERVER is None:
+            handler = partial(_handler_class(), enable_file_upload=True)
+            server = ThreadingHTTPServer(("127.0.0.1", port or 0), handler)
+            server.daemon_threads = True
+            server.bundles = {}
+            thread = threading.Thread(
+                target=server.serve_forever,
+                name="spyglass-review-server",
+                daemon=True,
+            )
+            thread.start()
+            _SERVER = server, thread
+        server, _ = _SERVER
+        served = server.bundles.setdefault(bundle_id, _Bundle(root))
+        if served.operations is None and operation_factory is not None:
+            served.operations = operation_factory()
+        return review_bundle_url(server.server_port, bundle_id)
 
 
 def served_review_bundles() -> dict[Path, str]:
     """``{bundle: url}`` for every bundle this process is serving."""
     with _LOCK:
+        if _SERVER is None:
+            return {}
+        server, _ = _SERVER
         return {
-            root: review_bundle_url(server.server_port)
-            for root, (server, thread) in _SERVERS.items()
-            if thread.is_alive()
+            bundle.root: review_bundle_url(server.server_port, bundle_id)
+            for bundle_id, bundle in server.bundles.items()
         }
 
 
 def stop_review_servers(bundle=None) -> None:
-    """Stop the server for ``bundle`` (or every server when ``None``)."""
+    """Unregister a bundle; stop delivery when none remain (or stop all)."""
+    global _SERVER
+    root = Path(bundle).resolve() if bundle is not None else None
     with _LOCK:
-        roots = list(_SERVERS) if bundle is None else [Path(bundle).resolve()]
-        for root in roots:
-            entry = _SERVERS.pop(root, None)
-            if entry is None:
-                continue
-            server, thread = entry
-            if server.review_operations is not None:
-                server.review_operations.close()
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=5)
+        if _SERVER is None:
+            return
+        server, thread = _SERVER
+        for bundle_id, served in list(server.bundles.items()):
+            if root is None or served.root == root:
+                del server.bundles[bundle_id]
+                if served.operations is not None:
+                    served.operations.close()
+        stop = not server.bundles
+        if stop:
+            _SERVER = None
+    if stop:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 atexit.register(stop_review_servers)

@@ -16,7 +16,7 @@ window.figpack_p1.registerFPViewComponent({
     let session = reviewSessions.get(annotations);
     const firstMount = !session;
     if (!session) {
-      session = {saved: null, saving: false, error: "", loaded: !local, render: () => {},
+      session = {saved: null, revision: null, conflict: false, saving: false, error: "", loaded: !local, render: () => {},
         connected: false, reviewId: null, operation: {}, preview: null,
         resolutions: {}, start: "", stop: "", activeOperation: null};
       reviewSessions.set(annotations, session);
@@ -77,10 +77,16 @@ window.figpack_p1.registerFPViewComponent({
       session.render();
       try {
         const response = await fetch(new URL("annotations.json", window.location.href), {
-          method: "PUT", headers: {"Content-Type": "application/json"}, body: snapshot
+          method: "PUT", headers: {"Content-Type": "application/json", "If-Match": session.revision}, body: snapshot
         });
+        if (response.status === 409) {
+          session.conflict = true;
+          session.preview = null;
+          throw new Error("Another tab changed this draft. Your unsaved edits are still here. Open the latest draft, review its changes, and reapply your edits there.");
+        }
         if (!response.ok) throw new Error(`Draft was not saved (HTTP ${response.status}). Retry before committing.`);
         session.saved = snapshot;
+        session.revision = response.headers.get("ETag");
       } finally {
         session.saving = false;
         session.render();
@@ -153,11 +159,17 @@ window.figpack_p1.registerFPViewComponent({
         !editable || !curation().mergeGroups?.some(group => group.some(id => ids.includes(id))));
       if (local) {
         button(session.saving ? "Saving draft…" : "Save draft", () => saveDraft().catch(reportError),
-          !session.loaded || session.saving || busy || payload() === session.saved);
+          !session.loaded || session.saving || session.conflict || busy || payload() === session.saved);
+        if (session.conflict) {
+          const link = element("a", "Open latest draft in a new tab");
+          link.href = window.location.href;
+          link.target = "_blank";
+          link.rel = "noopener";
+        }
       }
       if (session.connected) {
-        button("Preview and commit", () => operate({action: "preview"}), !editable || session.saving);
-        button("Review parent branch", () => operate({action: "parent"}), !editable || session.saving);
+        button("Preview and commit", () => operate({action: "preview"}), !editable || session.saving || session.conflict);
+        button("Review parent branch", () => operate({action: "parent"}), !editable || session.saving || session.conflict);
         const inspection = element("div");
         element("span", "Inspection window (recording-relative seconds; blank = full recording): ", inspection);
         for (const [key, name] of [["start", "Start seconds"], ["stop", "Stop seconds"]]) {
@@ -264,6 +276,7 @@ window.figpack_p1.registerFPViewComponent({
         const data = response.status === 404 ? {annotations: {"/": {sorting_curation: JSON.stringify(seed)}}} : await response.json();
         annotations.dispatch({type: "setAllAnnotations", annotations: data.annotations || {}});
         session.saved = payload();
+        session.revision = response.headers.get("ETag");
         session.loaded = true;
       } catch (exception) {
         session.error = `Unable to load saved annotations: ${exception.message}. Reload before editing.`;

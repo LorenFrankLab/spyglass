@@ -143,6 +143,13 @@ class ReviewOperationService:
             operation_lock = _acquire_operation_lock(self.bundle)
         except BlockingIOError:
             state = read_json(self.bundle / OPERATION_FILE)
+            # The worker journals its result before exiting. Keep actions
+            # disabled until ownership is released, or an immediate commit
+            # after preview can fail on the previous worker's lock.
+            if state.get("status") != "running":
+                state.update(
+                    status="running", message="Finishing review operation…"
+                )
         else:
             with operation_lock:
                 state = read_json(self.bundle / OPERATION_FILE)

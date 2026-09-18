@@ -108,6 +108,31 @@ def test_service_reports_interrupted_work_and_serializes_actions(
         service.executor.shutdown(wait=True)
 
 
+@pytest.mark.parametrize("status", ["complete", "failed"])
+def test_service_waits_for_worker_release_before_reporting_result(
+    tmp_path, status
+):
+    from spyglass.spikesorting.v2._review_operations import (
+        OPERATION_FILE,
+        ReviewOperationService,
+        _acquire_operation_lock,
+    )
+
+    state = {"status": status, "action": "preview", "operation_id": "finishing"}
+    journal = tmp_path / OPERATION_FILE
+    journal.write_text(json.dumps(state))
+    service = ReviewOperationService("review", tmp_path, {})
+    try:
+        with _acquire_operation_lock(tmp_path):
+            observed = service.status()
+            assert observed["status"] == "running"
+            assert observed["operation_id"] == state["operation_id"]
+            assert json.loads(journal.read_text()) == state
+        assert service.status() == state
+    finally:
+        service.close()
+
+
 def test_delivery_failure_keeps_the_scientific_result(tmp_path, monkeypatch):
     from spyglass.spikesorting.v2 import _review_delivery
     from spyglass.spikesorting.v2._review_operations import (
