@@ -39,7 +39,7 @@ def make_annotation_tables(dj_conn, schema_name):
     -------
     tuple
         ``(table, schema)``. ``table`` is the annotation table, bound to the
-        production ``audit_positional_unit_ids`` and
+        production ``add_annotation``, ``audit_positional_unit_ids`` and
         ``migrate_positional_unit_ids``, with
         ``_positional_id_migration_table`` pointing at the test marker table.
         ``schema`` is handed to :func:`drop_annotation_tables` on teardown.
@@ -64,6 +64,10 @@ def make_annotation_tables(dj_conn, schema_name):
             quantification = NULL: float
             """
 
+        add_annotation = UnitAnnotation.add_annotation
+        _migration_marker_table = classmethod(
+            UnitAnnotation._migration_marker_table.__func__
+        )
         audit_positional_unit_ids = classmethod(
             UnitAnnotation.audit_positional_unit_ids.__func__
         )

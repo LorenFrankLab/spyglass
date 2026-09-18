@@ -294,8 +294,10 @@ dated rule sets and review profile; current presets and examples use them.
 `UnitAnnotation.unit_id` identifies the actual NWB units-table row rather than
 its position in the spike-times list. Existing annotations on sparse or
 merge-applied unit namespaces must be migrated once using the release-note
-commands above, before writing new annotations. Dense `0..n-1` unit namespaces
-are unaffected.
+commands above: `add_annotation` refuses to write to such a merge until it is,
+rather than mixing the two id meanings in one merge. A merge whose first
+annotation is written under the new contract is recorded as needing no
+migration. Dense `0..n-1` unit namespaces are unaffected.
 
 #### Spike Sorting v2: register schemas against any configured database host
 

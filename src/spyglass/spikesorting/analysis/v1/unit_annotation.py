@@ -52,8 +52,25 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             """
             return (UnitAnnotation & self).fetch_unit_spikes(return_unit_ids)
 
+    @classmethod
+    def _migration_marker_table(cls):
+        """Return the table marking merges already on the true-id contract."""
+        return getattr(
+            cls,
+            "_positional_id_migration_table",
+            UnitAnnotationPositionalIdMigration,
+        )
+
     def add_annotation(self, key, **kwargs):
         """Add an annotation to a unit. Creates the unit if it does not exist.
+
+        Refuses the write when the merge still holds rows written under the
+        older positional-``unit_id`` contract: the two id meanings would mix
+        silently in one merge. Run :meth:`migrate_positional_unit_ids` first.
+
+        The first annotation on a merge is born on the true-id contract, so it
+        is recorded in the migration-marker table inside the same transaction
+        as the rows it writes; a later migration then leaves that merge alone.
 
         Parameters
         ----------
@@ -63,17 +80,37 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            if unit_id is not valid for the sorting
+            if unit_id is not valid for the sorting, or if the merge holds
+            unmigrated positional annotations
         """
+        merge_id = key["spikesorting_merge_id"]
+        merge_restriction = {"spikesorting_merge_id": merge_id}
+        marker = self._migration_marker_table()
+        merge_has_rows = bool(self & merge_restriction)
+        merge_is_marked = bool(marker & merge_restriction)
+
+        if merge_has_rows and not merge_is_marked:
+            # A dense namespace is absent from the audit: position and true
+            # id coincide there, so there is nothing to migrate and nothing
+            # to refuse.
+            if not self.audit_positional_unit_ids(merge_ids=[merge_id]).empty:
+                raise ValueError(
+                    f"UnitAnnotation rows for {merge_id} predate the true-id "
+                    "contract and are unmigrated; run "
+                    "UnitAnnotation.migrate_positional_unit_ids(dry_run=False)"
+                    " before adding annotations."
+                )
+
         # validate new units
         unit_key = {
             k: v
             for k, v in key.items()
             if k in ["spikesorting_merge_id", "unit_id"]
         }
-        if not self & unit_key:
+        unit_is_new = not self & unit_key
+        if unit_is_new:
             nwb_file = (
-                SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
+                SpikeSortingOutput & {"merge_id": merge_id}
             ).fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
             # Compare against the NWB's actual unit_id set, not the
@@ -86,18 +123,37 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                     f"{key['spikesorting_merge_id']} "
                     f"(valid ids: {sorted(nwb_unit_ids)})."
                 )
+
+        if merge_has_rows:
+            if unit_is_new:
+                self.insert1(unit_key)
+            # add annotation
+            self.Annotation().insert1(key, **kwargs)
+            return
+
+        # First write for this merge: marker, unit and annotation land
+        # together or not at all, so a failed write cannot leave the merge
+        # marked migrated with no rows to show for it.
+        with self.connection.transaction:
+            if not merge_is_marked:
+                marker.insert1({**merge_restriction, "migration_version": 1})
             self.insert1(unit_key)
-        # add annotation
-        self.Annotation().insert1(key, **kwargs)
+            self.Annotation().insert1(key, **kwargs)
 
     @classmethod
-    def audit_positional_unit_ids(cls):
+    def audit_positional_unit_ids(cls, merge_ids=None):
         """List unmigrated annotations whose NWB namespace is not ``0..n-1``.
 
         In a sparse namespace, an older positional ``unit_id`` and the current
         NWB units-table id can differ. This audit is read-only and idempotent;
         a durable migration marker excludes merge ids already processed by
         :meth:`migrate_positional_unit_ids`.
+
+        Parameters
+        ----------
+        merge_ids : iterable, optional
+            Audit only these merge ids. By default every annotated merge is
+            audited, which reads one NWB file per unmigrated merge.
 
         Returns
         -------
@@ -114,16 +170,17 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             "stored_unit_ids",
         ]
         rows = []
-        marker_table = getattr(
-            cls,
-            "_positional_id_migration_table",
-            UnitAnnotationPositionalIdMigration,
-        )
+        marker_table = cls._migration_marker_table()
         migrated = set(marker_table.fetch("spikesorting_merge_id"))
-        merge_ids = sorted(
-            set(cls.fetch("spikesorting_merge_id")) - migrated, key=str
+        annotated = cls()
+        if merge_ids is not None:
+            annotated = annotated & [
+                {"spikesorting_merge_id": merge_id} for merge_id in merge_ids
+            ]
+        audit_merge_ids = sorted(
+            set(annotated.fetch("spikesorting_merge_id")) - migrated, key=str
         )
-        for merge_id in merge_ids:
+        for merge_id in audit_merge_ids:
             nwb_file = (
                 SpikeSortingOutput & {"merge_id": merge_id}
             ).fetch_nwb()[0]
@@ -151,10 +208,13 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
     def migrate_positional_unit_ids(cls, *, dry_run: bool = True) -> dict:
         """Idempotently remap positional annotation ids to NWB unit ids.
 
-        Run this immediately after upgrading from the positional-id contract
-        and before writing any new annotations. A durable per-merge marker is
-        inserted in the same transaction as the rewrite, making subsequent
-        calls no-ops. The full migration plan is validated before any write.
+        Run this immediately after upgrading from the positional-id contract.
+        The boundary is enforced, not merely documented: until a merge is
+        migrated, :meth:`add_annotation` refuses to write to it, and a first
+        annotation on a fresh merge marks it migrated, so this call skips it.
+        A durable per-merge marker is inserted in the same transaction as the
+        rewrite, making subsequent calls no-ops. The full migration plan is
+        validated before any write.
 
         Parameters
         ----------
@@ -201,11 +261,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         if dry_run or not candidate_merge_ids:
             return plan
 
-        marker_table = getattr(
-            cls,
-            "_positional_id_migration_table",
-            UnitAnnotationPositionalIdMigration,
-        )
+        marker_table = cls._migration_marker_table()
 
         def _remap(row, mapping):
             row = dict(row)
