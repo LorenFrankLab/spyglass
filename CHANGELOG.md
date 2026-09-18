@@ -1585,6 +1585,41 @@ cross-referenced here, not duplicated.
     `pytest-legacy` CI job runs that `sed` relax as its own step before
     creating the env. The committed v2 `spikeinterface==0.104.3` pin in
     `pyproject.toml` is never changed -- the relax is a build-time-only edit
+- **Relax the base `numpy` floor and repair the numpy<2 environments.**
+    Installing Spyglass no longer forces the numpy 2 line: the base
+    requirement is now `numpy>=1.26,<3`, and the `numpy>=2,<3` baseline the
+    SpikeInterface 0.104 + torch stack needs moved onto the
+    `spikesorting-v2` and `spikesorting-v2-matching` extras. The numpy<2
+    pipelines gain floors of their own -- `deeplabcut[tf]>=3.0` and
+    `keypoint-moseq>=0.6` -- so the resolver cannot backtrack onto pre-3.x
+    DeepLabCut or pre-0.6 keypoint-moseq releases. `scipy>=1.13` is now
+    declared directly rather than arriving transitively; modules across
+    `common`, `lfp`, `ripple`, `mua`, and `decoding` import it at top
+    level. `environments/environment_dlc.yml`,
+    `environment_moseq_cpu.yml`, and `environment_moseq_gpu.yml` are back
+    on `numpy<2` (they had carried `numpy>=2,<3`, which those stacks cannot
+    resolve) and the conda `pytorch<1.12.0` pin is dropped from all three;
+    DeepLabCut 3.x requires `torch>=2`, so the DLC environment now takes
+    torch and torchvision from pip as `..[dlc]` dependencies instead of
+    from its conda `torchaudio` / `torchvision` lines. The v2 spike-sorting
+    lane is `environments/environment.yml` /
+    `environment_spikesorting_v2.yml`, both still on numpy 2.
+    `environment.yml` also mirrors the `jax<0.10` and
+    `non_local_detector==0.6.9` pins `pyproject.toml` declares, so a
+    conda-only `mamba env update` cannot float JAX onto 0.10 (which removed
+    the `clip(a_min=..., a_max=...)` keywords `non_local_detector` 0.6.9
+    calls). Building the legacy SpikeInterface 0.99 environment no longer
+    rewrites the committed `numpy` pin -- the relaxed floor already admits
+    numpy 1.x, and `environment_spikesorting_legacy.yml` pins `numpy<2`
+    itself on both its conda and its pip layer; the SpikeInterface and
+    probeinterface rewrites are unchanged. The lint workflow pins black to
+    26.1.0, matching pre-commit. New
+    `tests/spikesorting/v2/scripts/verify_dependency_resolution.sh` checks
+    that the declared pins actually resolve: `uv pip compile` resolves
+    `pyproject.toml` once per install lane and `conda create --dry-run`
+    solves each environment file's conda section, both targeting Linux
+    x86_64. It reaches the network and takes minutes, so it is a script
+    rather than a collected test
 
 ### Pipelines
 
