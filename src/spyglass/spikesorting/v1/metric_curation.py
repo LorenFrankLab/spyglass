@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # SI 0.99 (legacy v0/v1 runtime env)
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
@@ -366,8 +367,14 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         fetch_all : bool, optional
             fetch all spikes for units, by default False. Overrides
             max_spikes_per_unit in waveform_params
+
+        Notes
+        -----
+        Reading an already-extracted waveform folder (``overwrite=False`` and a
+        non-empty folder) works under the pinned SpikeInterface. Extraction
+        still calls APIs removed after 0.99 and therefore requires the legacy
+        SpikeInterface environment.
         """
-        _require_legacy_si_environment("v1 MetricCuration.get_waveforms")
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
             return cached
@@ -376,15 +383,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         if len(query) != 1:
             raise ValueError(f"Found {len(query)} entries for: {key}")
 
-        sort_key = query.fetch("sorting_id", "curation_id", as_dict=True)[0]
-        recording = CurationV1.get_recording(sort_key)
-        sorting = CurationV1.get_sorting(sort_key)
-
-        # extract waveforms
         waveform_params = query.fetch1("waveform_params")
-        if "whiten" in waveform_params:
-            if waveform_params.pop("whiten"):
-                recording = sp.whiten(recording, dtype=np.float64)
 
         waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
         wf_dir_obj = Path(waveforms_dir)
@@ -403,6 +402,15 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         )
 
         if overwrite or dir_empty:
+            _require_legacy_si_environment(
+                "v1 MetricCuration.get_waveforms (extraction)"
+            )
+            sort_key = query.fetch("sorting_id", "curation_id", as_dict=True)[0]
+            recording = CurationV1.get_recording(sort_key)
+            sorting = CurationV1.get_sorting(sort_key)
+            if "whiten" in waveform_params:
+                if waveform_params.pop("whiten"):
+                    recording = sp.whiten(recording, dtype=np.float64)
             waveforms = si.extract_waveforms(
                 recording=recording,
                 sorting=sorting,
@@ -411,7 +419,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 **waveform_params,
             )
         else:
-            waveforms = si.load_waveforms(waveforms_dir)
+            waveforms = _si_compat.load_waveforms(waveforms_dir)
 
         self._waves_cache[key_hash] = waveforms
 
