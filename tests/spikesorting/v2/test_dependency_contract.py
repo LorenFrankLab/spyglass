@@ -6,17 +6,19 @@ job and assert the declared pins agree with each other.
 
 Three coupled invariants live here:
 
-1. The base ``numpy`` requirement is pinned to the v2 baseline (``>=2,<3``)
-   and the v2 conda env's SpikeInterface spec matches the ``pyproject``
-   hard pin. A bare ``numpy`` or a drifting SI range silently shifts the
-   resolved stack.
-2. The legacy (v0/v1) suite downgrades to the SI-0.99 / numpy<2 line by
-   **sed-rewriting** the exact ``numpy`` dependency string in an ephemeral
-   checkout (``.github/workflows/test-conda.yml`` ``pytest-legacy`` job and
-   the local ``environment_spikesorting_legacy.yml`` doc). If the committed
-   ``numpy`` pin text changes, those seds silently no-op and the legacy env
-   resolves numpy 2 against SI 0.99 (``np.issctype`` breakage). So the sed's
-   source pattern must always target the *current* committed numpy spec.
+1. The base ``numpy`` requirement floors at 1.26 so the numpy<2 pipelines
+   still install, while the ``spikesorting-v2`` and
+   ``spikesorting-v2-matching`` extras carry the ``>=2,<3`` baseline the SI
+   0.104 stack needs, and the v2 conda env's SpikeInterface spec matches the
+   ``pyproject`` hard pin. A bare ``numpy`` or a drifting SI range silently
+   shifts the resolved stack.
+2. The legacy (v0/v1) lane resolves the SI-0.99 stack by **sed-rewriting**
+   the committed SpikeInterface and probeinterface dependency strings in an
+   ephemeral checkout (``.github/workflows/test-conda.yml`` ``pytest-legacy``
+   job and the local ``environment_spikesorting_legacy.yml`` doc). If that
+   committed pin text changes, those seds silently no-op and the legacy env
+   resolves the 0.104 line instead, so the sed source patterns must keep
+   matching the current committed strings.
 3. Every conda environment either declares the modern SciPy >=1.13 contract
    or documents the complete legacy pre-install pin-relaxation recipe.
 """
@@ -33,9 +35,6 @@ V2_ENV = REPO_ROOT / "environments" / "environment_spikesorting_v2.yml"
 LEGACY_ENV = REPO_ROOT / "environments" / "environment_spikesorting_legacy.yml"
 CONDA_CI = REPO_ROOT / ".github" / "workflows" / "test-conda.yml"
 ENVIRONMENTS = REPO_ROOT / "environments"
-
-# The legacy (SI-0.99) suite downgrades numpy via this exact sed target.
-LEGACY_NUMPY_SPEC = "numpy>=1.23,<2"
 
 
 def _raw_dependencies() -> list[str]:
@@ -65,6 +64,13 @@ def _raw_dependency(name: str) -> str:
     raise AssertionError(f"{name} not found in base dependencies")
 
 
+def _extra_requirements(extra: str) -> dict[str, Requirement]:
+    """Parse one ``[project.optional-dependencies]`` group."""
+    project = tomllib.loads(PYPROJECT.read_text())["project"]
+    specs = project["optional-dependencies"][extra]
+    return {Requirement(s).name.lower(): Requirement(s) for s in specs}
+
+
 def _env_spikeinterface_spec(env_file: Path) -> str:
     """Return the SpikeInterface spec the env file pins in its pip section."""
     for line in env_file.read_text().splitlines():
@@ -74,24 +80,43 @@ def _env_spikeinterface_spec(env_file: Path) -> str:
     raise AssertionError(f"no spikeinterface line found in {env_file}")
 
 
-def test_numpy_pinned_and_si_contracts_agree():
-    """numpy is pinned to the v2 baseline and the env SI spec matches the
-    pyproject hard pin (not a looser range that could drift)."""
+def test_base_numpy_floor_allows_numpy_1x():
+    """The base numpy floor admits the 1.x line the numpy<2 pipelines
+    (DeepLabCut 3.x, keypoint-moseq 0.6) need, while keeping the upper bound
+    that holds the resolver off a future numpy 3."""
+    numpy = _base_requirements()["numpy"].specifier
+    assert numpy.contains("1.26.4"), (
+        f"base numpy is pinned {str(numpy)!r}; it must admit numpy 1.x so "
+        "deeplabcut / keypoint-moseq can resolve."
+    )
+    assert numpy.contains("2.4.0"), (
+        f"base numpy is pinned {str(numpy)!r}; it must still admit numpy 2 "
+        "for the v2 SpikeInterface stack."
+    )
+    assert not numpy.contains("3.0.0"), (
+        f"base numpy is pinned {str(numpy)!r}; the <3 cap must stay. A bare "
+        "or uncapped numpy lets the resolver float onto a future major line."
+    )
+
+
+def test_v2_extras_pin_numpy_2():
+    """The v2 extras carry the numpy-2 baseline the SI 0.104 + torch stack
+    resolves on, now that the base requirement no longer does."""
+    for extra in ("spikesorting-v2", "spikesorting-v2-matching"):
+        reqs = _extra_requirements(extra)
+        assert "numpy" in reqs, f"the {extra} extra does not declare numpy"
+        specs = {(s.operator, s.version) for s in reqs["numpy"].specifier}
+        assert specs == {(">=", "2"), ("<", "3")}, (
+            f"the {extra} extra must pin numpy>=2,<3; found "
+            f"{str(reqs['numpy'].specifier)!r}"
+        )
+
+
+def test_spikeinterface_hard_pin_matches_v2_env():
+    """SpikeInterface is hard-pinned in pyproject and the v2 conda env spec
+    matches that pin (not a looser range that could drift)."""
     reqs = _base_requirements()
 
-    # numpy is pinned to the v2 baseline >=2,<3 (not bare).
-    assert "numpy" in reqs, "numpy missing from base dependencies"
-    assert str(reqs["numpy"].specifier), (
-        "numpy must be pinned (>=2,<3), not bare: bare numpy lets the "
-        "resolver float across the numpy 1/2 boundary."
-    )
-    numpy_specs = {(s.operator, s.version) for s in reqs["numpy"].specifier}
-    assert numpy_specs == {
-        (">=", "2"),
-        ("<", "3"),
-    }, f"numpy must be pinned >=2,<3; found {str(reqs['numpy'].specifier)!r}"
-
-    # SpikeInterface is hard-pinned in pyproject, and the v2 env must agree.
     assert "spikeinterface" in reqs, "spikeinterface missing from base deps"
     si_specifiers = list(reqs["spikeinterface"].specifier)
     assert len(si_specifiers) == 1 and si_specifiers[0].operator == "==", (
@@ -111,26 +136,6 @@ def test_numpy_pinned_and_si_contracts_agree():
         f"but pyproject hard-pins =={pinned_version}. Make the env match the "
         f"hard pin (or document the intentional divergence in one place)."
     )
-
-
-def test_legacy_numpy_sed_targets_current_pin():
-    """The legacy-downgrade sed must target the *current* committed numpy
-    dependency text, so changing the numpy pin can't silently no-op the
-    legacy (SI-0.99 / numpy<2) downgrade in CI and the env doc."""
-    numpy_spec = _raw_dependency("numpy")  # literal, e.g. "numpy>=2,<3"
-
-    # Both the CI job and the local env doc carry a sed that rewrites the
-    # current numpy spec -> the legacy numpy<2 spec. Match the exact
-    # source->target fragment so a pin change without a sed update fails here.
-    expected_fragment = f'"{numpy_spec}",/  "{LEGACY_NUMPY_SPEC}",'
-
-    for path in (CONDA_CI, LEGACY_ENV):
-        assert expected_fragment in path.read_text(), (
-            f"{path} has no sed rewriting the current numpy pin "
-            f'"{numpy_spec}" -> "{LEGACY_NUMPY_SPEC}". The numpy pin changed '
-            f"without updating the legacy downgrade sed, so the SI-0.99 "
-            f"legacy env would resolve numpy 2 (np.issctype break)."
-        )
 
 
 def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
@@ -165,21 +170,22 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
 def test_pyproject_carries_no_si099_dependency_caps():
     """pyproject may not cap a dependency below what its own numpy pin needs.
 
-    The package pins ``numpy>=2`` for the SI 0.104 stack, and the conda
-    environments pin ``scipy>=1.13`` to match. A ``scipy<1.13`` or
-    ``jax<0.7.2`` cap here (both SI-0.99 compatibility bounds) contradicts
-    that: every scipy release capping numpy below 2 is excluded, so the
-    resolver falls back to pre-numpy-2 ancients instead of failing loudly.
-    The conda-env contract test above cannot catch it -- it reads only
-    ``environments/*.yml``, so pyproject can disagree with every one of them
-    while that test stays green.
+    The ``spikesorting-v2`` extra pins ``numpy>=2`` for the SI 0.104 stack,
+    and the conda environments pin ``scipy>=1.13`` to match. A ``scipy<1.13``
+    or ``jax<0.7.2`` cap in the base dependencies (both SI-0.99 compatibility
+    bounds) contradicts that: every scipy release capping numpy below 2 is
+    excluded, so the resolver falls back to pre-numpy-2 ancients instead of
+    failing loudly. The conda-env contract test above cannot catch it -- it
+    reads only ``environments/*.yml``, so pyproject can disagree with every
+    one of them while that test stays green.
     """
     requirements = _base_requirements()
-    numpy = requirements["numpy"].specifier
+    numpy = _extra_requirements("spikesorting-v2")["numpy"].specifier
     numpy_spec = str(numpy)
     assert numpy.contains("2.0.0") and not numpy.contains("1.26.0"), (
-        f"numpy is pinned {numpy_spec!r}; this guard assumes the numpy-2 "
-        "line and must be revisited if the baseline moves."
+        f"the spikesorting-v2 extra pins numpy {numpy_spec!r}; this guard "
+        "assumes the numpy-2 line and must be revisited if the v2 baseline "
+        "moves."
     )
     for package, cap in (("scipy", "<1.13"), ("jax", "<0.7.2")):
         req = requirements.get(package)

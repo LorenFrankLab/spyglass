@@ -57,12 +57,13 @@ dependencies = [
   # NLD 0.6.9 uses the clip(a_min=..., a_max=...) keywords removed in JAX 0.10.
   # Keep the published detector API and test real fitting before moving these.
   "jax<0.10",
-  # Pinned to the numpy-2 line: the v2 SpikeInterface 0.104 stack + torch>=2
-  # resolve on numpy>=2, and elephant (validation extra) requires >=2.0.0. The
-  # legacy v0/v1 (SI 0.99) suite downgrades this to numpy<2 by sed-rewriting
-  # this exact line (see environment_spikesorting_legacy.yml + the pytest-legacy
-  # CI job); test_dependency_contract guards that the sed stays in sync.
-  "numpy>=2,<3",
+  # The v2 SpikeInterface 0.104 stack pins numpy>=2 through the
+  # `spikesorting-v2` / `spikesorting-v2-matching` extras; DeepLabCut 3.x and
+  # keypoint-moseq 0.6 require numpy<2, so the base floor admits both lines.
+  # Admitting numpy 1.x here does NOT select the legacy SpikeInterface lane:
+  # that lane is still produced only by the pytest-legacy CI sed and
+  # environments/environment_spikesorting_legacy.yml.
+  "numpy>=1.26,<3",
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
@@ -131,6 +132,8 @@ optional-dependencies.spikesorting-v2 = [
   # (environments/environment_spikesorting_legacy.yml) or via the containerized
   # MS4 preset; preflight's sorter_runtime_available check reports either way.
   "mountainsort5>=0.5", # default v2 sorter; pulls isosplit6 + scikit-learn
+  # This extra's torch>=2 + SI 0.104 runtime resolves on the numpy-2 line.
+  "numpy>=2,<3",
   # Drift/motion QC: DriftEstimate's default preset
   # (compute_motion preset="dredge_fast") requires torch. Pinned >=2 because
   # torch 2.x is the numpy>=2-compatible line -- this is NOT the UnitMatchPy
@@ -152,6 +155,8 @@ optional-dependencies.spikesorting-v2-matching = [
   # Revisit when UnitMatchPy restores numpy>=2 support upstream.
   "UnitMatchPy>=3.2.6,<3.2.8",
   "mat73",                     # UnitMatchPy reads MATLAB .mat exports
+  # UnitMatchPy 3.2.6/3.2.7 and the v2 SI stack it runs beside need numpy 2.
+  "numpy>=2,<3",
 ]
 optional-dependencies.spikesorting-v2-curation = [
   "filelock", # atomic draft revision checks across review-server processes
@@ -169,6 +174,8 @@ optional-dependencies.spikesorting-v2-curation-test = [
   "playwright==1.55.0",
 ]
 optional-dependencies.spikesorting-v2-validation = [
+  # elephant is not declared directly -- it arrives through MEArec -- and it
+  # requires numpy>=2.0.0, so this extra resolves on the numpy-2 line.
   "MEArec>=1.9",       # ground-truth simulated recordings
   "neuroconv[mearec]", # MEArec -> NWB conversion
   "nwbinspector",      # NWBInspector validation of the generated fixture NWB
