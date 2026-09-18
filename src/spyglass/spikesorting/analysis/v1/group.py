@@ -25,11 +25,11 @@ UNIT_CRITERIA_OPERATORS = {
     "<": np.less,
     "<=": np.less_equal,
     "==": np.equal,
-    "!=": lambda vals, target: np.not_equal(vals, target) & _not_missing(vals),
+    "!=": np.not_equal,
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
     "isin": lambda vals, target: _isin(vals, target),
-    "notin": lambda vals, target: ~_isin(vals, target) & _not_missing(vals),
+    "notin": lambda vals, target: ~_isin(vals, target),
 }
 # Only "isin" and "notin" are list-aware, via _isin. The rest compare a
 # unit's value as a whole, so on a column holding a list per unit (e.g. the
@@ -251,7 +251,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         Notes
         -----
-        Units missing a value (NaN, or potentially None from an imported
+        Units missing a value (NaN, pd.NA, or None from an imported
         units table) fail every criterion on that column, negated ones
         ("!=", "notin") included: a metric that was never computed is no
         evidence that the unit is good. "isin" and "notin" also work on columns
@@ -292,6 +292,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     + "every unit."
                 )
             values = units_df[column].to_numpy()
+            present = units_df[column].notna().to_numpy(dtype=bool)
+            include_mask &= present
+            # Nullable pandas scalars cannot participate in NumPy comparisons.
+            # Evaluate only present values; missing evidence fails every operator.
+            values = values[present]
 
             for operator, value in criterion.items():
                 if operator not in UNIT_CRITERIA_OPERATORS:
@@ -319,7 +324,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                         + "unit in or out at once. Use 'isin' or 'notin', "
                         + "which match any item of the list."
                     )
-                include_mask &= UNIT_CRITERIA_OPERATORS[operator](values, value)
+                include_mask[present] &= UNIT_CRITERIA_OPERATORS[operator](
+                    values, value
+                )
 
         return include_mask
 
@@ -735,32 +742,6 @@ def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
     )
 
 
-def _not_missing(values):
-    """False where a unit has no value for the column a criterion gates on
-
-    We need this check because a missing value satisfies the negated
-    operators ("!=", "notin") on its own, which fails open: a criterion
-    meant to drop bad units would instead admit the units missing the
-    metric it gates on.
-    """
-    if values.dtype.kind == "f":
-        return ~np.isnan(values)
-
-    if values.dtype == object:  # np.isnan takes neither a list nor a string
-        return np.array(
-            [
-                val is not None
-                and not (isinstance(val, float) and np.isnan(val))
-                for val in values
-            ]
-        )
-
-    # Only a float column, or an object column (what pandas falls back to for
-    # a column of mixed types), can hold a missing value. No other dtype can,
-    # so every one of their units passes.
-    return np.ones(len(values), dtype=bool)
-
-
 def _isin(values, target):
     """True where a unit's value, or any item of it, is in target
 
@@ -788,7 +769,9 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
     nwb_field_name = (
         "object_id"
         if "object_id" in nwb_file
-        else "units" if "units" in nwb_file else None
+        else "units"
+        if "units" in nwb_file
+        else None
     )
     if nwb_field_name is None and not allow_empty:
         raise ValueError("NWB file does not have 'object_id' or 'units' field")

@@ -121,8 +121,6 @@ def test_select_units_for_analysis_round_trip(
     """Receipt verdicts == downstream fetch; rejected units cannot enter."""
     import numpy as np
 
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
     from spyglass.spikesorting.analysis.v1 import group as group_module
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
@@ -135,6 +133,7 @@ def test_select_units_for_analysis_round_trip(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     sorting_key = dict(planted_three_unit_sort)
     unit_ids = sorted(
@@ -293,6 +292,99 @@ def test_select_units_for_analysis_round_trip(
             select_units_for_analysis(preview)
     finally:
         for group_key in created:
+            (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
+        clear_curations_for(sorting_key)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_nullable_annotation_criteria_freeze_the_selected_population(
+    planted_three_unit_sort,
+):
+    """A missing boolean stays unavailable through storage, filtering and reads."""
+    import pandas as pd
+
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+    from spyglass.spikesorting.v2.analysis_selection import (
+        select_units_for_analysis,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.unit_annotation import (
+        CurationUnitAnnotationSet,
+        UnitAnnotationDefinition,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_three_unit_sort)
+    clear_curations_for(sorting_key)
+    groups = []
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        units = sorted(
+            int(u) for u in (CurationV2.Unit & root.as_key()).fetch("unit_id")
+        )
+        definition = UnitAnnotationDefinition.insert_definition(
+            "nullable_population_flag", 1, "bool"
+        )
+        annotation = CurationUnitAnnotationSet.from_dataframe(
+            root,
+            definition,
+            pd.DataFrame(
+                {"flag": pd.array([True, None, False], dtype="boolean")},
+                index=units,
+            ),
+            producer="nullable-population-regression",
+        )
+        for criterion in (
+            {"==": True},
+            {"!=": False},
+            {"isin": [True]},
+            {"notin": [False]},
+        ):
+            receipt = select_units_for_analysis(
+                root,
+                policy="all_units",
+                annotation_sets=[annotation],
+                unit_criteria={annotation.column_name: criterion},
+            )
+            groups.extend(group.group_key for group in receipt.groups)
+            assert receipt.included_unit_ids == (units[0],)
+            assert receipt.excluded_units[units[1]].startswith(
+                "unavailable metric:"
+            )
+            _, identities = receipt.fetch_spike_data(return_unit_ids=True)
+            assert [identity["unit_id"] for identity in identities] == [
+                units[0]
+            ]
+
+        # The shared filter also serves legacy numeric and list-valued columns.
+        for values in (
+            pd.Series([1, None, 0], dtype="Int64"),
+            pd.Series([1.0, None, 0.0]),
+            pd.Series([1, None, 0], dtype=object),
+        ):
+            for criterion in (
+                {">": 0},
+                {"!=": 0},
+                {"notin": [0]},
+                {"between": [1, 2]},
+            ):
+                assert SortedSpikesGroup.filter_units_by_criteria(
+                    values.to_frame("value"), {"value": criterion}
+                ).tolist() == [True, False, False]
+        assert SortedSpikesGroup.filter_units_by_criteria(
+            pd.DataFrame({"labels": [[], ["noise"], None, pd.NA]}),
+            {"labels": {"notin": ["noise"]}},
+        ).tolist() == [True, False, False, False]
+        assert not SortedSpikesGroup.filter_units_by_criteria(
+            pd.DataFrame({"flag": pd.array([None, None], dtype="boolean")}),
+            {"flag": {"!=": False}},
+        ).any()
+    finally:
+        for group_key in groups:
             (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
         clear_curations_for(sorting_key)
 
