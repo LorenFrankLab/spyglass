@@ -23,24 +23,6 @@ from tests.spikesorting.v2._ingest_helpers import (
 _DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
-def _stub_recording_with_2d_probe():
-    """Recording stub whose probe is already planar (``ndim == 2``).
-
-    ``_build_analyzer`` projects the probe to 2D (via ``recording.get_probe()``)
-    before building the analyzer; this test stubs the analyzer factory, so the
-    recording only needs a planar probe for the projection step to be skipped.
-    """
-
-    class _Probe:
-        ndim = 2
-
-    class _Recording:
-        def get_probe(self):
-            return _Probe()
-
-    return _Recording()
-
-
 def _fresh_unit_producing_selection(populated_sorting):
     """Build a fresh MS5 ``SortingSelection`` on the fixture's
     recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
@@ -361,16 +343,15 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2 import utils as utils_mod
-    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2._sorting_analyzer import build_analyzer
 
     # The caller resolves the cache folder (it carries the recipe identity) and
     # passes it in; build_analyzer does no path lookup of its own.
     analyzer_folder = tmp_path / "partial.analyzer"
 
-    class _OneUnitSorting:
-        def get_num_units(self):
-            return 1
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[1.0], num_channels=4, num_units=1, seed=0
+    )
 
     def _raise_after_creating_folder(**kwargs):
         folder = kwargs["folder"]
@@ -383,9 +364,9 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
     )
 
     with pytest.raises(RuntimeError, match="create_sorting_analyzer boom"):
-        Sorting._build_analyzer(
-            sorting=_OneUnitSorting(),
-            recording=_stub_recording_with_2d_probe(),
+        build_analyzer(
+            sorting=sorting,
+            recording=recording,
             key={"sorting_id": uuid.uuid4()},
             sorter_row={"job_kwargs": None},
             job_kwargs={},

@@ -285,6 +285,14 @@ def load_analyzer_folder(folder, *, recording=None):
         load_extensions=False,
         format="binary_folder",
     )
+    if not analyzer.has_recording():
+        # SI can silently load a recordingless analyzer when recording.json is
+        # invalid. Treat that as an invalid cache so the normal rebuild path
+        # reconstructs the exact recording and artifact exclusions.
+        raise ValueError(f"Analyzer recording could not be loaded: {folder}")
+    # Keep derivative save/select/merge operations on the same pickle contract
+    # as build_analyzer. SI does not persist this flag when loading an extractor.
+    analyzer.recording._serializability["json"] = False
     if "waveforms" not in analyzer.get_saved_extension_names():
         return analyzer
     extension = get_extension_class("waveforms")(analyzer)

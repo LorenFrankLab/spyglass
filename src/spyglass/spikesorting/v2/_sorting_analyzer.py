@@ -874,6 +874,11 @@ def build_analyzer(
         )
 
     try:
+        # SI 0.104 loses structured preprocessing parameters (notably artifact
+        # periods) in JSON. Set this AFTER probe projection/whitening: cloning
+        # an extractor reconstructs it and resets its serialization flags.
+        # Analyzer provenance is local, trusted Python data, like its sorting.
+        recording._serializability["json"] = False
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
             recording=recording,

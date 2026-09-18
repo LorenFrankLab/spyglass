@@ -115,6 +115,14 @@ costs ~0.17x versus >= 1x for an eager load. The scientific waveform sample
 (`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to meet a
 memory target -- only the storage and load paths changed.
 
+The analyzer's recording reference is saved as `recording.pickle`, including
+artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON
+loss of structured artifact intervals, including after probe projection. It
+stores extractor parameters and source paths; it does not copy the recording's
+trace data. Reopened derivative analyzers use the same serialization policy.
+An older cache whose recording cannot reload is treated as invalid and rebuilt
+through the usual cache recovery path.
+
 Folders written under the pre-launch `.zarr` convention are not read; they are
 disposable and rebuild on first access. Delete stale `*.zarr` folders under the
 analyzer root by hand.
