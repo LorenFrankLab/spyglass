@@ -23,13 +23,12 @@ dependencies:
   # - libgcc # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy>=2,<3
+  - numpy<2  # deeplabcut 3.x and keypoint-moseq 0.6 require numpy<2; the v2 spike-sorting lane is environment.yml / environment_spikesorting_v2.yml
   - pip
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - python>=3.10,<3.13
-  - pytorch<1.12.0
   - ripple_detection
   - scipy>=1.13
   - seaborn

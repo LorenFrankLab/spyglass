@@ -23,19 +23,21 @@ dependencies:
   - libgcc   # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy>=2,<3
+  - numpy<2  # deeplabcut 3.x and keypoint-moseq 0.6 require numpy<2; the v2 spike-sorting lane is environment.yml / environment_spikesorting_v2.yml
   - pip>=20.2.*
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus>=2.0.*
   - python>=3.10,<3.13
-  - pytorch<1.12.0
   - ripple_detection
   - scipy>=1.13
   - seaborn
-  - torchaudio  # dlc-only
-  - torchvision  # dlc-only
   - track_linearization>=2.3
   - pip:
+      # torch and torchvision arrive through pip as deeplabcut
+      # dependencies rather than from conda: DeepLabCut 3.x needs
+      # torch>=2, which the conda ``pytorch<1.12`` pin this file used to
+      # carry cannot satisfy. The ``..[dlc]`` install below pulls the
+      # matching wheels.
       - mountainsort4
       - ..[dlc]
