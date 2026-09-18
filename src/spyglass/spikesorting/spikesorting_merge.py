@@ -614,25 +614,46 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 "mix. Restrict to one source if that was not deliberate."
             )
 
-    def get_spike_times(self, key):
-        """Get spike times for the group"""
+    def get_spike_times_by_unit(self, key):
+        """Spike trains with the (merge_id, unit_id) identity of each train.
+
+        The aggregation is exactly the one ``get_spike_times`` performs; this
+        variant additionally keeps which merge each train came from, so a
+        caller can ask that merge what time its units were observed over.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction identifying one or more merge entries.
+
+        Returns
+        -------
+        list of np.ndarray
+            One spike train per unit, in fetch order.
+        list of dict
+            The matching identities, each ``{"spikesorting_merge_id": ...,
+            "unit_id": ...}``. ``unit_id`` is the units table's true id, not a
+            positional index: v2 merge-applied sortings leave gaps in it.
+        """
+        from spyglass.spikesorting.analysis.v1.group import _get_nwb_unit_ids
+
         # Resolve the files AND their merge_ids in one fetch_nwb pass so the
         # preview warning sees EXACTLY the merges consumed here -- fetch_nwb
         # honors both this instance's restriction and ``key`` and routes
         # parent-attribute restrictions, which a separate (cls & key) /
         # merge_restrict resolution could not. Warn (don't raise) if a consumed
         # merge is a v2 preview curation whose proposed merges are unapplied:
-        # the returned trains are the UNMERGED units. get_spike_times is the
-        # common sink (get_firing_rate -> get_spike_indicator ->
-        # get_spike_times), so warn here once; the strict raise stays on the
-        # decoding boundary.
+        # the returned trains are the UNMERGED units. This is the common sink
+        # (get_firing_rate -> get_spike_indicator -> get_spike_times ->
+        # here), so warn here once; the strict raise stays on the decoding
+        # boundary.
         nwb_files, merge_ids = self.fetch_nwb(
             key, return_merge_ids=True, multi_source=True
         )
         type(self)._warn_preview_merge_ids(merge_ids)
         self._warn_multi_source_merge_ids(merge_ids)
-        spike_times = []
-        for nwb_file in nwb_files:
+        spike_times, unit_ids = [], []
+        for nwb_file, merge_id in zip(nwb_files, merge_ids):
             # V1 uses 'object_id', V0 uses 'units'
             file_loc = "object_id" if "object_id" in nwb_file else "units"
             units = nwb_file[file_loc]
@@ -644,7 +665,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             if "spike_times" not in units:
                 continue
             spike_times.extend(units["spike_times"].to_list())
-        return spike_times
+            unit_ids.extend(
+                {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
+                for unit_id in _get_nwb_unit_ids(nwb_file, file_loc)
+            )
+        return spike_times, unit_ids
+
+    def get_spike_times(self, key):
+        """Get spike times for the group"""
+        return self.get_spike_times_by_unit(key)[0]
 
     @classmethod
     def get_spike_indicator(cls, key, time):
