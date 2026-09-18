@@ -4,17 +4,20 @@
 #
 # Two layers:
 #
-#   1. ``uv pip compile`` resolves pyproject.toml once per install lane (the
-#      base requirements, then the dlc / moseq-cpu / spikesorting-v2 /
+#   1. ``uv pip compile`` resolves the pip requirements once per install lane
+#      (the base requirements, then the dlc / moseq-cpu / spikesorting-v2 /
 #      spikesorting-v2-matching extras) and the resolved pins are asserted
 #      against that lane's contract: one SpikeInterface for everybody, the
 #      numpy<2 line for DeepLabCut and keypoint-moseq, the numpy 2 line for
-#      the v2 spike-sorting extras.
+#      the v2 spike-sorting extras. The dlc and moseq-cpu lanes also compile
+#      mountainsort4 alongside pyproject.toml, because the environment files
+#      pip-install it next to ``..[<extra>]`` and it belongs to no extra, so
+#      compiling pyproject.toml alone would leave it unresolved.
 #
-#   2. ``conda create --dry-run`` solves the *conda* section of each numpy<2
-#      environment file. It covers the conda section only; the pip section of
-#      those files installs this package, whose resolution layer 1 already
-#      checks.
+#   2. ``conda create --dry-run`` solves the *conda* section of each
+#      environment file. Between them the two layers cover a file completely:
+#      layer 2 takes its conda section, layer 1 takes both entries of its pip
+#      section.
 #
 # The conda solve uses each file's own channel list, read out of the file and
 # passed with --override-channels. That keeps the franklab and edeno channels
@@ -22,11 +25,23 @@
 # track_linearization live there) while keeping whatever extra channels happen
 # to sit in the developer's ~/.condarc out of the result.
 #
-# It also pins the solve to one subdir, because these are GPU/Linux install
-# recipes: environment_dlc.yml asks for cudatoolkit=11.3, which has no macOS
-# build at all, so solving for the developer's own platform would report a
-# machine-specific miss rather than anything about the pins. Set SOLVE_SUBDIR
-# to check another platform.
+# Both layers solve for Linux x86_64 by default -- conda subdir linux-64, pip
+# platform x86_64-manylinux_2_28 -- not for the machine running the script, so
+# the two layers describe one target and the answer does not change with the
+# developer's laptop. These are Linux/GPU install recipes anyway:
+# environment_dlc.yml asks for cudatoolkit=11.3, which has no macOS build at
+# all.
+#
+# Solving linux-64 from a non-Linux host also needs CONDA_OVERRIDE_GLIBC. conda
+# derives the ``__glibc`` virtual package from the running kernel, so off Linux
+# it is absent and every package that declares a glibc floor -- which is every
+# recent conda-forge build -- becomes uninstallable. The solver does not say
+# so: it quietly backtracks onto ancient builds that predate the metadata, and
+# takes many minutes to do it. The override states the target's glibc instead,
+# matched to the manylinux tag above.
+#
+# SOLVE_SUBDIR, SOLVE_PYTHON_PLATFORM and SOLVE_GLIBC retarget all of this;
+# keep them describing the same platform.
 #
 # Reaches the network and takes minutes, so it is a script rather than a test.
 #
@@ -41,8 +56,17 @@ cd "$REPO_ROOT"
 
 PYTHON_VERSION=3.11
 SOLVE_SUBDIR=${SOLVE_SUBDIR:-linux-64}
+SOLVE_PYTHON_PLATFORM=${SOLVE_PYTHON_PLATFORM:-x86_64-manylinux_2_28}
+SOLVE_GLIBC=${SOLVE_GLIBC:-2.28}
+export CONDA_OVERRIDE_GLIBC="$SOLVE_GLIBC"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
+
+# The environment files' pip sections install this package plus mountainsort4,
+# which no pyproject extra declares. Compiling this file alongside
+# pyproject.toml makes the lane's resolution match what those files install.
+MS4_REQUIREMENT="$WORK_DIR/mountainsort4.in"
+echo "mountainsort4" >"$MS4_REQUIREMENT"
 
 exit_code=0
 
@@ -104,24 +128,35 @@ PY
   fi
 }
 
-echo "platform:      $(uname -sm)"
-echo "python target: $PYTHON_VERSION"
-echo "uv:            $(uv --version)"
-echo "conda:         $(conda --version)"
-echo "conda subdir:  $SOLVE_SUBDIR"
-echo "date (UTC):    $(date -u)"
+echo "host:           $(uname -sm)"
+echo "python target:  $PYTHON_VERSION"
+echo "uv:             $(uv --version)"
+echo "conda:          $(conda --version)"
+echo "solve target:   $SOLVE_PYTHON_PLATFORM (pip) / $SOLVE_SUBDIR glibc" \
+  "$SOLVE_GLIBC (conda)"
+echo "date (UTC):     $(date -u)"
 
 echo
 echo "== pyproject resolution (uv pip compile) =="
 for lane in base dlc moseq-cpu spikesorting-v2 spikesorting-v2-matching; do
   resolved="$WORK_DIR/$lane.txt"
-  compile_args=(--quiet --python-version "$PYTHON_VERSION")
+  compile_args=(
+    --quiet
+    --python-version "$PYTHON_VERSION"
+    --python-platform "$SOLVE_PYTHON_PLATFORM"
+  )
   if [ "$lane" != base ]; then
     compile_args+=(--extra "$lane")
   fi
 
+  # The lanes whose environment file also pip-installs mountainsort4.
+  inputs=(pyproject.toml)
+  case "$lane" in
+    dlc | moseq-cpu) inputs+=("$MS4_REQUIREMENT") ;;
+  esac
+
   echo "$lane:"
-  if ! uv pip compile "${compile_args[@]}" pyproject.toml -o "$resolved"; then
+  if ! uv pip compile "${compile_args[@]}" "${inputs[@]}" -o "$resolved"; then
     fail "$lane" "uv pip compile failed"
     continue
   fi
@@ -133,10 +168,12 @@ for lane in base dlc moseq-cpu spikesorting-v2 spikesorting-v2-matching; do
     dlc)
       assert_min_version "$lane" "$resolved" deeplabcut 3.0
       assert_pin "$lane" "$resolved" '^numpy==1\.' "the numpy 1.x line"
+      assert_pin "$lane" "$resolved" '^mountainsort4==' "mountainsort4"
       ;;
     moseq-cpu)
       assert_min_version "$lane" "$resolved" keypoint-moseq 0.6
       assert_pin "$lane" "$resolved" '^numpy==1\.' "the numpy 1.x line"
+      assert_pin "$lane" "$resolved" '^mountainsort4==' "mountainsort4"
       ;;
     spikesorting-v2 | spikesorting-v2-matching)
       assert_pin "$lane" "$resolved" '^numpy==2\.' "the numpy 2.x line"
@@ -146,7 +183,7 @@ done
 
 echo
 echo "== conda section resolution (conda create --dry-run) =="
-for env_file in environment_dlc.yml environment_moseq_cpu.yml \
+for env_file in environment.yml environment_dlc.yml environment_moseq_cpu.yml \
   environment_moseq_gpu.yml; do
   yml="environments/$env_file"
   lane="conda:$env_file"
@@ -163,7 +200,8 @@ for env_file in environment_dlc.yml environment_moseq_cpu.yml \
   done < <(yaml_field "$yml" dependencies)
 
   if [ "${#channel_args[@]}" -eq 0 ] || [ "${#specs[@]}" -eq 0 ]; then
-    fail "$lane" "could not read channels and dependencies out of $yml"
+    fail "$lane" "could not read channels and dependencies out of $yml
+       (is PyYAML installed for the python3 on PATH?)"
     continue
   fi
 
@@ -171,7 +209,7 @@ for env_file in environment_dlc.yml environment_moseq_cpu.yml \
   if conda create --dry-run --subdir "$SOLVE_SUBDIR" --override-channels \
     "${channel_args[@]}" -n "verify-deps-${env_file%.yml}" "${specs[@]}" \
     >"$log" 2>&1; then
-    grep -E '^  (numpy|scipy|python|pytorch|libtorch) +' "$log" |
+    grep -E '^  (numpy|scipy|python|jax|non_local_detector|pytorch) +' "$log" |
       sed 's/^ */  /' || true
     echo "  $lane: conda section solves"
   else
