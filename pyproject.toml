@@ -88,7 +88,7 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut[tf]>=3.0", # floor only, so tf/numba need no pins of their own
   "ffmpeg",
 ]
 optional-dependencies.docs = [
@@ -113,12 +113,12 @@ optional-dependencies.kachery-cloud = [
 optional-dependencies.moseq-cpu = [
   "jax[cpu]",
   "jax-moseq",
-  "keypoint-moseq",
+  "keypoint-moseq>=0.6",
 ]
 optional-dependencies.moseq-gpu = [
   "jax[cuda12]",
   "jax-moseq[cuda12]",
-  "keypoint-moseq",
+  "keypoint-moseq>=0.6",
 ]
 optional-dependencies.spikesorting-v2 = [
   # Cross-process lock serializing concurrent AnalyzerCuration jobs that share a
