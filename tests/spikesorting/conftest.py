@@ -77,6 +77,7 @@ def write_waveform_folder(folder) -> WrittenWaveforms:
             ms_after=MS_AFTER,
             max_spikes_per_unit=MAX_SPIKES_PER_UNIT,
             sparse=False,
+            seed=SEED,
         )
     else:
         analyzer = si.create_sorting_analyzer(

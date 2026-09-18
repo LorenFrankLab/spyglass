@@ -2,11 +2,13 @@
 
 Several v0 and v1 active populate / curation / recompute paths still call
 SpikeInterface APIs that were removed or renamed in SpikeInterface 0.101+
-(``WaveformExtractor`` / ``extract_waveforms`` / ``load_waveforms`` /
+(``WaveformExtractor`` construction / ``extract_waveforms`` /
 ``ChunkRecordingExecutor`` signature widening / quality-metric renames). Those
 entry points are gated behind an explicit legacy-environment error rather than
 allowed to crash with an opaque ``AttributeError`` or ``AssertionError`` from
-inside SpikeInterface.
+inside SpikeInterface. Reading a previously saved binary waveform folder is
+*not* among them: 0.101+ reads those back as a ``MockWaveformExtractor``, so
+that read is routed through ``_si_compat.load_waveforms`` and left ungated.
 
 The guard is intentionally narrow:
 
