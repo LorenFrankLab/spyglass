@@ -5,7 +5,33 @@
 ### Release Notes
 
 Running draft to be removed immediately prior to release. When altering tables,
-import all foreign key references.
+import all foreign key references. For spike sorting v2, use the
+[preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database);
+it includes curation identity, observed-time metrics, and manual exclusions.
+
+Spike sorting v2 now keeps analyzer builds private until a successful Sorting
+insert establishes publication ownership. Duplicate workers cannot overwrite
+the committed result's analyzer. The existing cache audit reports abandoned
+build/trash directories, and cleanup skips active owners using filesystem locks.
+Shared-storage deployments require cross-host POSIX locking on the configured
+cache and review-bundle mounts.
+
+Artifact-masked analyzers retain a reloadable recording reference after probe
+projection and derivative saves. Local curation draft saves reject stale-tab
+overwrites and preserve unsaved edits for comparison/reapplication. Lineage
+display batches database reads instead of querying every curation separately.
+Connected review actions wait for the previous worker to release ownership
+before enabling the next action, including committing immediately after preview.
+The published decoder stack is constrained to `non-local-detector==0.6.9` and
+`jax<0.10`; package tests now fit, predict, and round-trip real decoder results
+and models rather than only constructing a classifier.
+
+The preproduction upgrade explicitly installs DataJoint's UUID type marker and
+unique index before `alter()`. Current missing-metric policies use new immutable
+rule names (`franklab_default_auto_curation_2026_09` and
+`v1_default_nn_noise_2026_09`) and the
+`franklab_hippocampus_2026_09_17` review profile; historical rules, profiles, and
+evaluations retain their stored meanings. Notebook examples use the new names.
 
 ```python
 # Alter Decoding v1 table
@@ -37,84 +63,9 @@ from spyglass.spikesorting.v1.recompute import (
 RecordingRecomputeSelection().alter()
 RecordingRecompute().alter()
 
-# Add the curation-UX identity and rule-policy columns. Existing CurationV2
-# rows must receive distinct UUIDs BEFORE the final non-null + unique alter.
-from spyglass.spikesorting.v2.curation import CurationV2
-from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
-
-curation_table = CurationV2()
-if "curation_uuid" not in curation_table.heading.names:
-    curation_table.connection.query(
-        f"ALTER TABLE {curation_table.full_table_name} "
-        "ADD COLUMN `curation_uuid` BINARY(16) NULL AFTER `curation_id`"
-    )
-    curation_table.connection.query(
-        f"UPDATE {curation_table.full_table_name} "
-        "SET `curation_uuid` = UNHEX(REPLACE(UUID(), '-', '')) "
-        "WHERE `curation_uuid` IS NULL"
-    )
-CurationV2().alter()  # finalize UUID and add created_at / created_by
-AutoCurationRules.Rule().alter()  # missing_policy defaults existing rows to error
-
-# Re-link each sort's artifact pass to the ArtifactDetectionOutput merge. The
-# part table's secondary FK moved from `artifact_detection_id` to
-# `artifact_detection_merge_id`, which `alter()` cannot retarget, so remap the
-# rows through the merge's source parts and redeclare the part table. Run this
-# BEFORE importing anything that inserts a SortingSelection. A trial database
-# with no v2 sorts worth keeping can instead drop the `spikesorting_v2_*`
-# schemas and let them redeclare.
-import datajoint as dj
-
-from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-from spyglass.spikesorting.v2.sorting import SortingSelection
-
-_part = dj.FreeTable(
-    dj.conn(), SortingSelection.ArtifactDetectionSource.full_table_name
-)
-if "artifact_detection_id" in _part.heading.names:
-    _by_detection = {}
-    for _src in ArtifactDetectionOutput.parts(as_objects=True):
-        for _row in _src.fetch(as_dict=True):
-            _by_detection[_row["artifact_detection_id"]] = _row["merge_id"]
-    _remapped = []
-    for _row in _part.fetch(as_dict=True):
-        _mid = _by_detection.get(_row["artifact_detection_id"])
-        if _mid is None:  # unregistered detection -- do not guess
-            raise RuntimeError(
-                "artifact_detection_id "
-                f"{_row['artifact_detection_id']} for sorting_id "
-                f"{_row['sorting_id']} is not registered in "
-                "ArtifactDetectionOutput; populate the detection (or delete "
-                "the orphaned sort) before migrating."
-            )
-        _remapped.append(
-            {
-                "sorting_id": _row["sorting_id"],
-                "artifact_detection_merge_id": _mid,
-            }
-        )
-    _part.drop_quick()  # redeclared on the next schema import
-    from importlib import reload
-
-    import spyglass.spikesorting.v2.sorting as _sorting_mod
-
-    reload(_sorting_mod)
-    _sorting_mod.SortingSelection.ArtifactDetectionSource.insert(_remapped)
-
-# Declare and seed the net-new immutable review-profile lookup after its two
-# recipe foreign keys have been upgraded/seeded.
-from spyglass.spikesorting.v2 import initialize_v2_defaults
-from spyglass.spikesorting.v2.review_profile import CurationReviewProfile  # noqa F401
-
-initialize_v2_defaults()
-
-# Declare the net-new typed annotation schema. It annotates exact CurationV2
-# unit namespaces and does not alter curation identity or the v1 annotation
-# table.
-from spyglass.spikesorting.v2.unit_annotation import (  # noqa F401
-    CurationUnitAnnotationSet,
-    UnitAnnotationDefinition,
-)
+# Spike sorting v2 development databases: complete the single staged sequence
+# in Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database
+# before initializing defaults or creating new selections.
 
 # UnitAnnotation.unit_id now stores the NWB unit id (was a positional index).
 # Run ONCE, before writing new annotations:
@@ -219,8 +170,9 @@ data or the production `UnitSelectionParams` rows.
   `open_curation_analyzer(...)` / `CurationRef.open_analyzer(...)`, a
   context-managed disk-backed working copy (exported from the pipeline
   facade). Browser reviews persist a
-  `ReviewDisplayOptions` budget (`max_amplitudes_per_unit` = 2000, seeded
-  uniform sampling across the whole recording, `min_similarity_for_correlograms`)
+  `ReviewDisplayOptions` budget (duration-scaled 50 Hz raster/amplitude limits,
+  optional smaller point caps, seeded amplitude sampling across the whole
+  recording, and `min_similarity_for_correlograms`)
   in the review configuration; it is display-only, part of the review
   identity, and carried onto the child review by
   `ReviewImportReceipt.continue_review()`.
@@ -257,15 +209,15 @@ data or the production `UnitSelectionParams` rows.
 row generation. The `(sorting_id, curation_id)` DataJoint primary key remains
 unchanged, but `curation_id` is `max(existing) + 1` and can be reused after a
 delete; durable review/cache references therefore use the fresh UUID. Existing
-preproduction rows require the one-time backfill above before the final
-non-null/unique `alter()`.
+preproduction rows require the staged UUID backfill and SQL unique-index
+creation in the migration guide before the remaining DataJoint alterations.
 
 `AutoCurationRules.Rule.missing_policy` persists one of `error`, `fail`, or
 `pass` and is part of rule-set content identity; existing rules default to
 the fail-fast `error` policy, while the shipped rule sets record `pass`. A net-new immutable `CurationReviewProfile` lookup
 binds the metric/rule recipes, ordered evaluation display columns, ordered label
 palette, and `replace`/`overlay` import mode under one content-addressed name.
-`initialize_v2_defaults()` ships `franklab_hippocampus_2026_06`; delivery
+`initialize_v2_defaults()` ships `franklab_hippocampus_2026_09_17`; delivery
 choices (`upload`, `ephemeral`, credentials/local destination) and
 curation-specific annotation selections remain runtime inputs and are not
 profile content.
@@ -325,8 +277,8 @@ byte-identical to `pass`; the column is now `enum('error', 'fail', 'pass')`. The
 `AutoCurationRules.Rule().alter()` already in the release-note commands above
 applies this -- no shipped row ever used `ignore`.
 
-The shipped rule sets (`v1_default_nn_noise`,
-`franklab_default_auto_curation_2026_06`) now record `missing_policy='pass'`
+The shipped rule sets (`v1_default_nn_noise_2026_09`,
+`franklab_default_auto_curation_2026_09`) record `missing_policy='pass'`
 explicitly instead of inheriting the fail-fast `error` default. `franklab_default`
 computes `nn_noise_overlap` with `min_spikes: 10`, so a unit with fewer than 10
 spikes is NaN *by design*; under `error` that aborted `CurationEvaluation` -- and
@@ -334,7 +286,8 @@ spikes is NaN *by design*; under `error` that aborted `CurationEvaluation` -- an
 unassessable unit unlabelled, matching v1's `compare(NaN, threshold)`. It stays
 silent per unit, but warns when a metric is non-finite for EVERY unit, since the
 rule then applied no labels at all. A database seeded before this change keeps
-its stored `error` rows: re-seed those two rule sets to pick up the new default.
+its historical rule rows and evaluations unchanged. Initialization adds the new
+dated rule sets and review profile; current presets and examples use them.
 
 #### UnitAnnotation now stores NWB unit ids
 
@@ -403,7 +356,7 @@ registrations); existing v2 table definitions are unchanged.
   `describe_pipeline_preset` inspect the catalog.
 - **Frank-lab presets use the ISI-aware curation policy.** The shipped
   polymer/tetrode MountainSort4, MountainSort5, and concat presets select
-  `franklab_default_auto_curation_2026_06`: units with
+  `franklab_default_auto_curation_2026_09`: units with
   `nn_noise_overlap > 0.1` are labeled `noise`, and units with
   `isi_violation > 0.02` are labeled `reject`. Neuropixels presets retain the
   v1-compatible NN-noise policy, while clusterless remains uncurated.

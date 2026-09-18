@@ -145,7 +145,7 @@ coexist under one merge surface.
 - **`CurationReviewProfile`** -- one immutable, DB-persisted name binding the
     exact quality-metric and auto-curation recipes to an ordered property
     display, label palette, and explicit `replace`/`overlay` import mode.
-    `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09`.
+    `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09_17`.
     Upload/ephemeral/credential/destination choices remain per-review runtime
     inputs and are not profile identity.
 - **`RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*`** -- v2 storage
@@ -612,10 +612,10 @@ shows them.
 ```python
 review = run_summary.start_review(
     source="root",  # use "auto_labeled" only when the run produced one
-    profile="franklab_hippocampus_2026_09",
+    profile="franklab_hippocampus_2026_09_17",
     upload=False,  # local seeded bundle; True publishes the same bundle
 )
-url = review.open()  # serves review.uri at http://localhost:<port>/ and opens it
+url = review.open()  # serves review.uri at http://localhost:<port>/bundles/<id>/
 
 # In the browser: select units -> labels / Merge Selected -> Save draft.
 # Local browser: Preview and commit -> inspect child -> record review.
@@ -674,17 +674,26 @@ final_merge_id = final_curation.merge_id
 member_merge_ids = final_curation.member_merge_ids  # concat-backed sorts
 ```
 
-`review.open()` starts (or reuses) a loopback server in the Python process over
-the exact saved bundle, so a browser save writes the same `annotations.json` the
-importer reads; nothing is copied or rebuilt. The port is process state, never
-persisted: after a kernel restart, `FigPackReview.resume(review_id).open()`
+`review.open()` starts (or reuses) one loopback server in the Python process.
+Each saved bundle has its own URL path and `annotations.json`, so a browser save
+writes the exact draft the importer reads; nothing is copied or rebuilt.
+Focused inspections and child reviews use the same port. The port is process
+state, never persisted: after a kernel restart, `FigPackReview.resume(review_id).open()`
 serves the same files again with every saved edit.
 `open(open_browser=False, port=...)` returns the URL for a notebook, a test, or
 a remote kernel (forward the port with `ssh -L <port>:localhost:<port> host` and
-open the same `localhost` URL; the frontend enables in-place editing only for a
-`localhost` origin, so a generic Jupyter proxy URL is not equivalent). The
+open the full returned `localhost` URL, including its bundle path; the frontend
+enables in-place editing only for a `localhost` origin, so a generic Jupyter
+proxy URL is not equivalent). The
 server accepts writes only to the bundle's `annotations.json`. A missing bundle
 raises with the recovery step (start the review again, which rebuilds it).
+
+If another tab saves the same local draft, an older tab cannot overwrite it.
+Its edits stay visible and the save reports a conflict. Choose **Open latest
+draft in a new tab**, review the saved changes, then reapply your edits there.
+The older tab remains available for comparison. Reopened local bundles receive
+the installed Spyglass controls, including this save protocol, while their
+scientific data and saved annotations stay in the bundle.
 
 #### Where am I, and how do I undo a merge?
 
@@ -694,8 +703,9 @@ the four states applies -- *saved browser edits differ from the reviewed parent*
 available for analysis* -- and what to do next. (The preview compares the bundle
 with the reviewed parent only; a diff you already committed still "differs", and
 committing it again reuses that child.) The browser's **Save draft** only
-writes a draft. Use `review.commit_panel()` to preview and commit it, or
-`preview_import()` / `commit()` for scripts.
+writes a draft. Local reviews offer **Preview and commit** in the browser.
+Hosted reviews use `review.commit_panel()` in the notebook; the panel also works
+locally. Use `preview_import()` / `commit()` for scripts.
 
 **A pending merge proposal** (saved, not committed): select its units in the
 browser, **Undo selected merge**, **Save draft**; `preview_import()` then
@@ -859,7 +869,7 @@ display(root.summarize(evaluation=None, annotation_sets=[annotation_set]))
 # The selected custom column appears in the review's unit table and its
 # set_hash becomes part of this figure's identity.
 review = root.start_review(
-    "franklab_hippocampus_2026_09",
+    "franklab_hippocampus_2026_09_17",
     annotation_sets=[annotation_set],
 )
 ```
@@ -927,7 +937,7 @@ The proposals are written to NWB but returned as one defensive
 ```python
 evaluation = run_summary.root_curation.evaluate(
     metric_params_name="franklab_default",
-    auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+    auto_curation_rules_name="franklab_default_auto_curation_2026_09",
 )
 display(evaluation.metrics)
 print(evaluation.proposed_labels, evaluation.suggested_merges)
@@ -1048,7 +1058,7 @@ from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
 
 initialize_v2_defaults()
 profile = (
-    CurationReviewProfile & {"review_profile_name": "franklab_hippocampus_2026_09"}
+    CurationReviewProfile & {"review_profile_name": "franklab_hippocampus_2026_09_17"}
 ).fetch1()
 ```
 
@@ -1852,8 +1862,11 @@ through `run_v2_pipeline` / `run_v2_unit_match` and the underlying tables.
 
 FigPack curation is profile-backed and local by default. Call
 `run_summary.start_review(...)`, `review.open()` to serve the seeded bundle to
-the browser, edit and **Save draft**, inspect `review.preview_import()`,
-and commit the exact verified change set. Merged and label-only curations render
+the browser, edit and **Save draft**, then use **Preview and commit**.
+Inspect the recomputed child after a merge and record its verification; retrieve
+the finished curation with `review.result()`. Hosted reviews use
+`review.commit_panel()` in the notebook; explicit `preview_import()` / `commit()`
+calls remain available for scripts. Merged and label-only curations render
 in their own unit namespace; evaluation metrics, suggestions and already-applied
 merge provenance are columns of the selectable unit table (context about the
 committed curation, not editable). Hosted delivery publishes the identical
@@ -2073,7 +2086,7 @@ their `UnitSelection` snapshots, as the whole-session notebook demonstrates.
 
 ### Observed-time metrics and downstream analysis
 
-The standard `franklab_hippocampus_2026_09` review profile uses
+The standard `franklab_hippocampus_2026_09_17` review profile uses
 `observed_duration_s`, `observed_firing_rate_hz`, and `observed_presence_ratio`.
 These use stored observation intervals, normalized through recording sample
 boundaries so the last sample contributes its full duration. Time is never
@@ -2141,8 +2154,8 @@ session timestamps. Automatic and manual masks are composed before motion
 correction and survive reconstruction and member export. No per-spike editing is
 introduced.
 
-These preproduction changes add `manual_excluded_times` to
-`RecordingArtifactSelection` and `SharedGroupArtifactSelection`, plus the
-`SortedSpikesGroup.UnitSelection` part. Recreate affected disposable schemas or
-apply reviewed DDL before using this branch with an existing database. No
-production migration is performed automatically.
+For existing development databases, follow the
+[preproduction upgrade/recreation sequence](SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
+before initializing defaults or creating selections. It covers manual exclusions,
+observed-time fields, curation identity, and the new analysis-selection part.
+No production migration is performed automatically.

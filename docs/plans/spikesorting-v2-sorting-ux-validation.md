@@ -1,6 +1,6 @@
 # Sorting workflow UX fixes and validation
 
-Validation through September 16, 2026. The September 15 baseline below kept the
+Validation through September 17, 2026. The September 15 baseline below kept the
 existing pipeline APIs/schema and improved sorting entry points. The
 [September 16 implementation](#september-16-scientist-workflow-implementation)
 adds concat artifact dependencies, valid intervals, and the remaining scientist
@@ -314,8 +314,66 @@ This audit adds correctness evidence, not new long-recording performance or
 human-usability measurements. The recorded timed run remains tied to its
 original implementation revision above.
 
+### September 17 review follow-up
+
+Local review delivery now uses one server port per Python process, with separate
+bundle paths, drafts, and operation adapters. Focused inspection, merged-child
+verification, and parent recovery therefore work through the initial SSH tunnel.
+Nullable annotation predicates exclude missing values before comparison; a
+missing boolean remains unavailable instead of raising an error or becoming
+`False`. Local and hosted next-step instructions name their respective controls.
+The migration guide now owns the complete development upgrade sequence, including
+metric and manual-exclusion columns before default initialization.
+
+**Validation:** 38 targeted checks passed: 19 delivery, operation, and browser
+checks; 19 analysis-selection, annotation, review-API, and browser-journey checks.
+The connected Playwright journey blocked every other localhost port while
+inspecting traces, committing a merge, verifying its child, and recovering the
+parent branch. The annotation regression used real stored boolean values and
+checked the selected population returned downstream. The final HTTP path
+resolution adjustment also passed all eight delivery checks. Database tests used
+a disposable container on port 3337, removed with its volumes afterward.
+
+Python documentation examples parse, the consolidated migration links resolve,
+and the changed code adds no Ruff findings relative to the existing files.
+The documented in-place database upgrade was not executed against historical
+database snapshots. These checks do not establish long-recording capacity or
+scientist usability on representative lab data.
+
+### September 17 release-readiness fixes
+
+Sorting attempts now keep analyzer builds private until the successful database
+insert establishes publication ownership. Duplicate workers discard only their
+own files. The cache audit includes abandoned build/trash directories, skips
+active ownership locks, and rechecks ownership before confirmed deletion.
+Single-machine and shared-storage deployments use the same protocol; the
+storage guide documents the cross-host filesystem contract.
+
+The documented retained-data upgrade now installs/repairs the UUID type marker
+and unique index through SQL before the remaining DataJoint alterations. New
+dated rule names and `franklab_hippocampus_2026_09_17` preserve historical rules,
+profiles, and review drafts while seeding current defaults. Presets and paired
+notebooks reference the replacements.
+
+**Validation:** 40 analyzer/cache/carrier checks passed. Both retained-data
+migration cases passed within the broader run, including running the published
+procedure twice and resuming an interrupted UUID-column addition. A final run
+passed 31 checks across sorting, publication/cleanup, both Chromium journeys,
+and selected runner workflows, including the corrected rollback assertion.
+The [release-readiness audit](spikesorting-v2-release-readiness-audit.md) records
+the exact runs, their overlapping coverage, and the migration rehearsal's
+limits. The modified Python files add no Ruff findings. All 67 code cells in
+the updated notebook/script pairs match and parse; 51 v2 documentation examples
+parse. These checks add no new cluster or long-recording capacity measurements.
+
 ### Remaining release gates and scientific limits
 
+- Validate two nodes against the actual shared storage and common MySQL server,
+    including cross-host lock exclusion, worker termination, competing sorting
+    inserts, analyzer rebuilds, and review-operation ownership. The
+    [release-readiness audit](spikesorting-v2-release-readiness-audit.md) records
+    the local evidence and deployment acceptance tasks. Local tests do not
+    establish the shared mount's locking behavior.
 - Run representative 1–3 hour tetrode and at least one-hour probe workloads on
     target Linux hardware, with actual nonempty artifact masks in both source
     modes. Record masks, actual sorted channels, units, timing, RAM, disk, and
@@ -331,13 +389,14 @@ original implementation revision above.
     documented tasks without developer coaching; record confusion and
     completion.
 - SI duration-based metrics still use the analyzer's full sample timeline.
-    Shared decoding consumers require callers to restrict analysis times to
-    valid intervals. Persisting `obs_intervals` does not make those consumers
-    apply them.
+    V2 `observed_*` metrics and sorted-spikes decoding through populations with
+    observation snapshots now honor usable time. Custom downstream analyses
+    must use the exposed intervals explicitly; legacy populations without
+    snapshots report unknown coverage.
 - Native splitting, per-spike edits, per-unit valid-time editing, selective
-    unmerge, Phy edit re-import, and persisted metric-filtered decoding groups
-    remain outside this merge scope. The notebook's SNR predicate filters
-    returned arrays only.
-- This pre-production schema adds concat artifact dependencies and observation
-    intervals. Recreate affected disposable v2 schemas/artifacts before using
-    the new branch; old concat artifacts are not a compatibility path.
+    unmerge, and Phy edit re-import remain outside this merge scope.
+    Metric-filtered populations now persist membership and observation
+    provenance through `select_units_for_analysis`; decoding reads that snapshot.
+- Follow the [preproduction database sequence](../src/Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
+    for the current schema. Old concat artifacts without mask provenance must
+    be rerun in a fresh development database.

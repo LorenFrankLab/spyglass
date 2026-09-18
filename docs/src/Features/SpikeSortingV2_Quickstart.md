@@ -118,7 +118,7 @@ switches its sorter or backend.
 Pass `auto_curate=True` so the run doesn't stop at the uncurated root: it scores
 the sort with the preset's metric and rule rows and commits an **auto-labeled**
 child curation in the same call. For the preset below the rules are
-`franklab_default_auto_curation_2026_06` (`nn_noise_overlap > 0.1` → `noise`,
+`franklab_default_auto_curation_2026_09` (`nn_noise_overlap > 0.1` → `noise`,
 `isi_violation > 0.02` → `reject`); call
 `describe_pipeline_preset("franklab_probe_hippocampus_30khz_ms5_2026_06")` to
 inspect them before running.
@@ -166,18 +166,23 @@ without `auto_curate=True` leaves it `None` and gives you only
 
 `start_review` evaluates the pinned curation with a named review profile and
 saves a seeded FigPack bundle (local by default). `review.open()` serves that
-exact bundle from your kernel at `http://localhost:<port>/` and returns the URL.
+exact bundle from your kernel at `http://localhost:<port>/bundles/<id>/` and
+returns the URL.
 In the browser: select units in the unit table (its columns
 are the profile's official metrics and the rule set's proposals for the curation
 under review), tick labels or **Merge Selected** in the Curation pane, then
 **Preview and commit**. **Save draft** keeps unfinished edits. Hosted figures use **Curate Figure** and **Save Annotations**
 for authenticated draft saving. Requires the `spikesorting-v2-curation` extra.
 
+If two tabs edit the same local draft, a stale save is rejected without discarding
+the tab's edits. Use **Open latest draft in a new tab** to review the saved
+changes and reapply your edits there.
+
 ```python
 from spyglass.spikesorting.v2.pipeline import FigPackReview
 
 review = run.start_review(
-    "franklab_hippocampus_2026_09",  # review profile: metrics + rules + columns
+    "franklab_hippocampus_2026_09_17",  # review profile: metrics + rules + columns
     source="auto_labeled",
     upload=False,
 )
@@ -219,8 +224,12 @@ session mapping. Raster and amplitude budgets default to `floor(duration_s * 50)
 points per unit, matching v1. Large time plots load only when explicitly requested.
 
 Remote kernel: forward the printed port (`ssh -L <port>:localhost:<port> host`)
-and open the same `localhost` URL locally -- the frontend enables editing only
-for a `localhost` origin. If you skip the browser, `auto_labeled` (or a
+and open the full returned `localhost` URL locally, including its bundle path.
+All reviews, focused inspections, and merged-child reviews opened by that Python
+process share the port, so one tunnel covers the whole sequence. The frontend
+enables editing only for a `localhost` origin. After restarting the kernel,
+forward the newly printed port, or use `review.open(port=...)` on the first open
+to request the same port again. If you skip the browser, `auto_labeled` (or a
 `save_manual_curation(...)` / `commit_merges(...)` child) is the curation you
 hand to analysis next -- name it `final_curation` deliberately; never infer it
 from the latest child.
