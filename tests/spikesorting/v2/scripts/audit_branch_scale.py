@@ -46,6 +46,6 @@ def test_branch_discovery_scaling(planted_two_unit_sort, monkeypatch):
             }
         )
     print("BRANCH_SCALE", json.dumps(records))
-    assert records[-1]["sql_queries"] <= records[0]["sql_queries"] + 5, (
-        "Lineage rendering must batch its reads as the history grows"
-    )
+    assert (
+        records[-1]["sql_queries"] <= records[0]["sql_queries"] + 5
+    ), "Lineage rendering must batch its reads as the history grows"

@@ -579,9 +579,9 @@ def test_explicit_restriction_keeps_hdf5_timestamps_lazy(
         return getitem(dataset, item)
 
     def no_full_array(dataset, *args, **kwargs):
-        assert not dataset.name.endswith("/timestamps"), (
-            "materialized full timestamp dataset"
-        )
+        assert not dataset.name.endswith(
+            "/timestamps"
+        ), "materialized full timestamp dataset"
         return as_array(dataset, *args, **kwargs)
 
     monkeypatch.setattr(h5py.Dataset, "__getitem__", bounded_getitem)

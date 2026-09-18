@@ -255,9 +255,9 @@ def test_browser_edits_reach_annotations_and_survive_reload(
         page.on("dialog", lambda dialog: dialogs.append(dialog.type))
         page.reload()
         page.get_by_text("Draft saved.", exact=False).wait_for()
-        assert dialogs == [], (
-            "Saved drafts must not produce an unsaved-edits warning."
-        )
+        assert (
+            dialogs == []
+        ), "Saved drafts must not produce an unsaved-edits warning."
 
     labels, merges = _saved_state(review_bundle)
     # Unit 2's cleared label is an empty list in the saved state (the

@@ -238,7 +238,8 @@ class _LazyConcatenatedTimestamps(_LazyTimestamps):
                 if overlap_start < overlap_stop:
                     chunks.append(
                         part[
-                            overlap_start - int(part_start) : overlap_stop
+                            overlap_start
+                            - int(part_start) : overlap_stop
                             - int(part_start)
                         ]
                     )
@@ -484,9 +485,11 @@ def restrict_recording_times(recording, valid_times):
         raise ValueError("Selected intervals contain no recording samples.")
     return (
         slices[0] if len(slices) == 1 else concatenate_recordings(slices),
-        timestamps[0]
-        if len(timestamps) == 1
-        else _LazyConcatenatedTimestamps(timestamps),
+        (
+            timestamps[0]
+            if len(timestamps) == 1
+            else _LazyConcatenatedTimestamps(timestamps)
+        ),
         len(slices),
     )
 

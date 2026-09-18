@@ -63,7 +63,10 @@ def make_dataset(seed: int):
             "contact_shapes": "circle",
             "contact_shape_params": {"radius": 6},
         },
-        generate_sorting_kwargs={"firing_rates": 10.0, "refractory_period_ms": 4.0},
+        generate_sorting_kwargs={
+            "firing_rates": 10.0,
+            "refractory_period_ms": 4.0,
+        },
         noise_kwargs={"noise_levels": 5.0, "strategy": "on_the_fly"},
         seed=seed,
     )
@@ -97,8 +100,16 @@ def drop_spikes(sorting, unit_subset, keep):
 # ----------------------------------------------------------------------------
 # FIXED bundle: per-unit temporal split of the unit's own sampled spikes
 # ----------------------------------------------------------------------------
-def extract_fixed_bundle(session_dir, recording, sorting, *, ms_before, ms_after,
-                         max_spikes_per_unit_total, seed):
+def extract_fixed_bundle(
+    session_dir,
+    recording,
+    sorting,
+    *,
+    ms_before,
+    ms_after,
+    max_spikes_per_unit_total,
+    seed,
+):
     um = _require_unitmatch()
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -108,9 +119,15 @@ def extract_fixed_bundle(session_dir, recording, sorting, *, ms_before, ms_after
     channel_positions = recording.get_channel_locations()
 
     analyzer = si.create_sorting_analyzer(sorting, recording, sparse=False)
-    analyzer.compute("random_spikes", method="uniform",
-                     max_spikes_per_unit=max_spikes_per_unit_total, seed=seed)
-    analyzer.compute("waveforms", ms_before=ms_before, ms_after=ms_after, **JOB_KWARGS)
+    analyzer.compute(
+        "random_spikes",
+        method="uniform",
+        max_spikes_per_unit=max_spikes_per_unit_total,
+        seed=seed,
+    )
+    analyzer.compute(
+        "waveforms", ms_before=ms_before, ms_after=ms_after, **JOB_KWARGS
+    )
     wf = analyzer.get_extension("waveforms").get_data()  # (n_sel, n_samp, n_ch)
     some_spikes = analyzer.get_extension("random_spikes").get_random_spikes()
     unit_ids = np.asarray(sorting.get_unit_ids(), dtype=int)
@@ -134,23 +151,35 @@ def extract_fixed_bundle(session_dir, recording, sorting, *, ms_before, ms_after
     rows = [np.array(("cluster_id", "group"))] + [
         np.array((str(i), "good")) for i in unit_ids
     ]
-    np.savetxt(session_dir / "cluster_group.tsv", np.vstack(rows),
-               fmt=["%s", "%s"], delimiter="\t")
+    np.savetxt(
+        session_dir / "cluster_group.tsv",
+        np.vstack(rows),
+        fmt=["%s", "%s"],
+        delimiter="\t",
+    )
 
 
 def extract_current_bundle(session_dir, recording, sorting):
     extract_unitmatch_bundle(
-        session_dir, recording, sorting,
-        ms_before=MS_BEFORE, ms_after=MS_AFTER,
-        max_spikes_per_unit=MAX_SPIKES_PER_HALF, seed=BUNDLE_SEED,
+        session_dir,
+        recording,
+        sorting,
+        ms_before=MS_BEFORE,
+        ms_after=MS_AFTER,
+        max_spikes_per_unit=MAX_SPIKES_PER_HALF,
+        seed=BUNDLE_SEED,
         job_kwargs=JOB_KWARGS,
     )
 
 
 def load_bundle(session_dir, unit_ids):
     return np.stack(
-        [np.load(Path(session_dir) / "RawWaveforms" / f"Unit{u}_RawSpikes.npy")
-         for u in unit_ids]
+        [
+            np.load(
+                Path(session_dir) / "RawWaveforms" / f"Unit{u}_RawSpikes.npy"
+            )
+            for u in unit_ids
+        ]
     )
 
 
@@ -171,8 +200,12 @@ def run_unitmatch(session_dirs):
         rec["drift"].append(np.asarray(out[0]).tolist())
         return out
 
-    def thr_rec(total_score, within_session, euclid_dist, param, is_first_pass=True):
-        out = orig_thr(total_score, within_session, euclid_dist, param, is_first_pass)
+    def thr_rec(
+        total_score, within_session, euclid_dist, param, is_first_pass=True
+    ):
+        out = orig_thr(
+            total_score, within_session, euclid_dist, param, is_first_pass
+        )
         rec["thresholds"].append(float(np.asarray(out).squeeze()))
         rec["euclid_dist"] = euclid_dist
         return out
@@ -185,11 +218,20 @@ def run_unitmatch(session_dirs):
         raw_positions = np.load(Path(session_dirs[0]) / "channel_positions.npy")
         session_dirs = [str(s) for s in session_dirs]
         param["KS_dirs"] = session_dirs
-        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(session_dirs)
+        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
+            session_dirs
+        )
         param = um.utils.get_probe_geometry(raw_positions, param)
-        (waveform, session_id, session_switch, within_session, good_units, param
-         ) = um.utils.load_good_waveforms(wave_paths, label_paths, param,
-                                          good_units_only=True)
+        (
+            waveform,
+            session_id,
+            session_switch,
+            within_session,
+            good_units,
+            param,
+        ) = um.utils.load_good_waveforms(
+            wave_paths, label_paths, param, good_units_only=True
+        )
         assert len(good_units) == len(session_dirs)
         waveform = _zero_center(waveform)
         clus_info = {
@@ -198,7 +240,9 @@ def run_unitmatch(session_dirs):
             "session_id": session_id,
             "original_ids": np.concatenate(good_units),
         }
-        extracted = um.overlord.extract_parameters(waveform, channel_pos, clus_info, param)
+        extracted = um.overlord.extract_parameters(
+            waveform, channel_pos, clus_info, param
+        )
         total_score, candidate_pairs, scores_to_include, predictors = (
             um.overlord.extract_metric_scores(
                 extracted, session_switch, within_session, param, niter=2
@@ -214,7 +258,9 @@ def run_unitmatch(session_dirs):
         probability = um.bayes_functions.apply_naive_bayes(
             kernels, priors, predictors, param, cond
         )
-        prob_matrix = probability[:, 1].reshape(param["n_units"], param["n_units"])
+        prob_matrix = probability[:, 1].reshape(
+            param["n_units"], param["n_units"]
+        )
     finally:
         mf.drift_n_sessions = orig_drift
         mf.get_threshold = orig_thr
@@ -295,7 +341,11 @@ def evaluate(res, S, n_units, thr):
                 if i == j:
                     continue
                 a, b = i in S, j in S
-                c = "SxS" if (a and b) else ("nonSxnonS" if (not a and not b) else "SxnonS")
+                c = (
+                    "SxS"
+                    if (a and b)
+                    else ("nonSxnonS" if (not a and not b) else "SxnonS")
+                )
                 if c != cat:
                     continue
                 p = mean_prob[i, nA + j]
@@ -383,12 +433,21 @@ def run_scenario(seed, scenario, S, base_rec, base_sort, log):
         sort_b = drop_spikes(sort_b, set(S), lambda st: st >= half_frames)
     unit_ids = np.asarray(base_sort.get_unit_ids(), dtype=int)
     spike_counts = {
-        "A": {int(u): int(sort_a.get_unit_spike_train(u).size) for u in unit_ids},
-        "B": {int(u): int(sort_b.get_unit_spike_train(u).size) for u in unit_ids},
+        "A": {
+            int(u): int(sort_a.get_unit_spike_train(u).size) for u in unit_ids
+        },
+        "B": {
+            int(u): int(sort_b.get_unit_spike_train(u).size) for u in unit_ids
+        },
     }
     root = RESULTS / f"seed{seed}" / scenario
-    out = {"seed": seed, "scenario": scenario, "S": [int(s) for s in S],
-           "spike_counts": spike_counts, "timings_s": {}}
+    out = {
+        "seed": seed,
+        "scenario": scenario,
+        "S": [int(s) for s in S],
+        "spike_counts": spike_counts,
+        "timings_s": {},
+    }
     conditions = {}
     for cond in ("current", "fixed"):
         dirs = []
@@ -398,9 +457,15 @@ def run_scenario(seed, scenario, S, base_rec, base_sort, log):
             if cond == "current":
                 extract_current_bundle(d, r, s)
             else:
-                extract_fixed_bundle(d, r, s, ms_before=MS_BEFORE, ms_after=MS_AFTER,
-                                     max_spikes_per_unit_total=2 * MAX_SPIKES_PER_HALF,
-                                     seed=BUNDLE_SEED)
+                extract_fixed_bundle(
+                    d,
+                    r,
+                    s,
+                    ms_before=MS_BEFORE,
+                    ms_after=MS_AFTER,
+                    max_spikes_per_unit_total=2 * MAX_SPIKES_PER_HALF,
+                    seed=BUNDLE_SEED,
+                )
             dirs.append(d)
         out["timings_s"][f"{cond}_bundle"] = time.time() - tc
         # zero-half verification
@@ -408,8 +473,16 @@ def run_scenario(seed, scenario, S, base_rec, base_sort, log):
         for lbl, d in zip(("A", "B"), dirs):
             wf = load_bundle(d, unit_ids)
             zero[lbl] = {
-                "half0_allzero": [int(u) for u, w in zip(unit_ids, wf) if np.all(w[..., 0] == 0)],
-                "half1_allzero": [int(u) for u, w in zip(unit_ids, wf) if np.all(w[..., 1] == 0)],
+                "half0_allzero": [
+                    int(u)
+                    for u, w in zip(unit_ids, wf)
+                    if np.all(w[..., 0] == 0)
+                ],
+                "half1_allzero": [
+                    int(u)
+                    for u, w in zip(unit_ids, wf)
+                    if np.all(w[..., 1] == 0)
+                ],
             }
         tm = time.time()
         res = run_unitmatch(dirs)
@@ -419,30 +492,45 @@ def run_scenario(seed, scenario, S, base_rec, base_sort, log):
         # cross-check the replicated path against the real backend
         bp = backend_pairs(dirs)
         mean_prob = (res["prob"] + res["prob"].T) / 2
-        both = (res["prob"] > res["match_threshold"]) & (res["prob"].T > res["match_threshold"])
+        both = (res["prob"] > res["match_threshold"]) & (
+            res["prob"].T > res["match_threshold"]
+        )
         nA = len(unit_ids)
-        mine = {(int(unit_ids[i]), int(unit_ids[j])): float(mean_prob[i, nA + j])
-                for i in range(nA) for j in range(nA) if both[i, nA + j]}
+        mine = {
+            (int(unit_ids[i]), int(unit_ids[j])): float(mean_prob[i, nA + j])
+            for i in range(nA)
+            for j in range(nA)
+            if both[i, nA + j]
+        }
         ev["backend_crosscheck"] = {
             "n_backend_pairs": len(bp),
             "n_replicated_pairs": len(mine),
             "same_keys": set(bp) == set(mine),
-            "max_abs_prob_diff": float(max((abs(bp[k] - mine[k]) for k in bp if k in mine), default=0.0)),
+            "max_abs_prob_diff": float(
+                max(
+                    (abs(bp[k] - mine[k]) for k in bp if k in mine), default=0.0
+                )
+            ),
         }
         np.save(root / cond / "prob_matrix.npy", res["prob"])
         np.save(root / cond / "total_score.npy", res["total_score"])
         conditions[cond] = ev
     out["conditions"] = conditions
     out["timings_s"]["scenario_total"] = time.time() - t0
-    log(f"seed={seed} scenario={scenario} done in {out['timings_s']['scenario_total']:.1f}s")
+    log(
+        f"seed={seed} scenario={scenario} done in {out['timings_s']['scenario_total']:.1f}s"
+    )
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
-    ap.add_argument("--scenarios", nargs="+",
-                    default=["control", "driftout_A", "driftout_AB"])
+    ap.add_argument(
+        "--scenarios",
+        nargs="+",
+        default=["control", "driftout_A", "driftout_AB"],
+    )
     args = ap.parse_args()
     RESULTS.mkdir(parents=True, exist_ok=True)
     all_out = []
@@ -453,16 +541,25 @@ def main():
     for seed in args.seeds:
         t = time.time()
         rec, sort = make_dataset(seed)
-        log(f"seed={seed}: dataset generated in {time.time() - t:.1f}s; "
+        log(
+            f"seed={seed}: dataset generated in {time.time() - t:.1f}s; "
             f"{rec.get_num_channels()} ch, {len(sort.get_unit_ids())} units, "
-            f"{rec.get_num_samples()} samples")
+            f"{rec.get_num_samples()} samples"
+        )
         rng = np.random.default_rng(seed)
         S = sorted(rng.choice(N_UNITS, size=5, replace=False).tolist())
         for scenario in args.scenarios:
             S_used = [] if scenario == "control" else S
             all_out.append(run_scenario(seed, scenario, S_used, rec, sort, log))
             with open(RESULTS / "results.json", "w") as f:
-                json.dump(all_out, f, indent=1, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
+                json.dump(
+                    all_out,
+                    f,
+                    indent=1,
+                    default=lambda o: (
+                        o.tolist() if hasattr(o, "tolist") else str(o)
+                    ),
+                )
     log("all done")
 
 

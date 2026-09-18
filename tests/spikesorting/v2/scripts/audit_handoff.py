@@ -301,6 +301,6 @@ def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
             default=str,
         ),
     )
-    assert selected.get_num_units() > 0, (
-        "Default auto-labeling excluded every sorted unit"
-    )
+    assert (
+        selected.get_num_units() > 0
+    ), "Default auto-labeling excluded every sorted unit"

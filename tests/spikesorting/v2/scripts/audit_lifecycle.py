@@ -278,9 +278,9 @@ def test_two_browser_drafts_preserve_both_edits(
             for context in contexts:
                 context.close()
             browser.close()
-            assert status == 409 or after.labels_after.get(a) == ("accept",), (
-                "A stale second browser silently overwrote the first scientist's saved label"
-            )
+            assert status == 409 or after.labels_after.get(a) == (
+                "accept",
+            ), "A stale second browser silently overwrote the first scientist's saved label"
     finally:
         stop_review_servers()
 
