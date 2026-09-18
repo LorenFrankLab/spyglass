@@ -1827,6 +1827,20 @@ cross-referenced here, not duplicated.
         pre-fill `parent_curation_id` / `apply_merge` by name; the expert
         `insert_curation` (and its ≥2-member merge-group validation) is
         unchanged.
+    - Detect MUA events per contiguous observed run. `MuaEventsV1.make`
+        previously dropped the bins no unit of the group was observed over
+        and concatenated what remained, which joined samples across the
+        missing time: two bursts on either side of a 380 ms unobserved
+        interval merged into one event spanning it. The population rate is
+        now smoothed within each observed run, normalized once over all
+        observed samples (runs too short to hold an event still contribute
+        their baseline), and events are extracted per run, so no event can
+        span unobserved time. Event numbers are renumbered chronologically
+        after concatenation, so the NWB table no longer carries duplicate
+        `event_number` values. Every detector parameter keeps its meaning,
+        and a fully observed group's events are unchanged. The firing-rate
+        FigURL leaves unobserved bins out of the plotted line and out of the
+        z-score statistics.
 
 ## [0.6.0] (Sep 1st 2026)
 

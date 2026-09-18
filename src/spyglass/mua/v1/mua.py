@@ -2,11 +2,13 @@ import datajoint as dj
 import numpy as np
 import sortingview.views as vv
 from pandas import DataFrame
-from ripple_detection import multiunit_HSE_detector
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.mua.v1._detection import (
+    detect_multiunit_events_in_observed_runs,
+)
 from spyglass.position import PositionOutput  # noqa: F401
 from spyglass.spikesorting.analysis.v1.group import (
     SortedSpikesGroup,
@@ -79,14 +81,20 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             - Spike indicator from SortedSpikesGroup
             - Valid times from IntervalList
             - Parameters from MuaEventsParameters
-        Uses multiunit_HSE_detector from ripple_detection package to detect
-        multiunit activity.
+
+        Events are detected within each contiguous run of observed samples,
+        using the steps of ripple_detection's multiunit_HSE_detector. An
+        event therefore cannot span time the group's units were not
+        observed over: the detection interval and the units' observation
+        intervals both bound it.
         """
         speed = self.get_speed(key)
         time = speed.index.to_numpy()
         speed = speed.to_numpy()
 
-        spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
+        spike_indicator, observed = SortedSpikesGroup.get_spike_indicator(
+            key, time, return_validity=True
+        )
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
 
         sampling_frequency = 1 / np.median(np.diff(time))
@@ -103,13 +111,15 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         mask = np.zeros_like(time, dtype=bool)
         for start, end in valid_times:
             mask = mask | ((time >= start) & (time <= end))
+        mask = mask & observed
 
-        time = time[mask]
-        speed = speed[mask]
-        spike_indicator = spike_indicator[mask]
-
-        mua_times = multiunit_HSE_detector(
-            time, spike_indicator, speed, sampling_frequency, **mua_params
+        mua_times = detect_multiunit_events_in_observed_runs(
+            time,
+            spike_indicator,
+            speed,
+            sampling_frequency,
+            mask,
+            **mua_params,
         )
         # Insert into analysis nwb file
         nwb_analysis_file = AnalysisNwbfile()
@@ -159,13 +169,24 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         mua_color="black",
         view_height=800,
     ):
-        """Create a FigURL for the MUA detection."""
+        """Create a FigURL for the MUA detection.
+
+        Bins the group's units were not observed over hold NaN in the firing
+        rate. They are z-scored out of the statistics and left out of the
+        plotted series, so the rate line breaks over unobserved time instead
+        of drawing a value the data does not support.
+        """
         key = self.fetch1("KEY")
         speed = self.get_speed(key)
         time = speed.index.to_numpy()
-        multiunit_firing_rate = self.get_firing_rate(key, time)
+        multiunit_firing_rate = np.asarray(
+            self.get_firing_rate(key, time)
+        ).squeeze()
+        observed = np.isfinite(multiunit_firing_rate)
         if zscore_mua:
-            multiunit_firing_rate = zscore(multiunit_firing_rate)
+            zscored = np.full(multiunit_firing_rate.shape, np.nan)
+            zscored[observed] = zscore(multiunit_firing_rate[observed])
+            multiunit_firing_rate = zscored
 
         mua_times = self.fetch1_dataframe()
 
@@ -179,8 +200,8 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         name = "Z-Scored Multiunit Rate" if zscore_mua else "Multiunit Rate"
         multiunit_firing_rate_view.add_line_series(
             name=name,
-            t=np.asarray(time),
-            y=np.asarray(multiunit_firing_rate, dtype=np.float32),
+            t=np.asarray(time)[observed],
+            y=np.asarray(multiunit_firing_rate, dtype=np.float32)[observed],
             color=mua_color,
             width=1,
         )
@@ -190,10 +211,11 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             multiunit_firing_rate_view.add_line_series(
                 name="Z-Score Threshold",
                 t=np.asarray(time).squeeze(),
-                y=np.ones_like(
-                    multiunit_firing_rate, dtype=np.float32
-                ).squeeze()
-                * zscore_threshold,
+                y=np.full(
+                    np.asarray(time).squeeze().shape,
+                    zscore_threshold,
+                    dtype=np.float32,
+                ),
                 color=mua_times_color,
                 width=1,
             )
