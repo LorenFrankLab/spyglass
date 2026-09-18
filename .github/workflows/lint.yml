@@ -14,6 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: psf/black@stable
+        with:
+          version: "26.1.0"
 
   codespell:
     name: Check for spelling errors
