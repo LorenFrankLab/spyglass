@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: Python 3 (spyglass_spikesorting_v2)
 #     language: python
@@ -58,8 +58,12 @@ pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
 review_profile = "franklab_hippocampus_2026_09_17"
 # Keep run-all/headless execution safe. Set True interactively when ready.
 open_review_in_browser = False
-use_connected_browser_result = False  # True after completing the local browser review
-use_notebook_commit_panel = False  # optional alternative, required for hosted drafts
+use_connected_browser_result = (
+    False  # True after completing the local browser review
+)
+use_notebook_commit_panel = (
+    False  # optional alternative, required for hosted drafts
+)
 commit_browser_review = False  # commit the previewed browser edits
 commit_merge_verification = False  # commit the post-merge verification review
 # Analysis population policy for the final handoff (section 4).
@@ -200,11 +204,7 @@ if run_custom_annotation_example:
     )
     scale = max(1, max((int(row["n_spikes"]) for row in unit_rows), default=1))
     custom_values = pd.DataFrame(
-        {
-            "custom_score": [
-                float(row["n_spikes"]) / scale for row in unit_rows
-            ]
-        },
+        {"custom_score": [float(row["n_spikes"]) / scale for row in unit_rows]},
         index=pd.Index(
             [int(row["unit_id"]) for row in unit_rows], name="unit_id"
         ),
@@ -627,7 +627,6 @@ if final_unit_ids:
 # and end, and a raster for those units. SI time ranges below are recording-
 # relative seconds; fetched analysis spikes use the original session timeline.
 
-# +
 final_evaluation = final_curation.evaluate(
     metric_params_name="franklab_default",
     auto_curation_rules_name="franklab_default_auto_curation_2026_09",
@@ -658,7 +657,6 @@ if inspection_unit_ids:
             time_range=[0.0, duration],
             backend="matplotlib",
         )
-# -
 
 # ### Should this pair merge?
 #

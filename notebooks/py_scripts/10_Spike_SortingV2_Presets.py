@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: Python 3 (spyglass_spikesorting_v2)
 #     language: python
@@ -67,7 +67,9 @@ review_group_id = None  # set one group after reading the batch report
 open_review_in_browser = False
 commit_group_review = False
 commit_group_verification = False
-use_group_browser_result = False  # True after the connected browser review finishes
+use_group_browser_result = (
+    False  # True after the connected browser review finishes
+)
 # Deliberate omissions are reported as a PARTIAL population.
 omitted_sort_group_ids = []
 # -
@@ -264,7 +266,6 @@ describe_run(session_results)
 # they do not write `accept`. Missing-policy pass means "not flagged", not
 # "quality established". Deny labels win: `accept` plus `noise` is excluded.
 
-# +
 final_curations = {}  # retain this mapping when rerunning the review cells
 successful_runs = {
     row["sort_group_id"]: row
@@ -278,7 +279,6 @@ if use_auto_labels_only:
             for group, run in successful_runs.items()
         }
     )
-# -
 
 # Select `review_group_id` above, then run this cell. Optional FigPack extra:
 # `pip install -e ".[spikesorting-v2-curation]"`.
@@ -416,9 +416,7 @@ def assemble_population():
             raise ValueError(
                 f"Group {group} needs a curation of its successful run."
             )
-        receipts[group] = select_units_for_analysis(
-            ref, policy=analysis_policy
-        )
+        receipts[group] = select_units_for_analysis(ref, policy=analysis_policy)
         print(f"Group {group}:\n{receipts[group].summary()}")
     key = {
         "nwb_file_name": nwb_file_name,
@@ -431,8 +429,7 @@ def assemble_population():
     for receipt in receipts.values():
         for selected_group in receipt.groups:
             stored = (
-                SortedSpikesGroup.UnitSelection
-                & dict(selected_group.group_key)
+                SortedSpikesGroup.UnitSelection & dict(selected_group.group_key)
             ).fetch1()
             snapshots[selected_group.merge_id] = {
                 "selected_unit_ids": list(stored["selected_unit_ids"]),
@@ -483,9 +480,7 @@ def assemble_population():
     actual = {
         (row["spikesorting_merge_id"], row["unit_id"]) for row in identities
     }
-    assert (
-        actual == expected
-    ), "Population differs from the per-group receipts."
+    assert actual == expected, "Population differs from the per-group receipts."
     print(
         (
             "PARTIAL population; omitted groups:"
@@ -501,4 +496,3 @@ population_key, group_selections, population_spikes, population_unit_ids = (
     assemble_population()
 )
 population_review_table()
-# -
