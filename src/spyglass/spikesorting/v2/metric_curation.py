@@ -53,6 +53,8 @@ from spyglass.spikesorting.v2._params.metric_curation import (
     required_extensions_for_metrics,
 )
 from spyglass.spikesorting.v2._recipe_catalog import (
+    FRANKLAB_CURATION_RULES,
+    V1_NOISE_CURATION_RULES,
     waveform_params_for_preprocessing,
 )
 from spyglass.spikesorting.v2._sorting_analyzer import (
@@ -585,7 +587,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             ),
             (
                 {
-                    "auto_curation_rules_name": "v1_default_nn_noise",
+                    "auto_curation_rules_name": V1_NOISE_CURATION_RULES,
                     "auto_merge_preset": "none",
                 },
                 [
@@ -627,9 +629,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 # the nn_noise_overlap column) and isi_violation -- the shipped
                 # ``franklab_default`` QualityMetricParameters row does both.
                 {
-                    "auto_curation_rules_name": (
-                        "franklab_default_auto_curation_2026_06"
-                    ),
+                    "auto_curation_rules_name": FRANKLAB_CURATION_RULES,
                     "auto_merge_preset": "none",
                 },
                 [

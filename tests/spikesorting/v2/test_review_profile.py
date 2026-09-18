@@ -143,7 +143,7 @@ def test_review_profile_persisted_and_immutable(dj_conn):
     row = {
         **_BASE,
         "review_profile_name": names[0],
-        "auto_curation_rules_name": ("franklab_default_auto_curation_2026_06"),
+        "auto_curation_rules_name": ("franklab_default_auto_curation_2026_09"),
     }
     try:
         CurationReviewProfile.insert1(row)
@@ -202,7 +202,7 @@ def test_franklab_review_profile_is_shipped(dj_conn):
     ).fetch1()
     assert row["metric_params_name"] == "franklab_default"
     assert row["auto_curation_rules_name"] == (
-        "franklab_default_auto_curation_2026_06"
+        "franklab_default_auto_curation_2026_09"
     )
     assert row["label_import_mode"] == "replace"
 

@@ -848,7 +848,7 @@ def test_every_preset_declares_curation_params():
     These became required fields, so a preset that omitted them would fail to
     build. The shipped mapping: Frank-lab polymer/tetrode presets pair
     ``franklab_default`` metrics with the ISI-aware Frank-lab rules;
-    Neuropixels keeps the historical ``v1_default_nn_noise`` rules; and the
+    Neuropixels keeps the historical ``v1_default_nn_noise_2026_09`` rules; and the
     clusterless preset (no clustered units to merge) pairs ``minimal`` metrics
     with the inert ``none`` rules.
     """
@@ -870,7 +870,7 @@ def test_every_preset_declares_curation_params():
 
     npx = _PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
     assert npx.metric_params_name == "neuropixels_default"
-    assert npx.auto_curation_rules_name == "v1_default_nn_noise"
+    assert npx.auto_curation_rules_name == "v1_default_nn_noise_2026_09"
 
     excluded = {
         "franklab_clusterless_2026_06",
@@ -882,7 +882,7 @@ def test_every_preset_declares_curation_params():
         assert preset.metric_params_name == "franklab_default", name
         assert (
             preset.auto_curation_rules_name
-            == "franklab_default_auto_curation_2026_06"
+            == "franklab_default_auto_curation_2026_09"
         ), name
 
 
@@ -901,7 +901,7 @@ def test_concat_preset_is_registered_and_shaped():
     assert preset.metric_params_name == "franklab_default"
     assert (
         preset.auto_curation_rules_name
-        == "franklab_default_auto_curation_2026_06"
+        == "franklab_default_auto_curation_2026_09"
     )
 
 
@@ -1185,7 +1185,7 @@ def test_preset_model_artifact_optional_and_motion_field():
         sorter="mountainsort5",
         sorter_params_name="franklab_30khz_ms5_2026_06",
         metric_params_name="franklab_default",
-        auto_curation_rules_name="v1_default_nn_noise",
+        auto_curation_rules_name="v1_default_nn_noise_2026_09",
         motion_correction_params_name="auto",
     )
     assert preset.artifact_detection_params_name is None
@@ -1197,7 +1197,7 @@ def test_preset_model_artifact_optional_and_motion_field():
             sorter="mountainsort5",
             sorter_params_name="franklab_30khz_ms5_2026_06",
             metric_params_name="franklab_default",
-            auto_curation_rules_name="v1_default_nn_noise",
+            auto_curation_rules_name="v1_default_nn_noise_2026_09",
             bogus_field=1,
         )
 
@@ -1281,7 +1281,7 @@ def test_describe_pipeline_preset_surfaces_curation_names(dj_conn, clone_env):
     )
     assert (
         _stage_value(detail, "preset", "auto_curation_rules_name")
-        == "franklab_default_auto_curation_2026_06"
+        == "franklab_default_auto_curation_2026_09"
     )
 
 

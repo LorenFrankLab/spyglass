@@ -398,7 +398,7 @@ still necessary between ordinary local curation actions.
   children need child-scoped annotations instead of copying stale values.
 
 Schema and regeneration details are in
-[the migration guide](../src/Features/SpikeSortingV2_Migration.md#updating-a-preproduction-v2-database-for-observed-time-and-browser-curation).
+[the migration guide](../src/Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 Existing production databases were not altered. Deferred features listed at the
 start of this plan remain out of scope.
 

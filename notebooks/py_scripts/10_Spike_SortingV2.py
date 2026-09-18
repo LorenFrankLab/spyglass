@@ -382,7 +382,7 @@ from spyglass.spikesorting.v2.pipeline import FigPackReview
 
 if importlib.util.find_spec("figpack") is not None:
     review = auto_summary.start_review(
-        "franklab_hippocampus_2026_09",
+        "franklab_hippocampus_2026_09_17",
         source="auto_labeled",
         upload=False,
     )

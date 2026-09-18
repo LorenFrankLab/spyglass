@@ -1064,7 +1064,7 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
         sorter="mountainsort5",
         sorter_params_name="franklab_30khz_ms5_2026_06",
         metric_params_name="franklab_default",
-        auto_curation_rules_name="v1_default_nn_noise",
+        auto_curation_rules_name="v1_default_nn_noise_2026_09",
     )
     monkeypatch.setitem(pl._PIPELINE_PRESETS, "_run_no_artifact", no_artifact)
 
@@ -1238,7 +1238,7 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     }
 
     # The child's labels are the RULES applied to the REAL computed metrics,
-    # not just plumbing. The preset's franklab_default_auto_curation_2026_06
+    # not just plumbing. The preset's franklab_default_auto_curation_2026_09
     # set labels nn_noise_overlap > 0.1 "noise" and isi_violation > 0.02
     # "reject". Recompute the expected labels independently from the
     # evaluation's own metrics and assert the materialized child carries

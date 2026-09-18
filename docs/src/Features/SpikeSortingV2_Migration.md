@@ -55,35 +55,170 @@ install; users who must *produce* new v0/v1 output should follow the legacy file
 verbatim and restore `pyproject.toml` afterwards. Packaging both stacks as
 installable profiles from unchanged metadata is deferred.
 
-### Upgrading a preproduction v2 database for curation review
+### Upgrading a preproduction v2 database
 
-This release adds four columns and new lookup/annotation tables without changing
-the existing DataJoint primary keys:
+This is the authoritative sequence for this preproduction branch. New databases
+declare the current schema automatically. For disposable development results,
+prefer a **fresh development database** and rerun ingestion, sorting, and
+curation. Keep v1/production databases separate. Pre-mask concatenated results
+must be rerun: adding columns cannot reconstruct their missing artifact
+provenance. The staged path below retains standalone development results; it
+is not a production migration.
 
-- `CurationV2.curation_uuid` is a fresh, immutable UUID for one row generation.
-    `(sorting_id, curation_id)` remains the query key, but its integer component
-    can be reused after deletion and is not safe as a durable external identity.
-- `AutoCurationRules.Rule.missing_policy` stores `error`, `fail`, or `pass`;
-    existing rows take the `error` default, while the shipped rule sets record
-    `pass` so a low-spike NaN cannot abort a run.
-- `CurationReviewProfile` persists one immutable metric/rule/display/label
-    bundle. `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09`.
-- `CurationV2.created_at` / `created_by` record real lifecycle metadata. The
-    additive defaults cover pre-existing preproduction rows; historical
-    authorship is not reconstructed.
-- `UnitAnnotationDefinition` and `CurationUnitAnnotationSet` add typed,
-    content-addressed custom unit properties scoped to an exact curation. These
-    are separate from both v1's merge-output `UnitAnnotation` and curation
-    labels.
+Before an in-place upgrade, stop v2 workers and preserve the development database,
+analysis files, local review bundles (`annotations.json`,
+`spyglass_curation.json`, and operation/result journals), and review IDs. Existing
+drafts belong to their exact curation generations; copying them into a fresh
+database does not transfer their identity.
 
-Run the staged migration in the unreleased [CHANGELOG](../CHANGELOG.md) before
-creating new v2 curations. It first adds a nullable UUID column, assigns a
-different UUID to every existing curation, and only then runs `alter()` to make
-the column non-null and database-unique. Running the final `alter()` first on a
-populated table can give every old row the same zero value and fail the unique
-index. The rule and creation-metadata alters are additive and their database
-defaults preserve old rows; importing the profile and unit-annotation modules
-declares their net-new tables without changing either recipe table.
+The schema changes covered here are:
+
+- `CurationV2.curation_uuid`, `created_at`, and `created_by`: durable generation
+  identity and lifecycle metadata. Existing integer curation keys stay unchanged.
+- `AutoCurationRules.Rule.missing_policy`: old rows default to `error`;
+  newly seeded rule sets use their declared policy under new dated names.
+  `franklab_default_auto_curation_2026_09` and
+  `v1_default_nn_noise_2026_09` use `pass` for unavailable rule metrics. Existing
+  rules and evaluations retain their original payloads. The new
+  `franklab_hippocampus_2026_09_17` review profile references the new rules;
+  existing review profiles and their drafts keep their original identities.
+- `QualityMetricParameters.observed_presence_bin_duration_s` (default 60) and
+  `CurationEvaluationSelection.observation_version` (old rows default to 0).
+  Newly normalized metric parameter rows use schema version 2; existing recipes
+  are not overwritten.
+- `RecordingArtifactSelection.manual_excluded_times` and
+  `SharedGroupArtifactSelection.manual_excluded_times`: nullable interval blobs;
+  an existing null means no manual exclusions.
+- `SortingSelection.ArtifactDetectionSource`: the artifact foreign key now
+  targets `ArtifactDetectionOutput`; the script remaps the old references.
+- New review-profile, typed annotation, and `SortedSpikesGroup.UnitSelection`
+  tables/parts are declared on import.
+
+Run the following in order in the development environment, reviewing DataJoint's
+proposed DDL. In particular, assign distinct UUIDs **before** the final curation
+alter, and add the metric/artifact columns **before** initializing defaults.
+
+```python
+# Add the curation-UX identity and rule-policy columns. Existing CurationV2
+# rows must receive distinct UUIDs BEFORE the final non-null + unique alter.
+from importlib import reload
+
+import datajoint as dj
+import spyglass.spikesorting.v2.curation as curation_module
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.metric_curation import (
+    AutoCurationRules,
+    CurationEvaluationSelection,
+    QualityMetricParameters,
+)
+from spyglass.spikesorting.v2.artifact import (
+    RecordingArtifactSelection,
+    SharedGroupArtifactSelection,
+)
+
+curation_table = CurationV2()
+if "curation_uuid" not in curation_table.heading.names:
+    curation_table.connection.query(
+        f"ALTER TABLE {curation_table.full_table_name} "
+        "ADD COLUMN `curation_uuid` BINARY(16) NULL COMMENT ':uuid:' "
+        "AFTER `curation_id`"
+    )
+curation_table.connection.query(
+    f"UPDATE {curation_table.full_table_name} "
+    "SET `curation_uuid` = UNHEX(REPLACE(UUID(), '-', '')) "
+    "WHERE `curation_uuid` IS NULL"
+)
+# Finalize the UUID through SQL: DataJoint needs the ':uuid:' type marker and
+# cannot add a unique index with alter(). MODIFY also repairs the unmarked
+# BINARY(16) column left by an interrupted earlier version of this procedure.
+curation_table.connection.query(
+    f"ALTER TABLE {curation_table.full_table_name} "
+    "MODIFY COLUMN `curation_uuid` BINARY(16) NOT NULL COMMENT ':uuid:'"
+)
+if not curation_table.heading.indexes.get(("curation_uuid",), {}).get("unique"):
+    curation_table.connection.query(
+        f"ALTER TABLE {curation_table.full_table_name} "
+        "ADD UNIQUE INDEX (`curation_uuid`)"
+    )
+# Raw DDL bypasses DataJoint's cached heading; reload before the final alter.
+CurationV2 = reload(curation_module).CurationV2
+# Each table's declaration context resolves its foreign keys (including master).
+# Add every newer field BEFORE seeding defaults or reading artifact selections.
+for table in (
+    CurationV2,  # finalize UUID; add created_at / created_by
+    AutoCurationRules.Rule,  # existing missing_policy defaults to error
+    QualityMetricParameters,  # presence-bin width; new parameter rows use v2
+    CurationEvaluationSelection,  # old evaluations retain observation_version=0
+    RecordingArtifactSelection,  # nullable manual_excluded_times
+    SharedGroupArtifactSelection,  # nullable manual_excluded_times
+):
+    table().alter(context=table.declaration_context)
+
+# Re-link each sort's artifact pass to the ArtifactDetectionOutput merge. The
+# part table's secondary FK moved from `artifact_detection_id` to
+# `artifact_detection_merge_id`, which `alter()` cannot retarget, so remap the
+# rows through the merge's source parts and redeclare the part table. Run this
+# BEFORE inserting a SortingSelection. This preserves standalone results;
+# pre-mask concat materializations require a fresh development database.
+from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+from spyglass.spikesorting.v2.sorting import SortingSelection
+
+_part = dj.FreeTable(
+    dj.conn(), SortingSelection.ArtifactDetectionSource.full_table_name
+)
+if "artifact_detection_id" in _part.heading.names:
+    _by_detection = {}
+    for _src in ArtifactDetectionOutput.parts(as_objects=True):
+        for _row in _src.fetch(as_dict=True):
+            _by_detection[_row["artifact_detection_id"]] = _row["merge_id"]
+    _remapped = []
+    for _row in _part.fetch(as_dict=True):
+        _mid = _by_detection.get(_row["artifact_detection_id"])
+        if _mid is None:  # unregistered detection -- do not guess
+            raise RuntimeError(
+                "artifact_detection_id "
+                f"{_row['artifact_detection_id']} for sorting_id "
+                f"{_row['sorting_id']} is not registered in "
+                "ArtifactDetectionOutput; populate the detection (or delete "
+                "the orphaned sort) before migrating."
+            )
+        _remapped.append(
+            {
+                "sorting_id": _row["sorting_id"],
+                "artifact_detection_merge_id": _mid,
+            }
+        )
+    _part.drop_quick()  # redeclared on the next schema import
+    import spyglass.spikesorting.v2.sorting as _sorting_mod
+
+    reload(_sorting_mod)
+    _sorting_mod.SortingSelection.ArtifactDetectionSource.insert(_remapped)
+
+# Declare and seed the net-new immutable review-profile lookup after its two
+# recipe foreign keys have been upgraded/seeded.
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.review_profile import CurationReviewProfile  # noqa F401
+
+initialize_v2_defaults()
+
+# Declare the net-new typed annotation schema. It annotates exact CurationV2
+# unit namespaces and does not alter curation identity or the v1 annotation
+# table.
+from spyglass.spikesorting.v2.unit_annotation import (  # noqa F401
+    CurationUnitAnnotationSet,
+    UnitAnnotationDefinition,
+)
+
+# Importing the current analysis group declares its new UnitSelection part.
+from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup  # noqa F401
+```
+
+After upgrading, reevaluate the chosen curation and start a review with
+`franklab_hippocampus_2026_09_17`. New evaluations use observation version 1 and do
+not relabel historical version-0 evaluations. For saved drafts and analysis
+populations, follow [resuming reviews and rebuilding populations](#resuming-reviews-and-rebuilding-populations)
+below. Import/commit an old draft through its original review before reviewing
+that committed child with the new profile; never overwrite its identity sidecar.
 
 ### Porting a v1 sort to v2
 
@@ -193,34 +328,21 @@ declares their net-new tables without changing either recipe table.
 
 ## 2. What you query differently
 
-### Updating a preproduction v2 database for observed time and browser curation
+### Resuming reviews and rebuilding populations
 
-New databases declare the current schema automatically. For an existing
-**development** database, first preserve local review bundles (including
-`annotations.json` and `spyglass_curation.json`) and their review IDs. Do not
-apply these development steps to a production database.
+Complete the [database upgrade/recreation sequence](#upgrading-a-preproduction-v2-database)
+first. Existing named profiles remain unchanged; start a new review with
+`franklab_hippocampus_2026_09_17` for current observed-time columns and view composition
+(view version 4).
 
-- Add `QualityMetricParameters.observed_presence_bin_duration_s` (float, default
-  60) and `CurationEvaluationSelection.observation_version` (int, default 0),
-  using the corresponding table's `.alter()` after reviewing its SQL. Version 0
-  identifies historical evaluations; new `insert_selection` calls explicitly
-  use version 1 and create new evaluation identities. The metric-parameter
-  normalization schema is now version 2.
-- Call `initialize_v2_defaults()` to install the new immutable
-  `franklab_hippocampus_2026_09` review profile. Existing named profiles remain
-  unchanged. Reevaluate a chosen curation and start a new review to get the
-  observed-time columns and new view composition (view version 3).
 - Saved display version 1 retains its explicit fixed point caps when resumed.
   New display version 2 uses duration-scaled 50 Hz budgets, optionally limited
-  by explicit caps. Do not overwrite an old review's identity sidecar or copy
-  annotations onto a different curation: resume/import the old draft through
-  its original review, commit it, then review that committed child with the
-  new profile.
+  by explicit caps. Resume/import an old draft through its original review,
+  commit it, then review that committed child with the new profile.
 - Newly created `SortedSpikesGroup.UnitSelection` snapshots include observed
-  intervals in `selection_provenance`; no extra part-table column is required.
-  Use a new group name to create a snapshot for a previously selected curation.
-  Existing groups retain their frozen membership and report unknown coverage
-  where observation snapshots are absent.
+  intervals in `selection_provenance`. Use a new group name to create a snapshot
+  for a previously selected curation. Existing groups retain their frozen
+  membership and report unknown coverage where observation snapshots are absent.
 
 The connected local browser writes operation/result journals beside the saved
 bundle, without a workflow-status table. Hosted bundles still require the
@@ -360,14 +482,17 @@ surface that stays v1-only is the stored per-pair burst metrics
     FigURL replacement. One immutable review profile evaluates the selected
     curation, seeds current labels, puts its metrics and suggestions in the
     selectable unit table, and returns a resumable FigPack handle.
-    `review.open()` serves the saved bundle at `http://localhost:<port>/` (the
+    `review.open()` serves the saved bundle at `http://localhost:<port>/bundles/<id>/` (the
     v1 FigURL link becomes a local URL; saves land in the bundle's
     `annotations.json`). `preview_import()` shows the exact diff; `commit()`
     verifies the figure's immutable parent UUID and creates a sibling child; a
     merge is automatically re-evaluated and `continue_review()` opens its actual
     merged analyzer for an explicit verification commit. Local delivery is the
     default; `upload=True` publishes the identical seeded bundle
-    (`FIGPACK_API_KEY`, or `ephemeral=True`). Needs the
+    (`FIGPACK_API_KEY`, or `ephemeral=True`). Connected local reviews offer
+    **Preview and commit** and open merged-child verification in the browser;
+    hosted reviews use `review.commit_panel()` in the notebook. All local review
+    and inspection URLs in one Python process share a port. Needs the
     `spikesorting-v2-curation` extra. The table-level `FigPackCurationSelection`
     and `FigPackCuration` APIs remain the expert layer.
 - **Available in v2** — lab-specific computed unit properties use immutable
@@ -439,9 +564,9 @@ remain unsupported.
 Concat selections now require explicit per-member artifact detection IDs (or
 explicit `None` values). The standard runner resolves these automatically from
 the preset. Masks precede motion correction, participate in concat identity, and
-survive rebuilds and per-session exports as `obs_intervals`. This changes the
-pre-production concat schema: recreate the affected disposable v2 schema before
-repopulating; old materializations cannot satisfy the new selection. There is no
-production data migration in this change. SI's duration-based metrics and
-downstream decoding times do not automatically honor observation intervals;
-restrict analysis windows explicitly.
+survive rebuilds and per-session exports as `obs_intervals`. Old concat materializations cannot satisfy the new selection; follow the
+[preproduction database sequence](#upgrading-a-preproduction-v2-database) and rerun
+them. Raw SI duration metrics retain SI definitions. V2 `observed_*` metrics and
+sorted-spikes decoding through populations with observation snapshots honor
+usable time; legacy populations without snapshots report unknown coverage.
+Custom downstream analyses must use the exposed observation intervals explicitly.

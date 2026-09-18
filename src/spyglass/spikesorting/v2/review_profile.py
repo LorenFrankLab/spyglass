@@ -18,13 +18,14 @@ from collections.abc import Mapping
 
 import datajoint as dj
 
+from spyglass.spikesorting.v2._enums import CurationLabel
+from spyglass.spikesorting.v2._figpack_curation import default_label_options
+from spyglass.spikesorting.v2._recipe_catalog import FRANKLAB_CURATION_RULES
 from spyglass.spikesorting.v2._review_profile import (
     normalize_review_profile,
     profile_display_property_vocabulary,
     review_profile_label_policy,
 )
-from spyglass.spikesorting.v2._figpack_curation import default_label_options
-from spyglass.spikesorting.v2._enums import CurationLabel
 from spyglass.spikesorting.v2.exceptions import DuplicateParameterContentError
 from spyglass.spikesorting.v2.metric_curation import (
     AutoCurationRules,
@@ -35,7 +36,7 @@ from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v2_metric_curation")
 
-FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_09"
+FRANKLAB_REVIEW_PROFILE = "franklab_hippocampus_2026_09_17"
 
 _PROFILE_CONTENT_FIELDS = (
     "metric_params_name",
@@ -165,9 +166,7 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         row = {
             "review_profile_name": FRANKLAB_REVIEW_PROFILE,
             "metric_params_name": "franklab_default",
-            "auto_curation_rules_name": (
-                "franklab_default_auto_curation_2026_06"
-            ),
+            "auto_curation_rules_name": FRANKLAB_CURATION_RULES,
             "displayed_unit_properties": [
                 "snr",
                 "isi_violation",

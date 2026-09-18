@@ -55,7 +55,7 @@ nwb_file_name = "your_session.nwb"  # replace with your ingested session
 team_name = "my_team"
 interval_list_name = "raw data valid times"
 pipeline_preset = "franklab_probe_hippocampus_30khz_ms5_2026_06"
-review_profile = "franklab_hippocampus_2026_09"
+review_profile = "franklab_hippocampus_2026_09_17"
 # Keep run-all/headless execution safe. Set True interactively when ready.
 open_review_in_browser = False
 use_connected_browser_result = False  # True after completing the local browser review
@@ -630,7 +630,7 @@ if final_unit_ids:
 # +
 final_evaluation = final_curation.evaluate(
     metric_params_name="franklab_default",
-    auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+    auto_curation_rules_name="franklab_default_auto_curation_2026_09",
 )
 display(final_evaluation.missing_qc_inputs().to_frame())
 if inspection_unit_ids:
@@ -731,7 +731,7 @@ analysis_provenance
 # 1. **Evaluate** the root -- metrics plus a rule set's label proposals.
 #    `franklab_default` computes `snr` / `isi_violation` / `firing_rate` /
 #    `num_spikes` / `presence_ratio` / `amplitude_cutoff` / `nn_advanced` (PCA);
-#    `franklab_default_auto_curation_2026_06` labels `nn_noise_overlap > 0.1`
+#    `franklab_default_auto_curation_2026_09` labels `nn_noise_overlap > 0.1`
 #    units `noise` and `isi_violation > 0.02` `reject`. `populate` is the heavy
 #    step (minutes on a real session; idempotent).
 # 2. **Inspect** proposals with the plot accessors. Proposals are thresholds, not
@@ -752,7 +752,7 @@ scripted_curation = None
 if run_scripted_curation_example:
     scripted_evaluation = root_curation.evaluate(
         metric_params_name="franklab_default",
-        auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+        auto_curation_rules_name="franklab_default_auto_curation_2026_09",
     )
     scripted_evaluation.plots.units_qc()
     display(scripted_evaluation.metrics)

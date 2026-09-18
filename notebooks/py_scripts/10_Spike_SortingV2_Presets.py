@@ -203,7 +203,7 @@ if "my_lab_custom" not in list_pipeline_presets():
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_30khz_ms5_2026_06",
             "metric_params_name": "franklab_default",
-            "auto_curation_rules_name": "franklab_default_auto_curation_2026_06",
+            "auto_curation_rules_name": "franklab_default_auto_curation_2026_09",
         },
     )
 
@@ -288,7 +288,7 @@ if review_group_id is not None:
     review_parent = final_curations.get(
         review_group_id, successful_runs[review_group_id].auto_labeled_curation
     )
-    group_review = review_parent.start_review("franklab_hippocampus_2026_09")
+    group_review = review_parent.start_review("franklab_hippocampus_2026_09_17")
     print(group_review.summary())
     print(group_review.open(open_browser=open_review_in_browser))
 

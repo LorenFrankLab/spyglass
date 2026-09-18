@@ -89,6 +89,10 @@ HIPPOCAMPUS_DISPLAY_WAVEFORMS = "franklab_hippocampus_actual_waveforms"
 HIPPOCAMPUS_METRIC_WAVEFORMS = "franklab_hippocampus_metric_waveforms"
 CORTEX_DISPLAY_WAVEFORMS = "franklab_cortex_actual_waveforms"
 CORTEX_METRIC_WAVEFORMS = "franklab_cortex_metric_waveforms"
+# Missing-metric behavior is scientific recipe content. Keep historical rules
+# untouched; current presets and reviews use these dated replacements.
+FRANKLAB_CURATION_RULES = "franklab_default_auto_curation_2026_09"
+V1_NOISE_CURATION_RULES = "v1_default_nn_noise_2026_09"
 
 
 # ---- Per-stage default-row builders ---------------------------------------
@@ -556,7 +560,7 @@ def _franklab_ms4_spec(probe_type: str, region: str, rate_hz: int) -> dict:
         sorter="mountainsort4",
         sorter_params_name=_RATE_MS4_SORTER[rate_hz],
         metric_params_name="franklab_default",
-        auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+        auto_curation_rules_name=FRANKLAB_CURATION_RULES,
         probe_type=probe_type,
         target_region=region,
         sampling_rate_hz=rate_hz,
@@ -668,7 +672,7 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
         sorter="mountainsort5",
         sorter_params_name=MS5_30KHZ,
         metric_params_name="franklab_default",
-        auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+        auto_curation_rules_name=FRANKLAB_CURATION_RULES,
         probe_type=probe_type,
         target_region="hippocampus",
         sampling_rate_hz=30000,
@@ -739,7 +743,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
             sorter="kilosort4",
             sorter_params_name=KS4_NEUROPIXELS,
             metric_params_name="neuropixels_default",
-            auto_curation_rules_name="v1_default_nn_noise",
+            auto_curation_rules_name=V1_NOISE_CURATION_RULES,
             probe_type="neuropixels",
             sampling_rate_hz=30000,
             sorter_family="kilosort4",
@@ -783,7 +787,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
             sorter="mountainsort5",
             sorter_params_name=MS5_30KHZ,
             metric_params_name="franklab_default",
-            auto_curation_rules_name="franklab_default_auto_curation_2026_06",
+            auto_curation_rules_name=FRANKLAB_CURATION_RULES,
             motion_correction_params_name="auto_default",
             probe_type="probe",
             target_region="hippocampus",
