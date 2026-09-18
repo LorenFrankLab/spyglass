@@ -156,6 +156,12 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
         tree = merged.visualize_lineage()
         assert f"* curation {merged.curation_id}" in tree
         assert "manual/merge" in tree
+        for ref in (root, labeled, preview, merged):
+            operation = ref.operation_type
+            assert (
+                f"curation {ref.curation_id} [{ref.commit_status}; "
+                f"{operation.producer}/{operation.change_kind}]"
+            ) in tree
 
         expected_merge = (
             SpikeSortingOutput.CurationV2 & merged.as_key()

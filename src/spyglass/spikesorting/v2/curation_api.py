@@ -94,6 +94,39 @@ class CurationOperation:
     change_kind: str
 
 
+def _curation_operation(row, groups, labels, parent_labels):
+    """Describe a curation from one snapshot of its row and part data."""
+    if int(row["parent_curation_id"]) == -1:
+        kind = "initial"
+    else:
+        has_merge = any(len(group) > 1 for group in groups.values())
+        inherited = _inherited_labels_after_operation(
+            _normalized_labels(parent_labels),
+            groups,
+            merges_applied=bool(row["merges_applied"]),
+        )
+        has_labels = _normalized_labels(labels) != inherited
+        if has_merge and has_labels:
+            kind = "merge+label"
+        elif has_merge:
+            kind = "merge"
+        elif has_labels:
+            kind = "label"
+        else:
+            kind = "no_change"
+    return CurationOperation(str(row["curation_source"]), kind)
+
+
+def _group_curation_parts(rows, field):
+    """Index part values by curation and unit, preserving fetch order."""
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(int(row["curation_id"]), {}).setdefault(
+            int(row["unit_id"]), []
+        ).append(row[field])
+    return grouped
+
+
 @dataclass(frozen=True)
 class CurationDeletePreview:
     """Leaf-first deletion inventory for a curation subtree."""
@@ -327,31 +360,13 @@ class CurationRef:
 
         key = self._unchecked_key()
         groups = CurationV2.get_unit_contributor_groups(key)
-        has_merge = any(len(group) > 1 for group in groups.values())
-        current_labels = _normalized_labels(CurationV2._labels_by_unit(key))
+        current_labels = CurationV2._labels_by_unit(key)
         parent_key = {
             "sorting_id": self.sorting_id,
             "curation_id": int(row["parent_curation_id"]),
         }
-        parent_labels = _normalized_labels(
-            CurationV2._labels_by_unit(parent_key)
-        )
-        expected_labels = _inherited_labels_after_operation(
-            parent_labels,
-            groups,
-            merges_applied=bool(row["merges_applied"]),
-        )
-        has_label_delta = current_labels != expected_labels
-        if has_merge and has_label_delta:
-            change_kind = "merge+label"
-        elif has_merge:
-            change_kind = "merge"
-        elif has_label_delta:
-            change_kind = "label"
-        else:
-            change_kind = "no_change"
-        return CurationOperation(
-            producer=str(row["curation_source"]), change_kind=change_kind
+        return _curation_operation(
+            row, groups, current_labels, CurationV2._labels_by_unit(parent_key)
         )
 
     def evaluate(
@@ -456,21 +471,59 @@ class CurationRef:
         rows = (CurationV2 & {"sorting_id": self.sorting_id}).fetch(
             as_dict=True, order_by="curation_id"
         )
+        key = {"sorting_id": self.sorting_id}
+        labels = _group_curation_parts(
+            (CurationV2.UnitLabel & key).fetch(as_dict=True), "curation_label"
+        )
+        groups = _group_curation_parts(
+            (CurationV2.ParentMergeGroup & key).fetch(as_dict=True),
+            "parent_unit_id",
+        )
+        # Match get_unit_contributor_groups: roots use raw contributors;
+        # children use their parent namespace, not inherited raw merges.
+        raw_keys = [
+            {"curation_id": row["curation_id"]}
+            for row in rows
+            if row["curation_id"] not in groups
+        ]
+        if raw_keys:
+            groups.update(
+                _group_curation_parts(
+                    (CurationV2.MergeGroup & key & raw_keys).fetch(
+                        as_dict=True
+                    ),
+                    "contributor_unit_id",
+                )
+            )
         by_parent: dict[int, list[dict[str, Any]]] = {}
         for row in rows:
             by_parent.setdefault(int(row["parent_curation_id"]), []).append(row)
         lines: list[str] = []
 
         def visit(row, prefix: str) -> None:
-            ref = type(self).from_key(row)
-            marker = "*" if ref.curation_uuid == self.curation_uuid else "-"
-            operation = ref.operation_type
+            cid = int(row["curation_id"])
+            marker = (
+                "*"
+                if _uuid(row["curation_uuid"]) == self.curation_uuid
+                else "-"
+            )
+            contributors = groups.get(cid, {})
+            operation = _curation_operation(
+                row,
+                contributors,
+                labels.get(cid, {}),
+                labels.get(int(row["parent_curation_id"]), {}),
+            )
+            preview = not row["merges_applied"] and any(
+                len(group) > 1 for group in contributors.values()
+            )
+            status = "preview" if preview else "committed"
             lines.append(
-                f"{prefix}{marker} curation {ref.curation_id} "
-                f"[{ref.commit_status}; {operation.producer}/"
+                f"{prefix}{marker} curation {cid} "
+                f"[{status}; {operation.producer}/"
                 f"{operation.change_kind}]"
             )
-            for child in by_parent.get(ref.curation_id, []):
+            for child in by_parent.get(cid, []):
                 visit(child, prefix + "  ")
 
         for root in by_parent.get(-1, []):
