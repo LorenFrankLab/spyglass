@@ -333,9 +333,8 @@ def evaluate(res, S, n_units, thr):
             "n_pass": int(passed.sum()),
         }
     # false cross-session pairs
-    cross = np.zeros((nA, nA), bool)
     for cat in ("SxS", "SxnonS", "nonSxnonS"):
-        vals, npass, maxp = [], 0, 0.0
+        vals, npass = [], 0
         for i in range(nA):
             for j in range(nA):
                 if i == j:
