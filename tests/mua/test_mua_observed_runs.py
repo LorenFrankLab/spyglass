@@ -51,6 +51,26 @@ def test_one_sample_gap_tolerance_keeps_a_jittered_run_intact():
     assert [run.tolist() for run in runs] == [[0, 1, 2, 3, 4, 5]]
 
 
+def test_many_short_runs_split_one_index_per_observed_sample():
+    """Alternating and blocked masks: every run is exactly its own block."""
+    time = np.arange(101) / SAMPLING_FREQUENCY
+    alternating = np.zeros(101, dtype=bool)
+    alternating[::2] = True
+
+    runs = contiguous_observed_runs(time, alternating, SAMPLING_FREQUENCY)
+
+    assert [run.tolist() for run in runs] == [[i] for i in range(0, 101, 2)]
+
+    blocked = np.ones(101, dtype=bool)
+    blocked[3::4] = False  # observed in blocks of three
+
+    runs = contiguous_observed_runs(time, blocked, SAMPLING_FREQUENCY)
+
+    assert [run.tolist() for run in runs] == [
+        [start, start + 1, start + 2] for start in range(0, 100, 4)
+    ] + [[100]]
+
+
 @pytest.fixture(scope="module")
 def detection():
     """The DB-free detection module.
@@ -370,3 +390,97 @@ def test_event_numbers_unique_after_concat_nwb_round_trip(
 
     assert events.index.to_list() == [1, 2]
     assert events.start_time.is_monotonic_increasing
+
+
+def test_make_intersects_the_detection_interval_with_observation(
+    gapped_mua, monkeypatch, dj_conn
+):
+    """make hands the helper the intersected mask and writes its frame."""
+    _ = dj_conn  # mua.py declares a schema at import
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.mua.v1 import mua as mua_module
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
+    time, indicator, speed, observed, (gap_start, gap_end) = gapped_mua
+    detection_end = 1.5  # ends inside the axis, so the mask is an AND of two
+    valid_times = np.array([[time[0], detection_end]])
+    params = {
+        "minimum_duration": 0.015,
+        "zscore_threshold": 2.0,
+        "close_event_threshold": 0.0,
+        "speed_threshold": 4.0,
+    }
+    written = {}
+
+    monkeypatch.setattr(
+        mua_module.MuaEventsV1,
+        "get_speed",
+        staticmethod(lambda key: pd.Series(speed, index=time)),
+    )
+    monkeypatch.setattr(
+        SortedSpikesGroup,
+        "get_spike_indicator",
+        lambda key, time_, return_unit_ids=False, **kwargs: (
+            (indicator.sum(axis=1, keepdims=True), observed)
+            if kwargs.get("return_validity")
+            else indicator.sum(axis=1, keepdims=True)
+        ),
+    )
+    monkeypatch.setattr(
+        IntervalList, "fetch1", lambda self, *args, **kwargs: valid_times
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsParameters,
+        "fetch1",
+        lambda self, *args, **kwargs: params,
+    )
+    monkeypatch.setattr(
+        SortedSpikesGroup, "fetch1", lambda self, *args, **kwargs: "mini.nwb"
+    )
+
+    def record_nwb_object(self, analysis_file_name, nwb_object, **kwargs):
+        written["mua_times"] = nwb_object
+        return "object-id"
+
+    def record_insert(self, key, **kwargs):
+        written["key"] = key
+
+    monkeypatch.setattr(
+        AnalysisNwbfile, "create", lambda self, nwb_file_name: "analysis.nwb"
+    )
+    monkeypatch.setattr(AnalysisNwbfile, "add_nwb_object", record_nwb_object)
+    monkeypatch.setattr(AnalysisNwbfile, "add", lambda self, **kwargs: None)
+    monkeypatch.setattr(mua_module.MuaEventsV1, "insert1", record_insert)
+
+    real_detect = mua_module.detect_multiunit_events_in_observed_runs
+
+    def spy(*args, **kwargs):
+        written["mask"] = args[4]
+        written["params"] = kwargs
+        return real_detect(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mua_module, "detect_multiunit_events_in_observed_runs", spy
+    )
+
+    key = {
+        "nwb_file_name": "mini.nwb",
+        "detection_interval": "01_s1",
+        "mua_param_name": "default",
+    }
+    mua_module.MuaEventsV1().make(dict(key))
+
+    np.testing.assert_array_equal(
+        written["mask"], (time <= detection_end) & observed
+    )
+    assert written["params"] == params
+
+    events = written["mua_times"]
+    assert events.index.to_list() == [1, 2]
+    assert events.index.name == "event_number"
+    assert not (
+        (events.start_time < gap_end) & (events.end_time > gap_start)
+    ).any()
+    assert (events.end_time <= detection_end).all()
+    assert written["key"]["mua_times_object_id"] == "object-id"

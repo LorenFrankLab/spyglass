@@ -1828,19 +1828,27 @@ cross-referenced here, not duplicated.
         `insert_curation` (and its ≥2-member merge-group validation) is
         unchanged.
     - Detect MUA events per contiguous observed run. `MuaEventsV1.make`
-        previously dropped the bins no unit of the group was observed over
-        and concatenated what remained, which joined samples across the
-        missing time: two bursts on either side of a 380 ms unobserved
-        interval merged into one event spanning it. The population rate is
-        now smoothed within each observed run, normalized once over all
-        observed samples (runs too short to hold an event still contribute
-        their baseline), and events are extracted per run, so no event can
-        span unobserved time. Event numbers are renumbered chronologically
-        after concatenation, so the NWB table no longer carries duplicate
-        `event_number` values. Every detector parameter keeps its meaning,
-        and a fully observed group's events are unchanged. The firing-rate
-        FigURL leaves unobserved bins out of the plotted line and out of the
-        z-score statistics.
+        masked by the detection interval only, so the bins no unit of the
+        group was observed over reached `multiunit_HSE_detector` as NaN.
+        Gaussian smoothing spread each NaN bin over ±8 sigma of the rate and
+        the z-score then renormalized over what survived, so events beside
+        unobserved time were silently lost and background fluctuations could
+        be reported in their place: in a reproduction, a 380 ms unobserved
+        interval erased both bursts next to it and two spurious events were
+        returned instead. The population rate is now smoothed within each
+        observed run, normalized once over all observed samples (runs too
+        short to hold an event still contribute their baseline), and events
+        are extracted per run, so no event can span unobserved time and
+        `close_event_threshold` merges events only within a run. Event
+        numbers are renumbered chronologically after concatenation, so the
+        NWB table no longer carries duplicate `event_number` values. Every
+        detector parameter keeps its meaning. A fully observed group is
+        unchanged when the detection interval is one contiguous stretch; a
+        detection interval with several `valid_times` segments is now
+        treated as one run per segment, where the old code smoothed and
+        normalized across the joins. The firing-rate FigURL leaves
+        unobserved bins out of the plotted line and out of the z-score
+        statistics.
 
 ## [0.6.0] (Sep 1st 2026)
 

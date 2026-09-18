@@ -64,17 +64,13 @@ def contiguous_observed_runs(
     time = np.asarray(time)
     mask = np.asarray(mask, dtype=bool)
 
-    if time.size == 0 or not mask.any():
+    observed = np.flatnonzero(mask)
+    if observed.size == 0:
         return []
 
     dt = 1.0 / sampling_frequency
-    is_run_start = np.r_[
-        True,
-        (~mask[:-1]) | (~mask[1:]) | (np.diff(time) > 1.5 * dt),
-    ]
-    run_ids = np.cumsum(is_run_start)
+    breaks = (np.diff(observed) > 1) | (  # an unobserved sample between
+        np.diff(time[observed]) > 1.5 * dt  # or a jump in the clock
+    )
 
-    return [
-        np.flatnonzero(mask & (run_ids == run_id))
-        for run_id in np.unique(run_ids[mask])
-    ]
+    return np.split(observed, np.flatnonzero(breaks) + 1)

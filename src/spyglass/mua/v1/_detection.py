@@ -2,14 +2,17 @@
 
 `ripple_detection.multiunit_HSE_detector` assumes every sample it is given
 is contiguous evidence. A group whose units were not observed for the whole
-time axis has unobserved bins, and dropping them before detection joins
-samples across the missing time: two bursts on either side of a gap become
-one event spanning it.
+time axis carries NaN in those bins, and handing that straight to the
+detector corrupts the result twice over: `gaussian_smooth` (truncate=8)
+spreads each NaN bin over +/- 8 sigma of the smoothed rate, and the
+z-score's `nan_policy="omit"` then renormalizes over whatever survived. In
+a reproduction, a 380 ms unobserved interval erased both bursts beside it
+and two background fluctuations were reported as events in their place.
 
 The functions here run the detector's own steps over each contiguous
 observed run instead, sharing one normalization across all observed
-samples. They hold no DataJoint tables, so the logic is unit testable
-without a database.
+samples, so unobserved time removes no real event and invents none. They
+hold no DataJoint tables, so the logic is unit testable without a database.
 """
 
 import warnings
@@ -170,7 +173,9 @@ def detect_multiunit_events_in_observed_runs(
     run separately, so no event can span time the units were not observed
     over. Runs shorter than `minimum_duration` cannot hold an event and are
     skipped at extraction, after they have contributed to the shared
-    normalization.
+    normalization. `close_event_threshold` merges events within a run and
+    never across a gap: two events on either side of unobserved time stay
+    two events however close their timestamps are.
 
     Parameters
     ----------
