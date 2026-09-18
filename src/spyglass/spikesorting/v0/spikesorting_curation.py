@@ -493,11 +493,13 @@ class Waveforms(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        we : spikeinterface.WaveformExtractor
+        we : WaveformExtractor or MockWaveformExtractor
+            SpikeInterface 0.99 returns a ``WaveformExtractor`` while 0.101 and
+            later return a ``MockWaveformExtractor`` over the same saved
+            folder, so the read works under either installed generation.
         """
-        _require_legacy_si_environment("v0 Waveforms.load_waveforms")
         we_path = self._get_waveform_path(key)
-        we = si.WaveformExtractor.load_from_folder(we_path)
+        we = _si_compat.load_waveforms(we_path)
         return we
 
     def fetch_nwb(self, key):
