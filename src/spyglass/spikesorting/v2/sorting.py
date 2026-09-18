@@ -20,6 +20,7 @@ and the analysis-NWB parent to the first frozen
 
 from __future__ import annotations
 
+import copy
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -510,19 +511,25 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
         Opt-in back-compat helper for users porting v1 workflows that name
         a non-curated sorter via ``('kilosort2_5','default')`` or similar.
-        For each entry of ``sis.available_sorters()`` it calls
-        SpikeInterface's ``sis.get_default_sorter_params(sorter)`` and
-        validates the result through ``GenericSorterParamsSchema``
-        (``extra='allow'``) so the row passes without typo-rejection.
+        For each entry of ``sis.available_sorters()`` it reads the SI
+        wrapper class's own default parameters
+        (``sis.sorter_dict[sorter]._dynamic_params()`` -- the algorithm
+        knobs WITHOUT SpikeInterface's global job kwargs, which
+        ``get_default_sorter_params`` folds in for any wrapper with
+        ``requires_binary_data=True``) and validates the result through
+        ``GenericSorterParamsSchema`` (``extra='allow'``) so the row passes
+        without typo-rejection, then against the wrapper vocabulary (built
+        from that same ``_dynamic_params``) so a row that would be rejected
+        at insert is skipped with a warning instead of aborting the batch.
 
         Two classes of sorter are skipped (logged at INFO):
 
         - **Not installed.** Gated on
           ``spikeinterface.sorters.installed_sorters()`` -- the SAME gate
           ``insert_default`` uses (see the install-gate rationale at
-          :meth:`insert_default`). ``get_default_sorter_params`` succeeds
-          for wrapper-only sorters whose binary is absent (e.g.
-          ``kilosort2_5``, ``ironclust``), so enumerating
+          :meth:`insert_default`). A wrapper class exposes its defaults
+          even when its binary is absent (e.g. ``kilosort2_5``,
+          ``ironclust``), so enumerating
           ``available_sorters()`` alone would ship rows that fail at
           ``Sorting.populate`` time with an unhelpful "sorter not
           installed" error. Inserting only *installed* sorters keeps the
@@ -555,6 +562,7 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         from spyglass.spikesorting.v2._params.sorter import (
             _SORTER_SCHEMAS,
             GenericSorterParamsSchema,
+            validate_sorter_params_against_wrapper,
         )
         from spyglass.spikesorting.v2._sorting_dispatch import MATLAB_SORTERS
 
@@ -575,13 +583,21 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 continue
             if sorter not in installed:
                 # Gate on installed_sorters() to match insert_default's installed-sorters
-                # gate -- get_default_sorter_params succeeds for
-                # wrapper-only sorters, so an available-but-not-installed
+                # gate -- a wrapper exposes its defaults even when its
+                # binary is absent, so an available-but-not-installed
                 # row would only fail later at populate time.
                 skipped_not_installed.append(sorter)
                 continue
             try:
-                params = sis.get_default_sorter_params(sorter)
+                # Read the wrapper's own defaults rather than
+                # ``get_default_sorter_params``: the latter is
+                # ``_dynamic_params()`` PLUS ``get_global_job_kwargs()``
+                # for a ``requires_binary_data`` sorter, and those job
+                # keys (n_jobs, chunk_duration, ...) are outside the
+                # wrapper vocabulary the insert guard enforces.
+                sorter_class = sis.sorter_dict[sorter]
+                params, _descriptions = sorter_class._dynamic_params()
+                params = copy.deepcopy(params)
             except Exception as exc:  # SI may raise on metadata fetch
                 logger.warning(
                     "insert_default_legacy_si_sorters: skipping "
@@ -597,6 +613,18 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                     f"insert_default_legacy_si_sorters: {sorter!r} did "
                     "not validate against GenericSorterParamsSchema "
                     f"({exc!r})."
+                )
+                continue
+            # The insert hook applies this same guard; run it here so ONE
+            # sorter whose wrapper defaults fall outside its own vocabulary
+            # is skipped rather than aborting the whole batch insert below.
+            try:
+                validate_sorter_params_against_wrapper(sorter, validated)
+            except Exception as exc:
+                logger.warning(
+                    f"insert_default_legacy_si_sorters: {sorter!r} default "
+                    "params are outside the installed wrapper's parameter "
+                    f"vocabulary ({exc!r}); skipping."
                 )
                 continue
             # Append a MAPPING row (not a positional tuple) so the insert hook

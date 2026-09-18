@@ -66,12 +66,11 @@ def test_insert_default_legacy_si_sorters_skips_not_installed(
 ):
     """An available-but-not-installed sorter gets no 'default' row.
 
-    ``get_default_sorter_params`` succeeds for wrapper-only sorters whose
-    binary is absent, so the helper must gate on ``installed_sorters()``
-    (mirroring ``insert_default``) -- otherwise it would ship a row that
-    fails at ``Sorting.populate`` time. A fictitious sorter name proves
-    the gate fires *before* ``get_default_sorter_params`` is consulted
-    (a real call for that name would raise).
+    A wrapper class exposes its defaults even when its binary is absent,
+    so the helper must gate on ``installed_sorters()`` (mirroring
+    ``insert_default``) -- otherwise it would ship a row that fails at
+    ``Sorting.populate`` time. A fictitious sorter name proves the gate
+    fires *before* the wrapper lookup (that name is in no registry).
     """
     import spikeinterface.sorters as sis
 
@@ -106,9 +105,21 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     fake = "fake_legacy_sorter_xyz"
+
+    class FakeSorter:
+        """Stand-in SI wrapper with an empty default-parameter dict."""
+
+        sorter_name = fake
+
+        @classmethod
+        def _dynamic_params(cls):
+            return {}, {}
+
     monkeypatch.setattr(sis, "available_sorters", lambda: [fake])
     monkeypatch.setattr(sis, "installed_sorters", lambda: [fake])
-    monkeypatch.setattr(sis, "get_default_sorter_params", lambda _sorter: {})
+    # The helper reads the wrapper class out of ``sis.sorter_dict``, so the
+    # fake must be registered there for this path to run at all.
+    monkeypatch.setitem(sis.sorter_dict, fake, FakeSorter)
     request.addfinalizer(
         lambda: (
             SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
@@ -124,3 +135,62 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
     assert row["execution_params"]["backend"] == "local"
     assert row["execution_params"]["container_image"] is None
     assert int(row["execution_params_schema_version"]) == 1
+
+
+def test_legacy_default_rows_exclude_job_kwargs(dj_conn, monkeypatch, request):
+    """Seeded rows carry wrapper params only -- no SI global job kwargs.
+
+    SpikeInterface's ``default_params()`` folds ``get_global_job_kwargs()``
+    into the returned dict for any wrapper with
+    ``requires_binary_data=True``, so a row built from it carries
+    ``n_jobs`` / ``chunk_duration`` / ... -- keys the wrapper-vocabulary
+    guard (built from ``_dynamic_params()``) rejects at insert, aborting
+    the whole batch. The helper must seed the algorithm knobs alone.
+    """
+    import spikeinterface.sorters as sis
+    from spikeinterface.sorters import sorterlist
+
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_sorter_params_against_wrapper,
+    )
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    # One dict object behind both import paths, so a single setitem is
+    # seen by the helper and by the wrapper-vocabulary lookup alike.
+    assert sis.sorter_dict is sorterlist.sorter_dict
+
+    fake = "fake_job_kwargs_sorter_xyz"
+
+    class FakeSorter:
+        """Stand-in for an SI wrapper with ``requires_binary_data=True``."""
+
+        sorter_name = fake
+
+        @classmethod
+        def _dynamic_params(cls):
+            return {"detect_threshold": 5}, {}
+
+        @classmethod
+        def default_params(cls):
+            params, _ = cls._dynamic_params()
+            return {**params, "n_jobs": 4, "chunk_duration": "1s"}
+
+    monkeypatch.setattr(sis, "available_sorters", lambda: [fake])
+    monkeypatch.setattr(sis, "installed_sorters", lambda: [fake])
+    monkeypatch.setitem(sis.sorter_dict, fake, FakeSorter)
+    request.addfinalizer(
+        lambda: (
+            SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
+        ).delete(safemode=False)
+    )
+
+    SorterParameters.insert_default_legacy_si_sorters()
+
+    row = (
+        SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
+    ).fetch1()
+    assert "n_jobs" not in row["params"]
+    assert "chunk_duration" not in row["params"]
+    assert row["params"]["detect_threshold"] == 5
+    # The seeded blob survives the guard that the insert itself applies.
+    validate_sorter_params_against_wrapper(fake, row["params"])
