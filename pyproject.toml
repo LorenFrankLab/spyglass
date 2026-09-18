@@ -53,7 +53,10 @@ dependencies = [
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
   "networkx",                       # imported by spikesorting v2 _matcher_graph
-  "non-local-detector",
+  "non-local-detector==0.6.9",
+  # NLD 0.6.9 uses the clip(a_min=..., a_max=...) keywords removed in JAX 0.10.
+  # Keep the published detector API and test real fitting before moving these.
+  "jax<0.10",
   # Pinned to the numpy-2 line: the v2 SpikeInterface 0.104 stack + torch>=2
   # resolve on numpy>=2, and elephant (validation extra) requires >=2.0.0. The
   # legacy v0/v1 (SI 0.99) suite downgrades this to numpy<2 by sed-rewriting
