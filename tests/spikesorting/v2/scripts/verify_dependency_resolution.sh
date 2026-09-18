@@ -29,9 +29,13 @@
 # Both layers solve for Linux x86_64 by default -- conda subdir linux-64, pip
 # platform x86_64-manylinux_2_28 -- not for the machine running the script, so
 # the two layers describe one target and the answer does not change with the
-# developer's laptop. These are Linux/GPU install recipes anyway:
-# environment_dlc.yml asks for cudatoolkit=11.3, which has no macOS build at
-# all.
+# developer's laptop. Both also solve for one Python, 3.11 by default: the pip
+# layer passes it as --python-version and the conda layer appends it to each
+# file's own specs, narrowing the file's python range. Different Pythons pick
+# different TensorFlow and JAX builds, so without the pin the two layers would
+# be describing different environments. These are Linux/GPU install recipes
+# anyway: environment_dlc.yml asks for cudatoolkit=11.3, which has no macOS
+# build at all.
 #
 # Solving linux-64 from a non-Linux host also needs CONDA_OVERRIDE_GLIBC. conda
 # derives the ``__glibc`` virtual package from the running kernel, so off Linux
@@ -41,8 +45,8 @@
 # takes many minutes to do it. The override states the target's glibc instead,
 # matched to the manylinux tag above.
 #
-# SOLVE_SUBDIR, SOLVE_PYTHON_PLATFORM and SOLVE_GLIBC retarget all of this;
-# keep them describing the same platform.
+# SOLVE_SUBDIR, SOLVE_PYTHON_PLATFORM, SOLVE_GLIBC and SOLVE_PYTHON_VERSION
+# retarget all of this; keep them describing the same platform and Python.
 #
 # Reaches the network and takes minutes, so it is a script rather than a test.
 #
@@ -55,7 +59,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../../.." && pwd)
 cd "$REPO_ROOT"
 
-PYTHON_VERSION=3.11
+SOLVE_PYTHON_VERSION=${SOLVE_PYTHON_VERSION:-3.11}
 SOLVE_SUBDIR=${SOLVE_SUBDIR:-linux-64}
 SOLVE_PYTHON_PLATFORM=${SOLVE_PYTHON_PLATFORM:-x86_64-manylinux_2_28}
 SOLVE_GLIBC=${SOLVE_GLIBC:-2.28}
@@ -130,7 +134,7 @@ PY
 }
 
 echo "host:           $(uname -sm)"
-echo "python target:  $PYTHON_VERSION"
+echo "python target:  $SOLVE_PYTHON_VERSION"
 echo "uv:             $(uv --version)"
 echo "conda:          $(conda --version)"
 echo "solve target:   $SOLVE_PYTHON_PLATFORM (pip) / $SOLVE_SUBDIR glibc" \
@@ -143,7 +147,7 @@ for lane in base dlc moseq-cpu spikesorting-v2 spikesorting-v2-matching; do
   resolved="$WORK_DIR/$lane.txt"
   compile_args=(
     --quiet
-    --python-version "$PYTHON_VERSION"
+    --python-version "$SOLVE_PYTHON_VERSION"
     --python-platform "$SOLVE_PYTHON_PLATFORM"
   )
   if [ "$lane" != base ]; then
@@ -206,7 +210,13 @@ for env_file in environment.yml environment_dlc.yml environment_moseq_cpu.yml \
     continue
   fi
 
-  echo "$lane: solving ${#specs[@]} specs for $SOLVE_SUBDIR"
+  # Solve the same Python the pip layer above compiled for. The file's own
+  # python range still applies; this only narrows it, and an override outside
+  # that range fails the solve loudly.
+  specs+=("python=$SOLVE_PYTHON_VERSION")
+
+  echo "$lane: solving ${#specs[@]} specs for $SOLVE_SUBDIR" \
+    "on python $SOLVE_PYTHON_VERSION"
   if conda create --dry-run --subdir "$SOLVE_SUBDIR" --override-channels \
     "${channel_args[@]}" -n "verify-deps-${env_file%.yml}" "${specs[@]}" \
     >"$log" 2>&1; then
