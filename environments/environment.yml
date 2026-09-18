@@ -19,10 +19,11 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
+  - jax<0.10  # non_local_detector 0.6.9 calls clip(a_min=..., a_max=...), keywords JAX 0.10 removed
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
-  - non_local_detector
+  - non_local_detector==0.6.9
   - numpy>=2,<3
   - pip
   - position_tools
