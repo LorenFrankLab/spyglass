@@ -479,11 +479,12 @@ def analyzer_cache_lock(sorting_id):
     ``populate(processes=N)`` (the standard parallel case) uses separate
     processes, so cross-job serialization is preserved.
 
-    This serializes processes on ONE machine. It does NOT coordinate across
-    machines sharing an NFS-mounted ``spikesorting_v2_analyzer_dir`` --
-    ``filelock``'s OS-level lock is local; cross-host populate of the same sort
-    would still race. A regeneratable cache makes the worst case a rebuild, not
-    data loss.
+    Shared-storage deployments must provide cross-host POSIX file locking on
+    this directory (including the lock files). Validate the server/client mount
+    configuration on the deployment hosts; local-filesystem tests do not prove
+    that contract. Lock-acquisition errors propagate rather than permitting an
+    unprotected write. Scientific result ownership is established separately by
+    the Sorting insert: a duplicate compute cannot publish over its winner.
 
     The lock blocks indefinitely by default (the intended serialize-don't-fail
     behavior); it releases when the holding process exits, so a crashed job
@@ -526,14 +527,14 @@ def _publish_sibling(canonical_folder, kind: str) -> Path:
     ``os.replace`` only preserves that reference -- and therefore the ability
     to (re)compute recording-dependent extensions like ``spike_amplitudes``
     after a load -- when the temp and the canonical slot are at the same depth
-    relative to the recording. A leading ``.`` keeps the staging folder hidden
-    from the orphan scan (which skips dotted entries) and from
-    ``remove_analyzer_cache``'s ``{sorting_id}__*.analyzer`` glob, and the
-    ``os.getpid()`` token avoids collisions across concurrent processes.
+    relative to the recording. A leading ``.`` distinguishes staging from
+    canonical caches. A UUID avoids collisions between workers on different
+    hosts, where process IDs can coincide.
     """
     parent = canonical_folder.parent
     return parent / (
-        f".{canonical_folder.stem}.{kind}-{os.getpid()}{canonical_folder.suffix}"
+        f".{canonical_folder.stem}.{kind}-{uuid.uuid4().hex}"
+        f"{canonical_folder.suffix}"
     )
 
 
@@ -563,6 +564,55 @@ def _sorting_id_from_analyzer_folder(canonical_folder) -> str:
             f"or a curation-cache payload; got {folder.name!r}."
         )
     return sorting_id
+
+
+class StagedAnalyzer:
+    """Attempt-owned analyzer, kept private until its Sorting insert succeeds.
+
+    The ownership lock spans compute and insert. Cleanup checks it without
+    blocking, so even a long wait for a database transaction cannot make an
+    active attempt look abandoned. Process death releases the OS lock; the
+    explicit cache audit can then reclaim the directory. ``close`` releases
+    ownership on normal completion or failure, including failed publication.
+    """
+
+    def __init__(self, canonical_folder):
+        from filelock import FileLock
+
+        self.canonical_folder = Path(canonical_folder)
+        self.sorting_id = _sorting_id_from_analyzer_folder(canonical_folder)
+        self.canonical_folder.parent.mkdir(parents=True, exist_ok=True)
+        self.folder = _publish_sibling(self.canonical_folder, "build")
+        self._lock = FileLock(str(self.folder) + ".lock")
+        self._lock.acquire()
+
+    def publish(self):
+        """Install the completed attempt; the caller establishes DB ownership."""
+        with analyzer_cache_lock(self.sorting_id):
+            _install_staged_analyzer(self.canonical_folder, self.folder)
+        return self.canonical_folder
+
+    def close(self):
+        """Discard this attempt's staging only; never remove a published cache."""
+        try:
+            try:
+                if self.folder.exists():
+                    shutil.rmtree(self.folder)
+            finally:
+                self._lock.release()
+            Path(self._lock.lock_file).unlink(missing_ok=True)
+        except OSError as exc:
+            from spyglass.utils import logger
+
+            logger.warning(
+                "Analyzer staging cleanup failed for %s: %s", self.folder, exc
+            )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
 
 
 def publish_analyzer_atomically(canonical_folder, build_into):
@@ -617,46 +667,81 @@ def publish_analyzer_atomically(canonical_folder, build_into):
     """
     canonical_folder = Path(canonical_folder)
     sorting_id = _sorting_id_from_analyzer_folder(canonical_folder)
-    with analyzer_cache_lock(sorting_id):
-        return _publish_analyzer_atomically_unlocked(
-            canonical_folder, build_into
-        )
-
-
-def _publish_analyzer_atomically_unlocked(canonical_folder, build_into):
-    """Publish implementation; caller holds ``analyzer_cache_lock``."""
-    canonical_folder.parent.mkdir(parents=True, exist_ok=True)
-    temp_folder = _publish_sibling(canonical_folder, "build")
-    # Clear any leftover from a crashed prior build before reusing the name.
-    shutil.rmtree(temp_folder, ignore_errors=True)
-    try:
-        build_into(temp_folder)
-        if not temp_folder.exists():
-            # Nothing built (zero-unit short-circuit): leave the slot as-is.
-            return canonical_folder
-        if not canonical_folder.exists():
-            os.replace(temp_folder, canonical_folder)
-            return canonical_folder
-        # Rebuild over an existing folder: move it aside, install the temp, then
-        # drop the aside copy. Restore it if the install fails so the slot is
-        # never left empty.
-        trash_folder = _publish_sibling(canonical_folder, "trash")
-        shutil.rmtree(trash_folder, ignore_errors=True)
-        os.replace(canonical_folder, trash_folder)
-        try:
-            os.replace(temp_folder, canonical_folder)
-        except Exception:
-            # Install failed: restore the original from trash so the slot is
-            # never left empty. If THIS also fails, leave the trash on disk for
-            # manual recovery -- it is the only surviving copy, so it must not
-            # be deleted (hence the cleanup is NOT in a ``finally``).
-            os.replace(trash_folder, canonical_folder)
-            raise
-        # Install succeeded: the trash is the now-stale old folder; drop it.
-        shutil.rmtree(trash_folder, ignore_errors=True)
+    with (
+        analyzer_cache_lock(sorting_id),
+        StagedAnalyzer(canonical_folder) as staged,
+    ):
+        build_into(staged.folder)
+        _install_staged_analyzer(canonical_folder, staged.folder)
         return canonical_folder
-    finally:
-        shutil.rmtree(temp_folder, ignore_errors=True)
+
+
+def _install_staged_analyzer(canonical_folder, temp_folder):
+    """Rename a completed build into place under ``analyzer_cache_lock``."""
+    if not temp_folder.exists():
+        return  # Zero-unit sorting: no analyzer was built.
+    if not canonical_folder.exists():
+        os.replace(temp_folder, canonical_folder)
+        return
+    trash_folder = _publish_sibling(canonical_folder, "trash")
+    os.replace(canonical_folder, trash_folder)
+    try:
+        os.replace(temp_folder, canonical_folder)
+    except BaseException:
+        # Preserve trash if rollback itself fails: it is the surviving copy.
+        os.replace(trash_folder, canonical_folder)
+        raise
+    shutil.rmtree(trash_folder, ignore_errors=True)
+
+
+def cleanup_analyzer_staging(
+    sorting_id=None, *, dry_run=True, candidates=None
+) -> list[str]:
+    """Report/remove abandoned build and trash folders, skipping active owners.
+
+    Both locks are nonblocking: a cache publisher holds the sort lock, and a
+    Sorting compute holds its build lock until insertion finishes. No PID or
+    age heuristic is needed, including on supported shared filesystems. Legacy
+    PID-named folders are recognized as well. Unrelated hidden directories are
+    never candidates. ``candidates`` limits a confirmed deletion to the paths
+    previously presented to the operator; ownership is still rechecked.
+    """
+    from filelock import FileLock, Timeout
+
+    root = analyzer_cache_root()
+    abandoned = []
+    allowed = None if candidates is None else set(map(str, candidates))
+    pattern = (
+        ".*.analyzer" if sorting_id is None else f".{sorting_id}__*.analyzer"
+    )
+    for folder in sorted(root.glob(pattern)):
+        if allowed is not None and str(folder) not in allowed:
+            continue
+        match = re.fullmatch(
+            r"\.(.+)\.(?:build|trash)-([0-9a-f]+)\.analyzer", folder.name
+        )
+        if not match or not folder.is_dir():
+            continue
+        identity = analyzer_cache_folder_identity(
+            match[1] + ANALYZER_FOLDER_SUFFIX
+        )
+        if identity is None or (
+            sorting_id is not None
+            and str(identity.sorting_id) != str(sorting_id)
+        ):
+            continue
+        owner = FileLock(str(folder) + ".lock")
+        try:
+            with analyzer_cache_lock(identity.sorting_id).acquire(timeout=0):
+                with owner.acquire(timeout=0):
+                    if folder.exists():
+                        abandoned.append(str(folder))
+                        if not dry_run:
+                            shutil.rmtree(folder)
+                Path(owner.lock_file).unlink(missing_ok=True)
+        except Timeout:
+            continue
+    return abandoned
 
 
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
@@ -696,13 +781,15 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """
     root = analyzer_cache_root()
     pattern = f"{sorting_id}__*{ANALYZER_FOLDER_SUFFIX}"
-    folders = sorted(root.glob(pattern)) if root.exists() else []
-    if not folders:
-        if missing_ok:
-            return False
-        raise FileNotFoundError(root / pattern)
-    for folder in folders:
-        shutil.rmtree(folder, ignore_errors=False)
+    with analyzer_cache_lock(sorting_id):
+        folders = sorted(root.glob(pattern)) if root.exists() else []
+        staging = cleanup_analyzer_staging(sorting_id, dry_run=False)
+        if not folders and not staging:
+            if missing_ok:
+                return False
+            raise FileNotFoundError(root / pattern)
+        for folder in folders:
+            shutil.rmtree(folder, ignore_errors=False)
     return True
 
 

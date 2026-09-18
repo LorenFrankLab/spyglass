@@ -529,6 +529,20 @@ def test_sorting_make_rollback_cleans_units_nwb(
     # Ensure no leftover Sorting row.
     (Sorting & sort_pk).super_delete(warn=False)
 
+    # Upstream cascades can leave a cache from an earlier committed result.
+    # A failed new attempt must neither replace nor remove that folder.
+    from spyglass.spikesorting.v2._analyzer_cache import (
+        analyzer_folder_storage_fingerprint,
+        analyzer_path,
+    )
+
+    analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
+    cache_before = (
+        analyzer_folder_storage_fingerprint(analyzer_folder)
+        if analyzer_folder.exists()
+        else None
+    )
+
     # Snapshot the analysis-file directory contents before the
     # broken populate runs so we can detect any orphan file that
     # appears AFTER the rollback. The except block in Sorting.make
@@ -574,30 +588,18 @@ def test_sorting_make_rollback_cleans_units_nwb(
         "when the transaction rolls back."
     )
 
-    # The analyzer folder published by ``_build_analyzer`` is deliberately LEFT
-    # on disk by the rollback (NOT eagerly removed): it is shared by sorting_id
-    # and regeneratable, and a concurrent in-flight worker (published but not yet
-    # committed) could own it, so failure cleanup never rmtrees it. With no
-    # committed Sorting row it is a disk-side orphan reclaimed by
-    # ``find_orphaned_analyzer_folders`` (``get_analyzer`` self-heals a missing
-    # one). The attempt-owned units NWB IS cleaned (asserted above).
-    from spyglass.spikesorting.v2._analyzer_cache import analyzer_path
-
-    analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
-    try:
-        assert analyzer_folder.exists(), (
-            f"rollback removed the analyzer folder {analyzer_folder}; the "
-            "shared, regeneratable analyzer must be left for orphan-sweep, not "
-            "eagerly deleted (a concurrent in-flight worker could own it)."
-        )
-    finally:
-        # The orphan is real now; clean it (and the selection) so it does not
-        # litter the analyzer root for later orphan-sweep tests in this session.
-        if analyzer_folder.exists():
-            import shutil
-
-            shutil.rmtree(analyzer_folder, ignore_errors=True)
-        (SortingSelection & sort_pk).super_delete(warn=False)
+    # Failure precedes publication: only the private attempt existed, and both
+    # it and the staged NWB are discarded. A peer's canonical cache is untouched.
+    cache_after = (
+        analyzer_folder_storage_fingerprint(analyzer_folder)
+        if analyzer_folder.exists()
+        else None
+    )
+    assert cache_after == cache_before
+    assert not list(
+        analyzer_folder.parent.glob(f".{sort_pk['sorting_id']}__*.analyzer")
+    )
+    (SortingSelection & sort_pk).super_delete(warn=False)
 
 
 def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):

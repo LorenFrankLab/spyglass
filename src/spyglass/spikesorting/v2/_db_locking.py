@@ -16,7 +16,7 @@ a hash of a table + key so that only operations on the SAME resource serialize
 
 A named lock is bound to the DB *session*, so a crashed run leaves no stale
 reservation, and it lives on the shared server, so it coordinates across
-processes and hosts (a local ``FileLock`` would not). This module depends on
+processes and hosts independently of filesystem locking. This module depends on
 neither the schema nor the pipeline, so domain tables can serialize against each
 other without importing the large orchestration module.
 """

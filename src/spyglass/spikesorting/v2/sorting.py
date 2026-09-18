@@ -91,6 +91,8 @@ if TYPE_CHECKING:
     import pandas as pd
     import spikeinterface as si
 
+    from spyglass.spikesorting.v2._analyzer_cache import StagedAnalyzer
+
 
 class SortingFetched(NamedTuple):
     """DB-side inputs gathered by :meth:`Sorting.make_fetch`.
@@ -154,10 +156,9 @@ class SortingComputed(NamedTuple):
 
     NONE of these fields are ``Sorting`` columns -- they are values threaded
     from ``make_compute`` into ``make_insert`` (NWB staging, lookups,
-    unit-part inserts). The analyzer folder ``_build_analyzer`` wrote is
-    NOT carried: ``make_compute`` already derives the unit rows from it, and
-    insertion neither reads nor cleans it. The analyzer cache folder is
-    deliberately not a DB column either; every code path resolves the
+    unit-part inserts). ``staged_analyzer`` retains the private build and its
+    ownership lock until insertion either publishes or discards it. The cache
+    folder is not a DB column; every reader resolves the
     canonical location from ``sorting_id`` via
     ``_analyzer_cache.analyzer_path``.
 
@@ -193,6 +194,8 @@ class SortingComputed(NamedTuple):
         The ``Sorting.Unit`` rows built ONCE in ``make_compute`` (peak channel /
         amplitude / spike count), reused by ``make_insert`` for the part insert
         so the DB and the NWB cannot drift. Empty for a zero-unit sort.
+    staged_analyzer : StagedAnalyzer
+        Private analyzer and cleanup ownership, transferred to ``make_insert``.
     """
 
     sorting_obj: "si.BaseSorting"
@@ -204,6 +207,7 @@ class SortingComputed(NamedTuple):
     spikeinterface_version: str
     sorter_version: str | None
     unit_rows: list[dict]
+    staged_analyzer: StagedAnalyzer
 
 
 schema = dj.schema("spikesorting_v2_sorting")
@@ -1823,107 +1827,94 @@ class Sorting(SpyglassMixin, dj.Computed):
         )
         sorting_obj = self._remove_excess_spikes(sorting_obj, recording)
 
-        # ``_build_analyzer`` creates the analyzer folder on disk.
-        # From this point on a failure must clean BOTH the analyzer
-        # folder AND the staged units NWB (if it was created). Pass
-        # ``sorter_row`` so ``_build_analyzer`` does not re-issue the
-        # ``SortingSelection`` + ``SorterParameters`` reads we
-        # already did in ``make_fetch``; pass ``job_kwargs`` so the
-        # analyzer uses the same resolved value as the sorter; pass the
-        # resolved DISPLAY recipe + its cache folder (the folder carries the
-        # recipe identity) so the analyzer window / subsample are not
-        # hardcoded.
         from spyglass.spikesorting.v2._analyzer_cache import (
-            analyzer_cache_lock,
+            StagedAnalyzer,
             analyzer_path,
-            publish_analyzer_atomically,
         )
 
-        analyzer_folder = analyzer_path(
-            key["sorting_id"], display_waveform_params_name
+        # Each compute owns its analyzer until its database insert succeeds.
+        # Metadata must come from this attempt, never a concurrent publication.
+        staged_analyzer = StagedAnalyzer(
+            analyzer_path(key["sorting_id"], display_waveform_params_name)
         )
-        # Publish the analyzer atomically: build into a private temp folder,
-        # then move it into the canonical slot under the per-sort lock, rather
-        # than writing ``overwrite=True`` straight into the live folder. The
-        # low-level ``_build_analyzer`` still builds wherever it is told (the
-        # temp here); only the canonical install goes through the publisher.
-        with analyzer_cache_lock(key["sorting_id"]):
-            publish_analyzer_atomically(
-                analyzer_folder,
-                lambda temp_folder: self._build_analyzer(
-                    sorting=sorting_obj,
-                    recording=recording,
-                    key=key,
-                    sorter_row=sorter_row,
-                    job_kwargs=job_kwargs,
-                    analyzer_folder=temp_folder,
-                    waveform_params=display_waveform_params,
-                ),
+        try:
+            self._build_analyzer(
+                sorting=sorting_obj,
+                recording=recording,
+                key=key,
+                sorter_row=sorter_row,
+                job_kwargs=job_kwargs,
+                analyzer_folder=staged_analyzer.folder,
+                waveform_params=display_waveform_params,
             )
-        # Compute the per-unit rows ONCE here (from the analyzer just built) and
-        # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
-        # make_insert -- so the file and the DB cannot drift, and the peak
-        # channel/amplitude are not computed twice.
-        unit_rows = self._build_unit_rows_from_analyzer(
-            sorting=sorting_obj,
-            analyzer_folder=analyzer_folder,
-            sorter_row=sorter_row,
-            electrode_by_id=electrode_by_id,
-            sort_group_id=sort_group_id,
-            nwb_file_name=nwb_file_name,
-            key=key,
-        )
-        unit_metadata = {
-            int(row["unit_id"]): {
-                "peak_amplitude_uv": row["peak_amplitude_uv"],
-                "peak_electrode_id": int(row["electrode_id"]),
-                "n_spikes": int(row["n_spikes"]),
-                "brain_region": region_by_electrode.get(
-                    int(row["electrode_id"])
-                ),
+            # Compute the per-unit rows ONCE here (from the analyzer just built) and
+            # reuse them for BOTH the NWB unit columns and the Sorting.Unit insert in
+            # make_insert -- so the file and the DB cannot drift, and the peak
+            # channel/amplitude are not computed twice.
+            unit_rows = self._build_unit_rows_from_analyzer(
+                sorting=sorting_obj,
+                analyzer_folder=staged_analyzer.folder,
+                sorter_row=sorter_row,
+                electrode_by_id=electrode_by_id,
+                sort_group_id=sort_group_id,
+                nwb_file_name=nwb_file_name,
+                key=key,
+            )
+            unit_metadata = {
+                int(row["unit_id"]): {
+                    "peak_amplitude_uv": row["peak_amplitude_uv"],
+                    "peak_electrode_id": int(row["electrode_id"]),
+                    "n_spikes": int(row["n_spikes"]),
+                    "brain_region": region_by_electrode.get(
+                        int(row["electrode_id"])
+                    ),
+                }
+                for row in unit_rows
             }
-            for row in unit_rows
-        }
-        concat_recording_id = (
-            source.key["concat_recording_id"]
-            if source.kind == "concatenated_recording"
-            else None
-        )
-        source_provenance = {
-            "recording_id": recording_id,
-            "concat_recording_id": concat_recording_id,
-            "sorter": sorter_row["sorter"],
-            "sorter_params_name": sorter_row["sorter_params_name"],
-            "sorter_params": sorter_row["params"],
-            # The execution backend (container / engine) can change the sorter
-            # output, so it is part of the named-parameter-row provenance.
-            "execution_params": execution_params,
-            "artifact_detection_id": sel_row.get("artifact_detection_id"),
-            "display_waveform_params_name": display_waveform_params_name,
-            "effective_random_seed": effective_random_seed,
-            "spikeinterface_version": spikeinterface_version,
-            "sorter_version": sorter_version,
-        }
-        analysis_file_name, units_object_id = self._stage_sorting_artifact(
-            sorting=sorting_obj,
-            recording=recording,
-            nwb_file_name=nwb_file_name,
-            obs_intervals=obs_intervals,
-            unit_metadata=unit_metadata,
-            source_provenance=source_provenance,
-        )
+            concat_recording_id = (
+                source.key["concat_recording_id"]
+                if source.kind == "concatenated_recording"
+                else None
+            )
+            source_provenance = {
+                "recording_id": recording_id,
+                "concat_recording_id": concat_recording_id,
+                "sorter": sorter_row["sorter"],
+                "sorter_params_name": sorter_row["sorter_params_name"],
+                "sorter_params": sorter_row["params"],
+                # The execution backend (container / engine) can change the sorter
+                # output, so it is part of the named-parameter-row provenance.
+                "execution_params": execution_params,
+                "artifact_detection_id": sel_row.get("artifact_detection_id"),
+                "display_waveform_params_name": display_waveform_params_name,
+                "effective_random_seed": effective_random_seed,
+                "spikeinterface_version": spikeinterface_version,
+                "sorter_version": sorter_version,
+            }
+            analysis_file_name, units_object_id = self._stage_sorting_artifact(
+                sorting=sorting_obj,
+                recording=recording,
+                nwb_file_name=nwb_file_name,
+                obs_intervals=obs_intervals,
+                unit_metadata=unit_metadata,
+                source_provenance=source_provenance,
+            )
 
-        return SortingComputed(
-            sorting_obj=sorting_obj,
-            analysis_file_name=analysis_file_name,
-            units_object_id=units_object_id,
-            nwb_file_name=nwb_file_name,
-            display_waveform_params_name=display_waveform_params_name,
-            effective_random_seed=effective_random_seed,
-            spikeinterface_version=spikeinterface_version,
-            sorter_version=sorter_version,
-            unit_rows=unit_rows,
-        )
+            return SortingComputed(
+                sorting_obj=sorting_obj,
+                analysis_file_name=analysis_file_name,
+                units_object_id=units_object_id,
+                nwb_file_name=nwb_file_name,
+                display_waveform_params_name=display_waveform_params_name,
+                effective_random_seed=effective_random_seed,
+                spikeinterface_version=spikeinterface_version,
+                sorter_version=sorter_version,
+                unit_rows=unit_rows,
+                staged_analyzer=staged_analyzer,
+            )
+        except BaseException:
+            staged_analyzer.close()
+            raise
 
     def make_insert(
         self,
@@ -1937,6 +1928,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         spikeinterface_version,
         sorter_version,
         unit_rows,
+        staged_analyzer,
     ):
         """Atomic registration of the AnalysisNwbfile + master + Unit rows.
 
@@ -1947,11 +1939,11 @@ class Sorting(SpyglassMixin, dj.Computed):
         atomically with the master row; splitting it across stages
         is explicitly forbidden.
 
-        Failure-mode B: if the registration raises after a
-        successful ``make_compute``, the attempt-owned staged units
-        NWB is removed before propagating; the analyzer folder is
-        shared by ``sorting_id`` and deliberately kept (an orphan is
-        reclaimed by ``find_orphaned_analyzer_folders``).
+        The successful master insert establishes publication ownership. Only
+        that attempt renames its completed analyzer into the shared cache,
+        before the surrounding transaction commits. A duplicate insert never
+        publishes. Failure removes this attempt's staged NWB and analyzer;
+        previously published caches are never deleted by a losing attempt.
 
         Parameters
         ----------
@@ -1974,37 +1966,38 @@ class Sorting(SpyglassMixin, dj.Computed):
             ``spikeinterface.__version__`` at sort time.
         sorter_version : str or None
             Sorter package distribution version, ``None`` for in-process sorters.
+        staged_analyzer : StagedAnalyzer
+            Private build to publish after insertion and close on every exit.
 
         Returns
         -------
         None
         """
         try:
-            self._insert_sorting_rows_transaction(
-                key=key,
-                sorting_obj=sorting_obj,
-                analysis_file_name=analysis_file_name,
-                units_object_id=units_object_id,
-                nwb_file_name=nwb_file_name,
-                display_waveform_params_name=display_waveform_params_name,
-                effective_random_seed=effective_random_seed,
-                spikeinterface_version=spikeinterface_version,
-                sorter_version=sorter_version,
-                unit_rows=unit_rows,
-            )
-        except Exception:
-            # Failure-mode B: registration failed after a successful
-            # make_compute -- remove the attempt-owned, unregistered units NWB
-            # before propagating. The analyzer folder is shared by sorting_id and
-            # regeneratable, and a concurrent worker may have just published it
-            # for the same sorting_id (without yet committing its row), so it is
-            # NEVER deleted here -- an analyzer with no committed row is a
-            # disk-side orphan reclaimed by find_orphaned_analyzer_folders, and
-            # get_analyzer self-heals a missing one.
+            with transaction_or_noop(self.connection):
+                self._insert_sorting_rows_transaction(
+                    key=key,
+                    sorting_obj=sorting_obj,
+                    analysis_file_name=analysis_file_name,
+                    units_object_id=units_object_id,
+                    nwb_file_name=nwb_file_name,
+                    display_waveform_params_name=display_waveform_params_name,
+                    effective_random_seed=effective_random_seed,
+                    spikeinterface_version=spikeinterface_version,
+                    sorter_version=sorter_version,
+                    unit_rows=unit_rows,
+                )
+                # The successful INSERT owns this sorting_id until commit or
+                # rollback. A duplicate worker cannot reach publication. Only
+                # a rename happens here; waveform extraction was in compute.
+                staged_analyzer.publish()
+        except BaseException:
             self._cleanup_staged_units_nwb(
                 analysis_file_name=analysis_file_name
             )
             raise
+        finally:
+            staged_analyzer.close()
 
     def _stage_sorting_artifact(
         self,
@@ -2018,11 +2011,9 @@ class Sorting(SpyglassMixin, dj.Computed):
     ):
         """Stage the units NWB; return ``(analysis_file_name, units_object_id)``.
 
-        ``_write_units_nwb`` self-cleans its own staged file on a write failure
-        (mode A) before propagating, and the analyzer folder is deliberately left
-        for orphan-sweep / ``get_analyzer`` self-heal rather than eagerly deleted
-        (it is shared by ``sorting_id`` and may belong to a concurrent worker),
-        so no extra failure cleanup is needed here. ``unit_metadata`` /
+        ``_write_units_nwb`` self-cleans its staged file on a write failure;
+        ``make_compute`` discards the private analyzer on that failure.
+        ``unit_metadata`` /
         ``source_provenance`` are the compute-once per-unit columns + source
         header embedded in the NWB.
         """
@@ -2086,14 +2077,10 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Removes ONLY the staged units NWB (failure-mode B: registration failed
         after ``make_compute`` staged the file) -- it is per-attempt and
-        content-addressed, owned by this populate attempt. The analyzer folder is
-        deliberately NOT touched: it is shared by ``sorting_id`` and
-        regeneratable, and a concurrent worker may have just published it for the
-        same ``sorting_id`` (without yet committing its row), so eagerly deleting
-        it could destroy a peer's analyzer. An analyzer with no committed
-        ``Sorting`` row is a disk-side orphan reclaimed by
-        ``find_orphaned_analyzer_folders``; ``get_analyzer`` self-heals a missing
-        one. Best-effort: a cleanup failure is logged, never raised, so it cannot
+        owned by this populate attempt. Analyzer staging has its own ownership
+        and cleanup in ``make_compute`` / ``make_insert``. A published canonical
+        analyzer is never removed by this failure path. Best-effort: a cleanup
+        failure is logged, never raised, so it cannot
         mask the original error. DataJoint cannot roll back this filesystem side
         effect, so the caller invokes this in its ``except`` before re-raising.
         """
@@ -2585,7 +2572,7 @@ class Sorting(SpyglassMixin, dj.Computed):
         or ``SortGroupV2``: the cascade reaches ``Sorting`` through DataJoint
         ``FreeTable`` objects and never dispatches this override. Raw SQL or a
         scripted ``dj.Table.connection.query`` also bypasses it. This periodic
-        audit mirrors ``prune_orphaned_selections`` and reports three classes:
+        audit mirrors ``prune_orphaned_selections`` and reports four classes:
 
         - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
           folder (``analyzer_path(sorting_id, display_waveform_params_name)``)
@@ -2600,6 +2587,9 @@ class Sorting(SpyglassMixin, dj.Computed):
         - **Disk-side orphan**: an on-disk raw- or curation-kind folder under
           the analyzer root that no live sort/evaluation/curation generation
           references. Safe to delete after inspection.
+        - **Staging**: a build/trash folder whose ownership locks are free.
+          Active attempts are skipped, including attempts on another host using
+          the supported shared-filesystem locking contract.
 
         **Zero-unit carve-out.** Rows with ``n_units == 0`` are NOT DB-side
         orphans: ``_build_analyzer`` short-circuits before writing a folder and
@@ -2614,17 +2604,18 @@ class Sorting(SpyglassMixin, dj.Computed):
             Restrict database queries and cache candidates to this sorting.
             Omit to audit all sortings, including folders for deleted sorts.
         dry_run : bool, optional
-            When True (default) only report the two orphan lists. When False,
+            When True (default) only report. When False,
             after interactive confirmation (``dj.utils.user_choice``), delete
-            the **disk-side** orphan folders only; DB-side rows are never
-            deleted.
+            disk-side orphans and abandoned staging; DB-side rows are never
+            deleted. Staging ownership is rechecked before removal.
 
         Returns
         -------
         dict
             ``{"db_side": [{"sorting_id", "computed_analyzer_path"}, ...],
             "disk_side": [folder_path_str, ...],
-            "reclaimed": [{"sorting_id", "computed_analyzer_path"}, ...]}``.
+            "reclaimed": [{"sorting_id", "computed_analyzer_path"}, ...],
+            "staging": [folder_path_str, ...]}``.
             ``computed_analyzer_path`` is resolved from ``sorting_id`` (there is
             no stored ``analyzer_folder`` column).
         """
@@ -2637,6 +2628,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             analyzer_cache_lock,
             analyzer_cache_root,
             classify_orphaned_analyzer_folders,
+            cleanup_analyzer_staging,
             collect_analyzer_cache_references,
             is_canonical_analyzer_folder_name,
         )
@@ -2677,12 +2669,14 @@ class Sorting(SpyglassMixin, dj.Computed):
         db_side = classification["db_side"]
         disk_side = classification["disk_side"]
         reclaimed = classification["reclaimed"]
+        staging = cleanup_analyzer_staging(sorting_id)
 
         logger.info(
             "Sorting.find_orphaned_analyzer_folders: "
             f"{len(db_side)} DB-side orphan(s) (row present, folder missing), "
             f"{len(disk_side)} disk-side orphan(s) (folder present, no row), "
-            f"{len(reclaimed)} reclaimed folder(s) (missing with deleted=1)."
+            f"{len(reclaimed)} reclaimed folder(s) (missing with deleted=1), "
+            f"{len(staging)} abandoned staging folder(s)."
         )
         for row in db_side:
             logger.info(
@@ -2698,23 +2692,29 @@ class Sorting(SpyglassMixin, dj.Computed):
             )
         for folder in disk_side:
             logger.info("  disk-side orphan: %s", folder)
+        for folder in staging:
+            logger.info("  abandoned staging: %s", folder)
 
-        if dry_run or not disk_side:
+        if dry_run or not (disk_side or staging):
             return {
                 "db_side": db_side,
                 "disk_side": disk_side,
                 "reclaimed": reclaimed,
+                "staging": staging,
             }
 
-        # dry_run=False: delete ONLY the disk-side orphan folders, and only
-        # after explicit interactive confirmation. DB-side rows are never
-        # auto-deleted -- removing a row is the human's decision.
+        # Confirmation covers disk-side orphans and abandoned staging only;
+        # this audit never deletes database rows.
         msg = (
-            f"Delete {len(disk_side)} orphaned analyzer folder(s) on disk "
-            "(no referencing Sorting row)? This frees 5-50 GB each and cannot "
+            f"Delete {len(disk_side)} orphaned analyzer folder(s) and "
+            f"{len(staging)} abandoned staging folder(s)? This cannot "
             "be undone [yes/no]: "
         )
         if dj.utils.user_choice(msg).lower() in ("y", "yes"):
+            # Recheck ownership after confirmation; never reclaim a live build.
+            deleted_staging = cleanup_analyzer_staging(
+                sorting_id, dry_run=False, candidates=staging
+            )
             for folder in disk_side:
                 identity = analyzer_cache_folder_identity(Path(folder).name)
                 if identity is None:  # pragma: no cover - classified above
@@ -2723,7 +2723,8 @@ class Sorting(SpyglassMixin, dj.Computed):
                     shutil.rmtree(folder, ignore_errors=False)
             logger.info(
                 "Sorting.find_orphaned_analyzer_folders: deleted "
-                f"{len(disk_side)} disk-side orphan folder(s)."
+                f"{len(disk_side)} disk-side orphan folder(s) and "
+                f"{len(deleted_staging)} abandoned staging folder(s)."
             )
         else:
             logger.info(
@@ -2734,6 +2735,7 @@ class Sorting(SpyglassMixin, dj.Computed):
             "db_side": db_side,
             "disk_side": disk_side,
             "reclaimed": reclaimed,
+            "staging": staging,
         }
 
     def get_unit_brain_regions(

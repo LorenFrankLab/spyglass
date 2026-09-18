@@ -250,9 +250,10 @@ def recording_artifact_lock(recording_id, *, timeout: float = -1):
 
     The lock file lives under the shared analyzer/lock root
     (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path --
-    NOT a per-worker temp -- so all workers on a machine contend on the same
-    file. As with ``analyzer_cache_lock`` this serializes processes on ONE
-    machine; it does not coordinate across hosts sharing an NFS mount.
+    NOT a per-worker temp. On multiple hosts the directory must be shared and
+    its mount must provide cross-host POSIX file locking, as required by
+    ``analyzer_cache_lock``. Validate that deployment contract before enabling
+    shared-storage workers; lock-acquisition errors propagate.
 
     Parameters
     ----------

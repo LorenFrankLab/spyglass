@@ -180,9 +180,9 @@ def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
 
     The lock file lives under the shared analyzer/lock root
     (:func:`._analyzer_cache.analyzer_cache_root`), a stable per-install path, so
-    all workers on a machine contend on the same file. As with the recording
-    lock this serializes processes on ONE machine; it does not coordinate across
-    hosts sharing an NFS mount.
+    all workers must resolve the same file. Multi-host deployments require
+    cross-host POSIX file locking on that mount, as documented for the recording
+    and analyzer locks. Lock-acquisition errors propagate.
 
     Parameters
     ----------

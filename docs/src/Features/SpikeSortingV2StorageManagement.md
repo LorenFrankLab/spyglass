@@ -125,6 +125,31 @@ requested) metric analyzers, plus one per-generation cache (and its derivatives)
 per committed merged curation you review. The `SortingAnalyzerRecompute` tables
 report folder sizes.
 
+Sorting computes its analyzer in a private build directory and derives unit
+metadata from that same build. Only the successful database insert can install
+it in the canonical slot. A competing attempt that loses its insert discards
+its own build and leaves the committed sorting's analyzer unchanged. Analyzer
+extraction runs outside the database transaction; publication uses directory
+renames. During a rebuild, budget space for both the old and new cache.
+
+## Shared storage and multiple workers
+
+Single-machine and multi-node workers use the same storage ownership protocol.
+For multiple nodes, configure all workers to use the same MySQL database,
+durable recording/analysis paths, and `spikesorting_v2_analyzer_dir`. The shared
+mount must provide cross-host POSIX file locking and directory renames within
+the cache filesystem. Review bundles shared between hosts need the same locking
+support. Do not place a worker's lock directory on local scratch while its
+analyzers live on shared storage.
+
+Validate locking on the actual server/client mounts before deploying multiple
+nodes: hold a cache lock on node A and verify that a short acquisition on node B
+times out; release or terminate A and verify that B can acquire it. Then run the
+two-worker publication, rebuild, and interruption tasks in the
+[release-readiness audit](../../plans/spikesorting-v2-release-readiness-audit.md).
+A successful local-filesystem test does not establish shared-mount behavior.
+Lock errors propagate rather than allowing unprotected cache writes.
+
 ## Release workload measurement
 
 `tests/spikesorting/v2/scripts/measure_release_workflow.py` is the repeatable
@@ -155,17 +180,20 @@ then reclaim only the disk-side orphans you reviewed:
 from spyglass.spikesorting.v2.sorting import Sorting
 
 report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
-report["disk_side"]  # folders with no surviving Sorting row
+report["disk_side"]  # canonical folders with no surviving reference
+report["staging"]  # abandoned build/trash folders, including interrupted jobs
 
-# Interactive confirmation; deletes disk-side folders only, never DB rows.
+# Interactive confirmation; deletes disk-side/staging folders, never DB rows.
 Sorting.find_orphaned_analyzer_folders(dry_run=False)
 ```
 
 The report also distinguishes DB-side rows whose expected folder is absent and
-folders intentionally reclaimed through `SortingAnalyzerRecompute`. It never
-auto-deletes a database row. Finish the upstream cascade before running the
-audit, and do not reclaim folders while sorting or analyzer rebuild jobs are
-active.
+folders intentionally reclaimed through `SortingAnalyzerRecompute`. Build
+ownership is checked with locks, not process IDs or elapsed time; active builds
+are skipped and ownership is checked again before cleanup. Killed processes
+release their locks, making their hidden build/trash directories reclaimable.
+The audit never auto-deletes a database row. Finish upstream cascades and run
+canonical-orphan reclamation when sorting/rebuild jobs are idle.
 
 ## Cache-drift policy
 

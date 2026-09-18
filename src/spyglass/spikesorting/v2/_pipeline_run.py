@@ -115,9 +115,10 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
     reservation), so an overlapping populate of the same *content-addressed* key
     -- another kernel, a lab populate worker, or a re-run of a long stage -- can
     commit the row while this call is still in ``make_compute``, making this
-    call's insert raise ``DuplicateError``. Because the id is content-addressed,
-    that committed row IS the identical result, so adopt it (the stage is
-    effectively "reused") rather than failing the whole pipeline.
+    call's insert raise ``DuplicateError``. Adopt the committed winner (the
+    stage is effectively "reused"). A sorter may produce different spikes
+    from the same inputs; Sorting keeps each attempt's analyzer private until
+    insertion establishes the winner, so the losing compute cannot replace it.
 
     A duplicate error with the row STILL absent afterward, or any non-duplicate
     error, is a genuine failure and is re-raised unchanged.
@@ -155,7 +156,8 @@ def _populate_once(table, key) -> None:
     the DB session, so if that session drops and reconnects mid-compute the lock
     is released and a concurrent run could recompute. The duplicate-tolerance
     still prevents a hard failure -- the worst case degrades to duplicated
-    compute, never a crash or a wrong result.
+    compute. Correctness relies on each stage's publication/insert contract,
+    independently of this compute-deduplication lock.
     """
     with _advisory_key_lock(table, key):
         _populate_tolerating_concurrent_duplicate(table, key)
