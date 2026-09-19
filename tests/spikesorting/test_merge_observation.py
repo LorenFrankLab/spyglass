@@ -309,6 +309,31 @@ def test_merge_indicator_no_matching_member(merge_table, plant_members):
     assert merge_table.get_firing_rate({}, time).shape == (10, 0)
 
 
+def test_merge_observation_failure_names_the_merge(
+    merge_table, plant_members, monkeypatch
+):
+    """An unreadable recording raises a message pointing somewhere useful.
+
+    Reporting full coverage instead would hide exactly the defect the
+    observed-time contract exists to catch, so the read still raises -- but
+    it names the merge and the snapshot-backed alternative.
+    """
+    from spyglass.spikesorting.v2 import _observation_io
+
+    plant_members([_v2("v2-a", [[0, 3], [4, 10]], {1: [1.0]})])
+
+    def unreadable(merge_id, requested):
+        raise FileNotFoundError("recording folder is gone")
+
+    monkeypatch.setattr(_observation_io, "selection_observations", unreadable)
+
+    with pytest.raises(RuntimeError, match="v2-a") as raised:
+        merge_table.get_spike_indicator({}, np.arange(10.0))
+
+    assert isinstance(raised.value.__cause__, FileNotFoundError)
+    assert "SortedSpikesGroup" in str(raised.value)
+
+
 def test_merge_firing_rate_does_not_bleed_into_gap(merge_table, plant_members):
     """Smoothing runs per observed span, so no rate crosses the gap."""
     time = np.arange(10.0)

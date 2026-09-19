@@ -409,9 +409,10 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     ``get_spike_times(merge_key)`` under the hood -- a regression
     in v2's ``get_spike_times`` dispatch silently breaks
     downstream consumers. Both APIs must return a
-    ``(n_time, n_units)`` array, non-negative everywhere,
-    finite. Parametrized so the same shape contract is verified
-    on both with identical setup.
+    ``(n_time, n_units)`` array that is non-negative and finite
+    in every bin the units were observed over, and ``np.nan`` in
+    the bins they were not. Parametrized so the same shape
+    contract is verified on both with identical setup.
     """
     import numpy as np
 
@@ -427,17 +428,27 @@ def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     assert n_units >= 1
 
     time_array = np.arange(0.0, 4.0, 0.1)
+    merge_key = {"merge_id": merge_id}
+    # get_firing_rate has no return_validity flag, so resolve the observed
+    # bins once and hold both methods to the same mask.
+    valid = SpikeSortingOutput.get_observation_intervals(merge_key).valid_bins(
+        time_array
+    )
     method = getattr(SpikeSortingOutput(), method_name)
-    result = method({"merge_id": merge_id}, time_array)
+    result = method(merge_key, time_array)
     assert result.shape == (len(time_array), n_units), (
         f"{method_name} returned shape {result.shape}; expected "
         f"({len(time_array)}, {n_units}). v2 dispatch regression."
     )
-    assert np.all(result >= 0), (
-        f"{method_name} returned negative values somewhere; "
-        "the indicator/rate contract is non-negative."
+    assert np.all(result[valid] >= 0), (
+        f"{method_name} returned negative values in an observed bin; "
+        "the indicator/rate contract is non-negative where observed."
     )
-    assert np.all(np.isfinite(result))
+    assert np.all(np.isfinite(result[valid]))
+    assert np.isnan(result[~valid]).all(), (
+        f"{method_name} must report np.nan, not a count or rate, in bins "
+        "the units were not observed over."
+    )
 
 
 @pytest.mark.slow

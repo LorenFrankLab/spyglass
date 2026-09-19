@@ -742,11 +742,29 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 # the v2 layer may not import at all, never reaches for it.
                 from spyglass.spikesorting.v2 import _observation_io
 
-                provenance = {
-                    "observation_intervals": (
-                        _observation_io.selection_observations(merge_id, ids)
+                try:
+                    observation = _observation_io.selection_observations(
+                        merge_id, ids
                     )
-                }
+                # Broad on purpose: resolving the spans needs the curated
+                # recording as well as the analysis NWB, and every way that
+                # can be missing (exported data, a moved base dir, a pruned
+                # cache) should name the merge rather than surface as an
+                # opaque loader error several frames down.
+                except Exception as err:  # noqa: BLE001
+                    raise RuntimeError(
+                        "SpikeSortingOutput.get_observation_intervals: could "
+                        f"not resolve the observed-time intervals of merge_id "
+                        f"{merge_id}. They are read from the curated analysis "
+                        "NWB file AND its recording, so they are unavailable "
+                        "when the recording cannot be loaded (exported data, "
+                        "a moved base directory, a pruned cache). Build a "
+                        "SortedSpikesGroup over this merge instead: its "
+                        "UnitSelection snapshot froze these intervals at "
+                        "group creation, so the group accessors do not need "
+                        "the recording."
+                    ) from err
+                provenance = {"observation_intervals": observation}
             snapshots.append((name, ids, provenance))
         return population_availability(snapshots)
 
@@ -755,8 +773,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         cls,
         key,
         time,
-        *,
         return_unit_ids: bool = False,
+        *,
         return_validity: bool = False,
     ):
         """Get spike indicator matrix for the group

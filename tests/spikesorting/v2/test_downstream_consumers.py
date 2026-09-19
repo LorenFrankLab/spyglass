@@ -138,7 +138,8 @@ def test_get_spike_times_returns_per_unit_arrays(populated_sorting):
 )
 def test_consumer_api_shape_contract(populated_sorting, method_name):
     """The two time-binned consumer APIs return ``(n_time, n_units)``
-    arrays that are non-negative and finite.
+    arrays that are non-negative and finite wherever the units were
+    observed, and ``np.nan`` in the bins they were not.
 
     Parametrized so the same shape contract is verified on both
     with identical setup; any v2-merge-dispatch regression in
@@ -150,12 +151,17 @@ def test_consumer_api_shape_contract(populated_sorting, method_name):
     _, merge_id = _make_v2_root_curation(populated_sorting)
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
     time_array = np.arange(0.0, 4.0, 0.1)
-    result = getattr(SpikeSortingOutput(), method_name)(
-        {"merge_id": merge_id}, time_array
+    merge_key = {"merge_id": merge_id}
+    # get_firing_rate has no return_validity flag, so resolve the observed
+    # bins once and hold both methods to the same mask.
+    valid = SpikeSortingOutput.get_observation_intervals(merge_key).valid_bins(
+        time_array
     )
+    result = getattr(SpikeSortingOutput(), method_name)(merge_key, time_array)
     assert result.shape == (len(time_array), n_units)
-    assert np.all(result >= 0)
-    assert np.all(np.isfinite(result))
+    assert np.all(result[valid] >= 0)
+    assert np.all(np.isfinite(result[valid]))
+    assert np.isnan(result[~valid]).all()
 
 
 @pytest.mark.slow
@@ -169,37 +175,46 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
     unit than ``get_spike_times()[j]`` (a sparse-unit_id misalignment that
     silently corrupts clusterless decoding). This pins the exact per-unit
     correspondence: ``get_spike_indicator`` bins each unit's spikes that
-    fall in ``[time[0], time[-1]]``, so the column sum MUST equal the
-    count of that same unit's spike times inside the window.
+    fall in ``[time[0], time[-1]]`` and inside the population's observed
+    time, so the column sum over the observed bins MUST equal the count of
+    that same unit's spikes that survive both filters.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     _, merge_id = _make_v2_root_curation(populated_sorting)
-    spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+    merge_key = {"merge_id": merge_id}
+    spike_times = SpikeSortingOutput().get_spike_times(merge_key)
     assert len(spike_times) >= 1, "fixture must yield at least one unit"
 
     time_array = np.arange(0.0, 4.0, 0.1)
-    indicator = SpikeSortingOutput().get_spike_indicator(
-        {"merge_id": merge_id}, time_array
+    indicator, valid = SpikeSortingOutput().get_spike_indicator(
+        merge_key, time_array, return_validity=True
     )
     assert indicator.shape == (len(time_array), len(spike_times))
+    assert np.isnan(indicator[~valid]).all()
 
+    observation = SpikeSortingOutput.get_observation_intervals(merge_key)
     min_t, max_t = time_array[0], time_array[-1]
-    column_sums = indicator.sum(axis=0)
+    # Unobserved bins hold NaN, so the counted evidence lives in the valid
+    # rows; a spike that falls in an unobserved bin is not counted anywhere.
+    column_sums = indicator[valid].sum(axis=0)
+
+    def counted(arr):
+        kept = arr[(arr >= min_t) & (arr <= max_t) & observation.contains(arr)]
+        return int(np.count_nonzero(valid[np.digitize(kept, time_array[1:-1])]))
+
     for j, arr in enumerate(spike_times):
-        in_window = int(np.count_nonzero((arr >= min_t) & (arr <= max_t)))
+        in_window = counted(arr)
         assert int(column_sums[j]) == in_window, (
             f"unit {j}: indicator column sum {int(column_sums[j])} != "
-            f"in-window spike count {in_window}; the per-unit indicator "
-            "is misaligned with get_spike_times (sparse-unit_id bug)."
+            f"in-window observed spike count {in_window}; the per-unit "
+            "indicator is misaligned with get_spike_times "
+            "(sparse-unit_id bug)."
         )
     # Total spikes in-window across all units must also agree (catches a
     # misalignment that happens to permute counts between equal-count
     # units).
-    total_in_window = sum(
-        int(np.count_nonzero((arr >= min_t) & (arr <= max_t)))
-        for arr in spike_times
-    )
+    total_in_window = sum(counted(arr) for arr in spike_times)
     assert int(column_sums.sum()) == total_in_window
 
 
