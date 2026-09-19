@@ -2,7 +2,9 @@
 
 These are pure-text checks (no DB, no SpikeInterface import): they parse
 ``pyproject.toml``, every conda environment file, and the ``pytest-legacy`` CI
-job and assert the declared pins agree with each other.
+job and assert the declared pins agree with each other. The one exception is
+the ripple-detection floor, which also imports ``ripple_detection`` to check
+the declared pin against the names the code actually uses.
 
 Three coupled invariants live here:
 

@@ -78,7 +78,10 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         Called inside a caller's transaction, that path participates in it
         rather than opening one of its own: the marker, unit and annotation
         then commit or roll back with the caller's other work, so several
-        annotations can be written as one batch.
+        annotations can be written as one batch. The caller must abort its
+        transaction when a write fails -- catching the exception and
+        committing anyway would leave the merge marked with no rows to show
+        for it, which is what the standalone path's transaction prevents.
 
         Parameters
         ----------

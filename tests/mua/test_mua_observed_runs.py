@@ -626,13 +626,18 @@ def test_figurl_rate_series_cover_exactly_the_observed_samples(
 
 def test_figurl_series_names_are_unique(figurl_recording):
     """sortingview keys each series to a dataset by name, so two series
-    sharing a name would collide on one dataset."""
+    sharing a name would collide on one dataset. Every run is numbered,
+    including a lone one, so the names do not depend on the run count."""
     rate_view = figurl_recording["rate_view"]
     names = [one["name"] for one in rate_view.line_series] + [
         one["name"] for one in rate_view.interval_series
     ]
 
     assert len(names) == len(set(names)), names
+    assert [one["name"] for one in _rate_series(rate_view)] == [
+        f"Z-Scored Multiunit Rate ({run_number})"
+        for run_number in range(1, len(_rate_series(rate_view)) + 1)
+    ]
 
 
 def test_figurl_series_dtypes_follow_sortingview(figurl_recording):

@@ -211,9 +211,11 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         plotted_rate = np.asarray(multiunit_firing_rate, dtype=np.float32)
         for run_number, run in enumerate(runs, start=1):
             # Each series is keyed to its own dataset by name, so the runs
-            # are numbered rather than sharing one name.
+            # are numbered rather than sharing one name. Numbering every run,
+            # including a lone one, keeps the legend names independent of how
+            # the recording happens to be split.
             multiunit_firing_rate_view.add_line_series(
-                name=name if len(runs) == 1 else f"{name} ({run_number})",
+                name=f"{name} ({run_number})",
                 t=np.asarray(time)[run],
                 y=plotted_rate[run],
                 color=mua_color,

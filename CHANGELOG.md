@@ -301,7 +301,11 @@ migration. If `audit_positional_unit_ids()` shows a refused merge whose
 `stored_unit_ids` already are its `true_unit_ids`, insert
 `{"spikesorting_merge_id": ..., "migration_version": 1}` into
 `UnitAnnotationPositionalIdMigration` instead of migrating it. Dense `0..n-1`
-unit namespaces are unaffected.
+unit namespaces are unaffected. `add_annotation` now participates in a
+caller's open DataJoint transaction instead of raising on it, so several
+annotations can be written as one batch; the caller must abort that
+transaction when a write fails, because a caught and ignored failure would
+let the migration marker commit without the rows it claims.
 
 #### Spike Sorting v2: register schemas against any configured database host
 
@@ -1635,6 +1639,15 @@ cross-referenced here, not duplicated.
     solves the conda section of the default, DLC, and MoSeq environment
     files, both targeting Linux x86_64. It reaches the network and takes
     minutes, so it is a script rather than a collected test
+- **Require `ripple-detection>=1.7`.** `spyglass.mua` imports
+    `ripple_detection.core.normalize_signal` and
+    `_validate_normalization_params` and passes the detector's
+    `normalization_method` / `normalization_mask` /
+    `normalization_time_range` parameters, none of which exist on the 1.6
+    line the previously unpinned requirement admitted. The conda
+    environment files keep their unpinned `ripple_detection` entry: the
+    enabled channels top out at 1.5.1, so each environment's `pip install
+    ..` step replaces the channel build with the PyPI wheel
 - **Warn when a `Merge.fetch_nwb` restriction skips a source.** In the
     parent-attribute branch, a source whose immediate parent lacks an
     attribute the restriction names was dropped from the search silently, so
@@ -1929,7 +1942,8 @@ cross-referenced here, not duplicated.
         treated as one run per segment, where the old code smoothed and
         normalized across the joins. The firing-rate FigURL leaves
         unobserved bins out of the plotted line and out of the z-score
-        statistics.
+        statistics, and draws the rate as one line segment per contiguous
+        observed run, so no drawn segment spans unobserved time.
 
 ## [0.6.0] (Sep 1st 2026)
 
