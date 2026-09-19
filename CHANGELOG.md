@@ -8,6 +8,9 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references. For spike sorting v2, use the
 [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database);
 it includes curation identity, observed-time metrics, and manual exclusions.
+It now also requires recreating every v2 `Recording` row and its artifact,
+because this release changes both the preprocessed traces and the electrode
+geometry stored in the artifact.
 
 Spike sorting v2 now keeps analyzer builds private until a successful Sorting
 insert establishes publication ownership. Duplicate workers cannot overwrite
@@ -202,6 +205,59 @@ data or the production `UnitSelectionParams` rows.
   `mountainsort4` wrapper (its `ml_ms4alg` backend cannot run on NumPy 2);
   MountainSort4 runs in the legacy environment or the containerized preset.
   The v2 CI job now runs `pip check` and a MountainSort5 runtime smoke.
+
+#### Spike Sorting v2: filter before restriction and persist normalized geometry
+
+`Recording` now channel-slices the raw acquisition, normalizes the electrode
+geometry, applies the temporal steps (optional ADC phase-shift, then the
+bandpass) to the **continuous** recording, and only then restricts to the
+selected intervals; bad-channel interpolation and referencing still run after
+that restriction. The restriction used to come first, so the lazy filter read
+its margin across the artificial joins between the selected intervals: every
+interval edge was filter transient, and a short interval was transient end to
+end. On the shipped 1.5 ms `min_segment_length` floor with a 600 Hz high-pass,
+those restricted samples missed the continuously filtered signal by 69.8 µV
+peak and carried 58× its RMS.
+
+- **Existing v2 `Recording` artifacts must be recreated.** For a selection with
+  more than one interval, both the traces near the interval edges and the
+  `content_hash` change, so a rebuild after a cache miss raises
+  `RecordingContentDriftError` instead of installing bytes that no longer match
+  the stored hash. Single-interval selections stay bit-identical. Follow the
+  [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
+- **Electrode geometry is normalized before any probe is built.** Contact
+  positions are reduced to the first coordinate plane in which every contact is
+  distinct — x-y, else x-z, else y-z — on the channel-sliced recording. That is
+  what lets Frank-lab tetrodes, whose contacts lie in x-z with a constant
+  `rel_y`, survive SpikeInterface's x-y projection instead of collapsing onto
+  each other.
+- **That geometry is persisted in the artifact.** The write stamps `rel_x` /
+  `rel_y` and a constant `rel_z = 0` onto the electrodes rows the
+  `ElectricalSeries` references, so a reload carries the geometry the sort ran
+  with rather than reverting to the parent NWB's raw coordinates; rows outside
+  that region keep the parent's values, or `NaN` where a `rel_*` column had to
+  be created because the parent carried none. The `tetrode_12.5` repair is
+  persisted the same way, so a reloaded four-channel tetrode has its 12.5 µm
+  square. Geometry is part of the content fingerprint, so an x-z sort group or
+  a repaired tetrode gets a new `content_hash` even when its traces are
+  unchanged.
+- **Coincident contacts now fail loud.** `Recording.make` checks the effective
+  2D positions after the tetrode repair and raises, naming the positions and
+  `Probe.Electrode` `rel_x`/`rel_y`/`rel_z`; the analyzer build raises the same
+  way before it constructs a probe, naming the `sorting_id`, instead of
+  surfacing probeinterface's bare "Contact positions must be unique within a
+  probe"; and `preflight_v2_pipeline` gains a `sort_group_geometry_distinct`
+  check that reports the collapse before a run starts. Preflight reads the
+  registered probe geometry in `Probe.Electrode`, while `Recording.make` reads
+  the raw NWB electrodes table, so a session whose registered geometry and
+  electrodes table disagree can pass preflight and still be repaired — or
+  rejected — at the recording stage.
+- **3D channel locations are refused, not projected.** The artifact write
+  raises on a recording whose locations are still 3D rather than persisting
+  SpikeInterface's default x-y projection of them. `ConcatenatedRecording`
+  drops the stitched members' constant third coordinate before writing and
+  raises when it varies, so recreate the member `Recording` rows before
+  rebuilding any concatenated recording.
 
 #### Spike Sorting v2 curation identity and review-profile foundation
 

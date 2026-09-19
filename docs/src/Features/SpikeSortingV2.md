@@ -82,9 +82,20 @@ coexist under one merge surface.
     `insert_default()` on each loads a default row; user params validate the
     `params` blob on insert.
 - **`RecordingSelection` / `Recording`** -- preprocessed recording
-    materialization. Optional ADC phase-shift, then bandpass, then
-    common-reference referencing; whitening is deferred to the sort stage so
-    motion correction never sees whitened data. The make body validates
+    materialization. Optional ADC phase-shift, then bandpass -- both on the
+    continuous channel-sliced source -- then the restriction to the selected
+    intervals, then bad-channel interpolation and common-reference
+    referencing; whitening is deferred to the sort stage so motion correction
+    never sees whitened data. Filtering before the restriction keeps the lazy
+    filter's margin on real adjacent samples instead of reading it across the
+    joins between selected intervals. Electrode geometry is normalized to the
+    first coordinate plane in which every contact is distinct (x-y, else x-z,
+    else y-z) before any probe is built, and that normalized geometry --
+    including the `tetrode_12.5` repair -- is persisted in the artifact's
+    `rel_x`/`rel_y`/`rel_z` electrodes rows, so a reload carries the geometry
+    the sort ran with rather than the parent NWB's raw coordinates. A sort
+    group whose contacts still share a 2D position raises rather than
+    sorting on a collapsed probe. The make body validates
     timestamp coverage and raises `RecordingTruncatedError` if the raw
     timestamps array does not span the requested interval. See
     [ADC phase-shift](#adc-phase-shift-neuropixels) below.
@@ -1237,6 +1248,13 @@ enabled, it runs **first** -- before the bandpass -- and only when the recording
 carries an `inter_sample_shift` property; on a recording without that property
 (any non-multiplexed acquisition, including Frank-lab polymer probes) it logs a
 skip and is a **no-op**, so enabling it never fails.
+
+Both of those steps run on the **continuous** channel-sliced recording. The
+full stage order is phase-shift → bandpass → restriction to the selected
+intervals → bad-channel interpolation → referencing, so the filter takes its
+margin from the surrounding acquisition rather than from a concatenation of the
+selected intervals, where every interval edge would be filter transient and a
+short interval transient end to end.
 
 It is **off in the `default` and region preproc rows** and **on in the
 `default_neuropixels` preset** -- a blessed Neuropixels recipe

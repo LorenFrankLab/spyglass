@@ -213,6 +213,38 @@ from spyglass.spikesorting.v2.unit_annotation import (  # noqa F401
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup  # noqa F401
 ```
 
+Finally, recreate every v2 `Recording` row and artifact. This release filters
+the raw traces before restricting them to the selected intervals and persists
+the normalized electrode geometry in the artifact, so a stored artifact no
+longer matches what the pipeline computes: its `content_hash` is stale, and a
+rebuild after a cache miss raises `RecordingContentDriftError` instead of
+reinstalling it. Recreate the single-session recordings **before** any
+concatenation, because a concatenation refuses member artifacts whose contacts
+were never reduced to one plane, and mint the concatenations again through
+`ConcatenatedRecordingSelection.insert_selection`: a selection freezes its
+members' `content_hash` values, so reusing one after the members are recreated
+raises `ConcatMemberDriftError`. Deleting a `Recording` cascades to the
+sortings and curations built on it, so preview the cascade and budget for
+re-running the pipeline on every selection you keep.
+
+```python
+from spyglass.spikesorting.v2.recording import Recording
+from spyglass.spikesorting.v2.session_group import (
+    ConcatenatedRecordingSelection,
+)
+
+# Both deletes cascade; inspect the preview before confirming each one. The
+# concat selections go too, because a frozen member set cannot be
+# re-snapshotted in place.
+ConcatenatedRecordingSelection().delete()
+Recording().delete()
+
+Recording.populate()  # recompute every remaining selection's artifact
+# Then re-run the sort/curation pipeline, and re-run
+# ConcatenatedRecordingSelection.insert_selection(...) for each session group
+# you concatenate.
+```
+
 After upgrading, reevaluate the chosen curation and start a review with
 `franklab_hippocampus_2026_09_17`. New evaluations use observation version 1 and do
 not relabel historical version-0 evaluations. For saved drafts and analysis

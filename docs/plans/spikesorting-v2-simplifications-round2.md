@@ -87,7 +87,7 @@ cases:
 | Value | Receiver | Bounded change |
 | --- | --- | --- |
 | `model_cls` | `_lookup_validation.py:52`, `_assert_schema_version_matches` | Remove the unused argument and its inaccurate fallback documentation. Its only repository caller already supplies a validated row. Keep the outer/inner version comparison. |
-| `sort_group_channel_ids` | `_recording_preprocessing.py:31`, `apply_pre_motion_preprocessing` | Remove it from this helper and its callers/tests. The recording is already channel-restricted here. Keep the channel list where restriction and geometry actually use it. |
+| `sort_group_channel_ids` | `_recording_preprocessing.py:45` / `:148`, `apply_temporal_preprocessing` / `apply_spatial_preprocessing` | Done: the pre-motion helper was split into these two and neither takes the channel list. The recording is already channel-restricted here. The channel list stays where restriction and geometry actually use it. |
 | `rounding` | `recompute.py:152`, `_recompute_compute` | Remove only this generic helper argument. Keep rounding in analyzer selection/provenance and `_recompute_analyzer_hashes`; the regeneration closure already captures it there. |
 | `analyzer_folder` | `sorting.py:1945`, `Sorting.make_insert` | Remove it from `SortingComputed`, its construction, and the matching insertion signature. `make_compute` already derives the unit rows, and insertion neither reads nor cleans the shared analyzer folder. |
 
