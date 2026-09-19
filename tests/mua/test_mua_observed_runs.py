@@ -1,5 +1,7 @@
 """Multiunit event detection never joins samples across unobserved time."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -487,3 +489,169 @@ def test_make_intersects_the_detection_interval_with_observation(
     ).any()
     assert (events.end_time <= detection_end).all()
     assert written["key"]["mua_times_object_id"] == "object-id"
+
+
+class _RecordingTimeseriesGraph:
+    """Capture what ``create_figurl`` asks sortingview to draw."""
+
+    instances = []
+
+    def __init__(self, **kwargs):
+        self.line_series = []
+        self.interval_series = []
+        _RecordingTimeseriesGraph.instances.append(self)
+
+    def add_line_series(self, **kwargs):
+        self.line_series.append(kwargs)
+        return self
+
+    def add_interval_series(self, **kwargs):
+        self.interval_series.append(kwargs)
+        return self
+
+
+class _StubLayoutItem:
+    def __init__(self, view, **kwargs):
+        self.view = view
+
+
+class _StubBox:
+    def __init__(self, **kwargs):
+        self.items = kwargs.get("items", [])
+
+    def url(self, label):
+        return f"stub://{label}"
+
+
+@pytest.fixture
+def figurl_recording(gapped_mua, monkeypatch, dj_conn):
+    """Run ``create_figurl`` over a gapped rate against stub sortingview."""
+    _ = dj_conn  # mua.py declares a schema at import
+    from spyglass.mua.v1 import mua as mua_module
+
+    time, _, speed, observed, gap = gapped_mua
+    rate = np.where(observed, np.sin(2 * np.pi * time) + 2.0, np.nan)
+    events = pd.DataFrame(
+        {"start_time": [0.50], "end_time": [0.56]},
+        index=pd.Index([1], name="event_number"),
+    )
+    key = {
+        "nwb_file_name": "mini.nwb",
+        "pos_merge_id": "pos",
+        "mua_param_name": "default",
+    }
+
+    monkeypatch.setattr(_RecordingTimeseriesGraph, "instances", [])
+    monkeypatch.setattr(
+        mua_module,
+        "vv",
+        SimpleNamespace(
+            TimeseriesGraph=_RecordingTimeseriesGraph,
+            LayoutItem=_StubLayoutItem,
+            Box=_StubBox,
+        ),
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsV1, "fetch1", lambda self, *args: key
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsV1,
+        "get_speed",
+        staticmethod(lambda key_: pd.Series(speed, index=time)),
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsV1,
+        "get_firing_rate",
+        classmethod(lambda cls, key_, time_: rate),
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsV1, "fetch1_dataframe", lambda self: events
+    )
+    monkeypatch.setattr(
+        mua_module.MuaEventsParameters,
+        "fetch1",
+        lambda self, *args, **kwargs: {"zscore_threshold": 2.0},
+    )
+
+    url = mua_module.MuaEventsV1().create_figurl()
+
+    rate_view = _RecordingTimeseriesGraph.instances[0]
+    return {
+        "url": url,
+        "rate_view": rate_view,
+        "time": time,
+        "observed": observed,
+        "gap": gap,
+    }
+
+
+def _rate_series(rate_view):
+    """The line series carrying the plotted rate, not the threshold line."""
+    return [
+        series
+        for series in rate_view.line_series
+        if series["name"].startswith("Z-Scored Multiunit Rate")
+    ]
+
+
+def test_figurl_rate_series_never_span_unobserved_time(figurl_recording):
+    """Each rate segment is one contiguous observed run, so no drawn line
+    joins the samples on either side of a gap."""
+    time = figurl_recording["time"]
+    dt = np.median(np.diff(time))
+    series = _rate_series(figurl_recording["rate_view"])
+
+    assert len(series) > 1  # the gapped fixture must produce a break
+    for one in series:
+        t = np.asarray(one["t"])
+        assert t.size > 0
+        assert np.all(np.diff(t) <= 1.5 * dt), (
+            f"series {one['name']!r} steps over a gap: "
+            f"max step {np.max(np.diff(t))} > {1.5 * dt}"
+        )
+
+
+def test_figurl_rate_series_cover_exactly_the_observed_samples(
+    figurl_recording,
+):
+    """Splitting the line drops no observed sample and invents none."""
+    time = figurl_recording["time"]
+    observed = figurl_recording["observed"]
+    series = _rate_series(figurl_recording["rate_view"])
+
+    drawn = np.concatenate([np.asarray(one["t"]) for one in series])
+    np.testing.assert_array_equal(drawn, time[observed])
+    assert np.all(np.isfinite(np.concatenate([one["y"] for one in series])))
+
+
+def test_figurl_series_names_are_unique(figurl_recording):
+    """sortingview keys each series to a dataset by name, so two series
+    sharing a name would collide on one dataset."""
+    rate_view = figurl_recording["rate_view"]
+    names = [one["name"] for one in rate_view.line_series] + [
+        one["name"] for one in rate_view.interval_series
+    ]
+
+    assert len(names) == len(set(names)), names
+
+
+def test_figurl_series_dtypes_follow_sortingview(figurl_recording):
+    """``y`` is float32; ``t`` stays float64 so TimeseriesGraph can take out
+    a shared time offset before downcasting, which is what keeps sub-sample
+    resolution on an absolute clock."""
+    for one in _rate_series(figurl_recording["rate_view"]):
+        assert np.asarray(one["y"]).dtype == np.float32
+        assert np.asarray(one["t"]).dtype == np.float64
+
+
+def test_figurl_threshold_line_still_spans_the_whole_axis(figurl_recording):
+    """The z-score threshold is a constant reference, not measured data."""
+    time = figurl_recording["time"]
+    (threshold,) = [
+        one
+        for one in figurl_recording["rate_view"].line_series
+        if one["name"] == "Z-Score Threshold"
+    ]
+
+    np.testing.assert_array_equal(np.asarray(threshold["t"]), time)
+    assert np.all(np.asarray(threshold["y"]) == 2.0)

@@ -14,6 +14,7 @@ from spyglass.spikesorting.analysis.v1.group import (
     SortedSpikesGroup,
 )  # noqa: F401
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.spikesorting import contiguous_observed_runs
 
 schema = dj.schema("mua_v1")
 
@@ -175,6 +176,10 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         rate. They are z-scored out of the statistics and left out of the
         plotted series, so the rate line breaks over unobserved time instead
         of drawing a value the data does not support.
+
+        The rate is drawn as one line segment per contiguous observed run, so
+        no segment spans unobserved time: a single series over the surviving
+        samples would join across each gap.
         """
         key = self.fetch1("KEY")
         speed = self.get_speed(key)
@@ -198,13 +203,22 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             color=mua_times_color,
         )
         name = "Z-Scored Multiunit Rate" if zscore_mua else "Multiunit Rate"
-        multiunit_firing_rate_view.add_line_series(
-            name=name,
-            t=np.asarray(time)[observed],
-            y=np.asarray(multiunit_firing_rate, dtype=np.float32)[observed],
-            color=mua_color,
-            width=1,
+        runs = contiguous_observed_runs(
+            time,
+            observed,
+            sampling_frequency=1 / np.median(np.diff(time)),
         )
+        plotted_rate = np.asarray(multiunit_firing_rate, dtype=np.float32)
+        for run_number, run in enumerate(runs, start=1):
+            # Each series is keyed to its own dataset by name, so the runs
+            # are numbered rather than sharing one name.
+            multiunit_firing_rate_view.add_line_series(
+                name=name if len(runs) == 1 else f"{name} ({run_number})",
+                t=np.asarray(time)[run],
+                y=plotted_rate[run],
+                color=mua_color,
+                width=1,
+            )
         if zscore_mua:
             mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
             zscore_threshold = mua_params.get("zscore_threshold")
