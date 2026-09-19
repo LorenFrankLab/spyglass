@@ -384,6 +384,8 @@ def test_merge_consumers_finite_on_observed_slices(
     NaN bins the merge accessor reports never reach ``zscore`` or the view,
     while the accessor's own output keeps them.
     """
+    import sortingview.views as real_views
+
     from spyglass.mua.v1 import mua as mua_module
 
     time = np.arange(10.0)
@@ -400,22 +402,21 @@ def test_merge_consumers_finite_on_observed_slices(
         zscored_inputs.append(np.asarray(values, dtype=float))
         return real_zscore(values, **kwargs)
 
-    plotted = []
+    graphs = []
 
-    class _FakeGraph:
-        def add_interval_series(self, **kwargs):
-            return self
-
-        def add_line_series(self, **kwargs):
-            plotted.append(kwargs)
-            return self
+    class _RecordingGraph(real_views.TimeseriesGraph):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            graphs.append(self)
 
     class _FakeBox:
         def url(self, label=None):
             return f"fake://{label}"
 
     class _FakeViews:
-        TimeseriesGraph = _FakeGraph
+        TimeseriesGraph = _RecordingGraph
+        TGDataset = real_views.TGDataset
+        TGSeries = real_views.TGSeries
 
         @staticmethod
         def LayoutItem(*args, **kwargs):
@@ -462,12 +463,26 @@ def test_merge_consumers_finite_on_observed_slices(
     assert len(zscored_inputs) == 1
     assert zscored_inputs[0].size == 9  # every bin but the unobserved one
     assert np.isfinite(zscored_inputs[0]).all()
-    rate_series = next(
+    graph = graphs[0].to_dict()
+    datasets = {data["name"]: data["data"] for data in graph["datasets"]}
+    rate_series = [
         series
-        for series in plotted
-        if series["name"] == "Z-Scored Multiunit Rate"
+        for series in graph["series"]
+        if series["dataset"].startswith("Z-Scored Multiunit Rate")
+    ]
+    assert len(rate_series) == 2
+    drawn_times, drawn_rates = [], []
+    for series in rate_series:
+        data = datasets[series["dataset"]]
+        times = data["t"].astype(float) + graph["timeOffset"]
+        assert np.all(np.diff(times) == 1)
+        assert np.isfinite(data["y"]).all()
+        drawn_times.append(times)
+        drawn_rates.append(data["y"])
+    valid = np.isfinite(rate[:, 0])
+    np.testing.assert_array_equal(np.concatenate(drawn_times), time[valid])
+    np.testing.assert_allclose(
+        np.concatenate(drawn_rates), real_zscore(rate[valid, 0]), rtol=1e-6
     )
-    assert np.isfinite(rate_series["y"]).all()
-    assert rate_series["t"].tolist() == [0, 1, 2, 4, 5, 6, 7, 8, 9]
     # The public accessor still reports the unobserved bin.
     assert np.isnan(rate[3, 0])

@@ -1943,7 +1943,9 @@ cross-referenced here, not duplicated.
         normalized across the joins. The firing-rate FigURL leaves
         unobserved bins out of the plotted line and out of the z-score
         statistics, and draws the rate as one line segment per contiguous
-        observed run, so no drawn segment spans unobserved time.
+        observed run, so no drawn segment spans unobserved time. The segments
+        share one legend entry, keeping the legend readable even when a
+        recording has many gaps.
 
 ## [0.6.0] (Sep 1st 2026)
 

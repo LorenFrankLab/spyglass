@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+import sortingview.views as real_views
 from ripple_detection import multiunit_HSE_detector
 
 from spyglass.utils.spikesorting import contiguous_observed_runs
@@ -491,23 +492,14 @@ def test_make_intersects_the_detection_interval_with_observation(
     assert written["key"]["mua_times_object_id"] == "object-id"
 
 
-class _RecordingTimeseriesGraph:
-    """Capture what ``create_figurl`` asks sortingview to draw."""
+class _RecordingTimeseriesGraph(real_views.TimeseriesGraph):
+    """Capture real SortingView graphs without publishing a FigURL."""
 
     instances = []
 
     def __init__(self, **kwargs):
-        self.line_series = []
-        self.interval_series = []
+        super().__init__(**kwargs)
         _RecordingTimeseriesGraph.instances.append(self)
-
-    def add_line_series(self, **kwargs):
-        self.line_series.append(kwargs)
-        return self
-
-    def add_interval_series(self, **kwargs):
-        self.interval_series.append(kwargs)
-        return self
 
 
 class _StubLayoutItem:
@@ -523,16 +515,26 @@ class _StubBox:
         return f"stub://{label}"
 
 
-@pytest.fixture
-def figurl_recording(gapped_mua, monkeypatch, dj_conn):
-    """Run ``create_figurl`` over a gapped rate against stub sortingview."""
+@pytest.fixture(params=["continuous", "one_gap", "many_gaps"])
+def figurl_recording(gapped_mua, monkeypatch, dj_conn, request):
+    """Serialize rates on an absolute clock, with up to 100 gaps."""
     _ = dj_conn  # mua.py declares a schema at import
     from spyglass.mua.v1 import mua as mua_module
 
-    time, _, speed, observed, gap = gapped_mua
+    time, _, speed, observed, _ = gapped_mua
+    observed = observed.copy()
+    expected_runs = 2
+    if request.param == "continuous":
+        observed[:] = True
+        expected_runs = 1
+    elif request.param == "many_gaps":
+        observed[:] = True
+        observed[10::20] = False
+        expected_runs = 101
     rate = np.where(observed, np.sin(2 * np.pi * time) + 2.0, np.nan)
+    time = time + 1_700_000_000.0
     events = pd.DataFrame(
-        {"start_time": [0.50], "end_time": [0.56]},
+        {"start_time": [time[500]], "end_time": [time[560]]},
         index=pd.Index([1], name="event_number"),
     )
     key = {
@@ -547,6 +549,8 @@ def figurl_recording(gapped_mua, monkeypatch, dj_conn):
         "vv",
         SimpleNamespace(
             TimeseriesGraph=_RecordingTimeseriesGraph,
+            TGDataset=real_views.TGDataset,
+            TGSeries=real_views.TGSeries,
             LayoutItem=_StubLayoutItem,
             Box=_StubBox,
         ),
@@ -581,15 +585,32 @@ def figurl_recording(gapped_mua, monkeypatch, dj_conn):
         "rate_view": rate_view,
         "time": time,
         "observed": observed,
-        "gap": gap,
+        "expected_runs": expected_runs,
     }
+
+
+def _line_series(rate_view):
+    """Resolve serialized line datasets and restore their absolute clocks."""
+    view = rate_view.to_dict()
+    datasets = {data["name"]: data["data"] for data in view["datasets"]}
+    return [
+        {
+            "name": series["dataset"],
+            "title": series["title"],
+            "t": datasets[series["dataset"]]["t"].astype(float)
+            + view["timeOffset"],
+            "y": datasets[series["dataset"]]["y"],
+        }
+        for series in view["series"]
+        if series["type"] == "line"
+    ]
 
 
 def _rate_series(rate_view):
     """The line series carrying the plotted rate, not the threshold line."""
     return [
         series
-        for series in rate_view.line_series
+        for series in _line_series(rate_view)
         if series["name"].startswith("Z-Scored Multiunit Rate")
     ]
 
@@ -601,7 +622,7 @@ def test_figurl_rate_series_never_span_unobserved_time(figurl_recording):
     dt = np.median(np.diff(time))
     series = _rate_series(figurl_recording["rate_view"])
 
-    assert len(series) > 1  # the gapped fixture must produce a break
+    assert len(series) == figurl_recording["expected_runs"]
     for one in series:
         t = np.asarray(one["t"])
         assert t.size > 0
@@ -620,33 +641,38 @@ def test_figurl_rate_series_cover_exactly_the_observed_samples(
     series = _rate_series(figurl_recording["rate_view"])
 
     drawn = np.concatenate([np.asarray(one["t"]) for one in series])
-    np.testing.assert_array_equal(drawn, time[observed])
+    # float32 offsets preserve millisecond samples even on an epoch clock.
+    np.testing.assert_allclose(drawn, time[observed], rtol=0, atol=3e-7)
     assert np.all(np.isfinite(np.concatenate([one["y"] for one in series])))
 
 
 def test_figurl_series_names_are_unique(figurl_recording):
     """sortingview keys each series to a dataset by name, so two series
-    sharing a name would collide on one dataset. Every run is numbered,
-    including a lone one, so the names do not depend on the run count."""
-    rate_view = figurl_recording["rate_view"]
-    names = [one["name"] for one in rate_view.line_series] + [
-        one["name"] for one in rate_view.interval_series
-    ]
+    sharing a name would collide on one dataset."""
+    view = figurl_recording["rate_view"].to_dict()
+    names = [dataset["name"] for dataset in view["datasets"]]
 
     assert len(names) == len(set(names)), names
-    assert [one["name"] for one in _rate_series(rate_view)] == [
-        f"Z-Scored Multiunit Rate ({run_number})"
-        for run_number in range(1, len(_rate_series(rate_view)) + 1)
+    assert all(series["dataset"] in names for series in view["series"])
+
+
+def test_figurl_legend_has_one_rate_entry_regardless_of_gaps(figurl_recording):
+    """Fragmenting the recording must not grow the displayed legend."""
+    lines = _line_series(figurl_recording["rate_view"])
+    assert [line["title"] for line in lines if line["title"]] == [
+        "Z-Scored Multiunit Rate",
+        "Z-Score Threshold",
     ]
 
 
 def test_figurl_series_dtypes_follow_sortingview(figurl_recording):
-    """``y`` is float32; ``t`` stays float64 so TimeseriesGraph can take out
-    a shared time offset before downcasting, which is what keeps sub-sample
-    resolution on an absolute clock."""
-    for one in _rate_series(figurl_recording["rate_view"]):
-        assert np.asarray(one["y"]).dtype == np.float32
-        assert np.asarray(one["t"]).dtype == np.float64
+    """Serialized arrays are float32 with a shared absolute time offset."""
+    view = figurl_recording["rate_view"].to_dict()
+    assert view["timeOffset"] >= figurl_recording["time"][0]
+    for dataset in view["datasets"]:
+        if dataset["name"].startswith("Z-Scored Multiunit Rate"):
+            assert dataset["data"]["y"].dtype == np.float32
+            assert dataset["data"]["t"].dtype == np.float32
 
 
 def test_figurl_threshold_line_still_spans_the_whole_axis(figurl_recording):
@@ -654,9 +680,9 @@ def test_figurl_threshold_line_still_spans_the_whole_axis(figurl_recording):
     time = figurl_recording["time"]
     (threshold,) = [
         one
-        for one in figurl_recording["rate_view"].line_series
+        for one in _line_series(figurl_recording["rate_view"])
         if one["name"] == "Z-Score Threshold"
     ]
 
-    np.testing.assert_array_equal(np.asarray(threshold["t"]), time)
+    np.testing.assert_allclose(threshold["t"], time, rtol=0, atol=3e-7)
     assert np.all(np.asarray(threshold["y"]) == 2.0)

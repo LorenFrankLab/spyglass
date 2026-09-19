@@ -179,11 +179,11 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
 
         The rate is drawn as one line segment per contiguous observed run, so
         no segment spans unobserved time: a single series over the surviving
-        samples would join across each gap.
+        samples would join across each gap. All runs share one legend entry.
         """
         key = self.fetch1("KEY")
         speed = self.get_speed(key)
-        time = speed.index.to_numpy()
+        time = speed.index.to_numpy(dtype=np.float64)
         multiunit_firing_rate = np.asarray(
             self.get_firing_rate(key, time)
         ).squeeze()
@@ -210,16 +210,38 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         )
         plotted_rate = np.asarray(multiunit_firing_rate, dtype=np.float32)
         for run_number, run in enumerate(runs, start=1):
-            # Each series is keyed to its own dataset by name, so the runs
-            # are numbered rather than sharing one name. Numbering every run,
-            # including a lone one, keeps the legend names independent of how
-            # the recording happens to be split.
-            multiunit_firing_rate_view.add_line_series(
-                name=f"{name} ({run_number})",
-                t=np.asarray(time)[run],
-                y=plotted_rate[run],
-                color=mua_color,
-                width=1,
+            if run_number == 1:
+                # Let SortingView establish its shared time offset before
+                # downcasting timestamps, and give the rate one legend entry.
+                multiunit_firing_rate_view.add_line_series(
+                    name=name,
+                    t=time[run],
+                    y=plotted_rate[run],
+                    color=mua_color,
+                    width=1,
+                )
+                time_offset = multiunit_firing_rate_view.to_dict()["timeOffset"]
+                continue
+
+            # Dataset names must be unique; empty titles omit subsequent
+            # runs from the legend without joining their line segments.
+            dataset_name = f"{name} ({run_number})"
+            multiunit_firing_rate_view.add_dataset(
+                vv.TGDataset(
+                    name=dataset_name,
+                    data={
+                        "t": (time[run] - time_offset).astype(np.float32),
+                        "y": plotted_rate[run],
+                    },
+                )
+            )
+            multiunit_firing_rate_view.add_series(
+                vv.TGSeries(
+                    type="line",
+                    dataset=dataset_name,
+                    encoding={"t": "t", "y": "y"},
+                    attributes={"color": mua_color, "width": 1},
+                )
             )
         if zscore_mua:
             mua_params = (MuaEventsParameters & key).fetch1("mua_param_dict")
