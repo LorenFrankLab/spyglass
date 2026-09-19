@@ -158,6 +158,26 @@ def test_normalize_rejects_non_finite_locations(nan_locations):
         normalize_channel_locations(recording)
 
 
+def test_normalize_treats_all_non_finite_locations_as_absent():
+    """A group with NO usable coordinates is passed through, not rejected.
+
+    ``sort_group_geometry_problem`` maps an all-unpositioned group onto the
+    all-zero legacy geometry so the ``tetrode_12.5`` repair can rescue it, and
+    lets the run start. Raising here would fail that same group at make, after
+    preflight cleared it. Partial non-finite rows still raise (above): there
+    the repair does not apply and the missing contacts are a real defect.
+    """
+    recording = _probeless_recording(4)
+    all_nan = np.full((4, 3), np.nan)
+    recording.set_channel_locations(all_nan)
+
+    result = normalize_channel_locations(recording)
+
+    locations = np.asarray(result.get_property("location"), dtype=float)
+    assert locations.shape == (4, 3), "unusable geometry must be left alone"
+    assert np.isnan(locations).all()
+
+
 def test_normalize_on_channel_subset(xz_tetrode_locations):
     """Normalization runs on the sliced group, not the parent's channels."""
     recording = _probeless_recording(4)
@@ -239,6 +259,40 @@ def test_assert_unique_contact_positions_requires_all_distinct():
     single = _probeless_recording(1)
     single.set_channel_locations(np.array([[0.0, 0.0]]))
     assert assert_unique_contact_positions(single) is None
+
+
+def test_assert_unique_contact_positions_refuses_3d_locations():
+    """Still-3D locations fail at the gate, not later inside the writer.
+
+    ``select_sort_group_channels`` keeps a ``specific`` reference channel
+    through plane selection and ``apply_spatial_preprocessing`` drops it
+    afterwards, so a group can reach this point with its 3D locations intact
+    and an x-y projection that happens to be distinct. The writer refuses that
+    recording -- but only after the whole compute has run.
+    """
+    recording = _probeless_recording(4)
+    # x-y alone separates these four, so the coincidence check would pass.
+    recording.set_channel_locations(
+        np.array(
+            [
+                [0.0, 0.0, 6.25],
+                [0.0, 12.5, 6.25],
+                [12.5, 0.0, -6.25],
+                [12.5, 12.5, -6.25],
+            ]
+        )
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        assert_unique_contact_positions(recording)
+    message = str(excinfo.value)
+    assert "2D plane" in message
+    assert "Probe.Electrode" in message
+
+    # The analyzer path deliberately loads 3D artifacts (the writer persists
+    # rel_z, so ``NwbRecordingExtractor`` rebuilds a 3D ``location``) and
+    # projects them with ``probe.to_2d()``; it opts out of the 2D requirement.
+    assert assert_unique_contact_positions(recording, require_2d=False) is None
 
 
 def test_assert_unique_contact_positions_without_any_geometry():

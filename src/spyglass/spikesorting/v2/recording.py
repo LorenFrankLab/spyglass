@@ -1255,7 +1255,10 @@ class Recording(SpyglassMixin, dj.Computed):
        four-channel ``tetrode_12.5`` group whose stored positions are
        degenerate onto the 12.5 um square;
     7. ``assert_unique_contact_positions``, so the EFFECTIVE geometry -- what
-       SpikeInterface will build a probe from -- is checked last.
+       SpikeInterface will build a probe from -- is checked last: distinct
+       positions, and a plane rather than still-3D locations (a dropped
+       ``specific`` reference channel can leave the group unnormalized), so
+       the compute fails here rather than inside the write.
 
     Whitening is deferred to the sorter for the sorters that need it. It then
     streams one ``ElectricalSeries`` into a fresh

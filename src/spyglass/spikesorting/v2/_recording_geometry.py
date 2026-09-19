@@ -469,6 +469,13 @@ def normalize_channel_locations(recording):
     legacy all-zero geometry is repaired downstream by
     :func:`maybe_apply_tetrode_geometry`, and
     :func:`assert_unique_contact_positions` raises afterwards if it was not.
+    A set in which EVERY coordinate is non-finite is treated the same way --
+    as no usable geometry rather than as an error -- because that is exactly
+    what ``sort_group_geometry_problem`` clears at preflight (it maps such a
+    group onto the all-zero legacy geometry so the ``tetrode_12.5`` repair can
+    rescue it). Raising here would fail at make a group preflight passed.
+    PARTIAL non-finite rows still raise: the repair does not apply to them, so
+    the missing contacts are a defect no downstream step can fix.
 
     Parameters
     ----------
@@ -483,8 +490,8 @@ def normalize_channel_locations(recording):
     Raises
     ------
     ValueError
-        If a probe is already attached to ``recording``, or any 3D contact
-        position is non-finite (a NULL ``rel_*`` column).
+        If a probe is already attached to ``recording``, or SOME but not all
+        3D contact positions are non-finite (a NULL ``rel_*`` column).
     """
     import numpy as np
 
@@ -504,7 +511,14 @@ def normalize_channel_locations(recording):
     if locations is None or np.asarray(locations).shape[1] != 3:
         return recording
 
-    chosen = select_distinct_plane(recording.get_channel_locations(axes="xyz"))
+    positions_3d = recording.get_channel_locations(axes="xyz")
+    if not np.isfinite(np.asarray(positions_3d, dtype=float)).any():
+        # No coordinate at all is indistinguishable from an absent location
+        # property, and preflight clears exactly this case so the tetrode
+        # repair can run; ``select_distinct_plane`` would raise on it.
+        return recording
+
+    chosen = select_distinct_plane(positions_3d)
     if chosen is None:
         return recording
     axes, positions = chosen
@@ -518,7 +532,9 @@ def normalize_channel_locations(recording):
     return recording
 
 
-def assert_unique_contact_positions(recording) -> None:
+def assert_unique_contact_positions(
+    recording, *, require_2d: bool = True
+) -> None:
     """Require every contact to have a distinct 2D position.
 
     Reads ``get_channel_locations()`` -- the x-y projection of whatever is
@@ -527,16 +543,30 @@ def assert_unique_contact_positions(recording) -> None:
     the *effective* geometry is what is checked. Single-channel groups pass
     trivially.
 
+    With ``require_2d`` (the default) a recording whose ``location`` property
+    is STILL 3D is refused here rather than deep inside the artifact writer.
+    The recording stage can reach that state: a ``specific`` reference channel
+    takes part in plane selection and is dropped afterwards, so a group whose
+    contacts separate in no plane WITH the reference can end up 3D but
+    x-y-distinct without it -- which the coincidence check below waves through
+    and ``write_nwb_artifact`` then rejects, after the whole compute has run.
+
     Parameters
     ----------
     recording : si.BaseRecording
         The fully prepared recording, after normalization and any probe patch.
+    require_2d : bool, default True
+        Keyword-only. When False, 3D locations are projected to x-y for the
+        uniqueness check instead of being refused. Consumers that reload a
+        written artifact pass False: the writer persists ``rel_z``, so
+        ``NwbRecordingExtractor`` rebuilds a 3D ``location`` property for every
+        artifact, and those callers project it deliberately.
 
     Raises
     ------
     ValueError
-        If the recording carries no geometry at all, or if two or more
-        contacts share a 2D position.
+        If the recording carries no geometry at all, if ``require_2d`` and its
+        locations are still 3D, or if two or more contacts share a 2D position.
     """
     import numpy as np
 
@@ -551,6 +581,19 @@ def assert_unique_contact_positions(recording) -> None:
             "Recording.make: this recording carries no contact positions at "
             "all. Populate Probe.Electrode rel_x/rel_y/rel_z for this sort "
             "group's electrodes."
+        )
+    if (
+        require_2d
+        and recording.get_property("location") is not None
+        and recording.has_3d_locations()
+    ):
+        raise ValueError(
+            "Recording.make: this recording still carries 3D channel "
+            "locations; normalize them to a 2D plane before the artifact is "
+            "written (normalize_channel_locations). Check Probe.Electrode "
+            "rel_x/rel_y/rel_z for this sort group -- a reference channel "
+            "that takes part in plane selection and is dropped afterwards can "
+            "leave the group unnormalized."
         )
     positions = np.asarray(recording.get_channel_locations(), dtype=float)
     if len(positions) > 1 and not _all_rows_distinct(positions):

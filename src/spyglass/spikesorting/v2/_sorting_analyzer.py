@@ -840,13 +840,17 @@ def build_analyzer(
     # ``get_channel_locations()``, which is the x-y projection SpikeInterface
     # will use and does NOT construct a probe, so it can run first. It also
     # catches a 3D probe whose contacts are distinct in 3D but collapse under
-    # the ``to_2d()`` projection below.
+    # the ``to_2d()`` projection below. ``require_2d=False``: the artifact
+    # writer persists ``rel_z``, so ``NwbRecordingExtractor`` rebuilds a 3D
+    # ``location`` property for EVERY reloaded artifact -- this path projects
+    # it deliberately (``probe.to_2d()`` below), unlike the recording stage,
+    # which must refuse a recording it never normalized.
     from spyglass.spikesorting.v2._recording_geometry import (
         assert_unique_contact_positions,
     )
 
     try:
-        assert_unique_contact_positions(recording)
+        assert_unique_contact_positions(recording, require_2d=False)
     except ValueError as exc:
         raise ValueError(
             "build_analyzer: cannot build a SortingAnalyzer for sorting_id="
