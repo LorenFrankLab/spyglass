@@ -640,6 +640,50 @@ def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     )
 
 
+def _flatten_planar_geometry(recording) -> None:
+    """Drop the constant third coordinate from a stitched recording, in place.
+
+    Member artifacts are read back from NWB, and SpikeInterface builds a 3D
+    ``location`` property whenever the electrodes table carries ``rel_z``
+    (``NwbRecordingExtractor._fetch_locations_and_groups``) -- which it always
+    does for an artifact ``write_nwb_artifact`` produced. That writer persists
+    the members' NORMALIZED 2D geometry with a constant ``rel_z = 0``, so the
+    x-y columns already ARE the geometry the members were sorted with. Making
+    that explicit here keeps every downstream consumer -- motion estimation,
+    the artifact mask, and the concat writer, which REFUSES 3D locations
+    rather than silently projecting them -- on one unambiguous plane.
+
+    No-op when the locations are already 2D or absent (a bare synthetic
+    recording in a test).
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The stitched recording, before motion correction.
+
+    Raises
+    ------
+    ValueError
+        If the third coordinate is not constant across contacts: the members
+        were never reduced to a plane, so dropping z would move contacts.
+    """
+    import numpy as np
+
+    locations = recording.get_property("location")
+    if locations is None or np.asarray(locations).shape[1] != 3:
+        return
+    locations = np.asarray(locations, dtype=float)
+    if len(np.unique(np.round(locations[:, 2], 6))) != 1:
+        raise ValueError(
+            "build_concatenated_recording: the member recordings' contacts "
+            "are not planar -- their third coordinate varies "
+            f"(rel_z={locations[:, 2].tolist()}), so it cannot be dropped. "
+            "These artifacts predate geometry normalization; re-populate the "
+            "member Recording rows before concatenating them."
+        )
+    recording.set_channel_locations(locations[:, :2])
+
+
 def build_concatenated_recording(
     recordings: list,
     *,
@@ -693,6 +737,7 @@ def build_concatenated_recording(
     assert_concat_compatible(recordings)
 
     concatenated = concatenate_recordings(recordings, ignore_times=True)
+    _flatten_planar_geometry(concatenated)
     if motion_preset is None:
         return concatenated
 

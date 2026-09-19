@@ -201,9 +201,11 @@ def _ensure_relative_position_columns(nwbfile) -> None:
     verbatim, so a parent written without probe-relative contact positions
     yields an analysis file with nowhere to put the normalized geometry.
     hdmf 4.3 accepts a new column on a table that was already written (the
-    file is open in append mode), so the missing columns are created here --
-    zero-filled for every row -- BEFORE ``io.write``. The post-write pass then
-    fills the rows the ElectricalSeries actually references.
+    file is open in append mode), so the missing columns are created here
+    BEFORE ``io.write``. The post-write pass then fills the rows the
+    ElectricalSeries actually references; every other row is left ``NaN``,
+    which records "no geometry known for this contact" rather than asserting
+    a contact at the origin.
 
     Parameters
     ----------
@@ -221,7 +223,7 @@ def _ensure_relative_position_columns(nwbfile) -> None:
                 f"the {column[-1]} coordinate of this contact relative to "
                 "the probe, in micrometers"
             ),
-            data=[0.0] * n_rows,
+            data=[float("nan")] * n_rows,
         )
 
 
@@ -233,7 +235,8 @@ def _persist_channel_geometry(
     Writes ``rel_x``/``rel_y`` from the recording's 2D channel locations and
     ``rel_z = 0`` into the electrodes-table rows the ElectricalSeries
     references, then reads them back and verifies them. Rows outside the
-    region keep whatever the parent NWB held.
+    region keep whatever the parent NWB held -- or ``NaN``, when the column
+    was created here because the parent carried no contact positions at all.
 
     This runs after ``io.write`` (the ElectricalSeries and its region are on
     disk) and before the content fingerprint, which hashes exactly these rows.
@@ -326,8 +329,11 @@ def write_nwb_artifact(
     reload's x-y projection is exactly the geometry the sort saw. SpikeInterface
     rebuilds channel locations from those columns, so persisting the parent
     NWB's raw 3D coordinates instead would let an x-z probe collapse back into
-    coincident contacts on every read. Rows outside the series region are left
-    untouched.
+    coincident contacts on every read. A recording whose locations are still 3D
+    is REFUSED rather than projected: the caller must normalize it to a plane
+    first. Rows outside the series region keep the parent NWB's values, or
+    ``NaN`` where a ``rel_*`` column had to be created because the parent
+    carried none.
 
     Returns ``(analysis_file_name, electrical_series_object_id,
     content_hash)``. The ``content_hash`` is the
@@ -415,6 +421,39 @@ def write_nwb_artifact(
         # gain or a missing offset cannot silently corrupt the scaling.
         conversion, es_offset = resolve_conversion_and_offset(recording)
 
+        # Geometry preconditions, settled before anything streams: the
+        # electrodes rows this write stamps are what SpikeInterface rebuilds a
+        # reloaded recording's channel locations from, so a recording with no
+        # geometry -- or with geometry that has not been reduced to a plane --
+        # must not reach the write at all.
+        #
+        # ``get_channel_locations()`` defaults to ``axes="xy"``, so a still-3D
+        # recording would be silently PROJECTED rather than rejected, and the
+        # persisted x-y projection of an x-z probe is exactly the collapse the
+        # normalization exists to prevent. Reject it here rather than rely on
+        # the caller: ``Recording.make_compute`` normalizes and asserts
+        # distinct positions upstream, but the concatenated-recording writer
+        # assembles its recording from reloaded member artifacts and has no
+        # such upstream check.
+        if not recording.has_channel_location():
+            raise ValueError(
+                "write_nwb_artifact: the recording carries no contact "
+                "positions, so the artifact would persist no geometry. "
+                "Populate Probe.Electrode rel_x/rel_y/rel_z for this sort "
+                "group's electrodes."
+            )
+        if (
+            recording.get_property("location") is not None
+            and recording.has_3d_locations()
+        ):
+            raise ValueError(
+                "write_nwb_artifact: the recording still carries 3D channel "
+                "locations; normalize them to a 2D plane before writing "
+                "(normalize_channel_locations). Persisting SpikeInterface's "
+                "default x-y projection of a 3D geometry would silently "
+                "collapse contacts that are distinct only in z."
+            )
+
         # The data iterator drives ``recording.get_traces(...)``
         # per chunk and never materializes the whole array. The
         # timestamps iterator wraps a 1D vector; resolve through
@@ -485,18 +524,13 @@ def write_nwb_artifact(
         # 3D coordinates -- an x-z tetrode collapses again under SI's x-y
         # projection and the in-memory normalization is lost. Before the
         # fingerprint below, which hashes these same rows as the artifact's
-        # geometry component.
-        if not recording.has_channel_location():
-            raise ValueError(
-                "write_nwb_artifact: the recording carries no contact "
-                "positions, so the artifact would persist no geometry. "
-                "Populate Probe.Electrode rel_x/rel_y/rel_z for this sort "
-                "group's electrodes."
-            )
+        # geometry component. ``axes="xy"`` is explicit: the guards above
+        # already established that these locations ARE 2D, so this is an
+        # identity selection, not a projection.
         _persist_channel_geometry(
             analysis_abs_path,
             geometry_rows,
-            recording.get_channel_locations(),
+            recording.get_channel_locations(axes="xy"),
         )
 
         # Fingerprint the persisted file (read back from the known abs path,

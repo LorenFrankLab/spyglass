@@ -181,6 +181,13 @@ def test_fingerprint_geometry_parity(tmp_path):
     """The persisted-region geometry hash equals one recomputed from
     SpikeInterface ``get_channel_locations`` for an unperturbed file -- pinning
     the SI readback surface as parity, not as the canonical fingerprint source.
+
+    Note that the parity holds here because this fixture's electrodes table
+    carries only ``rel_x``/``rel_y``. A real artifact written by
+    ``write_nwb_artifact`` always carries all three ``rel_*`` columns, so its
+    fingerprint geometry is ``(n_channels, 3)`` (with a constant ``rel_z = 0``)
+    while SI's reload projects to ``(n_channels, 2)``; the two are then
+    equivalent geometries, not equal arrays.
     """
     import spikeinterface.extractors as se
 

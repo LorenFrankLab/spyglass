@@ -488,15 +488,16 @@ def _replay(recording, requests, *, return_in_uV=True):
 
 @pytest.mark.slow
 @pytest.mark.database
+@pytest.mark.pipeline
 def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
     """The artifact reproduces the recording the writer was handed -- and so
     does the rebuild that replaces a deleted artifact.
 
     Pins the whole persisted surface, not just the traces: the wall-clock
     timestamps, the channel-id order, the normalized 2D geometry, and the
-    microvolt values. The geometry assertion is the one this dispatch adds --
-    SpikeInterface rebuilds channel locations from the persisted electrodes
-    rows, so an un-persisted normalization shows up here as an x-y collapse.
+    microvolt values. SpikeInterface rebuilds channel locations from the
+    persisted electrodes rows, so an un-persisted normalization shows up here
+    as an x-y collapse.
 
     The microvolt reference is read from the pre-write lazy recording at the
     writer's OWN chunk boundaries. A single whole-recording request is not a
@@ -823,7 +824,7 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     normalized geometry nowhere to land. hdmf accepts a new column on a table
     that is already on disk (the file is open in append mode), which is what
     the writer relies on; this pins that, and that only the referenced rows
-    end up non-zero.
+    end up with a position at all -- every other row stays ``NaN``.
 
     Exercises the two file-level helpers directly: they touch no database, and
     the branch is unreachable from the Frank-lab-shaped fixtures above (their
@@ -870,7 +871,63 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     np.testing.assert_array_equal(
         persisted[rows], np.column_stack([locations, np.zeros(len(rows))])
     )
+    # Rows the series does not reference stay NaN: the created columns record
+    # "no geometry known here", not a contact sitting at the origin.
     untouched = [i for i in range(len(_SMALL_ELECTRODE_IDS)) if i not in rows]
-    np.testing.assert_array_equal(
-        persisted[untouched], np.zeros((len(untouched), 3))
+    assert np.isnan(persisted[untouched]).all()
+
+
+# ---------------------------------------------------------------------------
+# 5. Unnormalized 3D geometry is refused, not projected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.database
+def test_write_refuses_unnormalized_3d_geometry(xz_probe_session):
+    """A recording whose channel locations are still 3D is rejected before the
+    write, rather than having SpikeInterface's default x-y projection
+    persisted for it.
+
+    ``get_channel_locations()`` defaults to ``axes="xy"``, so a 3D recording
+    does not fail -- it silently loses z. For the x-z geometry these fixtures
+    carry, that projection is exactly the contact collapse normalization
+    exists to prevent, and the concatenated-recording writer has no upstream
+    ``assert_unique_contact_positions`` to catch it. The refusal is what makes
+    the writer safe for that second caller.
+    """
+    import spikeinterface.core as si_core
+
+    from spyglass.settings import analysis_dir
+    from spyglass.spikesorting.v2.recording import Recording
+
+    channel_ids = list(_SMALL_GROUP_IDS)
+    raw_geometry = _xz_geometry(_SMALL_CONTACTS)
+    recording = si_core.NumpyRecording(
+        [np.zeros((200, len(channel_ids)), dtype=np.int16)],
+        sampling_frequency=_SAMPLING_FREQUENCY,
+        channel_ids=channel_ids,
     )
+    recording.set_channel_gains(_GAIN_UV_PER_COUNT)
+    recording.set_channel_offsets(_OFFSET_UV)
+    recording.set_property(
+        "location", np.array([raw_geometry[eid] for eid in channel_ids])
+    )
+    assert recording.has_3d_locations()
+    # Distinct in x-z, coincident in the x-y projection SI would take.
+    assert len(np.unique(recording.get_channel_locations(), axis=0)) < len(
+        channel_ids
+    )
+
+    nwb_file_name = xz_probe_session["nwb_file_name"]
+    staged_dir = Path(analysis_dir) / Path(nwb_file_name).stem
+    before = set(staged_dir.glob("*.nwb"))
+    with pytest.raises(ValueError, match="still carries 3D channel locations"):
+        Recording._write_nwb_artifact(
+            recording,
+            nwb_file_name,
+            filtering_description="3D geometry probe",
+        )
+    assert (
+        set(staged_dir.glob("*.nwb")) == before
+    ), "the refused write must not leave a staged artifact behind"
