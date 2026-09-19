@@ -24,7 +24,9 @@ inherently touch the DB / DataJoint at CALL time via lazy imports:
 ``spikeinterface_channel_ids`` (an ``Nwbfile`` path resolution),
 ``fetch_sort_group_probe_info`` (an ``Electrode * Probe`` fetch), and
 ``fetch_interior_bad_channel_ids`` (an ``Electrode * Probe.Electrode`` fetch).
-``maybe_apply_tetrode_geometry`` and the pitch/adjacency helpers
+``maybe_apply_tetrode_geometry``, the plane-normalization helpers
+(``select_distinct_plane``, ``normalize_channel_locations``,
+``assert_unique_contact_positions``) and the pitch/adjacency helpers
 (``_shank_pitch``, ``_interior_bad_channel_ids``) are pure.
 """
 
@@ -250,6 +252,192 @@ def maybe_apply_tetrode_geometry(
     tetrode.set_contact_ids([str(c) for c in sort_group_channel_ids])
     tetrode.set_device_channel_indices(np.arange(4))
     return recording.set_probe(tetrode, in_place=True)
+
+
+# Axis pairs tried, in order, when reducing 3D contact positions to the plane
+# SpikeInterface will actually use. ``x-y`` first because that is what
+# probeinterface's ``select_axes`` default gives, so a genuinely planar x-y
+# probe is never re-projected.
+_CANDIDATE_PLANES = ("xy", "xz", "yz")
+
+# Coordinates are micrometres read from ``Probe.Electrode`` ``rel_*`` columns
+# (``float``, i.e. single precision in DataJoint); 6 decimals is far below the
+# smallest real contact pitch and above float32 representation noise, so
+# rounding here decides "same contact" without float equality surprises.
+_POSITION_DECIMALS = 6
+
+
+def _all_rows_distinct(positions) -> bool:
+    """True when no two rows of ``positions`` coincide (to 6 decimals)."""
+    import numpy as np
+
+    rounded = np.round(np.asarray(positions, dtype=float), _POSITION_DECIMALS)
+    return len(np.unique(rounded, axis=0)) == len(rounded)
+
+
+def select_distinct_plane(locations):
+    """Pick the axis pair in which every contact has a distinct position.
+
+    SpikeInterface reduces 3D channel locations to 2D whenever it builds a
+    probe -- ``create_dummy_probe_from_locations`` calls
+    ``probeinterface.select_axes(locations, axes)`` with ``axes="xy"`` -- and
+    a probe with two contacts at the same position is rejected. Real
+    Frank-lab tetrodes lie in the x-z plane (``rel_y`` constant), so their x-y
+    projection collapses pairs of contacts; this picks x-z instead.
+
+    Parameters
+    ----------
+    locations : array_like
+        ``(n_contacts, 3)`` contact positions, in the ``Probe.Electrode``
+        ``(rel_x, rel_y, rel_z)`` order.
+
+    Returns
+    -------
+    tuple of (str, numpy.ndarray) or None
+        The chosen axis pair (``"xy"``, ``"xz"`` or ``"yz"``) and the
+        corresponding ``(n_contacts, 2)`` positions, preferring ``"xy"``.
+        ``None`` when no pair separates every contact -- including the
+        all-zero legacy geometry, where no projection can.
+
+    Raises
+    ------
+    ValueError
+        If ``locations`` is not ``(n_contacts, 3)``, or any coordinate is
+        non-finite.
+    """
+    import numpy as np
+
+    loc = np.asarray(locations, dtype=float)
+    if loc.ndim != 2 or loc.shape[1] != 3:
+        raise ValueError(
+            "select_distinct_plane: expected an (n_contacts, 3) array of "
+            f"contact positions, got shape {loc.shape}"
+        )
+    # ``rel_x/rel_y/rel_z`` are nullable, so a NULL arrives as NaN. NaN rows
+    # compare as distinct under np.unique, which would let a NaN plane win and
+    # sail through assert_unique_contact_positions into a probe build. Same
+    # finiteness screen ``_shank_pitch`` applies below.
+    if not np.isfinite(loc).all():
+        bad = np.flatnonzero(~np.isfinite(loc).all(axis=1))
+        raise ValueError(
+            "select_distinct_plane: contact positions must be finite, but "
+            f"row(s) {bad.tolist()} are {loc[bad].tolist()}. Populate "
+            "Probe.Electrode rel_x/rel_y/rel_z for this sort group."
+        )
+    for axes in _CANDIDATE_PLANES:
+        positions = loc[:, ["xyz".index(axis) for axis in axes]]
+        if _all_rows_distinct(positions):
+            return axes, positions
+    return None
+
+
+def normalize_channel_locations(recording):
+    """Reduce 3D channel locations to the distinct 2D plane, in place.
+
+    Runs at the recording stage on the channel-sliced recording -- so a group
+    whose bad channels were removed is normalized on the channels it actually
+    contains -- and *before* any probe exists, because SpikeInterface's
+    ``set_channel_locations`` refuses to write locations once a
+    ``contact_vector`` is attached (it would silently desynchronize the probe
+    from the property). Nothing here builds a probe.
+
+    A recording whose locations are already 2D, or that carries no ``location``
+    property at all, is returned untouched. So is one no plane separates: the
+    legacy all-zero geometry is repaired downstream by
+    :func:`maybe_apply_tetrode_geometry`, and
+    :func:`assert_unique_contact_positions` raises afterwards if it was not.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The channel-sliced recording, with no probe attached.
+
+    Returns
+    -------
+    si.BaseRecording
+        The same recording, with 2D channel locations when a plane was chosen.
+
+    Raises
+    ------
+    ValueError
+        If a probe is already attached to ``recording``, or any 3D contact
+        position is non-finite (a NULL ``rel_*`` column).
+    """
+    import numpy as np
+
+    from spyglass.utils import logger
+
+    if recording.get_property("contact_vector") is not None:
+        raise ValueError(
+            "normalize_channel_locations: a probe is already attached to this "
+            "recording, so its channel locations can no longer be rewritten. "
+            "Normalize the geometry before any probe is built (before "
+            "set_probe / get_probe / create_sorting_analyzer)."
+        )
+    # get_channel_locations() raises when there is no location property, and
+    # axes="xyz" on a 2D property indexes out of bounds, so the property
+    # itself is the ndim test.
+    locations = recording.get_property("location")
+    if locations is None or np.asarray(locations).shape[1] != 3:
+        return recording
+
+    chosen = select_distinct_plane(recording.get_channel_locations(axes="xyz"))
+    if chosen is None:
+        return recording
+    axes, positions = chosen
+    if axes != "xy":
+        logger.info(
+            "normalize_channel_locations: contacts are not distinct in x-y; "
+            "using the %s plane for this sort group",
+            axes,
+        )
+    recording.set_channel_locations(positions)
+    return recording
+
+
+def assert_unique_contact_positions(recording) -> None:
+    """Require every contact to have a distinct 2D position.
+
+    Reads ``get_channel_locations()`` -- the x-y projection of whatever is
+    attached, probe or bare property -- because that is the geometry
+    SpikeInterface will hand to ``create_sorting_analyzer``. Run this last, so
+    the *effective* geometry is what is checked. Single-channel groups pass
+    trivially.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The fully prepared recording, after normalization and any probe patch.
+
+    Raises
+    ------
+    ValueError
+        If the recording carries no geometry at all, or if two or more
+        contacts share a 2D position.
+    """
+    import numpy as np
+
+    # get_channel_locations raises a bare Exception("There are no channel
+    # locations") when neither a probe nor a location property is present;
+    # answer that case here so the operator gets the same actionable message.
+    if (
+        recording.get_property("contact_vector") is None
+        and recording.get_property("location") is None
+    ):
+        raise ValueError(
+            "Recording.make: this recording carries no contact positions at "
+            "all. Populate Probe.Electrode rel_x/rel_y/rel_z for this sort "
+            "group's electrodes."
+        )
+    positions = np.asarray(recording.get_channel_locations(), dtype=float)
+    if len(positions) > 1 and not _all_rows_distinct(positions):
+        raise ValueError(
+            "Recording.make: contacts share a 2D position after geometry "
+            f"normalization (locations={positions.tolist()}). Fix "
+            "Probe.Electrode rel_x/rel_y/rel_z for this sort group; the "
+            "tetrode_12.5 repair applies only to 4-channel single-group "
+            "tetrodes."
+        )
 
 
 # Pitch-anchored adjacency for the ``interpolate`` re-inclusion. Constants are
