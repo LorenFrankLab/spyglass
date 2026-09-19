@@ -309,6 +309,31 @@ def test_merge_indicator_no_matching_member(merge_table, plant_members):
     assert merge_table.get_firing_rate({}, time).shape == (10, 0)
 
 
+def test_merge_firing_rate_splits_a_jump_with_every_bin_observed(
+    merge_table, plant_members
+):
+    """A fully observed merge still splits smoothing at a timestamp jump.
+
+    The observed span covers the whole axis, so every bin is valid and the
+    validity mask gives no reason to split; only the six-second clock jump
+    does. Smoothing the whole axis would bleed the single spike across it.
+    """
+    time = np.r_[np.arange(4.0), 10.0 + np.arange(4.0)]
+    plant_members([_v2("v2-a", [[0, 14]], {1: [1.0]})])
+
+    indicator, valid = merge_table.get_spike_indicator(
+        {}, time, return_validity=True
+    )
+    assert valid.all()
+    assert np.flatnonzero(indicator[:, 0] == 1).tolist() == [1]
+
+    rate = merge_table.get_firing_rate({}, time, smoothing_sigma=2)
+
+    assert np.isfinite(rate).all()
+    assert rate[:4, 0].sum() > 0
+    assert rate[4:, 0].tolist() == [0.0] * 4
+
+
 def test_merge_observation_failure_names_the_merge(
     merge_table, plant_members, monkeypatch
 ):

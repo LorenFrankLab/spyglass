@@ -187,6 +187,40 @@ def test_group_smoothing_stops_at_a_timestamp_jump(common, monkeypatch):
     assert np.isnan(rate[8:, 0]).all()
 
 
+def test_group_smoothing_splits_a_jump_with_every_bin_observed(
+    common, monkeypatch
+):
+    """A fully observed population still splits at a timestamp jump.
+
+    Every bin here is inside the observed span, so a validity mask alone
+    offers no reason to split; only the clock jump does. Smoothing the whole
+    axis would carry the single spike across six seconds of missing samples.
+    """
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
+    time = np.r_[np.arange(4.0), 10.0 + np.arange(4.0)]
+    monkeypatch.setattr(
+        SortedSpikesGroup,
+        "get_observation_intervals",
+        lambda key, **kwargs: ObservationAvailability(np.array([[0.0, 14.0]])),
+    )
+    monkeypatch.setattr(
+        SortedSpikesGroup,
+        "fetch_spike_data",
+        lambda key, return_unit_ids: ([np.array([1.0])], [{"unit_id": 1}]),
+    )
+
+    counts, valid = SortedSpikesGroup.get_spike_indicator(
+        {}, time, return_validity=True
+    )
+    assert counts[1, 0] == 1
+    assert valid.all()
+
+    rate = SortedSpikesGroup.get_firing_rate({}, time, smoothing_sigma=2)
+    assert rate[:4, 0].sum() > 0
+    assert rate[4:, 0].tolist() == [0.0] * 4
+
+
 def test_shared_masks_are_stored_once_and_keep_original_fingerprint(
     monkeypatch,
 ):

@@ -16,6 +16,7 @@ from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.spikesorting import (
     contiguous_observed_runs,
     firing_rate_from_spike_indicator,
+    firing_rate_over_runs,
 )
 
 schema = dj.schema("spikesorting_group_v1")
@@ -671,10 +672,19 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if return_unit_ids is True, returns a list of dictionaries with
             keys 'spikesorting_merge_id' and 'unit_number' for each unit
         """
+        time = np.asarray(time)
         spike_indicator, unit_ids, valid = cls.get_spike_indicator(
             key, time, return_unit_ids=True, return_validity=True
         )
-        if valid.all():
+        # Smooth each observed run separately, never through an artifact. The
+        # shared splitter ends a run at a timestamp jump as well as at an
+        # unobserved sample, so a discontinuous time axis is not smoothed
+        # across even when every bin is observed, and the MUA detector and
+        # this accessor agree on what a run is.
+        runs = contiguous_observed_runs(
+            time, valid, 1 / np.median(np.diff(time))
+        )
+        if len(runs) == 1 and runs[0].size == time.size:
             firing_rate = firing_rate_from_spike_indicator(
                 spike_indicator=spike_indicator,
                 time=time,
@@ -682,30 +692,13 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 smoothing_sigma=smoothing_sigma,
             )
         else:
-            from ripple_detection import get_multiunit_population_firing_rate
-
-            # Smooth each observed run separately, never through an artifact.
-            # The shared splitter also ends a run at a timestamp jump, so a
-            # discontinuous time axis is not smoothed across either, and the
-            # MUA detector and this accessor agree on what a run is.
-            counts = (
-                spike_indicator.sum(axis=1, keepdims=True)
-                if multiunit
-                else spike_indicator
+            firing_rate = firing_rate_over_runs(
+                spike_indicator,
+                time,
+                runs,
+                multiunit=multiunit,
+                smoothing_sigma=smoothing_sigma,
             )
-            firing_rate = np.full(counts.shape, np.nan)
-            sampling_frequency = 1 / np.median(np.diff(time))
-            for run in contiguous_observed_runs(
-                time, valid, sampling_frequency
-            ):
-                for unit in range(counts.shape[1]):
-                    firing_rate[run, unit] = (
-                        get_multiunit_population_firing_rate(
-                            counts[run, unit, np.newaxis],
-                            sampling_frequency,
-                            smoothing_sigma,
-                        )
-                    )
         if return_unit_ids:
             return firing_rate, unit_ids
         return firing_rate

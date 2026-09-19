@@ -3,7 +3,6 @@ from typing import Union
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
-from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (
@@ -22,6 +21,7 @@ from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import (
     contiguous_observed_runs,
     firing_rate_from_spike_indicator,
+    firing_rate_over_runs,
 )
 
 
@@ -931,31 +931,27 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             time-dependent firing rate with shape (len(time), n_units).
             Bins no contributing unit was observed over hold ``np.nan``, and
             smoothing is applied within each contiguous observed run, so no
-            rate is carried across unobserved time.
+            rate is carried across unobserved time or across a jump in the
+            time axis of more than 1.5 sample periods.
         """
+        time = np.asarray(time)
         spike_indicator, valid = cls.get_spike_indicator(
             key, time, return_validity=True
         )
-        if valid.all():
+        runs = contiguous_observed_runs(
+            time, valid, 1 / np.median(np.diff(time))
+        )
+        if len(runs) == 1 and runs[0].size == time.size:
             return firing_rate_from_spike_indicator(
                 spike_indicator=spike_indicator,
                 time=time,
                 multiunit=multiunit,
                 smoothing_sigma=smoothing_sigma,
             )
-
-        counts = (
-            spike_indicator.sum(axis=1, keepdims=True)
-            if multiunit
-            else spike_indicator
+        return firing_rate_over_runs(
+            spike_indicator,
+            time,
+            runs,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )
-        firing_rate = np.full(counts.shape, np.nan)
-        sampling_frequency = 1 / np.median(np.diff(time))
-        for run in contiguous_observed_runs(time, valid, sampling_frequency):
-            for unit in range(counts.shape[1]):
-                firing_rate[run, unit] = get_multiunit_population_firing_rate(
-                    counts[run, unit, np.newaxis],
-                    sampling_frequency,
-                    smoothing_sigma,
-                )
-        return firing_rate

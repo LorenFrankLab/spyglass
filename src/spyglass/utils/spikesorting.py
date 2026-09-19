@@ -74,3 +74,60 @@ def contiguous_observed_runs(
     )
 
     return np.split(observed, np.flatnonzero(breaks) + 1)
+
+
+def firing_rate_over_runs(
+    spike_indicator: np.ndarray,
+    time: np.ndarray,
+    runs: list[np.ndarray],
+    multiunit: bool = False,
+    smoothing_sigma: float = 0.015,
+) -> np.ndarray:
+    """Smooth spike counts within each contiguous observed run.
+
+    Every sample outside the given runs holds ``np.nan``: it is time the
+    units were not observed over, or time the clock skipped, so no rate is
+    defined there and none is carried across it. Pass the runs from
+    ``contiguous_observed_runs`` so the smoothing splits wherever that
+    splitter says a run ends.
+
+    Parameters
+    ----------
+    spike_indicator : np.ndarray, shape (n_time,) or (n_time, n_units)
+        Per-bin spike counts. Samples outside ``runs`` are never read, so
+        they may hold ``np.nan``.
+    time : np.ndarray, shape (n_time,)
+        Bin times, ascending. Only the median sample period is used.
+    runs : list of np.ndarray
+        One integer index array per contiguous run, in time order.
+    multiunit : bool, optional
+        If True, sum the units into one population rate, by default False.
+    smoothing_sigma : float, optional
+        Standard deviation of the Gaussian smoother in seconds, by default
+        0.015.
+
+    Returns
+    -------
+    np.ndarray, shape (n_time, n_units) or (n_time, 1) when ``multiunit``
+        Firing rate in spikes/second, ``np.nan`` outside ``runs``.
+    """
+    spike_indicator = np.asarray(spike_indicator, dtype=float)
+    if spike_indicator.ndim == 1:
+        spike_indicator = spike_indicator[:, np.newaxis]
+
+    counts = (
+        spike_indicator.sum(axis=1, keepdims=True)
+        if multiunit
+        else spike_indicator
+    )
+    sampling_frequency = 1 / np.median(np.diff(time))
+
+    firing_rate = np.full(counts.shape, np.nan)
+    for run in runs:
+        for unit in range(counts.shape[1]):
+            firing_rate[run, unit] = get_multiunit_population_firing_rate(
+                counts[run, unit, np.newaxis],
+                sampling_frequency,
+                smoothing_sigma,
+            )
+    return firing_rate
