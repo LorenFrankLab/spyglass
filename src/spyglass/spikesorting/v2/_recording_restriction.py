@@ -1,6 +1,8 @@
 """Time/channel restriction + truncation-guard arithmetic behind ``Recording``.
 
-These functions slice the raw recording in time and channels for
+These functions slice the raw recording in channels
+(``select_sort_group_channels``, run before any temporal preprocessing) and in
+time (``restrict_recording``, run after it) for
 ``Recording.make_compute`` (and the rebuild path), and resolve the
 intended-vs-requested save durations and the sample-grid tolerance that the
 ``make_insert`` truncation / over-request guards compare against. The table
@@ -21,8 +23,9 @@ DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / spyglass dependencies are
 imported lazily inside the functions. ``restrict_recording`` touches the DB at
 CALL time via its lazy ``Interval`` import (which opens a DB connection on
-import) and the lazy ``spikeinterface_channel_ids`` it calls (an ``Nwbfile``
-path resolution in ``_recording_geometry``). The duration arithmetic
+import), and ``select_sort_group_channels`` via the lazy
+``spikeinterface_channel_ids`` it calls (an ``Nwbfile`` path resolution in
+``_recording_geometry``). The duration arithmetic
 (``truncation_tolerance``, ``compute_recording_save_expectation``) is pure.
 """
 
@@ -498,23 +501,22 @@ def restrict_recording(
     recording,
     nwb_file_name: str,
     interval_list_name: str,
-    sort_group_channel_ids: list,
-    reference_mode: str,
-    reference_electrode_id: int | None,
     sort_valid_times,
     raw_valid_times,
     *,
     min_segment_length: float = 1.0,
-    bad_channel_handling: str = "remove",
-    bad_channel_ids=(),
 ):
-    """Slice the SI recording in time and channels.
+    """Slice the SI recording in time.
+
+    Channel selection is a separate step
+    (:func:`select_sort_group_channels`) that runs BEFORE any temporal
+    preprocessing, so the bandpass filter sees the continuous source; this
+    function then restricts that filtered recording in time.
 
     Returns ``(recording, timestamps_override, n_selected_intervals)``:
 
-    - ``recording`` is the time- and channel-restricted SI
-      recording. A single selected interval yields a
-      ``frame_slice``; several yield
+    - ``recording`` is the time-restricted SI recording. A single
+      selected interval yields a ``frame_slice``; several yield
       ``concatenate_recordings(sliced)``.
     - ``timestamps_override`` is the persisted wall-clock timestamp
       vector -- lazy affine values for regular clocks, bounded source reads
@@ -531,34 +533,17 @@ def restrict_recording(
       the multi-interval gap envelope never feeds the truncation
       guard (which needs the gap-excluded span).
 
-    The reference channel is included in the slice when it is
-    a positive electrode id so ``common_reference`` can
-    subtract it; it is dropped after referencing in
-    ``apply_pre_motion_preprocessing``.
-
-    Uses ``ChannelSliceRecording`` directly because SI 0.104
-    dropped the ``recording.channel_slice(...)`` method; the
-    constructor accepts the same kwargs.
-
     Parameters
     ----------
     recording : si.BaseRecording
-        The full-source SI recording to slice in time and channels.
+        The channel-sliced, temporally preprocessed SI recording to
+        slice in time.
     nwb_file_name : str
-        Parent NWB filename, used to resolve SpikeInterface channel
-        ids for the requested electrode ids.
+        Parent NWB filename; used only in the error message raised
+        when the intersection is empty.
     interval_list_name : str
         Name of the sort interval list; used only in the error
         message raised when the intersection is empty.
-    sort_group_channel_ids : list
-        Spyglass electrode ids of the sort group's declared members.
-    reference_mode : str
-        One of ``"none"``, ``"global_median"``, or ``"specific"``.
-        On ``"specific"`` the reference electrode is sliced in for
-        later subtraction.
-    reference_electrode_id : int or None
-        Electrode id of the ``"specific"`` reference; ignored for the
-        other reference modes.
     sort_valid_times, raw_valid_times
         ``(n, 2)`` ndarrays of [start, end] seconds for the sort
         interval and the raw-data valid times. Fetched by
@@ -567,21 +552,8 @@ def restrict_recording(
     min_segment_length : float, optional
         Drop intersected sub-intervals shorter than this many seconds
         before slicing. Default ``1.0``.
-    bad_channel_handling : str, optional
-        ``"remove"`` (default) or ``"interpolate"``. On
-        ``"interpolate"`` the group's interior curated-bad channels
-        are sliced in so they are present to be filled.
-    bad_channel_ids : sequence of int, optional
-        Interior curated-bad electrode ids to slice in for the
-        ``"interpolate"`` path. Default ``()``.
     """
-    from spikeinterface.core.channelslice import ChannelSliceRecording
-
     from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting.v2._recording_geometry import (
-        spikeinterface_channel_ids,
-    )
-    from spyglass.spikesorting.v2.utils import assert_reference_not_member
 
     # When the requested sort interval is disjoint (e.g., a
     # run+sleep+run epoch group), frame-slice each chunk
@@ -605,9 +577,65 @@ def restrict_recording(
             "threshold or fix the upstream IntervalList."
         )
 
-    recording, timestamps_override, n_intervals = restrict_recording_times(
-        recording, valid_times
+    return restrict_recording_times(recording, valid_times)
+
+
+def select_sort_group_channels(
+    recording,
+    nwb_file_name: str,
+    sort_group_channel_ids: list,
+    reference_mode: str,
+    reference_electrode_id: int | None,
+    *,
+    bad_channel_handling: str = "remove",
+    bad_channel_ids=(),
+):
+    """Channel-slice the full-source recording to the sort group's surface.
+
+    Members plus the ``specific`` reference (sliced in for subtraction, dropped
+    after referencing) plus, on ``interpolate``, the interior curated-bad
+    channels. Time is untouched; call before any temporal preprocessing so
+    filters see the continuous source.
+
+    Uses ``ChannelSliceRecording`` directly because SI 0.104 dropped the
+    ``recording.channel_slice(...)`` method; the constructor accepts the same
+    kwargs.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The full-source SI recording to slice in channels.
+    nwb_file_name : str
+        Parent NWB filename, used to resolve SpikeInterface channel
+        ids for the requested electrode ids.
+    sort_group_channel_ids : list
+        Spyglass electrode ids of the sort group's declared members.
+    reference_mode : str
+        One of ``"none"``, ``"global_median"``, or ``"specific"``.
+        On ``"specific"`` the reference electrode is sliced in for
+        later subtraction.
+    reference_electrode_id : int or None
+        Electrode id of the ``"specific"`` reference; ignored for the
+        other reference modes.
+    bad_channel_handling : str, optional
+        ``"remove"`` (default) or ``"interpolate"``. On
+        ``"interpolate"`` the group's interior curated-bad channels
+        are sliced in so they are present to be filled.
+    bad_channel_ids : sequence of int, optional
+        Interior curated-bad electrode ids to slice in for the
+        ``"interpolate"`` path. Default ``()``.
+
+    Returns
+    -------
+    si.BaseRecording
+        The channel-sliced recording, renamed to the electrode ids.
+    """
+    from spikeinterface.core.channelslice import ChannelSliceRecording
+
+    from spyglass.spikesorting.v2._recording_geometry import (
+        spikeinterface_channel_ids,
     )
+    from spyglass.spikesorting.v2.utils import assert_reference_not_member
 
     assert_reference_not_member(
         reference_mode, reference_electrode_id, sort_group_channel_ids
@@ -626,9 +654,8 @@ def restrict_recording(
     slice_ids = sorted(set([int(c) for c in sort_group_channel_ids] + extra))
 
     si_ids = spikeinterface_channel_ids(nwb_file_name, slice_ids)
-    recording = ChannelSliceRecording(
+    return ChannelSliceRecording(
         recording,
         channel_ids=si_ids,
         renamed_channel_ids=slice_ids,
     )
-    return recording, timestamps_override, n_intervals

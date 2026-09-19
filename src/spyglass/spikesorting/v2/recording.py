@@ -59,6 +59,7 @@ from spyglass.spikesorting.v2._recording_preprocessing import (
 from spyglass.spikesorting.v2._recording_restriction import (
     compute_recording_save_expectation,
     restrict_recording,
+    select_sort_group_channels,
     truncation_tolerance,
 )
 from spyglass.spikesorting.v2._recipe_catalog import (
@@ -2106,19 +2107,23 @@ class Recording(SpyglassMixin, dj.Computed):
         )
         sampling_frequency = float(recording.get_sampling_frequency())
 
+        recording = select_sort_group_channels(
+            recording,
+            nwb_file_name=nwb_file_name,
+            sort_group_channel_ids=channel_ids,
+            reference_mode=reference_mode,
+            reference_electrode_id=reference_electrode_id,
+            bad_channel_handling=preprocessing_params.bad_channel_handling,
+            bad_channel_ids=bad_channel_ids,
+        )
         recording, timestamps_override, n_selected_intervals = (
             restrict_recording(
                 recording=recording,
                 nwb_file_name=nwb_file_name,
                 interval_list_name=interval_list_name,
-                sort_group_channel_ids=channel_ids,
-                reference_mode=reference_mode,
-                reference_electrode_id=reference_electrode_id,
                 sort_valid_times=sort_valid_times,
                 raw_valid_times=raw_valid_times,
                 min_segment_length=preprocessing_params.min_segment_length,
-                bad_channel_handling=preprocessing_params.bad_channel_handling,
-                bad_channel_ids=bad_channel_ids,
             )
         )
         recording, applied_steps = apply_pre_motion_preprocessing(

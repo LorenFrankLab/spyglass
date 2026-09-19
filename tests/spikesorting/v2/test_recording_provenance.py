@@ -441,11 +441,11 @@ def test_missing_electrode_id_raises(dj_conn, tmp_path, monkeypatch):
 
 
 @pytest.mark.slow
-def test_restrict_recording_carries_correct_traces(
+def test_channel_selection_carries_correct_traces(
     dj_conn, tmp_path, monkeypatch
 ):
-    """After ``restrict_recording`` renames sliced SI channels back to electrode
-    ids, each renamed electrode id carries ITS OWN raw trace.
+    """After ``select_sort_group_channels`` renames sliced SI channels back to
+    electrode ids, each renamed electrode id carries ITS OWN raw trace.
 
     Builds an electrodes table whose ids are a shuffled in-range permutation
     ``[2, 3, 0, 1]`` (so id-as-row-index silently maps to the wrong channel)
@@ -458,7 +458,7 @@ def test_restrict_recording_carries_correct_traces(
 
     from spyglass.common import Nwbfile
     from spyglass.spikesorting.v2._recording_restriction import (
-        restrict_recording,
+        select_sort_group_channels,
     )
 
     # Row order: id 2 -> row 0 (channel s0), id 3 -> row 1 (s1),
@@ -485,17 +485,12 @@ def test_restrict_recording_carries_correct_traces(
         channel_ids=si_channel_names,
     )
 
-    valid_times = np.array([[0.0, 1.0]])
-    sliced, _override, _n = restrict_recording(
-        recording=recording,
+    sliced = select_sort_group_channels(
+        recording,
         nwb_file_name="shuffled_traces.nwb",
-        interval_list_name="raw data valid times",
         sort_group_channel_ids=[0, 1],
         reference_mode="none",
         reference_electrode_id=None,
-        sort_valid_times=valid_times,
-        raw_valid_times=valid_times,
-        min_segment_length=0.0,
         bad_channel_handling="remove",
         bad_channel_ids=(),
     )
