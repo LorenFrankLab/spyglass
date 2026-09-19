@@ -223,7 +223,9 @@ peak and carried 58× its RMS.
   more than one interval, both the traces near the interval edges and the
   `content_hash` change, so a rebuild after a cache miss raises
   `RecordingContentDriftError` instead of installing bytes that no longer match
-  the stored hash. Single-interval selections stay bit-identical. Follow the
+  the stored hash. A single-interval selection whose geometry is unchanged
+  stays bit-identical; geometry-driven hash changes are described below and
+  are independent of the interval count. Follow the
   [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 - **Electrode geometry is normalized before any probe is built.** Contact
   positions are reduced to the first coordinate plane in which every contact is
