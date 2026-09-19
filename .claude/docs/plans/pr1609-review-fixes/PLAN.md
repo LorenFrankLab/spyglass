@@ -1,6 +1,6 @@
 # PR #1609 Review Fixes — Implementation Plan
 
-**Status:** Phase 1 implemented on `spikesorting-v2` (3b1f6974..61c72755, 2026-09-18), PR not yet opened; open item: moseq extras cannot resolve (keypoint-moseq pins panel==0.14.4 vs base panel>=1.4, owner decision). Phases 2-6 not started.
+**Status:** Phases 1 and 2 implemented on `spikesorting-v2` (phase 1: 3b1f6974..59829a9f; phase 2: 59829a9f..d5236c47; 2026-09-18), PRs not yet opened; open items: moseq extras cannot resolve (keypoint-moseq pins panel==0.14.4 vs base panel>=1.4, owner decision); dropped-frame run splitting on position clocks flagged for a real-session spot check; merge-level v2 accessors raise when the curated recording is unavailable. Phases 3a-6 not started.
 
 Fixes the merge-blocking findings from the 2026-09-18 full-branch review of PR #1609 (spikesorting-v2 vs master, head cc9a7953): five silent-science defects in the v2 signal path, cross-session matching, and observed-time layer; seven compatibility/dependency failures that break non-spike-sorting users (DLC, MoSeq) and v0/v1 read paths; then the CI lanes that let those regressions through, and the stale user docs. Each phase ships as its own PR against the `spikesorting-v2` branch. v2 is pre-production: schema changes are allowed (owner, 2026-09-18), and there is no backwards-compatibility or deprecation obligation for v2 tables, caches, or receipts. v0/v1 behavior must be preserved.
 
