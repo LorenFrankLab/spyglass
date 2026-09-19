@@ -238,6 +238,12 @@ def _persist_channel_geometry(
     region keep whatever the parent NWB held -- or ``NaN``, when the column
     was created here because the parent carried no contact positions at all.
 
+    The two persisted axes are the CHOSEN PLANE's axes, not necessarily the
+    original x and y: for an x-z sort group ``rel_y`` holds what
+    ``Probe.Electrode`` calls ``rel_z``, and the persisted ``rel_z`` is 0. A
+    diff of an artifact's ``rel_*`` against ``Probe.Electrode``'s will show
+    that relabeling; the geometry itself is unchanged.
+
     This runs after ``io.write`` (the ElectricalSeries and its region are on
     disk) and before the content fingerprint, which hashes exactly these rows.
     h5py rather than pynwb because the datasets already exist and only a few
@@ -331,9 +337,11 @@ def write_nwb_artifact(
     NWB's raw 3D coordinates instead would let an x-z probe collapse back into
     coincident contacts on every read. A recording whose locations are still 3D
     is REFUSED rather than projected: the caller must normalize it to a plane
-    first. Rows outside the series region keep the parent NWB's values, or
-    ``NaN`` where a ``rel_*`` column had to be created because the parent
-    carried none.
+    first. The persisted ``rel_x``/``rel_y`` are the two axes of the plane that
+    normalization chose, so for an x-z sort group ``rel_y`` holds the original
+    ``Probe.Electrode`` ``rel_z``. Rows outside the series region keep the
+    parent NWB's values, or ``NaN`` where a ``rel_*`` column had to be created
+    because the parent carried none.
 
     Returns ``(analysis_file_name, electrical_series_object_id,
     content_hash)``. The ``content_hash`` is the
@@ -487,7 +495,7 @@ def write_nwb_artifact(
             nwbfile = io.read()
             # The normalized geometry has to land in rel_x/rel_y/rel_z; a
             # parent NWB that never carried those columns gets them here,
-            # zero-filled, while the file is still open for writing.
+            # NaN-filled, while the file is still open for writing.
             _ensure_relative_position_columns(nwbfile)
             # ``recording.get_channel_ids()`` are spyglass electrode ids;
             # map them to electrodes-table ROW INDICES (not raw ids) so a

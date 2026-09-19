@@ -223,9 +223,15 @@ peak and carried 58× its RMS.
   more than one interval, both the traces near the interval edges and the
   `content_hash` change, so a rebuild after a cache miss raises
   `RecordingContentDriftError` instead of installing bytes that no longer match
-  the stored hash. A single-interval selection whose geometry is unchanged
-  stays bit-identical; geometry-driven hash changes are described below and
-  are independent of the interval count. Follow the
+  the stored hash. Only a selection covering the whole raw acquisition stays
+  bit-identical: the old order zero-padded the filter margin at the slice
+  edges, so any selection that is a strict sub-span of the raw acquisition —
+  single- or multi-interval — changes near each of its interval edges and its
+  `content_hash` changes with it. (Measured on a 4 s interval inside a 20 s
+  recording with a 600 Hz high-pass: 2.28 µV peak difference against a 0.58 µV
+  RMS within ~400 samples of each edge, 1.2e-7 µV in the interior.)
+  Geometry-driven hash changes are described below and are independent of the
+  interval count. Follow the
   [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 - **Electrode geometry is normalized before any probe is built.** Contact
   positions are reduced to the first coordinate plane in which every contact is
@@ -238,7 +244,11 @@ peak and carried 58× its RMS.
   `ElectricalSeries` references, so a reload carries the geometry the sort ran
   with rather than reverting to the parent NWB's raw coordinates; rows outside
   that region keep the parent's values, or `NaN` where a `rel_*` column had to
-  be created because the parent carried none. The `tetrode_12.5` repair is
+  be created because the parent carried none. `rel_x`/`rel_y` carry the two
+  axes of the chosen plane, so for an x-z probe the persisted `rel_y` holds the
+  original `rel_z` and `rel_z = 0`; anything diffing an artifact's `rel_*`
+  against `Probe.Electrode` `rel_*` sees that relabeling. The `tetrode_12.5`
+  repair is
   persisted the same way, so a reloaded four-channel tetrode has its 12.5 µm
   square. Geometry is part of the content fingerprint, so an x-z sort group or
   a repaired tetrode gets a new `content_hash` even when its traces are
@@ -260,6 +270,11 @@ peak and carried 58× its RMS.
   drops the stitched members' constant third coordinate before writing and
   raises when it varies, so recreate the member `Recording` rows before
   rebuilding any concatenated recording.
+- **A recording with no contact positions at all is refused.** `Recording.make`
+  raises from `assert_unique_contact_positions` — naming `Probe.Electrode`
+  `rel_x`/`rel_y`/`rel_z` — instead of letting SpikeInterface raise its bare
+  "There are no channel locations", and the artifact write refuses the same
+  recording.
 
 #### Spike Sorting v2 curation identity and review-profile foundation
 
