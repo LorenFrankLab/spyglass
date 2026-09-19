@@ -830,6 +830,33 @@ def build_analyzer(
     if job_kwargs is None:
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
 
+    # Refuse coincident contacts BEFORE any probe is built or any extension is
+    # computed. Every consumer below goes through a probe, and probeinterface
+    # rejects duplicate contact positions -- but its message ("Contact
+    # positions must be unique within a probe. Found 1 duplicate(s)...") names
+    # neither the sort nor the table to fix, and it is raised from inside
+    # ``get_probe()`` on the very next line, so wrapping the projection would
+    # never see it. ``assert_unique_contact_positions`` reads
+    # ``get_channel_locations()``, which is the x-y projection SpikeInterface
+    # will use and does NOT construct a probe, so it can run first. It also
+    # catches a 3D probe whose contacts are distinct in 3D but collapse under
+    # the ``to_2d()`` projection below.
+    from spyglass.spikesorting.v2._recording_geometry import (
+        assert_unique_contact_positions,
+    )
+
+    try:
+        assert_unique_contact_positions(recording)
+    except ValueError as exc:
+        raise ValueError(
+            "build_analyzer: cannot build a SortingAnalyzer for sorting_id="
+            f"{key.get('sorting_id')!r} -- its recording's contacts do not "
+            "have distinct 2D positions, so SpikeInterface cannot build a "
+            "probe for it. Fix Probe.Electrode rel_x/rel_y/rel_z for this "
+            "sort group's electrodes and re-populate the Recording. "
+            f"({exc})"
+        ) from exc
+
     # Project the probe to 2D before building the analyzer. Spyglass electrode
     # geometry is stored in 3D (the z coordinate is typically 0), but several
     # SortingAnalyzer extensions and consumers assume 2D contact positions:

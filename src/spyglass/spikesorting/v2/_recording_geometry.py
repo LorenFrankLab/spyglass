@@ -19,12 +19,14 @@ services" direction as ``_artifact_compute`` / ``_selection_identity`` /
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: all SpikeInterface / numpy / probeinterface / spyglass
-dependencies are imported lazily inside the functions. Three functions
+dependencies are imported lazily inside the functions. Four functions
 inherently touch the DB / DataJoint at CALL time via lazy imports:
 ``spikeinterface_channel_ids`` (an ``Nwbfile`` path resolution),
-``fetch_sort_group_probe_info`` (an ``Electrode * Probe`` fetch), and
-``fetch_interior_bad_channel_ids`` (an ``Electrode * Probe.Electrode`` fetch).
-``maybe_apply_tetrode_geometry``, the plane-normalization helpers
+``fetch_sort_group_probe_info`` (an ``Electrode * Probe`` fetch),
+``fetch_sort_group_contact_positions`` and ``fetch_interior_bad_channel_ids``
+(both an ``Electrode * Probe.Electrode`` fetch).
+``maybe_apply_tetrode_geometry``, its gate predicate
+(``tetrode_repair_applies``), the plane-normalization helpers
 (``select_distinct_plane``, ``normalize_channel_locations``,
 ``assert_unique_contact_positions``) and the pitch/adjacency helpers
 (``_shank_pitch``, ``_interior_bad_channel_ids``) are pure.
@@ -165,6 +167,135 @@ def fetch_sort_group_probe_info(
     return probe_types, electrode_group_names
 
 
+def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
+    """Fetch the ``Probe.Electrode`` 3D contact position of each channel.
+
+    The probe-relative ``rel_x``/``rel_y``/``rel_z`` columns (joined onto
+    ``Electrode``), NOT ``Electrode.x/y/z`` -- same source
+    :func:`fetch_interior_bad_channel_ids` uses, and the geometry that reaches
+    SpikeInterface through the raw electrodes table.
+
+    The columns are nullable and the join drops any electrode with no probe
+    link, so both "no geometry" cases arrive as ``NaN`` rows rather than a
+    silent 0.0: the caller decides whether that means "this group has no
+    geometry at all" (the legacy all-zero tetrode, which
+    :func:`maybe_apply_tetrode_geometry` repairs) or a partially-populated
+    probe (an error).
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Parent NWB filename restricting the fetch.
+    channel_ids : sequence of int
+        Spyglass electrode ids to look up.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(len(channel_ids), 3)`` float array of ``(rel_x, rel_y, rel_z)``,
+        row-aligned to ``sorted(channel_ids)`` -- the order
+        :func:`fetch_sort_group_probe_info` returns its tuples in, so the two
+        can be zipped. ``NaN`` where the electrode has no probe link or a
+        NULL coordinate.
+    """
+    import numpy as np
+
+    from spyglass.common.common_device import Probe as _Probe
+    from spyglass.common.common_ephys import Electrode as _Electrode
+
+    wanted = sorted(int(c) for c in channel_ids)
+    rows = (
+        (_Electrode * _Probe.Electrode)
+        & {"nwb_file_name": nwb_file_name}
+        & [{"electrode_id": c} for c in wanted]
+    ).fetch("electrode_id", "rel_x", "rel_y", "rel_z", as_dict=True)
+    by_id = {int(r["electrode_id"]): r for r in rows}
+    positions = np.full((len(wanted), 3), np.nan, dtype=float)
+    for index, electrode_id in enumerate(wanted):
+        row = by_id.get(electrode_id)
+        if row is None:
+            continue
+        for axis, column in enumerate(("rel_x", "rel_y", "rel_z")):
+            if row[column] is not None:
+                positions[index, axis] = float(row[column])
+    return positions
+
+
+# Gates for the legacy ``tetrode_12.5`` geometry repair, as
+# (predicate-of-failure, reason) pairs built from the sort group's probe
+# metadata. The reason text lives next to its predicate so adding/removing a
+# gate is a one-line edit with no index alignment.
+def _tetrode_repair_skip_reason(
+    probe_types: tuple, electrode_group_names: tuple, n_channels: int
+) -> "str | None":
+    """Why the ``tetrode_12.5`` repair does NOT apply, or ``None`` if it does.
+
+    Separated from :func:`maybe_apply_tetrode_geometry` so preflight can ask
+    the same question without a recording (see
+    :func:`tetrode_repair_applies`), and so the log message an operator greps
+    for stays next to the predicate that produced it.
+    """
+    unique_probes = set(probe_types)
+    unique_groups = set(electrode_group_names)
+    # ``next(iter(...), None)`` avoids StopIteration on an empty probe set --
+    # the ``len != 1`` gate above it fires first.
+    gates = (
+        (
+            len(unique_probes) != 1,
+            "sort group spans multiple probe types "
+            "(expected a single tetrode_12.5)",
+        ),
+        (
+            next(iter(unique_probes), None) != "tetrode_12.5",
+            "single probe is not tetrode_12.5",
+        ),
+        (
+            int(n_channels) != 4,
+            "sort group does not have exactly 4 channels",
+        ),
+        (
+            len(unique_groups) != 1,
+            "sort group spans multiple electrode groups",
+        ),
+    )
+    for failed, reason in gates:
+        if failed:
+            return reason
+    return None
+
+
+def tetrode_repair_applies(
+    probe_types: tuple, electrode_group_names: tuple, n_channels: int
+) -> bool:
+    """True when :func:`maybe_apply_tetrode_geometry` would spread this group.
+
+    Preflight uses this to decide whether a sort group whose stored geometry
+    collapses in every plane (the legacy all-zero tetrode) is nevertheless
+    runnable: the repair installs the 12.5 µm square before the uniqueness
+    assertion runs, so those groups must not be reported as broken.
+
+    Parameters
+    ----------
+    probe_types : tuple
+        ``probe_type`` per channel in the sort group.
+    electrode_group_names : tuple
+        ``electrode_group_name`` per channel in the sort group.
+    n_channels : int
+        Number of channels in the sort group.
+
+    Returns
+    -------
+    bool
+        True when every gate passes.
+    """
+    return (
+        _tetrode_repair_skip_reason(
+            probe_types, electrode_group_names, n_channels
+        )
+        is None
+    )
+
+
 def maybe_apply_tetrode_geometry(
     recording,
     probe_types: tuple,
@@ -209,35 +340,15 @@ def maybe_apply_tetrode_geometry(
     """
     from spyglass.utils import logger
 
-    unique_probes = set(probe_types)
-    unique_groups = set(electrode_group_names)
-    # First failing gate wins; the reason text lives next to its
-    # predicate so adding/removing a gate is a one-line edit with no
-    # index alignment. ``next(iter(...), None)`` avoids StopIteration on
-    # an empty probe set -- the ``len != 1`` gate above it fires first.
-    gates = (
-        (
-            len(unique_probes) != 1,
-            "sort group spans multiple probe types "
-            "(expected a single tetrode_12.5)",
-        ),
-        (
-            next(iter(unique_probes), None) != "tetrode_12.5",
-            "single probe is not tetrode_12.5",
-        ),
-        (
-            len(sort_group_channel_ids) != 4,
-            "sort group does not have exactly 4 channels",
-        ),
-        (
-            len(unique_groups) != 1,
-            "sort group spans multiple electrode groups",
-        ),
+    # First failing gate wins. The gates themselves live in
+    # ``_tetrode_repair_skip_reason`` so preflight (via
+    # ``tetrode_repair_applies``) cannot drift from what this actually does.
+    reason = _tetrode_repair_skip_reason(
+        probe_types, electrode_group_names, len(sort_group_channel_ids)
     )
-    for failed, reason in gates:
-        if failed:
-            logger.info("maybe_apply_tetrode_geometry skipped: %s", reason)
-            return recording
+    if reason is not None:
+        logger.info("maybe_apply_tetrode_geometry skipped: %s", reason)
+        return recording
 
     import numpy as np
     import probeinterface as pi

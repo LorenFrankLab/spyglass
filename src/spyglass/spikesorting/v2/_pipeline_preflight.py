@@ -777,6 +777,106 @@ def assert_concat_preflight(
     return []
 
 
+def sort_group_geometry_problem(
+    nwb_file_name: str, sort_group_id: int
+) -> "str | None":
+    """Report a sort group whose effective 2D contact geometry collapses.
+
+    SpikeInterface builds a probe from the contact positions and rejects two
+    contacts at the same place, so a sort group whose electrodes share a
+    position fails minutes into ``Recording.populate`` (or, on a stored
+    artifact, at the analyzer build). This reproduces the *effective* geometry
+    the recording stage computes -- ``select_distinct_plane`` over the
+    ``Probe.Electrode`` ``rel_x``/``rel_y``/``rel_z``, then the legacy
+    ``tetrode_12.5`` repair -- and reports the failure up front instead.
+
+    NULL / absent ``rel_*`` for the WHOLE group is the legacy "geometry was
+    never written" case: the raw electrodes table reads back as all-zero,
+    which is exactly what the tetrode repair covers, so it is checked as
+    all-zero rather than rejected outright. A group where only SOME
+    electrodes lack a coordinate is a partially-populated probe and is
+    reported as such (``select_distinct_plane`` would otherwise raise on the
+    NaN rows, and NaNs compare as distinct).
+
+    Checked on the sort group's full electrode membership -- the same list
+    ``Recording.make_fetch`` passes to ``maybe_apply_tetrode_geometry``. A
+    ``bad_channel_handling='remove'`` run drops members later, which can only
+    remove a collision, so this is conservative by at most that case.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The raw NWB file.
+    sort_group_id : int
+        The sort group to check.
+
+    Returns
+    -------
+    str or None
+        ``None`` when the group's contacts are distinct (or will be made so
+        by the tetrode repair); otherwise the operator-facing fix text.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._recording_geometry import (
+        fetch_sort_group_contact_positions,
+        fetch_sort_group_probe_info,
+        select_distinct_plane,
+        tetrode_repair_applies,
+    )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    channel_ids = sorted(
+        (
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": int(sort_group_id),
+            }
+        ).fetch("electrode_id"),
+        key=int,
+    )
+    if not channel_ids:
+        # ``sort_group_has_electrodes`` owns this failure; reporting it twice
+        # would just duplicate the error.
+        return None
+
+    positions = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
+    unpositioned = np.flatnonzero(~np.isfinite(positions).all(axis=1))
+    if unpositioned.size == len(channel_ids):
+        positions = np.zeros_like(positions)
+    elif unpositioned.size:
+        missing = [int(channel_ids[i]) for i in unpositioned]
+        return (
+            f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
+            f"electrode(s) {missing[:5]} with no Probe.Electrode position "
+            "(missing row or NULL rel_x/rel_y/rel_z) while its other "
+            "electrodes have one. SpikeInterface cannot place those contacts. "
+            "Populate Probe.Electrode rel_x/rel_y/rel_z for every electrode "
+            "in the sort group."
+        )
+
+    if select_distinct_plane(positions) is not None:
+        return None
+
+    probe_types, electrode_group_names = fetch_sort_group_probe_info(
+        nwb_file_name, channel_ids
+    )
+    if tetrode_repair_applies(
+        probe_types, electrode_group_names, len(channel_ids)
+    ):
+        # The recording stage spreads these onto the 12.5 um square.
+        return None
+    return (
+        f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
+        "contacts that share a position in every coordinate plane "
+        f"(Probe.Electrode rel_x/rel_y/rel_z = {positions.tolist()}), so "
+        "SpikeInterface cannot build a probe for it. Fix Probe.Electrode "
+        "rel_x/rel_y/rel_z for this sort group's electrodes; the "
+        "tetrode_12.5 repair covers only 4-channel single-group tetrodes."
+    )
+
+
 def preflight_v2_pipeline(
     nwb_file_name: str,
     sort_group_id: int,
@@ -1004,6 +1104,17 @@ def preflight_v2_pipeline(
             "has zero electrode members; Recording.populate would raise 'has "
             "zero electrodes'. Recreate it with "
             "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
+        )
+        # Geometry the sort would actually see: a group whose contacts
+        # coincide cannot produce a probe, and the failure otherwise lands
+        # minutes into Recording.populate (or later, at the analyzer build).
+        geometry_problem = sort_group_geometry_problem(
+            nwb_file_name, sort_group_id
+        )
+        _check(
+            "sort_group_geometry_distinct",
+            geometry_problem is None,
+            geometry_problem or "",
         )
 
     # 6-8. The preset's parameter Lookup rows.

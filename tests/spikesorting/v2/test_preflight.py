@@ -473,6 +473,124 @@ def test_preflight_empty_sort_group(preflight_inputs):
         (SortGroupV2 & restr).delete_quick()
 
 
+def _make_sort_group(nwb_file_name: str, sort_group_id: int, n_channels: int):
+    """Create a SortGroupV2 with exactly ``n_channels`` real members.
+
+    The channel COUNT is what the ``tetrode_12.5`` repair gates on, so the
+    geometry test needs genuine 4- and 5-member groups rather than a
+    monkeypatched membership. Electrodes are taken from the session's own
+    ``Electrode`` rows so the part-table FK resolves.
+    """
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    electrode_keys = sorted(
+        (Electrode & {"nwb_file_name": nwb_file_name}).fetch("KEY"),
+        key=lambda k: int(k["electrode_id"]),
+    )[:n_channels]
+    assert len(electrode_keys) == n_channels
+    restr = {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+    SortGroupV2.insert1(
+        {**restr, "reference_mode": "none"}, skip_duplicates=True
+    )
+    SortGroupV2.SortGroupElectrode.insert(
+        [{**key, "sort_group_id": sort_group_id} for key in electrode_keys],
+        skip_duplicates=True,
+    )
+    return restr, electrode_keys
+
+
+@pytest.mark.database
+def test_preflight_rejects_coincident_contacts_after_repair(
+    preflight_inputs, monkeypatch
+):
+    """Preflight reports geometry that collapses AFTER the tetrode repair.
+
+    The recording stage normalizes 3D contact positions to the plane that
+    keeps them distinct and then applies the legacy ``tetrode_12.5`` repair;
+    only if BOTH fail do the contacts coincide and SpikeInterface refuse to
+    build a probe. Preflight reproduces exactly that sequence, so it must
+    reject the all-zero five-channel group (no plane separates it, and the
+    repair does not apply), accept the all-zero four-channel tetrode (the
+    repair spreads it onto the 12.5 um square), and accept real Frank-lab
+    x-z geometry that only the x-y projection collapses.
+    """
+    import numpy as np
+
+    import spyglass.spikesorting.v2._recording_geometry as geometry
+
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = preflight_inputs["nwb_file_name"]
+    five_restr, _ = _make_sort_group(nwb_file_name, 987101, 5)
+    four_restr, _ = _make_sort_group(nwb_file_name, 987102, 4)
+
+    def _geometry_check(sort_group_id):
+        report = preflight_v2_pipeline(
+            **{**preflight_inputs, "sort_group_id": sort_group_id}
+        )
+        (check,) = [
+            c for c in report.checks if c.name == "sort_group_geometry_distinct"
+        ]
+        return check
+
+    def _patch(positions_for, probe_type):
+        monkeypatch.setattr(
+            geometry,
+            "fetch_sort_group_contact_positions",
+            lambda _f, channel_ids: positions_for(len(channel_ids)),
+        )
+        monkeypatch.setattr(
+            geometry,
+            "fetch_sort_group_probe_info",
+            lambda _f, channel_ids: (
+                (probe_type,) * len(channel_ids),
+                ("0",) * len(channel_ids),
+            ),
+        )
+
+    try:
+        # 1. Legacy all-zero geometry, five channels on a tetrode probe: no
+        #    plane separates the contacts and the repair needs exactly four.
+        _patch(lambda n: np.zeros((n, 3)), "tetrode_12.5")
+        failing = _geometry_check(987101)
+        assert failing.ok is False
+        assert "sort_group_id=987101" in failing.fix
+        assert nwb_file_name in failing.fix
+        assert "Probe.Electrode" in failing.fix
+        # The positions are quoted so the operator sees WHAT collapsed.
+        assert "0.0" in failing.fix
+
+        # 2. Same all-zero geometry, but a four-channel single-group
+        #    tetrode_12.5: the repair spreads it, so this must NOT be
+        #    reported. This is what makes case 1 a geometry verdict rather
+        #    than an "all-zero is always bad" verdict.
+        assert _geometry_check(987102).ok is True
+
+        # 3. Real Frank-lab tetrode geometry (rel_y == 0, contacts at
+        #    +-6.25 um in x and z): the x-y projection SpikeInterface reaches
+        #    for first collapses it into two coincident pairs, so this passes
+        #    only because the x-z plane is selected. The probe type is NOT
+        #    tetrode_12.5, so the repair cannot be what saves it.
+        xz_positions = np.array(
+            [
+                [6.25, 0.0, 6.25],
+                [-6.25, 0.0, 6.25],
+                [-6.25, 0.0, -6.25],
+                [6.25, 0.0, -6.25],
+            ]
+        )
+        assert (
+            len(np.unique(xz_positions[:, :2], axis=0)) == 2
+        ), "fixture must be degenerate in x-y for this case to mean anything"
+        _patch(lambda _n: xz_positions, "not_a_tetrode")
+        assert _geometry_check(987102).ok is True
+    finally:
+        for restr in (five_restr, four_restr):
+            (SortGroupV2.SortGroupElectrode & restr).delete_quick()
+            (SortGroupV2 & restr).delete_quick()
+
+
 @pytest.mark.database
 def test_preflight_missing_params_row_points_to_initialize_defaults(
     preflight_inputs, monkeypatch
