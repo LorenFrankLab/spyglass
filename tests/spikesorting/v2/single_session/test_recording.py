@@ -2039,3 +2039,177 @@ def test_inplace_writer_does_not_unlink_canonical_on_failure(
     # Temp-staged rebuild (existing None): the partial temp file is removed.
     rn._remove_partial_artifact("temp.nwb", existing_analysis_file_name=None)
     assert not temp.exists(), "temp-staged partial must be cleaned up"
+
+
+# ---------- the compute path filters BEFORE it restricts -------------------
+
+
+@pytest.mark.slow
+def test_compute_artifact_filters_before_restriction(recording_selection_key):
+    """The PERSISTED artifact matches a continuously filtered reference.
+
+    The unit tests compose the temporal step and the time restriction
+    themselves, so nothing there would notice if ``_compute_recording_artifact``
+    went back to restricting first; the shipped selection fixture cannot notice
+    either, because a single contiguous interval is bit-identical under both
+    orders. This drives the production body with THREE disjoint intervals --
+    including a ~1.5 ms sliver, shorter than the 600 Hz high-pass settling
+    time -- reads the written NWB back, and compares its uV traces, per
+    interval, with the same bandpass applied to the whole channel-sliced raw
+    recording and sampled at the same frame boundaries. Restrict-then-filter
+    misses that target by orders of magnitude at every join.
+    """
+    import numpy as np
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.common.common_interval import Interval
+    from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.spikesorting.v2._recording_nwb import (
+        raw_eseries_path_and_timestamp_mode,
+        read_recording_nwb,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _consolidate_regular_intervals,
+        _recording_has_explicit_time_vector,
+        _recording_start_time,
+        select_sort_group_channels,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        _ELECTRICAL_SERIES_PATH,
+        Recording,
+    )
+
+    fetched = Recording().make_fetch(recording_selection_key)
+    nwb_file_name = fetched.sel["nwb_file_name"]
+    # With no reference and no interpolation the spatial half is a no-op, so
+    # the persisted traces are the temporal half alone and the reference below
+    # is exactly the bandpass.
+    assert fetched.reference_mode == "none"
+    assert fetched.preprocessing_params.bad_channel_handling == "remove"
+    assert fetched.preprocessing_params.bandpass_filter is not None
+
+    # Off-round boundaries, so each join carries a real step; the middle
+    # interval is 1.5 ms, the shipped ``min_segment_length`` floor.
+    sort_valid_times = np.array(
+        [[0.13, 1.27], [2.05, 2.0515], [2.91, 3.87]], dtype=float
+    )
+    validated = fetched.preprocessing_params.model_copy(
+        update={"min_segment_length": 0.0015}
+    )
+
+    artifact = Recording()._compute_recording_artifact(
+        raw_path=Nwbfile().get_abs_path(nwb_file_name),
+        raw_object_id=fetched.raw_object_id,
+        nwb_file_name=nwb_file_name,
+        interval_list_name=fetched.sel["interval_list_name"],
+        channel_ids=fetched.channel_ids,
+        reference_mode=fetched.reference_mode,
+        reference_electrode_id=fetched.reference_electrode_id,
+        sort_valid_times=sort_valid_times,
+        raw_valid_times=fetched.raw_valid_times,
+        preprocessing_params=validated,
+        probe_types=fetched.probe_types,
+        electrode_group_names=fetched.electrode_group_names,
+        bad_channel_ids=fetched.bad_channel_ids,
+    )
+    written_abs_path = AnalysisNwbfile.get_abs_path(artifact.analysis_file_name)
+    try:
+        written = read_recording_nwb(
+            written_abs_path,
+            electrical_series_path=_ELECTRICAL_SERIES_PATH,
+        )
+
+        # The reference: the same channel slice, filtered CONTINUOUSLY.
+        raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
+            Nwbfile().get_abs_path(nwb_file_name), fetched.raw_object_id
+        )
+        source = read_recording_nwb(
+            Nwbfile().get_abs_path(nwb_file_name),
+            load_time_vector=load_time_vector,
+            electrical_series_path=raw_series_path,
+        )
+        sliced = select_sort_group_channels(
+            source,
+            nwb_file_name=nwb_file_name,
+            sort_group_channel_ids=fetched.channel_ids,
+            reference_mode=fetched.reference_mode,
+            reference_electrode_id=fetched.reference_electrode_id,
+        )
+        reference = sip.bandpass_filter(
+            sliced,
+            freq_min=validated.bandpass_filter.freq_min,
+            freq_max=validated.bandpass_filter.freq_max,
+            dtype=np.float64,
+        )
+
+        # The frame ranges the restriction selected, recomputed from the same
+        # intersected valid times so the reference is sampled at exactly the
+        # boundaries the artifact holds.
+        valid_times = (
+            Interval(sort_valid_times)
+            .intersect(
+                Interval(fetched.raw_valid_times),
+                min_length=validated.min_segment_length,
+            )
+            .times
+        )
+        segment = source.select_segments([0])
+        assert not _recording_has_explicit_time_vector(segment)
+        frames = _consolidate_regular_intervals(
+            np.asarray(valid_times, dtype=float),
+            n_samples=source.get_num_samples(segment_index=0),
+            sampling_frequency=source.get_sampling_frequency(),
+            t_start=_recording_start_time(segment),
+        )
+        assert len(frames) == 3, "precondition: three disjoint intervals"
+        assert (
+            int(frames[1][1]) - int(frames[1][0]) <= 50
+        ), "precondition: the middle interval is the ~1.5 ms sliver"
+        assert written.get_num_samples() == sum(
+            int(stop) - int(start) for start, stop in frames
+        )
+
+        offset = 0
+        for index, (start, stop) in enumerate(frames):
+            count = int(stop) - int(start)
+            ref = np.asarray(
+                reference.get_traces(
+                    start_frame=int(start),
+                    end_frame=int(stop),
+                    return_in_uV=True,
+                ),
+                dtype=np.float64,
+            )
+            saved = np.asarray(
+                written.get_traces(
+                    start_frame=offset,
+                    end_frame=offset + count,
+                    return_in_uV=True,
+                ),
+                dtype=np.float64,
+            )
+            offset += count
+
+            rms_ref = float(np.sqrt(np.mean(ref**2)))
+            rms_saved = float(np.sqrt(np.mean(saved**2)))
+            max_abs = float(np.max(np.abs(saved - ref)))
+            assert max_abs <= 1e-3 * rms_ref, (
+                f"interval {index} ({count} samples, frames "
+                f"[{int(start)}, {int(stop)})): the persisted artifact misses "
+                f"the continuously filtered reference by {max_abs:.4g} uV "
+                f"(bound {1e-3 * rms_ref:.4g} uV) -- the compute path is "
+                "restricting before it filters"
+            )
+            assert abs(rms_saved - rms_ref) / rms_ref <= 1e-3, (
+                f"interval {index}: rms {rms_saved:.6g} uV vs reference "
+                f"{rms_ref:.6g} uV"
+            )
+    finally:
+        Path(written_abs_path).unlink(missing_ok=True)
+        if AnalysisNwbfile & {
+            "analysis_file_name": artifact.analysis_file_name
+        }:
+            (
+                AnalysisNwbfile
+                & {"analysis_file_name": artifact.analysis_file_name}
+            ).delete(safemode=False)

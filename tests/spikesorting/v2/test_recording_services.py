@@ -772,6 +772,7 @@ def test_restricted_traces_match_continuously_filtered_reference():
     ``get_traces`` request, so two requests with different boundaries differ
     by ~1e-4 uV.
     """
+    import scipy.signal
     import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._recording_preprocessing import (
@@ -802,6 +803,30 @@ def test_restricted_traces_match_continuously_filtered_reference():
         freq_min=validated.bandpass_filter.freq_min,
         freq_max=validated.bandpass_filter.freq_max,
         dtype=np.float64,
+    )
+
+    # Independent reference: scipy over the whole trace in one pass, with
+    # SpikeInterface's own coefficients (``FilterRecording.__init__`` builds
+    # them with ``scipy.signal.iirfilter(filter_order=5, band, fs=fs,
+    # btype="bandpass", ftype="butter", output="sos")`` and filters with
+    # ``sosfiltfilt``). Without it the target would come from the very filter
+    # object under test, and a margin bug inside it would cancel out.
+    sos = scipy.signal.iirfilter(
+        5,
+        [
+            validated.bandpass_filter.freq_min,
+            validated.bandpass_filter.freq_max,
+        ],
+        fs=_FS,
+        analog=False,
+        btype="bandpass",
+        ftype="butter",
+        output="sos",
+    )
+    scipy_reference = scipy.signal.sosfiltfilt(
+        sos,
+        np.asarray(recording.get_traces(return_in_uV=True), dtype=np.float64),
+        axis=0,
     )
 
     offset = 0
@@ -848,6 +873,15 @@ def test_restricted_traces_match_continuously_filtered_reference():
             f"interval {index}: the old order's max abs error {old_max:.4g} "
             f"uV should dwarf {bound:.4g} uV -- the test no longer "
             "discriminates the two orders"
+        )
+
+        # Same bound against the independent scipy pass.
+        scipy_ref = scipy_reference[start:stop]
+        scipy_bound = 1e-3 * _rms(scipy_ref)
+        scipy_max = float(np.max(np.abs(new - scipy_ref)))
+        assert scipy_max <= scipy_bound, (
+            f"interval {index}: max abs error {scipy_max:.4g} uV against the "
+            f"scipy whole-trace reference exceeds {scipy_bound:.4g} uV"
         )
 
 
