@@ -33,10 +33,13 @@ from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 # Fixture construction
 # ---------------------------------------------------------------------------
 
-# A deliberately non-Frank-lab probe type: ``maybe_apply_tetrode_geometry``
+# Deliberately non-Frank-lab probe types: ``maybe_apply_tetrode_geometry``
 # patches only 4-channel ``tetrode_12.5`` groups, and these fixtures must
-# exercise the plane-normalization path rather than the tetrode repair.
-_XZ_PROBE_TYPE = "v2_xz_test_probe"
+# exercise the plane-normalization path rather than the tetrode repair. One
+# name per fixture -- ``ProbeType`` is keyed on the name and its shank count
+# differs between them.
+_SMALL_PROBE_TYPE = "v2_xz_test_probe_1shank"
+_ROUNDTRIP_PROBE_TYPE = "v2_xz_test_probe_2shank"
 _CONTACT_PITCH_UM = 30.0
 _SAMPLING_FREQUENCY = 1000.0
 
@@ -60,33 +63,70 @@ _SMALL_ELECTRODE_IDS = (3, 30, 5, 40, 9, 12, 17, 21)
 # Rows 0, 2, 4, 5 -- ascending rows, non-contiguous ids, and id != row for
 # every one of them.
 _SMALL_GROUP_IDS = (3, 5, 9, 12)
+_SMALL_CONTACTS = tuple((eid, 0) for eid in _SMALL_ELECTRODE_IDS)
+
+# The full-pipeline fixture: two shanks interleaved row by row, so the table's
+# ids run 5, 60, 9, 61, ... -- permuted and non-contiguous -- while each
+# shank's own ids still ascend with its rows.
+_ROUNDTRIP_GROUP_IDS = (5, 9, 14, 22, 30, 38, 47, 55)
+_ROUNDTRIP_OTHER_IDS = (60, 61, 62, 63, 64, 65, 66, 67)
+_ROUNDTRIP_CONTACTS = tuple(
+    contact
+    for pair in zip(
+        ((eid, 0) for eid in _ROUNDTRIP_GROUP_IDS),
+        ((eid, 1) for eid in _ROUNDTRIP_OTHER_IDS),
+    )
+    for contact in pair
+)
+# Raw span and the two disjoint sort intervals carved out of it (seconds).
+_ROUNDTRIP_RAW_SECONDS = 720.0
+_ROUNDTRIP_INTERVALS = ((10.0, 350.0), (370.0, 710.0))
+_ROUNDTRIP_PARAMS_NAME = "_pytest_xz_roundtrip"
 
 
-def _xz_positions(n_contacts: int) -> np.ndarray:
-    """Contact positions in the x-z plane, ``(n_contacts, 3)`` micrometres.
+def _xz_geometry(contacts) -> dict:
+    """Map each electrode id to its ``(rel_x, rel_y, rel_z)`` micrometres.
 
-    ``rel_y`` is constant (0) and ``rel_x`` repeats every other contact, so the
-    x-y projection SpikeInterface reaches for first collapses the contacts into
-    coincident pairs while the x-z projection separates all of them. This is
-    the real Frank-lab tetrode failure mode, reproduced without a tetrode.
+    ``rel_y`` is constant (0) and ``rel_x`` repeats every other contact within
+    a shank, so the x-y projection SpikeInterface reaches for first collapses
+    the contacts into coincident pairs while the x-z projection separates all
+    of them. This is the real Frank-lab tetrode failure mode, reproduced
+    without a tetrode. Shanks are offset along ``rel_x`` so they never overlap.
+
+    Parameters
+    ----------
+    contacts : sequence of (int, int)
+        ``(electrode_id, shank_id)`` in electrodes-table row order.
+
+    Returns
+    -------
+    dict
+        ``{electrode_id: numpy.ndarray of shape (3,)}``.
     """
-    index = np.arange(n_contacts)
-    return np.column_stack(
-        [
-            _CONTACT_PITCH_UM * (index % 2),
-            np.zeros(n_contacts),
-            -_CONTACT_PITCH_UM * (index // 2),
-        ]
-    ).astype(float)
+    within_shank: dict[int, int] = {}
+    geometry = {}
+    for electrode_id, shank_id in contacts:
+        index = within_shank.get(shank_id, 0)
+        within_shank[shank_id] = index + 1
+        geometry[int(electrode_id)] = np.array(
+            [
+                300.0 * shank_id + _CONTACT_PITCH_UM * (index % 2),
+                0.0,
+                -_CONTACT_PITCH_UM * (index // 2),
+            ],
+            dtype=float,
+        )
+    return geometry
 
 
 def _write_xz_probe_nwb(
     out_path,
     *,
-    electrode_ids,
+    contacts,
     n_samples: int,
     seed: int,
     fixture_name: str,
+    probe_type: str,
 ):
     """Write an ingestible Spyglass NWB whose contacts lie in the x-z plane.
 
@@ -100,15 +140,19 @@ def _write_xz_probe_nwb(
     ----------
     out_path : pathlib.Path or str
         Destination NWB path.
-    electrode_ids : sequence of int
-        Electrode ids in electrodes-table ROW order. Row ``k`` gets id
-        ``electrode_ids[k]``.
+    contacts : sequence of (int, int)
+        ``(electrode_id, shank_id)`` in electrodes-table ROW order, so row
+        ``k`` gets id ``contacts[k][0]``.
     n_samples : int
         Number of samples in the raw ``ElectricalSeries``.
     seed : int
         Seed for the synthetic int16 traces.
     fixture_name : str
         Recorded as the NWB ``session_id`` / identifier stem.
+    probe_type : str
+        ``Probe.probe_type`` for the synthetic device. Distinct per fixture:
+        Spyglass keys ``ProbeType`` on the name, so two fixtures sharing one
+        name but differing in shank count collide on ingestion.
 
     Returns
     -------
@@ -125,8 +169,8 @@ def _write_xz_probe_nwb(
 
     from spyglass.spikesorting.v2._fixtures.mearec_to_nwb import _build_nwbfile
 
-    electrode_ids = [int(e) for e in electrode_ids]
-    positions = _xz_positions(len(electrode_ids))
+    contacts = [(int(eid), int(shank)) for eid, shank in contacts]
+    geometry = _xz_geometry(contacts)
 
     nwbfile = _build_nwbfile(
         fixture_name=fixture_name,
@@ -135,7 +179,7 @@ def _write_xz_probe_nwb(
     probe = Probe(
         id=0,
         name="probe 0",
-        probe_type=_XZ_PROBE_TYPE,
+        probe_type=probe_type,
         units="um",
         probe_description="synthetic x-z plane probe",
         contact_side_numbering=True,
@@ -154,20 +198,25 @@ def _write_xz_probe_nwb(
     )
     nwbfile.add_electrode_group(electrode_group)
 
-    shank = Shank(name="0")
-    for eid, (rel_x, rel_y, rel_z) in zip(electrode_ids, positions):
-        shank.add_shanks_electrode(
-            ShanksElectrode(
-                name=str(eid),
-                rel_x=float(rel_x),
-                rel_y=float(rel_y),
-                rel_z=float(rel_z),
+    for shank_id in sorted({shank for _, shank in contacts}):
+        shank = Shank(name=str(shank_id))
+        for eid, contact_shank in contacts:
+            if contact_shank != shank_id:
+                continue
+            rel_x, rel_y, rel_z = geometry[eid]
+            shank.add_shanks_electrode(
+                ShanksElectrode(
+                    name=str(eid),
+                    rel_x=float(rel_x),
+                    rel_y=float(rel_y),
+                    rel_z=float(rel_z),
+                )
             )
-        )
-    probe.add_shank(shank)
+        probe.add_shank(shank)
     nwbfile.add_device(probe)
 
-    for eid, (rel_x, rel_y, rel_z) in zip(electrode_ids, positions):
+    for eid, _ in contacts:
+        rel_x, rel_y, rel_z = geometry[eid]
         nwbfile.add_electrode(
             id=int(eid),
             location="CA1",
@@ -181,16 +230,16 @@ def _write_xz_probe_nwb(
             imp=0.0,
             filtering="none",
         )
-    n_contacts = len(electrode_ids)
+    n_contacts = len(contacts)
     nwbfile.electrodes.add_column(
         name="probe_shank",
         description="The shank of the probe this channel is located on",
-        data=[0] * n_contacts,
+        data=[shank for _, shank in contacts],
     )
     nwbfile.electrodes.add_column(
         name="probe_electrode",
         description="The ID of this electrode with respect to the probe",
-        data=[int(e) for e in electrode_ids],
+        data=[eid for eid, _ in contacts],
     )
     nwbfile.electrodes.add_column(
         name="bad_channel",
@@ -251,10 +300,30 @@ def xz_probe_session(dj_conn, tmp_path_factory):
     """Ingest a short 8-electrode x-z session; yield its session key."""
     path = _write_xz_probe_nwb(
         tmp_path_factory.mktemp("xz_probe") / "v2_xz_probe.nwb",
-        electrode_ids=_SMALL_ELECTRODE_IDS,
+        contacts=_SMALL_CONTACTS,
         n_samples=int(5 * _SAMPLING_FREQUENCY),
         seed=7,
         fixture_name="v2_xz_probe",
+        probe_type=_SMALL_PROBE_TYPE,
+    )
+    yield {"nwb_file_name": _ingest_synthetic_nwb(path)}
+
+
+@pytest.fixture(scope="session")
+def xz_roundtrip_session(dj_conn, tmp_path_factory):
+    """Ingest the long two-shank x-z session the round-trip test sorts.
+
+    Long enough that the writer streams the artifact in several chunks (see
+    ``test_recording_semantic_round_trip``), which is why it is session-scoped:
+    synthesizing and ingesting it is the heaviest step in this module.
+    """
+    path = _write_xz_probe_nwb(
+        tmp_path_factory.mktemp("xz_roundtrip") / "v2_xz_roundtrip.nwb",
+        contacts=_ROUNDTRIP_CONTACTS,
+        n_samples=int(_ROUNDTRIP_RAW_SECONDS * _SAMPLING_FREQUENCY),
+        seed=11,
+        fixture_name="v2_xz_roundtrip",
+        probe_type=_ROUNDTRIP_PROBE_TYPE,
     )
     yield {"nwb_file_name": _ingest_synthetic_nwb(path)}
 
@@ -310,9 +379,7 @@ def test_persist_geometry_writes_series_rows_only(xz_probe_session):
     from spyglass.spikesorting.v2.recording import Recording
 
     nwb_file_name = xz_probe_session["nwb_file_name"]
-    raw_geometry = dict(
-        zip(_SMALL_ELECTRODE_IDS, _xz_positions(len(_SMALL_ELECTRODE_IDS)))
-    )
+    raw_geometry = _xz_geometry(_SMALL_CONTACTS)
     # A recording over four of the eight electrodes, in ascending id order
     # (what ``select_sort_group_channels`` produces) -- which is neither the
     # electrodes-table row order nor a contiguous id run. The locations are
@@ -385,3 +452,425 @@ def test_persist_geometry_writes_series_rows_only(xz_probe_session):
             _drop_analysis_file(second_name)
     finally:
         _drop_analysis_file(first_name)
+
+
+# ---------------------------------------------------------------------------
+# 2. Semantic round trip: populate -> read -> rebuild -> read
+# ---------------------------------------------------------------------------
+
+
+def _sort_group_for(nwb_file_name: str, electrode_id: int) -> int:
+    """Return the sort group that owns ``electrode_id``."""
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    return int(
+        (
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "electrode_id": int(electrode_id),
+            }
+        ).fetch1("sort_group_id")
+    )
+
+
+def _replay(recording, requests, *, return_in_uV=True):
+    """Yield ``recording``'s traces for each recorded writer request."""
+    for start, stop, channel_ids in requests:
+        yield recording.get_traces(
+            segment_index=0,
+            channel_ids=channel_ids,
+            start_frame=start,
+            end_frame=stop,
+            return_in_uV=return_in_uV,
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.database
+def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
+    """The artifact reproduces the recording the writer was handed -- and so
+    does the rebuild that replaces a deleted artifact.
+
+    Pins the whole persisted surface, not just the traces: the wall-clock
+    timestamps, the channel-id order, the normalized 2D geometry, and the
+    microvolt values. The geometry assertion is the one this dispatch adds --
+    SpikeInterface rebuilds channel locations from the persisted electrodes
+    rows, so an un-persisted normalization shows up here as an x-y collapse.
+
+    The microvolt reference is read from the pre-write lazy recording at the
+    writer's OWN chunk boundaries. A single whole-recording request is not a
+    valid reference: the lazy bandpass filters each request over a short margin
+    of context, so its interior values depend on where the request boundaries
+    fall. The test asserts that too, so the reason for the chunked reference is
+    documented rather than assumed.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import _nwb_iterators as iterators_module
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = xz_roundtrip_session["nwb_file_name"]
+    initialize_v2_defaults()
+    LabTeam.insert1(
+        {
+            "team_name": "v2_xz_team",
+            "team_description": "v2 persisted-geometry tests",
+        },
+        skip_duplicates=True,
+    )
+    # A 1 kHz fixture cannot use the shipped 300-6000 Hz default (6000 Hz is
+    # past Nyquist). Everything else is the schema default.
+    PreprocessingParameters().insert1(
+        {
+            "preprocessing_params_name": _ROUNDTRIP_PARAMS_NAME,
+            "params": PreprocessingParamsSchema.model_validate(
+                {"bandpass_filter": {"freq_min": 100.0, "freq_max": 400.0}}
+            ).model_dump(),
+        },
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name, reference_mode="global_median"
+        )
+    interval_list_name = "v2_xz_two_intervals"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+            "valid_times": np.asarray(_ROUNDTRIP_INTERVALS, dtype=float),
+            "pipeline": "v2_xz_two_intervals",
+        },
+        skip_duplicates=True,
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": _sort_group_for(
+                nwb_file_name, _ROUNDTRIP_GROUP_IDS[0]
+            ),
+            "interval_list_name": interval_list_name,
+            "preprocessing_params_name": _ROUNDTRIP_PARAMS_NAME,
+            "team_name": "v2_xz_team",
+        }
+    )
+
+    # Capture the recording the writer is handed, and the exact trace requests
+    # the chunk iterator issues while streaming it.
+    captured: dict = {}
+    real_write = Recording._write_nwb_artifact
+    requests: list = []
+    real_iterator = iterators_module.SpikeInterfaceRecordingDataChunkIterator
+
+    class _RecordingRequests(real_iterator):
+        def _get_data(self, selection):
+            requests.append(
+                (
+                    selection[0].start,
+                    selection[0].stop,
+                    list(self.channel_ids[selection[1]]),
+                )
+            )
+            return super()._get_data(selection)
+
+    def _capture_write(**kwargs):
+        captured.update(kwargs)
+        return real_write(**kwargs)
+
+    monkeypatch.setattr(
+        Recording, "_write_nwb_artifact", staticmethod(_capture_write)
+    )
+    monkeypatch.setattr(
+        iterators_module,
+        "SpikeInterfaceRecordingDataChunkIterator",
+        _RecordingRequests,
+    )
+
+    (Recording & pk).super_delete(warn=False, force_masters=True)
+    Recording.populate(pk, reserve_jobs=False)
+    monkeypatch.undo()
+
+    source = captured["recording"]
+    source_timestamps = np.asarray(captured["timestamps_override"], float)
+    write_requests = list(requests)
+    row = (Recording & pk).fetch1()
+
+    assert len(write_requests) >= 3, (
+        "the fixture must be long enough that the writer streams it in "
+        f"several chunks; it issued {len(write_requests)} get_traces requests"
+    )
+    assert len({(start, stop) for start, stop, _ in write_requests}) >= 3, (
+        "the writer's requests must span at least three distinct sample "
+        "ranges, so the chunked reference is genuinely chunk-boundary "
+        f"dependent (got {sorted({(s, e) for s, e, _ in write_requests})})"
+    )
+    assert source.get_num_segments() == 1
+    assert source.get_num_samples() == len(
+        source_timestamps
+    ), "the persisted timestamps must cover every written sample"
+
+    # The selection's two disjoint pieces survive as one gap in the persisted
+    # wall clock: the artifact's samples are contiguous, its timestamps are
+    # not.
+    sample_period = 1.0 / _SAMPLING_FREQUENCY
+    first_interval, second_interval = _ROUNDTRIP_INTERVALS
+    gaps = np.flatnonzero(np.diff(source_timestamps) > 1.5 * sample_period)
+    assert len(gaps) == 1, (
+        "the two selected intervals must leave exactly one wall-clock gap in "
+        f"the persisted timestamps, found {len(gaps)}"
+    )
+    assert source_timestamps[0] == pytest.approx(
+        first_interval[0], abs=sample_period
+    )
+    assert source_timestamps[gaps[0]] == pytest.approx(
+        first_interval[1], abs=sample_period
+    )
+    assert source_timestamps[gaps[0] + 1] == pytest.approx(
+        second_interval[0], abs=sample_period
+    )
+    assert source_timestamps[-1] == pytest.approx(
+        second_interval[1], abs=sample_period
+    )
+    # ``duration_s`` on the row is the gap-EXCLUDING saved span.
+    selected_seconds = sum(stop - start for start, stop in _ROUNDTRIP_INTERVALS)
+    assert float(row["duration_s"]) == pytest.approx(
+        selected_seconds, abs=10 * sample_period
+    )
+    assert int(row["n_channels"]) == source.get_num_channels()
+    assert float(row["sampling_frequency"]) == pytest.approx(
+        _SAMPLING_FREQUENCY
+    )
+
+    def _assert_matches(reloaded, label):
+        np.testing.assert_array_equal(
+            np.asarray(reloaded.get_channel_ids()),
+            np.asarray(source.get_channel_ids()),
+            err_msg=f"{label}: channel-id order changed across the write",
+        )
+        np.testing.assert_array_equal(
+            np.asarray(reloaded.get_channel_locations(), dtype=float),
+            np.asarray(source.get_channel_locations(), dtype=float),
+            err_msg=(
+                f"{label}: the reloaded 2D geometry is not the normalized "
+                "geometry the sort ran on -- the writer did not persist it"
+            ),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(reloaded.get_times(), dtype=float),
+            source_timestamps,
+            err_msg=f"{label}: persisted wall-clock timestamps changed",
+        )
+        for expected, got in zip(
+            _replay(source, write_requests), _replay(reloaded, write_requests)
+        ):
+            np.testing.assert_allclose(
+                got,
+                expected,
+                rtol=0.0,
+                atol=1e-6,
+                err_msg=(
+                    f"{label}: microvolt traces diverged from the pre-write "
+                    "recording read at the writer's own chunk boundaries"
+                ),
+            )
+
+    first_load = Recording().get_recording(pk)
+    _assert_matches(first_load, "first load")
+
+    # A whole-recording request is NOT a valid reference: the lazy bandpass
+    # pulls only a short margin of context around each request, so its interior
+    # values move when the request boundaries move.
+    whole = first_load.get_traces(return_in_uV=True)
+    unchunked = source.get_traces(return_in_uV=True)
+    assert np.max(np.abs(whole - unchunked)) > 1e-6, (
+        "a single whole-recording request reproduced the chunked write "
+        "exactly, so this test is not actually pinning the chunk-boundary "
+        "dependence it claims to"
+    )
+    del whole, unchunked
+
+    # The rebuild path serves the same science from the same row.
+    Path(
+        AnalysisNwbfile.get_abs_path(
+            row["analysis_file_name"], from_schema=True
+        )
+    ).unlink()
+    _assert_matches(Recording().get_recording(pk), "rebuilt load")
+    assert (Recording & pk).fetch1("content_hash") == row[
+        "content_hash"
+    ], "the rebuild must reproduce the stored content hash"
+
+
+# ---------------------------------------------------------------------------
+# 3. Tracked follow-up: specific reference drops the per-channel calibration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.database
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "tracked follow-up: a 'specific' reference subtracts RAW counts and "
+        "then zeroes the channel offsets, so with unequal per-channel offsets "
+        "and no bandpass to remove the DC the per-channel calibration "
+        "(offset_i - offset_ref) is lost before the writer's uniform-offset "
+        "guard can see it"
+    ),
+)
+def test_specific_reference_physical_units_oracle(xz_probe_session):
+    """Reloaded microvolts must equal the reference subtraction done in
+    PHYSICAL units, not in raw counts.
+
+    The oracle is built from the raw counts and the per-channel calibration --
+    ``(raw_i * gain_i + offset_i) - (raw_ref * gain_ref + offset_ref)`` -- not
+    from the preprocessed in-memory recording, which already carries the loss.
+    """
+    import spikeinterface.core as si_core
+
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_spatial_preprocessing,
+    )
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import (
+        _ELECTRICAL_SERIES_PATH,
+        Recording,
+    )
+
+    nwb_file_name = xz_probe_session["nwb_file_name"]
+    channel_ids = [3, 5, 9]  # rows 0, 2, 4; electrode 9 is the reference
+    reference_electrode_id = 9
+    # Uniform gain (a single ElectricalSeries conversion can carry it) but
+    # UNEQUAL per-channel offsets, which it cannot.
+    offsets_uv = np.array([5.0, 44.0, 200.0])
+    raw = np.random.default_rng(3).integers(
+        -400, 400, size=(400, len(channel_ids)), dtype=np.int16
+    )
+    recording = si_core.NumpyRecording(
+        [raw],
+        sampling_frequency=_SAMPLING_FREQUENCY,
+        channel_ids=channel_ids,
+    )
+    recording.set_channel_gains(_GAIN_UV_PER_COUNT)
+    recording.set_channel_offsets(offsets_uv)
+    recording.set_channel_locations(
+        np.array([[0.0, 0.0], [0.0, -30.0], [0.0, -60.0]])
+    )
+
+    referenced, _ = apply_spatial_preprocessing(
+        recording,
+        reference_mode="specific",
+        reference_electrode_id=reference_electrode_id,
+        # ``bandpass_filter=None``: no filter runs, so nothing removes the DC
+        # the offsets describe.
+        validated=PreprocessingParamsSchema.model_validate(
+            {"bandpass_filter": None}
+        ),
+    )
+
+    kept = [0, 1]  # electrodes 3 and 5; electrode 9 was the reference
+    oracle = (raw[:, kept] * _GAIN_UV_PER_COUNT + offsets_uv[kept]) - (
+        raw[:, [2]] * _GAIN_UV_PER_COUNT + offsets_uv[2]
+    )
+
+    analysis_file_name, _, _ = Recording._write_nwb_artifact(
+        referenced,
+        nwb_file_name,
+        filtering_description="no filter, specific reference",
+    )
+    try:
+        reloaded = read_recording_nwb(
+            AnalysisNwbfile.get_abs_path(analysis_file_name),
+            electrical_series_path=_ELECTRICAL_SERIES_PATH,
+        )
+        np.testing.assert_allclose(
+            reloaded.get_traces(return_in_uV=True),
+            oracle,
+            rtol=0.0,
+            atol=1e-6,
+        )
+    finally:
+        _drop_analysis_file(analysis_file_name)
+
+
+# ---------------------------------------------------------------------------
+# 4. A parent NWB without rel_* columns still gets the geometry (no DB)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_geometry_columns_are_created_when_absent(tmp_path):
+    """The writer's persistence step works on an electrodes table that never
+    carried ``rel_x``/``rel_y``/``rel_z``.
+
+    ``AnalysisNwbfile().create`` exports the parent's electrodes table
+    verbatim, so a parent written without probe-relative positions leaves the
+    normalized geometry nowhere to land. hdmf accepts a new column on a table
+    that is already on disk (the file is open in append mode), which is what
+    the writer relies on; this pins that, and that only the referenced rows
+    end up non-zero.
+
+    Exercises the two file-level helpers directly: they touch no database, and
+    the branch is unreachable from the Frank-lab-shaped fixtures above (their
+    parents all carry the columns).
+    """
+    import pynwb
+
+    from spyglass.spikesorting.v2._recording_nwb import (
+        _ensure_relative_position_columns,
+        _persist_channel_geometry,
+    )
+
+    path = tmp_path / "no_rel_columns.nwb"
+    nwbfile = pynwb.NWBFile(
+        session_description="electrodes table without rel_* columns",
+        identifier="no-rel-columns",
+        session_start_time=datetime(2024, 3, 1, tzinfo=timezone.utc),
+    )
+    device = nwbfile.create_device(name="probe0")
+    group = nwbfile.create_electrode_group(
+        name="0", description="g", location="CA1", device=device
+    )
+    for electrode_id in _SMALL_ELECTRODE_IDS:
+        nwbfile.add_electrode(id=int(electrode_id), location="CA1", group=group)
+    with pynwb.NWBHDF5IO(str(path), mode="w") as io:
+        io.write(nwbfile)
+
+    with pynwb.NWBHDF5IO(str(path), mode="a", load_namespaces=True) as io:
+        reopened = io.read()
+        assert "rel_x" not in reopened.electrodes.colnames
+        _ensure_relative_position_columns(reopened)
+        io.write(reopened)
+
+    rows = [2, 4, 5]
+    locations = np.array([[0.0, -30.0], [0.0, -60.0], [30.0, -60.0]])
+    # Raises on its own read-back if the columns did not take.
+    _persist_channel_geometry(str(path), rows, locations)
+
+    with pynwb.NWBHDF5IO(str(path), mode="r", load_namespaces=True) as io:
+        table = io.read().electrodes
+        persisted = np.column_stack(
+            [table[column][:] for column in ("rel_x", "rel_y", "rel_z")]
+        )
+    np.testing.assert_array_equal(
+        persisted[rows], np.column_stack([locations, np.zeros(len(rows))])
+    )
+    untouched = [i for i in range(len(_SMALL_ELECTRODE_IDS)) if i not in rows]
+    np.testing.assert_array_equal(
+        persisted[untouched], np.zeros((len(untouched), 3))
+    )
