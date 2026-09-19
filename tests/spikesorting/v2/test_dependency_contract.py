@@ -237,3 +237,42 @@ def test_pyproject_carries_no_si099_dependency_caps():
             f"that cannot co-resolve with numpy{numpy_spec}. Drop the cap, or "
             "move the whole package back to the SI-0.99 baseline."
         )
+
+
+def test_ripple_detection_floor_covers_normalization_api():
+    """The ripple-detection floor admits only releases carrying the
+    normalization API ``spyglass.mua`` imports.
+
+    ``src/spyglass/mua/v1/_detection.py`` imports ``normalize_signal`` and
+    ``_validate_normalization_params`` from ``ripple_detection.core`` and
+    ``_get_event_stats`` from ``ripple_detection.detectors``. The 1.6 line
+    has neither core name, and its ``multiunit_HSE_detector`` takes no
+    ``normalization_method`` / ``normalization_mask`` /
+    ``normalization_time_range``. Both halves are asserted here so the
+    declared floor and the imported names drift together: if a future
+    release moves one of these names, this fails next to the pin that has
+    to move with it.
+    """
+    from ripple_detection import core, detectors
+
+    specifier = _base_requirements()["ripple-detection"].specifier
+    assert specifier.contains("1.7.0"), (
+        f"ripple-detection is pinned {str(specifier)!r}; it must admit 1.7, "
+        "the first release carrying the multiunit normalization API."
+    )
+    assert not specifier.contains("1.6.0"), (
+        f"ripple-detection is pinned {str(specifier)!r}; 1.6 lacks "
+        "core.normalize_signal and the detector's normalization parameters, "
+        "so spyglass.mua fails to import against it."
+    )
+
+    for module, name in (
+        (core, "normalize_signal"),
+        (core, "_validate_normalization_params"),
+        (detectors, "_get_event_stats"),
+    ):
+        assert hasattr(module, name), (
+            f"ripple_detection.{module.__name__.split('.')[-1]} has no "
+            f"{name!r}, which spyglass/mua/v1/_detection.py imports. Move "
+            "the import and the pyproject floor together."
+        )
