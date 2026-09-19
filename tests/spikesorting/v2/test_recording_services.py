@@ -885,6 +885,180 @@ def test_restricted_traces_match_continuously_filtered_reference():
         )
 
 
+# Jitter as a fraction of the nominal sample period. Each step lands in
+# [0.8/fs, 1.2/fs], which is irregular enough that no regular grid reproduces
+# the clock but still under the 1.5/fs threshold ``base_intervals_and_gaps``
+# reads as a wall-clock discontinuity, so the jitter alone splits no interval.
+_CLOCK_JITTER_FRACTION = 0.2
+
+
+def _explicit_clock_recording(duration_s, seed=11):
+    """``_drift_recording`` carrying an explicit, slightly irregular clock.
+
+    The Frank-lab production path: the raw ElectricalSeries stores per-frame
+    timestamps, so ``restrict_recording_times`` takes its non-regular branch
+    (``frames_for_times`` binary search) rather than the regular-grid
+    arithmetic every other test in this block exercises.
+    """
+    recording = _drift_recording(duration_s)
+    n_samples = recording.get_num_samples(segment_index=0)
+    rng = np.random.default_rng(seed)
+    steps = (1.0 / _FS) * (
+        1.0 + _CLOCK_JITTER_FRACTION * (2.0 * rng.random(n_samples - 1) - 1.0)
+    )
+    times = np.concatenate([[0.0], np.cumsum(steps)])
+    recording.set_times(times, segment_index=0, with_warning=False)
+    return recording
+
+
+def _explicit_clock_frames(recording, intervals):
+    """Frames ``restrict_recording_times`` selects on an explicit clock."""
+    from spyglass.spikesorting.v2._signal_math import frames_for_times
+
+    bounds = np.asarray(intervals, dtype=float).reshape(-1, 2)
+    starts = frames_for_times(recording, bounds[:, 0])
+    stops = frames_for_times(recording, bounds[:, 1], side="right")
+    return [
+        (int(start), int(stop))
+        for start, stop in zip(starts, stops)
+        if start < stop
+    ]
+
+
+@pytest.mark.unit
+def test_restricted_traces_match_reference_on_explicit_clock():
+    """The same reference agreement, on the explicit-timestamp clock.
+
+    ``test_restricted_traces_match_continuously_filtered_reference`` pins the
+    new order on a rate-based recording, which takes
+    ``restrict_recording_times``' regular-grid branch. Production raw files
+    carry per-frame timestamps and take the other branch, whose frames come
+    from a binary search over the clock -- so the clock has to survive the
+    filter for the reorder to select the same samples. It does: SpikeInterface
+    copies the parent segment's time kwargs into the preprocessor's segment
+    (``BasePreprocessorSegment.__init__`` ->
+    ``parent_recording_segment.get_times_kwargs()``), so the filtered
+    recording reports the identical explicit time vector.
+    """
+    import scipy.signal
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_temporal_preprocessing,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _recording_has_explicit_time_vector,
+        restrict_recording_times,
+    )
+
+    recording = _explicit_clock_recording(20.0)
+    validated = _bandpass_params()
+    assert _recording_has_explicit_time_vector(recording) is True
+    assert np.all(np.diff(recording.get_times()) > 0)
+
+    filtered, _ = apply_temporal_preprocessing(recording, validated)
+    # The clock is the parent's, unchanged, so the restriction arithmetic
+    # below reads exactly what it would read on the raw recording.
+    assert _recording_has_explicit_time_vector(filtered) is True
+    np.testing.assert_array_equal(filtered.get_times(), recording.get_times())
+
+    # The frames chosen on the filtered recording ARE the frames chosen on the
+    # raw one -- the reorder must not move a sample boundary.
+    frames = _explicit_clock_frames(recording, _INTERVALS)
+    assert frames == _explicit_clock_frames(filtered, _INTERVALS)
+    assert len(frames) == len(_INTERVALS)
+    # Not the regular-grid answer: this is a genuinely irregular clock.
+    assert frames != _selected_frames(recording, _INTERVALS)
+
+    new_order, _times, n_intervals = restrict_recording_times(
+        filtered, _INTERVALS
+    )
+    assert n_intervals == len(frames)
+    assert new_order.get_num_samples() == sum(
+        stop - start for start, stop in frames
+    )
+    restricted, _t, n_raw = restrict_recording_times(recording, _INTERVALS)
+    assert n_raw == n_intervals
+    assert restricted.get_num_samples() == new_order.get_num_samples()
+    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+
+    reference = sip.bandpass_filter(
+        recording,
+        freq_min=validated.bandpass_filter.freq_min,
+        freq_max=validated.bandpass_filter.freq_max,
+        dtype=np.float64,
+    )
+    # Independent whole-trace pass with SpikeInterface's own coefficients, so
+    # a margin bug inside the filter under test cannot cancel out.
+    sos = scipy.signal.iirfilter(
+        5,
+        [
+            validated.bandpass_filter.freq_min,
+            validated.bandpass_filter.freq_max,
+        ],
+        fs=_FS,
+        analog=False,
+        btype="bandpass",
+        ftype="butter",
+        output="sos",
+    )
+    scipy_reference = scipy.signal.sosfiltfilt(
+        sos,
+        np.asarray(recording.get_traces(return_in_uV=True), dtype=np.float64),
+        axis=0,
+    )
+
+    offset = 0
+    for index, (start, stop) in enumerate(frames):
+        count = stop - start
+        ref = np.asarray(
+            reference.get_traces(
+                start_frame=start, end_frame=stop, return_in_uV=True
+            ),
+            dtype=np.float64,
+        )
+        new = np.asarray(
+            new_order.get_traces(
+                start_frame=offset,
+                end_frame=offset + count,
+                return_in_uV=True,
+            ),
+            dtype=np.float64,
+        )
+        old = np.asarray(
+            old_order.get_traces(
+                start_frame=offset,
+                end_frame=offset + count,
+                return_in_uV=True,
+            ),
+            dtype=np.float64,
+        )
+        offset += count
+
+        rms_ref = _rms(ref)
+        bound = 1e-3 * rms_ref
+        new_max = float(np.max(np.abs(new - ref)))
+        assert new_max <= bound, (
+            f"interval {index} ({count} samples): max abs error {new_max:.4g} "
+            f"uV exceeds {bound:.4g} uV"
+        )
+        assert abs(_rms(new) - rms_ref) / rms_ref <= 1e-3
+        assert np.max(np.abs(new[0] - ref[0])) <= bound
+        assert np.max(np.abs(new[-1] - ref[-1])) <= bound
+        assert float(np.max(np.abs(old - ref))) > 100 * bound, (
+            f"interval {index}: the old order no longer discriminates the "
+            "two orders on an explicit clock"
+        )
+
+        scipy_ref = scipy_reference[start:stop]
+        scipy_bound = 1e-3 * _rms(scipy_ref)
+        scipy_max = float(np.max(np.abs(new - scipy_ref)))
+        assert scipy_max <= scipy_bound, (
+            f"interval {index}: max abs error {scipy_max:.4g} uV against the "
+            f"scipy whole-trace reference exceeds {scipy_bound:.4g} uV"
+        )
+
+
 @pytest.mark.unit
 def test_sliver_after_highpass_matches_continuous_filter():
     """A 1.5 ms interval is entirely filter transient under the old order.
