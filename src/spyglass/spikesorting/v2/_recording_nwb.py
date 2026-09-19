@@ -181,6 +181,126 @@ def _remove_partial_artifact(
         )
 
 
+# Probe-relative contact position columns of the NWB electrodes table. These
+# are what SpikeInterface rebuilds a reloaded recording's channel locations
+# from (``NwbRecordingExtractor._fetch_locations_and_groups``), and what the
+# content fingerprint hashes as the artifact's geometry component.
+_RELATIVE_POSITION_COLUMNS = ("rel_x", "rel_y", "rel_z")
+
+# Contact positions are micrometres. 1e-6 um is far below any real contact
+# pitch and matches the rounding the geometry helpers in
+# ``_recording_geometry`` use to decide "same contact", so it is the tolerance
+# for the persisted-versus-requested read-back.
+_POSITION_TOLERANCE_UM = 1e-6
+
+
+def _ensure_relative_position_columns(nwbfile) -> None:
+    """Give the analysis file's electrodes table its ``rel_*`` columns.
+
+    ``AnalysisNwbfile().create`` exports the parent NWB's electrodes table
+    verbatim, so a parent written without probe-relative contact positions
+    yields an analysis file with nowhere to put the normalized geometry.
+    hdmf 4.3 accepts a new column on a table that was already written (the
+    file is open in append mode), so the missing columns are created here --
+    zero-filled for every row -- BEFORE ``io.write``. The post-write pass then
+    fills the rows the ElectricalSeries actually references.
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        The analysis file, opened in append mode and not yet written.
+    """
+    electrodes = nwbfile.electrodes
+    n_rows = len(electrodes.id)
+    for column in _RELATIVE_POSITION_COLUMNS:
+        if column in electrodes.colnames:
+            continue
+        electrodes.add_column(
+            name=column,
+            description=(
+                f"the {column[-1]} coordinate of this contact relative to "
+                "the probe, in micrometers"
+            ),
+            data=[0.0] * n_rows,
+        )
+
+
+def _persist_channel_geometry(
+    analysis_abs_path: str, row_indices, locations
+) -> None:
+    """Stamp the recording's normalized 2D geometry onto its electrodes rows.
+
+    Writes ``rel_x``/``rel_y`` from the recording's 2D channel locations and
+    ``rel_z = 0`` into the electrodes-table rows the ElectricalSeries
+    references, then reads them back and verifies them. Rows outside the
+    region keep whatever the parent NWB held.
+
+    This runs after ``io.write`` (the ElectricalSeries and its region are on
+    disk) and before the content fingerprint, which hashes exactly these rows.
+    h5py rather than pynwb because the datasets already exist and only a few
+    of their elements change.
+
+    Parameters
+    ----------
+    analysis_abs_path : str
+        Absolute path to the just-written analysis NWB file.
+    row_indices : sequence of int
+        Electrodes-table ROW indices the series references, in the recording's
+        channel order (the region ``electrode_table_region`` built).
+    locations : array_like
+        ``(n_channels, 2)`` normalized contact positions, in the recording's
+        channel order.
+
+    Raises
+    ------
+    ValueError
+        If ``locations`` is not ``(n_channels, 2)`` or does not have one row
+        per referenced electrode.
+    RuntimeError
+        If the persisted coordinates do not read back as written.
+    """
+    import h5py
+    import numpy as np
+
+    positions = np.asarray(locations, dtype=float)
+    rows = np.asarray(row_indices, dtype=int)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError(
+            "write_nwb_artifact: the recording's channel locations must be "
+            f"2D after geometry normalization, got shape {positions.shape}."
+        )
+    if len(positions) != len(rows):
+        raise ValueError(
+            "write_nwb_artifact: the recording has "
+            f"{len(positions)} channel locations but its ElectricalSeries "
+            f"references {len(rows)} electrodes; the persisted geometry would "
+            "be misaligned with the series."
+        )
+    expected = np.column_stack([positions, np.zeros(len(rows))])
+
+    with h5py.File(analysis_abs_path, "a") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        for axis, column in enumerate(_RELATIVE_POSITION_COLUMNS):
+            values = group[column][:]
+            values[rows] = expected[:, axis]
+            group[column][:] = values
+
+    with h5py.File(analysis_abs_path, "r") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        persisted = np.column_stack(
+            [group[column][:][rows] for column in _RELATIVE_POSITION_COLUMNS]
+        )
+    if not np.allclose(
+        persisted, expected, rtol=0.0, atol=_POSITION_TOLERANCE_UM
+    ):
+        raise RuntimeError(
+            "write_nwb_artifact: the electrodes table did not retain the "
+            f"normalized geometry (wrote {expected.tolist()}, read back "
+            f"{persisted.tolist()}). A reload would rebuild the recording "
+            "from coordinates the sort never saw."
+        )
+
+
 def write_nwb_artifact(
     recording,
     nwb_file_name: str,
@@ -199,6 +319,15 @@ def write_nwb_artifact(
     Without streaming, a 30 kHz x 128 ch x 1 h recording
     (~110 GB float64) would have to materialize in RAM before the
     NWB write, which OOMs on any lab workstation.
+
+    The electrodes rows the ElectricalSeries references are stamped with the
+    recording's NORMALIZED 2D geometry -- ``rel_x``/``rel_y`` from
+    ``recording.get_channel_locations()`` and a constant ``rel_z = 0`` -- so a
+    reload's x-y projection is exactly the geometry the sort saw. SpikeInterface
+    rebuilds channel locations from those columns, so persisting the parent
+    NWB's raw 3D coordinates instead would let an x-z probe collapse back into
+    coincident contacts on every read. Rows outside the series region are left
+    untouched.
 
     Returns ``(analysis_file_name, electrical_series_object_id,
     content_hash)``. The ``content_hash`` is the
@@ -317,6 +446,10 @@ def write_nwb_artifact(
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbfile = io.read()
+            # The normalized geometry has to land in rel_x/rel_y/rel_z; a
+            # parent NWB that never carried those columns gets them here,
+            # zero-filled, while the file is still open for writing.
+            _ensure_relative_position_columns(nwbfile)
             # ``recording.get_channel_ids()`` are spyglass electrode ids;
             # map them to electrodes-table ROW INDICES (not raw ids) so a
             # non-contiguous / reordered electrodes table does not silently
@@ -326,6 +459,7 @@ def write_nwb_artifact(
                 recording.get_channel_ids(),
                 "Sort group electrodes",
             )
+            geometry_rows = [int(row) for row in table_region.data]
             series = pynwb.ecephys.ElectricalSeries(
                 name=_ELECTRICAL_SERIES_NAME,
                 data=data_iterator,
@@ -344,6 +478,26 @@ def write_nwb_artifact(
                 nwbfile.add_scratch(table)
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
+
+        # Persist the geometry the sort actually ran on. SpikeInterface
+        # rebuilds a reloaded recording's channel locations from these rows,
+        # so without this the reload silently reverts to the parent NWB's raw
+        # 3D coordinates -- an x-z tetrode collapses again under SI's x-y
+        # projection and the in-memory normalization is lost. Before the
+        # fingerprint below, which hashes these same rows as the artifact's
+        # geometry component.
+        if not recording.has_channel_location():
+            raise ValueError(
+                "write_nwb_artifact: the recording carries no contact "
+                "positions, so the artifact would persist no geometry. "
+                "Populate Probe.Electrode rel_x/rel_y/rel_z for this sort "
+                "group's electrodes."
+            )
+        _persist_channel_geometry(
+            analysis_abs_path,
+            geometry_rows,
+            recording.get_channel_locations(),
+        )
 
         # Fingerprint the persisted file (read back from the known abs path,
         # never the checksum-validating get_abs_path) so the identity reflects
