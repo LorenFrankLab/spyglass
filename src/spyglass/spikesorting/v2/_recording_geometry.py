@@ -171,9 +171,21 @@ def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
     """Fetch the ``Probe.Electrode`` 3D contact position of each channel.
 
     The probe-relative ``rel_x``/``rel_y``/``rel_z`` columns (joined onto
-    ``Electrode``), NOT ``Electrode.x/y/z`` -- same source
-    :func:`fetch_interior_bad_channel_ids` uses, and the geometry that reaches
-    SpikeInterface through the raw electrodes table.
+    ``Electrode``), NOT ``Electrode.x/y/z`` -- the same source
+    :func:`fetch_interior_bad_channel_ids` uses.
+
+    **This is the registered probe's geometry, not the session's.**
+    ``Probe.Electrode`` is ingested from the NWB's ``ShanksElectrode`` device
+    metadata and keyed by probe TYPE, so one row set serves every session
+    recorded on that probe type. SpikeInterface, by contrast, reads the
+    per-session electrodes table's ``rel_x``/``rel_y``/``rel_z`` columns. The
+    two normally agree, because Frank-lab writers fill both from the same
+    probe YAML -- but nothing enforces it, and a file whose electrodes table
+    was written (or edited) independently of its device metadata will
+    disagree. The v2 suite has such a fixture on purpose: a synthesized
+    tetrode whose electrodes table is zeroed while its ``ShanksElectrode``
+    attributes keep the canonical square. Callers reasoning about what the
+    SORT will see should keep that gap in mind.
 
     The columns are nullable and the join drops any electrode with no probe
     link, so both "no geometry" cases arrive as ``NaN`` rows rather than a

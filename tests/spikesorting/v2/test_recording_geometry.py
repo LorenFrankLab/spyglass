@@ -249,3 +249,46 @@ def test_assert_unique_contact_positions_without_any_geometry():
     with pytest.raises(ValueError) as excinfo:
         assert_unique_contact_positions(recording)
     assert "Probe.Electrode" in str(excinfo.value)
+
+
+def test_tetrode_repair_applies_gates():
+    """Each gate of the legacy ``tetrode_12.5`` repair, one at a time.
+
+    ``maybe_apply_tetrode_geometry`` needs a recording and logs its verdict;
+    preflight needs the same verdict from probe metadata alone. Both now ask
+    this predicate, so its four gates are pinned here: one all-true case, and
+    one case per gate that flips it to False with everything else held.
+    """
+    from spyglass.spikesorting.v2._recording_geometry import (
+        tetrode_repair_applies,
+    )
+
+    tetrode = ("tetrode_12.5",) * 4
+    one_group = ("0",) * 4
+
+    assert tetrode_repair_applies(tetrode, one_group, 4) is True
+
+    # Gate 1: the group spans more than one probe type.
+    assert (
+        tetrode_repair_applies(
+            ("tetrode_12.5", "tetrode_12.5", "tetrode_12.5", "other_probe"),
+            one_group,
+            4,
+        )
+        is False
+    )
+    # Gate 2: a single probe, but not the one the 12.5 um square describes.
+    assert (
+        tetrode_repair_applies(
+            ("128c-4s6mm6cm-15um-26um-sl",) * 4, one_group, 4
+        )
+        is False
+    )
+    # Gate 3: not exactly four channels (the square has four corners).
+    assert tetrode_repair_applies(tetrode, one_group, 3) is False
+    assert tetrode_repair_applies(("tetrode_12.5",) * 5, ("0",) * 5, 5) is False
+    # Gate 4: four tetrode channels, but drawn from two electrode groups --
+    # they are not one physical tetrode.
+    assert tetrode_repair_applies(tetrode, ("0", "0", "1", "1"), 4) is False
+    # An empty group must answer False, not raise on the empty probe set.
+    assert tetrode_repair_applies((), (), 0) is False

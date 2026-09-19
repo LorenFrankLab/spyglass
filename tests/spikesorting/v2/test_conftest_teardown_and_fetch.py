@@ -206,6 +206,63 @@ def test_item_consumes_smoke_fixture_only_for_real_consumers(tmp_path):
     )
 
 
+def test_require_fixtures_gate_ignores_stale_ingested_copies(
+    tmp_path, monkeypatch
+):
+    """A leftover ingest copy must not satisfy a downloaded fixture's gate.
+
+    ``copy_and_insert_nwb`` copies every ingested fixture into the shared raw
+    data directory under its own stem, so that directory accumulates files
+    named exactly like the v2 fixtures. The gate exists to prove THIS run
+    downloaded and verified the fixture, so only
+    ``tests/spikesorting/v2/fixtures/<name>.nwb`` counts for a name
+    ``_fetch.py`` knows.
+
+    The real recorded session (``minirec20230622``) has no entry there -- CI
+    curls it straight into the raw data directory -- so for that name, and
+    only that name, the raw directory is where the gate looks.
+    """
+    import tests.spikesorting.v2.conftest as v2_conftest
+    from tests.spikesorting.v2.conftest import _missing_required_fixtures
+    from tests.spikesorting.v2.fixtures._fetch import FIXTURE_URLS
+
+    # Mirror the real layout: the helper resolves both directories from its
+    # own module path (``tests/spikesorting/v2/conftest.py`` ->
+    # ``./fixtures`` and ``../../_data/raw``).
+    conftest_path = tmp_path / "tests" / "spikesorting" / "v2" / "conftest.py"
+    fixtures_dir = conftest_path.parent / "fixtures"
+    raw_dir = tmp_path / "tests" / "_data" / "raw"
+    fixtures_dir.mkdir(parents=True)
+    raw_dir.mkdir(parents=True)
+    monkeypatch.setattr(v2_conftest, "__file__", str(conftest_path))
+
+    assert "mearec_polymer_smoke" in FIXTURE_URLS
+    assert "minirec20230622" not in FIXTURE_URLS
+    required = ["mearec_polymer_smoke", "minirec20230622"]
+
+    # Nothing anywhere: both are missing.
+    assert _missing_required_fixtures(required) == required
+
+    # A stale ingest copy of the DOWNLOADED fixture sits in the raw directory,
+    # and the real session sits there legitimately.
+    (raw_dir / "mearec_polymer_smoke.nwb").write_bytes(b"stale ingest copy")
+    (raw_dir / "minirec20230622.nwb").write_bytes(b"curled by CI")
+    assert _missing_required_fixtures(required) == ["mearec_polymer_smoke"], (
+        "a leftover copy in the raw data directory satisfied a downloaded "
+        "fixture's gate, so a failed download would look green"
+    )
+
+    # The verified download itself is what clears it.
+    (fixtures_dir / "mearec_polymer_smoke.nwb").write_bytes(b"downloaded")
+    assert _missing_required_fixtures(required) == []
+
+    # ...and the fixtures directory is NOT where the real session is looked
+    # for, so a file of that name there does not clear it.
+    (raw_dir / "minirec20230622.nwb").unlink()
+    (fixtures_dir / "minirec20230622.nwb").write_bytes(b"wrong home")
+    assert _missing_required_fixtures(required) == ["minirec20230622"]
+
+
 def test_require_fixtures_gate_still_exits_nonzero():
     """The honest-green gate must fail loudly when a required fixture is absent.
 

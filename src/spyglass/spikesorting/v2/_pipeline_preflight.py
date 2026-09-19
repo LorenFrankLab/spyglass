@@ -777,6 +777,64 @@ def assert_concat_preflight(
     return []
 
 
+# A preflight message is read in a terminal, so it names enough contacts to
+# act on and then says how many it left out. A 128-channel group with no
+# geometry would otherwise print 128 triples.
+_MAX_REPORTED_CONTACTS = 4
+
+
+def _truncated(items: list) -> str:
+    """Render ``items``, capped, stating how many were omitted."""
+    shown = items[:_MAX_REPORTED_CONTACTS]
+    omitted = len(items) - len(shown)
+    return f"{shown}" + (f" (+{omitted} more)" if omitted else "")
+
+
+def _coincident_contact_report(channel_ids, positions) -> str:
+    """Describe the electrodes that share an x-y position.
+
+    Only called once ``select_distinct_plane`` has returned ``None``, so x-y
+    necessarily has at least one duplicate: had it not, ``"xy"`` -- the first
+    candidate plane -- would have been chosen.
+
+    Parameters
+    ----------
+    channel_ids : sequence of int
+        Sort-group electrode ids, row-aligned to ``positions``.
+    positions : numpy.ndarray
+        ``(n, 3)`` finite contact positions.
+
+    Returns
+    -------
+    str
+        ``"electrodes [1, 2] at (0.0, 0.0); ..."``, capped by
+        ``_MAX_REPORTED_CONTACTS`` groups.
+    """
+    import numpy as np
+
+    # Same rounding the geometry helpers use to decide "same contact", so the
+    # message cannot name a different set than the verdict was based on.
+    from spyglass.spikesorting.v2._recording_geometry import (
+        _POSITION_DECIMALS,
+    )
+
+    xy = np.round(np.asarray(positions, dtype=float)[:, :2], _POSITION_DECIMALS)
+    groups: dict = {}
+    for electrode_id, position in zip(channel_ids, xy):
+        groups.setdefault(tuple(position.tolist()), []).append(
+            int(electrode_id)
+        )
+    colliding = [
+        (position, ids) for position, ids in groups.items() if len(ids) > 1
+    ]
+    shown = colliding[:_MAX_REPORTED_CONTACTS]
+    report = "; ".join(
+        f"electrodes {_truncated(ids)} at {position}" for position, ids in shown
+    )
+    omitted = len(colliding) - len(shown)
+    return report + (f" (+{omitted} more position(s))" if omitted else "")
+
+
 def sort_group_geometry_problem(
     nwb_file_name: str, sort_group_id: int
 ) -> "str | None":
@@ -802,6 +860,15 @@ def sort_group_geometry_problem(
     ``Recording.make_fetch`` passes to ``maybe_apply_tetrode_geometry``. A
     ``bad_channel_handling='remove'`` run drops members later, which can only
     remove a collision, so this is conservative by at most that case.
+
+    Reads the REGISTERED PROBE's geometry (``Probe.Electrode``, keyed by probe
+    type), while the sort itself gets its channel locations from the session's
+    own electrodes table. Those agree for any file whose writer filled both
+    from one probe definition, but nothing enforces it -- see
+    :func:`~spyglass.spikesorting.v2._recording_geometry.fetch_sort_group_contact_positions`.
+    A session that disagrees with its probe can therefore pass this check and
+    still reach the recording stage's own assertion, which sees what
+    SpikeInterface sees.
 
     Parameters
     ----------
@@ -849,11 +916,11 @@ def sort_group_geometry_problem(
         missing = [int(channel_ids[i]) for i in unpositioned]
         return (
             f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
-            f"electrode(s) {missing[:5]} with no Probe.Electrode position "
-            "(missing row or NULL rel_x/rel_y/rel_z) while its other "
-            "electrodes have one. SpikeInterface cannot place those contacts. "
-            "Populate Probe.Electrode rel_x/rel_y/rel_z for every electrode "
-            "in the sort group."
+            f"electrode(s) {_truncated(missing)} with no Probe.Electrode "
+            "position (missing row or NULL rel_x/rel_y/rel_z) while its "
+            "other electrodes have one. SpikeInterface cannot place those "
+            "contacts. Populate Probe.Electrode rel_x/rel_y/rel_z for every "
+            "electrode in the sort group."
         )
 
     if select_distinct_plane(positions) is not None:
@@ -869,11 +936,11 @@ def sort_group_geometry_problem(
         return None
     return (
         f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
-        "contacts that share a position in every coordinate plane "
-        f"(Probe.Electrode rel_x/rel_y/rel_z = {positions.tolist()}), so "
-        "SpikeInterface cannot build a probe for it. Fix Probe.Electrode "
-        "rel_x/rel_y/rel_z for this sort group's electrodes; the "
-        "tetrode_12.5 repair covers only 4-channel single-group tetrodes."
+        "contacts that share a position: no coordinate plane separates them. "
+        f"Coincident in x-y (the projection SpikeInterface builds its probe "
+        f"from): {_coincident_contact_report(channel_ids, positions)}. Fix "
+        "Probe.Electrode rel_x/rel_y/rel_z for this sort group's electrodes; "
+        "the tetrode_12.5 repair covers only 4-channel single-group tetrodes."
     )
 
 

@@ -134,6 +134,44 @@ def _item_consumes_smoke_fixture(item):
     return "dj_conn" in fixtures and _module_references_smoke(item)
 
 
+def _missing_required_fixtures(required):
+    """Names from ``SPYGLASS_V2_REQUIRE_FIXTURES`` that no file satisfies.
+
+    A name ``_fetch.py`` knows is satisfied ONLY by
+    ``tests/spikesorting/v2/fixtures/<name>.nwb`` -- the file it downloads and
+    sha256-verifies. The shared raw data directory must not count for those:
+    ``copy_and_insert_nwb`` copies every ingested fixture into it under its
+    own stem, so a leftover copy from a previous run would satisfy a gate
+    whose whole purpose is to prove THIS run's download happened.
+
+    A name ``_fetch.py`` does not know has no home in ``fixtures/``. That is
+    the real recorded session (``minirec20230622``) the workflow curls
+    straight into the raw data directory, so for those -- and only those --
+    the raw data directory is where the gate looks.
+
+    Parameters
+    ----------
+    required : sequence of str
+        Fixture stems (no ``.nwb``) the run declares it must exercise.
+
+    Returns
+    -------
+    list of str
+        The names with no satisfying file, in the given order.
+    """
+    from tests.spikesorting.v2.fixtures._fetch import FIXTURE_URLS
+
+    here = Path(__file__).resolve()
+    fixtures_dir = here.parent / "fixtures"
+    raw_dir = here.parents[2] / "_data" / "raw"
+    missing = []
+    for name in required:
+        home = fixtures_dir if name in FIXTURE_URLS else raw_dir
+        if not (home / f"{name}.nwb").exists():
+            missing.append(name)
+    return missing
+
+
 def pytest_sessionstart(session):
     """Pre-fetch only the fixtures this session is configured to require.
 
@@ -166,19 +204,7 @@ def pytest_sessionstart(session):
     # it downloaded (per-PR: smoke; nightly: + 60s polymer; manual dispatch:
     # + scenario fixtures). Unset locally, so absent fixtures skip as before.
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
-    # Two homes: the generated/downloaded v2 fixtures, and the shared raw data
-    # directory that holds the real recorded sessions the general suite
-    # downloads (minirec20230622). A v2 test may gate on either, so a name is
-    # satisfied by a file in either place.
-    search_dirs = (
-        Path(__file__).resolve().parent / "fixtures",
-        Path(__file__).resolve().parents[2] / "_data" / "raw",
-    )
-    missing = [
-        n
-        for n in required
-        if not any((d / f"{n}.nwb").exists() for d in search_dirs)
-    ]
+    missing = _missing_required_fixtures(required)
     if missing:
         pytest.exit(
             "Required v2 fixtures are absent, so their gates would silently "

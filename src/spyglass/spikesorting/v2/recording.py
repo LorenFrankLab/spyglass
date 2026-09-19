@@ -1237,10 +1237,28 @@ class Recording(SpyglassMixin, dj.Computed):
     ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar -- the
     in-NWB ``ElectricalSeries`` is the sole cached artifact.
 
-    ``make()`` loads the raw NWB, restricts to the requested sort group
-    and interval, applies pre-motion preprocessing (bandpass + common
-    reference -- whitening is deferred to the sorter for sorters that
-    need it), streams one ``ElectricalSeries`` into a fresh
+    ``make()`` loads the raw NWB and prepares the recording in this order:
+
+    1. select the sort group's channels (``select_sort_group_channels``);
+    2. reduce the 3D contact positions to the plane that keeps every
+       contact distinct (``normalize_channel_locations``) -- before any
+       probe exists, since a probe freezes the locations;
+    3. ``apply_temporal_preprocessing`` (phase shift, bandpass) on the
+       CONTINUOUS source, so each filter's margin is drawn from real
+       neighboring samples;
+    4. restrict to the requested interval (``restrict_recording``) -- after
+       filtering, so an interval edge is signal rather than filter transient;
+    5. ``apply_spatial_preprocessing`` (bad-channel interpolation or
+       removal, then referencing) -- per-sample across channels, so the
+       interval joins cannot affect it;
+    6. ``maybe_apply_tetrode_geometry``, which spreads a legacy
+       four-channel ``tetrode_12.5`` group whose stored positions are
+       degenerate onto the 12.5 um square;
+    7. ``assert_unique_contact_positions``, so the EFFECTIVE geometry -- what
+       SpikeInterface will build a probe from -- is checked last.
+
+    Whitening is deferred to the sorter for the sorters that need it. It then
+    streams one ``ElectricalSeries`` into a fresh
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
     requested ``IntervalList.valid_times``, and records a representation-blind
     content fingerprint of the persisted file (``content_hash``; see

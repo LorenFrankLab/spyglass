@@ -1,12 +1,11 @@
 """DB-free guards in ``build_analyzer``.
 
-``build_analyzer`` is the single door every SortingAnalyzer goes through, so
-the geometry it hands SpikeInterface is checked here rather than at each
-extension. A recording whose contacts share a 2D position cannot produce a
-probe at all (``probeinterface`` raises "Contact positions must be unique
-within a probe"), and that bare message names neither the sort nor the table
-an operator has to fix -- so the build refuses first, with an actionable
-error, before any extension is computed.
+``build_analyzer`` checks the geometry once, up front, rather than leaving
+each extension to fail its own way: a recording whose contacts share a 2D
+position cannot produce a probe at all (``probeinterface`` raises "Contact
+positions must be unique within a probe"), and that bare message names
+neither the sort nor the table an operator has to fix. So the build refuses
+first, with an actionable error, before any extension is computed.
 """
 
 from __future__ import annotations
