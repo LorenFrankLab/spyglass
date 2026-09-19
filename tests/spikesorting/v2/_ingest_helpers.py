@@ -474,6 +474,81 @@ def synthesize_minirec_nwb(
     return out_path
 
 
+def zero_raw_electrode_geometry(nwb_path):
+    """Zero the electrodes table's ``rel_x``/``rel_y``/``rel_z`` in place.
+
+    Reproduces the legacy Frank-lab session whose contact positions were
+    never written into the electrodes table: SpikeInterface reads exactly
+    these three columns as the recording's channel locations, so every
+    contact in a sort group collapses onto a single point and only
+    ``maybe_apply_tetrode_geometry`` can spread them apart again.
+
+    The ``ShanksElectrode`` probe metadata is deliberately LEFT ALONE.
+    Spyglass ingests it into ``Probe.Electrode``, whose primary key is
+    ``(probe_id, probe_shank, probe_electrode)`` with ``probe_id`` taken
+    from the probe TYPE -- device metadata is global, not per session. A
+    second ``tetrode_12.5`` probe carrying zeroed positions therefore
+    collides with the canonical one (``DuplicateError: ... already exists
+    with different values for rel_z``) and no test database can hold both.
+
+    Edited with h5py rather than pynwb because the columns are datasets
+    already on disk and only their values change.
+
+    Parameters
+    ----------
+    nwb_path : pathlib.Path or str
+        NWB file to edit IN PLACE.
+
+    Returns
+    -------
+    pathlib.Path
+        ``nwb_path``.
+    """
+    import h5py
+
+    nwb_path = Path(nwb_path)
+    with h5py.File(str(nwb_path), "a") as h5:
+        electrodes = h5["general/extracellular_ephys/electrodes"]
+        for column in ("rel_x", "rel_y", "rel_z"):
+            electrodes[column][:] = 0.0
+    return nwb_path
+
+
+def rename_probe_type(nwb_path, new_probe_type: str):
+    """Relabel every ``ndx_franklab_novela.Probe`` device in place.
+
+    ``Probe`` (and therefore ``Probe.Electrode``) is keyed by the probe TYPE
+    alone, so one database can hold exactly ONE geometry per probe type.
+    Ingesting a second session whose ``tetrode_12.5`` contacts sit elsewhere
+    raises ``DuplicateError``. Relabelling the copy gives it private device
+    rows, at the cost of the ``tetrode_12.5``-gated geometry repair no longer
+    applying to it.
+
+    Parameters
+    ----------
+    nwb_path : pathlib.Path or str
+        NWB file to edit IN PLACE.
+    new_probe_type : str
+        Replacement ``probe_type`` (also becomes the Spyglass ``probe_id``).
+
+    Returns
+    -------
+    pathlib.Path
+        ``nwb_path``.
+    """
+    import h5py
+
+    nwb_path = Path(nwb_path)
+    with h5py.File(str(nwb_path), "a") as h5:
+
+        def _rename(_name, obj):
+            if obj.attrs.get("neurodata_type") == "Probe":
+                obj.attrs["probe_type"] = new_probe_type
+
+        h5["general/devices"].visititems(_rename)
+    return nwb_path
+
+
 def write_two_eseries_nwb(
     out_path,
     *,

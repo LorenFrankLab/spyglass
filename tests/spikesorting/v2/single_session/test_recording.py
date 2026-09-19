@@ -2213,3 +2213,270 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
                 AnalysisNwbfile
                 & {"analysis_file_name": artifact.analysis_file_name}
             ).delete(safemode=False)
+
+
+# ---------- persisted geometry survives the artifact round trip -----------
+
+# The real Frank-lab tetrode session the general test suite already uses. It
+# is NOT a v2 fixture (it lives in the shared raw data directory, not
+# ``tests/spikesorting/v2/fixtures``), so it is skipped when absent unless the
+# run declares it required -- the same honest-green contract the downloaded v2
+# fixtures follow.
+_MINIREC_NAME = "minirec20230622"
+_MINIREC_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "_data"
+    / "raw"
+    / f"{_MINIREC_NAME}.nwb"
+)
+
+
+def _require_or_skip_minirec():
+    """Skip unless the real minirec session is available (or required)."""
+    import os
+
+    if _MINIREC_PATH.exists():
+        return
+    required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
+    message = (
+        f"Real tetrode session {_MINIREC_PATH} not found. It is downloaded "
+        "by the scheduled / manual CI runs; locally, fetch it as the general "
+        "test suite does."
+    )
+    if _MINIREC_NAME in required:
+        pytest.fail(message + " It is named in SPYGLASS_V2_REQUIRE_FIXTURES.")
+    pytest.skip(message)
+
+
+def _ingest_fresh(nwb_source, dest_name: str) -> str:
+    """Ingest ``nwb_source`` as ``dest_name``, discarding any stale copy.
+
+    ``copy_and_insert_nwb`` skips the copy when a file of that name is already
+    in the raw directory, which would silently ingest a PREVIOUS run's bytes.
+    These tests depend on the exact geometry of the file they just wrote, so
+    both the raw file and Spyglass's ``_``-suffixed copy are removed first.
+    """
+    from spyglass.settings import raw_dir
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
+
+    Path(raw_dir, dest_name).unlink(missing_ok=True)
+    Path(raw_dir, get_nwb_copy_filename(dest_name)).unlink(missing_ok=True)
+    return copy_and_insert_nwb(nwb_source, dest_name=dest_name)
+
+
+def _populate_one_group(nwb_file_name: str, sort_group_id: int) -> dict:
+    """Populate ``Recording`` for one sort group; return its PK."""
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+    )
+
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    recording_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": int(sort_group_id),
+            "interval_list_name": "raw data valid times",
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    (Recording & recording_pk).super_delete(warn=False, force_masters=True)
+    Recording.populate(recording_pk, reserve_jobs=False)
+    return recording_pk
+
+
+def _square_offsets(locations):
+    """Contact positions as a set of offsets from their minimum corner.
+
+    probeinterface re-centers contacts on their centroid, so the absolute
+    origin of a repaired tetrode is not stable; the 12.5 um square -- the only
+    thing a geometry-aware sorter consumes -- is.
+    """
+    import numpy as np
+
+    positions = np.round(np.asarray(locations, dtype=float), 3)
+    return {(float(x), float(y)) for x, y in positions - positions.min(axis=0)}
+
+
+@pytest.mark.slow
+def test_tetrode_geometry_persists_across_reload(dj_conn, tmp_path):
+    """A repaired all-zero tetrode reloads with its repaired geometry.
+
+    ``maybe_apply_tetrode_geometry`` spreads a legacy four-channel
+    ``tetrode_12.5`` group whose stored contact positions are all zero onto a
+    12.5 um square -- in memory, during ``Recording.make``. If the artifact
+    does not persist those positions, the reload hands SpikeInterface four
+    coincident contacts again and ``get_probe()`` (hence every analyzer built
+    on it) fails. This drives that end to end on a synthesized session whose
+    electrodes table -- the columns SpikeInterface reads as channel locations
+    -- carries no geometry at all.
+    """
+    from datetime import datetime, timezone
+
+    from spyglass.spikesorting.v2.recording import Recording, SortGroupV2
+
+    from tests.spikesorting.v2._ingest_helpers import (
+        synthesize_minirec_nwb,
+        zero_raw_electrode_geometry,
+    )
+
+    source = tmp_path / "zero_geometry_tetrode.nwb"
+    synthesize_minirec_nwb(
+        source,
+        session_start=datetime(2023, 6, 22, 12, 0, tzinfo=timezone.utc),
+        fixture_name="v2_zero_geometry_tetrode",
+        seed=20260919,
+        duration_s=5.0,
+    )
+    zero_raw_electrode_geometry(source)
+    nwb_file_name = _ingest_fresh(source, "v2_zero_geometry_tetrode.nwb")
+
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+                "sort_group_id"
+            )
+        )[0]
+    )
+    members = SortGroupV2.SortGroupElectrode & {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": sort_group_id,
+    }
+    assert len(members) == 4, (
+        "the tetrode repair gate needs exactly 4 channels; got "
+        f"{len(members)}"
+    )
+    # Precondition: the raw session really carries no channel geometry, so a
+    # reload showing a square can only have got it from the persisted
+    # artifact. Read the raw columns directly -- SpikeInterface's own source.
+    import h5py
+    import numpy as np
+
+    with h5py.File(str(source), "r") as raw:
+        raw_positions = np.stack(
+            [
+                raw[f"general/extracellular_ephys/electrodes/{column}"][:]
+                for column in ("rel_x", "rel_y", "rel_z")
+            ],
+            axis=1,
+        )
+    assert not raw_positions.any(), (
+        "fixture must have an all-zero raw electrodes table; got "
+        f"{raw_positions.tolist()}"
+    )
+
+    recording_pk = _populate_one_group(nwb_file_name, sort_group_id)
+    reloaded = Recording().get_recording(recording_pk)
+
+    assert reloaded.get_num_channels() == 4
+    assert _square_offsets(reloaded.get_channel_locations()) == {
+        (0.0, 0.0),
+        (0.0, 12.5),
+        (12.5, 0.0),
+        (12.5, 12.5),
+    }, (
+        "the reloaded artifact does not carry the repaired 12.5 um square -- "
+        "the in-memory tetrode repair was not persisted"
+    )
+    # The probe build is what actually fails on coincident contacts, and it is
+    # what every SortingAnalyzer goes through.
+    probe = reloaded.get_probe()
+    assert probe.get_contact_count() == 4
+
+
+@pytest.mark.slow
+def test_xz_geometry_reloads_with_four_positions(dj_conn, tmp_path):
+    """A real x-z tetrode session reloads probe-able and analyzer-able.
+
+    ``minirec20230622`` stores its contacts in the x-z plane (``rel_y`` is 0,
+    ``rel_x``/``rel_z`` are +-6.25 um), so the x-y projection SpikeInterface
+    reaches for first collapses each tetrode into two coincident pairs and
+    ``get_probe()`` -- hence ``create_sorting_analyzer`` -- raises "Contact
+    positions must be unique within a probe". The recording stage normalizes
+    onto the x-z plane and the artifact persists the result, so the reload
+    must produce four distinct positions and build a SortingAnalyzer.
+
+    The copy's probe type is RELABELLED before ingestion, for two reasons.
+    ``Probe``/``Probe.Electrode`` are keyed by probe type alone, so the real
+    ``tetrode_12.5`` rows would collide with the (differently positioned)
+    ``tetrode_12.5`` rows the all-zero test above ingests -- one database can
+    hold one geometry per probe type. It also switches OFF the
+    ``tetrode_12.5``-gated square repair, which would otherwise overwrite the
+    x-z geometry with its own square and mask what this test is for: the four
+    distinct positions below can only come from the plane normalization.
+    """
+    import numpy as np
+    import shutil
+
+    import spikeinterface as si
+    from spikeinterface.core import NumpySorting
+
+    from spyglass.spikesorting.v2.recording import Recording, SortGroupV2
+
+    from tests.spikesorting.v2._ingest_helpers import rename_probe_type
+
+    _require_or_skip_minirec()
+    source = tmp_path / "xz_geometry_minirec.nwb"
+    shutil.copy(_MINIREC_PATH, source)
+    rename_probe_type(source, "tetrode_12.5_xz_unrepaired")
+    nwb_file_name = _ingest_fresh(source, "v2_xz_geometry_minirec.nwb")
+
+    # This session's electrodes reference an electrode INSIDE their own
+    # tetrode, which SortGroupV2 rejects (subtracting then dropping it would
+    # silently sort one channel short). Geometry is what is under test, so
+    # the groups are built unreferenced.
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name, reference_mode="none"
+    )
+    sort_group_id = int(
+        sorted(
+            (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
+                "sort_group_id"
+            )
+        )[0]
+    )
+    assert (
+        len(
+            SortGroupV2.SortGroupElectrode
+            & {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_id,
+            }
+        )
+        == 4
+    )
+
+    recording_pk = _populate_one_group(nwb_file_name, sort_group_id)
+    reloaded = Recording().get_recording(recording_pk)
+
+    positions = np.round(
+        np.asarray(reloaded.get_channel_locations(), dtype=float), 6
+    )
+    assert len(np.unique(positions, axis=0)) == 4, (
+        f"reloaded contacts {positions.tolist()} are not distinct -- the x-y "
+        "projection of the persisted geometry still collapses them"
+    )
+    assert reloaded.get_probe().get_contact_count() == 4
+
+    # The analyzer build is the consumer that raised "Contact positions must
+    # be unique within a probe"; a tiny two-unit sorting is enough to reach it.
+    n_samples = reloaded.get_num_frames()
+    sorting = NumpySorting.from_samples_and_labels(
+        [np.array([100, n_samples // 2, n_samples - 100])],
+        [np.array([1, 2, 1])],
+        sampling_frequency=reloaded.get_sampling_frequency(),
+    )
+    analyzer = si.create_sorting_analyzer(
+        sorting=sorting, recording=reloaded, sparse=False
+    )
+    assert analyzer.get_num_channels() == 4

@@ -166,8 +166,19 @@ def pytest_sessionstart(session):
     # it downloaded (per-PR: smoke; nightly: + 60s polymer; manual dispatch:
     # + scenario fixtures). Unset locally, so absent fixtures skip as before.
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
-    fixtures_dir = Path(__file__).resolve().parent / "fixtures"
-    missing = [n for n in required if not (fixtures_dir / f"{n}.nwb").exists()]
+    # Two homes: the generated/downloaded v2 fixtures, and the shared raw data
+    # directory that holds the real recorded sessions the general suite
+    # downloads (minirec20230622). A v2 test may gate on either, so a name is
+    # satisfied by a file in either place.
+    search_dirs = (
+        Path(__file__).resolve().parent / "fixtures",
+        Path(__file__).resolve().parents[2] / "_data" / "raw",
+    )
+    missing = [
+        n
+        for n in required
+        if not any((d / f"{n}.nwb").exists() for d in search_dirs)
+    ]
     if missing:
         pytest.exit(
             "Required v2 fixtures are absent, so their gates would silently "

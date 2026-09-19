@@ -342,16 +342,61 @@ jobs:
       run: |
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_neuropixels_60s
         python tests/spikesorting/v2/fixtures/_fetch.py mearec_tetrode_60s
+    - name: Cache the real tetrode session (scheduled / manual runs)
+      id: cache-minirec
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: actions/cache@v4
+      with:
+        # Deliberately NOT the ``test-data-`` key the run-tests / pytest-legacy
+        # jobs share: this job fetches a subset of what that entry holds, so
+        # saving under that key would hand those jobs an incomplete cache.
+        path: |
+          tests/_data/raw/minirec20230622.nwb
+          tests/_data/video/
+        key: v2-minirec-${{ hashFiles('.github/workflows/test-conda.yml') }}
+    - name: Download the real tetrode session (scheduled / manual runs)
+      # minirec20230622 is a real Frank-lab tetrode session: its contacts sit
+      # in the x-z plane (rel_y == 0), which is exactly the geometry the x-y
+      # projection SpikeInterface reaches for first collapses. It drives the
+      # geometry round-trip gate in single_session/test_recording.py, which
+      # skips cleanly when the file is absent (per-PR runs cover the repair
+      # path on a synthesized all-zero tetrode instead). Same Box URL the
+      # run-tests and pytest-legacy jobs use; the videos come along because
+      # ingestion resolves the session's ImageSeries external files.
+      if: |-
+        (github.event_name == 'schedule'
+          || github.event_name == 'workflow_dispatch')
+        && steps.cache-minirec.outputs.cache-hit != 'true'
+      env:
+        BASEURL: https://ucsf.box.com/shared/static/
+        NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
+        VID1URL: ykep8ek4ogad20wz4p0vuyuqfo60cv3w.h264
+        VID2URL: d2jjk0y565ru75xqojio3hymmehzr5he.h264
+        NWBFILE: minirec20230622.nwb
+        VID_ONE: 20230622_minirec_01_s1.1.h264
+        VID_TWO: 20230622_minirec_02_s2.1.h264
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
+      run: |
+        mkdir -p $RAW_DIR $VID_DIR
+        curl_opts() { # Declare func with download options
+          curl -L --output "$1""$2" "$BASEURL""$3"
+        }
+        curl_opts $RAW_DIR $NWBFILE $NWB_URL
+        curl_opts $VID_DIR $VID_ONE $VID1URL
+        curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Select required fixtures for this run
       # Names the fixtures that MUST drive their gates on this tier (matching
       # the download steps above). conftest's pytest_sessionstart fails the
       # session if any are absent, so a green run honestly means the gates ran
-      # rather than silently skipping on a missing fixture.
+      # rather than silently skipping on a missing fixture. ``minirec20230622``
+      # lives in the shared raw data directory rather than the v2 fixtures
+      # directory; the gate looks in both.
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s"
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s minirec20230622"
         elif [ "${{ github.event_name }}" = "schedule" ]; then
-          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s"
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s minirec20230622"
         else
           REQ="mearec_polymer_smoke"
         fi
