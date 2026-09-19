@@ -35,9 +35,11 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2._recording_geometry import (
+    assert_unique_contact_positions,
     fetch_interior_bad_channel_ids,
     fetch_sort_group_probe_info,
     maybe_apply_tetrode_geometry,
+    normalize_channel_locations,
 )
 from spyglass.spikesorting.v2._recording_nwb import (
     raw_eseries_path_and_timestamp_mode,
@@ -1461,8 +1463,8 @@ class Recording(SpyglassMixin, dj.Computed):
     ):
         """Run the preprocessing + streaming write outside any DB transaction.
 
-        Long-running step (open raw NWB, frame/channel slice, bandpass
-        + reference, stream ElectricalSeries into a fresh
+        Long-running step (open raw NWB, channel slice, bandpass, frame
+        slice, reference, stream ElectricalSeries into a fresh
         ``AnalysisNwbfile``, hash the persisted file). Returning
         happens before the framework opens its commit transaction so
         a 20-minute write here does not hold any DB lock -- the
@@ -2019,6 +2021,14 @@ class Recording(SpyglassMixin, dj.Computed):
     ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
+        The stage order is: read -> channel-select -> normalize the channel
+        geometry -> temporal preprocessing (phase-shift, bandpass) on the
+        CONTINUOUS recording -> time restriction -> spatial preprocessing
+        (bad-channel interpolation, reference) -> tetrode geometry repair ->
+        distinct-position check. Filtering before the restriction is what
+        keeps a selected interval free of the transient a concatenation join
+        would otherwise inject.
+
         Pipeline body shared between ``make_compute`` and
         ``_rebuild_nwb_artifact``; both stage a fresh, unregistered file
         (``existing_analysis_file_name=None``). The rebuild path installs that
@@ -2108,6 +2118,16 @@ class Recording(SpyglassMixin, dj.Computed):
         )
         sampling_frequency = float(recording.get_sampling_frequency())
 
+        # Channel-slice first, then filter the CONTINUOUS recording, and only
+        # then restrict in time. Restricting first would hand the lazy bandpass
+        # a concatenation of the selected intervals, and its margin would be
+        # read across the artificial joins -- so every interval edge, and a
+        # short interval in its entirety, would be filter transient rather than
+        # signal. SpikeInterface's ``FrameSliceRecording`` of a filter pulls
+        # that margin from the continuous parent instead, so each retained
+        # sample is filtered with its true temporal context. The spatial steps
+        # are per-sample across channels, so they are unaffected by the joins
+        # and run afterwards, on the restricted recording only.
         recording = select_sort_group_channels(
             recording,
             nwb_file_name=nwb_file_name,
@@ -2116,6 +2136,10 @@ class Recording(SpyglassMixin, dj.Computed):
             reference_electrode_id=reference_electrode_id,
             bad_channel_handling=preprocessing_params.bad_channel_handling,
             bad_channel_ids=bad_channel_ids,
+        )
+        recording = normalize_channel_locations(recording)
+        recording, temporal_steps = apply_temporal_preprocessing(
+            recording, preprocessing_params
         )
         recording, timestamps_override, n_selected_intervals = (
             restrict_recording(
@@ -2126,9 +2150,6 @@ class Recording(SpyglassMixin, dj.Computed):
                 raw_valid_times=raw_valid_times,
                 min_segment_length=preprocessing_params.min_segment_length,
             )
-        )
-        recording, temporal_steps = apply_temporal_preprocessing(
-            recording, preprocessing_params
         )
         recording, spatial_steps = apply_spatial_preprocessing(
             recording,
@@ -2145,6 +2166,7 @@ class Recording(SpyglassMixin, dj.Computed):
             electrode_group_names=electrode_group_names,
             sort_group_channel_ids=channel_ids,
         )
+        assert_unique_contact_positions(recording)
 
         # Provenance string for the persisted ElectricalSeries, built from the
         # steps ACTUALLY applied (the ``applied_steps`` report): the old

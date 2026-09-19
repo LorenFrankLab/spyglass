@@ -625,3 +625,290 @@ def test_restriction_preserves_segment_boundaries_and_rejects_backward_time():
     recording.set_times(np.arange(100) / 100, segment_index=1)
     with pytest.raises(ValueError, match="backward across segments"):
         restrict_recording_times(recording, [[0, 6]])
+
+
+# ---------------------------------------------------------------------------
+# Filter-before-restriction: the temporal preprocessing must see the
+# CONTINUOUS recording, so every retained sample is filtered with its true
+# temporal context instead of the ringing around an artificial join.
+# ---------------------------------------------------------------------------
+
+_DRIFT_HZ = 0.3
+_DRIFT_UV = 200.0
+_FS = 30_000.0
+# Endpoints are deliberately NOT multiples of the drift half-period
+# (1 / (2 * 0.3) = 1.667 s): at a zero crossing the join carries no step and
+# the defect hides.
+_INTERVALS = [[2.4, 6.4], [9.3, 9.3015], [12.7, 18.9]]
+
+
+def _drift_recording(duration_s, n_channels=2, seed=0):
+    """Synthetic recording plus an explicit slow drift, gains pinned to 1.
+
+    The drift is what makes a concatenation join visible: a 600 Hz high-pass
+    removes it completely, but only when the filter sees the continuous
+    signal. Gains 1.0 / offsets 0.0 make ``return_in_uV=True`` the identity,
+    so the numbers below are the stored values in uV.
+    """
+    import spikeinterface as si
+    from spikeinterface.core import NumpyRecording
+
+    base = si.generate_recording(
+        num_channels=n_channels,
+        sampling_frequency=_FS,
+        durations=[duration_s],
+        seed=seed,
+    )
+    traces = np.asarray(base.get_traces(), dtype=np.float64)
+    times = np.arange(traces.shape[0], dtype=np.float64) / _FS
+    traces += (_DRIFT_UV * np.sin(2 * np.pi * _DRIFT_HZ * times))[:, None]
+    recording = NumpyRecording([traces], sampling_frequency=_FS)
+    recording.set_channel_gains(1.0)
+    recording.set_channel_offsets(0.0)
+    return recording
+
+
+def _bandpass_params(freq_min=600.0, freq_max=6000.0):
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+
+    return PreprocessingParamsSchema.model_validate(
+        {
+            "phase_shift": None,
+            "bandpass_filter": {"freq_min": freq_min, "freq_max": freq_max},
+            "common_reference": {"operator": "median"},
+            "min_segment_length": 0.0015,
+            "bad_channel_handling": "remove",
+        }
+    )
+
+
+def _selected_frames(recording, intervals):
+    """(start, stop) frames of each selected interval on the regular grid."""
+    from spyglass.spikesorting.v2._recording_restriction import (
+        _consolidate_regular_intervals,
+    )
+
+    return [
+        (int(start), int(stop))
+        for start, stop in _consolidate_regular_intervals(
+            np.asarray(intervals, dtype=float),
+            n_samples=recording.get_num_samples(segment_index=0),
+            sampling_frequency=_FS,
+            t_start=0.0,
+        )
+    ]
+
+
+def _rms(values):
+    return float(np.sqrt(np.mean(np.asarray(values, dtype=np.float64) ** 2)))
+
+
+@pytest.mark.unit
+def test_restriction_output_unchanged_by_reorder():
+    """Restricting a filtered recording selects exactly the same frames.
+
+    The reorder (filter first, restrict second) may not move a single frame
+    boundary, timestamp or channel: SpikeInterface preprocessors copy the
+    parent segment's time kwargs, so the restriction arithmetic sees the same
+    clock either way.
+    """
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_temporal_preprocessing,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording_times,
+    )
+
+    recording = _drift_recording(20.0)
+    filtered, _steps = apply_temporal_preprocessing(
+        recording, _bandpass_params()
+    )
+
+    # The filter delegates the clock to its parent, so the inputs the
+    # restriction reads are identical.
+    assert filtered.get_num_samples() == recording.get_num_samples()
+    assert filtered.has_time_vector(0) == recording.has_time_vector(0)
+    np.testing.assert_array_equal(filtered.get_times(), recording.get_times())
+
+    raw_sel, raw_times, raw_n = restrict_recording_times(recording, _INTERVALS)
+    filtered_sel, filtered_times, filtered_n = restrict_recording_times(
+        filtered, _INTERVALS
+    )
+
+    assert raw_n == filtered_n == len(_INTERVALS)
+    np.testing.assert_array_equal(
+        np.asarray(raw_times), np.asarray(filtered_times)
+    )
+    assert list(filtered_sel.get_channel_ids()) == list(
+        raw_sel.get_channel_ids()
+    )
+    assert filtered_sel.get_num_samples() == raw_sel.get_num_samples()
+
+    # Per-interval frames, not just the total: a compensating pair of shifts
+    # would keep the total unchanged.
+    for interval in _INTERVALS:
+        raw_one, raw_one_times, _ = restrict_recording_times(
+            recording, [interval]
+        )
+        filtered_one, filtered_one_times, _ = restrict_recording_times(
+            filtered, [interval]
+        )
+        assert filtered_one.get_num_samples() == raw_one.get_num_samples()
+        np.testing.assert_array_equal(
+            np.asarray(raw_one_times), np.asarray(filtered_one_times)
+        )
+
+
+@pytest.mark.unit
+def test_restricted_traces_match_continuously_filtered_reference():
+    """Filter-then-restrict reproduces the continuously filtered signal.
+
+    The target is the SAME filter applied to the whole recording and sampled
+    at the selected frame ranges -- never the old restrict-then-filter output,
+    which differs at every interval edge by construction. The tolerance is
+    loose on purpose: SpikeInterface's lazy filter takes a finite margin per
+    ``get_traces`` request, so two requests with different boundaries differ
+    by ~1e-4 uV.
+    """
+    import spikeinterface.preprocessing as sip
+
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_temporal_preprocessing,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording_times,
+    )
+
+    recording = _drift_recording(20.0)
+    validated = _bandpass_params()
+    frames = _selected_frames(recording, _INTERVALS)
+
+    # New order: filter the continuous recording, then restrict.
+    filtered, _ = apply_temporal_preprocessing(recording, validated)
+    new_order, _times, n_intervals = restrict_recording_times(
+        filtered, _INTERVALS
+    )
+    assert n_intervals == len(frames)
+
+    # Old order, built from the primitives: restrict, then filter the
+    # concatenation.
+    restricted, _t, _n = restrict_recording_times(recording, _INTERVALS)
+    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+
+    reference = sip.bandpass_filter(
+        recording,
+        freq_min=validated.bandpass_filter.freq_min,
+        freq_max=validated.bandpass_filter.freq_max,
+        dtype=np.float64,
+    )
+
+    offset = 0
+    for index, (start, stop) in enumerate(frames):
+        count = stop - start
+        ref = np.asarray(
+            reference.get_traces(
+                start_frame=start, end_frame=stop, return_in_uV=True
+            ),
+            dtype=np.float64,
+        )
+        new = np.asarray(
+            new_order.get_traces(
+                start_frame=offset,
+                end_frame=offset + count,
+                return_in_uV=True,
+            ),
+            dtype=np.float64,
+        )
+        old = np.asarray(
+            old_order.get_traces(
+                start_frame=offset,
+                end_frame=offset + count,
+                return_in_uV=True,
+            ),
+            dtype=np.float64,
+        )
+        offset += count
+
+        rms_ref = _rms(ref)
+        bound = 1e-3 * rms_ref
+        new_max = float(np.max(np.abs(new - ref)))
+        old_max = float(np.max(np.abs(old - ref)))
+        assert new_max <= bound, (
+            f"interval {index} ({count} samples): max abs error {new_max:.4g} "
+            f"uV exceeds {bound:.4g} uV"
+        )
+        assert abs(_rms(new) - rms_ref) / rms_ref <= 1e-3
+        # The edges are where the join transient lives; assert them by name so
+        # a future slice that trims them cannot pass quietly.
+        assert np.max(np.abs(new[0] - ref[0])) <= bound
+        assert np.max(np.abs(new[-1] - ref[-1])) <= bound
+        assert old_max > 100 * bound, (
+            f"interval {index}: the old order's max abs error {old_max:.4g} "
+            f"uV should dwarf {bound:.4g} uV -- the test no longer "
+            "discriminates the two orders"
+        )
+
+
+@pytest.mark.unit
+def test_sliver_after_highpass_matches_continuous_filter():
+    """A 1.5 ms interval is entirely filter transient under the old order.
+
+    With ``min_segment_length`` at its 1.5 ms floor a selected sliver is
+    shorter than the 600 Hz high-pass settling time, so restrict-then-filter
+    returns ringing from the two joins rather than signal.
+    """
+    from spyglass.spikesorting.v2._recording_preprocessing import (
+        apply_temporal_preprocessing,
+    )
+    from spyglass.spikesorting.v2._recording_restriction import (
+        restrict_recording_times,
+    )
+    import spikeinterface.preprocessing as sip
+
+    intervals = [[5.0, 20.0], [40.4, 40.4015], [70.0, 110.0]]
+    recording = _drift_recording(120.0)
+    validated = _bandpass_params(freq_min=600.0, freq_max=6000.0)
+    frames = _selected_frames(recording, intervals)
+    sliver_start, sliver_stop = frames[1]
+    count = sliver_stop - sliver_start
+    assert count == 46  # 1.5 ms at 30 kHz, inclusive of both endpoints
+    offset = frames[0][1] - frames[0][0]
+
+    filtered, _ = apply_temporal_preprocessing(recording, validated)
+    new_order, _times, _n = restrict_recording_times(filtered, intervals)
+    restricted, _t, _n2 = restrict_recording_times(recording, intervals)
+    old_order, _ = apply_temporal_preprocessing(restricted, validated)
+    reference = sip.bandpass_filter(
+        recording,
+        freq_min=validated.bandpass_filter.freq_min,
+        freq_max=validated.bandpass_filter.freq_max,
+        dtype=np.float64,
+    )
+
+    ref = np.asarray(
+        reference.get_traces(
+            start_frame=sliver_start,
+            end_frame=sliver_stop,
+            return_in_uV=True,
+        ),
+        dtype=np.float64,
+    )
+    new = np.asarray(
+        new_order.get_traces(
+            start_frame=offset, end_frame=offset + count, return_in_uV=True
+        ),
+        dtype=np.float64,
+    )
+    old = np.asarray(
+        old_order.get_traces(
+            start_frame=offset, end_frame=offset + count, return_in_uV=True
+        ),
+        dtype=np.float64,
+    )
+
+    rms_ref = _rms(ref)
+    assert abs(_rms(new) - rms_ref) / rms_ref <= 0.01
+    assert float(np.max(np.abs(new - ref))) < 1.0
+    assert float(np.max(np.abs(old - ref))) > 10.0
