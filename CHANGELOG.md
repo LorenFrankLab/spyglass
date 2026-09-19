@@ -1878,7 +1878,12 @@ cross-referenced here, not duplicated.
         `SortedSpikesGroup` accessors use: spikes are counted only inside
         the population's common observed time, bins outside it hold
         `np.nan`, and the firing rate is smoothed within each contiguous
-        observed run. The new `SpikeSortingOutput.get_observation_intervals`
+        observed run. That group-level contract, unreleased until now, is
+        that `SortedSpikesGroup.get_spike_indicator` and `get_firing_rate`
+        return `np.nan` in every bin outside the population's common
+        observed time and expose the bin mask itself through a new
+        `return_validity` flag. The new
+        `SpikeSortingOutput.get_observation_intervals`
         reports that common span -- the intersection of the spans stored by
         the v2 curation sources (`CurationV2`, `ConcatMemberCuration`) for
         the selected units -- and lists in `unknown_sources` the merge ids
@@ -1886,14 +1891,23 @@ cross-referenced here, not duplicated.
         `ImportedSpikeSorting` predate that snapshot, so they restrict
         nothing and are named rather than silently treated as observed
         throughout (a population with no reporting source therefore keeps
-        the previous every-bin-observed behavior). `get_spike_indicator`
+        the previous every-bin-observed behavior). Resolving a v2 source's
+        spans reads the curated analysis NWB file *and* its recording, so
+        when the recording cannot be loaded (exported data, a moved base
+        directory) the accessor raises a `RuntimeError` naming the merge
+        rather than assuming full coverage; build a `SortedSpikesGroup`
+        over that merge instead, since its `UnitSelection` snapshot froze
+        the intervals at group creation and needs no recording.
+        `get_spike_indicator`
         takes new `return_unit_ids` and `return_validity` flags, and the new
         `SpikeSortingOutput.get_spike_times_by_unit` returns the trains
         `get_spike_times` returns together with each train's
         `spikesorting_merge_id` and units-table `unit_id` (the true id, not
-        a positional index). `SortedSpikesGroup.get_firing_rate` splits
-        observed runs with the same shared helper, so it no longer smooths
-        across a jump in the time axis of more than 1.5 sample periods.
+        a positional index). Both accessors split observed runs with the
+        same shared helper, and split them unconditionally rather than only
+        when a bin is unobserved, so neither smooths across a jump in the
+        time axis of more than 1.5 sample periods even when every bin of a
+        discontinuous axis is observed.
     - Detect MUA events per contiguous observed run. `MuaEventsV1.make`
         masked by the detection interval only, so the bins no unit of the
         group was observed over reached `multiunit_HSE_detector` as NaN.

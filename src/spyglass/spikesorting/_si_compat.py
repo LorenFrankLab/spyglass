@@ -62,7 +62,9 @@ def load_waveforms(folder):
         return si.load_waveforms(folder, with_recording=False)
     except NotImplementedError as exc:  # Zarr-format legacy waveforms
         raise RuntimeError(
-            _legacy_runtime_message("Zarr-format WaveformExtractor folders")
+            _legacy_runtime_message(
+                "Loading a Zarr-format WaveformExtractor folder"
+            )
         ) from exc
 
 

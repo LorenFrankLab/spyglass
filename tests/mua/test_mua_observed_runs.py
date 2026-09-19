@@ -335,7 +335,10 @@ def test_event_numbers_unique_after_concat(gapped_mua, detection):
     "recording.channel_slice (spikesorting/v1/recording.py:644), removed in "
     "SI 0.101 -> AttributeError: 'FrameSliceRecording' object has no "
     "attribute 'channel_slice'. Needs a SortedSpikesGroup fixture that does "
-    "not run the legacy v1 recording path."
+    "not run the legacy v1 recording path. Remove this skip once such a "
+    "fixture exists -- a group built over a v2 curation (CurationV2 sorts "
+    "inserted into SpikeSortingOutput, no SpikeSortingRecording populate) "
+    "satisfies it, and nothing else in this test depends on v1."
 )
 @pytest.mark.slow
 @pytest.mark.integration
