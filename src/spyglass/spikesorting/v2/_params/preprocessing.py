@@ -56,7 +56,7 @@ class CommonReferenceParams(BaseModel):
     """Common-reference re-referencing options.
 
     The reference mode is selected from the ``SortGroupV2.reference_mode``
-    column in ``Recording._apply_pre_motion_preprocessing`` (single for
+    column in ``apply_spatial_preprocessing`` (single for
     ``"specific"`` -- subtract the named ``reference_electrode_id`` --
     global for ``"global_median"``, none for ``"none"``). A free-standing
     ``reference`` field is intentionally not exposed because that dispatch
@@ -100,7 +100,8 @@ class PreprocessingParamsSchema(BaseModel):
       runtime preprocessing ORDER also changed at 3, from
       reference->filter to **bandpass filter->reference** (the
       signal-processing-preferred order; see
-      ``apply_pre_motion_preprocessing``). The params blob shape is
+      ``apply_temporal_preprocessing`` /
+      ``apply_spatial_preprocessing``). The params blob shape is
       unchanged, so ``schema_version`` is NOT bumped -- only the runtime
       interpretation moved; dev rows are regenerated, not migrated.
     * 3 also added the optional ``phase_shift`` sub-model (ADC sample-shift

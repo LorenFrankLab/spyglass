@@ -100,11 +100,11 @@ def test_no_filter_reference_zeroes_channel_offset(
     Fails before SIG-1 (offsets stay at 1000 uV).
     """
     from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
+        apply_spatial_preprocessing,
     )
 
     rec = _rec([0.195] * 4, [1000.0] * 4)
-    out, _ = apply_pre_motion_preprocessing(
+    out, _ = apply_spatial_preprocessing(
         rec,
         reference_mode=reference_mode,
         reference_electrode_id=reference_id,
@@ -121,11 +121,11 @@ def test_no_filter_no_reference_preserves_offset():
     referencing runs, so a genuine DC offset must be carried through (the fix
     zeroes ONLY after a ``common_reference`` branch)."""
     from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
+        apply_spatial_preprocessing,
     )
 
     rec = _rec([0.195] * 4, [1000.0] * 4)
-    out, _ = apply_pre_motion_preprocessing(
+    out, _ = apply_spatial_preprocessing(
         rec,
         reference_mode="none",
         reference_electrode_id=None,

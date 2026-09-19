@@ -21,7 +21,7 @@ def assert_freq_max_below_nyquist(
     fails opaquely deep inside the design call, far from the misconfiguration.
     Checking here -- where ``fs`` is known but the Pydantic schema is not --
     gives an actionable message. ``context`` is prepended to name the call site
-    (e.g. ``"apply_pre_motion_preprocessing: "``).
+    (e.g. ``"apply_temporal_preprocessing: "``).
     """
     nyquist = sampling_frequency / 2.0
     if freq_max >= nyquist:

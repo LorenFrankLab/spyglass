@@ -44,7 +44,8 @@ from spyglass.spikesorting.v2._recording_nwb import (
     write_nwb_artifact,
 )
 from spyglass.spikesorting.v2._recording_preprocessing import (
-    apply_pre_motion_preprocessing,
+    apply_spatial_preprocessing,
+    apply_temporal_preprocessing,
 )
 from spyglass.spikesorting.v2._selection_identity import (
     recording_input_hash,
@@ -2126,14 +2127,18 @@ class Recording(SpyglassMixin, dj.Computed):
                 min_segment_length=preprocessing_params.min_segment_length,
             )
         )
-        recording, applied_steps = apply_pre_motion_preprocessing(
-            recording=recording,
+        recording, temporal_steps = apply_temporal_preprocessing(
+            recording, preprocessing_params
+        )
+        recording, spatial_steps = apply_spatial_preprocessing(
+            recording,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
             validated=preprocessing_params,
             bad_channel_handling=preprocessing_params.bad_channel_handling,
             bad_channel_ids=bad_channel_ids,
         )
+        applied_steps = {**temporal_steps, **spatial_steps}
         recording = maybe_apply_tetrode_geometry(
             recording=recording,
             probe_types=probe_types,

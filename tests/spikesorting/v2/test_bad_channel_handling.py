@@ -4,7 +4,7 @@ Three tiers:
 
 - **Unit (no DB):** the pitch-anchored adjacency helpers (`_shank_pitch`,
   `_interior_bad_channel_ids`) -- geometry math only.
-- **Stub (no DB, monkeypatched SI):** `apply_pre_motion_preprocessing` runs the
+- **Stub (no DB, monkeypatched SI):** the preprocessing stack runs the
   handling step between filter and reference, `remove` is a no-op, the reference
   is never interpolated, and missing channel locations raise clearly.
 - **Integration (DB / DB+SI):** `make_fetch` re-includes only the group's
@@ -91,7 +91,7 @@ def test_interior_bad_channel_ids_pitch_anchored():
 
 
 # --------------------------------------------------------------------------- #
-# Stub tier (no DB): apply_pre_motion_preprocessing handling step.
+# Stub tier (no DB): the bad-channel handling step of preprocessing.
 # --------------------------------------------------------------------------- #
 
 
@@ -109,14 +109,14 @@ class _FakeRecording:
 
     def get_sampling_frequency(self):
         # 30 kHz: well above 2x the default bandpass freq_max (6 kHz), so the
-        # Nyquist guard in apply_pre_motion_preprocessing is a no-op here.
+        # Nyquist guard in apply_temporal_preprocessing is a no-op here.
         return 30000.0
 
     def get_property(self, key):
         return None
 
     def has_channel_location(self):
-        # The predicate `apply_pre_motion_preprocessing` actually uses (SI's
+        # The predicate `apply_spatial_preprocessing` actually uses (SI's
         # `get_channel_locations()` *raises* when no geometry, it never returns
         # None -- so the guard checks `has_channel_location()`).
         return bool(self._locations)
@@ -186,16 +186,46 @@ def _validated(operator="median"):
     )
 
 
-def test_interpolate_runs_between_filter_and_reference(monkeypatch):
+def _apply_preprocessing(
+    recording,
+    reference_mode,
+    reference_electrode_id,
+    validated,
+    bad_channel_handling="remove",
+    bad_channel_ids=(),
+):
+    """Compose the two preprocessing halves the way ``make_compute`` does.
+
+    ``make_compute`` runs ``apply_temporal_preprocessing`` on the continuous
+    recording, restricts time, then runs ``apply_spatial_preprocessing``. The
+    time restriction between them cannot reorder SpikeInterface calls, so
+    composing them directly pins the same apply order these tests are about.
+    """
     from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
+        apply_spatial_preprocessing,
+        apply_temporal_preprocessing,
     )
 
+    recording, temporal_steps = apply_temporal_preprocessing(
+        recording, validated
+    )
+    recording, spatial_steps = apply_spatial_preprocessing(
+        recording,
+        reference_mode,
+        reference_electrode_id,
+        validated,
+        bad_channel_handling,
+        bad_channel_ids,
+    )
+    return recording, {**temporal_steps, **spatial_steps}
+
+
+def test_interpolate_runs_between_filter_and_reference(monkeypatch):
     calls: list = []
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 3], calls)
 
-    _out, applied_steps = apply_pre_motion_preprocessing(
+    _out, applied_steps = _apply_preprocessing(
         rec,
         "global_median",
         None,
@@ -215,15 +245,11 @@ def test_interpolate_runs_between_filter_and_reference(monkeypatch):
 
 
 def test_remove_default_is_a_noop(monkeypatch):
-    from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
-    )
-
     calls: list = []
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 3], calls)
 
-    _out, applied_steps = apply_pre_motion_preprocessing(
+    _out, applied_steps = _apply_preprocessing(
         rec, "global_median", None, _validated()
     )
 
@@ -232,16 +258,12 @@ def test_remove_default_is_a_noop(monkeypatch):
 
 
 def test_reference_is_never_interpolated(monkeypatch):
-    from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
-    )
-
     calls: list = []
     _patch_sip(monkeypatch, calls)
     # 99 is the 'specific' reference, sliced in for subtraction.
     rec = _FakeRecording([0, 1, 2, 99], calls)
 
-    apply_pre_motion_preprocessing(
+    _apply_preprocessing(
         rec,
         "specific",
         99,
@@ -257,16 +279,12 @@ def test_reference_is_never_interpolated(monkeypatch):
 
 
 def test_interpolate_needs_channel_locations(monkeypatch):
-    from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
-    )
-
     calls: list = []
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2, 3], calls, locations=False)
 
     with pytest.raises(ValueError, match="requires channel locations"):
-        apply_pre_motion_preprocessing(
+        _apply_preprocessing(
             rec,
             "none",
             None,
@@ -277,16 +295,12 @@ def test_interpolate_needs_channel_locations(monkeypatch):
 
 
 def test_invalid_bad_channel_handling_raises(monkeypatch):
-    from spyglass.spikesorting.v2._recording_preprocessing import (
-        apply_pre_motion_preprocessing,
-    )
-
     calls: list = []
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2], calls)
 
     with pytest.raises(ValueError, match="invalid bad_channel_handling"):
-        apply_pre_motion_preprocessing(
+        _apply_preprocessing(
             rec,
             "none",
             None,

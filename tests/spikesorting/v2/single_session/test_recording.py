@@ -996,7 +996,7 @@ def test_recording_make_rollback_cleans_analysis_nwb(
 
 @pytest.mark.slow
 def test_recording_make_global_median_reference(polymer_smoke_session):
-    """``Recording._apply_pre_motion_preprocessing`` applies the
+    """``apply_spatial_preprocessing`` applies the
     global-median reference when ``reference_mode == "global_median"``.
 
     Every other recording test uses ``reference_mode = "none"``, so the
@@ -1126,7 +1126,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
     """The ``no_filter`` preset materializes an UNfiltered recording.
 
     ``bandpass_filter`` is optional: the ``no_filter`` preset ships
-    ``bandpass_filter=None`` and ``_apply_pre_motion_preprocessing`` must
+    ``bandpass_filter=None`` and ``apply_temporal_preprocessing`` must
     SKIP the bandpass step (not silently pass a wide-band that still
     filters). This populates two recordings on the same data -- one with
     the bandpassed ``default`` preset, one with ``no_filter`` --
@@ -1191,7 +1191,7 @@ def test_recording_no_filter_preset_skips_bandpass(polymer_smoke_session):
         "no_filter and default recordings are indistinguishable "
         f"(mean |diff| = {delta:.2e}); the bandpass was NOT skipped for "
         "no_filter. Check the `if bandpass_filter is not None` guard in "
-        "_apply_pre_motion_preprocessing."
+        "apply_temporal_preprocessing."
     )
 
 

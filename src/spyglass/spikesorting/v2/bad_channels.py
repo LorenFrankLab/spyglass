@@ -328,7 +328,7 @@ def suggest_bad_channels(
     )
     # freq_max must be below the recording's Nyquist (fs/2); a value at/above
     # it fails opaquely inside scipy's filter design (shared check with
-    # apply_pre_motion_preprocessing).
+    # apply_temporal_preprocessing).
     from spyglass.spikesorting.v2._signal_math import (
         assert_freq_max_below_nyquist,
     )
