@@ -75,9 +75,10 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         transaction. A later migration then leaves the merge alone, and later
         writes skip the audit's NWB read.
 
-        Because that path opens its own transaction, this method cannot be
-        called inside an enclosing DataJoint transaction: nested transactions
-        are unsupported and the outer one would be rolled back.
+        Called inside a caller's transaction, that path participates in it
+        rather than opening one of its own: the marker, unit and annotation
+        then commit or roll back with the caller's other work, so several
+        annotations can be written as one batch.
 
         Parameters
         ----------
@@ -152,11 +153,23 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         # write or an existing merge the audit cleared. Marker, unit and
         # annotation land together or not at all, so a failed write cannot
         # leave the merge marked with no rows to show for it.
-        with self.connection.transaction:
+        def _write_marked():
             marker.insert1({**merge_restriction, "migration_version": 1})
             if unit_is_new:
                 self.insert1(unit_key)
             self.Annotation().insert1(key, **kwargs)
+
+        if self.connection.in_transaction:
+            # DataJoint refuses a nested transaction and cancels the open one
+            # on the way out, so a batch of annotations under a caller's
+            # ``with connection.transaction`` would lose the caller's work.
+            # Participate instead: the caller's transaction already gives
+            # these three inserts the same all-or-nothing guarantee.
+            _write_marked()
+            return
+
+        with self.connection.transaction:
+            _write_marked()
 
     @classmethod
     def audit_positional_unit_ids(cls, merge_ids=None):

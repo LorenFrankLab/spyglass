@@ -284,3 +284,39 @@ def test_dense_namespace_accepts_write_and_is_marked(
         "dense-2",
     ]
     assert nwb_reads == [case["dense_id"]]
+
+
+def test_batch_annotation_writes_inside_caller_transaction(annotation_case):
+    """Several annotations commit together under one caller transaction."""
+    case = annotation_case
+    table = case["table"]
+    fresh = {"spikesorting_merge_id": case["fresh_id"]}
+
+    with table.connection.transaction:
+        table().add_annotation({**fresh, "unit_id": 5, "annotation": "one"})
+        table().add_annotation({**fresh, "unit_id": 7, "annotation": "two"})
+
+    assert (case["marker"] & fresh).fetch1("migration_version") == 1
+    assert _unit_ids(table, case["fresh_id"]) == [5, 7]
+    assert sorted((table.Annotation & fresh).fetch("annotation")) == [
+        "one",
+        "two",
+    ]
+
+
+def test_caller_transaction_failure_rolls_back_first_write(annotation_case):
+    """The caller's rollback covers writes this method participated in."""
+    case = annotation_case
+    table = case["table"]
+    fresh = {"spikesorting_merge_id": case["fresh_id"]}
+
+    with pytest.raises(RuntimeError, match="caller failed"):
+        with table.connection.transaction:
+            table().add_annotation(
+                {**fresh, "unit_id": 5, "annotation": "doomed"}
+            )
+            raise RuntimeError("caller failed")
+
+    assert not (case["marker"] & fresh)
+    assert not (table & fresh)
+    assert not (table.Annotation & fresh)
