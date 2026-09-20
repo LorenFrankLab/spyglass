@@ -172,6 +172,11 @@ def test_classify_missing_geometry(
     infinite[1, 0] = np.inf
     assert classify_missing_geometry(infinite) == "partial"
 
+    # An empty set has no verdict: reading it as "wholly unpositioned" would
+    # route a group with no contacts onto the legacy all-zero geometry.
+    with pytest.raises(ValueError, match="no contacts"):
+        classify_missing_geometry(np.empty((0, 3)))
+
 
 def test_normalize_rejects_a_wholly_non_finite_coordinate(
     xz_tetrode_locations,
@@ -303,6 +308,27 @@ def test_normalize_still_requires_every_sliced_contact_to_be_placeable(
     NaN into the filled channels rather than being harmlessly ignored.
     """
     locations = np.vstack([xz_tetrode_locations, [[np.nan, np.nan, np.nan]]])
+    recording = _probeless_recording(5)
+    recording.set_channel_locations(locations)
+    channel_ids = list(recording.get_channel_ids())
+
+    with pytest.raises(ValueError, match="finite"):
+        normalize_channel_locations(recording, channel_ids=channel_ids[:4])
+
+
+def test_normalize_screens_a_positioned_reference_beside_unpositioned_members():
+    """Unpositioned members plus a positioned reference is still a defect.
+
+    "The group carries no geometry" is the ONE shape of missing geometry that
+    is passed through for the ``tetrode_12.5`` repair, and it is a statement
+    about the whole sliced set -- the repair spreads the group onto a square
+    it computes itself, so a reference sitting at a real coordinate beside
+    members that have none is a half-populated probe, not the legacy case.
+    Classifying only the retained rows would return the recording still 3D,
+    with NaN locations, and let it run.
+    """
+    locations = np.full((5, 3), np.nan)
+    locations[4] = [10.0, 20.0, 30.0]
     recording = _probeless_recording(5)
     recording.set_channel_locations(locations)
     channel_ids = list(recording.get_channel_ids())

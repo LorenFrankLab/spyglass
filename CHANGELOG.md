@@ -235,15 +235,15 @@ peak and carried 58× its RMS.
   [preproduction database upgrade/recreation sequence](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database).
 - **Electrode geometry is normalized before any probe is built.** Contact
   positions are reduced to the first coordinate plane in which every contact is
-  distinct — x-y, else x-z, else y-z. That is
-  what lets Frank-lab tetrodes, whose contacts lie in x-z with a constant
-  `rel_y`, survive SpikeInterface's x-y projection instead of collapsing onto
-  each other. The plane is chosen from the contacts the sort surface RETAINS —
-  the members plus, on the `interpolate` path, the interior bad channels — and
-  then applied to every sliced channel. A `specific` reference is sliced in
-  only for subtraction and dropped afterwards, and `Probe.Electrode` `rel_*`
-  are per probe type, so a reference on another probe of the same type shares a
-  member's coordinates and would otherwise leave the whole group unnormalized.
+  distinct — x-y, else x-z, else y-z. That is what lets Frank-lab tetrodes,
+  whose contacts lie in x-z with a constant `rel_y`, survive SpikeInterface's
+  x-y projection instead of collapsing onto each other. The plane is chosen
+  from the contacts the sort surface RETAINS — the members plus, on the
+  `interpolate` path, the interior bad channels — and then applied to every
+  sliced channel. A `specific` reference is sliced in only for subtraction and
+  dropped afterwards, and `Probe.Electrode` `rel_*` are per probe type, so a
+  reference on another probe of the same type shares a member's coordinates
+  and would otherwise leave the whole group unnormalized.
 - **That geometry is persisted in the artifact.** The write stamps `rel_x` /
   `rel_y` and a constant `rel_z = 0` onto the electrodes rows the
   `ElectricalSeries` references, so a reload carries the geometry the sort ran

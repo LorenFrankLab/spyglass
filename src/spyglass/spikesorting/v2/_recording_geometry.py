@@ -415,25 +415,70 @@ def classify_missing_geometry(locations) -> str:
       is "none" here: it is present, just degenerate. Plane selection reports
       that separately.)
 
+    An EMPTY set is refused rather than classified. Every verdict above is a
+    claim about contacts that exist, and the vacuous one ("no coordinate of
+    any contact is finite") is the dangerous reading: it would route an
+    empty group onto the all-zero legacy geometry and let it run. No caller
+    can reach this today -- preflight returns before it on a group with no
+    electrodes, and a recording always has channels.
+
     Parameters
     ----------
     locations : array_like
         ``(n_contacts, 3)`` contact positions in ``(rel_x, rel_y, rel_z)``
-        order.
+        order, with at least one contact.
 
     Returns
     -------
     str
         ``"complete"``, ``"partial"`` or ``"none"``.
+
+    Raises
+    ------
+    ValueError
+        If ``locations`` holds no contacts.
     """
     import numpy as np
 
-    finite = np.isfinite(np.asarray(locations, dtype=float))
+    positions = np.asarray(locations, dtype=float)
+    if positions.size == 0:
+        raise ValueError(
+            "classify_missing_geometry: no contacts to classify (got shape "
+            f"{positions.shape}). A sort group with no electrodes is a "
+            "membership problem, not a geometry one."
+        )
+    finite = np.isfinite(positions)
     if not finite.any():
         return "complete"
     if not finite.all():
         return "partial"
     return "none"
+
+
+def _project(locations, axes):
+    """Take the two columns of ``locations`` the axis pair ``axes`` names.
+
+    One place decides what ``"xz"`` means, so the plane
+    :func:`select_distinct_plane` chose from the retained contacts and the
+    projection :func:`normalize_channel_locations` writes back for every
+    channel cannot drift apart.
+
+    Parameters
+    ----------
+    locations : array_like
+        ``(n_contacts, 3)`` contact positions.
+    axes : str
+        Two of ``"x"``, ``"y"``, ``"z"``, e.g. ``"xz"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_contacts, 2)`` positions in the order ``axes`` gives.
+    """
+    import numpy as np
+
+    loc = np.asarray(locations, dtype=float)
+    return loc[:, ["xyz".index(axis) for axis in axes]]
 
 
 def _all_rows_distinct(positions) -> bool:
@@ -515,7 +560,7 @@ def select_distinct_plane(locations):
         )
     assert_finite_contact_positions(loc)
     for axes in _CANDIDATE_PLANES:
-        positions = loc[:, ["xyz".index(axis) for axis in axes]]
+        positions = _project(loc, axes)
         if _all_rows_distinct(positions):
             return axes, positions
     return None
@@ -536,17 +581,20 @@ def normalize_channel_locations(recording, *, channel_ids=None):
     legacy all-zero geometry is repaired downstream by
     :func:`maybe_apply_tetrode_geometry`, and
     :func:`assert_unique_contact_positions` raises afterwards if it was not.
-    A set in which EVERY coordinate is non-finite is treated the same way --
-    as no usable geometry rather than as an error -- because that is exactly
-    what ``sort_group_geometry_problem`` clears at preflight (it maps such a
-    group onto the all-zero legacy geometry so the ``tetrode_12.5`` repair can
-    rescue it). Raising here would fail at make a group preflight passed.
-    PARTIAL non-finite rows still raise: the repair does not apply to them, so
-    the missing contacts are a defect no downstream step can fix.
+    A set in which EVERY coordinate of EVERY SLICED channel is non-finite is
+    treated the same way -- as no usable geometry rather than as an error --
+    because that is exactly what ``sort_group_geometry_problem`` clears at
+    preflight (it maps such a group onto the all-zero legacy geometry so the
+    ``tetrode_12.5`` repair can rescue it). Raising here would fail at make a
+    group preflight passed. PARTIAL non-finite rows still raise: the repair
+    does not apply to them, so the missing contacts are a defect no
+    downstream step can fix.
 
-    SUBSET RULE. The plane is chosen from the rows of ``channel_ids`` -- the
-    contacts that REMAIN on the sort surface -- and the chosen projection is
-    then applied to EVERY channel of the recording. The channel slice is wider
+    SUBSET RULE. ``channel_ids`` scopes the choice of PLANE, and nothing
+    else: how much geometry is missing is decided on the whole sliced set
+    (above) before the subset is consulted. The plane is chosen from the rows
+    of ``channel_ids`` -- the contacts that REMAIN on the sort surface -- and
+    the chosen projection is then applied to EVERY channel of the recording. The channel slice is wider
     than that surface: it also carries the ``specific`` reference electrode,
     which is subtracted and dropped in ``apply_spatial_preprocessing``.
     ``Probe.Electrode`` ``rel_*`` are recorded per probe TYPE, so a reference
@@ -611,17 +659,21 @@ def normalize_channel_locations(recording, *, channel_ids=None):
         if channel_ids is None
         else positions_3d[recording.ids_to_indices(list(channel_ids))]
     )
-    if classify_missing_geometry(retained) == "complete":
+    # How much geometry is missing is a question about the WHOLE sliced set,
+    # answered before the retained subset is consulted: only the choice of
+    # plane is scoped to the retained contacts.
+    if classify_missing_geometry(positions_3d) == "complete":
         # No coordinate at all is indistinguishable from an absent location
         # property, and preflight clears exactly this case so the tetrode
-        # repair can run; the finiteness screen would raise on it. A PARTIAL
-        # set falls through to that raise.
+        # repair can run; the finiteness screen would raise on it.
         return recording
-    # Only the choice of plane is scoped to the retained contacts. EVERY
-    # sliced contact still has to be placeable: the reference keeps its
-    # coordinates until it is dropped, and the interpolate path reads every
-    # channel's location (SI's kriging weights are built from the whole good
-    # set), so a NULL rel_* there would spread NaN into the filled channels.
+    # Every sliced contact has to be placeable, retained or not: the
+    # reference keeps its coordinates until it is dropped, and the
+    # interpolate path reads every channel's location (SI's kriging weights
+    # are built from the whole good set), so a NULL rel_* there would spread
+    # NaN into the filled channels. This also covers unpositioned members
+    # beside a positioned reference -- a half-populated probe, not the
+    # legacy geometry the repair rescues.
     assert_finite_contact_positions(positions_3d)
 
     chosen = select_distinct_plane(retained)
@@ -635,9 +687,7 @@ def normalize_channel_locations(recording, *, channel_ids=None):
             axes,
         )
     # The projection the retained contacts chose, applied to every channel.
-    recording.set_channel_locations(
-        positions_3d[:, ["xyz".index(axis) for axis in axes]]
-    )
+    recording.set_channel_locations(_project(positions_3d, axes))
     return recording
 
 
