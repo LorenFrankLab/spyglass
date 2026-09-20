@@ -27,7 +27,8 @@ inherently touch the DB / DataJoint at CALL time via lazy imports:
 (both an ``Electrode * Probe.Electrode`` fetch).
 ``maybe_apply_tetrode_geometry``, its gate predicate
 (``tetrode_repair_applies``), the plane-normalization helpers
-(``select_distinct_plane``, ``normalize_channel_locations``,
+(``classify_missing_geometry``, ``select_distinct_plane``,
+``normalize_channel_locations``,
 ``assert_unique_contact_positions``) and the pitch/adjacency helpers
 (``_shank_pitch``, ``_interior_bad_channel_ids``) are pure.
 """
@@ -390,12 +391,88 @@ _CANDIDATE_PLANES = ("xy", "xz", "yz")
 _POSITION_DECIMALS = 6
 
 
+def classify_missing_geometry(locations) -> str:
+    """Say how much of a contact-position set is missing.
+
+    ``Probe.Electrode`` ``rel_x``/``rel_y``/``rel_z`` are nullable, so a NULL
+    reaches numpy as NaN. How much is missing decides what happens next, and
+    preflight and the recording stage MUST answer that the same way -- a
+    group that clears preflight and then raises at ``Recording.make`` has
+    wasted the operator's run.
+
+    * ``"complete"`` -- no coordinate of any contact is finite. That is
+      indistinguishable from "geometry was never written": the raw electrodes
+      table reads back all-zero, which is exactly what the ``tetrode_12.5``
+      repair covers, so preflight maps the group onto the all-zero legacy
+      geometry and the recording stage passes it through untouched.
+    * ``"partial"`` -- some but not all coordinates are non-finite. One NaN
+      ``rel_z`` on otherwise positioned contacts counts, and so does a single
+      contact with no position among positioned ones. Nothing downstream
+      repairs these: the repair needs the WHOLE group to be unpositioned, and
+      a NaN coordinate compares as distinct, so it would otherwise sail
+      through the uniqueness check into a probe build.
+    * ``"none"`` -- every coordinate is finite. (The all-zero legacy geometry
+      is "none" here: it is present, just degenerate. Plane selection reports
+      that separately.)
+
+    Parameters
+    ----------
+    locations : array_like
+        ``(n_contacts, 3)`` contact positions in ``(rel_x, rel_y, rel_z)``
+        order.
+
+    Returns
+    -------
+    str
+        ``"complete"``, ``"partial"`` or ``"none"``.
+    """
+    import numpy as np
+
+    finite = np.isfinite(np.asarray(locations, dtype=float))
+    if not finite.any():
+        return "complete"
+    if not finite.all():
+        return "partial"
+    return "none"
+
+
 def _all_rows_distinct(positions) -> bool:
     """True when no two rows of ``positions`` coincide (to 6 decimals)."""
     import numpy as np
 
     rounded = np.round(np.asarray(positions, dtype=float), _POSITION_DECIMALS)
     return len(np.unique(rounded, axis=0)) == len(rounded)
+
+
+def assert_finite_contact_positions(locations) -> None:
+    """Refuse contact positions with a non-finite coordinate.
+
+    ``rel_x``/``rel_y``/``rel_z`` are nullable, so a NULL arrives as NaN. NaN
+    rows compare as distinct under ``np.unique``, which would let a NaN plane
+    win and sail through :func:`assert_unique_contact_positions` into a probe
+    build. Same finiteness screen ``_shank_pitch`` applies.
+
+    Parameters
+    ----------
+    locations : array_like
+        ``(n_contacts, 3)`` contact positions.
+
+    Raises
+    ------
+    ValueError
+        If any coordinate is non-finite, naming the offending rows.
+    """
+    import numpy as np
+
+    loc = np.asarray(locations, dtype=float)
+    if np.isfinite(loc).all():
+        return
+    bad = np.flatnonzero(~np.isfinite(loc).all(axis=1))
+    raise ValueError(
+        "Recording geometry: contact positions must be finite, but "
+        f"row(s) {bad.tolist()} are {loc[bad].tolist()}. Populate "
+        "Probe.Electrode rel_x/rel_y/rel_z for this sort group."
+    )
 
 
 def select_distinct_plane(locations):
@@ -436,17 +513,7 @@ def select_distinct_plane(locations):
             "select_distinct_plane: expected an (n_contacts, 3) array of "
             f"contact positions, got shape {loc.shape}"
         )
-    # ``rel_x/rel_y/rel_z`` are nullable, so a NULL arrives as NaN. NaN rows
-    # compare as distinct under np.unique, which would let a NaN plane win and
-    # sail through assert_unique_contact_positions into a probe build. Same
-    # finiteness screen ``_shank_pitch`` applies below.
-    if not np.isfinite(loc).all():
-        bad = np.flatnonzero(~np.isfinite(loc).all(axis=1))
-        raise ValueError(
-            "select_distinct_plane: contact positions must be finite, but "
-            f"row(s) {bad.tolist()} are {loc[bad].tolist()}. Populate "
-            "Probe.Electrode rel_x/rel_y/rel_z for this sort group."
-        )
+    assert_finite_contact_positions(loc)
     for axes in _CANDIDATE_PLANES:
         positions = loc[:, ["xyz".index(axis) for axis in axes]]
         if _all_rows_distinct(positions):
@@ -513,8 +580,8 @@ def normalize_channel_locations(recording, *, channel_ids=None):
     ValueError
         If a probe is already attached to ``recording``, if ``channel_ids``
         names a channel the recording does not carry, or if SOME but not all
-        of the retained 3D contact positions are non-finite (a NULL ``rel_*``
-        column).
+        of the recording's 3D contact positions are non-finite (a NULL
+        ``rel_*`` column) -- on any sliced channel, not just a retained one.
     """
     import numpy as np
 
@@ -544,11 +611,18 @@ def normalize_channel_locations(recording, *, channel_ids=None):
         if channel_ids is None
         else positions_3d[recording.ids_to_indices(list(channel_ids))]
     )
-    if not np.isfinite(retained).any():
+    if classify_missing_geometry(retained) == "complete":
         # No coordinate at all is indistinguishable from an absent location
         # property, and preflight clears exactly this case so the tetrode
-        # repair can run; ``select_distinct_plane`` would raise on it.
+        # repair can run; the finiteness screen would raise on it. A PARTIAL
+        # set falls through to that raise.
         return recording
+    # Only the choice of plane is scoped to the retained contacts. EVERY
+    # sliced contact still has to be placeable: the reference keeps its
+    # coordinates until it is dropped, and the interpolate path reads every
+    # channel's location (SI's kriging weights are built from the whole good
+    # set), so a NULL rel_* there would spread NaN into the filled channels.
+    assert_finite_contact_positions(positions_3d)
 
     chosen = select_distinct_plane(retained)
     if chosen is None:

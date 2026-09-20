@@ -283,6 +283,14 @@ peak and carried 58× its RMS.
   `rel_x`/`rel_y`/`rel_z` — instead of letting SpikeInterface raise its bare
   "There are no channel locations", and the artifact write refuses the same
   recording.
+- **Partially missing geometry is reported up front.** Preflight and the
+  recording stage now share one predicate for how much of a group's geometry
+  is missing. Only a group with NO finite coordinate at all is treated as the
+  legacy "never written" case the `tetrode_12.5` repair rescues; anything
+  less — a NULL `rel_z` across the group, or one unpositioned electrode among
+  positioned ones — fails preflight, naming the electrodes and the missing
+  `rel_*` columns, rather than clearing preflight and raising at
+  `Recording.make`.
 
 #### Spike Sorting v2 curation identity and review-profile foundation
 

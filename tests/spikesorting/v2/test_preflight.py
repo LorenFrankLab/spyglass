@@ -523,7 +523,7 @@ def test_preflight_rejects_coincident_contacts_after_repair(
 
     nwb_file_name = preflight_inputs["nwb_file_name"]
     five_restr, _ = _make_sort_group(nwb_file_name, 987101, 5)
-    four_restr, _ = _make_sort_group(nwb_file_name, 987102, 4)
+    four_restr, four_electrodes = _make_sort_group(nwb_file_name, 987102, 4)
 
     def _geometry_check(sort_group_id):
         report = preflight_v2_pipeline(
@@ -585,6 +585,30 @@ def test_preflight_rejects_coincident_contacts_after_repair(
         ), "fixture must be degenerate in x-y for this case to mean anything"
         _patch(lambda _n: xz_positions, "not_a_tetrode")
         assert _geometry_check(987102).ok is True
+
+        # 4. A tetrode with finite x and y but a NULL rel_z. EVERY row is
+        #    incomplete, so a row-level "any coordinate missing" test read it
+        #    as wholly unpositioned, zeroed the group and let the repair
+        #    appear to rescue it -- while the recording stage, which treats
+        #    only an entirely non-finite set as unpositioned, raised at make.
+        #    The group is a four-channel tetrode_12.5, so it is the case the
+        #    repair WOULD have covered had the geometry really been absent.
+        nan_z_positions = np.array(xz_positions)
+        nan_z_positions[:, 2] = np.nan
+        _patch(lambda _n: nan_z_positions, "tetrode_12.5")
+        partial = _geometry_check(987102)
+        assert partial.ok is False, (
+            "finite x/y with a NaN rel_z is a partially positioned probe, "
+            "not the legacy all-zero geometry the repair rescues"
+        )
+        assert "sort_group_id=987102" in partial.fix
+        electrode_ids = sorted(
+            int(key["electrode_id"]) for key in four_electrodes
+        )
+        for electrode_id in electrode_ids:
+            assert (
+                f"electrode {electrode_id} (rel_z)" in partial.fix
+            ), "name each electrode AND the coordinate it is missing"
     finally:
         for restr in (five_restr, four_restr):
             (SortGroupV2.SortGroupElectrode & restr).delete_quick()

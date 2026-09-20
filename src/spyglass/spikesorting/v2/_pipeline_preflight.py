@@ -790,6 +790,44 @@ def _truncated(items: list) -> str:
     return f"{shown}" + (f" (+{omitted} more)" if omitted else "")
 
 
+def _missing_coordinate_report(channel_ids, positions) -> str:
+    """Name the electrodes with a non-finite coordinate, and which one.
+
+    "electrode 12 is missing rel_z" is actionable; "electrode 12 has no
+    position" sends the operator looking for a row that is there. A whole
+    unpositioned contact reports all three columns.
+
+    Parameters
+    ----------
+    channel_ids : sequence of int
+        Sort-group electrode ids, row-aligned to ``positions``.
+    positions : numpy.ndarray
+        ``(n, 3)`` contact positions in ``(rel_x, rel_y, rel_z)`` order, at
+        least one coordinate of which is non-finite.
+
+    Returns
+    -------
+    str
+        ``"electrode 12 (rel_z); electrode 15 (rel_y, rel_z)"``, capped by
+        ``_MAX_REPORTED_CONTACTS``.
+    """
+    import numpy as np
+
+    columns = ("rel_x", "rel_y", "rel_z")
+    finite = np.isfinite(np.asarray(positions, dtype=float))
+    described = []
+    for row in np.flatnonzero(~finite.all(axis=1)):
+        absent = ", ".join(
+            column
+            for column, is_finite in zip(columns, finite[row])
+            if not is_finite
+        )
+        described.append(f"electrode {int(channel_ids[row])} ({absent})")
+    shown = described[:_MAX_REPORTED_CONTACTS]
+    omitted = len(described) - len(shown)
+    return "; ".join(shown) + (f" (+{omitted} more)" if omitted else "")
+
+
 def _coincident_contact_report(channel_ids, positions) -> str:
     """Describe the electrodes that share an x-y position.
 
@@ -848,13 +886,18 @@ def sort_group_geometry_problem(
     ``Probe.Electrode`` ``rel_x``/``rel_y``/``rel_z``, then the legacy
     ``tetrode_12.5`` repair -- and reports the failure up front instead.
 
-    NULL / absent ``rel_*`` for the WHOLE group is the legacy "geometry was
-    never written" case: the raw electrodes table reads back as all-zero,
+    How much of the geometry is missing is classified by
+    :func:`~spyglass.spikesorting.v2._recording_geometry.classify_missing_geometry`
+    -- the same predicate ``normalize_channel_locations`` uses at make, so
+    this check cannot clear a group that then fails there. NULL / absent
+    ``rel_*`` for EVERY coordinate of the whole group is the legacy "geometry
+    was never written" case: the raw electrodes table reads back as all-zero,
     which is exactly what the tetrode repair covers, so it is checked as
-    all-zero rather than rejected outright. A group where only SOME
-    electrodes lack a coordinate is a partially-populated probe and is
-    reported as such (``select_distinct_plane`` would otherwise raise on the
-    NaN rows, and NaNs compare as distinct).
+    all-zero rather than rejected outright. Anything less than that -- one
+    NULL ``rel_z`` across the group, or a single unpositioned electrode among
+    positioned ones -- is a partially-populated probe and is reported as such,
+    naming the electrodes AND the missing columns (``select_distinct_plane``
+    would otherwise raise on the NaN rows, and NaNs compare as distinct).
 
     Checked on the sort group's full electrode membership -- the same list
     ``Recording.make_fetch`` passes to ``maybe_apply_tetrode_geometry``. A
@@ -886,6 +929,7 @@ def sort_group_geometry_problem(
     import numpy as np
 
     from spyglass.spikesorting.v2._recording_geometry import (
+        classify_missing_geometry,
         fetch_sort_group_contact_positions,
         fetch_sort_group_probe_info,
         select_distinct_plane,
@@ -909,18 +953,20 @@ def sort_group_geometry_problem(
         return None
 
     positions = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
-    unpositioned = np.flatnonzero(~np.isfinite(positions).all(axis=1))
-    if unpositioned.size == len(channel_ids):
+    # The same verdict ``normalize_channel_locations`` reaches at make, so a
+    # group cannot clear preflight and then fail there.
+    missing_geometry = classify_missing_geometry(positions)
+    if missing_geometry == "complete":
         positions = np.zeros_like(positions)
-    elif unpositioned.size:
-        missing = [int(channel_ids[i]) for i in unpositioned]
+    elif missing_geometry == "partial":
+        report = _missing_coordinate_report(channel_ids, positions)
         return (
             f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
-            f"electrode(s) {_truncated(missing)} with no Probe.Electrode "
-            "position (missing row or NULL rel_x/rel_y/rel_z) while its "
-            "other electrodes have one. SpikeInterface cannot place those "
-            "contacts. Populate Probe.Electrode rel_x/rel_y/rel_z for every "
-            "electrode in the sort group."
+            "electrode(s) with an incomplete Probe.Electrode position "
+            f"(missing row or NULL rel_*): {report}. SpikeInterface cannot "
+            "place those contacts, and the tetrode_12.5 repair applies only "
+            "to a group with NO positions at all. Populate Probe.Electrode "
+            "rel_x/rel_y/rel_z for every electrode in the sort group."
         )
 
     if select_distinct_plane(positions) is not None:

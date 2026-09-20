@@ -19,6 +19,7 @@ import pytest
 
 from spyglass.spikesorting.v2._recording_geometry import (
     assert_unique_contact_positions,
+    classify_missing_geometry,
     normalize_channel_locations,
     select_distinct_plane,
 )
@@ -139,6 +140,56 @@ def test_select_distinct_plane_prefers_xy_then_xz(
     np.testing.assert_array_equal(positions, [[1.0, 2.0]])
 
 
+def test_classify_missing_geometry(
+    xz_tetrode_locations, nan_locations, all_zero_locations
+):
+    """One predicate decides how much of a group's geometry is missing.
+
+    Preflight and the recording stage have to agree on this, or a group
+    clears preflight (which maps a wholly unpositioned group onto the
+    all-zero legacy geometry the ``tetrode_12.5`` repair rescues) and then
+    fails minutes later at make.
+    """
+    assert classify_missing_geometry(xz_tetrode_locations) == "none"
+    assert classify_missing_geometry(all_zero_locations) == "none"
+    assert classify_missing_geometry(np.full((4, 3), np.nan)) == "complete"
+
+    # A whole row missing, and a single missing coordinate on otherwise
+    # positioned rows, are the same verdict: some contacts cannot be placed.
+    partial_row = np.array(xz_tetrode_locations)
+    partial_row[2] = np.nan
+    assert classify_missing_geometry(partial_row) == "partial"
+    assert classify_missing_geometry(nan_locations) == "partial"
+
+    # The case the two gates disagreed on: finite x and y, NaN z. Every ROW
+    # is incomplete, but the group is not unpositioned.
+    nan_z = np.array(xz_tetrode_locations)
+    nan_z[:, 2] = np.nan
+    assert classify_missing_geometry(nan_z) == "partial"
+
+    # np.inf is not a position either.
+    infinite = np.array(xz_tetrode_locations)
+    infinite[1, 0] = np.inf
+    assert classify_missing_geometry(infinite) == "partial"
+
+
+def test_normalize_rejects_a_wholly_non_finite_coordinate(
+    xz_tetrode_locations,
+):
+    """Finite x/y with a NaN z is a defect, not an unpositioned group.
+
+    ``not np.isfinite(positions).any()`` -- "no coordinate at all is finite"
+    -- is the only shape of missing geometry the tetrode repair rescues.
+    """
+    recording = _probeless_recording(4)
+    nan_z = np.array(xz_tetrode_locations)
+    nan_z[:, 2] = np.nan
+    recording.set_channel_locations(nan_z)
+
+    with pytest.raises(ValueError, match="finite"):
+        normalize_channel_locations(recording)
+
+
 def test_select_distinct_plane_rejects_non_finite(nan_locations):
     """A NULL ``rel_*`` column must not masquerade as a distinct contact."""
     with pytest.raises(ValueError) as excinfo:
@@ -239,6 +290,25 @@ def test_normalize_uses_only_the_retained_contacts(xz_tetrode_locations):
     # The reference is dropped by the referencing step; what is left must pass
     # the recording stage's own gate.
     assert_unique_contact_positions(result.remove_channels(channel_ids[4:]))
+
+
+def test_normalize_still_requires_every_sliced_contact_to_be_placeable(
+    xz_tetrode_locations,
+):
+    """Only the PLANE is scoped to the retained contacts, not finiteness.
+
+    The reference keeps its coordinates until it is dropped, and the
+    ``interpolate`` path builds SpikeInterface's kriging weights from every
+    channel's location -- so a NULL ``rel_*`` on the reference would spread
+    NaN into the filled channels rather than being harmlessly ignored.
+    """
+    locations = np.vstack([xz_tetrode_locations, [[np.nan, np.nan, np.nan]]])
+    recording = _probeless_recording(5)
+    recording.set_channel_locations(locations)
+    channel_ids = list(recording.get_channel_ids())
+
+    with pytest.raises(ValueError, match="finite"):
+        normalize_channel_locations(recording, channel_ids=channel_ids[:4])
 
 
 def test_normalize_reduces_planar_geometry_to_xy(xy_square_locations):
