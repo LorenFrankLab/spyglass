@@ -4,6 +4,8 @@
 
 Sections: [filter-before-restriction](#filter-before-restriction) · [valid-sample-statistics](#valid-sample-statistics) · [geometry-normalization](#geometry-normalization) · [per-unit-halves](#per-unit-halves) · [metric-missingness](#metric-missingness) · [mua-contiguous-runs](#mua-contiguous-runs)
 
+Added feature designs: [independent motion estimation/application](designs-motion-and-matching.md#independent-motion-stage) · [matching independently sorted daily groups](designs-motion-and-matching.md#matching-independently-sorted-recording-groups). These own the source/provenance changes in phases 3c/4c; the per-unit-halves design below remains a separate fix.
+
 ## filter-before-restriction
 
 **Problem.** `Recording.make_compute` (`recording.py:2101-2137`) restricts time first (`restrict_recording`, which frame-slices each selected interval and concatenates), then filters (`apply_pre_motion_preprocessing`). The lazy `bandpass_filter` sees a concatenated signal with step discontinuities at every join; its `margin_ms` only covers chunk boundaries of a continuous parent. With the shipped `min_segment_length: 0.0015` (`_recipe_catalog.py:180,192`) a 45-sample sliver is entirely filter transient (measured 3.8× RMS, 96 µV peak error after a 600 Hz high-pass).
@@ -248,6 +250,8 @@ Single-channel groups pass trivially. Confirm SpikeInterface's `get_channel_loca
 
 **Design.** One dense analyzer on the whole session; split each unit's sampled spikes by temporal order (first half → cv 0, second half → cv 1), as UnitMatchPy's own `extract_raw_data` does. Reference implementation and measured results: [appendix-unitmatch-experiment.py](appendix-unitmatch-experiment.py) (the review's 10-seed experiment; its FIXED condition is this design) and [appendix-unitmatch-results.md](appendix-unitmatch-results.md).
 
+**Upstream agreement is limited to the split.** UnitMatchPy 3.2.7's native extractor selects evenly spaced spike indices and takes median waveforms, with its own smoothing/baseline handling; this design retains SI random sampling and mean templates. The official SI integration helper inspected on 2026-09-19 uses recording-midpoint splits and means. Do not describe the whole proposal as a single jointly recommended upstream recipe. See [phase 4a](phase-4a-unitmatch-halves.md#upstream-alignment-and-evidence-limits). Two sampled spikes ensure nonempty halves, not scientifically reliable matching; the measured dropout experiment is not a validation of hours-long waveform drift.
+
 ```python
 analyzer = si.create_sorting_analyzer(sorting, recording, sparse=False)
 analyzer.compute("random_spikes", method="uniform",
@@ -274,7 +278,7 @@ keep = np.array([i for i, u in enumerate(unit_ids) if int(u) not in excluded], d
 if keep.size == 0:
     raise ValueError(
         f"extract_unitmatch_bundle: every unit in {session_dir} has fewer than two sampled "
-        "spikes; the session cannot be matched. Lower max_spikes_per_unit or exclude the session."
+        "spikes; the session cannot be matched. Check available valid spikes and sampling settings."
     )
 avg_waves, unit_ids = avg_waves[keep], unit_ids[keep]
 assert not np.any(np.all(avg_waves == 0, axis=(1, 2))), "a template half is all-zero"

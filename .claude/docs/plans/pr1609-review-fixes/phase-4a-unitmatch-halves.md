@@ -14,11 +14,17 @@
 
 **Designs referenced:** [designs.md#per-unit-halves](designs.md#per-unit-halves).
 
+## Upstream alignment and evidence limits
+
+This adopts the per-unit temporal **split** used by UnitMatchPy 3.2.7's native raw extractor, while retaining Spyglass/SI random sampling and mean templates. The native extractor uses evenly spaced spike indices, median waveforms, and additional smoothing/baseline processing. The [official SI integration helper](https://github.com/EnnyvanBeest/UnitMatch/blob/main/UnitMatchPy/UnitMatchPy/save_utils.py) inspected on 2026-09-19 instead uses the recording midpoint and means; the [native extractor](https://github.com/EnnyvanBeest/UnitMatch/blob/main/UnitMatchPy/UnitMatchPy/extract_raw_data.py) uses per-unit counts. Recheck the pinned dependency when implementing; these links do not imply a dependency upgrade.
+
+The fix is supported by one upstream extraction strategy and our paired dropout experiments; it is not an exact copy of every upstream preprocessing step. Fewer-than-two exclusion prevents an empty half, not low-quality matching in general. Synthetic dropout recovery does not prove tracking through hours of waveform/position change. Independent motion correction is owned by [phase 3c](phase-3c-motion-correction.md), and daily-concat/long-duration tracking by [phase 4c](phase-4c-concat-unitmatch.md).
+
 ## Tasks
 
 - **Baseline capture**: port [appendix-unitmatch-experiment.py](appendix-unitmatch-experiment.py) to `tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py` (committed; not collected), parametrized by seed count (default 10). It must run both bundle constructions and report, pooled and per seed: drift-out true matches, healthy true matches, healthy false positives, S×S false pairs, and UnitMatchPy's fitted prior. Re-run it before editing and paste the pooled table into the PR description as the pre-change baseline.
 - **Replace the time-half loop** (`:208-231`) with the per-unit temporal split per the design. `max_spikes_per_unit` keeps its "per half" meaning (draw `2 * max_spikes_per_unit`, split). Return the list of excluded unit ids (fewer than 2 sampled spikes) and log them at WARNING with the session dir.
-- **Surface exclusions through the extraction loop, not the backend**: `extract_unitmatch_bundle` is called from `UnitMatch.make` (`unit_matching.py:1277`) before `UnitMatchBackend.match`; collect its returned `excluded` list per session there, log one WARNING per session naming the excluded unit ids, and keep the session ↔ bundle mapping intact (a session whose units are ALL excluded raises inside `extract_unitmatch_bundle`, so `make` fails loudly rather than matching a shortened session list). `match()` keeps returning `list[MatchPair]` and is not changed for exclusions. Do not add excluded units to the frozen universe or to `Pair` rows.
+- **Surface exclusions through the extraction loop, not the backend**: `extract_unitmatch_bundle` is called from `UnitMatch.make` (`unit_matching.py:1277`) before `UnitMatchBackend.match`; collect its returned `excluded` list per session there, log one WARNING per session naming the excluded unit ids, and keep the session ↔ bundle mapping intact (a session whose units are ALL excluded raises inside `extract_unitmatch_bundle`, so `make` fails loudly rather than matching a shortened session list). `match()` keeps returning `list[MatchPair]` and is not changed for exclusions. Preserve excluded units in the already-frozen universe; do not produce `Pair` rows for them.
 - **Integer index and empty-session guard**: `keep` is built with `dtype=np.intp`; an all-excluded session raises `ValueError` naming the session dir before any bundle file is written (an empty Python list would otherwise become a float64 array and `avg_waves[keep]` would raise `IndexError`).
 - **Assert no zero halves**: after building `avg_waves`, `assert not np.any(np.all(avg_waves == 0, axis=(1, 2)))` (per unit per half) with a message naming the unit — this is the invariant the bug violated.
 - **Docstrings**: `extract_unitmatch_bundle` (the "split the recording into two halves" paragraph at 137-144) and `UnitMatchParamsSchema.max_spikes_per_unit` description now describe per-unit temporal halves; `docs/src/Features/SpikeSortingV2_CrossSession.md` (or wherever the matcher is described — grep "cross-validation") gets the same sentence.
@@ -36,6 +42,7 @@
 - `MatchPair.match_probability` construction-time validation and the str/UUID key shapes (appendix Important/type findings).
 - The `manual` strategy's string `sorting_id` rejection (appendix).
 - Any change to the 0.5 match threshold or the both-directions rule in `_pairs_from_matrix`.
+- Motion estimation/application, support for concat-backed matching inputs, and proof of long-duration tracking (phases 3c/4c). This phase remains independently deliverable.
 
 ## Validation slice
 

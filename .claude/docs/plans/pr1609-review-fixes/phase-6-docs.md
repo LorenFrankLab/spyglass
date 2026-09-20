@@ -4,6 +4,8 @@
 
 **Scope split (owner, 2026-09-18).** Tasks marked **[required]** block the PR #1609 merge: factual corrections, documentation needed to use the new API, removal of the planning artifact this branch introduced, and scaffolding tokens in shipped source. Tasks marked **[optional]** are cleanup that may ship in this phase or later without blocking.
 
+**Added-feature docs (2026-09-19).** Phases 3c/4c ship their own usage, provenance and recreation documentation. The audit below applies when those features land; it does not add their scheduling to the original phase-6 merge gate. Until then, user docs must accurately state the existing limitations.
+
 **Inputs to read first:**
 
 - `README.md:160-185` — quick example using the removed `analysis_merge_id` key (167, 172, 181); the real key is `auto_labeled_merge_id` (`src/spyglass/spikesorting/v2/_pipeline_run.py:1013,1081`).
@@ -15,7 +17,7 @@
 - `TODO.md` (repo root, 234 lines) — planning artifact.
 - `tests/spikesorting/v2/test_multi_source_merge_fetch_nwb.py:16-19` — states v0/v1 are import-incompatible with SI 0.104, contradicting the coexistence test.
 
-**Designs referenced:** none.
+**Designs referenced:** [motion and matching contracts](designs-motion-and-matching.md).
 
 ## Tasks
 
@@ -27,11 +29,12 @@
 - **[required] Delete `TODO.md`** (introduced by this branch); move its one open design note (U8 god-module decomposition) into `.claude/docs/plans/` if the owner wants it kept, else drop it.
 - **[required] Small factual fixes**: `pyproject.toml:120-121` comment → "Cross-process lock for the shared analyzer cache (see `_analyzer_cache.analyzer_cache_lock`) and review draft revisions."; `waveform_features.py` docstring 500 → "max_spikes_per_unit (20000 in the shipped recipes)"; `test_multi_source_merge_fetch_nwb.py:16-19` docstring corrected. **[optional]** `SharedGroupArtifactSelection.member_set_hash` column comment "ordered" → "sorted (order-independent)" (`artifact.py:~596`); `unit_matching.py` forward-looking column comments (`~160`, `~1330`) → semantic descriptions.
 - **[required] Docstrings needed to use the new API**: `start_review` (`review_api.py:853`), `merge_and_evaluate` / `create_initial_curation` / `preview_merges` / `commit_merges` / `save_manual_curation` (`curation_api.py:1099-1169`) — NumPy style with Parameters/Returns. **[optional]** `ArtifactDetectionOutput` class (`artifact_output.py:71`), `CurationRef` properties (`curation_api.py:282-345`), `EvaluationResult` accessors (714-820), `MatcherProtocol.match` (`matcher_protocol.py:93`), and the remaining gaps in the appendix.
+- **[required with phases 3c/4c] Motion and daily-sort matching audit.** Verify docs, examples, receipts and CHANGELOG agree on off/estimate/apply, resolved estimator/interpolation settings, recipe validation status, saved-motion rebuilds, effective channel geometry, supported single/daily-concat matching inputs, and original-session detection counts. Check the daily-concat-to-cross-day notebook/script against the actual selection API and original-member handoff. Correct the older remediation plan's unsupported claim that concat curations were already matchable; explicitly distinguish historical scope from new functionality. Explain that `rigid_fast` uses a rigid DREDge estimator and that phase 4a mirrors the temporal split rather than every upstream preprocessing step.
 
 ## Deliberately not in this phase
 
 - The remaining ~30 missing docstrings on internal helpers (appendix I7) — follow-up.
-- Notebook content changes beyond the black re-sync in phase 1.
+- Notebook content changes beyond the black re-sync in phase 1 and the daily-concat matching example owned by phase 4c.
 
 ## Validation slice
 
@@ -42,6 +45,7 @@
 | `grep -rn "ArtifactDetection\b\|ArtifactDetectionSelection" src/ docs/ CHANGELOG.md` (manual) | only the five historical mentions remain |
 | `mkdocs build --strict` | no broken `:meth:` / cross-reference warnings for the edited docstrings |
 | `git ls-files TODO.md` | empty |
+| Feature examples after phases 3c/4c land | named modes/recipes and receipt fields exist; the daily-parent matching example returns original-member identities/times; docs never equate estimate-only with applied correction |
 
 ## Fixtures
 

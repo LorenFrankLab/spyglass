@@ -4,7 +4,7 @@
 
 ## Current codebase integration points
 
-All paths relative to the repo root; line numbers verified at head cc9a7953.
+All paths relative to the repo root; original review line numbers were verified at head cc9a7953 and may have moved. Added-feature integration points below use symbol names checked in the workspace on 2026-09-19.
 
 Recording stage (phase 3a):
 - `src/spyglass/spikesorting/v2/recording.py:2101-2137` — `Recording.make_compute` body: `read_recording_nwb` → `restrict_recording` (2109-2123) → `apply_pre_motion_preprocessing` (2124-2131) → `maybe_apply_tetrode_geometry` (2132-2137). Order changes; the read and the geometry call are preserved.
@@ -28,6 +28,16 @@ Sorting/analyzer stage (phase 3b):
 
 Cross-session (phase 4a):
 - `src/spyglass/spikesorting/v2/_unitmatch_backend.py:126` `extract_unitmatch_bundle`; time-half loop 208-231; `match` 328 (applies `_zero_center` at 401).
+
+Independent motion correction (added phase 3c):
+- `recording.py::DriftEstimate` is QC-only. `session_group.py::ConcatenatedRecording.make_compute` and `_concat_recording.py::build_concatenated_recording` apply correction only on concat sources and discard the estimate. Paths in this paragraph are under `src/spyglass/spikesorting/v2/`.
+- `_pipeline_run.py`, `_pipeline_presets.py`, `_pipeline_preflight.py` currently couple motion recipes to concat mode. `sorting.py::SortingSelection.resolve_source`, `_selection_identity.py::sorting_identity_payload`, curation/analyzer/UnitMatch/rebuild readers must preserve original lineage while selecting effective corrected traces.
+- SI 0.104.3's `rigid_fast` also uses `dredge_ap`, with rigid/coarse settings. A preset name is not scientific validation. Source links and exact distinctions: [shared design](designs-motion-and-matching.md#evidence-and-upstream-behavior).
+
+Matching daily concatenations (added phase 4c):
+- `unit_matching.py::_curation_member_identity` explicitly rejects concat sources; `UnitMatchSelection.MemberCuration` assumes one original recording per input. `TrackedUnit` maps each sorting to one original session. These contracts must be extended together.
+- `ConcatenatedRecordingSelection.MemberSnapshot`, `MemberBoundary`, and `ConcatMemberCuration` already retain constituent membership and parent unit IDs. Match the independently curated parent once; use its member projections for original-session analysis.
+- The earlier `pr1609-remediation` plan incorrectly describes concat-backed matching as existing support. The code restriction dates to `9343433f`; [phase 4c](phase-4c-concat-unitmatch.md) implements the missing route.
 
 Metric curation (phase 4b):
 - `src/spyglass/spikesorting/v2/_metric_curation.py:108` `apply_label_rules`; policy logic 165-215.
@@ -66,11 +76,14 @@ Docs (phase 6): `README.md:167,172,181`; `CHANGELOG.md` `[Unreleased]` (contradi
 - Real Frank-lab tetrode files (x-z contact geometry) sort with four distinct contact positions and never crash at analyzer build.
 - DLC and MoSeq users can install a working spyglass again; v0/v1 read paths work under SI 0.104 for binary-folder artifacts.
 - CI proves the above with real artifacts, not stubs.
+- Added phase 3c: optional motion estimation and application for either single or assembled recordings, with saved estimates, exact source/mask provenance, unchanged clocks, and probe-specific scientific validation before recipe promotion.
+- Added phase 4c: match independently sorted daily concatenations across days without duplicating parent units; retain all original-member times, regions, and detection support. Existing single-session matching remains supported.
 
 ### Non-Goals
 
 - The Important/Suggestion backlog in the appendix (cache-loader exception narrowing, recompute fingerprint churn, review-UI poll recovery, preset waveform-window fallback, type Literals, etc.) is NOT in this plan. Revisit trigger: after phases 1-4 merge, open a follow-up plan from the appendix's "Important" list, highest first: review-UI failed-poll freeze, `Merge.fetch_nwb` strictness, `clone_pipeline_preset` waveform window, cache-loader `except Exception`.
-- Motion correction, new sorters, schema redesign beyond the two column-type changes in phase 4b.
+- New sorters and unrelated schema redesign. The owner-requested motion and matching source/schema changes are now in phases 3c/4c; they supersede the original exclusion of motion correction from this plan.
+- Automatic motion-algorithm selection, unvalidated universal motion defaults, matching overlapping alternative sorts, within-one-NWB window matching, and matching multi-day concatenations as single inputs. The new matching input is a same-day concatenation; cross-day matching between those independent inputs is in scope.
 - Hosting the two-session UnitMatch fixtures (external Box upload; phase 5 wires the CI once they exist).
 
 ### Dependency policy
@@ -80,6 +93,8 @@ Decision (see Open Question 1): the base `numpy>=2,<3` pin moves to the `spikeso
 ## Cross-cutting test principle
 
 The defects this plan fixes share one shape: arrays keep the right dimensions, calls succeed, files reload, but meaning is lost at a boundary — which samples were observed, which frames are continuous in acquisition time, which unit an integer names, which units a value carries, whether a NaN is "not applicable" or "failed". The existing tests missed them because their fixtures were non-discriminating: dense ids, zero offsets, regular clocks, continuous recordings, units present throughout. Every phase's validation slice therefore includes fixtures where competing interpretations give different answers (sparse/reordered ids, x-z geometry, unequal gains and offsets, drifted clocks, disjoint intervals, drift-in/drift-out units), and the five reusable test kinds are placed in the phases that own them: validity/continuity properties (3b), semantic round trips (3a), state transitions (2, annotations), failure injection (2, 3b, 4b), and tests-of-the-tests plus execution evidence (5).
+
+For phases 3c/4c, add corrected-versus-original trace oracles, parent-versus-member identity, and known spatial motion. Test actual interpolation and sorting quality as well as the estimate. Pin development/held-out populations and numeric gates before acceptance; passing mocked wiring or recovering dropout units does not establish long-duration tracking performance.
 
 ## Tracked follow-ups (in scope for spikesorting-v2, not merge-blocking)
 
@@ -96,6 +111,8 @@ The defects this plan fixes share one shape: arrays keep the right dimensions, c
 - Phase 3b: the 990 Hz-under-1000 Hz probe excludes 0 samples (currently 10); the MUA probe returns 1 event with a NaN gap adjacent to the event (currently 31-35).
 - Phase 1: `uv pip compile --extra dlc` resolves deeplabcut ≥ 3.0 and `import deeplabcut` succeeds in a throwaway venv; `conda create --dry-run` succeeds for all three env files; `black --check .` is clean.
 - Phase 3a: the real file `tests/_data/raw/minirec20230622.nwb` (x-z geometry) yields four distinct 2D contact positions after reload and `get_probe()` succeeds.
+- Phase 3c: exact off/estimate bypass and original-time invariants; paired motion-error, unit precision/recall, false-merge/oversplit, border-channel, runtime and memory measurements on known-motion and no-motion controls. Numeric scientific gates are committed from development evidence before held-out acceptance; no polymer preset is called validated until these pass.
+- Phase 4c: daily-concat pair identity and original-member recovery, no parent duplication or false detection in empty members, plus held-out recall and incorrect-identity rates under gradual drift and disappearance/reappearance. The full corrected-daily-sort-to-match chain must run; phase 4a's existing 10-seed dropout gates remain unchanged.
 
 ## Risks and Mitigations
 
@@ -113,17 +130,22 @@ The defects this plan fixes share one shape: arrays keep the right dimensions, c
 | Per-unit halves exclude units with < 2 sampled spikes from the bundle | Excluded ids are logged and returned; they remain in the frozen matchable universe and simply produce no pairs (same outcome as today, but explicit). |
 | Raising on unexpected-NaN metrics turns previously "successful" evaluations into failures | That is the intended change; the classifier treats `n_spikes < min_spikes` / `fr < min_fr` as expected, so only genuine computation failures raise. |
 | Persisting patched geometry via h5py write-back after the pynwb write | Write-back happens before the content hash is computed; a read-back assertion in the same function verifies the values landed. |
+| Motion recipe is mistaken for a validated scientific result | Compare explicit resolved recipes on fixed probe-specific data; preserve experimental status and visible missing-evidence reports until acceptance passes. |
+| Sorting uses corrected traces but an analyzer or matcher reloads the original cache | One effective-source resolver, separate original lineage, and a discriminating round-trip test through every consumer/rebuild path (3c). |
+| Independent gap segments acquire incompatible motion reference frames | Persist continuity and time maps; test jumps/gaps against known motion; reject unsupported inputs rather than resetting each span independently (3c). |
+| A daily concat is represented as its first session or as repeated copies of each unit | Frozen expanded matching-input provenance, one graph node per parent unit, and per-member detection/region/time tests (4c). |
 
 ## Rollout Strategy
 
-Phases 1-5 and the required subset of phase 6 land on the `spikesorting-v2` branch before PR #1609 merges; phase 6's optional items and the deferred environment reorganization may follow. No feature flags. v2 users must recreate the preproduction database and analyzer caches after phases 3a/3b/4b (documented in CHANGELOG). v0/v1 users see no behavior change except the restored waveform reads (phase 2).
+The original phases 1, 2, 3a, 3b, 4a, 4b, 5 and required subset of phase 6 retain the agreed pre-#1609 merge gate; optional cleanup may follow. Phases 3c/4c are newly authorized separate feature PRs, with dependencies recorded in PLAN.md; their inclusion in that original merge gate has not been decided by adding them to the plan. No feature flags hide the original correctness fixes. The motion feature has explicit off/estimate/apply choices and remains opt-in pending scientific validation. v2 users recreate affected preproduction schemas/artifacts after identity or schema changes (including 3c/4c when shipped), as documented in CHANGELOG. v0/v1 behavior stays preserved except for the original authorized fixes.
 
 ## Open Questions
 
 1. **Base numpy pin.** DECIDED by the owner on 2026-09-18: relax base to `numpy>=1.26,<3` and pin `numpy>=2,<3` in the v2 extras (phase 1 as written). Alternative B (keep the pin, declare DLC/MoSeq unsupported) is not taken.
 2. **Observed-interval end for the last sample.** Current best answer: `t_last + 1/fs` using the recording's declared rate (phase 3b design). Alternative: `t_last + median(diff)`; deferred unless drift > 1% is observed in production files.
 3. **Legacy waveform reads for Zarr-format WaveformExtractors.** Current best answer: keep them gated with a message naming Zarr (SI 0.104 raises NotImplementedError). No known Frank-lab v0 Zarr waveform folders; deferred.
+4. **Motion recipe promotion and long-duration evidence.** No candidate is yet validated for the polymer probe by this plan. Phase 3c captures development baselines and freezes numeric held-out gates; phase 4c extends to tracking. Fixture availability and acceptance results remain explicit prerequisites for promotion, not reasons to omit structural implementation/tests.
 
 ## Estimated Effort
 
-Roughly +1,900 / −450 LOC across the six phases: phase 1 ~120 (config + tests), phase 2 ~350, phase 3a ~400, phase 3b ~450, phase 4a ~200, phase 4b ~250, phase 5 ~400 (fixtures + tests), phase 6 ~−300 net (deletions and rewrites). Tests are roughly half of the additions.
+Original review-fix estimate only: roughly +1,900 / −450 LOC, with phase 1 ~120 (config + tests), phase 2 ~350, phase 3a ~400, phase 3b ~450, phase 4a ~200, phase 4b ~250, phase 5 ~400 (fixtures + tests), phase 6 ~−300 net. Tests are roughly half of those additions. Phases 3c/4c add persisted stages, source/selection schema changes, consumer integration and scientific benchmarks; they are not covered by that estimate and should be sized as separate feature PRs.
