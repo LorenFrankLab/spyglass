@@ -2215,6 +2215,125 @@ def test_compute_artifact_filters_before_restriction(recording_selection_key):
             ).delete(safemode=False)
 
 
+# ---------- the plane is chosen from the contacts that are kept ------------
+
+
+@pytest.mark.slow
+def test_compute_artifact_normalizes_on_the_retained_contacts(
+    recording_selection_key,
+):
+    """A ``specific`` reference duplicating a member's position must not veto
+    the plane.
+
+    ``Probe.Electrode`` ``rel_*`` are recorded per probe TYPE, so a reference
+    contact on a second probe of the same type carries the SAME raw
+    coordinates as one of the sort group's members. That reference is sliced
+    in only for subtraction and is dropped by
+    ``apply_spatial_preprocessing``, so it has no say in which plane keeps the
+    MEMBERS distinct -- but while it took part in the choice, no plane
+    separated the sliced set, the recording stayed 3D, and
+    ``assert_unique_contact_positions`` rejected geometry that is perfectly
+    usable once the reference is gone.
+
+    Driven on a copy of the session's raw NWB whose reference electrode's
+    ``rel_*`` are overwritten with a member's: no shipped fixture carries one
+    contact position twice, and the copy is the small link file, so the
+    traces are still read from the original acquisition.
+    """
+    import shutil
+
+    import h5py
+    import numpy as np
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.spikesorting.v2._recording_nwb import read_recording_nwb
+    from spyglass.spikesorting.v2.recording import (
+        _ELECTRICAL_SERIES_PATH,
+        Recording,
+    )
+
+    fetched = Recording().make_fetch(recording_selection_key)
+    nwb_file_name = fetched.sel["nwb_file_name"]
+    members = [int(c) for c in fetched.channel_ids]
+    raw_abs = Path(Nwbfile().get_abs_path(nwb_file_name))
+
+    # The copy lives beside the original: its acquisition is an external link
+    # resolved by bare filename against the linking file's own directory.
+    patched = raw_abs.with_name(f"{raw_abs.stem}_coincident_ref_.nwb")
+    shutil.copy2(raw_abs, patched)
+    written_abs_path = None
+    artifact = None
+    try:
+        with h5py.File(patched, "a") as handle:
+            group = handle["/general/extracellular_ephys/electrodes"]
+            electrode_ids = [int(i) for i in group["id"][:]]
+            outside = [i for i in electrode_ids if i not in members]
+            assert outside, "the fixture must have an electrode off the group"
+            reference_electrode_id = outside[0]
+            member_row = electrode_ids.index(members[0])
+            reference_row = electrode_ids.index(reference_electrode_id)
+            for column in ("rel_x", "rel_y", "rel_z"):
+                values = group[column][:]
+                values[reference_row] = values[member_row]
+                group[column][:] = values
+            positions = np.column_stack(
+                [group[column][:] for column in ("rel_x", "rel_y", "rel_z")]
+            )
+        member_rows = [electrode_ids.index(c) for c in members]
+        member_positions = positions[member_rows]
+        assert len(np.unique(member_positions[:, :2], axis=0)) == len(members)
+        sliced = np.vstack([member_positions, positions[reference_row]])
+        for axes in ((0, 1), (0, 2), (1, 2)):
+            assert len(np.unique(sliced[:, axes], axis=0)) < len(sliced), (
+                "precondition: NO plane separates the sliced set while the "
+                "reference is in it"
+            )
+
+        artifact = Recording()._compute_recording_artifact(
+            raw_path=str(patched),
+            raw_object_id=fetched.raw_object_id,
+            nwb_file_name=nwb_file_name,
+            interval_list_name=fetched.sel["interval_list_name"],
+            channel_ids=fetched.channel_ids,
+            reference_mode="specific",
+            reference_electrode_id=reference_electrode_id,
+            sort_valid_times=np.array([[0.13, 1.27]], dtype=float),
+            raw_valid_times=fetched.raw_valid_times,
+            preprocessing_params=fetched.preprocessing_params,
+            probe_types=fetched.probe_types,
+            electrode_group_names=fetched.electrode_group_names,
+            bad_channel_ids=fetched.bad_channel_ids,
+        )
+        written_abs_path = AnalysisNwbfile.get_abs_path(
+            artifact.analysis_file_name
+        )
+        written = read_recording_nwb(
+            written_abs_path, electrical_series_path=_ELECTRICAL_SERIES_PATH
+        )
+        assert [
+            int(c) for c in written.get_channel_ids()
+        ] == members, (
+            "the reference must be dropped from the persisted sort surface"
+        )
+        # The artifact carries the members' own plane, not the reference's
+        # duplicate: every contact distinct, and equal to the raw x-y.
+        persisted = np.asarray(written.get_channel_locations(), dtype=float)
+        np.testing.assert_allclose(persisted, member_positions[:, :2])
+        assert len(np.unique(persisted, axis=0)) == len(members)
+    finally:
+        patched.unlink(missing_ok=True)
+        if written_abs_path is not None:
+            Path(written_abs_path).unlink(missing_ok=True)
+        if artifact is not None and (
+            AnalysisNwbfile
+            & {"analysis_file_name": artifact.analysis_file_name}
+        ):
+            (
+                AnalysisNwbfile
+                & {"analysis_file_name": artifact.analysis_file_name}
+            ).delete(safemode=False)
+
+
 # ---------- persisted geometry survives the artifact round trip -----------
 
 # The real Frank-lab tetrode session the general test suite already uses. It

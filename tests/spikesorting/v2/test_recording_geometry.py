@@ -199,6 +199,48 @@ def test_normalize_on_channel_subset(xz_tetrode_locations):
     ), "normalization must not build a probe"
 
 
+def test_normalize_uses_only_the_retained_contacts(xz_tetrode_locations):
+    """The plane is chosen from the contacts that stay in the sort surface.
+
+    A ``specific`` reference is sliced in for subtraction and dropped
+    afterwards, and ``Probe.Electrode`` ``rel_*`` are per probe TYPE -- so a
+    reference contact on a second, identical probe carries the SAME raw
+    coordinates as one of the members. No plane separates the five sliced
+    rows, while the four retained ones separate in x-z. Choosing the plane
+    over the sliced set therefore leaves a perfectly good sort group 3D, and
+    ``assert_unique_contact_positions`` rejects it after the reference is
+    dropped.
+    """
+    locations = np.vstack([xz_tetrode_locations, xz_tetrode_locations[:1]])
+
+    unrestricted = _probeless_recording(5)
+    unrestricted.set_channel_locations(locations)
+    assert normalize_channel_locations(unrestricted).has_3d_locations(), (
+        "fixture must be unseparable WITH the reference, or this test proves "
+        "nothing"
+    )
+
+    recording = _probeless_recording(5)
+    recording.set_channel_locations(locations)
+    channel_ids = list(recording.get_channel_ids())
+
+    result = normalize_channel_locations(recording, channel_ids=channel_ids[:4])
+
+    projected = np.asarray(result.get_property("location"), dtype=float)
+    assert projected.shape == (5, 2), (
+        "the chosen projection must be applied to EVERY channel, including "
+        "the reference that is still on the surface"
+    )
+    np.testing.assert_array_equal(projected, locations[:, [0, 2]])
+    assert (
+        len(np.unique(projected[:4], axis=0)) == 4
+    ), "the four retained contacts must be distinct in the chosen plane"
+
+    # The reference is dropped by the referencing step; what is left must pass
+    # the recording stage's own gate.
+    assert_unique_contact_positions(result.remove_channels(channel_ids[4:]))
+
+
 def test_normalize_reduces_planar_geometry_to_xy(xy_square_locations):
     """A 3D but already-planar probe is reduced to its x-y columns."""
     recording = _probeless_recording(4)

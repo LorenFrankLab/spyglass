@@ -454,7 +454,7 @@ def select_distinct_plane(locations):
     return None
 
 
-def normalize_channel_locations(recording):
+def normalize_channel_locations(recording, *, channel_ids=None):
     """Reduce 3D channel locations to the distinct 2D plane, in place.
 
     Runs at the recording stage on the channel-sliced recording -- so a group
@@ -477,10 +477,31 @@ def normalize_channel_locations(recording):
     PARTIAL non-finite rows still raise: the repair does not apply to them, so
     the missing contacts are a defect no downstream step can fix.
 
+    SUBSET RULE. The plane is chosen from the rows of ``channel_ids`` -- the
+    contacts that REMAIN on the sort surface -- and the chosen projection is
+    then applied to EVERY channel of the recording. The channel slice is wider
+    than that surface: it also carries the ``specific`` reference electrode,
+    which is subtracted and dropped in ``apply_spatial_preprocessing``.
+    ``Probe.Electrode`` ``rel_*`` are recorded per probe TYPE, so a reference
+    on another probe of the same type has the same raw coordinates as one of
+    the members; letting it take part in the choice means no plane separates
+    the sliced set, the recording stays 3D, and
+    :func:`assert_unique_contact_positions` then rejects member geometry that
+    is perfectly distinct on its own. The reference still gets 2D coordinates
+    because preprocessing and the writer require one consistent location
+    array across the surface -- it is dropped before the uniqueness
+    assertion, so its (possibly duplicated) position never has to be distinct.
+
     Parameters
     ----------
     recording : si.BaseRecording
         The channel-sliced recording, with no probe attached.
+    channel_ids : sequence, optional
+        Keyword-only. Channel ids of the contacts the plane is chosen from;
+        ``None`` (default) uses every channel. Pass the contacts the sort
+        surface retains: the members plus, on the ``interpolate`` path, the
+        interior bad channels -- everything except the ``specific``
+        reference.
 
     Returns
     -------
@@ -490,8 +511,10 @@ def normalize_channel_locations(recording):
     Raises
     ------
     ValueError
-        If a probe is already attached to ``recording``, or SOME but not all
-        3D contact positions are non-finite (a NULL ``rel_*`` column).
+        If a probe is already attached to ``recording``, if ``channel_ids``
+        names a channel the recording does not carry, or if SOME but not all
+        of the retained 3D contact positions are non-finite (a NULL ``rel_*``
+        column).
     """
     import numpy as np
 
@@ -511,24 +534,36 @@ def normalize_channel_locations(recording):
     if locations is None or np.asarray(locations).shape[1] != 3:
         return recording
 
-    positions_3d = recording.get_channel_locations(axes="xyz")
-    if not np.isfinite(np.asarray(positions_3d, dtype=float)).any():
+    positions_3d = np.asarray(
+        recording.get_channel_locations(axes="xyz"), dtype=float
+    )
+    # ``ids_to_indices`` raises naming the unknown ids, which is the report an
+    # operator needs when the retained set and the slice have drifted apart.
+    retained = (
+        positions_3d
+        if channel_ids is None
+        else positions_3d[recording.ids_to_indices(list(channel_ids))]
+    )
+    if not np.isfinite(retained).any():
         # No coordinate at all is indistinguishable from an absent location
         # property, and preflight clears exactly this case so the tetrode
         # repair can run; ``select_distinct_plane`` would raise on it.
         return recording
 
-    chosen = select_distinct_plane(positions_3d)
+    chosen = select_distinct_plane(retained)
     if chosen is None:
         return recording
-    axes, positions = chosen
+    axes, _ = chosen
     if axes != "xy":
         logger.info(
             "normalize_channel_locations: contacts are not distinct in x-y; "
             "using the %s plane for this sort group",
             axes,
         )
-    recording.set_channel_locations(positions)
+    # The projection the retained contacts chose, applied to every channel.
+    recording.set_channel_locations(
+        positions_3d[:, ["xyz".index(axis) for axis in axes]]
+    )
     return recording
 
 

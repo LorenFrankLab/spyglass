@@ -2158,7 +2158,24 @@ class Recording(SpyglassMixin, dj.Computed):
             bad_channel_handling=preprocessing_params.bad_channel_handling,
             bad_channel_ids=bad_channel_ids,
         )
-        recording = normalize_channel_locations(recording)
+        # Choose the plane from the contacts that STAY on the sort surface.
+        # The slice above also carries the ``specific`` reference, which
+        # ``apply_spatial_preprocessing`` subtracts and drops; because
+        # ``Probe.Electrode`` rel_* are per probe TYPE, a reference on another
+        # probe of the same type duplicates a member's raw position and would
+        # veto every plane for a group that is distinct without it.
+        # The interior bad channels the ``interpolate`` path re-includes DO
+        # stay; the reference is excluded even when it is one of them (which
+        # is also how ``apply_spatial_preprocessing`` treats it).
+        retained = {int(c) for c in channel_ids}
+        if preprocessing_params.bad_channel_handling == "interpolate":
+            retained |= {int(c) for c in bad_channel_ids}
+        if reference_mode == "specific":
+            retained -= {int(reference_electrode_id)}
+        retained_channel_ids = sorted(retained)
+        recording = normalize_channel_locations(
+            recording, channel_ids=retained_channel_ids
+        )
         recording, temporal_steps = apply_temporal_preprocessing(
             recording, preprocessing_params
         )
