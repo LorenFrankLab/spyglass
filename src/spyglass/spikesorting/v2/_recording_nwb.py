@@ -227,6 +227,59 @@ def _ensure_relative_position_columns(nwbfile) -> None:
         )
 
 
+def _widen_position_column_to_float64(group, column) -> None:
+    """Recreate a narrower-than-float64 ``rel_*`` dataset as float64.
+
+    ``group[column][:] = values`` casts to the DESTINATION dtype, so a float32
+    column silently truncates the geometry it is handed (1000.1 um is stored
+    as 1000.0999755859375 -- an error of 2.4e-5 um, far outside the 1e-6 um
+    read-back tolerance below). Column dtypes come from the parent NWB:
+    ``AnalysisNwbfile().create`` exports the parent's electrodes table and a
+    pynwb export preserves each column's on-disk dtype, so a parent written
+    with float32 ``rel_*`` hands the writer a float32 destination. Widening
+    the destination keeps the persisted geometry equal to the geometry the
+    sort ran with, for every file, rather than only for coordinates that
+    happen to be exactly representable in the parent's dtype.
+
+    h5py cannot change a dataset's dtype in place, so the dataset is read,
+    unlinked and recreated with the same name, shape, layout and ATTRIBUTES.
+    The attributes are what keep the file readable: hdmf identifies a
+    ``VectorData`` column by its ``neurodata_type``/``namespace`` and tracks
+    it by ``object_id``, so dropping them would orphan the column. (The
+    unlinked dataset's bytes are not reclaimed by HDF5; for a handful of
+    electrode rows that is a few hundred bytes.)
+
+    Parameters
+    ----------
+    group : h5py.Group
+        The open ``/general/extracellular_ephys/electrodes`` group.
+    column : str
+        Name of the ``rel_*`` dataset to widen. A no-op when it is already
+        float64.
+    """
+    import numpy as np
+
+    dataset = group[column]
+    if dataset.dtype == np.float64:
+        return
+    values = dataset[:].astype(np.float64)
+    attributes = dict(dataset.attrs)
+    layout = {
+        "chunks": dataset.chunks,
+        "compression": dataset.compression,
+        "compression_opts": dataset.compression_opts,
+        "shuffle": dataset.shuffle,
+        "fletcher32": dataset.fletcher32,
+        "maxshape": dataset.maxshape,
+    }
+    del group[column]
+    widened = group.create_dataset(
+        column, data=values, dtype=np.float64, **layout
+    )
+    for name, value in attributes.items():
+        widened.attrs[name] = value
+
+
 def _persist_channel_geometry(
     analysis_abs_path: str, row_indices, locations
 ) -> None:
@@ -248,6 +301,12 @@ def _persist_channel_geometry(
     disk) and before the content fingerprint, which hashes exactly these rows.
     h5py rather than pynwb because the datasets already exist and only a few
     of their elements change.
+
+    Coordinates are persisted at DOUBLE precision: a destination column the
+    parent NWB wrote narrower than float64 is recreated as float64 first
+    (:func:`_widen_position_column_to_float64`), because assigning into it
+    would otherwise round every coordinate to the parent's precision.
+    Columns this writer had to create are float64 already.
 
     Parameters
     ----------
@@ -290,6 +349,9 @@ def _persist_channel_geometry(
     with h5py.File(analysis_abs_path, "a") as handle:
         group = handle["/general/extracellular_ephys/electrodes"]
         for axis, column in enumerate(_RELATIVE_POSITION_COLUMNS):
+            # The destination dtype is the parent NWB's; widen it first so
+            # the assignment below cannot truncate what it is handed.
+            _widen_position_column_to_float64(group, column)
             values = group[column][:]
             values[rows] = expected[:, axis]
             group[column][:] = values

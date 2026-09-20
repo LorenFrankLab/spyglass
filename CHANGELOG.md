@@ -257,7 +257,10 @@ peak and carried 58× its RMS.
   persisted the same way, so a reloaded four-channel tetrode has its 12.5 µm
   square. Geometry is part of the content fingerprint, so an x-z sort group or
   a repaired tetrode gets a new `content_hash` even when its traces are
-  unchanged.
+  unchanged. Coordinates are persisted at double precision: a `rel_*` column
+  the parent NWB wrote narrower than float64 is widened to float64 in the
+  artifact, so a coordinate like 1000.1 µm is not rounded to the parent's
+  precision.
 - **Coincident contacts now fail loud.** `Recording.make` checks the effective
   2D positions after the tetrode repair and raises, naming the positions and
   `Probe.Electrode` `rel_x`/`rel_y`/`rel_z`; the analyzer build raises the same

@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 
@@ -875,6 +876,159 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     # "no geometry known here", not a contact sitting at the origin.
     untouched = [i for i in range(len(_SMALL_ELECTRODE_IDS)) if i not in rows]
     assert np.isnan(persisted[untouched]).all()
+    # Created columns are double precision, so a coordinate that is not
+    # exactly representable in float32 survives them unchanged.
+    with h5py.File(path, "r") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        for column in ("rel_x", "rel_y", "rel_z"):
+            assert group[column].dtype == np.float64
+
+
+# ---------------------------------------------------------------------------
+# 4b. A parent whose rel_* columns are narrower than float64
+# ---------------------------------------------------------------------------
+
+# Coordinates chosen so that none of them is exactly representable in
+# float32: 1000.1 lands on 1000.0999755859375 there (an error of 2.4e-5 um,
+# 24x the writer's 1e-6 um read-back tolerance).
+_NARROW_ELECTRODE_IDS = (3, 5, 9, 12)
+_NARROW_LOCATIONS = np.array(
+    [
+        [1000.1, 0.0],
+        [1000.1, -30.3],
+        [1030.7, 0.0],
+        [1030.7, -30.3],
+    ]
+)
+
+
+def _write_narrow_geometry_nwb(path):
+    """Write an NWB whose ``rel_x``/``rel_y`` are float32, ``rel_z`` float64.
+
+    Real files carry mixed-precision ``rel_*`` columns, and
+    ``AnalysisNwbfile().create`` exports the parent's electrodes table
+    verbatim -- a pynwb export preserves each column's on-disk dtype -- so the
+    analysis file the writer stamps inherits that float32 destination. An x-z
+    sort group then projects its float64 ``rel_z`` into the float32 ``rel_y``.
+    """
+    import pynwb
+
+    nwbfile = pynwb.NWBFile(
+        session_description="mixed-precision rel_* columns",
+        identifier="narrow-rel-columns",
+        session_start_time=datetime(2024, 3, 1, tzinfo=timezone.utc),
+    )
+    device = nwbfile.create_device(name="probe0")
+    group = nwbfile.create_electrode_group(
+        name="0", description="g", location="CA1", device=device
+    )
+    for index, electrode_id in enumerate(_NARROW_ELECTRODE_IDS):
+        nwbfile.add_electrode(
+            id=int(electrode_id),
+            location="CA1",
+            group=group,
+            rel_x=float(index),
+            rel_y=0.0,
+            rel_z=float(-index),
+        )
+    nwbfile.add_acquisition(
+        pynwb.ecephys.ElectricalSeries(
+            name="e-series",
+            data=np.zeros((32, len(_NARROW_ELECTRODE_IDS)), dtype=np.int16),
+            electrodes=nwbfile.create_electrode_table_region(
+                region=list(range(len(_NARROW_ELECTRODE_IDS))),
+                description="electrodes used in raw e-series recording",
+            ),
+            starting_time=0.0,
+            rate=_SAMPLING_FREQUENCY,
+            conversion=_GAIN_UV_PER_COUNT * 1e-6,
+        )
+    )
+    with pynwb.NWBHDF5IO(str(path), mode="w") as io:
+        io.write(nwbfile)
+
+    # pynwb writes every rel_* column float64; narrow two of them the way a
+    # writer that declared float32 would have.
+    with h5py.File(path, "a") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        for column in ("rel_x", "rel_y"):
+            dataset = group[column]
+            values = dataset[:]
+            attrs = dict(dataset.attrs)
+            del group[column]
+            narrowed = group.create_dataset(
+                column, data=values.astype(np.float32), dtype=np.float32
+            )
+            for name, value in attrs.items():
+                narrowed.attrs[name] = value
+    return path
+
+
+@pytest.mark.unit
+def test_geometry_is_persisted_at_double_precision(tmp_path):
+    """A float32 destination column must not truncate the sort's geometry.
+
+    ``group[column][:] = values`` casts to the destination dtype, so an x-z
+    group whose float64 ``rel_z`` is projected into a float32 ``rel_y`` lost
+    2.4e-5 um per coordinate -- 24x the 1e-6 um the writer verifies against --
+    and the read-back check failed the whole write on a perfectly valid file.
+    The persisted geometry is what SpikeInterface rebuilds a reloaded
+    recording's channel locations from, so it has to hold the coordinates the
+    sort actually ran with, not a truncation of them.
+    """
+    import pynwb
+
+    from spyglass.spikesorting.v2._recording_nwb import (
+        _persist_channel_geometry,
+        read_recording_nwb,
+    )
+
+    path = _write_narrow_geometry_nwb(tmp_path / "narrow_rel_columns.nwb")
+    with h5py.File(path, "r") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        assert group["rel_x"].dtype == np.float32
+        assert group["rel_y"].dtype == np.float32
+        assert group["rel_z"].dtype == np.float64
+    assert not np.array_equal(
+        _NARROW_LOCATIONS, _NARROW_LOCATIONS.astype(np.float32)
+    ), "the fixture coordinates must not be float32-exact"
+
+    rows = list(range(len(_NARROW_ELECTRODE_IDS)))
+    _persist_channel_geometry(str(path), rows, _NARROW_LOCATIONS)
+
+    with h5py.File(path, "r") as handle:
+        group = handle["/general/extracellular_ephys/electrodes"]
+        for column in ("rel_x", "rel_y", "rel_z"):
+            assert group[column].dtype == np.float64
+        persisted = np.column_stack(
+            [group[column][:] for column in ("rel_x", "rel_y", "rel_z")]
+        )
+    np.testing.assert_allclose(
+        persisted,
+        np.column_stack([_NARROW_LOCATIONS, np.zeros(len(rows))]),
+        rtol=0.0,
+        atol=1e-6,
+    )
+
+    # The widened columns are still a readable DynamicTable: pynwb resolves
+    # the table (and the series' region through it), and SpikeInterface
+    # rebuilds the recording's locations from it.
+    with pynwb.NWBHDF5IO(str(path), mode="r", load_namespaces=True) as io:
+        table = io.read().electrodes
+        assert {"rel_x", "rel_y", "rel_z"}.issubset(table.colnames)
+        np.testing.assert_array_equal(
+            np.asarray(table["rel_x"][:], dtype=float), persisted[:, 0]
+        )
+
+    reloaded = read_recording_nwb(
+        str(path), electrical_series_path="acquisition/e-series"
+    )
+    np.testing.assert_allclose(
+        np.asarray(reloaded.get_channel_locations(), dtype=float),
+        _NARROW_LOCATIONS,
+        rtol=0.0,
+        atol=1e-6,
+    )
 
 
 # ---------------------------------------------------------------------------
