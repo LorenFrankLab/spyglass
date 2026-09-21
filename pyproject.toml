@@ -66,7 +66,7 @@ dependencies = [
   "pubnub<6.4",                   # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",
-  "ripple-detection",
+  "ripple-detection>=2,<3",
   "scipy<1.13",                   # TODO(#1609): remove with SpikeInterface bump
   "seaborn",
   "sortingview>=0.11",
