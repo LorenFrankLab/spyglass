@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import sortingview.views as vv
 from matplotlib.axes import Axes
-from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
+from ripple_detection import DETECTORS, get_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
+from ripple_detection.registry import RIPPLE_BAND_LFP
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
@@ -21,9 +22,40 @@ from spyglass.utils.nwb_helper_fn import get_electrode_indices
 schema = dj.schema("ripple_v1")
 
 RIPPLE_DETECTION_ALGORITHMS = {
-    "Kay_ripple_detector": Kay_ripple_detector,
-    "Karlsson_ripple_detector": Karlsson_ripple_detector,
+    name: spec.detector
+    for name, spec in DETECTORS.items()
+    if spec.inputs == (RIPPLE_BAND_LFP,)
 }
+"""Detectors this table can run, from the ripple_detection registry.
+
+Every detector that takes ripple-band filtered LFP, which is what
+`RippleTimesV1` supplies. Built from the package rather than listed here, so a
+detector added there is available without a change in spyglass. Kept as a
+module-level name because it was one before the registry existed.
+"""
+
+
+def _resolve_ripple_detector(name: str):
+    """Look up a detection algorithm by name, and check it takes our input.
+
+    Raises
+    ------
+    KeyError
+        If no detector has that name. The message lists the ones that do.
+    ValueError
+        If the detector exists but takes something other than ripple-band
+        filtered LFP. `Long_sharp_wave_ripple_detector` takes raw two-channel
+        LFP through an identical signature, so without this check it would run
+        on filtered data and return plausible but meaningless events.
+    """
+    spec = get_detector(name)
+    if spec.inputs != (RIPPLE_BAND_LFP,):
+        raise ValueError(
+            f"{name} takes {', '.join(spec.inputs)}, but RippleTimesV1 supplies "
+            "ripple-band filtered LFP only. Detectors usable here: "
+            f"{', '.join(sorted(RIPPLE_DETECTION_ALGORITHMS))}."
+        )
+    return spec.detector
 
 # Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
@@ -196,9 +228,10 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             - Nwb file name from LFPBandV1
             - Parameters for ripple detection from RippleParameters
             - Ripple LFPs and position info from PositionOutput and LFPBandV1
-        Runs she specified ripple detection algorithm (Karlsson or Kay from
-        ripple_detection package), inserts the results into the analysis nwb
-        file, and inserts the key into the RippleTimesV1 table.
+        Runs the specified ripple detection algorithm, resolved by name from
+        the ripple_detection package's registry and checked to take ripple-band
+        filtered LFP, inserts the results into the analysis nwb file, and
+        inserts the key into the RippleTimesV1 table.
 
         """
         nwb_file_name = (LFPBandV1 & key).fetch1("nwb_file_name")
@@ -216,7 +249,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             interval_ripple_lfps,
             sampling_frequency,
         ) = self.get_ripple_lfps_and_position_info(key)
-        ripple_times = RIPPLE_DETECTION_ALGORITHMS[ripple_detection_algorithm](
+        ripple_times = _resolve_ripple_detector(ripple_detection_algorithm)(
             time=np.asarray(interval_ripple_lfps.index),
             filtered_lfps=np.asarray(interval_ripple_lfps),
             speed=np.asarray(speed),
