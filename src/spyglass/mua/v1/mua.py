@@ -87,7 +87,10 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         speed = speed.to_numpy()
 
         spike_indicator = SortedSpikesGroup.get_spike_indicator(key, time)
-        spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+        # Kept per unit rather than summed: multiunit_HSE_detector sums
+        # internally for the population rate, so the events are identical
+        # either way, but it also counts the units active in each event and
+        # reports n_active_units. Summing first makes that count always 1.
 
         sampling_frequency = 1 / np.median(np.diff(time))
 
