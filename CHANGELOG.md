@@ -2,10 +2,46 @@
 
 ## [0.6.1] (Unreleased)
 
+### Breaking Changes
+
+#### Ripple and MUA Detection Results Change
+
+Spyglass now requires `ripple-detection>=2,<3`, which was previously
+unconstrained. That release changes detection results: the ripple-band filter's
+output differs at every sampling rate other than 1500 Hz, the minimum-duration
+rule admits about 20% more events, and three defects in per-event selection are
+fixed.
+
+`RippleTimesV1` and `MuaEventsV1` entries populated before the upgrade therefore
+hold different events from entries populated after it. The stored results stay
+valid; they are simply not comparable with new ones. Repopulate any analysis
+that mixes the two, and record which version produced a given set of events.
+
+`MuaEventsV1` also gains an `n_active_units` column, the number of units with a
+spike inside each event.
+
 ### Infrastructure
 
 - Prevent errors during update for dandi standard from propagating to other
   files #1677
+- Pin `ripple-detection` to 2.x, which was previously unconstrained
+
+### Pipelines
+
+- Ripple
+
+    - Resolve detection algorithms from the `ripple_detection` registry rather
+      than a hard-coded mapping, which makes six detectors available to
+      `RippleTimesV1` in place of two and needs no change here when that
+      package adds one
+    - Raise a clear error for a detector that does not take ripple-band
+      filtered LFP, rather than running it on the wrong input
+
+- MUA
+
+    - Keep the spike indicator per unit rather than summing it, so
+      `n_active_units` counts the units in a burst; the detected events are
+      unchanged
 
 ## [0.6.0] (Sep 1st 2026)
 

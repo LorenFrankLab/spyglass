@@ -6,9 +6,8 @@ import numpy as np
 import pandas as pd
 import sortingview.views as vv
 from matplotlib.axes import Axes
-from ripple_detection import DETECTORS, get_detector
+from ripple_detection import DETECTORS, RIPPLE_BAND_LFP, get_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
-from ripple_detection.registry import RIPPLE_BAND_LFP
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
