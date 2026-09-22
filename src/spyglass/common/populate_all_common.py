@@ -51,6 +51,12 @@ def log_insert_error(
 ) -> None:
     """Log a given error to the InsertError table.
 
+    Deprecated in favour of `IngestionPlanLog`, which records a whole file's
+    problems together with the entries they blocked, rather than one row per
+    exception with no memory of what was already staged. `InsertError`
+    remains declared and written to so existing queries keep working; it is
+    no longer where new work should look.
+
     Parameters
     ----------
     table : str
@@ -61,6 +67,13 @@ def log_insert_error(
         Dictionary with keys for dj_user, connection_id, and nwb_file_name.
         Defaults to checking dj.conn and using "Unknown" for nwb_file_name.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        name="InsertError, written by populate_all_common",
+        alt="IngestionPlanLog, which stages entries alongside their problems",
+    )
+
     if error_constants is None:
         error_constants = dict(
             dj_user=dj.config["database.user"],
@@ -76,6 +89,70 @@ def log_insert_error(
             error_raw=str(err),
         )
     )
+
+
+def ingestion_table_list() -> List[dj.Table]:
+    """Return every table ingested from an NWB file, parents before children.
+
+    One declared set, shared by the inserter and the planner. The order is
+    written out rather than derived: the schema is fixed at import time, so
+    sorting it on every call costs ~0.17s to rediscover an answer that cannot
+    change. `test_ingestion_table_list_is_dependency_ordered` checks the
+    order against DataJoint's foreign-key graph instead, so a table added in
+    the wrong place fails a test rather than an ingestion.
+
+    Returns
+    -------
+    list
+        SpyglassIngestion table classes, in dependency order.
+    """
+    from spyglass.lfp.lfp_imported import ImportedLFP
+    from spyglass.position.v1.imported_pose import ImportedPose
+    from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    return [
+        # no parents among these
+        CameraDevice,
+        DataAcquisitionDeviceAmplifier,
+        DataAcquisitionDeviceSystem,
+        Institution,
+        Lab,
+        LabMember,
+        LabTeam,
+        OpticalFiberDevice,
+        ProbeType,
+        Subject,
+        Virus,
+        # devices and probes
+        DataAcquisitionDevice,  # -> DataAcq*Amplifier, DataAcq*System
+        Probe,  # -> ProbeType
+        Probe.Shank,  # -> Probe
+        Probe.Electrode,  # -> Probe.Shank
+        # the session, and what hangs from it
+        Session,  # -> Subject, Institution, Lab
+        Session.Experimenter,  # -> Session, LabMember
+        Session.DataAcquisitionDevice,  # -> Session, DataAcq*Device
+        VirusInjection,  # -> Session, Virus
+        ElectrodeGroup,  # -> Session
+        ImportedSpikeSorting,  # -> Session
+        IntervalList,  # -> Session
+        OpticalFiberImplant,  # -> Session, OpticalFiberDevice
+        PositionSource,  # -> Session, IntervalList
+        Raw,  # -> Session, IntervalList
+        RawCompassDirection,  # -> Session, IntervalList
+        SampleCount,  # -> Session
+        SensorData,  # -> Session, IntervalList
+        TaskEpoch,  # -> Session, Task, CameraDevice, IntervalList
+        VideoFile,  # -> TaskEpoch
+        # last: depend on the above
+        DIOEvents,  # -> Session, IntervalList
+        Electrode,  # -> ElectrodeGroup, Probe.Electrode
+        ImportedLFP,  # -> LFPElectrodeGroup, IntervalList
+        ImportedPose,  # -> IntervalList
+        OptogeneticProtocol,  # -> TaskEpoch
+        StateScriptFile,  # -> TaskEpoch
+        # NwbfileKachery, # Not used by default
+    ]
 
 
 def single_transaction_make(
@@ -133,7 +210,10 @@ def populate_all_common(
         The name of the NWB file to populate.
     rollback_on_fail : bool, optional
         If True, will delete the Session entry if any errors occur.
-        Defaults to False.
+        Defaults to False. Deprecated: planning a file reports every problem
+        before anything is written, so there is nothing to undo. A rollback
+        now belongs only to a `planner_miss`, where a validated plan failed
+        halfway — see `insert_plan(rollback_on_miss=True)`.
     raise_err : bool, optional
         If True, will raise any errors that occur during population.
         Defaults to False. This will prevent any rollback from occurring.
@@ -233,6 +313,13 @@ def populate_all_common(
     nwbfile_query = Nwbfile & {"nwb_file_name": nwb_file_name}
 
     if err_query and nwbfile_query and rollback_on_fail:
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            name="rollback_on_fail, the blanket undo after a failed ingest",
+            alt="plan the file first; insert_plan(rollback_on_miss=True) "
+            + "covers the one case a rollback is still for",
+        )
         logger.error(f"Rolling back population for {nwb_file_name}...")
         # Should this be safemode=False to prevent confirmation prompt?
         nwbfile_query.super_delete(warn=False)
