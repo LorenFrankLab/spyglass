@@ -10,12 +10,14 @@ that emit a parent's rows alongside their own would appear broken, and one
 missing object would be reported once per dependent table rather than once.
 """
 
+from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
 from spyglass.data_import.ingestion_plan import (
     IngestionPlan,
     PlannedEntries,
     Problem,
+    ReportResult,
     TablePlan,
     row_key,
 )
@@ -183,6 +185,12 @@ def plan_nwbfile(
 
         tables = ingestion_table_list()
 
+    # One hashing pass over the file yields a digest per object, so each
+    # table's read-set can be fingerprinted without re-reading anything.
+    # Roughly 14x cheaper than parsing the same file, so it earns its place
+    # even when nothing turns out to be reusable.
+    hasher = _object_hasher(nwb_file_name)
+
     key_space = VirtualKeySpace()
     table_plans: List[TablePlan] = []
     failed_tables: set = set()
@@ -240,6 +248,9 @@ def plan_nwbfile(
                 status=status,
                 problems=tuple(problems),
                 reads=plan.reads,
+                read_set_digest=(
+                    hasher.read_set_digest(plan.reads) if hasher else None
+                ),
             )
         )
 
@@ -258,6 +269,35 @@ def plan_nwbfile(
     return plan
 
 
+def _object_hasher(nwb_file_name: str):
+    """Return a hasher indexing the file's objects, or None.
+
+    A file that cannot be hashed is not a failure: the plan is still correct,
+    it just cannot say whether a later run could reuse any of it. Returning
+    None rather than raising keeps that distinction -- every `read_set_digest`
+    is then None, which reads as "unknown", not "unchanged".
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The copy file registered in Nwbfile.
+
+    Returns
+    -------
+    NwbfileHasher or None
+    """
+    from spyglass.common.common_nwbfile import Nwbfile
+    from spyglass.utils.nwb_hash import NwbfileHasher
+
+    try:
+        return NwbfileHasher(
+            Nwbfile.get_abs_path(nwb_file_name), object_ids=True
+        )
+    except Exception as err:  # unreadable, or a dtype the hasher chokes on
+        logger.debug(f"Read-set digests unavailable for {nwb_file_name}: {err}")
+        return None
+
+
 def _blocking_parents(table, failed_tables: set) -> Tuple[str, ...]:
     """Return the failed tables this one depends on.
 
@@ -271,3 +311,295 @@ def _blocking_parents(table, failed_tables: set) -> Tuple[str, ...]:
     except Exception:  # pragma: no cover - undeclared table
         return ()
     return tuple(sorted(parents & failed_tables))
+
+
+def insert_plan(
+    plan: IngestionPlan,
+    allow_partial: bool = False,
+    on_divergence: str = "interactive",
+    rollback_on_miss: bool = False,
+) -> ReportResult:
+    """Insert what a plan worked out, re-deriving nothing.
+
+    The plan already holds every intended row, already checked. This applies
+    the divergence policy, then writes those rows in dependency order. No
+    file is reopened and no mapping is re-run: if a row is wrong here, the
+    plan was wrong, which is a planner gap rather than an ingestion error.
+
+    Freshness is judged per entry, never by comparing the file's hash to the
+    one recorded when the plan was made. The expected workflow edits the file
+    between attempts, so a whole-file comparison would reject every plan it
+    was meant to preserve.
+
+    Parameters
+    ----------
+    plan : IngestionPlan
+        As returned by `plan_nwbfile`, with live table targets.
+    allow_partial : bool, optional
+        Insert the tables that planned cleanly even though others did not.
+        Default False: a plan with blocking problems inserts nothing, so a
+        half-ingested file is a choice rather than an accident.
+    on_divergence : str, optional
+        What to do when the file disagrees with a stored row (D7).
+        `interactive` prompts once per divergence, outside any transaction;
+        `accept` keeps the stored value and inserts the rest; `raise` fails
+        with the report attached. Default `interactive`.
+    rollback_on_miss : bool, optional
+        Delete the session when a `planner_miss` leaves the file part
+        inserted. Default False. This is the *only* case a rollback is for
+        now: a plan is checked before anything is written, so a failure here
+        means the planner was wrong, not the file. Everything the old
+        `rollback_on_fail` guarded against is now caught at plan time, and a
+        blanket rollback would throw away good rows to undo a bug.
+
+    Returns
+    -------
+    ReportResult
+        Falsy when everything asked for was inserted.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+
+    if on_divergence not in ("interactive", "accept", "raise"):
+        raise ValueError(
+            f"Unknown on_divergence {on_divergence!r}. "
+            + "Expected interactive, accept or raise."
+        )
+
+    if plan.verdict == "no_op":
+        # Nothing to do to the *data*; the staging area still needs closing.
+        # Leaving it open would keep a payload for every entry that is
+        # already stored, which is the one thing the log must not do.
+        logger.info(f"{plan.nwb_file_name}: already ingested, nothing to do")
+        IngestionPlanLog().mark_inserted(
+            plan, inserted=(), existing=list(_targets(plan)), complete=True
+        )
+        return ReportResult(plan)
+
+    divergences = [p for p in plan.problems if p.code == "divergence"]
+    if divergences and not _divergence_accepted(divergences, on_divergence):
+        logger.error(plan.report(log=False))
+        return ReportResult(plan)
+
+    blocking = plan.hard_failures
+    if blocking and not allow_partial:
+        logger.error(
+            f"{plan.nwb_file_name}: {len(blocking)} blocking problems, "
+            + "nothing inserted. Fix them, or pass allow_partial=True."
+        )
+        logger.error(plan.report(log=False))
+        return ReportResult(plan)
+
+    inserted, misses, existing = [], [], []
+    for table_plan in plan.table_plans:
+        if table_plan.status != "ok":
+            continue  # failed or blocked: its rows were never validated
+
+        for target, rows in table_plan.entries.entries:
+            if not rows:
+                continue
+            table = target.as_instance
+            # The *target's* name, not the owning plan's: a table routinely
+            # emits rows for another, and the staged entry is keyed by where
+            # the row is going. Using the owner's name here matched nothing
+            # for every secondary target, silently leaving them staged.
+            name = getattr(target, "full_table_name", str(target))
+
+            try:
+                # A plan describes what the file holds, not what is missing
+                # from the database, so a partial re-run legitimately
+                # restages rows that already landed. Inserting those would
+                # raise a duplicate for work already done -- the very noise
+                # this replaces. Inside the try: deciding what to insert can
+                # fail too, and that is no less a planner gap than the
+                # insert itself.
+                novel = _novel_rows(table, rows)
+                if stored := [row for row in rows if row not in novel]:
+                    existing.append((name, target, stored))
+                if not novel:
+                    continue
+
+                # A target may be a plain SpyglassMixin -- Task, say, which
+                # TaskEpoch plans rows for but which ingests nothing itself.
+                insert = getattr(table, "_insert_plan", None)
+                if insert is None:
+                    table.insert(
+                        novel, skip_duplicates=False, allow_direct_insert=True
+                    )
+                else:
+                    insert(novel, nwb_file_name=plan.nwb_file_name)
+                inserted.append((name, target, novel))
+            except Exception as err:
+                # The plan said these rows were insertable and they were not.
+                # That is a gap in the planner, not a user error, so it is
+                # coded distinctly to stay findable.
+                misses.append(
+                    Problem(
+                        severity="hard",
+                        code="planner_miss",
+                        message=f"{type(err).__name__}: {err}",
+                        table=table_plan.table_name,
+                        exc_type=type(err).__name__,
+                    )
+                )
+                logger.error(f"planner_miss in {table_plan.table_name}: {err}")
+                break
+
+    if misses and rollback_on_miss:
+        _rollback(plan.nwb_file_name)
+
+    if skipped := sum(len(rows) for _, _, rows in existing):
+        logger.info(f"{plan.nwb_file_name}: {skipped} entries already stored")
+
+    IngestionPlanLog().mark_inserted(
+        plan, inserted, existing=existing, complete=not misses
+    )
+
+    if misses:  # attach them, so the caller sees what the plan missed
+        plan = replace(plan, fatal=plan.fatal + tuple(misses))
+
+    return ReportResult(plan)
+
+
+def _rollback(nwb_file_name: str) -> None:
+    """Delete a session after a planner miss left it part inserted.
+
+    The fallback of last resort, and deliberately not the default: it throws
+    away rows that inserted correctly in order to undo the ones that did not.
+    Worth it only when a validated plan failed halfway, because then the
+    partial state is not something the user chose.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The file to roll back.
+    """
+    from spyglass.common.common_nwbfile import Nwbfile
+
+    query = Nwbfile & {"nwb_file_name": nwb_file_name}
+    if not query:
+        return
+
+    logger.error(
+        f"Rolling back {nwb_file_name} after a planner miss. "
+        + "This deletes rows that inserted correctly; the miss is a bug "
+        + "worth reporting."
+    )
+    query.super_delete(warn=False)
+
+
+def _targets(plan):
+    """Yield `(table_name, target, rows)` for every target a plan holds.
+
+    Keyed by the *target*, not by the plan that emitted it: a table
+    routinely plans rows for another, and a staged entry belongs to where
+    the row is going.
+
+    Parameters
+    ----------
+    plan : IngestionPlan
+
+    Yields
+    ------
+    tuple of (str, dj.Table, tuple of dict)
+    """
+    for table_plan in plan.table_plans:
+        for target, rows in table_plan.entries.entries:
+            if rows:
+                yield (
+                    getattr(target, "full_table_name", str(target)),
+                    target,
+                    rows,
+                )
+
+
+def _novel_rows(table, rows) -> List[dict]:
+    """Return the rows this table does not already hold.
+
+    One query per table, not per row: the primary keys already stored are
+    fetched once and compared in memory. Restricted to the file where the
+    table is keyed by one, so a shared table like `Task` is still answered
+    correctly without reading every row in it.
+
+    Parameters
+    ----------
+    table : dj.Table
+        An instanced table.
+    rows : sequence of dict
+        Planned entries for it.
+
+    Returns
+    -------
+    list of dict
+        Those whose primary key is not present.
+    """
+    restriction = True
+    if "nwb_file_name" in table.primary_key:
+        names = {
+            row.get("nwb_file_name") for row in rows if row.get("nwb_file_name")
+        }
+        if names:
+            restriction = [{"nwb_file_name": name} for name in names]
+
+    try:
+        stored = {
+            row_key(table, existing)
+            for existing in (table & restriction).fetch(as_dict=True)
+        }
+    except Exception as err:  # unreadable: insert and let the table object
+        logger.debug(f"Could not read existing keys for {table}: {err}")
+        return list(rows)
+
+    return [row for row in rows if row_key(table, row) not in stored]
+
+
+def _divergence_accepted(divergences, on_divergence: str) -> bool:
+    """Apply the divergence policy, outside any transaction.
+
+    Prompting mid-transaction is what the plan pass exists to avoid: a
+    question asked with rows half-written holds a lock open on an answer
+    nobody is there to give.
+
+    Parameters
+    ----------
+    divergences : list of Problem
+        The divergence problems this plan recorded.
+    on_divergence : str
+        `interactive`, `accept` or `raise`.
+
+    Returns
+    -------
+    bool
+        Whether to go on and insert.
+    """
+    from spyglass.settings import test_mode
+
+    if on_divergence == "accept":
+        logger.info(
+            f"Keeping the stored values for {len(divergences)} divergences"
+        )
+        return True
+
+    if on_divergence == "raise":
+        logger.error(
+            f"{len(divergences)} entries disagree with stored rows. "
+            + "Nothing inserted."
+        )
+        return False
+
+    # interactive, which never runs unattended: a suite that blocked on
+    # stdin would hang rather than fail, so test mode declines instead.
+    # This is the same short-circuit `accept_divergence` has always had.
+    if test_mode:
+        logger.error(
+            f"{len(divergences)} divergences, and test mode does not prompt. "
+            + "Nothing inserted."
+        )
+        return False
+
+    for problem in divergences:
+        logger.warning(str(problem))
+    answer = input(
+        f"{len(divergences)} entries disagree with stored rows. "
+        + "Keep the stored values and insert the rest? [y/N] "
+    )
+    return answer.strip().lower() in ("y", "yes")

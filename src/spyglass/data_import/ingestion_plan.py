@@ -51,7 +51,10 @@ class Problem:
 
     def __str__(self):
         where = f"{self.table}: " if self.table else ""
-        return f"[{self.severity}] {where}{self.code}: {self.message}"
+        # The object id is how a user finds the thing in the file, so it
+        # belongs on the line rather than only in the stored record.
+        which = f" (object {self.nwb_object_id})" if self.nwb_object_id else ""
+        return f"[{self.severity}] {where}{self.code}: {self.message}{which}"
 
 
 def _target_key(table) -> str:
@@ -132,6 +135,39 @@ def hashable(value):
     if hasattr(value, "tobytes"):  # array
         return value.tobytes()
     return value
+
+
+def entry_digest(entry: dict) -> str:
+    """Digest over a whole entry, faithful to what arrays actually hold.
+
+    Not `datajoint.hash.key_hash`, which is the right tool for a primary key
+    and the wrong one here: it hashes `str(value)`, and numpy abbreviates a
+    large array to `[0. 1. 2. ... 9997. 9998. 9999.]`. An edit in the middle
+    of an `IntervalList.valid_times` would hash identically, which for a
+    change-detection hash is the one unacceptable answer. `hashable` reduces
+    an array to its bytes instead.
+
+    Attribute names are included, so gaining or losing a column counts as a
+    change -- again unlike `key_hash`, which hashes values alone.
+
+    Parameters
+    ----------
+    entry : dict
+        A planned entry.
+
+    Returns
+    -------
+    str
+        32-character hex digest.
+    """
+    hashed = md5()
+    for name, value in sorted(entry.items()):
+        hashed.update(str(name).encode())
+        reduced = hashable(value)
+        hashed.update(
+            reduced if isinstance(reduced, bytes) else str(reduced).encode()
+        )
+    return hashed.hexdigest()
 
 
 def row_key(table, row) -> tuple:
@@ -339,6 +375,36 @@ class FrozenPlannedEntries:
         return any(rows for _, rows in self.entries)
 
 
+# One line per problem code, saying what to do about it. Keyed by code so a
+# report stays useful to someone who has not read the parser: the message says
+# what happened, this says what to change.
+REMEDIES = {
+    "file_not_registered": "Insert the file into Nwbfile before planning it.",
+    "file_unreadable": "Check the file opens with pynwb; it may be truncated.",
+    "parse_error": "A table raised while parsing. The traceback names where.",
+    "missing_attribute": (
+        "The NWB file does not supply a required column. Add it to the file, "
+        "or declare it in the file's _spyglass_config.yaml."
+    ),
+    "missing_parent": (
+        "Nothing in the file or the database supplies the referenced row. "
+        "Ingest the parent first, or fix the reference."
+    ),
+    "duplicate_key": (
+        "Two planned entries share a primary key. Usually one source object "
+        "is described twice in the file."
+    ),
+    "value_too_long": "Shorten the value in the file, or widen the column.",
+    "divergence": (
+        "The file disagrees with a row already stored. Apply the revision "
+        "below, or correct the file to match."
+    ),
+    "entry_too_large": (
+        "Too large to stage, so it will be re-parsed rather than reused. "
+        "No action needed unless it recurs."
+    ),
+}
+
 # Ordered worst-first, so the first match is the severity that matters.
 _SEVERITY_RANK = {name: rank for rank, name in enumerate(SEVERITIES)}
 
@@ -359,6 +425,11 @@ class TablePlan:
     status: str = "ok"  # ok | skipped | failed
     problems: Tuple[Problem, ...] = ()
     reads: Tuple[str, ...] = ()
+    # Digest over the objects this table read, from the file as it was when
+    # the plan was made. Equal digest, same inputs: this table's parse can be
+    # reused. None when the file could not be hashed, which means "unknown",
+    # never "unchanged".
+    read_set_digest: Optional[str] = None
 
     @property
     def entry_count(self) -> int:
@@ -380,6 +451,84 @@ class TablePlan:
         """Whether nothing here blocks insertion."""
         return not any(
             problem.severity in BLOCKING for problem in self.problems
+        )
+
+
+class ReportResult:
+    """What ingestion returns: a report that still behaves like the old list.
+
+    `populate_all_common` used to return `InsertError.fetch("KEY")` -- an
+    empty list on success, a list of error keys otherwise. Callers test it
+    for truth, iterate it, and measure its length, so this keeps all three
+    while carrying the plan and its report.
+
+    Falsy means clean. That is the same test as before and it still means
+    "nothing went wrong", so a caller written against the old contract keeps
+    working without knowing a plan exists.
+
+    Parameters
+    ----------
+    plan : IngestionPlan
+        The plan this result describes.
+    """
+
+    def __init__(self, plan: "IngestionPlan"):
+        self.plan = plan
+
+    @property
+    def problems(self) -> Tuple["Problem", ...]:
+        """The blocking problems, which are what the old list stood for."""
+        return tuple(p for p in self.plan.problems if p.severity in BLOCKING)
+
+    def __bool__(self) -> bool:
+        """True when something blocked, matching the old error list."""
+        return bool(self.problems)
+
+    def __iter__(self):
+        return iter(self.problems)
+
+    def __len__(self) -> int:
+        return len(self.problems)
+
+    def __str__(self) -> str:
+        return self.plan.report(log=False)
+
+    def __repr__(self) -> str:
+        return f"ReportResult({self.plan.nwb_file_name}: {self.plan.verdict})"
+
+    def fetch(self, *attrs, **kwargs):
+        """Stand in for the `InsertError` query the old return value was.
+
+        Deprecated, and logged as such: the caller wants problems, and the
+        plan holds them in a shape that does not require a table.
+
+        Parameters
+        ----------
+        *attrs
+            Ignored beyond `"KEY"`, which yields one dict per problem.
+
+        Returns
+        -------
+        list
+        """
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            name="the InsertError key list returned by populate_all_common",
+            alt="str(result) for the report, or IngestionPlanLog for history",
+        )
+
+        if attrs and attrs[0] == "KEY":
+            return [
+                {
+                    "nwb_file_name": self.plan.nwb_file_name,
+                    "table": problem.table or "",
+                    "error_type": problem.code,
+                }
+                for problem in self.problems
+            ]
+        return (
+            [getattr(p, attrs[0], None) for p in self.problems] if attrs else []
         )
 
 
@@ -423,13 +572,18 @@ class IngestionPlan:
         """Return the count of novel entries per table, omitting zeroes."""
         return {name: n for name, n in self.novel.items() if n}
 
-    def report(self, verbose: bool = False) -> str:
+    def report(self, verbose: bool = False, log: bool = True) -> str:
         """Render the plan as text, leading with the verdict.
+
+        A clean plan is one line to avoid empty sections.
 
         Parameters
         ----------
         verbose : bool, optional
             Include every problem, not only the blocking ones. Default False.
+        log : bool, optional
+            Also emit the report through `logger`, at `warning` when the plan
+            has blocking problems and `info` otherwise. Default True.
 
         Returns
         -------
@@ -458,17 +612,36 @@ class IngestionPlan:
             else [p for p in self.problems if p.severity in BLOCKING]
         )
         if shown:
-            lines.append("")
-            lines.append("Problems:")
-            lines.extend(f"  {problem}" for problem in shown)
+            by_severity = {}
+            for problem in shown:
+                by_severity.setdefault(problem.severity, []).append(problem)
+
+            for severity in sorted(by_severity, key=_SEVERITY_RANK.get):
+                group = sorted(
+                    by_severity[severity],
+                    key=lambda p: (p.table or "", p.code, p.message),
+                )
+                lines.append("")
+                lines.append(f"{severity.capitalize()} ({len(group)}):")
+                seen_codes = set()
+                for problem in group:
+                    lines.append(f"  {problem}")
+                    # The remedy is per code, so print it once per group
+                    # rather than repeating it under every occurrence.
+                    if problem.code not in seen_codes and (
+                        remedy := REMEDIES.get(problem.code)
+                    ):
+                        lines.append(f"      -> {remedy}")
+                        seen_codes.add(problem.code)
+
             if suggestions := [
                 p for p in shown if p.suggested_revision is not None
             ]:
                 lines.append("")
-                lines.append("Suggested revisions:")
-                lines.extend(
-                    f"  {p.table}: {p.suggested_revision}" for p in suggestions
-                )
+                lines.append("Suggested revisions, to apply as-is:")
+                for problem in suggestions:
+                    lines.append(f"  # {problem.table}")
+                    lines.append(f"  {problem.suggested_revision!r}")
 
         if blocked := [
             plan.table_name
@@ -481,7 +654,15 @@ class IngestionPlan:
                 + ", ".join(sorted(blocked))
             )
 
-        return "\n".join(lines)
+        text = "\n".join(lines)
+
+        if log:
+            from spyglass.utils.logging import logger
+
+            emit = logger.warning if self.hard_failures else logger.info
+            emit(text)
+
+        return text
 
     @property
     def problems(self) -> Tuple[Problem, ...]:
@@ -532,6 +713,7 @@ class IngestionPlan:
                     "entry_count": plan.entry_count,
                     "problems": [asdict(p) for p in plan.problems],
                     "reads": list(plan.reads),
+                    "read_set_digest": plan.read_set_digest,
                     "entries": [
                         {
                             "table": getattr(
@@ -567,6 +749,7 @@ class IngestionPlan:
                         Problem(**p) for p in plan.get("problems", [])
                     ),
                     reads=tuple(plan.get("reads", [])),
+                    read_set_digest=plan.get("read_set_digest"),
                 )
             )
 

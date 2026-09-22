@@ -51,6 +51,12 @@ def log_insert_error(
 ) -> None:
     """Log a given error to the InsertError table.
 
+    Deprecated in favour of `IngestionPlanLog`, which records a whole file's
+    problems together with the entries they blocked, rather than one row per
+    exception with no memory of what was already staged. `InsertError`
+    remains declared and written to so existing queries keep working; it is
+    no longer where new work should look.
+
     Parameters
     ----------
     table : str
@@ -61,6 +67,13 @@ def log_insert_error(
         Dictionary with keys for dj_user, connection_id, and nwb_file_name.
         Defaults to checking dj.conn and using "Unknown" for nwb_file_name.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        name="InsertError, written by populate_all_common",
+        alt="IngestionPlanLog, which stages entries alongside their problems",
+    )
+
     if error_constants is None:
         error_constants = dict(
             dj_user=dj.config["database.user"],
@@ -197,7 +210,10 @@ def populate_all_common(
         The name of the NWB file to populate.
     rollback_on_fail : bool, optional
         If True, will delete the Session entry if any errors occur.
-        Defaults to False.
+        Defaults to False. Deprecated: planning a file reports every problem
+        before anything is written, so there is nothing to undo. A rollback
+        now belongs only to a `planner_miss`, where a validated plan failed
+        halfway — see `insert_plan(rollback_on_miss=True)`.
     raise_err : bool, optional
         If True, will raise any errors that occur during population.
         Defaults to False. This will prevent any rollback from occurring.
@@ -297,6 +313,13 @@ def populate_all_common(
     nwbfile_query = Nwbfile & {"nwb_file_name": nwb_file_name}
 
     if err_query and nwbfile_query and rollback_on_fail:
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            name="rollback_on_fail, the blanket undo after a failed ingest",
+            alt="plan the file first; insert_plan(rollback_on_miss=True) "
+            + "covers the one case a rollback is still for",
+        )
         logger.error(f"Rolling back population for {nwb_file_name}...")
         # Should this be safemode=False to prevent confirmation prompt?
         nwbfile_query.super_delete(warn=False)

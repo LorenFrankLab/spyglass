@@ -721,6 +721,28 @@ class IngestionMixin(BaseMixin):
                 )
                 self._insert_logline(nwb_file_name, len(table_entries), table)
 
+    def _insert_plan(self, rows, nwb_file_name: str = None) -> None:
+        """Insert rows a plan already validated, deriving nothing.
+
+        The mechanical half of `_run_nwbfile_insert`, for the path where the
+        rows come from a plan rather than from a parse that just happened.
+        No adjustment, no duplicate validation, no divergence prompt: the
+        plan pass did all of that, and redoing it here would let the two
+        disagree.
+
+        Parameters
+        ----------
+        rows : sequence of dict
+            Entries destined for this table.
+        nwb_file_name : str, optional
+            For the log line only.
+        """
+        if not rows:
+            return
+
+        self.insert(list(rows), skip_duplicates=False, allow_direct_insert=True)
+        self._insert_logline(nwb_file_name, len(rows), self)
+
     def _key_has_required_attrs(self, key):
         """Check that all non-nullable attributes are present in the key."""
         for attr in self.heading.attributes.values():

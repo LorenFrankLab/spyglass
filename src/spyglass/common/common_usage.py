@@ -58,6 +58,321 @@ class InsertError(dj.Manual):
 
 
 @schema
+class IngestionPlanLog(SpyglassMixin, dj.Manual):
+    """A file's ingestion plan, staged at entry granularity.
+
+    A staging area for *incomplete* ingestion, never a second source of
+    truth. One live plan per file, updated in place across attempts. On full
+    success every entry is migrated to its real table and its blob cleared,
+    leaving the hashes behind as provenance.
+
+    `nwb_hash` is recorded for provenance only and is never a validity gate.
+    The expected loop is ingest → read the report → edit the file → retry, so
+    the file hash differs on every attempt by construction; gating freshness
+    on it would discard the whole plan exactly when it is most useful.
+    Validity is per entry, via the read-set object digests.
+    """
+
+    definition = """
+    nwb_file_name: varchar(64)
+    ---
+    verdict: varchar(16)                 # no_op|all_new|partial_new|conflict
+    status = "open": enum("open", "complete")
+    attempt = 1: int                     # how many times this file was planned
+    nwb_hash = NULL: varchar(32)         # provenance only, never a gate
+    spyglass_version = NULL: varchar(32)
+    dj_user: varchar(64)
+    timestamp = CURRENT_TIMESTAMP: timestamp
+    """
+
+    class Entry(SpyglassMixinPart):
+        """One prospective row, with the two hashes that classify it.
+
+        `key_hash` is the entry's identity, so a re-plan updates the row it
+        already has rather than appending a duplicate -- which is what lets
+        a second attempt stage N+M where the first staged N.
+
+        `blob_hash` covers the whole serialized entry, so change detection
+        needs no byte-comparison of arrays, datetimes or nested dicts.
+
+        Two hashes because they answer different questions. Same key, same
+        blob: already staged, unchanged. Same key, different blob:
+        divergence, not novelty. One hash cannot tell those apart.
+
+        `table_name` is a plain string, not a foreign key: prospective
+        entries routinely name tables whose rows do not exist yet.
+        """
+
+        definition = """
+        -> master
+        table_name: varchar(128)
+        key_hash: varchar(32)            # of the primary key: stable identity
+        ---
+        state: enum("planned","blocked","failed","exists","conflict","inserted")
+        blob_hash = NULL: varchar(32)    # of the whole entry: change detection
+        entry_blob = NULL: longblob      # cleared once migrated
+        problem_code = NULL: varchar(64)
+        message = NULL: varchar(255)
+        """
+
+    class Problem(SpyglassMixinPart):
+        """A file-level problem, belonging to no single entry."""
+
+        definition = """
+        -> master
+        problem_id: int
+        ---
+        table_name = "": varchar(128)
+        severity: varchar(16)
+        code: varchar(64)
+        message = "": varchar(255)
+        suggested_revision = NULL: blob
+        error_raw = NULL: blob
+        """
+
+    # Per entry, and transient: blobs are cleared on success. Sized against
+    # the fattest single row seen in production (IntervalList.valid_times,
+    # 50 KB max), with headroom. Over the cap an entry is staged as hashes
+    # and a problem only, and marked so it is re-parsed rather than trusted:
+    # silent degradation would read as a cache hit.
+    _entry_blob_cap = 1 << 20  # 1 MiB
+
+    def stage(self, plan) -> dict:
+        """Record a plan, updating the entries it already holds.
+
+        Parameters
+        ----------
+        plan : IngestionPlan
+            The dataclass from `spyglass.data_import.ingestion_plan`, as
+            returned by `plan_nwbfile`.
+
+        Returns
+        -------
+        dict
+            The master key of the staged plan.
+        """
+        from spyglass.data_import.ingestion_plan import BLOCKING
+
+        master_key = {"nwb_file_name": plan.nwb_file_name}
+        existing = self & master_key
+        attempt = (existing.fetch1("attempt") + 1) if existing else 1
+
+        master = dict(
+            master_key,
+            verdict=plan.verdict,
+            status="open",
+            attempt=attempt,
+            nwb_hash=plan.nwb_hash,
+            spyglass_version=plan.spyglass_version,
+            dj_user=dj.config["database.user"],
+        )
+
+        rows, problems = [], []
+        for table_plan in plan.table_plans:
+            # A table that could not be parsed, or was skipped because a
+            # parent failed, stages its entries in that state rather than as
+            # ready-to-insert. `exists` and `conflict` are per-entry
+            # judgements the plan does not carry at entry granularity; they
+            # are set by the insert pass, which checks each row anyway.
+            state = {"failed": "failed", "skipped": "blocked"}.get(
+                table_plan.status, "planned"
+            )
+            for target, entries in table_plan.entries:
+                name = getattr(target, "full_table_name", str(target))
+                for entry in entries:
+                    rows.append(
+                        self._entry_row(master_key, target, name, entry, state)
+                    )
+
+            for problem in table_plan.problems:
+                problems.append(problem)
+        problems.extend(plan.fatal)
+
+        problem_rows = [
+            dict(
+                master_key,
+                problem_id=index,
+                table_name=problem.table or "",
+                severity=problem.severity,
+                code=problem.code,
+                message=(problem.message or "")[:255],
+                suggested_revision=problem.suggested_revision,
+                error_raw=getattr(problem, "traceback", None),
+            )
+            for index, problem in enumerate(problems)
+        ]
+
+        with self._safe_context():
+            # Replace rather than append: an entry keeps its identity across
+            # attempts, so re-planning updates what is already staged.
+            (self.Entry & master_key).delete_quick()
+            (self.Problem & master_key).delete_quick()
+            existing.delete_quick()
+            self.insert1(master)
+            self.Entry.insert(rows)
+            self.Problem.insert(problem_rows)
+
+        blocked = sum(1 for p in problems if p.severity in BLOCKING)
+        logger.info(
+            f"Staged plan for {plan.nwb_file_name}: attempt {attempt}, "
+            + f"{len(rows)} entries, {blocked} blocking problems"
+        )
+        return master_key
+
+    def mark_inserted(
+        self, plan, inserted, existing=(), complete: bool = False
+    ) -> None:
+        """Record which staged entries made it into their real tables.
+
+        Clears `entry_blob` for those entries: keeping a payload for a row
+        that now exists in its own table would make the log a second copy of
+        the data, which is the failure this design exists to avoid. The
+        hashes stay, as provenance.
+
+        Parameters
+        ----------
+        plan : IngestionPlan
+            The plan that was inserted.
+        inserted : list of (str, table, rows)
+            What `insert_plan` actually wrote.
+        existing : list of (str, table, rows), optional
+            What it found already stored and so did not write. These are
+            recorded as `exists` and lose their payload too: the invariant
+            is that no blob is kept for an entry present in its own table,
+            and an entry that was skipped is no less present than one just
+            written.
+        complete : bool, optional
+            Whether every entry is now stored, closing the plan. Default
+            False.
+        """
+        from datajoint.hash import key_hash
+
+        from spyglass.data_import.ingestion_plan import row_key
+
+        master_key = {"nwb_file_name": plan.nwb_file_name}
+        if not (self & master_key):  # never staged; nothing to record
+            return
+
+        def identify(table_name, target, rows):
+            for row in rows:
+                try:
+                    identity = key_hash(dict(row_key(target, row)))
+                except Exception:
+                    identity = key_hash(row)
+                yield {
+                    **master_key,
+                    "table_name": table_name,
+                    "key_hash": identity,
+                }
+
+        done = [
+            (entry_key, state)
+            for state, group in (("inserted", inserted), ("exists", existing))
+            for table_name, target, rows in group
+            for entry_key in identify(table_name, target, rows)
+        ]
+
+        # One transaction with the state change: a crash between the data
+        # write and this would leave a stale blob claiming work already done.
+        with self._safe_context():
+            for entry_key, state in done:
+                if not (self.Entry & entry_key):
+                    continue  # not staged, nothing to migrate
+                # update1 on the table itself: DataJoint refuses it on a
+                # restricted query, and the key is already complete.
+                self.Entry.update1(
+                    {**entry_key, "state": state, "entry_blob": None}
+                )
+            if complete:
+                self.update1({**master_key, "status": "complete"})
+
+        migrated = sum(1 for _, state in done if state == "inserted")
+        logger.info(
+            f"{plan.nwb_file_name}: {migrated} entries migrated, "
+            + f"{len(done) - migrated} already stored"
+            + (", plan complete" if complete else "")
+        )
+
+    def _entry_row(
+        self,
+        master_key: dict,
+        target,
+        table_name: str,
+        entry: dict,
+        state: str = "planned",
+    ):
+        """Build one staged row, hashing its key and its whole payload.
+
+        The two hashes must cover different things or the pair is useless:
+        `key_hash` over the primary key alone is what makes an entry
+        re-identifiable across attempts, and `blob_hash` over the whole entry
+        is what separates "already staged, unchanged" from "staged, and the
+        plan now disagrees with it".
+
+        `target` is the live table, so its primary key is known here without
+        resolving `table_name` back to a class. A plan rebuilt from storage
+        carries name-only targets; those fall back to hashing the whole
+        entry, which still detects change but cannot tell divergence from
+        novelty.
+
+        Parameters
+        ----------
+        master_key : dict
+            The plan this entry belongs to.
+        target : dj.Table
+            The table the entry is destined for.
+        table_name : str
+            Its full table name, as stored.
+        entry : dict
+            The prospective row.
+        state : str, optional
+            How this entry stands, from its table's plan. Default
+            `planned`.
+        """
+        from datajoint.hash import key_hash
+
+        from spyglass.data_import.ingestion_plan import entry_digest, row_key
+
+        try:
+            # DataJoint's own key hash, as JobTable uses for the same job.
+            # Sound here because primary keys are scalars, where `str` is
+            # faithful, and `row_key` has already coerced them to the
+            # column's declared type.
+            primary = key_hash(dict(row_key(target, entry)))
+        except Exception:  # name-only target, from a rebuilt plan
+            primary = key_hash(entry)
+
+        blob = dict(entry)
+        row = dict(
+            master_key,
+            table_name=table_name,
+            key_hash=primary,
+            # Not key_hash: it would abbreviate a large array and miss an
+            # edit inside it. See entry_digest.
+            blob_hash=entry_digest(blob),
+            state=state,
+        )
+
+        packed = dj.blob.pack(blob)
+        if len(packed) > self._entry_blob_cap:
+            # Hashes and a problem only. Not stageable, so a later attempt
+            # re-parses it rather than trusting a payload we did not keep.
+            logger.warning(
+                f"{table_name}: entry of {len(packed)} bytes exceeds the "
+                + f"{self._entry_blob_cap} byte staging cap; storing hashes "
+                + "only, it will be re-parsed"
+            )
+            return dict(
+                row,
+                state="failed",
+                problem_code="entry_too_large",
+                message=f"{len(packed)} bytes over the staging cap",
+            )
+
+        return dict(row, entry_blob=blob)
+
+
+@schema
 class ActivityLog(dj.Manual):
     """A log of suspected low-use features worth deprecating."""
 

@@ -223,3 +223,143 @@ def test_report_leads_with_the_verdict(clean_plan):
 
     assert isinstance(report, str)
     assert "no_op" in report or "already ingested" in report.lower()
+
+
+# --- divergence policy (D7) -------------------------------------------------
+# A divergence is the file disagreeing with a row already stored. The policy
+# decides what a *real* run does about it; a dry run only ever records it.
+
+
+def _divergence(plan_types=None):
+    """One divergence problem, enough to exercise a policy."""
+    from spyglass.data_import.ingestion_plan import Problem
+
+    return [
+        Problem(
+            severity="hard",
+            code="divergence",
+            message="subject 54321 exists with different values",
+            table="`common_subject`.`subject`",
+            suggested_revision={"sex": "M"},
+        )
+    ]
+
+
+def test_divergence_accept_keeps_the_stored_value():
+    """`accept` takes what is already stored and inserts the rest."""
+    from spyglass.data_import.planner import _divergence_accepted
+
+    assert _divergence_accepted(
+        _divergence(), "accept"
+    ), "accept should proceed"
+
+
+def test_divergence_raise_inserts_nothing():
+    """`raise` refuses the run rather than choosing for the user."""
+    from spyglass.data_import.planner import _divergence_accepted
+
+    assert not _divergence_accepted(
+        _divergence(), "raise"
+    ), "raise should decline"
+
+
+def test_divergence_interactive_does_not_prompt_in_test_mode():
+    """An unattended run must fail, not block on stdin.
+
+    A suite that prompted would hang rather than fail, which is worse than
+    either outcome. This is the short-circuit `accept_divergence` has always
+    had.
+    """
+    from spyglass.data_import.planner import _divergence_accepted
+
+    assert not _divergence_accepted(
+        _divergence(), "interactive"
+    ), "interactive must decline under test mode rather than prompt"
+
+
+def test_divergence_interactive_asks_and_obeys(monkeypatch):
+    """Outside test mode it asks once, and takes the answer."""
+    import spyglass.settings
+    from spyglass.data_import import planner
+
+    monkeypatch.setattr(spyglass.settings, "test_mode", False)
+
+    asked = []
+
+    def fake_input(prompt):
+        asked.append(prompt)
+        return answer
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    answer = "y"
+    assert planner._divergence_accepted(_divergence(), "interactive")
+    answer = ""
+    assert not planner._divergence_accepted(_divergence(), "interactive")
+
+    assert len(asked) == 2, "One prompt per run, not one per divergence"
+    assert "disagree" in asked[0]
+
+
+def test_unknown_divergence_policy_is_refused(common, mini_copy_name):
+    """A misspelled policy must not silently fall through to a default."""
+    import pytest as _pytest
+
+    from spyglass.data_import.ingestion_plan import IngestionPlan
+    from spyglass.data_import.planner import insert_plan
+
+    with _pytest.raises(ValueError, match="on_divergence"):
+        insert_plan(
+            IngestionPlan(nwb_file_name=mini_copy_name),
+            on_divergence="ignore",
+        )
+
+
+def test_rollback_is_off_by_default_and_scoped_to_a_miss(
+    common, mini_copy_name, monkeypatch
+):
+    """A rollback undoes good rows to fix a bug, so it must be asked for.
+
+    Everything the old blanket `rollback_on_fail` guarded against is caught
+    at plan time now. The only state worth undoing is a `planner_miss`: a
+    plan that validated and then failed halfway, leaving a partial file the
+    user never chose.
+    """
+    from spyglass.data_import import planner
+    from spyglass.data_import.ingestion_plan import (
+        IngestionPlan,
+        PlannedEntries,
+        TablePlan,
+    )
+
+    rolled = []
+    monkeypatch.setattr(planner, "_rollback", lambda name: rolled.append(name))
+
+    # A plan with one novel row, so the insert path is actually entered.
+    entries = PlannedEntries()
+    entries.add(common.Institution, [{"institution_name": "_miss test"}])
+    plan = IngestionPlan(
+        nwb_file_name=mini_copy_name,
+        novel={"`common_lab`.`institution`": 1},
+        table_plans=(
+            TablePlan(
+                table_name="`common_lab`.`institution`",
+                entries=entries.freeze(),
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        planner,
+        "_novel_rows",
+        lambda table, rows: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    result = planner.insert_plan(plan, on_divergence="accept")
+
+    assert any(
+        problem.code == "planner_miss" for problem in result
+    ), f"A failure inserting a validated plan is a planner_miss: {result!r}"
+    assert not rolled, "rollback_on_miss defaults to False"
+
+    planner.insert_plan(plan, on_divergence="accept", rollback_on_miss=True)
+    assert rolled == [mini_copy_name], "Asked for, it rolls back that file"
