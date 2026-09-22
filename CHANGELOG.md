@@ -7,18 +7,27 @@
 #### Ripple and MUA Detection Results Change
 
 Spyglass now requires `ripple-detection>=2,<3`, which was previously
-unconstrained. That release changes detection results: the ripple-band filter's
-output differs at every sampling rate other than 1500 Hz, the minimum-duration
-rule admits about 20% more events, and three defects in per-event selection are
-fixed.
+unconstrained. That release changes detection results: the minimum-duration
+rule counts samples and admits about 20% more events, three defects in
+per-event selection are fixed, and no event spans a gap any more.
+`RippleTimesV1` detects on the valid-time intervals concatenated, so an event
+used to be able to straddle the join between two intervals; it now ends at the
+interval edge and is flagged. (The release also changes the ripple-band filter
+at rates other than 1500 Hz, which does not affect Spyglass: `LFPBandV1`
+filters.)
 
 `RippleTimesV1` and `MuaEventsV1` entries populated before the upgrade therefore
 hold different events from entries populated after it. The stored results stay
 valid; they are simply not comparable with new ones. Repopulate any analysis
 that mixes the two, and record which version produced a given set of events.
 
-`MuaEventsV1` also gains an `n_active_units` column, the number of units with a
-spike inside each event.
+The stored tables change shape. `max_thresh` is renamed `max_sustained_zscore`
+and means the largest z-score sustained for the minimum duration; the old value
+could fall below the detection threshold, so rows from the two versions are not
+comparable under one name. Every table gains `n_samples`, `clipped_start` and
+`clipped_end` (the event was cut off by missing data, an interval edge or the
+recording edge). `MuaEventsV1` also gains `n_active_units`, the number of units
+with a spike inside each event.
 
 ### Infrastructure
 
@@ -35,13 +44,20 @@ spike inside each event.
       `RippleTimesV1` in place of two and needs no change here when that
       package adds one
     - Raise a clear error for a detector that does not take ripple-band
-      filtered LFP, rather than running it on the wrong input
+      filtered LFP, rather than running it on the wrong input, and for a
+      parameter set naming a tunable the chosen detector lacks
+    - `RippleTimesV1.get_Kay_ripple_consensus_trace` delegates to the package,
+      so the plotted trace is the one the detector thresholded
+    - Store a detection that found no events as an empty table; hdmf's
+      `DynamicTable.from_dataframe` raised on a frame with no rows, so such an
+      interval could not be populated
 
 - MUA
 
     - Keep the spike indicator per unit rather than summing it, so
       `n_active_units` counts the units in a burst; the detected events are
       unchanged
+    - Store a detection that found no events as an empty table
 
 ## [0.6.0] (Sep 1st 2026)
 

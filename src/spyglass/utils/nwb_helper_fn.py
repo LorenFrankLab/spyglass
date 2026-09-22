@@ -686,3 +686,38 @@ def is_nwb_obj_type(
         return isinstance(nwb_object, target_type)
 
     return nwb_object.__class__.__name__ == target_type
+
+
+def events_as_nwb_table(events, name="pandas_table"):
+    """A detected-events DataFrame in the form the analysis file can store.
+
+    ``DynamicTable.from_dataframe`` raises on a frame with no rows (hdmf 4.x),
+    so a detector that found nothing could not be stored. A non-empty frame is
+    returned as is, for the writer to convert; an empty one is built as a
+    zero-row ``DynamicTable`` with the same columns, so the entry records that
+    the detector ran and found nothing.
+
+    Parameters
+    ----------
+    events : pd.DataFrame
+        One row per event, as the ripple_detection detectors return.
+    name : str, optional
+        Name of the table in the NWB scratch space. Default matches the
+        writer's default for a DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame or hdmf.common.DynamicTable
+    """
+    from hdmf.common import DynamicTable, VectorData
+
+    if len(events):
+        return events
+    return DynamicTable(
+        name=name,
+        description="detected events; none in this interval",
+        columns=[
+            VectorData(name=column, description=column, data=[])
+            for column in events.columns
+        ],
+    )

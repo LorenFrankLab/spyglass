@@ -7,7 +7,9 @@ import pandas as pd
 import sortingview.views as vv
 from matplotlib.axes import Axes
 from ripple_detection import DETECTORS, RIPPLE_BAND_LFP, get_detector
-from ripple_detection.core import gaussian_smooth, get_envelope
+from ripple_detection import (
+    get_Kay_ripple_consensus_trace as _package_consensus_trace,
+)
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import IntervalList
@@ -16,7 +18,10 @@ from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.nwb_helper_fn import get_electrode_indices
+from spyglass.utils.nwb_helper_fn import (
+    events_as_nwb_table,
+    get_electrode_indices,
+)
 
 schema = dj.schema("ripple_v1")
 
@@ -34,8 +39,9 @@ module-level name because it was one before the registry existed.
 """
 
 
-def _resolve_ripple_detector(name: str):
-    """Look up a detection algorithm by name, and check it takes our input.
+def _resolve_ripple_detector(name: str, parameters: dict):
+    """Look up a detection algorithm by name, and check it takes our input
+    and our parameters.
 
     Raises
     ------
@@ -45,7 +51,11 @@ def _resolve_ripple_detector(name: str):
         If the detector exists but takes something other than ripple-band
         filtered LFP. `Long_sharp_wave_ripple_detector` takes raw two-channel
         LFP through an identical signature, so without this check it would run
-        on filtered data and return plausible but meaningless events.
+        on filtered data and return plausible but meaningless events. Also if
+        `parameters` names a tunable the detector does not have: the stored
+        parameter sets were written for `Kay_ripple_detector`, and Yu and
+        Zugaro take different ones, so the mismatch is reported here rather
+        than as a TypeError from the call.
     """
     spec = get_detector(name)
     if spec.inputs != (RIPPLE_BAND_LFP,):
@@ -54,7 +64,9 @@ def _resolve_ripple_detector(name: str):
             "ripple-band filtered LFP only. Detectors usable here: "
             f"{', '.join(sorted(RIPPLE_DETECTION_ALGORITHMS))}."
         )
+    spec.check_parameters(parameters)
     return spec.detector
+
 
 # Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
@@ -152,18 +164,15 @@ class RippleParameters(SpyglassMixin, dj.Lookup):
         ripple_detection_algorithm : str
             Name of the ripple detection algorithm to use
         ripple_detection_params : dict
-            Dictionary of parameters for the ripple detection algorithm, which
-            may include...
-            speed_threshold : float
-                Speed threshold for ripple detection (cm/s)
-            minimum_duration : float
-                Minimum duration for ripple detection (sec)
-            zscore_threshold : float
-                Z-score threshold for ripple detection (std)
-            smoothing_sigma : float
-                Smoothing sigma for ripple detection (sec)
-            close_ripple_threshold : float
-                Close ripple threshold for ripple detection (sec)
+            Keyword parameters for that algorithm. They differ between
+            algorithms: `Kay_ripple_detector` takes speed_threshold (cm/s),
+            minimum_duration (s), zscore_threshold (SD), smoothing_sigma (s)
+            and close_ripple_threshold (s), which the default sets below
+            give; `Yu_ripple_detector` takes a percentile in place of a
+            z-score threshold, and `Zugaro_ripple_detector` takes low and
+            high thresholds and a merge interval. Every parameter with its
+            default is `ripple_detection.get_detector(name).parameters`, and
+            populate rejects a set naming a parameter the algorithm lacks.
     """
 
     definition = """
@@ -248,7 +257,10 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
             interval_ripple_lfps,
             sampling_frequency,
         ) = self.get_ripple_lfps_and_position_info(key)
-        ripple_times = _resolve_ripple_detector(ripple_detection_algorithm)(
+        detector = _resolve_ripple_detector(
+            ripple_detection_algorithm, ripple_detection_params
+        )
+        ripple_times = detector(
             time=np.asarray(interval_ripple_lfps.index),
             filtered_lfps=np.asarray(interval_ripple_lfps),
             speed=np.asarray(speed),
@@ -260,7 +272,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = nwb_analysis_file.create(nwb_file_name)
         key["ripple_times_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
-            nwb_object=ripple_times,
+            nwb_object=events_as_nwb_table(ripple_times),
         )
         nwb_analysis_file.add(
             nwb_file_name=nwb_file_name,
@@ -365,22 +377,21 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def get_Kay_ripple_consensus_trace(
         ripple_filtered_lfps, sampling_frequency, smoothing_sigma: float = 0.004
     ) -> pd.DataFrame:
-        """Calculate the consensus trace for the ripple filtered LFPs"""
-        ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
-        not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
+        """The consensus trace `Kay_ripple_detector` thresholds.
 
-        ripple_consensus_trace[not_null] = get_envelope(
-            np.asarray(ripple_filtered_lfps)[not_null]
-        )
-        ripple_consensus_trace = np.sum(ripple_consensus_trace**2, axis=1)
-        ripple_consensus_trace[not_null] = gaussian_smooth(
-            ripple_consensus_trace[not_null],
-            smoothing_sigma,
+        Delegates to the ripple_detection package, so the trace is the one
+        the detector computed: envelope and smoothing run within each
+        contiguous block of valid samples and never across a gap in the
+        timestamps or a NaN. The copy that lived here stitched the valid
+        samples together first.
+        """
+        trace = _package_consensus_trace(
+            np.asarray(ripple_filtered_lfps),
             sampling_frequency,
+            smoothing_sigma=smoothing_sigma,
+            time=np.asarray(ripple_filtered_lfps.index),
         )
-        return pd.DataFrame(
-            np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index
-        )
+        return pd.DataFrame(trace, index=ripple_filtered_lfps.index)
 
     @staticmethod
     def plot_ripple_consensus_trace(

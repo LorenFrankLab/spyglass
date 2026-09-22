@@ -12,6 +12,7 @@ from spyglass.spikesorting.analysis.v1.group import (
     SortedSpikesGroup,
 )  # noqa: F401
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.nwb_helper_fn import events_as_nwb_table
 
 schema = dj.schema("mua_v1")
 
@@ -120,7 +121,7 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = nwb_analysis_file.create(nwb_file_name)
         key["mua_times_object_id"] = nwb_analysis_file.add_nwb_object(
             analysis_file_name=key["analysis_file_name"],
-            nwb_object=mua_times,
+            nwb_object=events_as_nwb_table(mua_times),
         )
         nwb_analysis_file.add(
             nwb_file_name=nwb_file_name,
