@@ -9,7 +9,6 @@
 # Add alter commands here
 ```
 
-### Infrastructure
 -->
 
 ### Pipelines
@@ -18,6 +17,16 @@
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
         comparison that skipped hash verification on recompute. #1662
+
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+  files #1677
 
 ## [0.6.0] (Sep 1st 2026)
 
@@ -146,7 +155,6 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
-- Add File Backends developer page #1662
 
 ### Infrastructure
 
