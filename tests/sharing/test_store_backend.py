@@ -34,6 +34,14 @@ def _client(**kwargs):
 
 
 @pytest.fixture
+def store_module(common):
+    """The sharing schema, declared so `_known_hash` has tables to read."""
+    from spyglass.sharing import sharing_store
+
+    return sharing_store
+
+
+@pytest.fixture
 def backend():
     """A fresh backend, so the per-process resolve memo starts empty."""
     return StoreBackend()
@@ -214,3 +222,70 @@ def test_a_login_mid_session_is_not_blocked_by_a_cached_no(backend, tmp_path):
 
     with _with_client(_client()):  # user configures a broker and logs in
         assert backend.has(target) is True
+
+
+# ------------------------- unambiguous resolution -------------------------
+
+
+def test_resolution_prefers_a_recorded_hash(backend, tmp_path, monkeypatch):
+    """A name the broker indexes per-owner is settled by the local digest.
+
+    Two owners can register the same `spyglass_name`, and the broker returns
+    whichever row it finds first with no owner field to tell them apart. The
+    Spyglass database keys the upload on the file name, so the digest it
+    recorded names the bytes rather than anyone's registration of them.
+    """
+    asked = {}
+
+    def _find(name=None, sha256=None):
+        asked.update(name=name, sha256=sha256)
+        return RECORD
+
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: "cd" * 32)
+
+    with _with_client(_client(find=_find)):
+        backend.has(str(tmp_path / "a.nwb"))
+
+    assert asked == {"name": None, "sha256": "cd" * 32}
+
+
+def test_resolution_falls_back_to_the_name(backend, tmp_path, monkeypatch):
+    """A file shared from another Spyglass instance has no local digest."""
+    asked = {}
+
+    def _find(name=None, sha256=None):
+        asked.update(name=name, sha256=sha256)
+        return RECORD
+
+    monkeypatch.setattr(StoreBackend, "_known_hash", lambda self, n: None)
+
+    with _with_client(_client(find=_find)):
+        backend.has(str(tmp_path / "a.nwb"))
+
+    assert asked == {"name": "a.nwb", "sha256": None}
+
+
+def test_an_unreachable_sharing_schema_falls_back(backend, monkeypatch):
+    """No grants, no schema, no connection: resolve by name rather than fail.
+
+    `_known_hash` is an improvement on name resolution, not a requirement for
+    it. An instance that cannot read the sharing tables must still be able to
+    fetch a file.
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _refuse(name, *args, **kwargs):
+        if name == "spyglass.sharing.sharing_store":
+            raise RuntimeError("command denied to user")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _refuse)
+
+    assert backend._known_hash("a.nwb") is None
+
+
+def test_an_unshared_file_has_no_recorded_hash(backend, store_module):
+    """A name this instance never uploaded resolves by name, as before."""
+    assert backend._known_hash("never-shared-by-anyone.nwb") is None

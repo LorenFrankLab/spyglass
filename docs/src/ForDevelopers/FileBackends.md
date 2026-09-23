@@ -205,9 +205,22 @@ broader type catch it too; only resolution is narrow.
 neither streams nor downloads, so it is the one backend that overrides `open`.
 
 **`StoreBackend`** reads from a self-hosted shared-storage broker, and declares
-both capabilities. Its `has` asks the broker to resolve a Spyglass file name,
-and a single per-process memo means the `open` that follows does not pay a
-second round trip. Two behaviors are worth knowing:
+both capabilities. A single per-process memo means the `open` that follows a
+`has` does not pay a second round trip.
+
+It resolves by **content hash where it can, and by name only as a fallback**.
+The broker registers files per owner and enforces no uniqueness on
+`spyglass_name`, so its resolve endpoint returns the first row matching a name
+with no owner field to disambiguate by — two people who both share a
+`minirec20230622_.nwb` produce a nondeterministic winner, and a reader can be
+handed someone else's private row and refused a file they could in fact read.
+The Spyglass database settles it: `SharedFileSelection` is keyed on the file
+name, so within one instance a name maps to exactly one upload and one digest,
+and content addressing means that digest names the bytes rather than anyone's
+registration of them. The name is still used for a file shared from a
+*different* Spyglass instance, where no local row exists.
+
+Two more behaviors are worth knowing:
 
 - **An unconfigured instance holds nothing.** With no `store_url` set, or with
     the user not logged in, `has` returns `False` and the chain moves on. Most

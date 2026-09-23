@@ -462,3 +462,21 @@ def test_an_undeclared_parent_blocks_inheritance(store):
             store.inherited_visibility(raw_files=["a"], analysis_files=["b"])
             is None
         )
+
+
+def test_an_upload_makes_the_name_resolvable_by_hash(
+    store, declared, fake_client
+):
+    """What populate records is what settles an ambiguous name later.
+
+    `SharedFileSelection` is keyed on the file name, so one instance maps a
+    name to exactly one digest. `StoreBackend` resolves by that digest rather
+    than by the name the broker indexes per owner.
+    """
+    from spyglass.utils.file_backends import StoreBackend
+
+    store.SharedFile.populate(declared)
+
+    recorded = (store.SharedFile & declared).fetch1("sha256")
+
+    assert StoreBackend()._known_hash(declared["nwb_file_name"]) == recorded

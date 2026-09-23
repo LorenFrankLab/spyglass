@@ -452,11 +452,63 @@ class StoreBackend(FileBackend):
 
         return client
 
+    def _known_hash(self, name: str) -> Optional[str]:
+        """Return the digest this instance recorded for a file name, if any.
+
+        Resolving by name is ambiguous at the broker: registration is per
+        owner, nothing enforces that a `spyglass_name` is unique across them,
+        and the resolve endpoint returns the first matching row with no owner
+        field to disambiguate by. Two people who share a
+        `minirec20230622_.nwb` therefore produce a nondeterministic winner,
+        and a reader can be handed someone else's private row and refused a
+        file they could in fact read.
+
+        The Spyglass database settles it. `SharedFileSelection` is keyed on
+        the file name, so within one instance a name maps to exactly one
+        upload and one digest — and content addressing means that digest names
+        the bytes rather than anyone's registration of them. Where the row
+        exists, this is the authority the broker's name index is not.
+
+        Absent for a file someone else shared from a different Spyglass
+        instance, which is the case that still falls back to the name.
+
+        Parameters
+        ----------
+        name : str
+            Spyglass file name.
+
+        Returns
+        -------
+        str or None
+            Hex digest, or None if this instance has no record of the upload.
+        """
+        try:
+            from spyglass.sharing.sharing_store import (
+                SharedAnalysisFile,
+                SharedFile,
+            )
+        except Exception as err:  # no such schema, no grants, no connection
+            logger.debug(f"No local sharing record available: {err}")
+            return None
+
+        for table, attr in (
+            (SharedFile, "nwb_file_name"),
+            (SharedAnalysisFile, "analysis_file_name"),
+        ):
+            digests = (table & {attr: name}).fetch("sha256")
+            if len(digests):
+                return digests[0]
+
+        return None
+
     def _resolve(self, nwb_file_path: str) -> Optional[dict]:
         """Return the broker's record for this file, or None.
 
         The single lookup for this backend, so `has` and `open` cannot
         disagree about what the broker holds.
+
+        Resolves by content hash where this instance recorded one, and by name
+        otherwise. See `_known_hash` for why that distinction matters.
 
         A refusal and a miss both return None. That is what the resolution
         chain needs — try the next backend either way — but it does mean a
@@ -499,7 +551,11 @@ class StoreBackend(FileBackend):
             # every file probed before that permanently unavailable.
             return None
 
-        self._resolved[name] = client.find(name=name)
+        digest = self._known_hash(name)
+
+        self._resolved[name] = (
+            client.find(sha256=digest) if digest else client.find(name=name)
+        )
 
         return self._resolved[name]
 
