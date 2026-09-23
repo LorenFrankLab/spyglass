@@ -68,10 +68,15 @@ so that what blocks you is not buried in what does not.
 
 | Verdict       | Meaning                                          |
 | ------------- | ------------------------------------------------ |
+| `fatal`       | The file could not be planned at all             |
 | `no_op`       | Everything in the file is already stored         |
 | `all_new`     | Nothing in the file is stored yet                |
 | `partial_new` | Some of it is stored; the rest is new            |
 | `conflict`    | The file disagrees with something already stored |
+
+`fatal` is answered before the others. A file that could not be read plans no
+entries, so counting them would say "nothing new" — which reads as *already
+ingested*, the opposite of what happened.
 
 ### Blocked tables
 
@@ -131,9 +136,9 @@ what was already staged, which is what `IngestionPlanLog` replaces.
 | reading `error_message` per row         | `plan.report()`                                      |
 | checking whether the list is empty      | the returned result is falsy when clean              |
 
-The value returned by ingestion is falsy when nothing blocked, iterates over the
-blocking problems, and prints as the report, so code written against the old
-error list keeps working:
+The value returned by ingestion is the `IngestionPlan` itself. It is falsy when
+nothing blocked, iterates over the blocking problems, and prints as the report,
+so code written against the old error list keeps working:
 
 ```python
 result = ...  # returned by ingestion

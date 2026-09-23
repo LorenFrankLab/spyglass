@@ -278,7 +278,7 @@ class IngestionMixin(BaseMixin):
         """
         from spyglass.common.common_nwbfile import Nwbfile
 
-        empty = PlannedEntries().freeze()
+        empty = PlannedEntries()
         nwb_key = {"nwb_file_name": nwb_file_name}
 
         if nwb_file is None:
@@ -329,7 +329,7 @@ class IngestionMixin(BaseMixin):
 
         return TablePlan(
             table_name=self.full_table_name,
-            entries=planned.freeze(),
+            entries=planned,
             status="ok" if planned else "skipped",
             problems=tuple(ctx.problems),
             reads=tuple(ctx.reads),
@@ -675,8 +675,8 @@ class IngestionMixin(BaseMixin):
 
         # One parse, shared with plan_from_nwbfile: the entries inserted here
         # are the entries a plan would have reported. Merging across source
-        # objects is PlannedEntries' job, so a later object introducing a
-        # table the first did not is no longer a KeyError.
+        # objects is PlannedEntries' job, so a later object may introduce a
+        # table the first did not.
         ctx = FileContext(
             nwb_file_name=nwb_file_name,
             nwb_file=nwb_file,
@@ -767,9 +767,9 @@ class IngestionMixin(BaseMixin):
 
         Fallback for tables that do not implement `_adjust_keys_for_entry` --
         a table declared with SpyglassMixin rather than SpyglassIngestion,
-        such as a parent generated alongside this one. Takes the same
-        list-in/list-out shape as the method it stands in for; it previously
-        took a single dict and so raised AttributeError for every caller.
+        such as a parent generated alongside this one. Takes a list and
+        returns a list, matching the method it stands in for: callers pass
+        a table's entries, never one of them.
 
         Parameters
         ----------

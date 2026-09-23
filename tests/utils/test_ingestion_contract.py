@@ -131,15 +131,29 @@ def test_dependency_order_puts_parents_first(common):
     ), "Task is TaskEpoch's parent and must be inserted first"
 
 
-def test_freeze_is_immutable():
-    """A frozen collection can be stored and compared, not mutated."""
+def test_validation_does_not_change_what_will_be_inserted(common):
+    """The rows a plan was checked against are the rows it inserts.
+
+    The design is validate-then-insert, so a check that quietly rewrote an
+    entry would mean the plan no longer described the insert -- the worst
+    bug available here. A frozen wrapper used to stand in for this guarantee
+    and never covered it: it forbade `.add` while the rows inside stayed
+    mutable dicts.
+    """
+    from copy import deepcopy
+
+    from spyglass.data_import.planner import VirtualKeySpace
+
+    table = common.Institution()
     entries = PlannedEntries()
-    entries.add(_Alpha, [{"n": 1}])
+    entries.add(table, [{"institution_name": "_contract check"}])
+    before = deepcopy(entries.rows_for(table))
 
-    frozen = entries.freeze()
+    table.check_planned_rows(
+        entries.rows_for(table), VirtualKeySpace(), table=table
+    )
 
-    with pytest.raises((AttributeError, TypeError)):
-        frozen.add(_Alpha, [{"n": 2}])
+    assert entries.rows_for(table) == before, "Checking rewrote an entry"
 
 
 # ---------------------------------------------------------------------------

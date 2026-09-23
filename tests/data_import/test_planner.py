@@ -263,22 +263,35 @@ def test_divergence_raise_inserts_nothing():
     ), "raise should decline"
 
 
-def test_divergence_interactive_does_not_prompt_in_test_mode():
+def test_divergence_interactive_declines_via_the_shared_utility(monkeypatch):
     """An unattended run must fail, not block on stdin.
 
     A suite that prompted would hang rather than fail, which is worse than
-    either outcome. This is the short-circuit `accept_divergence` has always
-    had.
+    either outcome. The short-circuit is `accept_divergence`'s own, not a
+    second copy of it here: the planner path and the insert path must decline
+    for the same reason, or one of them will stop doing so.
     """
-    from spyglass.data_import.planner import _divergence_accepted
+    from spyglass.data_import import planner
+    from spyglass.utils import dj_helper_fn
 
-    assert not _divergence_accepted(
+    called = []
+    real = dj_helper_fn.accept_divergence
+
+    def spy(*args, **kwargs):
+        called.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(dj_helper_fn, "accept_divergence", spy)
+
+    assert not planner._divergence_accepted(
         _divergence(), "interactive"
     ), "interactive must decline under test mode rather than prompt"
+    assert called, "The shared utility is what decides, not a local branch"
+    assert called[0]["test_mode"], "It is told this is a test run"
 
 
-def test_divergence_interactive_asks_and_obeys(monkeypatch):
-    """Outside test mode it asks once, and takes the answer."""
+def test_divergence_interactive_asks_once_and_obeys(monkeypatch):
+    """Outside test mode it asks once for the batch, and takes the answer."""
     import spyglass.settings
     from spyglass.data_import import planner
 
@@ -292,13 +305,39 @@ def test_divergence_interactive_asks_and_obeys(monkeypatch):
 
     monkeypatch.setattr("builtins.input", fake_input)
 
-    answer = "y"
+    answer = "yes"
     assert planner._divergence_accepted(_divergence(), "interactive")
-    answer = ""
+    answer = "no"
     assert not planner._divergence_accepted(_divergence(), "interactive")
 
     assert len(asked) == 2, "One prompt per run, not one per divergence"
     assert "disagree" in asked[0]
+
+
+def test_a_fatal_plan_does_not_close_its_staging_area(common, mini_copy_name):
+    """A file that could not be read has not "already been ingested".
+
+    A fatal plan holds no table plans, so nothing is novel, so the verdict
+    used to read `no_op` -- and `insert_plan` checked that first. The result
+    was an unreadable file logging "already ingested, nothing to do" and
+    marking its staging area complete. The return value was truthy, so a
+    caller testing it still saw the failure; the log and the plan record did
+    not.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import insert_plan, plan_nwbfile
+
+    unregistered = "_no_such_file_.nwb"
+    plan = plan_nwbfile(unregistered)
+
+    assert plan.verdict == "fatal", f"Expected fatal, got {plan.verdict}"
+
+    result = insert_plan(plan, on_divergence="accept")
+
+    assert result, "A file that could not be planned is not a success"
+    assert not (
+        IngestionPlanLog & {"nwb_file_name": unregistered}
+    ), "Nothing to stage, and certainly nothing to mark complete"
 
 
 def test_unknown_divergence_policy_is_refused(common, mini_copy_name):
@@ -344,7 +383,7 @@ def test_rollback_is_off_by_default_and_scoped_to_a_miss(
         table_plans=(
             TablePlan(
                 table_name="`common_lab`.`institution`",
-                entries=entries.freeze(),
+                entries=entries,
             ),
         ),
     )

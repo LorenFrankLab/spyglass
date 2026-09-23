@@ -19,7 +19,7 @@ def _broken(plan_types):
         table_plans=(
             plan_types.TablePlan(
                 table_name="`common`.`session`",
-                entries=plan_types.PlannedEntries().freeze(),
+                entries=plan_types.PlannedEntries(),
                 status="failed",
                 problems=(
                     plan_types.Problem(
@@ -46,7 +46,7 @@ def _broken(plan_types):
             ),
             plan_types.TablePlan(
                 table_name="`common`.`electrode`",
-                entries=plan_types.PlannedEntries().freeze(),
+                entries=plan_types.PlannedEntries(),
                 status="blocked",
             ),
         ),
@@ -162,35 +162,48 @@ def test_entry_digest_is_stable_across_numpy_and_python_scalars(plan_types):
     ), "np.int64(1) and 1 are the same stored value"
 
 
-def test_report_result_is_falsy_when_clean(plan_types):
+def test_a_clean_plan_is_falsy_when_returned(plan_types):
     """The old contract: an empty error list means nothing went wrong."""
-    clean = plan_types.ReportResult(
-        plan_types.IngestionPlan(nwb_file_name="clean_.nwb")
-    )
+    clean = plan_types.IngestionPlan(nwb_file_name="clean_.nwb")
 
-    assert not clean, "A clean result must be falsy, as the old list was"
+    assert not clean, "A clean plan must be falsy, as the old list was"
     assert len(clean) == 0
     assert list(clean) == []
     assert "no_op" in str(clean), "str() gives the report"
 
 
-def test_report_result_carries_only_blocking_problems(plan_types):
+def test_a_returned_plan_carries_only_blocking_problems(plan_types):
     """The list it replaces held failures, not advisories."""
-    result = plan_types.ReportResult(_broken(plan_types))
+    plan = _broken(plan_types)
 
-    assert result, "A blocked result must be truthy"
-    assert len(result) == 2, "Two hard problems, the soft one excluded"
+    assert plan, "A blocked plan must be truthy"
+    assert len(plan) == 2, "Two hard problems, the soft one excluded"
     assert all(
-        problem.severity in plan_types.BLOCKING for problem in result
+        problem.severity in plan_types.BLOCKING for problem in plan
     ), "Iterating yields the problems that actually blocked"
+    assert plan.blocking == tuple(
+        plan
+    ), "One definition of blocking, whichever way it is asked for"
 
 
-def test_report_result_still_answers_fetch_key(plan_types):
-    """Legacy callers reached for `.fetch("KEY")`; that still works."""
-    result = plan_types.ReportResult(_broken(plan_types))
-    keys = result.fetch("KEY")
+def test_a_fatal_plan_is_not_a_no_op(plan_types):
+    """A file that could not be read has not 'already been ingested'.
 
-    assert len(keys) == len(result), "One key per blocking problem"
-    assert all(
-        "nwb_file_name" in key and "table" in key for key in keys
-    ), "Keys keep the shape callers indexed into"
+    `fatal` used to fall through to the entry count: a file nothing could be
+    planned from has no novel entries, so the verdict read `no_op`, and
+    `insert_plan` logged "already ingested" and closed the staging area for
+    a file it had never opened.
+    """
+    unreadable = plan_types.IngestionPlan(
+        nwb_file_name="broken_.nwb",
+        fatal=(
+            plan_types.Problem(
+                "fatal", "file_unreadable", "truncated at byte 0"
+            ),
+        ),
+    )
+
+    assert unreadable.verdict == "fatal", "Not no_op, and not clean"
+    assert not unreadable.is_clean
+    assert len(unreadable.blocking) == 1, "fatal blocks, as hard does"
+    assert "already ingested" not in unreadable.report(log=False)

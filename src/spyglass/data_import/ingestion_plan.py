@@ -200,8 +200,9 @@ class PlannedEntries:
     """Rows destined for one or more tables, keyed by stable identity.
 
     Adding to a target that is already present appends to it; merging accepts
-    targets the receiver has never seen. Neither raises, which is what the
-    two hand-rolled merge sites this replaces used to do.
+    targets the receiver has never seen. Neither raises: a table's entries
+    arrive one source object at a time, and any object may be the first to
+    name a given target.
     """
 
     def __init__(self):
@@ -312,14 +313,6 @@ class PlannedEntries:
                 return {}
         return {}
 
-    def freeze(self) -> "FrozenPlannedEntries":
-        """Return an immutable snapshot of this collection."""
-        return FrozenPlannedEntries(
-            tuple(
-                (target, tuple(rows)) for target, rows in self._entries.values()
-            )
-        )
-
     def as_dict(self) -> dict:
         """Return the legacy `{table: [rows]}` mapping, dependency-ordered."""
         return {
@@ -349,30 +342,6 @@ class PlannedEntries:
             f"{getattr(t, '__name__', t)}: {len(r)}" for t, r in self
         )
         return f"PlannedEntries({summary})"
-
-
-@dataclass(frozen=True)
-class FrozenPlannedEntries:
-    """An immutable snapshot of a PlannedEntries collection."""
-
-    entries: Tuple[Tuple[Any, Tuple[dict, ...]], ...]
-
-    def rows_for(self, table) -> Tuple[dict, ...]:
-        """Return the rows planned for one target, empty if it has none."""
-        key = _target_key(table)
-        for target, rows in self.entries:
-            if _target_key(target) == key:
-                return rows
-        return ()
-
-    def __iter__(self) -> Iterator[Tuple[Any, Tuple[dict, ...]]]:
-        return iter(self.entries)
-
-    def __len__(self) -> int:
-        return len(self.entries)
-
-    def __bool__(self) -> bool:
-        return any(rows for _, rows in self.entries)
 
 
 # One line per problem code, saying what to do about it. Keyed by code so a
@@ -416,12 +385,14 @@ BLOCKING = ("fatal", "hard")
 class TablePlan:
     """What one table would insert for one file, and what went wrong.
 
-    Produced by parsing, consumed by inserting. Immutable: a plan records a
-    decision already made, rather than a buffer still being filled.
+    Produced by parsing, consumed by inserting. The dataclass is frozen, so
+    nothing rebinds a plan's fields once it is built. The entries themselves
+    are an ordinary `PlannedEntries`: nothing mutates them between validation
+    and insertion, and `tests/utils/test_ingestion_contract.py` asserts it.
     """
 
     table_name: str
-    entries: FrozenPlannedEntries
+    entries: "PlannedEntries"
     status: str = "ok"  # ok | skipped | failed
     problems: Tuple[Problem, ...] = ()
     reads: Tuple[str, ...] = ()
@@ -454,89 +425,13 @@ class TablePlan:
         )
 
 
-class ReportResult:
-    """What ingestion returns: a report that still behaves like the old list.
-
-    `populate_all_common` used to return `InsertError.fetch("KEY")` -- an
-    empty list on success, a list of error keys otherwise. Callers test it
-    for truth, iterate it, and measure its length, so this keeps all three
-    while carrying the plan and its report.
-
-    Falsy means clean. That is the same test as before and it still means
-    "nothing went wrong", so a caller written against the old contract keeps
-    working without knowing a plan exists.
-
-    Parameters
-    ----------
-    plan : IngestionPlan
-        The plan this result describes.
-    """
-
-    def __init__(self, plan: "IngestionPlan"):
-        self.plan = plan
-
-    @property
-    def problems(self) -> Tuple["Problem", ...]:
-        """The blocking problems, which are what the old list stood for."""
-        return tuple(p for p in self.plan.problems if p.severity in BLOCKING)
-
-    def __bool__(self) -> bool:
-        """True when something blocked, matching the old error list."""
-        return bool(self.problems)
-
-    def __iter__(self):
-        return iter(self.problems)
-
-    def __len__(self) -> int:
-        return len(self.problems)
-
-    def __str__(self) -> str:
-        return self.plan.report(log=False)
-
-    def __repr__(self) -> str:
-        return f"ReportResult({self.plan.nwb_file_name}: {self.plan.verdict})"
-
-    def fetch(self, *attrs, **kwargs):
-        """Stand in for the `InsertError` query the old return value was.
-
-        Deprecated, and logged as such: the caller wants problems, and the
-        plan holds them in a shape that does not require a table.
-
-        Parameters
-        ----------
-        *attrs
-            Ignored beyond `"KEY"`, which yields one dict per problem.
-
-        Returns
-        -------
-        list
-        """
-        from spyglass.common.common_usage import ActivityLog
-
-        ActivityLog().deprecate_log(
-            name="the InsertError key list returned by populate_all_common",
-            alt="str(result) for the report, or IngestionPlanLog for history",
-        )
-
-        if attrs and attrs[0] == "KEY":
-            return [
-                {
-                    "nwb_file_name": self.plan.nwb_file_name,
-                    "table": problem.table or "",
-                    "error_type": problem.code,
-                }
-                for problem in self.problems
-            ]
-        return (
-            [getattr(p, attrs[0], None) for p in self.problems] if attrs else []
-        )
-
-
 @dataclass(frozen=True)
 class IngestionPlan:
     """What a whole file would insert, and everything wrong with it.
 
-    Falsy when nothing blocks it, so `if plan:` reads as "is there a problem".
+    Also what an ingestion returns. It behaves as a collection of the problems
+    that blocked it: falsy when nothing did, so `if plan:` reads as "is there
+    a problem", and iterable and measurable over `blocking`.
     """
 
     nwb_file_name: str
@@ -554,12 +449,20 @@ class IngestionPlan:
 
         One answer in place of a wall of duplicate errors on a re-run:
 
+        - `fatal` — the file could not be planned at all
         - `conflict` — an entry exists with different values, which is a
           disagreement to resolve rather than work to do
         - `no_op` — every planned entry is already present and matches
         - `all_new` — none of it is in the database yet
         - `partial_new` — some of it is
+
+        `fatal` is answered before the count, and must stay that way: a file
+        that could not be read plans no entries, so nothing is novel, and
+        counting alone would call it `no_op` -- already ingested.
         """
+        if any(problem.severity == "fatal" for problem in self.problems):
+            return "fatal"
+
         if any(problem.code == "divergence" for problem in self.problems):
             return "conflict"
 
@@ -591,6 +494,7 @@ class IngestionPlan:
             The report.
         """
         headline = {
+            "fatal": "could not be planned",
             "no_op": "already ingested, nothing to do",
             "all_new": f"{self.entry_count} entries, all new",
             "partial_new": f"{sum(self.novel.values())} new entries",
@@ -659,7 +563,7 @@ class IngestionPlan:
         if log:
             from spyglass.utils.logging import logger
 
-            emit = logger.warning if self.hard_failures else logger.info
+            emit = logger.warning if self.blocking else logger.info
             emit(text)
 
         return text
@@ -678,14 +582,19 @@ class IngestionPlan:
         return sum(plan.entry_count for plan in self.table_plans)
 
     @property
-    def hard_failures(self) -> Tuple[Problem, ...]:
-        """Problems that block a table."""
-        return tuple(p for p in self.problems if p.severity == "hard")
+    def blocking(self) -> Tuple[Problem, ...]:
+        """The problems that stop work, rather than merely describe it.
+
+        `fatal` and `hard`, never `soft` or `info`. The single definition of
+        "blocking": anything asking whether a plan may be inserted asks here,
+        so that a narrower second answer cannot come into existence.
+        """
+        return tuple(p for p in self.problems if p.severity in BLOCKING)
 
     @property
     def is_clean(self) -> bool:
         """Whether the file can be ingested with nothing left unresolved."""
-        return not any(p.severity in BLOCKING for p in self.problems)
+        return not self.blocking
 
     def status_by_table(self) -> Dict[str, str]:
         """Return each table's status, keyed by table name."""
@@ -743,7 +652,7 @@ class IngestionPlan:
             table_plans.append(
                 TablePlan(
                     table_name=plan["table_name"],
-                    entries=entries.freeze(),
+                    entries=entries,
                     status=plan.get("status", "ok"),
                     problems=tuple(
                         Problem(**p) for p in plan.get("problems", [])
@@ -765,6 +674,17 @@ class IngestionPlan:
     def __bool__(self) -> bool:
         """True when something blocks this plan."""
         return not self.is_clean
+
+    def __iter__(self) -> Iterator[Problem]:
+        """Yield the blocking problems, not every problem noticed."""
+        return iter(self.blocking)
+
+    def __len__(self) -> int:
+        """Count the blocking problems, not every problem noticed."""
+        return len(self.blocking)
+
+    def __str__(self) -> str:
+        return self.report(log=False)
 
     def __repr__(self) -> str:
         verdict = "clean" if self.is_clean else "blocked"

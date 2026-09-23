@@ -536,26 +536,34 @@ def bytes_to_human_readable(size: int) -> str:
 
 
 def accept_divergence(
-    key: str,
-    new_value: Any,
-    existing_value: Any,
+    key: str = None,
+    new_value: Any = None,
+    existing_value: Any = None,
     test_mode: bool = False,
     table_name: Optional[str] = None,
+    prompt: Optional[str] = None,
 ):
     """Prompt to accept divergence in values between existing and new entries
 
     Parameters
     ----------
-    key : str
-        Name of the column where the divergence is found
-    new_value : Any
-        New value to be inserted into the table
-    existing_value : Any
-        Existing value in the table that is different from the new value
+    key : str, optional
+        Name of the column where the divergence is found. Unused when
+        `prompt` is given.
+    new_value : Any, optional
+        New value to be inserted into the table. Unused when `prompt` is
+        given.
+    existing_value : Any, optional
+        Existing value in the table that is different from the new value.
+        Unused when `prompt` is given.
     test_mode : bool, optional
         If True, will not prompt and return False, by default False
     table_name : str, optional
         Name of the table where the divergence is found, by default None
+    prompt : str, optional
+        Ask this instead of the per-column question. For a caller holding a
+        batch of divergences rather than one column, which has no single
+        key, value or table to name. Default None.
     """
     if test_mode:
         # If get here in test mode, is because want to test failure
@@ -567,11 +575,14 @@ def accept_divergence(
     if table_name:  # optional message with table name
         tbl_msg = f" of '{table_name}'"
     response = dj.utils.user_choice(
-        f"Existing entry differs in '{key}' column{tbl_msg}.\n"
-        + "Accept the existing value of: \n"
-        + f"'{existing_value}' \n"
-        + "in place of the new value: \n"
-        + f"'{new_value}' ?\n"
+        prompt
+        or (
+            f"Existing entry differs in '{key}' column{tbl_msg}.\n"
+            + "Accept the existing value of: \n"
+            + f"'{existing_value}' \n"
+            + "in place of the new value: \n"
+            + f"'{new_value}' ?\n"
+        )
     )
     return str_to_bool(response)
 

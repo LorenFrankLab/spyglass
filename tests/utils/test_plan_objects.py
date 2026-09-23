@@ -37,7 +37,7 @@ def _table_plan(**kwargs):
     entries.add(_NamedTable(TABLE_NAME), [{"a": 1}, {"a": 2}])
     defaults = dict(
         table_name=TABLE_NAME,
-        entries=entries.freeze(),
+        entries=entries,
         status="ok",
         problems=(),
     )
@@ -115,7 +115,7 @@ def test_plan_is_not_clean_with_a_hard_problem():
 
     assert not plan.is_clean
     assert plan, "A plan with blocking problems is truthy"
-    assert len(plan.hard_failures) == 1
+    assert len(plan.blocking) == 1
 
 
 def test_plan_surfaces_fatal_problems_separately():
@@ -154,7 +154,7 @@ def test_plan_round_trips_through_a_dict():
 
     assert rebuilt.nwb_file_name == plan.nwb_file_name
     assert rebuilt.entry_count == plan.entry_count
-    assert len(rebuilt.hard_failures) == len(plan.hard_failures)
+    assert len(rebuilt.blocking) == len(plan.blocking)
     assert rebuilt.plan_hash == plan.plan_hash
 
 
