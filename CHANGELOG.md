@@ -10,16 +10,20 @@
 ```
 -->
 
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+- Add File Backends developer page #1662
+
 ### Infrastructure
 
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
 - Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
-
-### Documentation
-
-- Add File Backends developer page #1662
 
 ### Pipelines
 
