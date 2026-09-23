@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.6.1] (Unreleased)
+
+### Infrastructure
+
+- Add ingestion plans: parse an NWB file and report every problem before
+    anything is written #1685
+
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
