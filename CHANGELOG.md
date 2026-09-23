@@ -14,7 +14,19 @@ from spyglass.common.common_lab import LabMember
 LabMember.LabMemberInfo().alter()
 ```
 
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+
 ### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
 
 #### Shared-Storage Broker
 
@@ -56,7 +68,11 @@ object-store credential.
 - Spike Sorting
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
-        comparison that skipped hash verification on recompute. #1662
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
 
 ## [0.6.0] (Sep 1st 2026)
 
@@ -185,16 +201,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
-- Add File Backends developer page #1662
 
 ### Infrastructure
 
-- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol,
-    with local, kachery, and DANDI as backends #1662
-- Deprecate `file_from_dandi` in favor of `file_is_remote`, and report streaming
-    from the backend that opened the file rather than from HDF5 internals #1662
-- Add `prefer_download` custom config, making stream-capable backends fetch the
-    whole file instead of streaming it #1662
 - Add cross-platform installer script with Docker support, input validation, and
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372

@@ -358,6 +358,30 @@ class DandiBackend(FileBackend):
         """Return True if DANDI holds this file under either naming scheme."""
         return self._resolve(nwb_file_path) is not None
 
+    def will_stream(self, nwb_file_path: str) -> bool:
+        """Stream if DANDI holds the file only under its raw name.
+
+        A raw session published as `X.nwb` is not the `X_.nwb` link copy
+        Spyglass tracks locally — the two differ in size. Writing the DANDI
+        bytes to the tracked path leaves a file that fails the DataJoint
+        filepath checksum on every later fetch, and keeps failing after the
+        preference is turned back off. So `prefer_download` does not apply to a
+        name-mismatched match: those are always streamed.
+
+        Parameters
+        ----------
+        nwb_file_path : str
+            Absolute path of the file as Spyglass expects it locally.
+
+        Returns
+        -------
+        bool
+            True if the next `open` call will read over the network.
+        """
+        if self._resolve(nwb_file_path) != nwb_file_path:
+            return True
+        return super().will_stream(nwb_file_path)
+
     def stream(
         self, nwb_file_path: str
     ) -> Tuple[pynwb.NWBHDF5IO, pynwb.NWBFile]:

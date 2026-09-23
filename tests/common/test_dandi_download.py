@@ -1,9 +1,12 @@
-"""Tests for `DandiPath.download_file_from_dandi` staging and arguments.
+"""Tests for DANDI retrieval: download staging, arguments, and `fetch_nwb`.
 
 No network: the asset lookup and the HTTP filesystem are both replaced, so
-what is under test is the destination handling and the staging path.
+what is under test is the destination handling and the staging path. The
+`fetch_nwb` case replaces `DandiPath`'s transfer methods outright and serves
+the original raw file, which is what the archive would hold.
 """
 
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -93,3 +96,65 @@ def test_download_cleans_up_on_failure(dandi_tbl, monkeypatch, tmp_path):
 
     assert not dest.exists(), "Failed download left a file at dest"
     assert not list(tmp_path.glob("*.part")), "Failed download left a fragment"
+
+
+@pytest.fixture(scope="function")
+def raw_on_dandi_only(mini_insert, mini_copy_name, monkeypatch, tmp_path):
+    """Hide the local raw copy. Serve the original raw file, as DANDI does."""
+    from spyglass.common import Nwbfile, common_dandi
+    from spyglass.utils import file_backends as fb
+    from spyglass.utils import nwb_helper_fn as nh
+
+    copy_path = Path(Nwbfile.get_abs_path(mini_copy_name))
+    orig = copy_path.with_name(copy_path.name.replace("_.nwb", ".nwb"))
+
+    def fake_stream(self, key=None, nwb_file_path=None):
+        import pynwb
+
+        io = pynwb.NWBHDF5IO(str(orig), "r", load_namespaces=True)
+        return io, io.read()
+
+    def fake_download(self, key=None, nwb_file_path=None, dest=None):
+        shutil.copyfile(orig, dest)
+        return Path(dest).exists()
+
+    dandi_path = common_dandi.DandiPath
+    monkeypatch.setattr(fb.KacheryBackend, "has", lambda self, p: False)
+    monkeypatch.setattr(fb.DandiBackend, "_resolve", lambda self, p: orig.name)
+    monkeypatch.setattr(dandi_path, "fetch_file_from_dandi", fake_stream)
+    monkeypatch.setattr(dandi_path, "download_file_from_dandi", fake_download)
+
+    backup = tmp_path / copy_path.name
+    nh.close_nwb_files()
+    shutil.move(copy_path, backup)
+    yield copy_path
+    nh.close_nwb_files()
+    copy_path.unlink(missing_ok=True)
+    shutil.move(backup, copy_path)
+
+
+@pytest.mark.parametrize("prefer_download", [False, True])
+def test_raw_dandi_match_streams(
+    raw_on_dandi_only, mini_copy_name, monkeypatch, prefer_download
+):
+    """A raw-name DANDI match streams. It never replaces the tracked copy.
+
+    DANDI publishes `X.nwb`; Spyglass tracks the smaller link copy `X_.nwb`.
+    Writing the former to the latter's path fails the DataJoint filepath check
+    on this fetch and on every later one, with or without the preference set.
+
+    The parameter is the setting the backend must ignore here, so both values
+    assert the same outcome. `True` is the regression: without the
+    `will_stream` override it downloads and this fails. `False` is the default
+    path, and the only end-to-end check that a raw-name match reaches
+    `fetch_nwb` as a stream at all.
+    """
+    from spyglass.common import Session
+    from spyglass.settings import sg_config
+    from spyglass.utils.nwb_helper_fn import file_is_remote
+
+    monkeypatch.setattr(sg_config, "_prefer_download", prefer_download)
+
+    assert (Session & {"nwb_file_name": mini_copy_name}).fetch_nwb()
+    assert file_is_remote(str(raw_on_dandi_only)), "Raw match did not stream"
+    assert not raw_on_dandi_only.exists(), "DANDI raw file at tracked path"

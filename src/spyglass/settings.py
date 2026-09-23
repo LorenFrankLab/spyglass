@@ -136,14 +136,11 @@ class SpyglassConfig:
             else str_to_bool(self._debug_mode_arg)
         )
         self._test_mode = _UNSET
-        # An ordinary reloadable setting, like debug_mode: the constructor
-        # seeds it so it reads before any load, and each load re-resolves it.
-        self._prefer_download = str_to_bool(
-            kwargs.get("prefer_download", False)
-        )
-        # Same lifecycle as _prefer_download. "" is the meaningful default:
-        # an instance with no broker is the common case, and the shared-store
-        # backend reads it as "I hold nothing" rather than as an error.
+        # Readable before any load. Each load reads it from dj.config.
+        self._prefer_download = False
+        # "" is the meaningful default: an instance with no broker is the
+        # common case, and the shared-store backend reads it as "I hold
+        # nothing" rather than as an error.
         self._store_url = _clean_store_url(kwargs.get("store_url", ""))
         self._dlc_base = None
         # Initialized here, not only in load_config's COMMIT phase: a load
@@ -856,10 +853,22 @@ class SpyglassConfig:
         ----------
         value : bool or str
             Accepts the same string forms as other boolean settings.
+
+        Notes
+        -----
+        The value is written to `dj.config` as well as the instance, so that a
+        reload or a `save_dj_config` keeps it. `_config` is only touched once a
+        load has succeeded: a non-empty `_config` is the cache sentinel, and
+        seeding it after a failed load would make every later `load_config`
+        return early with no directories resolved.
         """
         self.load_config()
         self._prefer_download = str_to_bool(value)
-        self._config["prefer_download"] = self._prefer_download
+
+        custom = dj.config.setdefault("custom", {})
+        custom["prefer_download"] = self._prefer_download
+        if self._config:
+            self._config["prefer_download"] = self._prefer_download
 
     @property
     def store_url(self) -> str:
