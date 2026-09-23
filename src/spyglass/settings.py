@@ -138,10 +138,11 @@ class SpyglassConfig:
         self._test_mode = _UNSET
         # Readable before any load. Each load reads it from dj.config.
         self._prefer_download = False
-        # "" is the meaningful default: an instance with no broker is the
-        # common case, and the shared-store backend reads it as "I hold
-        # nothing" rather than as an error.
-        self._store_url = _clean_store_url(kwargs.get("store_url", ""))
+        # Readable before any load. Each load reads it from dj.config. "" is
+        # the meaningful default: an instance with no broker is the common
+        # case, and the shared-store backend reads it as "I hold nothing"
+        # rather than as an error.
+        self._store_url = ""
         self._dlc_base = None
         # Initialized here, not only in load_config's COMMIT phase: a load
         # that fails or returns early (e.g. no base under an ambient test
@@ -889,10 +890,22 @@ class SpyglassConfig:
         value : str or None
             Base URL, e.g. ``https://store.example.org``. A trailing slash is
             dropped. None or "" detaches from the broker.
+
+        Notes
+        -----
+        Written to `dj.config` as well as the instance, so a reload or a
+        `save_dj_config` keeps it. `_config` is only touched once a load has
+        succeeded: a non-empty `_config` is the cache sentinel, and seeding it
+        after a failed load would make every later `load_config` return early
+        with no directories resolved.
         """
         self.load_config()
         self._store_url = _clean_store_url(value)
-        self._config["store_url"] = self._store_url
+
+        custom = dj.config.setdefault("custom", {})
+        custom["store_url"] = self._store_url
+        if self._config:
+            self._config["store_url"] = self._store_url
 
     @property
     def dlc_project_dir(self) -> str:

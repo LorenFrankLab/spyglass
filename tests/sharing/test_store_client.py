@@ -450,6 +450,68 @@ def test_store_url_round_trips_through_settings():
         sg_config.store_url = prior
 
 
+def test_store_url_survives_a_reload(monkeypatch, tmp_path):
+    """A reload re-reads the URL, because the setter wrote it to `dj.config`.
+
+    `load_config` resolves every custom key from `dj.config` alone, so a
+    setter that only touched the instance lost the value on the next
+    `force_reload` — and wrote "" to disk on the next `save_dj_config`.
+
+    The load must actually reach its commit phase for this to mean anything,
+    hence the explicit sandbox base dir.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "store_url", "")
+    # A committed load rewrites the global stores; keep it to this test.
+    monkeypatch.setitem(
+        dj.config, "stores", dict(dj.config.get("stores") or {})
+    )
+
+    # The test-mode sandbox requires a 'tests' component in the base path.
+    base = tmp_path / "tests" / "_data"
+
+    def load():
+        cfg.load_config(base_dir=str(base), test_mode=True, force_reload=True)
+
+    cfg = SpyglassConfig(test_mode=True)
+    load()
+    assert cfg._config, "Precondition: the first load must succeed"
+
+    cfg.store_url = BROKER + "/"
+    load()
+
+    assert cfg.store_url == BROKER, "Reload lost the broker URL"
+    assert cfg._generate_dj_config()["custom"]["store_url"] == BROKER
+
+
+def test_store_url_set_before_a_base_dir_leaves_the_cache_empty(monkeypatch):
+    """Setting the URL on an unloadable config must not seed `_config`.
+
+    A non-empty `_config` is the cache sentinel. Seeding it after a failed
+    load would make every later `load_config` return that one key at once,
+    resolving no directories and skipping the test-mode base-dir guard.
+    """
+    import datajoint as dj
+
+    from spyglass.settings import SpyglassConfig
+
+    custom = dj.config.setdefault("custom", {})
+    monkeypatch.setitem(custom, "store_url", "")
+    monkeypatch.setitem(custom, "spyglass_dirs", {})
+    monkeypatch.delenv("SPYGLASS_BASE_DIR", raising=False)
+
+    cfg = SpyglassConfig()  # no base dir anywhere, so the load fails
+    cfg.store_url = BROKER
+
+    assert cfg.store_url == BROKER, "Setter did not hold the value"
+    assert cfg._config == {}, "A failed load left a poisoned cache"
+    assert cfg.load_failed is True
+
+
 def test_an_unset_store_url_is_the_default(token_file):
     """Most instances are attached to no broker; that is not a failure."""
     from spyglass.settings import sg_config
