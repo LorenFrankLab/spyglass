@@ -14,7 +14,6 @@
 
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
-- Add File Backends developer page #1662
 
 ### Infrastructure
 
