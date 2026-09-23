@@ -146,11 +146,15 @@ def test_download_only_backend_uses_default_open(tmp_path):
     mock_open.assert_called_once_with(target)
 
 
-def test_failed_download_raises_file_not_found(tmp_path):
-    """A download that reports failure surfaces as FileNotFoundError."""
+def test_failed_download_raises_backend_unavailable(tmp_path):
+    """A download that reports failure raises BackendUnavailable.
+
+    The narrower type, not its `FileNotFoundError` base: only the former is a
+    miss the resolver may step past.
+    """
     backend = _FakeDownloadBackend(download_ok=False)
 
-    with pytest.raises(FileNotFoundError, match="fake_dl"):
+    with pytest.raises(BackendUnavailable, match="fake_dl"):
         backend.open(str(tmp_path / "file.nwb"))
 
 

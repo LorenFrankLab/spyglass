@@ -69,6 +69,12 @@ order is unaffected, so a file already on disk is still read from disk. A
 backend that can only stream streams anyway: serving the file matters more than
 honoring a performance preference.
 
+One more case overrides the preference. DANDI publishes a raw session as
+`X.nwb`, while Spyglass tracks the link copy `X_.nwb`; the two are different
+files. Writing the DANDI bytes to the tracked path would leave a file that fails
+the DataJoint filepath checksum on every later fetch, so a match found only
+under the raw name is streamed regardless of the setting.
+
 !!! note
 
     Streaming already caches. `DandiBackend` reads through an `fsspec`
@@ -145,6 +151,7 @@ so declares both flags `False`.
 `open` calls `will_stream(nwb_file_path)` to pick its path. The inherited
 implementation combines the two flags with the user's `prefer_download` setting;
 override it if your backend streams some files and downloads others.
+`DandiBackend` does, to stream raw-name matches whatever the preference.
 
 The flags describe what the backend *can* do; `will_stream` answers what a given
 call will do.
