@@ -27,7 +27,7 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 # Ripple detection depends on a set of LFPs, the parameters used for detection and the speed of the animal. You will need `RippleLFPSelection`, `RippleParameters`, and `PositionOutput` to be populated accordingly.
 #
@@ -36,7 +36,6 @@
 #
 
 # +
-import os
 import datajoint as dj
 import numpy as np
 import pandas as pd

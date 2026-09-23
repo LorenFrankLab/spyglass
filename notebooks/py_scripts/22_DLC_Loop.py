@@ -27,7 +27,7 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 # This tutorial will extract position via DeepLabCut (DLC). It will walk through...
 #
@@ -69,7 +69,6 @@
 # %autoreload 2
 
 # +
-import os
 import datajoint as dj
 
 import spyglass.common as sgc

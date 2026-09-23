@@ -91,7 +91,7 @@ jupyter notebook 01_Concepts.ipynb
 - Place NWB files in your configured `raw` directory (default:
     `$SPYGLASS_BASE_DIR/raw/`)
 - See
-    [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/)
+    [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/02_Insert_Data/)
     for details
 
 ### Join community
@@ -211,6 +211,7 @@ example that pre-configures Frank Lab settings.
 
 ______________________________________________________________________
 
-**Next tutorial**: [01_Concepts.ipynb](notebooks/01_Concepts.ipynb) **Full
-documentation**:
+**Next tutorial**:
+[01_Concepts](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Concepts/)
+**Full documentation**:
 [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)

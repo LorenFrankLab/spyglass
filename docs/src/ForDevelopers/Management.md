@@ -29,6 +29,11 @@ DataJoint schemas correspond to MySQL databases. Privileges are managed by
 schema/database prefix.
 
 - `SELECT` privileges allow users to read, write, and delete data.
+- `REFERENCES` privileges allow users to declare a foreign key pointing at a
+    table. MySQL validates a foreign key against the *parent* table, so this is
+    granted everywhere `SELECT` is: a role able to read a schema but not
+    reference it could not declare a table in its own prefix that depends on any
+    upstream table, which is the normal way pipelines are built.
 - `ALL` privileges allow users to create, alter, or drop tables and schemas in
     addition to operations above.
 
@@ -42,18 +47,46 @@ prefix. User types differ in the privileges they are granted on these prifixes.
 Declaring a table with the SpyglassMixin on a schema other than a shared module
 or the user's own prefix will raise a warning.
 
+#### Declaring tables in shared schemas
+
+On shared prefixes, the `dj_user` role is granted every privilege *except*
+`CREATE`, namely `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`,
+`INDEX`, `REFERENCES`, and `LOCK TABLES`. Regular users can therefore add, edit,
+and remove data in shared schemas, but **declaring a new table in a shared
+schema requires an admin**.
+
+If a user runs code that declares a table not yet present in a shared schema,
+MySQL will reject it with an access-denied error. An admin should import the
+relevant module once to declare the table; every other user can then use and
+populate it as usual. Users keep `ALL` privileges on their own prefix, so
+prototyping new tables there requires no admin involvement.
+
+#### Role activation
+
+Privileges are granted to roles, and roles are granted to users. MySQL does not
+activate a user's roles automatically. Unless the server sets
+`activate_all_roles_on_login` to `ON`, each new session starts with no role
+active, and the user must run `SET ROLE ALL;` before any of the privileges above
+take effect. A correctly configured user will otherwise hit access-denied errors
+and reasonably conclude that their permissions were never applied. DataJoint
+does not issue `SET ROLE` on connect, so we recommend admins enable this
+variable server-side. For details, see
+[MySQL's `activate_all_roles_on_login`](https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_activate_all_roles_on_login).
+
 ### Users roles
 
 When a database is first initialized, the team should run `add_roles` to create
 the following roles:
 
-- `dj_guest`: `SELECT` on all schemas.
-- `dj_collab`: `ALL` on user schema, `SELECT` on all other schemas.
-- `dj_user`: `ALL` on shared and user schema, `SELECT` on all other schemas.
+- `dj_guest`: `SELECT`, `REFERENCES` on all schemas.
+- `dj_collab`: `ALL` on user schema, `SELECT`/`REFERENCES` on all other schemas.
+- `dj_user`: `ALL` on user schema, all privileges except `CREATE` on shared
+    schemas, `SELECT`/`REFERENCES` on all other schemas.
 - `dj_admin`: `ALL` on all schemas.
 
 If new shared modules are introduced, the `add_module` method should be used to
-expand the privileges of the `dj_user` role.
+expand the privileges of the `dj_user` role. Because that grant also withholds
+`CREATE`, an admin must declare the tables in the new module.
 
 ### Setting Passwords
 
@@ -381,8 +414,8 @@ entries. Files made orphaned by that database phase are handled on the next run.
     immediate cleanup. This age gate applies to the `*.nwb` filesystem sweep,
     not DataJoint's custom-table external cleanup later in the run.
 - **Deletion limits catch a wrong directory or large unexpected backlog**:
-    destructive cleanup refuses a plan above `max_delete_fraction` (default
-    0.9) or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
+    destructive cleanup refuses a plan above `max_delete_fraction` (default 0.9)
+    or `max_delete_to_tracked_ratio` (default 10.0). These limits apply to
     untracked or empty analysis NWB files; foreign keys continue to govern
     orphan-row deletion.
 - **Leaf symlinks reclaim cross-volume analysis storage**: an old, untracked
@@ -397,21 +430,21 @@ entries. Files made orphaned by that database phase are handled on the next run.
     concurrent filesystem or database changes. A leaf `*.nwb` symlink below
     `analysis_dir` can authorize deletion outside that directory, including
     beneath another configured store, because there is no protected-store
-    denylist. Restrict write access to the analysis tree and do not run
-    cleanup concurrently with analysis writers or registration.
+    denylist. Restrict write access to the analysis tree and do not run cleanup
+    concurrently with analysis writers or registration.
 - **Insert blocking refuses ambiguous ownership**: cleanup checks registered
     analysis tables for existing blockers before proceeding; a destructive run
     then installs temporary `BEFORE INSERT` triggers. If a blocker already
     exists, previews and destructive runs both refuse because they cannot tell
-    whether another cleanup is active or the trigger is stale. First
-    confirm that no cleanup is running; only then inspect the triggers and use
+    whether another cleanup is active or the trigger is stale. First confirm
+    that no cleanup is running; only then inspect the triggers and use
     `AnalysisRegistry().unblock_new_inserts()` if every blocking trigger is
     stale. That helper removes all registered analysis blocking triggers.
 
 **Concurrency limit**: the trigger check is not a database-wide cleanup lease,
-and triggers do not carry per-run ownership. Do not overlap cleanup runs.
-The tracked-path and filesystem snapshots can also become stale before unlink,
-so do not concurrently register or mutate eligible analysis paths.
+and triggers do not carry per-run ownership. Do not overlap cleanup runs. The
+tracked-path and filesystem snapshots can also become stale before unlink, so do
+not concurrently register or mutate eligible analysis paths.
 
 ### Custom Tables
 
