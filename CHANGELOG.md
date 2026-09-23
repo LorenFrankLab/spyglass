@@ -4,6 +4,8 @@
 
 ### Infrastructure
 
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
 - Add ingestion plans: parse an NWB file and report every problem before
     anything is written #1685
 
@@ -134,6 +136,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add pages for custom analysis tables and class inheritance structure #1435
 - Add support for bandstop filter type #1464
 - Add Interval and Populate migration guides #1615
+- Add LFP artifact detection to the LFP notebook #1641
 
 ### Infrastructure
 
