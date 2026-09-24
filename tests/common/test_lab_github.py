@@ -119,6 +119,6 @@ def test_denial_names_the_admin_action(common, lab_member):
             common.LabMember.set_github_user_name(lab_member, "octocat")
 
     message = str(err.value)
-    assert "admin-only" in message
+    assert "database admin" in message
     assert "update1" in message
     assert lab_member in message and "octocat" in message

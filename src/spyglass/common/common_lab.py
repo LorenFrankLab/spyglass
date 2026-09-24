@@ -1,5 +1,6 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
+from contextlib import contextmanager
 from typing import Dict
 
 import datajoint as dj
@@ -10,6 +11,49 @@ from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from .common_nwbfile import Nwbfile  # noqa: F401
 
 schema = dj.schema("common_lab")
+
+ADMIN_ONLY_NOTE = (
+    "If you see a permission error, this means your database admin has "
+    "restricted access to this table for data sharing security. Please send "
+    "the table edit command to your database admin for them to execute:"
+)
+
+
+@contextmanager
+def forward_to_admin(command: str):
+    """Turn a refused write into a `PermissionError` naming what to forward.
+
+    On an instance attached to a shared-storage broker, `LabMember` and
+    `LabTeam` are admin-only. They have to be: together they decide who the
+    broker believes you are and which teams you belong to, so anyone who could
+    edit them could add themselves to a team and be handed that team's files.
+
+    A denial here is policy rather than a fault, and the useful response is to
+    hand an admin the exact command — not to surface a bare MySQL error that
+    names a privilege instead of an action.
+
+    Parameters
+    ----------
+    command : str
+        The edit an admin would run, spelled as the user should send it.
+
+    Yields
+    ------
+    None
+        The wrapped write runs in this context.
+
+    Raises
+    ------
+    PermissionError
+        If the database refuses the write. A `PermissionError` raised by a
+        nested use of this helper is re-raised with the outer command, so the
+        user is told to forward the call they actually made rather than an
+        implementation detail of it.
+    """
+    try:
+        yield
+    except (dj.errors.AccessError, PermissionError) as err:
+        raise PermissionError(f"{ADMIN_ONLY_NOTE}\n\n    {command}") from err
 
 
 @schema
@@ -85,16 +129,24 @@ class LabMember(SpyglassIngestion, dj.Manual):
         ----------
         full_name : str
             The name to be added.
+
+        Raises
+        ------
+        PermissionError
+            If this account may not write `LabMember`. See
+            `forward_to_admin` for why, and what to do about it.
         """
         _, first, last = decompose_name(full_name)
-        cls.insert1(
-            dict(
-                lab_member_name=f"{first} {last}",
-                first_name=first,
-                last_name=last,
-            ),
-            skip_duplicates=True,
+        row = dict(
+            lab_member_name=f"{first} {last}",
+            first_name=first,
+            last_name=last,
         )
+
+        with forward_to_admin(
+            f"LabMember.insert1({row}, skip_duplicates=True)"
+        ):
+            cls.insert1(row, skip_duplicates=True)
 
     @classmethod
     def set_github_user_name(cls, lab_member_name: str, github_user_name: str):
@@ -166,8 +218,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
             cls.LabMemberInfo.update1(row)
         except dj.errors.AccessError as err:
             raise PermissionError(
-                "`common_lab.LabMember.LabMemberInfo` is admin-only on this "
-                + "instance. Ask an admin to run:\n\n"
+                f"{ADMIN_ONLY_NOTE}\n\n"
                 + "    LabMember.LabMemberInfo.update1(\n"
                 + f'        {{"lab_member_name": "{lab_member_name}",\n'
                 + f'         "github_user_name": "{github_user_name}"}}\n'
@@ -333,38 +384,56 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         dry_run : bool
             If True, do not insert into the database, just return the
             dictionaries that would be inserted.
+
+        Raises
+        ------
+        PermissionError
+            If this account may not write `LabTeam` or the `LabMember` rows it
+            needs. See `forward_to_admin` for why, and what to do about it.
         """
         labteam_dict = {
             "team_name": team_name,
             "team_description": team_description,
         }
 
-        member_list = []
-        for team_member in team_members:
-            if not dry_run:
-                LabMember.insert_from_name(team_member)
-            member_dict = {"lab_member_name": decompose_name(team_member)[0]}
-            query = (LabMember.LabMemberInfo() & member_dict).fetch(
-                "google_user_name"
-            )
-            query_is_empty = len(query) == 0
-            if query_is_empty and not cls()._test_mode:
-                logger.warning(
-                    "To help manage permissions in LabMemberInfo, please add "
-                    + f"Google user ID for {team_member}"
+        # One wrapper around every write this makes, including the member
+        # inserts, so a refusal names this call rather than the row it
+        # happened to reach first. That is the command to send an admin.
+        with forward_to_admin(
+            "LabTeam().create_new_team(\n"
+            + f"        team_name={team_name!r},\n"
+            + f"        team_members={team_members!r},\n"
+            + f"        team_description={team_description!r},\n"
+            + "    )"
+        ):
+            member_list = []
+            for team_member in team_members:
+                if not dry_run:
+                    LabMember.insert_from_name(team_member)
+                member_dict = {
+                    "lab_member_name": decompose_name(team_member)[0]
+                }
+                query = (LabMember.LabMemberInfo() & member_dict).fetch(
+                    "google_user_name"
                 )
-            labteammember_dict = {
-                "team_name": team_name,
-                **member_dict,
-            }
-            member_list.append(labteammember_dict)
-            # clear cache for this member
-            _ = cls._shared_teams.pop(team_member, None)
+                query_is_empty = len(query) == 0
+                if query_is_empty and not cls()._test_mode:
+                    logger.warning(
+                        "To help manage permissions in LabMemberInfo, please "
+                        + f"add Google user ID for {team_member}"
+                    )
+                labteammember_dict = {
+                    "team_name": team_name,
+                    **member_dict,
+                }
+                member_list.append(labteammember_dict)
+                # clear cache for this member
+                _ = cls._shared_teams.pop(team_member, None)
 
-        if dry_run:
-            return labteam_dict, member_list
-        cls.insert1(labteam_dict, skip_duplicates=True)
-        cls.LabTeamMember.insert(member_list, skip_duplicates=True)
+            if dry_run:
+                return labteam_dict, member_list
+            cls.insert1(labteam_dict, skip_duplicates=True)
+            cls.LabTeamMember.insert(member_list, skip_duplicates=True)
 
 
 @schema

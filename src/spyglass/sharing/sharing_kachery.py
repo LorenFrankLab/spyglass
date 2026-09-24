@@ -1,3 +1,12 @@
+"""Sharing analysis files through kachery-cloud.
+
+.. deprecated:: 0.6.1
+    Scheduled for removal in 0.7.0, one release cycle after this notice.
+    Use `spyglass.sharing.share_file` and the shared-storage broker instead;
+    see the Data Sync notebook. Existing rows are left alone — retiring the
+    schema is a database-admin task, not part of the removal.
+"""
+
 import os
 
 import datajoint as dj
@@ -35,11 +44,39 @@ except KeyError:
 schema = dj.schema("sharing_kachery")
 
 
+_DEPRECATION_ALT = "spyglass.sharing.share_file"
+_DEPRECATION_DOC = (
+    "https://lorenfranklab.github.io/spyglass/latest/notebooks/03_Data_Sync/"
+)
+
+
+def _deprecate(name: str) -> None:
+    """Record one use of a kachery entry point, and warn once per session.
+
+    Kachery is being retired in favor of the shared-storage broker. Logging
+    the call rather than only warning means the decision to remove the code
+    can be made from what is actually used, not from what is assumed unused.
+
+    Called only where kachery is present and about to do real work, so an
+    instance without it installed neither warns nor writes a row.
+
+    Parameters
+    ----------
+    name : str
+        Entry point being used, as it should appear in `ActivityLog`.
+    """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        name, alt=_DEPRECATION_ALT, doc=_DEPRECATION_DOC
+    )
+
+
 def _require_kachery():
     if not _kachery_available:
         raise ImportError(
             "kachery_cloud is not installed. Install it with:\n"
-            "  pip install spyglass-neuro[kachery-cloud]\n"
+            "  pip install spyglass-neuro[kachery-legacy]\n"
             "or remove kachery from your workflow and use the DANDI fallback "
             "in spyglass.utils.nwb_helper_fn.get_nwb_file instead."
         )
@@ -155,6 +192,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Populate with the uri of the analysis file"""
         _require_kachery()
+        _deprecate("AnalysisNwbfileKachery.make")
         analysis_file = key["analysis_file_name"]
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file)
 
@@ -195,6 +233,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
             if permit_fail:
                 return False
             _require_kachery()
+        _deprecate("AnalysisNwbfileKachery.download_file")
         fetched_list = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
         ).fetch("analysis_file_uri", "kachery_zone_name")
@@ -259,6 +298,7 @@ def share_data_to_kachery(
         Does not allow sharing of all data in table
     """
     _require_kachery()
+    _deprecate("share_data_to_kachery")
     if not zone_name:
         zone_name = config["KACHERY_ZONE"]
     kachery_selection_key = {"kachery_zone_name": zone_name}

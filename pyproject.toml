@@ -94,7 +94,14 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
+# Deprecated alias for kachery-legacy, kept so an existing install command
+# does not break during the deprecation cycle. Removed with the extra itself.
 optional-dependencies.kachery-cloud = [
+  "spyglass-neuro[kachery-legacy]",
+]
+# Deprecated in 0.6.1, removed in 0.7.0. Superseded by the shared-storage
+# broker; nothing in the default install depends on these.
+optional-dependencies.kachery-legacy = [
   "kachery",
   "kachery-client",
   "kachery-cloud>=0.4",

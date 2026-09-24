@@ -139,6 +139,15 @@ nwb_copy_file_name
 # can fetch public files only. See the
 # [Data Sync notebook](./03_Data_Sync.ipynb).
 #
+# **A note on permissions.** If any edit in this section raises a permission
+# error, this means your database admin has restricted access to this table for
+# data sharing security. `LabMember` and `LabTeam` together decide who the
+# shared-storage broker believes you are and which teams you belong to, so on
+# an instance attached to a broker they are admin-only. Please send the table
+# edit command to your database admin for them to execute. Spyglass helpers
+# such as `insert_from_name` and `create_new_team` raise a `PermissionError`
+# that includes the exact command to forward.
+#
 # We can insert lab member information using the NWB file `experimenter` field
 # as follows...
 #
@@ -436,7 +445,9 @@ sgc.Session.Experimenter.insert1(
 # session_entry.delete()
 # -
 
-# To delete, you'll need to share a team with the session experimenter.
+# To delete, you'll need to share a team with the session experimenter. These
+# are the same admin-only tables as above: if the inserts below raise a
+# permission error, send them to your database admin to execute.
 #
 
 your_name = "YourFirst YourLast"

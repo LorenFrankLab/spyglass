@@ -14,6 +14,23 @@ from spyglass.common.common_lab import LabMember
 LabMember.LabMemberInfo().alter()
 ```
 
+#### Kachery Sharing Is Deprecated
+
+Kachery sharing still works, and is removed in 0.7.0. Using it now warns once
+per session. Use the shared-storage broker instead — `share_file` replaces
+`share_data_to_kachery`, and readers need no zone, no cloud directory, and no
+kachery install.
+
+```python
+from spyglass.sharing import share_file
+
+share_file(file_name, scope="group", teams=["my_team"])
+```
+
+The `kachery-cloud` extra is now an alias for `kachery-legacy`; existing install
+commands keep working until 0.7.0. Removal will not drop the `sharing_kachery`
+schema or its rows. See the Data Sync notebook.
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -56,12 +73,19 @@ object-store credential.
     parent's visibility — the intersection where there are several, so a default
     never widens access. A derived file of unshared parents is not queued at
     all.
+- Turn a refused `LabMember` or `LabTeam` edit into a `PermissionError` naming
+    the command to send a database admin, rather than a bare MySQL denial. Both
+    tables are admin-only on a broker-attached instance, since together they
+    decide which teams a reader belongs to.
 - Add `sha256_file` to `spyglass.utils.nwb_hash`, digesting a file's raw bytes
     for the object store's checksum. `NwbfileHasher` answers a different
     question and is unchanged.
 - Add the `store_url` config key, declare `requests` and `fsspec` as direct
     dependencies, and rewrite `03_Data_Sync` for the broker workflow with a
     Kachery appendix.
+- Deprecate kachery sharing, scheduled for removal in 0.7.0. Kachery entry
+    points log to `ActivityLog` and warn once per session, and the
+    `kachery-cloud` extra becomes an alias for `kachery-legacy`.
 
 ### Pipelines
 

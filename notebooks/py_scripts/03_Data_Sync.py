@@ -108,8 +108,9 @@ sgc.LabMember.LabMemberInfo & {"lab_member_name": "Firstname Lastname"}
 #
 # ```text
 # PermissionError:
-#   `common_lab.LabMember.LabMemberInfo` is admin-only on this instance.
-#   Ask an admin to run:
+#   If you see a permission error, this means your database admin has
+#   restricted access to this table for data sharing security. Please send the
+#   table edit command to your database admin for them to execute:
 #
 #     LabMember.LabMemberInfo.update1(
 #         {"lab_member_name": "Firstname Lastname",
@@ -415,14 +416,16 @@ sgs.AnalysisFileSelection()
 # ## Appendix: Kachery (deprecated)
 #
 
-# Kachery sharing still works during the deprecation window, and is removed
-# once the shared store replaces it. New work should use the tables above.
+# Kachery sharing still works during the deprecation window, and is removed in
+# 0.7.0. New work should use the tables above. Calling a kachery entry point
+# now warns once per session and records the call, so removal can be timed
+# against real use.
 #
 # Kachery is download-only, has no streaming path, and does not support raw
 # files. It requires the optional dependency:
 #
 # ```bash
-# pip install spyglass-neuro[kachery-cloud]
+# pip install spyglass-neuro[kachery-legacy]  # was: [kachery-cloud]
 # ```
 #
 # A [Kachery Zone](https://github.com/flatironinstitute/kachery-cloud/blob/main/doc/create_kachery_zone.md)
