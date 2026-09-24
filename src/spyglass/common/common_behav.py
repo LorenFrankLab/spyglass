@@ -483,40 +483,68 @@ class VideoFile(SpyglassIngestion, dj.Imported):
     # Entries are built per epoch in the override, not per column.
     table_key_to_obj_attr = {"self": dict()}
 
-    def _epoch_intervals(self, nwb_file_name) -> dict:
-        """Return the valid times of each task epoch, fetched once per file.
+    def _epoch_intervals(self, nwb_file_name, ctx=None) -> dict:
+        """Return the valid times of each task epoch, resolved once per file.
 
         A video belongs to whichever epoch its timestamps fall inside, so
         every epoch's times are needed to place a single video.
+
+        Both `TaskEpoch` and `IntervalList` are filled by the same ingestion
+        that fills this table, and both are planned before it. Asked of the
+        context, this reads what the plan will contain; asked of the database
+        while planning a file that is not ingested, it would find no epochs and
+        place no videos at all -- reporting nothing wrong while planning
+        nothing.
 
         Parameters
         ----------
         nwb_file_name : str
             The file being ingested.
+        ctx : FileContext, optional
+            Parse context. Default None, querying the database, which is
+            correct on a plain insert where those rows are written first.
 
         Returns
         -------
         dict
             Epoch number to that epoch's Interval.
         """
-        if nwb_file_name not in self._epoch_cache:
+        if nwb_file_name in self._epoch_cache:
+            return self._epoch_cache[nwb_file_name]
+
+        restr = {"nwb_file_name": nwb_file_name}
+
+        if ctx is not None:
+            by_name = {
+                row["interval_list_name"]: row
+                for row in ctx.rows_for(IntervalList(), restr)
+            }
+            # The valid times, not the row: `Interval(dict)` treats a dict as
+            # a key and looks it up, which is the very query being avoided --
+            # for a planned row there is nothing to find.
+            self._epoch_cache[nwb_file_name] = {
+                row["epoch"]: Interval(
+                    by_name[row["interval_list_name"]]["valid_times"]
+                )
+                for row in ctx.rows_for(TaskEpoch(), restr)
+                if row.get("interval_list_name") in by_name
+            }
+        else:
             self._epoch_cache[nwb_file_name] = {
                 epoch: (
                     IntervalList
-                    & {
-                        "nwb_file_name": nwb_file_name,
-                        "interval_list_name": interval_list_name,
-                    }
+                    & dict(restr, interval_list_name=interval_list_name)
                 ).fetch_interval()
                 for epoch, interval_list_name in zip(
-                    *(TaskEpoch & {"nwb_file_name": nwb_file_name}).fetch(
-                        "epoch", "interval_list_name"
-                    )
+                    *(TaskEpoch & restr).fetch("epoch", "interval_list_name")
                 )
             }
+
         return self._epoch_cache[nwb_file_name]
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Place one video in whichever epochs its timestamps overlap.
 
         Failures are collected rather than raised, matching the previous
@@ -528,7 +556,7 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         mismatches = []  # kept only if the video places in no epoch
 
         for epoch, valid_times in self._epoch_intervals(
-            base_key["nwb_file_name"]
+            base_key["nwb_file_name"], ctx
         ).items():
             key = dict(base_key, epoch=epoch)
             try:

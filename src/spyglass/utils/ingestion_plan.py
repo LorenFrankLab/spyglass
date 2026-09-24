@@ -13,6 +13,12 @@ discouraged. `PlannedEntries` keys a table by name, so a class, an instance
 and a FreeTable resolve to one target and merging never has to guess;
 `FileContext` carries per-file state explicitly, so it cannot outlive the
 ingestion that created it.
+
+**Imports nothing from spyglass, and must not.** This is the vocabulary
+`utils.mixins.ingestion` speaks, imported there at module scope while
+`spyglass.utils` is still initializing. It therefore has to sit below every
+other spyglass module -- which is also why it lives here rather than under
+`data_import`, whose package `__init__` reaches `spyglass.common`.
 """
 
 import json
@@ -734,11 +740,67 @@ class FileContext:
     cache: dict = field(default_factory=dict)
     reads: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
+    # The keys and rows the whole plan will hold, when one is being built.
+    # None on a plain insert, where the database is authoritative because
+    # rows are written table by table as the pass proceeds.
+    key_space: Any = None
 
     @property
     def file_restr(self) -> dict:
         """Restriction selecting this file."""
         return {"nwb_file_name": self.nwb_file_name}
+
+    def rows_for(self, table, restriction: dict = None) -> tuple:
+        """Return the rows a table will hold, for a cross-reference.
+
+        Ask this rather than querying, whenever a table needs a value from
+        another table that the same ingestion fills. Querying answers for the
+        database as it is now, which during planning is a file's *past*: the
+        rows are not written yet, so a parse that queries reports a failure or
+        quietly plans something different from what the insert will do.
+
+        With a plan in progress this answers `planned | stored`. Without one --
+        a plain insert -- it queries, which is correct there because each
+        table's rows are written before the tables that depend on them parse.
+
+        Parameters
+        ----------
+        table : dj.Table
+            The table to read, instanced.
+        restriction : dict, optional
+            Attribute equalities every returned row must satisfy.
+
+        Returns
+        -------
+        tuple of dict
+        """
+        if self.key_space is not None:
+            return self.key_space.rows_for(table, restriction)
+
+        return tuple((table & (restriction or True)).fetch(as_dict=True))
+
+    def value_for(self, table, attr: str, restriction: dict = None):
+        """Return one attribute of one row a table will hold, or None.
+
+        The common shape of the lookups above: a single value, from a row this
+        file owns. None when no such row is planned or stored, which the
+        caller decides what to do about -- silently different behaviour on a
+        missing cross-reference is the failure mode this exists to prevent.
+
+        Parameters
+        ----------
+        table : dj.Table
+        attr : str
+            Attribute to read.
+        restriction : dict, optional
+
+        Returns
+        -------
+        Any or None
+        """
+        rows = self.rows_for(table, restriction)
+
+        return rows[0].get(attr) if rows else None
 
     def record_read(self, nwb_object) -> None:
         """Note that an NWB object was read while parsing.

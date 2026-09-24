@@ -63,10 +63,18 @@ class ImportedLFP(SpyglassIngestion, dj.Imported):
         }
         return series
 
-    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        """Insert entries, numbering interval names by position in the file."""
+    def before_parse(self, ctx) -> None:
+        """Clear the per-run group bookkeeping.
+
+        `_planned_groups` and `_planned_names` mean "resolved *this run*", and
+        `_plan_electrode_group` returns no entries for a group it has already
+        resolved -- correct within one pass, where the group was emitted the
+        first time. Reset here rather than in `insert_from_nwbfile`, because
+        planning never calls that: a second plan in the same process would
+        otherwise reference a group it had decided not to emit again, and the
+        report would name `LFPElectrodeGroup` as a missing parent.
+        """
         self._planned_groups, self._planned_names = dict(), set()
-        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
     def enumerated_interval_name(
         self, nwb_obj: pynwb.ecephys.ElectricalSeries

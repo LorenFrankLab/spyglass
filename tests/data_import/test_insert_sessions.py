@@ -9,7 +9,7 @@ from hdmf.backends.warnings import BrokenLinkWarning
 
 @pytest.fixture(scope="session")
 def copy_nwb_link_raw_ephys(data_import):
-    from spyglass.data_import.insert_sessions import (
+    from spyglass.data_import.insert_tools import (
         copy_nwb_link_raw_ephys,
     )  # noqa: E402
 

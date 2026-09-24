@@ -92,16 +92,35 @@ class SensorData(SpyglassIngestion, dj.Imported):
 
         return series.object_id
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Attach the raw ephys interval, which these data share."""
         super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
         self_key = super_ins[self][0]
+        nwb_file_name = self_key["nwb_file_name"]
 
-        # the valid times for these data are the same as the valid times for
-        # the raw ephys data
-        self_key["interval_list_name"] = (
-            Raw & {"nwb_file_name": self_key["nwb_file_name"]}
-        ).fetch1("interval_list_name")
+        # The valid times for these data are the same as the valid times for
+        # the raw ephys data. Asked of the context rather than of `Raw`: the
+        # same ingestion fills `Raw`, so while planning a file that row is not
+        # written yet and a query would raise here instead of reporting.
+        interval_list_name = (
+            ctx.value_for(
+                Raw(), "interval_list_name", {"nwb_file_name": nwb_file_name}
+            )
+            if ctx is not None
+            else (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
+                "interval_list_name"
+            )
+        )
+
+        if interval_list_name is None:
+            raise ValueError(
+                f"No Raw entry planned or stored for {nwb_file_name}, so "
+                + "these sensor data have no interval to share."
+            )
+
+        self_key["interval_list_name"] = interval_list_name
 
         return super_ins
 

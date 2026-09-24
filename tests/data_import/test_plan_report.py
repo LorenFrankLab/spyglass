@@ -6,7 +6,7 @@ import pytest
 @pytest.fixture
 def plan_types():
     """The plan dataclasses, which need no database."""
-    from spyglass.data_import import ingestion_plan
+    from spyglass.utils import ingestion_plan
 
     return ingestion_plan
 

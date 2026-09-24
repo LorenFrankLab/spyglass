@@ -7,10 +7,51 @@ from typing import List, Union
 import pynwb
 
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
-from spyglass.common.common_nwbfile import schema as nwbfile_schema
 from spyglass.settings import debug_mode, raw_dir, test_mode
 from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+
+def _plan_raw_file(copy_name: str, raw_path: Path):
+    """Plan an ingestion from the raw file, before anything is registered.
+
+    Reads the raw file and plans under the *copy's* name, which is what a real
+    ingestion keys its entries by. The two describe one session -- the copy
+    holds links where the raw file holds ephys data, and an NWB `object_id` is
+    the same either way -- so what is planned is what would be inserted.
+
+    Parameters
+    ----------
+    copy_name : str
+        The `_.nwb` name ingestion would register.
+    raw_path : pathlib.Path
+        The raw file to read.
+
+    Returns
+    -------
+    IngestionPlan
+        Staged and reported.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.common.populate_all_common import lab_config
+    from spyglass.data_import.planner import plan_nwbfile
+
+    logger.info(f"Planning {raw_path.name} without registering it")
+
+    with pynwb.NWBHDF5IO(
+        path=str(raw_path), mode="r", load_namespaces=True
+    ) as io:
+        plan = plan_nwbfile(
+            copy_name,
+            config=lab_config(),  # the sidecar needs a registered file
+            nwb_file=io.read(),
+            nwb_path=str(raw_path),
+        )
+
+    IngestionPlanLog().stage(plan)
+    plan.report()
+
+    return plan
 
 
 def insert_sessions(
@@ -42,12 +83,12 @@ def insert_sessions(
         the first table that raises. Default False.
 
         A dry run writes nothing at all: no `_.nwb` copy, no `Nwbfile` row,
-        and no `reinsert` delete. Planning reads the copy and the tables keyed
-        by `nwb_file_name` refer to the `Nwbfile` row for it, so a file that
-        has never been ingested reports `file_not_registered` rather than
-        being registered in order to be checked. A file already in `Nwbfile`
-        is planned where a real run would warn and skip it, since reporting on
-        an ingested file is the usual reason to ask.
+        and no `reinsert` delete. A file already in `Nwbfile` is planned from
+        its copy, where a real run would warn and skip it; a file Spyglass has
+        never seen is planned from the raw file, keyed by the `_.nwb` name
+        ingestion would give it. Either way every table is checked: the plan
+        runs tables in the order an insert would, so a table resolving a
+        reference to one this ingestion also fills sees the planned rows.
 
     Returns
     -------
@@ -63,11 +104,9 @@ def insert_sessions(
     results = []
 
     for nwb_file_name in nwb_file_names:
-        nwb_file_name = str(nwb_file_name)  # in case it's a Path object
-
-        if "/" in nwb_file_name:
-            nwb_file_name = nwb_file_name.split("/")[-1]
-
+        # Accepts a Path or a name with directories in front of it; the file
+        # always lives in the raw directory, which get_abs_path supplies.
+        nwb_file_name = Path(str(nwb_file_name)).name
         nwb_file_abs_path = Path(
             Nwbfile.get_abs_path(nwb_file_name, new_file=True)
         )
@@ -96,11 +135,19 @@ def insert_sessions(
         if dry_run:
             # None of the branches below: copying the file, registering it in
             # Nwbfile and deleting an existing session are all writes, and a
-            # dry run writes to log tables only. A file not yet registered
-            # therefore reports `file_not_registered` rather than being
-            # copied into place -- planning from a raw path is a separate
-            # piece of work.
-            results.append(populate_all_common(out_nwb_file_name, dry_run=True))
+            # dry run writes to log tables only.
+            if file_exists:
+                # Registered: plan the copy, which is what a real run reads,
+                # and whose config sidecar is reachable.
+                results.append(
+                    populate_all_common(out_nwb_file_name, dry_run=True)
+                )
+            else:
+                # Never seen: plan the raw file, so a report is available
+                # before the copy and the Nwbfile row exist.
+                results.append(
+                    _plan_raw_file(out_nwb_file_name, nwb_file_abs_path)
+                )
             continue
 
         if file_exists and not reinsert:

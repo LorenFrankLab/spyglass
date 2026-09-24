@@ -34,7 +34,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         return pynwb.behavior.BehavioralEvents
 
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> Dict["SpyglassIngestion", List[dict]]:
         """Generate entries from nwb object.
 
@@ -44,6 +44,10 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
             The NWB file object.
         base_key : dict, optional
             The base key to use for the entries, by default None
+        ctx : FileContext, optional
+            Parse context, used to resolve `Raw`'s interval against the plan as
+            well as the database. Default None, resolving against the database
+            alone -- correct on a plain insert, where `Raw` is written first.
 
         Returns
         -------
@@ -56,12 +60,27 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         if not nwb_file_name:
             raise ValueError("nwb_file_name must be provided in base_key")
 
-        # Times for these events correspond to the valid times for the raw data
-        # If no raw data found, create a default interval list named
-        # "dio data valid times"
-        interval_list_name = "dio data valid times"
-        if raw_query := (Raw() & {"nwb_file_name": nwb_file_name}):
-            interval_list_name = (raw_query).fetch1("interval_list_name")
+        # Times for these events correspond to the valid times for the raw
+        # data; with no raw data, these events get an interval of their own.
+        #
+        # Asked of the context, not of `Raw` directly: the same ingestion fills
+        # `Raw`, so while planning a file that row exists only in the plan.
+        # Querying made this branch turn on *when* the plan was built -- absent
+        # `Raw` it takes the fallback, planning a different
+        # `interval_list_name` and an extra IntervalList row than the insert
+        # would write. That is a plan disagreeing with its own insert, which is
+        # worse than either branch.
+        raw_restr = {"nwb_file_name": nwb_file_name}
+        raw_interval = (
+            ctx.value_for(Raw(), "interval_list_name", raw_restr)
+            if ctx is not None
+            else next(
+                iter((Raw() & raw_restr).fetch("interval_list_name")), None
+            )
+        )
+
+        has_raw = raw_interval is not None
+        interval_list_name = raw_interval or "dio data valid times"
 
         dio_inserts = []
         time_range_list = []
@@ -83,7 +102,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
             time_range_list.extend([timestamps[0], timestamps[-1]])
 
         interval_key = []
-        if not raw_query:
+        if not has_raw:
             interval_key.append(
                 dict(
                     nwb_file_name=nwb_file_name,

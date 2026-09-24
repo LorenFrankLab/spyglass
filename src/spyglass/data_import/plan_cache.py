@@ -16,7 +16,7 @@ from hashlib import md5
 from pathlib import Path
 from typing import Optional, Tuple
 
-from spyglass.data_import.ingestion_plan import IngestionPlan
+from spyglass.utils.ingestion_plan import IngestionPlan
 from spyglass.utils.logging import logger
 
 # Bump when a change to the plan format makes older files unreadable. A plan

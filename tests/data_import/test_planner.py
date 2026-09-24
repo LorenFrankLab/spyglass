@@ -17,7 +17,7 @@ as one problem.
 import pytest
 
 from spyglass.data_import.planner import plan_nwbfile
-from spyglass.data_import.ingestion_plan import IngestionPlan
+from spyglass.utils.ingestion_plan import IngestionPlan
 
 
 @pytest.fixture
@@ -144,7 +144,7 @@ def test_duplicate_primary_keys_within_the_plan_are_caught(
     """
 
     def _twice(self, source, ctx):
-        from spyglass.data_import.ingestion_plan import PlannedEntries
+        from spyglass.utils.ingestion_plan import PlannedEntries
 
         entries = PlannedEntries()
         row = dict(ctx.base_key, sample_count_object_id="x" * 8)
@@ -198,7 +198,7 @@ def test_verdict_reports_conflict_over_novelty(
     """An entry that exists with different values is a conflict, not new."""
 
     def _changed(self, source, ctx):
-        from spyglass.data_import.ingestion_plan import PlannedEntries
+        from spyglass.utils.ingestion_plan import PlannedEntries
 
         entries = PlannedEntries()
         entries.add(
@@ -232,7 +232,7 @@ def test_report_leads_with_the_verdict(clean_plan):
 
 def _divergence(plan_types=None):
     """One divergence problem, enough to exercise a policy."""
-    from spyglass.data_import.ingestion_plan import Problem
+    from spyglass.utils.ingestion_plan import Problem
 
     return [
         Problem(
@@ -344,7 +344,7 @@ def test_unknown_divergence_policy_is_refused(common, mini_copy_name):
     """A misspelled policy must not silently fall through to a default."""
     import pytest as _pytest
 
-    from spyglass.data_import.ingestion_plan import IngestionPlan
+    from spyglass.utils.ingestion_plan import IngestionPlan
     from spyglass.data_import.planner import insert_plan
 
     with _pytest.raises(ValueError, match="on_divergence"):
@@ -365,7 +365,7 @@ def test_rollback_is_off_by_default_and_scoped_to_a_miss(
     user never chose.
     """
     from spyglass.data_import import planner
-    from spyglass.data_import.ingestion_plan import (
+    from spyglass.utils.ingestion_plan import (
         IngestionPlan,
         PlannedEntries,
         TablePlan,

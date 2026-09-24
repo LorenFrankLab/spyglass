@@ -169,7 +169,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         plan : IngestionPlan
-            The dataclass from `spyglass.data_import.ingestion_plan`, as
+            The dataclass from `spyglass.utils.ingestion_plan`, as
             returned by `plan_nwbfile`.
 
         Returns
@@ -177,7 +177,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         dict
             The master key of the staged plan.
         """
-        from spyglass.data_import.ingestion_plan import BLOCKING
+        from spyglass.utils.ingestion_plan import BLOCKING
 
         master_key = {"nwb_file_name": plan.nwb_file_name}
         existing = self & master_key
@@ -273,7 +273,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         """
         from datajoint.hash import key_hash
 
-        from spyglass.data_import.ingestion_plan import row_key
+        from spyglass.utils.ingestion_plan import row_key
 
         master_key = {"nwb_file_name": plan.nwb_file_name}
         if not (self & master_key):  # never staged; nothing to record
@@ -357,7 +357,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
         """
         from datajoint.hash import key_hash
 
-        from spyglass.data_import.ingestion_plan import entry_digest, row_key
+        from spyglass.utils.ingestion_plan import entry_digest, row_key
 
         try:
             # DataJoint's own key hash, as JobTable uses for the same job.

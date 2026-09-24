@@ -157,6 +157,17 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the file's task tables."""
+        # Take the camera map from the file in hand, before anything can
+        # return early. `_camera_names` otherwise resolves the registered
+        # path and opens the file a second time -- a wasted read on every
+        # ingestion, and an outright failure when planning a file that has
+        # not been registered yet, which is the case this check exists for.
+        if (
+            nwb_file_name is not None
+            and nwb_file_name not in self._camera_cache
+        ):
+            self._camera_cache[nwb_file_name] = self._camera_name_map(nwb_file)
+
         tasks_mod = nwb_file.processing.get("tasks")
         task_tables = (
             [
@@ -228,32 +239,55 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
 
         return camera_names
 
-    def _session_intervals(self, nwb_file_name) -> list:
-        """Return the interval names already held for a file, fetched once.
+    def _session_intervals(self, nwb_file_name, ctx=None) -> list:
+        """Return the interval names a file will hold, resolved once.
+
+        Asked of the context where there is one: `IntervalList` is filled by
+        the same ingestion -- `Raw` and `PositionSource` both emit rows into it
+        before this table is planned -- so querying it while planning a file
+        that is not ingested yet finds nothing, and every epoch then resolves
+        to no interval and yields no row.
 
         Parameters
         ----------
         nwb_file_name : str
             The file being ingested.
+        ctx : FileContext, optional
+            Parse context. Default None, querying the database, which is
+            correct on a plain insert where those rows are written first.
 
         Returns
         -------
         list of str
-            Interval names in IntervalList for this file.
+            Interval names this file will have in IntervalList.
         """
         if nwb_file_name not in self._interval_cache:
+            restr = {"nwb_file_name": nwb_file_name}
             self._interval_cache[nwb_file_name] = (
-                IntervalList & {"nwb_file_name": nwb_file_name}
-            ).fetch("interval_list_name")
+                [
+                    row["interval_list_name"]
+                    for row in ctx.rows_for(IntervalList(), restr)
+                ]
+                if ctx is not None
+                else list((IntervalList & restr).fetch("interval_list_name"))
+            )
         return self._interval_cache[nwb_file_name]
 
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None, ctx=None
+    ):
         """Generate a Task entry and one TaskEpoch entry per epoch.
 
         Called once per row of a task table. Task is returned first: it is
         TaskEpoch's parent and has to exist before the epoch rows land.
         """
-        entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        # `ctx` forwarded: for the task table itself, super() loops the rows
+        # and calls back into this method per row. Dropping the context here
+        # would leave every per-row call resolving intervals against the
+        # database, which during planning holds none of them yet.
+        entries = super().generate_entries_from_nwb_object(
+            nwb_obj, base_key, ctx
+        )
 
         if hasattr(nwb_obj, "to_dataframe"):
             return entries  # the table itself; rows come back through here
@@ -283,11 +317,11 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                 task_key,
                 nwb_obj.task_epochs,
                 nwb_file_name,
-                self._session_intervals(nwb_file_name),
+                self._session_intervals(nwb_file_name, ctx),
             ),
         }
 
-    def generate_entries_from_config(self, config, base_key=None):
+    def generate_entries_from_config(self, config, base_key=None, ctx=None):
         """Generate entries for tasks declared in the config file.
 
         The config names tasks in its own shape. A `Tasks` list of dicts,
@@ -315,7 +349,7 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
                     task_key,
                     task.get("task_epochs", []),
                     nwb_file_name,
-                    self._session_intervals(nwb_file_name),
+                    self._session_intervals(nwb_file_name, ctx),
                 )
             )
 

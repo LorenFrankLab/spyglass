@@ -18,7 +18,7 @@ behavior; this module pins the target.
 
 import pytest
 
-from spyglass.data_import.ingestion_plan import FileContext, PlannedEntries
+from spyglass.utils.ingestion_plan import FileContext, PlannedEntries
 from spyglass.utils.mixins.helpers import HelperMixin
 
 # ---------------------------------------------------------------------------

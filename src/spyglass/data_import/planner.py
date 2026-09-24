@@ -13,7 +13,7 @@ missing object would be reported once per dependent table rather than once.
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
-from spyglass.data_import.ingestion_plan import (
+from spyglass.utils.ingestion_plan import (
     IngestionPlan,
     PlannedEntries,
     Problem,
@@ -82,6 +82,70 @@ class VirtualKeySpace:
         """Return the keys planned for a table in this pass."""
         return self._planned.get(table.full_table_name, set())
 
+    def rows_for(self, table, restriction: dict = None) -> Tuple[dict, ...]:
+        """Return the rows a table will hold once this plan is inserted.
+
+        The read side of `add_planned`, and the reason a table can resolve a
+        cross-reference while parsing without querying for rows this same
+        ingestion has yet to write. Planned rows come first and win on a shared
+        primary key: the plan is what is being described, and a disagreement
+        with a stored row is reported as a divergence rather than silently
+        resolved here.
+
+        Parameters
+        ----------
+        table : dj.Table
+            An instanced table.
+        restriction : dict, optional
+            Attribute values every returned row must match. Default None, no
+            filter. Applied to stored rows as a query and to planned rows in
+            memory, since the planned ones are not queryable.
+
+        Returns
+        -------
+        tuple of dict
+        """
+        name = table.full_table_name
+        planned = [
+            row
+            for row in self._planned_rows.get(name, {}).values()
+            if _matches(row, restriction)
+        ]
+
+        try:
+            stored = (table & (restriction or True)).fetch(as_dict=True)
+        except Exception as err:  # undeclared, or unreadable
+            logger.debug(f"Could not read rows for {name}: {err}")
+            stored = []
+
+        planned_keys = {row_key(table, row) for row in planned}
+
+        return tuple(
+            planned
+            + [row for row in stored if row_key(table, row) not in planned_keys]
+        )
+
+
+def _matches(row: dict, restriction: dict = None) -> bool:
+    """Whether a row satisfies a plain equality restriction.
+
+    Planned rows are not queryable, so the subset of DataJoint restriction
+    syntax these lookups use -- a dict of attribute equalities -- is applied
+    in memory instead.
+
+    Parameters
+    ----------
+    row : dict
+    restriction : dict, optional
+
+    Returns
+    -------
+    bool
+    """
+    if not restriction:
+        return True
+    return all(row.get(key) == value for key, value in restriction.items())
+
 
 def _as_table(target):
     """Return a plan target as a table instance.
@@ -102,6 +166,8 @@ def plan_nwbfile(
     config: dict = None,
     tables: Optional[List] = None,
     use_cache: bool = False,
+    nwb_file=None,
+    nwb_path: str = None,
 ) -> IngestionPlan:
     """Plan the ingestion of one NWB file, writing nothing.
 
@@ -129,6 +195,16 @@ def plan_nwbfile(
         Read and write the plan cache. Default False; see above for when it
         is safe. A subset of `tables` does not describe the whole file, so
         those runs are never cached.
+    nwb_file : pynwb.NWBFile, optional
+        An already-open file to plan from, for a file that has no `Nwbfile`
+        row yet. Default None, fetching the registered copy. Supplying this
+        is what lets a file be checked *before* it is ingested: the row every
+        session-keyed table refers to is then treated as part of the plan,
+        the same way a parent a table emits alongside its own rows is.
+    nwb_path : str, optional
+        Absolute path of `nwb_file`, used only for the read-set digests.
+        Default None: without it those digests are None, which reads as
+        "unknown" and never as "unchanged".
 
     Returns
     -------
@@ -139,6 +215,7 @@ def plan_nwbfile(
 
     config = config or dict()
     nwb_key = {"nwb_file_name": nwb_file_name}
+    registered = bool(Nwbfile & nwb_key)
 
     # Only a whole-file plan is cacheable: one built for some tables would be
     # served later as though it covered all of them.
@@ -152,32 +229,33 @@ def plan_nwbfile(
         if cached is not None:
             return cached
 
-    if not (query := Nwbfile & nwb_key):
-        return IngestionPlan(
-            nwb_file_name=nwb_file_name,
-            fatal=(
-                Problem(
-                    severity="fatal",
-                    code="file_not_registered",
-                    message=f"{nwb_file_name} is not in the Nwbfile table",
+    if nwb_file is None:
+        if not registered:
+            return IngestionPlan(
+                nwb_file_name=nwb_file_name,
+                fatal=(
+                    Problem(
+                        severity="fatal",
+                        code="file_not_registered",
+                        message=f"{nwb_file_name} is not in the Nwbfile table",
+                    ),
                 ),
-            ),
-        )
+            )
 
-    try:  # one open file, shared by every table
-        nwb_file = query.fetch_nwb()[0]
-    except Exception as err:
-        return IngestionPlan(
-            nwb_file_name=nwb_file_name,
-            fatal=(
-                Problem(
-                    severity="fatal",
-                    code="file_unreadable",
-                    message=str(err),
-                    exc_type=type(err).__name__,
+        try:  # one open file, shared by every table
+            nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
+        except Exception as err:
+            return IngestionPlan(
+                nwb_file_name=nwb_file_name,
+                fatal=(
+                    Problem(
+                        severity="fatal",
+                        code="file_unreadable",
+                        message=str(err),
+                        exc_type=type(err).__name__,
+                    ),
                 ),
-            ),
-        )
+            )
 
     if tables is None:
         from spyglass.common.populate_all_common import ingestion_table_list
@@ -188,9 +266,31 @@ def plan_nwbfile(
     # table's read-set can be fingerprinted without re-reading anything.
     # Roughly 14x cheaper than parsing the same file, so it earns its place
     # even when nothing turns out to be reusable.
-    hasher = _object_hasher(nwb_file_name)
+    hasher = _object_hasher(nwb_file_name, nwb_path, registered)
 
     key_space = VirtualKeySpace()
+    file_problems: List[Problem] = []
+
+    if not registered:
+        # Every table keyed by `nwb_file_name` refers to the `Nwbfile` row for
+        # it, and ingestion creates that row before it reads anything. So the
+        # plan intends it: seeding the key space is the same prospective
+        # integrity that lets a table emit its parent's rows alongside its own.
+        # Without this, checking an unregistered file reports `missing_parent`
+        # for Session and blocks every table beneath it -- a report about the
+        # absence of a row the caller was about to create.
+        key_space.add_planned(Nwbfile(), [dict(nwb_key)])
+        file_problems.append(
+            Problem(
+                severity="info",
+                code="file_will_be_registered",
+                message=(
+                    f"{nwb_file_name} is not in Nwbfile yet; planned as though "
+                    + "ingestion had registered it"
+                ),
+            )
+        )
+
     table_plans: List[TablePlan] = []
     failed_tables: set = set()
     novel: Dict[str, int] = {}
@@ -211,8 +311,14 @@ def plan_nwbfile(
             )
             continue
 
+        # The key space goes in, so a table resolving a reference to one this
+        # ingestion also fills sees the planned rows. Tables are planned in
+        # dependency order, so a parent's rows are already in it.
         plan = instance.plan_from_nwbfile(
-            nwb_file_name, config=table_config, nwb_file=nwb_file
+            nwb_file_name,
+            config=table_config,
+            nwb_file=nwb_file,
+            key_space=key_space,
         )
 
         problems = list(plan.problems)
@@ -256,6 +362,7 @@ def plan_nwbfile(
     plan = IngestionPlan(
         nwb_file_name=nwb_file_name,
         table_plans=tuple(table_plans),
+        fatal=tuple(file_problems),  # file-level, not any one table's
         novel=novel,
         nwb_hash=nwb_hash,
         config_hash=config_hash,
@@ -268,7 +375,9 @@ def plan_nwbfile(
     return plan
 
 
-def _object_hasher(nwb_file_name: str):
+def _object_hasher(
+    nwb_file_name: str, nwb_path: str = None, registered: bool = True
+):
     """Return a hasher indexing the file's objects, or None.
 
     A file that cannot be hashed is not a failure: the plan is still correct,
@@ -280,6 +389,14 @@ def _object_hasher(nwb_file_name: str):
     ----------
     nwb_file_name : str
         The copy file registered in Nwbfile.
+    nwb_path : str, optional
+        Hash this path instead of resolving the registered copy. Default
+        None, resolving it.
+    registered : bool, optional
+        Whether `nwb_file_name` has an Nwbfile row. Default True. When it has
+        none and no path was given there is nothing to hash: resolving the
+        name would raise, and a digest over the wrong file is worse than no
+        digest at all.
 
     Returns
     -------
@@ -288,10 +405,13 @@ def _object_hasher(nwb_file_name: str):
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.utils.nwb_hash import NwbfileHasher
 
+    if nwb_path is None:
+        if not registered:
+            return None
+        nwb_path = Nwbfile.get_abs_path(nwb_file_name)
+
     try:
-        return NwbfileHasher(
-            Nwbfile.get_abs_path(nwb_file_name), object_ids=True
-        )
+        return NwbfileHasher(nwb_path, object_ids=True)
     except Exception as err:  # unreadable, or a dtype the hasher chokes on
         logger.debug(f"Read-set digests unavailable for {nwb_file_name}: {err}")
         return None

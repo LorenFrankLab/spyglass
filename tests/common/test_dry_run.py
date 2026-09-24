@@ -108,7 +108,7 @@ def test_dry_run_returns_a_plan_that_reads_as_the_old_error_list(
     contract keeps working.
     """
     from spyglass.common.populate_all_common import populate_all_common
-    from spyglass.data_import.ingestion_plan import IngestionPlan
+    from spyglass.utils.ingestion_plan import IngestionPlan
 
     plan = populate_all_common(mini_copy_name, dry_run=True)
 
@@ -185,7 +185,7 @@ def test_a_real_run_is_unchanged_by_the_flag_existing(
     None, or a list of InsertError keys -- rather than a plan.
     """
     from spyglass.common.populate_all_common import populate_all_common
-    from spyglass.data_import.ingestion_plan import IngestionPlan
+    from spyglass.utils.ingestion_plan import IngestionPlan
 
     result = populate_all_common(mini_copy_name)
 
@@ -254,7 +254,7 @@ def test_insert_sessions_dry_run_plans_an_already_ingested_file(
     also suppress the report.
     """
     from spyglass.data_import import insert_sessions
-    from spyglass.data_import.ingestion_plan import IngestionPlan
+    from spyglass.utils.ingestion_plan import IngestionPlan
 
     results = insert_sessions(mini_path.name, dry_run=True)
 

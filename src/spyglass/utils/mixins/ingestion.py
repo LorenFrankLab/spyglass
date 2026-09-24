@@ -8,7 +8,7 @@ import numpy as np
 from packaging.version import Version
 from pynwb import NWBFile
 
-from spyglass.data_import.ingestion_plan import (
+from spyglass.utils.ingestion_plan import (
     FileContext,
     PlannedEntries,
     Problem,
@@ -132,8 +132,31 @@ class IngestionMixin(BaseMixin):
 
         return entries
 
+    def _generate_entries(self, nwb_obj, base_key, ctx=None):
+        """Call the generate hook, handing it `ctx` if it declares one.
+
+        The hook is overridden by most ingestion tables, and only the few that
+        resolve a reference to a table this same ingestion fills need the
+        context. Passing it conditionally keeps the rest on the two-argument
+        signature they were written with -- and passing it through *every*
+        call site, including the per-row recursion below, is what stops a
+        table's context from silently becoming None halfway down.
+        """
+        kwargs = dict()
+        if (
+            "ctx"
+            in inspect.signature(
+                self.generate_entries_from_nwb_object
+            ).parameters
+        ):
+            kwargs["ctx"] = ctx
+
+        return self.generate_entries_from_nwb_object(
+            nwb_obj, base_key, **kwargs
+        )
+
     def generate_entries_from_nwb_object(
-        self, nwb_obj, base_key=None
+        self, nwb_obj, base_key=None, ctx=None
     ) -> IngestionEntries:
         """Generates a list of table entries from an NWB object.
 
@@ -155,11 +178,10 @@ class IngestionMixin(BaseMixin):
                 # may produce part entries or a parent's entries alongside
                 # its own. First-seen order is preserved, so a subclass that
                 # yields a parent before self keeps that ordering.
-                for (
-                    table,
-                    table_entries,
-                ) in self.generate_entries_from_nwb_object(
-                    row, base_key
+                # Through `_generate_entries`, so the row-level call reaches
+                # the same override with the same context the container did.
+                for table, table_entries in self._generate_entries(
+                    row, base_key, ctx
                 ).items():
                     entries.setdefault(table, []).extend(table_entries)
             return entries
@@ -254,6 +276,7 @@ class IngestionMixin(BaseMixin):
         nwb_file_name: str,
         config: dict = None,
         nwb_file=None,
+        key_space=None,
     ) -> TablePlan:
         """Parse an NWB file into the entries this table would insert.
 
@@ -270,6 +293,12 @@ class IngestionMixin(BaseMixin):
         nwb_file : pynwb.NWBFile, optional
             An already-open file, so a caller planning many tables opens it
             once. Default None, fetching it here.
+        key_space : VirtualKeySpace, optional
+            What the whole plan will hold, for resolving a reference to a
+            table this same ingestion fills. Default None: a table planned on
+            its own resolves against the database, which is right for one
+            table and wrong for a whole file, where the rows it would look for
+            have not been written yet.
 
         Returns
         -------
@@ -304,6 +333,7 @@ class IngestionMixin(BaseMixin):
             nwb_file=nwb_file,
             config=config or dict(),
             base_key=base_entry,
+            key_space=key_space,
         )
 
         try:
@@ -437,12 +467,13 @@ class IngestionMixin(BaseMixin):
             Entries for this table, and any other table it feeds.
         """
         # Legacy path: a table overriding generate_entries_from_nwb_object
-        # still drives ingestion through it, row expansion included.
+        # still drives ingestion through it, row expansion included. An
+        # override that needs to resolve a reference to another table this
+        # ingestion fills declares a `ctx` parameter and is handed the context;
+        # the rest keep the two-argument signature they were written with.
         if self._overrides_legacy_generate:
             return PlannedEntries.from_dict(
-                self.generate_entries_from_nwb_object(
-                    source, dict(ctx.base_key)
-                )
+                self._generate_entries(source, dict(ctx.base_key), ctx)
             )
 
         if hasattr(source, "to_dataframe") and not self._single_entry_per_table:
@@ -493,8 +524,20 @@ class IngestionMixin(BaseMixin):
         """
         if not ctx.config:
             return PlannedEntries()
+
+        # As with the NWB-object hook: an override that resolves a reference to
+        # a table this ingestion also fills declares `ctx` and receives it.
+        kwargs = dict()
+        if (
+            "ctx"
+            in inspect.signature(self.generate_entries_from_config).parameters
+        ):
+            kwargs["ctx"] = ctx
+
         return PlannedEntries.from_dict(
-            self.generate_entries_from_config(ctx.config, ctx.base_key)
+            self.generate_entries_from_config(
+                ctx.config, ctx.base_key, **kwargs
+            )
         )
 
     def after_insert(self, ctx, inserted) -> None:

@@ -11,7 +11,7 @@ data table, however badly the file is malformed. Every failure becomes a
 
 import pytest
 
-from spyglass.data_import.ingestion_plan import (
+from spyglass.utils.ingestion_plan import (
     IngestionPlan,
     PlannedEntries,
     Problem,

@@ -30,16 +30,20 @@ if plan:  # truthy means something blocked
     print(plan)
 ```
 
+This works whether or not Spyglass has seen the file before. A file already in
+`Nwbfile` is planned from its `_.nwb` copy; a file it has never seen is planned
+from the **raw** file, keyed by the `_.nwb` name ingestion would give it, with
+foreign keys to `Nwbfile` resolving against the row ingestion would create.
+Either way nothing is written — no copy, no `Nwbfile` row, no data table.
+
 `populate_all_common(copy_file_name, dry_run=True)` does the same for one
 already-registered file. Both return an `IngestionPlan`.
 
-!!! note "A dry run needs the file to be registered already"
-
-    Planning reads the `_.nwb` copy, and every table keyed by `nwb_file_name` refers
-    to the `Nwbfile` row for it. Creating either would be a write, so a dry run of a
-    file Spyglass has never seen reports `file_not_registered` rather than copying
-    it into place. Ingest it normally, or dry-run it after an attempt has registered
-    it.
+Every table is checked either way. Tables are planned in the order an insert
+would run them, so one that needs a value from another table the same ingestion
+fills — `SensorData` and `DIOEvents` want `Raw`'s interval, `VideoFile` wants
+the task epochs — reads it from the plan rather than from a database that has
+not been written yet.
 
 ## Planning a file directly
 
