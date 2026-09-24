@@ -44,6 +44,15 @@ class CautiousDelete(dj.Manual):
 
 @schema
 class InsertError(dj.Manual):
+    """Ingestion failures, one row per exception. Deprecated.
+
+    Superseded by `IngestionPlanLog`, which records a whole file's problems
+    together with the entries they blocked, rather than one row per exception
+    with no memory of what was already staged. Reading is the part that has to
+    keep working, so the table stays declared with every column and `fetch`
+    warns once; a dry run records nothing here at all.
+    """
+
     definition = """
     id: int auto_increment
     ---
@@ -55,6 +64,23 @@ class InsertError(dj.Manual):
     error_message: varchar(255)
     error_raw = null: blob
     """
+
+    def _warn_deprecated(self) -> None:
+        """Say once that these rows are history, and where to look instead."""
+        ActivityLog().deprecate_log(
+            name="InsertError",
+            alt="IngestionPlanLog, which stages entries with their problems",
+        )
+
+    def fetch(self, *args, **kwargs):
+        """Fetch rows, warning once that the table is no longer written."""
+        self._warn_deprecated()
+        return super().fetch(*args, **kwargs)
+
+    def fetch1(self, *args, **kwargs):
+        """Fetch one row, warning once that the table is no longer written."""
+        self._warn_deprecated()
+        return super().fetch1(*args, **kwargs)
 
 
 @schema
@@ -76,7 +102,7 @@ class IngestionPlanLog(SpyglassMixin, dj.Manual):
     definition = """
     nwb_file_name: varchar(64)
     ---
-    verdict: varchar(16)                 # no_op|all_new|partial_new|conflict
+    verdict: varchar(16)                 # fatal|no_op|all_new|partial_new|conflict
     status = "open": enum("open", "complete")
     attempt = 1: int                     # how many times this file was planned
     nwb_hash = NULL: varchar(32)         # provenance only, never a gate

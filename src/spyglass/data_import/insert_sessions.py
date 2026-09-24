@@ -18,6 +18,7 @@ def insert_sessions(
     rollback_on_fail: bool = False,
     raise_err: bool = False,
     reinsert: bool = False,
+    dry_run: bool = False,
 ):
     """Populate the database with new sessions.
 
@@ -35,12 +36,25 @@ def insert_sessions(
     reinsert : bool, optional
         If True and the nwb file already exists in the Nwbfile table,
         reinsert the data. Default is False.
+    dry_run : bool, optional
+        If True, report what each file would insert and insert none of it.
+        Every problem in a file is reported at once, rather than stopping at
+        the first table that raises. Default False.
+
+        A dry run writes nothing at all: no `_.nwb` copy, no `Nwbfile` row,
+        and no `reinsert` delete. Planning reads the copy and the tables keyed
+        by `nwb_file_name` refer to the `Nwbfile` row for it, so a file that
+        has never been ingested reports `file_not_registered` rather than
+        being registered in order to be checked. A file already in `Nwbfile`
+        is planned where a real run would warn and skip it, since reporting on
+        an ingested file is the usual reason to ask.
 
     Returns
     -------
     list
-        One `populate_all_common` result per file processed. Files skipped
-        because they are already in the Nwbfile table contribute no entry.
+        One `populate_all_common` result per file processed -- an
+        `IngestionPlan` on a dry run. Files skipped because they are already
+        in the Nwbfile table contribute no entry, except on a dry run.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -78,6 +92,17 @@ def insert_sessions(
         # Check whether the file already exists in the Nwbfile table
         query = Nwbfile() & {"nwb_file_name": out_nwb_file_name}
         file_exists = bool(query)
+
+        if dry_run:
+            # None of the branches below: copying the file, registering it in
+            # Nwbfile and deleting an existing session are all writes, and a
+            # dry run writes to log tables only. A file not yet registered
+            # therefore reports `file_not_registered` rather than being
+            # copied into place -- planning from a raw path is a separate
+            # piece of work.
+            results.append(populate_all_common(out_nwb_file_name, dry_run=True))
+            continue
+
         if file_exists and not reinsert:
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"

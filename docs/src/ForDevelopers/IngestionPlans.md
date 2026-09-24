@@ -17,7 +17,31 @@ out every row each table would write, checks those rows for problems, and
 reports all of them together. Nothing is written, so a file with five errors
 tells you about five errors instead of the first one.
 
-## Planning a file
+## Checking a file before you ingest it
+
+Pass `dry_run=True` to either entry point. Spyglass plans the file, prints the
+report, and writes nothing to any data table:
+
+```python
+from spyglass.data_import import insert_sessions
+
+plan = insert_sessions("minirec20230622.nwb", dry_run=True)[0]
+if plan:  # truthy means something blocked
+    print(plan)
+```
+
+`populate_all_common(copy_file_name, dry_run=True)` does the same for one
+already-registered file. Both return an `IngestionPlan`.
+
+!!! note "A dry run needs the file to be registered already"
+
+    Planning reads the `_.nwb` copy, and every table keyed by `nwb_file_name` refers
+    to the `Nwbfile` row for it. Creating either would be a write, so a dry run of a
+    file Spyglass has never seen reports `file_not_registered` rather than copying
+    it into place. Ingest it normally, or dry-run it after an attempt has registered
+    it.
+
+## Planning a file directly
 
 ```python
 from spyglass.data_import.planner import plan_nwbfile
@@ -126,9 +150,10 @@ to avoid.
 
 ## Migrating from `InsertError`
 
-`InsertError` still exists and is still written, so existing queries keep
-working. It is deprecated: it records one row per exception with no memory of
-what was already staged, which is what `IngestionPlanLog` replaces.
+`InsertError` still exists and still holds the rows earlier versions wrote, so
+existing queries keep working — `fetch` warns once to say it is deprecated. It
+records one row per exception with no memory of what was already staged, which
+is what `IngestionPlanLog` replaces. A dry run records nothing there.
 
 | Instead of                              | Use                                                  |
 | --------------------------------------- | ---------------------------------------------------- |

@@ -91,6 +91,44 @@ def log_insert_error(
     )
 
 
+def _plan_only(nwb_file_name: str):
+    """Plan a file, stage the plan, report, and write no data table.
+
+    What a dry run does. The plan pass reads the database but never writes to
+    it, so every problem in the file is reported at once rather than one per
+    table that happened to fail, and nothing is half-ingested afterwards.
+    The plan is staged so a later attempt can see what this one worked out.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The copy file registered in Nwbfile.
+
+    Returns
+    -------
+    IngestionPlan
+        Falsy when nothing blocks it; printable as the report.
+    """
+    from spyglass.common.common_usage import IngestionPlanLog
+    from spyglass.data_import.planner import plan_nwbfile
+
+    # The sidecar config sits beside the file, and locating it goes through
+    # `Nwbfile.get_abs_path`, which raises for a file with no row. An
+    # unregistered file has no plan to make, so skip the lookup and let the
+    # planner report `file_not_registered` -- reporting is the whole contract
+    # here, and raising from a dry run breaks it.
+    registered = bool(Nwbfile & {"nwb_file_name": nwb_file_name})
+    config = (
+        merged_config(nwb_file_name, lab_config()) if registered else dict()
+    )
+
+    plan = plan_nwbfile(nwb_file_name, config=config)
+    IngestionPlanLog().stage(plan)
+    plan.report()
+
+    return plan
+
+
 def ingestion_table_list() -> List[dj.Table]:
     """Return every table ingested from an NWB file, parents before children.
 
@@ -155,6 +193,54 @@ def ingestion_table_list() -> List[dj.Table]:
     ]
 
 
+def lab_config() -> dict:
+    """Return the lab-wide config entries, from `entries.yaml` in base_dir.
+
+    Returns
+    -------
+    dict
+        `{TableName: [rows]}`, empty when there is no such file.
+    """
+    entries_path = Path(base_dir) / "entries.yaml"
+    if not entries_path.exists():
+        return dict()
+
+    with open(entries_path, "r") as stream:
+        # yaml.safe_load returns None for an empty file
+        return yaml.safe_load(stream) or dict()
+
+
+def merged_config(nwb_file_name: str, config: dict = None) -> dict:
+    """Return the config a file is ingested with, sidecar over defaults.
+
+    Entries may be declared in a `_spyglass_config.yaml` beside the NWB file
+    as well as in `entries.yaml`. Both share the `{TableName: [rows]}` shape
+    that `generate_entries_from_config` indexes by name, so each table is
+    handed the whole merged mapping -- a per-table lookup would yield a row
+    list. The file's own config wins: `entries.yaml` holds lab-wide defaults,
+    while the sidecar describes this session.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The file whose sidecar config to read.
+    config : dict, optional
+        Defaults the sidecar overrides. Default None, no defaults.
+
+    Returns
+    -------
+    dict
+    """
+    file_config = (
+        get_config(
+            Nwbfile.get_abs_path(nwb_file_name),
+            calling_table="populate_all_common",
+        )
+        or dict()
+    )
+    return {**(config or dict()), **file_config}
+
+
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
@@ -168,29 +254,12 @@ def single_transaction_make(
     once via `insert_from_nwbfile` rather than running `make` per key_source
     key. Failures are logged per table unless `raise_err` is set.
     """
-
-    # Entries may also be declared in a `_spyglass_config.yaml` beside the NWB
-    # file. Both configs share the {TableName: [rows]} shape that
-    # `generate_entries_from_config` indexes by name, so each table is handed
-    # the whole merged mapping -- a per-table lookup would yield a row list.
-    # The file's own config wins: `entries.yaml` holds lab-wide defaults,
-    # while the sidecar describes this session. Before this PR the sidecar was
-    # the only config any table that read one consulted.
-    # `or dict()`: yaml.safe_load returns None for an empty file, and the
-    # config argument is optional.
-    file_config = (
-        get_config(
-            Nwbfile.get_abs_path(nwb_file_name),
-            calling_table="populate_all_common",
-        )
-        or dict()
-    )
-    merged_config = {**(config or dict()), **file_config}
+    merged = merged_config(nwb_file_name, config)
 
     with Nwbfile._safe_context():
         for table in tables:
             try:
-                table().insert_from_nwbfile(nwb_file_name, config=merged_config)
+                table().insert_from_nwbfile(nwb_file_name, config=merged)
             except Exception as err:
                 if raise_err:
                     raise err
@@ -200,7 +269,7 @@ def single_transaction_make(
 
 
 def populate_all_common(
-    nwb_file_name, rollback_on_fail=False, raise_err=False
+    nwb_file_name, rollback_on_fail=False, raise_err=False, dry_run=False
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
 
@@ -217,23 +286,34 @@ def populate_all_common(
     raise_err : bool, optional
         If True, will raise any errors that occur during population.
         Defaults to False. This will prevent any rollback from occurring.
+    dry_run : bool, optional
+        If True, plan the file and return the report without inserting
+        anything. Every problem is reported at once rather than one per
+        failed table, and no data table is written — see `IngestionPlan`.
+        Default False.
 
     Returns
     -------
-    List
-        A list of keys for InsertError entries if any errors occurred.
+    IngestionPlan or List or None
+        On a dry run, the plan: falsy when nothing blocks it, iterable over
+        its blocking problems, and printable as the report. Otherwise a list
+        of keys for InsertError entries if any errors occurred.
 
     Notes
     -----
     InsertError rows logged by an earlier attempt at the same file, under the
     same user and connection, are cleared before population starts, so the
-    returned list only ever describes the current attempt.
+    returned list only ever describes the current attempt. A dry run neither
+    reads nor writes them.
     """
     from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
     _ = declare_all_merge_tables()
+
+    if dry_run:
+        return _plan_only(nwb_file_name)
 
     error_constants = dict(
         dj_user=dj.config["database.user"],
@@ -294,11 +374,7 @@ def populate_all_common(
         ],
     ]
 
-    config = dict()
-    entries_path = Path(base_dir) / "entries.yaml"
-    if entries_path.exists():
-        with open(f"{base_dir}/entries.yaml", "r") as stream:
-            config = yaml.safe_load(stream)
+    config = lab_config()
 
     for tables in table_lists:
         single_transaction_make(
