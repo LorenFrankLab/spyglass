@@ -96,48 +96,64 @@ def test_insert_sessions_resolves_the_nwbfile_foreign_key(
     assert not blocked, f"Nothing should be blocked on a good file: {blocked}"
 
 
-def test_planning_a_raw_file_matches_planning_its_copy(
-    common, unregistered_raw, mini_copy_name, mini_insert
+def test_planning_a_raw_file_resolves_every_cross_reference(
+    common, unregistered_raw
 ):
-    """The plan describes the ingestion, not the moment it was made.
+    """The F20 invariant: a reference resolves against the plan, not the DB.
 
-    The copy holds links where the raw file holds ephys data, so the two
-    describe one session, and every table must plan the same entries from
-    either -- for **every** table, with no exclusions. Tables are planned in
-    the order an insert would run them, so a table resolving a reference to
-    one this same ingestion fills sees the planned rows rather than querying
-    for rows nothing has written yet.
+    Five tables used to work out a cross-reference by querying the database
+    for rows this same ingestion creates -- SensorData and DIOEvents want
+    `Raw`'s interval, TaskEpoch and VideoFile want `IntervalList`/`TaskEpoch`,
+    ImportedLFP needs an `LFPElectrodeGroup`. On a file with none of those rows
+    yet they reported a failure, planned nothing, or planned *different* rows.
+    Each must now plan what the file describes.
 
-    Five tables used to fail this: SensorData and DIOEvents read `Raw`,
-    TaskEpoch and VideoFile read `IntervalList`/`TaskEpoch`, ImportedLFP needs
-    an `LFPElectrodeGroup`. DIOEvents was the worst of them -- absent `Raw` it
-    took a fallback branch and planned a *different* interval name, so the
-    plan disagreed with its own insert.
+    Asserted against the file's own content rather than against a plan of its
+    registered copy. Comparing the two found this bug and is a bad way to pin
+    it: the copy has database history, so its plan legitimately varies with
+    whatever else the suite did to it, and the test then fails for reasons that
+    have nothing to do with the invariant.
     """
     from spyglass.data_import import insert_sessions
-    from spyglass.data_import.planner import plan_nwbfile
 
-    from_raw = insert_sessions(unregistered_raw.name, dry_run=True)[0]
-    from_copy = plan_nwbfile(mini_copy_name)
+    plan = insert_sessions(unregistered_raw.name, dry_run=True)[0]
 
-    def counts(plan):
-        # Per (planning table, target). LFPElectrodeGroup is excluded for a
-        # reason that is not F20: a group is *shared* by any session with the
-        # same electrodes, so `plan_cautious_insert` deliberately reuses a
-        # stored one and plans no row. That is a database-state decision the
-        # design intends, not a reference resolved against the wrong source.
-        return {
-            (tp.table_name, name): len(rows)
-            for tp in plan.table_plans
-            for target, rows in tp.entries
-            if rows
-            and "l_f_p_electrode_group"
-            not in (name := getattr(target, "full_table_name", str(target)))
-        }
+    # Each table's own rows, not the parents it emits alongside them.
+    own = {
+        tp.table_name: len(rows)
+        for tp in plan.table_plans
+        for target, rows in tp.entries
+        if getattr(target, "full_table_name", None) == tp.table_name
+    }
 
-    assert counts(from_raw) == counts(
-        from_copy
-    ), "A raw file and its copy must plan the same entries, table for table"
+    for fragment, least in (
+        ("_sensor_data", 1),
+        ("_d_i_o_events", 3),
+        ("_task_epoch", 2),
+        ("_video_file", 2),
+        ("_imported_l_f_p", 1),
+    ):
+        found = next((n for name, n in own.items() if fragment in name), 0)
+        assert found >= least, (
+            f"{fragment} planned {found} rows, expected at least {least} -- "
+            + "a cross-reference resolved against the database instead of "
+            + "the plan"
+        )
+
+    # The sharpest of the five: absent `Raw`, DIOEvents used to fall back to an
+    # interval of its own, so it planned a different `interval_list_name` and
+    # an extra IntervalList row -- a plan disagreeing with its own insert.
+    dio_rows = [
+        row
+        for tp in plan.table_plans
+        for target, rows in tp.entries
+        if "_d_i_o_events" in getattr(target, "full_table_name", "")
+        for row in rows
+    ]
+    assert dio_rows, "Premise: the file has DIO events"
+    assert {row["interval_list_name"] for row in dio_rows} == {
+        "raw data valid times"
+    }, "DIOEvents must take Raw's planned interval, not its own fallback"
 
 
 def test_planning_a_raw_file_leaves_no_table_unchecked(

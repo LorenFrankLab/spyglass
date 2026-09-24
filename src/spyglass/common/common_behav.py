@@ -607,13 +607,21 @@ class VideoFile(SpyglassIngestion, dj.Imported):
 
         return {self: entries}
 
-    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        """Ingest, then report on any videos that could not be placed."""
+    def before_parse(self, ctx) -> None:
+        """Clear the per-file bookkeeping, for planning as well as inserting.
+
+        `before_parse` rather than `insert_from_nwbfile`: both paths run
+        `_parse`, only one runs `insert_from_nwbfile`. Reset there and a second
+        *plan* in the same process reuses the epoch map from the first, which
+        is a map of a database state that has since moved.
+        """
         self._epoch_cache = dict()
         self._failed_videos = defaultdict(list)
         self._video_count = 0
         self._placed_videos = 0
 
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Ingest, then report on any videos that could not be placed."""
         entries = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
         if not self._video_count:

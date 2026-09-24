@@ -151,9 +151,23 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         not reload it. Kept on `self` only because `get_nwb_objects` and
         `_camera_name_map` take no config argument.
         """
-        self._camera_cache, self._interval_cache = dict(), dict()
         self._file_config = config or dict()
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
+
+    def before_parse(self, ctx) -> None:
+        """Clear the per-file lookups, for planning as well as inserting.
+
+        `before_parse` rather than `insert_from_nwbfile`: both paths run
+        `_parse`, only one runs `insert_from_nwbfile`. The interval cache in
+        particular is a snapshot of what the plan and database held at the time
+        it was built, so carrying it into a second plan answers the new run's
+        questions with the old run's answers.
+        """
+        self._camera_cache, self._interval_cache = dict(), dict()
+        # From the context, which carries the config this run was given. The
+        # plan path never calls `insert_from_nwbfile`, so `get_nwb_objects` was
+        # otherwise reading whichever config the last insert happened to leave.
+        self._file_config = ctx.config or dict()
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Return the file's task tables."""

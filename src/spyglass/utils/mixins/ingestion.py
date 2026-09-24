@@ -61,13 +61,16 @@ class IngestionMixin(BaseMixin):
     Ingestion runs once per file, and a table may cache file-level state on
     itself while it runs -- a camera map, an epoch lookup, an enumerator.
     Such state is the table's own, and **the table is responsible for
-    resetting it when a new file is passed**, at the top of its
-    `insert_from_nwbfile` (or wherever it first sees the new file). Two
-    reasons this is not optional: a class-level `dict()` or counter is shared
-    by every instance, so mutating it writes through to the class; and
-    `populate` loops files on a single instance, so nothing else will clear
-    it between files. Names cannot collide across tables -- each is a separate
-    class -- so a table need only answer for its own.
+    resetting it in `before_parse`**. Three reasons this is not optional: a
+    class-level `dict()` or counter is shared by every instance, so mutating it
+    writes through to the class; `populate` loops files on a single instance,
+    so nothing else will clear it between files; and **planning and inserting
+    share `_parse` but not `insert_from_nwbfile`**, so a reset placed in the
+    latter never runs for a plan. Three tables reset there and each carried a
+    previous run's answers into the next -- `VideoFile`'s epoch map,
+    `TaskEpoch`'s interval cache, `ImportedLFP`'s planned group names. Names
+    cannot collide across tables -- each is a separate class -- so a table need
+    only answer for its own.
     """
 
     _expected_duplicates = False  # If True, rows to be shared across sessions

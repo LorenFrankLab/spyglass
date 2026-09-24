@@ -550,7 +550,20 @@ def _refuse(
         logger.error(plan.report(log=False))
         return plan
 
-    if (blocking := plan.blocking) and not allow_partial:
+    # An accepted divergence no longer blocks. A divergence is recorded as
+    # `hard` because it stops an *unattended* run, but the policy above is
+    # exactly the decision that resolves it: the caller said to keep the stored
+    # value and insert the rest. Leaving it in `blocking` made the gate below
+    # refuse a run the caller had just approved, so `accept` and `raise`
+    # differed only in what they logged -- contradicting D7 and this function's
+    # own docstring. Other `hard` problems are untouched.
+    blocking = tuple(
+        problem
+        for problem in plan.blocking
+        if not (divergences and problem.code == "divergence")
+    )
+
+    if blocking and not allow_partial:
         logger.error(
             f"{plan.nwb_file_name}: {len(blocking)} blocking problems, "
             + "nothing inserted. Fix them, or pass allow_partial=True."

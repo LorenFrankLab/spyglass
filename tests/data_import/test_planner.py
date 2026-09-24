@@ -402,3 +402,110 @@ def test_rollback_is_off_by_default_and_scoped_to_a_miss(
 
     planner.insert_plan(plan, on_divergence="accept", rollback_on_miss=True)
     assert rolled == [mini_copy_name], "Asked for, it rolls back that file"
+
+
+def test_accepting_a_divergence_lets_the_run_proceed(
+    common, mini_copy_name, monkeypatch
+):
+    """`accept` must actually insert the rest, not just log differently.
+
+    A divergence is recorded as `hard` because it stops an unattended run. But
+    `on_divergence` is the decision that resolves it: "keep the stored value
+    and insert the rest" (D7). Those problems were left in `plan.blocking`, so
+    the gate refused a run the caller had just approved -- `accept` and `raise`
+    reached the same outcome and differed only in their log lines.
+
+    Pinned on the gate rather than on a whole ingestion: `_refuse` returning
+    None is what "go on and insert" means.
+    """
+    from spyglass.data_import import planner
+    from spyglass.utils.ingestion_plan import (
+        IngestionPlan,
+        PlannedEntries,
+        Problem,
+        TablePlan,
+    )
+
+    entries = PlannedEntries()
+    entries.add(common.Institution, [{"institution_name": "_divergence test"}])
+    plan = IngestionPlan(
+        nwb_file_name=mini_copy_name,
+        novel={"`common_lab`.`institution`": 1},
+        table_plans=(
+            TablePlan(
+                table_name="`common_lab`.`institution`",
+                entries=entries,
+                problems=(
+                    Problem(
+                        severity="hard",
+                        code="divergence",
+                        message="stored with different values",
+                        table="`common_lab`.`institution`",
+                        suggested_revision={"institution_name": "other"},
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert plan.blocking, "Premise: a divergence blocks until it is resolved"
+
+    assert (
+        planner._refuse(plan, allow_partial=False, on_divergence="accept")
+        is None
+    ), "accept resolves the divergence, so the run proceeds"
+
+    assert (
+        planner._refuse(plan, allow_partial=False, on_divergence="raise")
+        is not None
+    ), "raise still declines, and the two must not be the same outcome"
+
+
+def test_accepting_a_divergence_does_not_excuse_other_failures(
+    common, mini_copy_name
+):
+    """Only the divergence is resolved; a real failure still blocks.
+
+    The narrow reading matters: `accept` answers one question, and must not
+    become a way to insert a file with a missing parent or an unset required
+    column.
+    """
+    from spyglass.data_import import planner
+    from spyglass.utils.ingestion_plan import (
+        IngestionPlan,
+        PlannedEntries,
+        Problem,
+        TablePlan,
+    )
+
+    entries = PlannedEntries()
+    entries.add(common.Institution, [{"institution_name": "_mixed test"}])
+    plan = IngestionPlan(
+        nwb_file_name=mini_copy_name,
+        novel={"`common_lab`.`institution`": 1},
+        table_plans=(
+            TablePlan(
+                table_name="`common_lab`.`institution`",
+                entries=entries,
+                problems=(
+                    Problem(
+                        severity="hard",
+                        code="divergence",
+                        message="stored with different values",
+                        table="`common_lab`.`institution`",
+                    ),
+                    Problem(
+                        severity="hard",
+                        code="missing_parent",
+                        message="no such parent row",
+                        table="`common_lab`.`institution`",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert (
+        planner._refuse(plan, allow_partial=False, on_divergence="accept")
+        is not None
+    ), "A missing parent still blocks, whatever was decided about divergence"
