@@ -1,26 +1,16 @@
 """Declare which files are shared through the shared-storage broker.
 
-Parallel to `sharing_kachery` so the migration off kachery is legible: a
-selection table names what should be shared, a computed table records what
-actually was, and `populate()` is the transfer.
+A selection table names what should be shared, a computed table records what
+actually was. Raw and analysis are separate pairs, because `Nwbfile` and
+`AnalysisNwbfile` have separate primary keys.
 
-The split that kachery does not have is raw versus analysis. They are separate
-DataJoint tables — `Nwbfile` and `AnalysisNwbfile` — with separate primary
-keys, so one selection table cannot reference both. The broker keeps the same
-distinction in `file_class`, which is what its policies key on.
-
-Two things are worth being precise about.
-
-**Declaring a share is a database insert; nothing crosses the network until
-`populate()`.** That is what makes a failed upload a retry rather than a
-recovery: the declaration survives, and re-running populate picks up where it
-stopped.
+**Declaring a share is a database insert; `populate()` is the transfer** —
+unless `sg_config.store_auto_upload` is set. Either way a failed upload leaves
+the declaration to retry.
 
 **Nothing here decides who may read anything.** These tables record what the
-owner *declared*. The broker verifies ownership, resolves teams against
-`LabTeam`, and enforces the result. A row in `Visibility` is a request, not a
-grant — which is why `update_visibility` relays the change to the broker
-rather than trusting the local row.
+owner declared; the broker verifies ownership and enforces the result. Hence
+`update_visibility` relays to the broker rather than trusting the local row.
 """
 
 from typing import List, Optional
@@ -137,7 +127,7 @@ class SharedFileSelection(SpyglassMixin, dj.Manual):
     # Raw NWB files declared for sharing through the broker
     -> Nwbfile
     ---
-    scope = 'private': enum('private', 'group', 'public')
+    scope = 'public': enum('private', 'group', 'public') # Public by default
     """
 
     class Team(SpyglassMixin, dj.Part):
@@ -160,7 +150,8 @@ class AnalysisFileSelection(SpyglassMixin, dj.Manual):
     # Analysis NWB files declared for sharing through the broker
     -> AnalysisNwbfile
     ---
-    scope = 'private': enum('private', 'group', 'public')
+    scope = 'public': enum('private', 'group', 'public') # Public by default
+    inherited = 0: bool # Written by inheritance
     """
 
     class Team(SpyglassMixin, dj.Part):
@@ -168,6 +159,14 @@ class AnalysisFileSelection(SpyglassMixin, dj.Manual):
         # Teams that may read this file, when scope is 'group'
         -> master
         -> LabTeam
+        """
+
+    class Parent(SpyglassMixin, dj.Part):
+        definition = """
+        # Files this declaration was inherited from
+        -> master
+        parent_name: varchar(64)
+        file_class: enum('raw', 'analysis')
         """
 
     _file_class = "analysis"
@@ -268,7 +267,8 @@ class _UploadMixin(_SharedFile):
         Returns
         -------
         tuple
-            `(file_id, sha256, deduplicated)`, passed on to `make_insert`.
+            `(file_id, sha256, deduplicated, content_md5)`, passed on to
+            `make_insert`.
 
         Raises
         ------
@@ -276,7 +276,7 @@ class _UploadMixin(_SharedFile):
             If no broker is configured.
         """
         from spyglass.sharing.store_client import get_client
-        from spyglass.utils.nwb_hash import sha256_file
+        from spyglass.utils.nwb_hash import digest_file
 
         client = get_client()
 
@@ -286,7 +286,9 @@ class _UploadMixin(_SharedFile):
                 + "dj_local_conf.json before populating."
             )
 
-        digest = sha256_file(path, show_progress=True)
+        digests = digest_file(
+            path, algorithms=client.upload_digests(), show_progress=True
+        )
 
         result = client.upload(
             path,
@@ -294,16 +296,18 @@ class _UploadMixin(_SharedFile):
             file_class=self._file_class,
             scope=scope,
             teams=teams,
-            sha256=digest,
+            sha256=digests["sha256"],
+            content_md5=digests.get("md5"),
         )
 
         return (
             result["file_id"],
-            digest,
+            digests["sha256"],
             bool(result.get("deduplicated")),
+            digests.get("md5"),
         )
 
-    def make_insert(self, key, file_id, digest, deduplicated):
+    def make_insert(self, key, file_id, digest, deduplicated, content_md5):
         """Record what the broker accepted.
 
         Parameters
@@ -316,6 +320,10 @@ class _UploadMixin(_SharedFile):
             SHA-256 of the file's bytes.
         deduplicated : bool
             True if the object was already stored by someone.
+        content_md5 : str
+            MD5 declared to the broker. Recorded so a later audit need not
+            re-read every file; see the column comment for what it does and
+            does not attest.
         """
         self.insert1(
             {
@@ -323,6 +331,7 @@ class _UploadMixin(_SharedFile):
                 "file_id": file_id,
                 "sha256": digest,
                 "deduplicated": deduplicated,
+                "content_md5": content_md5,
             }
         )
 
@@ -335,6 +344,9 @@ class _UploadMixin(_SharedFile):
         read a file cannot widen access to it. The local declaration is
         updated only after the broker accepts the change, so the tables never
         claim a visibility the broker did not apply.
+
+        Re-scoping a raw follows into the derivatives that inherited from it;
+        see `_resync_inherited`.
 
         Parameters
         ----------
@@ -365,9 +377,8 @@ class _UploadMixin(_SharedFile):
 
         teams = list(teams or []) if scope == "group" else []
 
-        # Checked before the broker call, because a name the local foreign key
-        # rejects would otherwise fail *after* the broker had already applied
-        # the change, leaving the two disagreeing about who can read.
+        # Before the broker call: a name the local FK rejects would other-
+        # wise fail after the broker had already applied the change.
         unknown = set(teams) - set(LabTeam.fetch("team_name"))
         if unknown:
             raise ValueError(
@@ -380,11 +391,8 @@ class _UploadMixin(_SharedFile):
 
         get_client().set_visibility(file_id, scope=scope, teams=teams)
 
-        # Only now is the declaration true. Writing it first would leave the
-        # tables claiming a visibility a refused request never applied. The
-        # two writes are one transaction so a failure between them cannot
-        # leave a 'group' row naming no team, which `_declared_visibility`
-        # refuses and no later populate could get past.
+        # Only now is the declaration true. One transaction, so a failure
+        # cannot leave a 'group' row naming no team.
         with self.connection.transaction:
             self._selection.update1({**selection_key, "scope": scope})
             (self._selection.Team & selection_key).delete_quick()
@@ -393,6 +401,90 @@ class _UploadMixin(_SharedFile):
             )
 
         logger.info(f"{self.file_name(selection_key)} is now {scope}.")
+
+        self._resync_inherited(selection_key)
+
+    def _resync_inherited(self, key: dict) -> None:
+        """Re-derive the derivatives that inherited from this raw.
+
+        Inheritance copies a parent's scope at registration, so a raw
+        re-scoped afterward leaves them at the old audience. Narrows or
+        widens; skips rows the user scoped by hand, which `inherited` marks.
+
+        Never raises — the raw's own change is already applied.
+
+        Parameters
+        ----------
+        key : dict
+            Selection key of the raw file whose visibility just changed.
+        """
+        if self._file_class != "raw":
+            return
+
+        derived = AnalysisFileSelection & {"inherited": 1}
+        derived &= AnalysisNwbfile & {"nwb_file_name": key[self._name_attr]}
+
+        for name in derived.fetch("analysis_file_name"):
+            self._rederive(name)
+
+    def _rederive(self, analysis_file_name: str) -> None:
+        """Recompute one derivative's visibility from its recorded parents.
+
+        Its parents, not the raw alone: one that named `share_parents` is as
+        narrow as the narrowest of them.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The derived file to re-derive.
+        """
+        key = {"analysis_file_name": analysis_file_name}
+        parents = AnalysisFileSelection.Parent & key
+
+        if not parents:  # declared before parents were recorded
+            logger.warning(
+                f"{analysis_file_name} inherited its visibility before "
+                + "parents were recorded, so it cannot be re-derived. Set it "
+                + "with `update_visibility`, or redeclare it."
+            )
+            return
+
+        by_class = {
+            kind: list((parents & {"file_class": kind}).fetch("parent_name"))
+            for kind in ("raw", "analysis")
+        }
+        inherited = inherited_visibility(
+            raw_files=by_class["raw"], analysis_files=by_class["analysis"]
+        )
+
+        if inherited is None:  # a parent is no longer declared at all
+            return
+
+        scope, teams = inherited
+        current = declared_visibility(analysis_file_name, "analysis")
+
+        if current is None or (scope, set(teams)) == current:
+            return
+
+        try:
+            if SharedAnalysisFile & key:  # uploaded, so the Broker must agree
+                SharedAnalysisFile().update_visibility(
+                    key, scope=scope, teams=teams
+                )
+            else:  # not uploaded; the next populate carries the new scope
+                with self.connection.transaction:
+                    AnalysisFileSelection.update1({**key, "scope": scope})
+                    (AnalysisFileSelection.Team & key).delete_quick()
+                    AnalysisFileSelection.Team.insert(
+                        [{**key, "team_name": t} for t in teams]
+                    )
+                logger.info(f"{analysis_file_name} is now {scope}.")
+        except Exception as err:  # noqa: BLE001 - see _resync_inherited
+            logger.warning(
+                f"Could not re-scope {analysis_file_name} to {scope}: {err}. "
+                + "It still carries its parent's previous visibility; an "
+                + "owner of it can run `update_visibility` by hand."
+            )
 
 
 @schema
@@ -406,6 +498,7 @@ class SharedFile(SpyglassMixin, _UploadMixin, dj.Computed):
     file_id: varchar(64)       # the broker's id for this registration
     sha256: char(64)           # digest of the file's bytes
     deduplicated = 0: bool     # the object was already stored by someone
+    content_md5 = null: char(32)  # declared, NOT proof the bytes were checked
     """
 
     _file_class = "raw"
@@ -425,6 +518,7 @@ class SharedAnalysisFile(SpyglassMixin, _UploadMixin, dj.Computed):
     file_id: varchar(64)       # the broker's id for this registration
     sha256: char(64)           # digest of the file's bytes
     deduplicated = 0: bool     # the object was already stored by someone
+    content_md5 = null: char(32)  # declared, NOT proof the bytes were checked
     """
 
     _file_class = "analysis"
@@ -527,8 +621,9 @@ def queue_inherited_share(
     """Declare a derived file at its parents' visibility.
 
     Queuing only. The row is a database insert; `SharedAnalysisFile.populate()`
-    is what transfers the bytes, so a derived file never uploads itself as a
-    side effect of being created.
+    is what transfers the bytes. Uploading as a side effect of creation is
+    `AnalysisNwbfileBuilder`'s business, under `sg_config.store_auto_upload`,
+    and it drives it from the return value below.
 
     Does nothing when no parent was ever shared. That is the whole safety
     property: a default that queued anything would be a default that widened
@@ -560,8 +655,18 @@ def queue_inherited_share(
 
     scope, teams = inherited
 
-    AnalysisFileSelection.insert1({**key, "scope": scope})
+    AnalysisFileSelection.insert1({**key, "scope": scope, "inherited": 1})
     AnalysisFileSelection.Team.insert([{**key, "team_name": t} for t in teams])
+    AnalysisFileSelection.Parent.insert(
+        [
+            {**key, "parent_name": name, "file_class": kind}
+            for names, kind in (
+                (raw_files, "raw"),
+                (analysis_files, "analysis"),
+            )
+            for name in names
+        ]
+    )
 
     logger.info(
         f"Queued {analysis_file_name} for sharing as {scope}"
@@ -574,7 +679,7 @@ def queue_inherited_share(
 
 def share_file(
     file_name: str,
-    scope: str = "private",
+    scope: str = "public",
     teams: Optional[List[str]] = None,
     file_class: str = "analysis",
     populate: bool = True,
@@ -589,7 +694,9 @@ def share_file(
     file_name : str
         Spyglass file name.
     scope : str, optional
-        "private", "group", or "public".
+        "private", "group", or "public". Defaults to "public", matching the
+        selection tables: declaring a share is an explicit act, and the point
+        of it is to be read. Pass "private" or "group" to narrow.
     teams : list of str, optional
         `LabTeam` names. Required when `scope` is "group".
     file_class : str, optional

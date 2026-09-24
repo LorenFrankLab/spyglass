@@ -59,6 +59,30 @@ In `dj_local_conf.json`, for a machine that is always on a slow link:
 }
 ```
 
+That is the instance-wide default. A single backend can override it under
+`custom.backends`, keyed by the backend's `name`:
+
+```json
+{
+  "custom": {
+    "prefer_download": false,
+    "backends": {
+      "dandi": {
+        "prefer_download": true
+      },
+      "store": {
+        "url": "https://store.example.org",
+        "auto_upload": false
+      }
+    }
+  }
+}
+```
+
+`will_stream` asks `sg_config.backend_prefers_download(name)` for this. Names
+match case-insensitively, so `dandi` finds `DandiBackend`; a backend with no
+block takes the default.
+
 Or for one session, where the same user is fast on the lab network and slow from
 a laptop:
 
@@ -68,9 +92,8 @@ from spyglass.settings import sg_config
 sg_config.prefer_download = True
 ```
 
-`sg_config.save_dj_config()` persists it like any other custom key. There is no
-environment variable; the two forms above cover the durable and the one-off
-case. Read the value live as `sg_config.prefer_download` — a module-level name
+`sg_config.save_dj_config()` persists it like any other custom key; there is no
+environment variable. Read it live as `sg_config.prefer_download`, since a name
 captured at import would not see the session setter.
 
 The setting changes how a file is fetched, not which backend supplies it. Chain
@@ -78,11 +101,10 @@ order is unaffected, so a file already on disk is still read from disk. A
 backend that can only stream streams anyway: serving the file matters more than
 honoring a performance preference.
 
-One more case overrides the preference. DANDI publishes a raw session as
-`X.nwb`, while Spyglass tracks the link copy `X_.nwb`; the two are different
-files. Writing the DANDI bytes to the tracked path would leave a file that fails
-the DataJoint filepath checksum on every later fetch, so a match found only
-under the raw name is streamed regardless of the setting.
+One case overrides the preference. DANDI publishes a raw session as `X.nwb`
+while Spyglass tracks the link copy `X_.nwb`, so writing DANDI's bytes to the
+tracked path fails the DataJoint filepath checksum on every later fetch. A match
+found only under the raw name is always streamed.
 
 !!! note
 

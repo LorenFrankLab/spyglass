@@ -1354,7 +1354,12 @@ def create_database_config(
             "debug_mode": False,
             "test_mode": False,
             "prefer_download": False,
-            "store_url": "",
+            "backends": {
+                "store": {
+                    "url": "",
+                    "auto_upload": False,
+                },
+            },
             "kachery_zone": "franklab.default",
             "spyglass_dirs": {
                 "base": str(base_dir),

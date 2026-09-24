@@ -53,9 +53,8 @@ _DEPRECATION_DOC = (
 def _deprecate(name: str) -> None:
     """Record one use of a kachery entry point, and warn once per session.
 
-    Kachery is being retired in favor of the shared-storage broker. Logging
-    the call rather than only warning means the decision to remove the code
-    can be made from what is actually used, not from what is assumed unused.
+    Logging the call rather than only warning means removal can be timed
+    against real use.
 
     Called only where kachery is present and about to do real work, so an
     instance without it installed neither warns nor writes a row.

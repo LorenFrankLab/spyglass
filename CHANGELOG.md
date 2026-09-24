@@ -14,23 +14,6 @@ from spyglass.common.common_lab import LabMember
 LabMember.LabMemberInfo().alter()
 ```
 
-#### Kachery Sharing Is Deprecated
-
-Kachery sharing still works, and is removed in 0.7.0. Using it now warns once
-per session. Use the shared-storage broker instead — `share_file` replaces
-`share_data_to_kachery`, and readers need no zone, no cloud directory, and no
-kachery install.
-
-```python
-from spyglass.sharing import share_file
-
-share_file(file_name, scope="group", teams=["my_team"])
-```
-
-The `kachery-cloud` extra is now an alias for `kachery-legacy`; existing install
-commands keep working until 0.7.0. Removal will not drop the `sharing_kachery`
-schema or its rows. See the Data Sync notebook.
-
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -44,59 +27,18 @@ schema or its rows. See the Data Sync notebook.
     #1662
 - Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
 - Add `prefer_download` custom config for stream-capable backends #1662
-
-#### Shared-Storage Broker
-
-Client half of sharing NWB files through a self-hosted broker, which decides who
-may read a file and issues short-lived signed URLs. No Spyglass code holds an
-object-store credential.
-
-- Add `github_user_name` to `LabMember.LabMemberInfo`, linking a lab member to a
-    GitHub identity. Defaults to `null`; a member without one is an unaffiliated
-    reader who can fetch public files only. On a broker-attached instance this
-    table is admin-only, so `LabMember.set_github_user_name()` turns the
-    resulting denial into a `PermissionError` naming the update an admin should
-    run.
-- Add `spyglass.sharing.store_client`, a client for the broker's versioned HTTP
-    API, with GitHub device-flow login (no browser callback, so it works over
-    SSH and in containers) and a `0600` token cache keyed by broker URL. New
-    `spyglass-store` console script for `login` / `logout` / `status`.
-- Add `StoreBackend` to the resolution chain, after `LocalBackend` and before
-    `KacheryBackend`. Streams over range requests against the broker's stable
-    content URL, so a large read outlives any single signature; honors
-    `prefer_download`.
-- Add `spyglass.sharing.sharing_store`, with separate selection tables for raw
-    and analysis files and a part table naming `LabTeam`s for group visibility.
-    Declaring a share is a database insert; `populate()` is the transfer, so a
-    failed upload is a retry rather than a recovery.
-- `AnalysisFileBuilder` queues a sharing row at registration, inheriting the
-    parent's visibility — the intersection where there are several, so a default
-    never widens access. A derived file of unshared parents is not queued at
-    all.
-- Turn a refused `LabMember` or `LabTeam` edit into a `PermissionError` naming
-    the command to send a database admin, rather than a bare MySQL denial. Both
-    tables are admin-only on a broker-attached instance, since together they
-    decide which teams a reader belongs to.
-- Add `sha256_file` to `spyglass.utils.nwb_hash`, digesting a file's raw bytes
-    for the object store's checksum. `NwbfileHasher` answers a different
-    question and is unchanged.
-- Add the `store_url` config key, declare `requests` and `fsspec` as direct
-    dependencies, and rewrite `03_Data_Sync` for the broker workflow with a
-    Kachery appendix.
-- Deprecate kachery sharing, scheduled for removal in 0.7.0. Kachery entry
-    points log to `ActivityLog` and warn once per session, and the
-    `kachery-cloud` extra becomes an alias for `kachery-legacy`.
+- Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
+    #1686
+- Expand `custom` config to specify per-backend data store behavior #1686
+- Deprecate kachery sharing, removed in 0.7.0 #1686
 
 ### Pipelines
 
 - Spike Sorting
 
     - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
-        comparison that skipped hash verification on recompute. A recompute that
-        does not match the stored hash now deletes the new files and raises. Rows
-        written before this have a null hash; a recompute of one warns and is
-        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
-        #1662
+        comparison that skipped hash verification on recompute. Backfill null
+        hashes with `SpikeSortingRecording().update_ids()` #1662
 
 ## [0.6.0] (Sep 1st 2026)
 

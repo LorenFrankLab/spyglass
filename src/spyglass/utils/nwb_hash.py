@@ -3,7 +3,7 @@ import json
 from functools import cached_property
 from hashlib import md5, sha256
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Iterable, Union
 
 import h5py
 import numpy as np
@@ -39,6 +39,83 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     }
 
 
+DIGESTS = {"sha256": sha256, "md5": md5}
+#: What to compute when the broker cannot say which it enforces.
+UPLOAD_DIGESTS = ("sha256", "md5")
+
+
+def digest_file(
+    file_path: Union[str, Path],
+    algorithms: Iterable[str] = ("sha256",),
+    chunk_size: int = SHA256_CHUNK_SIZE,
+    show_progress: bool = False,
+) -> Dict[str, str]:
+    """Return the requested digests of a file's raw bytes, in one read.
+
+    Digests the raw bytes, unlike `NwbfileHasher`, which digests HDF5 datasets
+    and ignores parts carrying no scientific content.
+
+    Computes only what is asked for, since each digest over a multi-gigabyte
+    file is expensive; `StoreClient.upload_digests` says which the broker's
+    store enforces. Several digests share one read.
+
+    Parameters
+    ----------
+    file_path : Union[str, Path]
+        Path to any file. Not NWB-specific.
+    algorithms : iterable of str, optional
+        Names from `DIGESTS`. Defaults to SHA-256, the object store's address
+        for the file.
+    chunk_size : int, optional
+        Bytes read per iteration. Much larger than `DEFAULT_BATCH_SIZE`, which
+        sizes reads of individual datasets rather than whole files.
+    show_progress : bool, optional
+        Display a progress bar. Off by default.
+
+    Returns
+    -------
+    dict
+        Algorithm name to hex digest, for each requested.
+
+    Raises
+    ------
+    ValueError
+        If an algorithm is not one this supports.
+    """
+    path = Path(file_path)
+    unknown = set(algorithms) - set(DIGESTS)
+
+    if unknown:
+        raise ValueError(
+            f"Unknown digest(s): {', '.join(sorted(unknown))}. "
+            + f"Pick from {', '.join(DIGESTS)}."
+        )
+
+    hashers = {name: DIGESTS[name]() for name in algorithms}
+
+    def _consume(chunk, bar=None):
+        for hasher in hashers.values():
+            hasher.update(chunk)
+        if bar is not None:
+            bar.update(len(chunk))
+
+    with path.open("rb") as f:
+        if show_progress:
+            with tqdm(
+                total=path.stat().st_size,
+                unit="B",
+                unit_scale=True,
+                desc=f"hashing {path.name}",
+            ) as bar:
+                for chunk in iter(lambda: f.read(chunk_size), b""):
+                    _consume(chunk, bar)
+        else:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                _consume(chunk)
+
+    return {name: hasher.hexdigest() for name, hasher in hashers.items()}
+
+
 def sha256_file(
     file_path: Union[str, Path],
     chunk_size: int = SHA256_CHUNK_SIZE,
@@ -46,53 +123,26 @@ def sha256_file(
 ) -> str:
     """Return the SHA-256 hex digest of a file's raw bytes.
 
-    This answers a different question than `NwbfileHasher`, which digests HDF5
-    datasets with md5 and deliberately ignores parts of the file that carry no
-    scientific content. That makes it the right tool for "did recompute
-    reproduce this file" and the wrong one here: the shared-storage object
-    store verifies the checksum of the bytes it receives, so the client cannot
-    offer an approximation of them.
-
-    Two files with identical bytes produce identical digests, which is what
-    lets the store deduplicate them to one object.
+    A wrapper over `digest_file`. Callers wanting both digests should use that
+    directly rather than reading the file twice.
 
     Parameters
     ----------
     file_path : Union[str, Path]
         Path to any file. Not NWB-specific.
     chunk_size : int, optional
-        Bytes read per iteration. The default is much larger than
-        `DEFAULT_BATCH_SIZE` because this walks whole multi-gigabyte files
-        rather than individual datasets.
+        Bytes read per iteration.
     show_progress : bool, optional
-        Display a progress bar. Off by default, so the digest is quiet when
-        called as part of a larger operation.
+        Display a progress bar.
 
     Returns
     -------
     str
         64-character lowercase hex digest.
     """
-    path = Path(file_path)
-    hasher = sha256()
-
-    with path.open("rb") as f:
-        if not show_progress:
-            for chunk in iter(lambda: f.read(chunk_size), b""):
-                hasher.update(chunk)
-            return hasher.hexdigest()
-
-        with tqdm(
-            total=path.stat().st_size,
-            unit="B",
-            unit_scale=True,
-            desc=f"sha256 {path.name}",
-        ) as bar:
-            for chunk in iter(lambda: f.read(chunk_size), b""):
-                hasher.update(chunk)
-                bar.update(len(chunk))
-
-    return hasher.hexdigest()
+    return digest_file(file_path, ("sha256",), chunk_size, show_progress)[
+        "sha256"
+    ]
 
 
 class DirectoryHasher:

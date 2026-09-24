@@ -34,6 +34,33 @@ def _clean_store_url(value) -> str:
     return str(value).strip().rstrip("/") if value else ""
 
 
+def _normalize_backends(value) -> dict:
+    """Lower-case the backend names in a `custom.backends` block.
+
+    `FileBackend.name` is not consistently cased (`DandiBackend` is "Dandi"),
+    and this block is written by hand, so lookups match lower-cased.
+
+    Parameters
+    ----------
+    value : dict or None
+        The `backends` block, as the config file supplied it.
+
+    Returns
+    -------
+    dict
+        Backend name (lower-cased) to its settings dict. Malformed entries
+        are dropped rather than raising.
+    """
+    if not isinstance(value, dict):
+        return {}
+
+    return {
+        str(name).lower(): dict(settings)
+        for name, settings in value.items()
+        if isinstance(settings, dict)
+    }
+
+
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
 
@@ -121,6 +148,11 @@ class SpyglassConfig:
         _store_url (str)
             Base URL of the shared-storage broker, or "" when this instance is
             not attached to one.
+        _store_auto_upload (bool)
+            True if declaring a derived file for sharing should also upload it.
+        _backends (dict)
+            Per-backend settings from `custom.backends`, keyed by lower-cased
+            backend name.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
@@ -143,6 +175,9 @@ class SpyglassConfig:
         # case, and the shared-store backend reads it as "I hold nothing"
         # rather than as an error.
         self._store_url = ""
+        self._store_auto_upload = False
+        # Per-backend overrides; a backend with no block takes the default.
+        self._backends = {}
         self._dlc_base = None
         # Initialized here, not only in load_config's COMMIT phase: a load
         # that fails or returns early (e.g. no base under an ambient test
@@ -287,6 +322,7 @@ class SpyglassConfig:
         dj_kachery = dj_custom.get("kachery_dirs", {})
         dj_dlc = dj_custom.get("dlc_dirs", {})
         dj_moseq = dj_custom.get("moseq_dirs", {})
+        dj_backends = _normalize_backends(dj_custom.get("backends", {}))
 
         test_mode, test_mode_is_bound = self._resolve_test_mode(
             kwargs.get("test_mode", _UNSET), dj_custom
@@ -305,7 +341,9 @@ class SpyglassConfig:
 
         debug_mode = _resolve_debug_mode()
         prefer_download = str_to_bool(dj_custom.get("prefer_download", False))
-        store_url = _clean_store_url(dj_custom.get("store_url", ""))
+        dj_store = dj_backends.get("store", {})
+        store_url = _clean_store_url(dj_store.get("url", ""))
+        store_auto_upload = str_to_bool(dj_store.get("auto_upload", False))
 
         # Until a deliberate test-mode load commits, keep the object visibly
         # failed. A successful commit below resets this flag. Same-mode reloads
@@ -458,6 +496,8 @@ class SpyglassConfig:
         self._debug_mode = debug_mode
         self._prefer_download = prefer_download
         self._store_url = store_url
+        self._store_auto_upload = store_auto_upload
+        self._backends = dj_backends
         self._dlc_base = dlc_base
         self._moseq_base = moseq_base
 
@@ -477,6 +517,8 @@ class SpyglassConfig:
             test_mode=self.test_mode,
             prefer_download=self._prefer_download,
             store_url=self._store_url,
+            store_auto_upload=self._store_auto_upload,
+            backends=self._backends,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -726,8 +768,17 @@ class SpyglassConfig:
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
                 "test_mode": str(self.test_mode).lower(),
+                # The instance-wide default, which any backend may override in
+                # its own block below.
                 "prefer_download": str(self._prefer_download).lower(),
-                "store_url": self._store_url,
+                "backends": {
+                    **self._backends,
+                    "store": {
+                        **self._backends.get("store", {}),
+                        "url": self._store_url,
+                        "auto_upload": str(self._store_auto_upload).lower(),
+                    },
+                },
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -839,12 +890,117 @@ class SpyglassConfig:
     def prefer_download(self) -> bool:
         """Returns True if whole-file download is preferred over streaming.
 
-        Streaming backends honor this by fetching the file to local disk and
-        reading the copy. Backends that cannot download ignore it. Useful on
-        slow or metered connections, where many small range requests cost more
-        than one sequential transfer.
+        The instance-wide default. Streaming backends honor it by fetching the
+        file to local disk and reading the copy; backends that cannot download
+        ignore it. Useful on slow or metered connections.
+
+        A single backend can override it — see `backend_prefers_download`,
+        which is what `FileBackend.will_stream` asks.
         """
         return self._prefer_download
+
+    @property
+    def backends(self) -> dict:
+        """Per-backend settings, keyed by lower-cased backend name.
+
+        A copy, so a caller cannot edit the loaded config in place. Backends
+        absent from `custom.backends` are absent here too; every reader is
+        expected to supply its own default.
+        """
+        return {name: dict(opts) for name, opts in self._backends.items()}
+
+    def backend_option(self, backend: str, key: str, default=None):
+        """Return one setting for one backend, or `default`.
+
+        Lookup is case-insensitive, because backend `name` attributes are not
+        consistently cased and the config is written by hand.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name, as `FileBackend.name` spells it.
+        key : str
+            Setting within that backend's block.
+        default : Any, optional
+            Returned when the backend has no block, or no such key in it.
+
+        Returns
+        -------
+        Any
+            The configured value, or `default`.
+        """
+        self.load_config()
+
+        return self._backends.get(str(backend).lower(), {}).get(key, default)
+
+    def backend_prefers_download(self, backend: str) -> bool:
+        """Return True if this backend should download rather than stream.
+
+        The backend's own `prefer_download`, falling back to the instance-wide
+        setting. The tradeoff is per-link: a lab fast to its own broker may be
+        slow to DANDI.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name, as `FileBackend.name` spells it.
+
+        Returns
+        -------
+        bool
+            Whether a whole-file transfer is preferred for this backend.
+        """
+        return str_to_bool(
+            self.backend_option(
+                backend, "prefer_download", self._prefer_download
+            )
+        )
+
+    def set_backend_option(self, backend: str, key: str, value) -> None:
+        """Set one backend's setting for this session, and persist it.
+
+        The one path that writes `custom.backends`. Writing to `dj.config` is
+        what makes a reload or a `save_dj_config` keep the value.
+
+        `_config` is only touched once a load has succeeded: a non-empty
+        `_config` is the cache sentinel, so seeding it after a failed load
+        would make every later `load_config` return early.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name. Stored lower-cased.
+        key : str
+            Setting within that backend's block.
+        value : Any
+            The already-normalized value to store.
+        """
+        name = str(backend).lower()
+
+        backends = dj.config.setdefault("custom", {}).setdefault("backends", {})
+        backends.setdefault(name, {})[key] = value
+
+        self._backends.setdefault(name, {})[key] = value
+
+        if self._config:
+            self._config["backends"] = self.backends
+
+    def _write_custom_key(self, key: str, value) -> None:
+        """Write one top-level `custom` setting through to `dj.config`.
+
+        See `set_backend_option` for why `_config` waits on a successful load.
+
+        Parameters
+        ----------
+        key : str
+            Key under `custom` in `dj.config`.
+        value : bool or str
+            The already-normalized value to store.
+        """
+        dj.config.setdefault("custom", {})[key] = value
+
+        if self._config:
+            self._config[key] = value
 
     @prefer_download.setter
     def prefer_download(self, value) -> None:
@@ -854,22 +1010,10 @@ class SpyglassConfig:
         ----------
         value : bool or str
             Accepts the same string forms as other boolean settings.
-
-        Notes
-        -----
-        The value is written to `dj.config` as well as the instance, so that a
-        reload or a `save_dj_config` keeps it. `_config` is only touched once a
-        load has succeeded: a non-empty `_config` is the cache sentinel, and
-        seeding it after a failed load would make every later `load_config`
-        return early with no directories resolved.
         """
         self.load_config()
         self._prefer_download = str_to_bool(value)
-
-        custom = dj.config.setdefault("custom", {})
-        custom["prefer_download"] = self._prefer_download
-        if self._config:
-            self._config["prefer_download"] = self._prefer_download
+        self._write_custom_key("prefer_download", self._prefer_download)
 
     @property
     def store_url(self) -> str:
@@ -890,22 +1034,40 @@ class SpyglassConfig:
         value : str or None
             Base URL, e.g. ``https://store.example.org``. A trailing slash is
             dropped. None or "" detaches from the broker.
-
-        Notes
-        -----
-        Written to `dj.config` as well as the instance, so a reload or a
-        `save_dj_config` keeps it. `_config` is only touched once a load has
-        succeeded: a non-empty `_config` is the cache sentinel, and seeding it
-        after a failed load would make every later `load_config` return early
-        with no directories resolved.
         """
         self.load_config()
         self._store_url = _clean_store_url(value)
+        self.set_backend_option("store", "url", self._store_url)
 
-        custom = dj.config.setdefault("custom", {})
-        custom["store_url"] = self._store_url
         if self._config:
             self._config["store_url"] = self._store_url
+
+    @property
+    def store_auto_upload(self) -> bool:
+        """True if declaring a derived file for sharing should also upload it.
+
+        Off by default, and meant for a shared compute host, where a pipeline
+        writes analysis files and nobody runs `SharedAnalysisFile.populate()`.
+        Leave it off where declaring a share should stay instant.
+        """
+        return self._store_auto_upload
+
+    @store_auto_upload.setter
+    def store_auto_upload(self, value) -> None:
+        """Set whether declaring a derived share also transfers it.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings, because
+            this is typed into `dj_local_conf.json` by hand.
+        """
+        self.load_config()
+        self._store_auto_upload = str_to_bool(value)
+        self.set_backend_option("store", "auto_upload", self._store_auto_upload)
+
+        if self._config:
+            self._config["store_auto_upload"] = self._store_auto_upload
 
     @property
     def dlc_project_dir(self) -> str:

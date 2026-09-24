@@ -24,13 +24,11 @@ def forward_to_admin(command: str):
     """Turn a refused write into a `PermissionError` naming what to forward.
 
     On an instance attached to a shared-storage broker, `LabMember` and
-    `LabTeam` are admin-only. They have to be: together they decide who the
-    broker believes you are and which teams you belong to, so anyone who could
-    edit them could add themselves to a team and be handed that team's files.
+    `LabTeam` are admin-only: together they decide who the broker believes you
+    are and which teams you belong to.
 
-    A denial here is policy rather than a fault, and the useful response is to
-    hand an admin the exact command — not to surface a bare MySQL error that
-    names a privilege instead of an action.
+    A denial here is policy rather than a fault, so the error hands an admin
+    the exact command rather than a bare MySQL privilege error.
 
     Parameters
     ----------

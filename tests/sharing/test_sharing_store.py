@@ -40,6 +40,8 @@ def fake_client():
         calls=calls,
         upload=_upload,
         set_visibility=_set_visibility,
+        # What a broker on a store that ignores the sha256 header asks for.
+        upload_digests=lambda: ["md5", "sha256"],
     )
 
     with patch("spyglass.sharing.store_client.get_client", return_value=client):
@@ -480,3 +482,446 @@ def test_an_upload_makes_the_name_resolvable_by_hash(
     recorded = (store.SharedFile & declared).fetch1("sha256")
 
     assert StoreBackend()._known_hash(declared["nwb_file_name"]) == recorded
+
+
+# ----------------------------- auto upload ------------------------------
+
+
+@pytest.fixture
+def auto_upload():
+    """Turn on transfer-as-you-declare for one test, then restore it."""
+    from spyglass.settings import sg_config
+
+    prior = sg_config.store_auto_upload
+    sg_config.store_auto_upload = True
+
+    yield
+
+    sg_config.store_auto_upload = prior
+
+
+def test_auto_upload_is_off_by_default(
+    store, declared, build_analysis, broker_configured, fake_client
+):
+    """The declaration is still queued, but no bytes leave the host."""
+    analysis = build_analysis()
+
+    assert store.AnalysisFileSelection & {"analysis_file_name": analysis}
+    assert fake_client.calls == [], "Registered a file and uploaded it"
+
+
+def test_auto_upload_transfers_on_creation(
+    store, declared, build_analysis, broker_configured, auto_upload, fake_client
+):
+    """With the flag set, registering a derivative also transfers it."""
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    kinds = [call[0] for call in fake_client.calls]
+
+    assert kinds == ["upload"], f"Expected one upload, got {kinds}"
+    assert (store.SharedAnalysisFile & key).fetch1("file_id") == "f1"
+
+
+def test_auto_upload_transfers_only_the_new_file(
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    auto_upload,
+    fake_client,
+    mini_copy_name,
+    common,
+):
+    """A bare populate() would drain every declaration on the instance."""
+    with common.AnalysisNwbfile().build(mini_copy_name) as builder:
+        bystander = builder.analysis_file_name
+
+    other = {"analysis_file_name": bystander}
+    path = Path(common.AnalysisNwbfile.get_abs_path(bystander))
+
+    try:
+        fake_client.calls.clear()  # the bystander's own auto upload
+        (store.SharedAnalysisFile & other).delete(
+            safemode=False, force_permission=True
+        )
+
+        build_analysis()
+
+        assert len(fake_client.calls) == 1, "Uploaded more than the new file"
+    finally:
+        (store.AnalysisFileSelection & other).delete(
+            safemode=False, force_permission=True
+        )
+        (common.AnalysisNwbfile & other).delete(
+            safemode=False, force_permission=True
+        )
+        path.unlink(missing_ok=True)
+
+
+def test_a_failed_auto_upload_leaves_the_analysis_intact(
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    auto_upload,
+    fake_client,
+    caplog,
+    common,
+):
+    """A network blip must cost a retry, not hours of compute.
+
+    The analysis file is finished by the time the upload is attempted.
+    """
+
+    def _boom(path, **kwargs):
+        raise RuntimeError("connection reset")
+
+    fake_client.upload = _boom
+
+    analysis = build_analysis()  # must not raise
+    key = {"analysis_file_name": analysis}
+
+    assert store.AnalysisFileSelection & key, "Lost the declaration"
+    assert common.AnalysisNwbfile & key, "Lost the analysis file"
+    assert not (store.SharedAnalysisFile & key), "Recorded a failed upload"
+    assert "connection reset" in caplog.text
+    assert "Could not upload" in caplog.text, "Warning blamed the wrong half"
+
+
+def test_auto_upload_does_nothing_without_a_shared_parent(
+    store, build_analysis, broker_configured, auto_upload, fake_client
+):
+    """Nothing inherited means nothing sent."""
+    analysis = build_analysis()
+
+    assert not (store.AnalysisFileSelection & {"analysis_file_name": analysis})
+    assert fake_client.calls == []
+
+
+def test_auto_upload_does_nothing_without_a_broker(
+    mini_copy_name, common, auto_upload, fake_client
+):
+    """The flag does not override the no-broker early return."""
+    from spyglass.settings import sg_config
+
+    prior = sg_config.store_url
+    sg_config.store_url = ""
+
+    with patch(
+        "spyglass.sharing.sharing_store.queue_inherited_share"
+    ) as queued:
+        try:
+            with common.AnalysisNwbfile().build(mini_copy_name) as builder:
+                analysis = builder.analysis_file_name
+        finally:
+            sg_config.store_url = prior
+
+    try:
+        queued.assert_not_called()
+        assert fake_client.calls == []
+    finally:
+        (common.AnalysisNwbfile & {"analysis_file_name": analysis}).delete(
+            safemode=False, force_permission=True
+        )
+
+
+# --------------------------- default visibility -------------------------
+
+
+def test_a_share_declared_without_a_scope_is_public(store, mini_copy_name):
+    """The schema exists to share data; a default nobody can read does not."""
+    key = {"nwb_file_name": mini_copy_name}
+    store.SharedFileSelection.insert1(key)
+
+    try:
+        assert (store.SharedFileSelection & key).fetch1("scope") == "public"
+    finally:
+        (store.SharedFileSelection & key).delete(
+            safemode=False, force_permission=True
+        )
+
+
+def test_the_public_default_never_reaches_inheritance(store):
+    """A derived file takes its parents' scopes, never the column default.
+
+    One file has one scope; this list is one entry per parent.
+    """
+    parent_scopes = ["private", "public"]  # a private raw, a public analysis
+
+    assert store.most_restrictive(parent_scopes) == "private"
+    assert store.most_restrictive([]) == "private", "No parents is not public"
+
+    with patch.object(store, "declared_visibility", return_value=None):
+        assert store.inherited_visibility(raw_files=["never_shared"]) is None
+
+
+# ------------------------- inherited re-sync ----------------------------
+
+
+@pytest.fixture
+def team_names(common):
+    """Two LabTeams to scope shares to, removed afterward."""
+    names = ["Resync Alpha", "Resync Beta"]
+
+    for name in names:
+        common.LabTeam.insert1({"team_name": name}, skip_duplicates=True)
+
+    yield names
+
+    for name in names:
+        (common.LabTeam & {"team_name": name}).delete(
+            safemode=False, force_permission=True
+        )
+
+
+def test_narrowing_a_raw_narrows_its_derivatives(
+    store, declared, build_analysis, broker_configured, fake_client, team_names
+):
+    """A raw re-scoped after registration must not leave derivatives behind."""
+    alpha, _ = team_names
+    store.SharedFileSelection.update1({**declared, "scope": "group"})
+    store.SharedFileSelection.Team.insert1({**declared, "team_name": alpha})
+
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "group"
+
+    store.SharedFile.populate(declared)
+    store.SharedFile().update_visibility(declared, scope="private")
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+    assert not (store.AnalysisFileSelection.Team & key)
+
+
+def test_widening_a_raw_widens_its_derivatives(
+    store, declared, build_analysis, broker_configured, fake_client
+):
+    """A raw opened up carries its derivatives with it."""
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+
+    store.SharedFile.populate(declared)
+    store.SharedFile().update_visibility(declared, scope="public")
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+
+
+def test_widening_stops_at_another_parents_restriction(
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    fake_client,
+    common,
+    mini_copy_name,
+):
+    """Re-derivation reads every recorded parent, not just the raw."""
+    # A hand-declared private analysis file for the derivative to also
+    # inherit from. `inherited = 0` is what makes it a choice rather than
+    # another row the cascade re-derives — were it inherited from this same
+    # raw, widening it along with everything else would be correct.
+    with common.AnalysisNwbfile().build(mini_copy_name) as builder:
+        upstream = builder.analysis_file_name
+
+    up_key = {"analysis_file_name": upstream}
+    store.AnalysisFileSelection.update1({**up_key, "scope": "private"})
+    store.AnalysisFileSelection.update1({**up_key, "inherited": 0})
+
+    with common.AnalysisNwbfile().build(
+        mini_copy_name, share_parents=[upstream]
+    ) as builder:
+        derived = builder.analysis_file_name
+
+    key = {"analysis_file_name": derived}
+    path = Path(common.AnalysisNwbfile.get_abs_path(derived))
+    up_path = Path(common.AnalysisNwbfile.get_abs_path(upstream))
+
+    try:
+        assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+
+        store.SharedFile.populate(declared)
+        store.SharedFile().update_visibility(declared, scope="public")
+
+        assert (store.AnalysisFileSelection & key).fetch1(
+            "scope"
+        ) == "private", "Widened past the analysis parent"
+    finally:
+        for k, p in ((key, path), (up_key, up_path)):
+            (store.AnalysisFileSelection & k).delete(
+                safemode=False, force_permission=True
+            )
+            (common.AnalysisNwbfile & k).delete(
+                safemode=False, force_permission=True
+            )
+            p.unlink(missing_ok=True)
+
+
+def test_a_hand_declared_derivative_is_left_alone(
+    store, declared, build_analysis, broker_configured, fake_client
+):
+    """A scope the user chose is a choice, not a default to re-derive."""
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    # What a hand declaration looks like: inherited stays 0.
+    store.AnalysisFileSelection.update1({**key, "inherited": 0})
+    store.AnalysisFileSelection.update1({**key, "scope": "public"})
+
+    store.SharedFile.populate(declared)
+    store.SharedFile().update_visibility(declared, scope="private")
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+
+
+def test_a_refused_narrowing_warns_and_keeps_going(
+    store, declared, build_analysis, broker_configured, fake_client, caplog
+):
+    """A refusal names the file and moves on, rather than failing the call."""
+    # The derivative must start wider than where the raw is headed, or there
+    # is nothing to narrow and no relay to refuse.
+    store.SharedFileSelection.update1({**declared, "scope": "public"})
+
+    analysis = build_analysis()
+    key = {"analysis_file_name": analysis}
+
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+
+    store.SharedFile.populate(declared)
+    store.SharedAnalysisFile.populate(key)
+
+    # The refusal lands on the derivative's relay, not the raw's own.
+    refused = RuntimeError("This identity does not own the file.")
+
+    with patch.object(
+        store.SharedAnalysisFile, "update_visibility", side_effect=refused
+    ):
+        store.SharedFile().update_visibility(declared, scope="private")
+
+    assert (store.SharedFileSelection & declared).fetch1("scope") == "private"
+    assert "Could not re-scope" in caplog.text
+    assert analysis in caplog.text
+
+
+# ------------------------------ checksums -------------------------------
+
+
+@pytest.mark.parametrize(
+    "algorithms", [("sha256",), ("md5",), ("sha256", "md5")]
+)
+def test_the_file_is_read_once(tmp_path, algorithms):
+    """However many digests are asked for, the read happens once."""
+    from spyglass.utils import nwb_hash
+
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(b"spyglass" * 4096)
+
+    opens = []
+    real_open = Path.open
+
+    def _counting_open(self, *args, **kwargs):
+        opens.append(self)
+        return real_open(self, *args, **kwargs)
+
+    with patch.object(Path, "open", _counting_open):
+        digests = nwb_hash.digest_file(target, algorithms=algorithms)
+
+    assert opens == [target], f"Read the file {len(opens)} times"
+    assert set(digests) == set(algorithms)
+
+
+def test_the_digests_match_hashlib(tmp_path):
+    """Both, against hashlib on the same bytes.
+
+    A chunking mistake is invisible to a self-consistent implementation.
+    """
+    import hashlib
+
+    from spyglass.utils import nwb_hash
+
+    payload = b"".join(bytes([i % 256]) for i in range(70000))
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    # A chunk size that does not divide the payload evenly.
+    digests = nwb_hash.digest_file(
+        target, algorithms=("sha256", "md5"), chunk_size=4096
+    )
+
+    assert digests["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert digests["md5"] == hashlib.md5(payload).hexdigest()
+
+
+def test_sha256_file_still_returns_a_string(tmp_path):
+    """The wrapper keeps its documented contract."""
+    import hashlib
+
+    from spyglass.utils.nwb_hash import sha256_file
+
+    payload = b"unchanged"
+    target = tmp_path / "bytes.bin"
+    target.write_bytes(payload)
+
+    assert sha256_file(target) == hashlib.sha256(payload).hexdigest()
+
+
+def test_upload_sends_the_md5(store, declared, fake_client):
+    """The digest reaches the broker, where it is signed into the URL."""
+    store.SharedFile.populate(declared)
+
+    _, _, kwargs = fake_client.calls[0]
+
+    assert len(kwargs["content_md5"]) == 32
+    assert len(kwargs["sha256"]) == 64
+
+
+def test_a_deduplicated_upload_still_records_what_it_declared(
+    store, declared, fake_client
+):
+    """Recorded even when no bytes moved, and not to be read as verified."""
+
+    def _dedup(path, **kwargs):
+        fake_client.calls.append(("upload", path, kwargs))
+        return {"file_id": "f1", "deduplicated": True}
+
+    fake_client.upload = _dedup
+    store.SharedFile.populate(declared)
+
+    row = (store.SharedFile & declared).fetch1()
+
+    assert row["deduplicated"] == 1
+    assert row["content_md5"] and len(row["content_md5"]) == 32
+
+    comment = store.SharedFile.heading.attributes["content_md5"].comment
+    assert (
+        "NOT proof" in comment
+    ), f"Column comment reassures wrongly: {comment}"
+
+
+def test_only_the_requested_digests_are_computed(
+    store, declared, fake_client, monkeypatch
+):
+    """A broker whose store verifies sha256 must not cost an extra digest."""
+    from spyglass.utils import nwb_hash
+
+    fake_client.upload_digests = lambda: ["sha256"]
+    asked = []
+
+    real = nwb_hash.digest_file
+
+    def _record(path, algorithms=("sha256",), **kwargs):
+        asked.append(sorted(algorithms))
+        return real(path, algorithms=algorithms, **kwargs)
+
+    monkeypatch.setattr(nwb_hash, "digest_file", _record)
+    store.SharedFile.populate(declared)
+
+    assert asked == [["sha256"]], f"Computed {asked}"
+
+    _, _, kwargs = fake_client.calls[0]
+
+    assert kwargs["content_md5"] is None
+    assert (store.SharedFile & declared).fetch1("content_md5") is None

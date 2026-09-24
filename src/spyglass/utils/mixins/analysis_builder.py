@@ -80,6 +80,7 @@ class AnalysisFileBuilder:
             file is declared at the narrowest scope any parent declared. Pass
             these when a result draws on analysis files beyond
             `nwb_file_name`, so it cannot be shared more widely than they are.
+            See `_queue_inherited_share`.
         """
         self._table = analysis_table
         self.nwb_file_name = nwb_file_name
@@ -246,45 +247,64 @@ class AnalysisFileBuilder:
     def _queue_inherited_share(self):
         """Declare this file for sharing at its parents' visibility.
 
-        A derived file should reach the same people its sources reached,
-        without the user being asked again. Queuing is a database insert;
-        `SharedAnalysisFile.populate()` is what uploads, so registering a file
-        never transfers bytes as a side effect.
+        A derived file reaches the same people its sources reached, without
+        the user being asked again. Queuing is a database insert;
+        `SharedAnalysisFile.populate()` is what uploads — unless
+        `sg_config.store_auto_upload` is set, which transfers it here too.
 
-        Does nothing when no parent was declared shared, which is the common
-        case and the safe one. No default here may widen access.
+        Does nothing when no parent was declared shared, so nothing queued
+        means nothing uploaded.
 
         Returns before importing anything when no broker is configured.
-        Importing `sharing_store` *declares* its schema, and an instance that
-        will never share a file should not grow four tables as a side effect
-        of writing an analysis file.
+        Importing `sharing_store` declares its schema, which an instance that
+        will never share a file should not grow.
 
-        Never raises. A share that could not be queued is a share the user can
-        declare by hand; failing registration over it would destroy an
-        analysis file that is otherwise complete and correct. It does warn,
-        though: this branch is only reached on an instance whose owner
-        configured a broker, so silence would leave them wondering why
-        nothing is ever queued.
+        Never raises. Failing registration would destroy an analysis file that
+        is otherwise complete; the declaration survives for a later
+        `populate()`. Warns, naming which half failed.
         """
         from spyglass.settings import sg_config
 
         if not sg_config.store_url:
             return
 
-        try:
-            from spyglass.sharing.sharing_store import queue_inherited_share
+        action = "queue"  # which half the warning below should name
 
-            queue_inherited_share(
+        try:
+            from spyglass.sharing.sharing_store import (
+                SharedAnalysisFile,
+                queue_inherited_share,
+            )
+
+            queued = queue_inherited_share(
                 self.analysis_file_name,
                 raw_files=[self.nwb_file_name],
                 analysis_files=self.share_parents,
             )
+
+            if queued is None or not sg_config.store_auto_upload:
+                return
+
+            action = "upload"
+
+            # Restricted to this file: a bare populate() would drain every
+            # outstanding declaration on the instance. reserve_jobs keeps two
+            # pipelines on one host from both uploading it.
+            SharedAnalysisFile.populate(
+                {"analysis_file_name": self.analysis_file_name},
+                reserve_jobs=True,
+            )
         except Exception as err:  # noqa: BLE001 - see docstring
-            logger.warning(
-                f"Could not queue {self.analysis_file_name} for sharing: "
+            message = (
+                f"Could not upload {self.analysis_file_name} to the shared "
+                + f"store: {err}. The declaration stands; run "
+                + "`SharedAnalysisFile.populate()` to retry."
+                if action == "upload"
+                else f"Could not queue {self.analysis_file_name} for sharing: "
                 + f"{err}. Declare it by hand with "
                 + "`spyglass.sharing.share_file` if it should be shared."
             )
+            logger.warning(message)
 
     def close_and_write(self):
         """Close open NWB file and write changes to disk.

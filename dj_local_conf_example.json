@@ -32,7 +32,12 @@
     "debug_mode": "false",
     "test_mode": "false",
     "prefer_download": "false",
-    "store_url": "",
+    "backends": {
+      "store": {
+        "url": "",
+        "auto_upload": "false"
+      }
+    },
     "spyglass_dirs": {
       "base": "/your/base/path",
       "raw": "/your/base/path/raw",

@@ -70,6 +70,20 @@ warnings.filterwarnings("ignore")
 # nothing in this notebook applies, and `get_nwb_file` keeps working exactly as
 # it does today.
 #
+# The broker settings live under `custom.backends.store` in
+# `dj_local_conf.json`, beside any other backend you configure:
+#
+# ```json
+# {"custom": {"backends": {"store": {
+#     "url": "https://store.example.org",
+#     "auto_upload": false
+# }}}}
+# ```
+#
+# `auto_upload` is for a shared compute host: it uploads a derived file as it
+# is declared, so a reader is not told the file was never transferred because
+# nobody ran `populate()` there. Leave it off on a laptop.
+#
 
 sg_config.store_url
 
@@ -196,6 +210,12 @@ client.tier, client.github_login
 # | `private` | you only                                |
 # | `group`   | members of the `LabTeam`s you name      |
 # | `public`  | anyone with an account                  |
+#
+# **`public` is the default.** Declaring a share is an explicit act and the
+# point of it is to be read, so omitting `scope` publishes. Narrowing is what
+# you say out loud. Note this is the opposite of *inheritance*, which always
+# takes the narrowest scope a file's parents declared — a derivative of a
+# private raw is never published by a default nobody chose.
 #
 # Declaring a share is a **database insert**. Raw and analysis files live in
 # separate tables, because `Nwbfile` and `AnalysisNwbfile` have separate

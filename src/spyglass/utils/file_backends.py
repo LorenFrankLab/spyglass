@@ -181,6 +181,9 @@ class FileBackend(Protocol):
         prefers download but whose backend cannot download is served by
         streaming anyway: the setting is a preference, never a failure mode.
 
+        The preference is read per backend: `custom.backends.<name>` first,
+        then the instance-wide `custom.prefer_download`.
+
         Override to give per-file answers if the backend streams some files and
         downloads others.
 
@@ -198,7 +201,10 @@ class FileBackend(Protocol):
 
         if not self.supports_streaming:
             return False
-        return not (self.supports_download and sg_config.prefer_download)
+
+        prefers_download = sg_config.backend_prefers_download(self.name)
+
+        return not (self.supports_download and prefers_download)
 
     def open(self, nwb_file_path: str) -> Opened:
         """Open the file and report how it was read.
@@ -362,11 +368,9 @@ class DandiBackend(FileBackend):
         """Stream if DANDI holds the file only under its raw name.
 
         A raw session published as `X.nwb` is not the `X_.nwb` link copy
-        Spyglass tracks locally — the two differ in size. Writing the DANDI
-        bytes to the tracked path leaves a file that fails the DataJoint
-        filepath checksum on every later fetch, and keeps failing after the
-        preference is turned back off. So `prefer_download` does not apply to a
-        name-mismatched match: those are always streamed.
+        Spyglass tracks locally. Writing the DANDI bytes to the tracked path
+        leaves a file that fails the DataJoint filepath checksum on every
+        later fetch, so `prefer_download` does not apply to these.
 
         Parameters
         ----------

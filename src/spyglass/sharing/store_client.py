@@ -242,6 +242,7 @@ class StoreClient:
         self.timeout = timeout
         self._token = token
         self._record = None
+        self._info = None
 
     # ------------------------------- state -------------------------------
 
@@ -665,6 +666,48 @@ class StoreClient:
         """
         return self.url(f"/file/{file_id}/content")
 
+    def info(self) -> dict:
+        """Return the broker's description of itself, fetched once.
+
+        Memoized per instance, never on disk: a restart must pick up a
+        backend change, since a stale answer means uploads that look verified
+        and are not.
+
+        Returns
+        -------
+        dict
+            At least `upload_digests`. A broker without this route, or one
+            unreachable, yields both digests.
+        """
+        if self._info is None:
+            try:
+                self._info = self._request("GET", "/info").json()
+            except StoreError as err:  # includes 404 on an older broker
+                from spyglass.utils.nwb_hash import UPLOAD_DIGESTS
+
+                logger.debug(f"Broker /info unavailable ({err}); both.")
+                self._info = {"upload_digests": list(UPLOAD_DIGESTS)}
+
+        return self._info
+
+    def upload_digests(self) -> List[str]:
+        """Return the digest names to compute and send on registration.
+
+        Names this client does not implement are dropped, so a newer broker
+        naming an unknown digest still works.
+
+        Returns
+        -------
+        list of str
+            Always includes "sha256", the object's address.
+        """
+        from spyglass.utils.nwb_hash import DIGESTS
+
+        declared = self.info().get("upload_digests") or []
+        known = [name for name in declared if name in DIGESTS]
+
+        return sorted(set(known) | {"sha256"})
+
     def register(
         self,
         sha256: str,
@@ -673,6 +716,7 @@ class StoreClient:
         file_class: str = "analysis",
         scope: str = "private",
         teams: Optional[List[str]] = None,
+        content_md5: Optional[str] = None,
     ) -> dict:
         """Declare an upload and ask where to put the bytes.
 
@@ -693,6 +737,9 @@ class StoreClient:
             "private", "group", or "public".
         teams : list of str, optional
             `LabTeam` names, required when `scope` is "group".
+        content_md5 : str, optional
+            Hex MD5 of the same bytes, signed into the presigned URL as
+            `Content-MD5`. Omitted from the body when unknown, not sent null.
 
         Returns
         -------
@@ -713,6 +760,9 @@ class StoreClient:
             "visibility": {"scope": scope, "teams": list(teams or [])},
         }
 
+        if content_md5:  # optional on the wire; a null is worse than absent
+            body["content_md5"] = content_md5
+
         return self._request("POST", "/file", json=body).json()
 
     def upload(
@@ -723,6 +773,7 @@ class StoreClient:
         scope: str = "private",
         teams: Optional[List[str]] = None,
         sha256: Optional[str] = None,
+        content_md5: Optional[str] = None,
     ) -> dict:
         """Register a local file and transfer its bytes if they are new.
 
@@ -740,6 +791,8 @@ class StoreClient:
             `LabTeam` names, required when `scope` is "group".
         sha256 : str, optional
             Precomputed digest, to avoid re-reading a large file.
+        content_md5 : str, optional
+            Precomputed MD5, from a caller that already hashed the file.
 
         Returns
         -------
@@ -753,21 +806,28 @@ class StoreClient:
         StoreError
             If the object store refuses the bytes.
         """
-        from spyglass.utils.nwb_hash import sha256_file
+        from spyglass.utils.nwb_hash import digest_file
 
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Cannot upload missing file: {path}")
 
-        digest = sha256 or sha256_file(path)
+        have = {"sha256": sha256, "md5": content_md5}
+        missing = [n for n in self.upload_digests() if not have.get(n)]
+
+        if missing:  # one read, however many digests it feeds
+            have.update(digest_file(path, algorithms=missing))
+
+        sha256, content_md5 = have["sha256"], have.get("md5")
 
         target = self.register(
-            sha256=digest,
+            sha256=sha256,
             size_bytes=path.stat().st_size,
             spyglass_name=spyglass_name or path.name,
             file_class=file_class,
             scope=scope,
             teams=teams,
+            content_md5=content_md5,
         )
 
         if target.get("deduplicated"):
